@@ -220,13 +220,18 @@ repository.
 **One repository, two libraries, one version.** This is the project the lockstep
 rule exists for.
 
-- **Identity** semantic version, single-sourced from `VERSION` at the root.
-  Mirrors: `WT_VERSION_*` in `C99/include/webtransport/version.h` and
-  `library` in `Swift/Sources/WebTransport/WebTransportVersion.swift`.
-  Enforced by `Swift/check-version-sync.sh` in CI and by the C99 CMake configure.
-  Bump with `./Swift/check-version-sync.sh --write`. **The Swift and C99 libraries
-  always carry the same number**; if only one changed, recompile the other at the
-  new number rather than leaving it behind.
+- **Identity** semantic version. **The two libraries must always carry the same
+  number** — if only one changed, recompile the other at the new number rather than
+  leaving it behind.
+- **The lockstep mechanism is not landed yet.** It is being introduced by the open
+  pull request `release/single-version-source`: a root `VERSION` file as the single
+  source, `WT_VERSION_*` in `C99/include/webtransport/version.h` and `library` in
+  `Swift/Sources/WebTransport/WebTransportVersion.swift` as its mirrors, and
+  `Swift/check-version-sync.sh` as the gate (bump with `--write`). **Until that PR
+  merges, `main` has no in-repo version at all**: the Swift side's identity is the
+  git tag and the README install pin (`1.3.8`), while the C99 side declares `0.1.0`
+  in `C99/include/webtransport/version.h` and repeats it in `C99/CMakeLists.txt`.
+  Do not describe the lockstep as landed until it is.
 - **`WT_ABI_VERSION` is not part of the lockstep.** It moves only for a breaking
   layout or signature change; a bug-fix release moves the version and not the ABI.
   `wt_protocol_draft()` is a third, separate axis.
@@ -244,14 +249,14 @@ rule exists for.
   - output lands in `.build/release-artifacts/` with a `SHA256SUMS`.
 - **Gates** `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh`
   (19 shared targets must agree across the two manifests),
-  `Swift/check-version-sync.sh`, `check-api-compatibility.sh`, the C99
-  `C99/scripts/check-*.sh` family, and the full suite under ASan and TSan.
+  `check-api-compatibility.sh`, the C99 `C99/scripts/check-*.sh` family, and the
+  full suite under ASan and TSan — plus `Swift/check-version-sync.sh` once the pull
+  request above lands.
 - **Two manifests** — the root `Package.swift` and `Swift/Package.swift` —
   intentionally expose different product sets; shared targets must not diverge.
-- **Publishing** currently ships only the Swift products. The C99 library is new
-  and not yet built for release; when it joins, it joins **this** tag and these
-  notes rather than getting its own, and the notes must say which library is not
-  yet built.
+- **Publishing** currently ships only the Swift products. The C99 library is built
+  and tested but not released; when it joins, it joins **this** tag and these notes
+  rather than getting its own, and the notes must say which library is not yet built.
 
 ## XAIOS — C, **build numbers**, 6 releases
 
@@ -277,8 +282,12 @@ apply here.*
   must remain fetchable at the tag it names.
 - **Builders** `scripts/build-arch-image.sh` per architecture, `Makefile` at the
   root, `platform/*/build-*.sh` per hypervisor target.
-- **Gates** the build's own `BUILD_NUMBER` validation, and the C99/C toolchain
-  checks in `AUDIT/` and the platform scripts.
+- **Gates** `BUILD_NUMBER` validation, which `make docs-check` cross-checks against
+  the `## Build <n>` section in `CHANGELOG.md` — bump both together or the gate
+  fails. Then `make compile-check`, `make hosted-test`, `make xapt-test` and the
+  QEMU boot gates. **`release-check` is local-only**: no CI job runs it, and
+  `local-gates` must be recorded against HEAD on a clean tree, because any later
+  commit costs another run.
 
 ## Converter — Swift, semantic version, 1 release
 
@@ -327,44 +336,71 @@ apply here.*
 
 ## ChatBots — Swift, no release yet
 
-- **Identity** semantic version, not yet established.
-- **Code scanning** as for MCPSearch: CodeQL default setup, AI Scan disabled.
-- Needs a release path before it can be called releasable; follow Converter's
-  minimal shape once it produces a runnable target.
+- **Identity** semantic version, not yet established. The only version literals are
+  `APP_VERSION` and `APP_BUILD` in `tools/make-app.sh`, expanded into the bundle's
+  `Info.plist`; nothing enforces either against a release.
+- **Code scanning** runs CodeQL **default setup** — there is no `codeql.yml` here —
+  and AI Scan for pull requests is disabled. The Autofind job asks
+  `api.individual.githubcopilot.com` for a model an individual Copilot plan does not
+  serve, so it failed on every PR head with `CAPIError: 400 The requested model is
+  not supported` and could never report a finding. Re-enable only with an entitlement
+  that serves that model. If Swift CodeQL coverage is wanted, the pattern that works
+  is advanced setup on `xcode-27` with `build-mode: manual`, because default setup
+  autobuilds with a Swift 6.3.3 image that cannot parse this package's 6.4 manifest.
+- **Before the first release** this needs a runnable artifact: a version literal that
+  cannot drift, one script that builds and packages native `arm64` only, a dry run,
+  and a Release carrying the archive plus its digest. Nothing here produces a binary
+  yet, so the release gate below cannot be exercised.
 
-## TinyTitan_Datacenter — Python, no release yet
+## TinyTitan_Datacenter — Swift and Python, no release yet
 
-- **Identity** semantic version, not yet established.
-- **No compiled artifact.** If a release is warranted it ships the harness as a
-  wheel or source archive with a documented entry point, and §1.2.1–1.2.4 do not
-  apply because nothing is compiled for the host.
+- **Identity** semantic version, not yet established. There is no `VERSION`, no
+  `BUILD_NUMBER`, no tag and no release; the only versioned contracts are the IR
+  schema (`currentVersion` in `sources/DatacenterIR/IRSpec.swift`) and the trace
+  schema (`SCHEMA_VERSION` in `tools/trace_format.py`).
+- **Compiled artifacts do exist.** `Package.swift` declares the executable targets
+  `datacenter-trace` and `datacenter-generate`, so the native `arm64` and `lipo`
+  rules of §1.2.1–§1.2.4 **do** apply here. The Python side under `tools/` is
+  stdlib-only. There is no release script and no packaging step yet.
 - **Purpose** the multi-node Apple-silicon cluster: harness, measurements and
   findings. Measurements are reported as measurements, never as performance
   ceilings, and every recorded number names the commit, hardware, RAM, macOS and
-  Swift/toolchain versions it was taken on.
+  toolchain versions it was taken on.
 
 ## YTLive_Laundry — Python, no release yet
 
-- **Identity** semantic version, not yet established.
+- **Identity** semantic version, not yet established. There is no version literal
+  anywhere — every tunable is declared in `conf/stream.env`.
 - **Repository is public.** Its views badge uses the README-embedded static form
-  rather than the endpoint form the other public repositories use; either works,
-  and it is left alone rather than churning the README. Converting it means moving
-  it into the `REPOS` list in `~/bin/traffic-badge-update.sh` and swapping the
-  badge for the endpoint shape.
-- No compiled artifact; see TinyTitan_Datacenter for the shape if a release is
-  warranted.
+  rather than the endpoint form; either works, and it is left alone rather than
+  churning the README. Converting it means moving it into the `REPOS` list in
+  `~/bin/traffic-badge-update.sh` and swapping the badge for the endpoint shape.
+- **No compiled artifact.** A release here would be a source archive of `bin/`,
+  `conf/` and `install.sh` plus its digest — there is nothing to build, and Part 1's
+  macOS packaging sections do not apply.
+- **No CI.** `.github/` does not exist here, so nothing runs `bin/smoke_test.sh`
+  automatically; it is a local gate only, and a green check elsewhere says nothing
+  about this repository.
 
 ## AISessionServer — Shell, no release yet
 
 - **Identity** semantic version, not yet established.
-- **No compiled artifact.** A release, if warranted, is a tagged source archive
-  with a documented entry point, and the archive is what the Release carries.
-- **Code scanning** CodeQL default setup covers `actions`.
+- **Two Swift binaries are compiled, but neither is committed.** `xcrun swiftc -O
+  chatbox.swift -o chatbox`, and the same for `chatbox-mcp.swift`; both outputs are
+  gitignored. A release would therefore carry either the built binaries (native
+  `arm64` only, per §1.2.1–§1.2.4) or a tagged source archive with a documented entry
+  point. There is no release script.
+- **Code scanning** runs CodeQL **advanced** setup (`.github/workflows/codeql.yml`,
+  Swift, `build-mode: manual`). **Default setup is not configured and must stay
+  that way** — it ran `swift build`, found no `Package.swift`, and analysed nothing
+  while failing.
 
 ## Minecraft — Shell, no release yet
 
 - **Identity** semantic version, not yet established.
-- **No compiled artifact**; the same source-archive shape as AISessionServer.
+- **No compiled artifact.** A release here would be a source archive of `caddy/`
+  plus its digest — there is nothing to build, and Part 1's macOS packaging sections
+  do not apply.
 - Nine stale code-scanning alerts point at deleted `Server App/…` paths and want
   dismissing as no-longer-present rather than fixing.
 
@@ -402,10 +438,12 @@ there, and the rule above already forbids that.
   covering both, because the source is the reviewable artifact and the `.ex5` is
   the one users actually load into a terminal.
 - **Identity** the `#property version "M.mpp"` line in `FXNews.mq5` — currently
-  `"3.300"` for version 3.3. That is the only version literal; nothing else in the
-  tree restates it, and no separate `VERSION` file is introduced. MQL5 version
-  properties are two-component at most in practice, so the release tag here is
-  `v3.300`, taken verbatim from the property rather than re-derived.
+  `"3.300"` for version 3.3. **Nothing enforces it.** The same version is restated in
+  the `// FXNews version 3.3` comment on line 1 and in `README.md`, and
+  `tools/contracts.py` does not check the version triple, so a bump must touch all
+  three by hand. No separate `VERSION` file is introduced. MQL5 version properties
+  are two-component at most in practice, so the release tag is `v3.300`, taken
+  verbatim from the property rather than re-derived.
 - **Build** `tools/build-macos.sh`, which drives MetaEditor under the
   MetaQuotes-bundled Wine on macOS. It exits non-zero on a compiler error **or
   warning**, so a warning-free compile is already enforced and the release uses the
