@@ -401,8 +401,8 @@ apply here.*
 - **No compiled artifact.** A release here would be a source archive of `caddy/`
   plus its digest — there is nothing to build, and Part 1's macOS packaging sections
   do not apply.
-- Nine stale code-scanning alerts point at deleted `Server App/…` paths and want
-  dismissing as no-longer-present rather than fixing.
+- Nine stale code-scanning alerts point at deleted `Server App/…` and `Client App/…`
+  paths and want dismissing as no-longer-present rather than fixing.
 
 ## RoomCAD — JavaScript, no release yet
 
