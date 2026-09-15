@@ -291,12 +291,56 @@ apply here.*
 
 ## Converter — Swift, semantic version, 1 release
 
-- **Identity** semantic version, `vX.Y`. Single release so far: `v1.0`.
-- **Artifacts** a single executable `converter` plus `converter.sha256`. This is
-  the minimal shape and the one to bring the other single-binary projects to.
+- **Identity** semantic version, `vX.Y`. `v1.0` is the only published release (`v1.0` →
+  `d47025f`, 2026-09-15). The one authoritative value is the root **`VERSION`** file:
+  `scripts/check-version-sync.sh` fails when the topmost `## [X.Y]` heading of
+  `CHANGELOG.md` or the name of `docs/release-notes-vX.Y.md` disagrees with it, and CI
+  runs that gate, so a half-done bump cannot land. The git tag `v<version>` is the third
+  declaration: `scripts/release.sh` refuses to publish unless it points at `HEAD`. A
+  bump is one edit to `VERSION` plus `scripts/check-version-sync.sh --write`.
+- **Identity is not observable from the artifact**, which §1.3 asks for — there is no
+  `--version` flag and no version constant in the Swift sources, and the asset is a bare
+  `converter`. The tag and the Release page are the only way to say what is running;
+  publishing the named archive below is what closes this.
+- **Artifacts** a single executable `converter` plus `docs/converter.sha256`, both
+  attached to the Release. This is the minimal shape and the one to bring the other
+  single-binary projects to. The committed binary is **hash-gated**: a rebuild must update
+  `docs/converter.sha256` *and* `docs/BINARY_PROVENANCE.md` in the same commit, or CI fails.
+- **Mechanism** `scripts/release.sh` — dry run by default, `--publish` only on the flag.
+  It builds in a **fresh scratch path** (so the warning scan cannot pass vacuously over an
+  incremental build), asserts `lipo -archs` is exactly `arm64`, reports the digest and the
+  byte count, and refuses to publish when the tree is dirty, `gh` is not the owner, the
+  rebuilt binary is not the committed one, the Release already exists, an existing tag is
+  not `HEAD`, or the notes carry neither the §1.8 placeholder nor the real digest and size.
+- **Gates** `scripts/check-format.sh` (**the report is the gate** — `swift format
+  lint` exits 0 even when it reports differences), `scripts/lint-budget.sh` (a
+  ratchet against `scripts/lint-budget.json`: 151 violations, 21 error-level, pinned
+  to `swiftlint` 0.65.1), `scripts/check-python.sh` (`ruff` plus `mypy --strict` over
+  `AUDIT/tools`), `shasum -a 256 -c docs/converter.sha256`, the `Swift version 6.4`
+  assertion, both `-warnings-as-errors` builds (the release one also carrying
+  `-Xcc -Wall -Xcc -Wextra -Xcc -Werror`), and `swift test --package-path Sources` —
+  **278 tests, around 11 minutes, doing real media processing**, so it is not a fast
+  gate and two of them must not overlap on an 8 GB machine. `.github/workflows/ci.yml`
+  runs these on the `xcode-27` image as `build-and-test` and `static-analysis`, the
+  latter adding gitleaks over the full history, semgrep, cppcheck at
+  `--check-level=exhaustive`, and clang-tidy requiring **zero** first-party findings.
+- **Traps** a `swiftlint` version change is reported but does not fail the ratchet.
+  Swift is **deliberately switched off** in this repository's CodeQL default setup
+  (#0160, re-check by 2026-10-15), because the autobuild image ships Swift 6.3.3 and
+  cannot parse the 6.4 manifest — do not read a green CodeQL check as Swift coverage.
+  Swift 6.4's SwiftPM writes to `.build/out/Products/<config>/`, so ask
+  `--show-bin-path` rather than spelling a path. The binary is thin `arm64`,
+  ad-hoc/linker-signed and **not notarized**, so Gatekeeper quarantines it.
 - **To bring into line** the artifact is published as a bare binary rather than a
-  named archive. A rename to `converter-X.Y-macos-arm64` with the licence and a
-  `README-binaries.txt` inside would satisfy §1.6 without changing how it is used.
+  named archive, so it carries no `LICENSE`, no third-party notices and no
+  `README-binaries.txt`. Publishing `converter-X.Y-macos-arm64.tar.gz` holding the
+  binary, `LICENSE` and a `README-binaries.txt` would satisfy §1.6 without changing
+  how it is used.
+- **Landed for `v1.1`** the root `VERSION` file, `scripts/check-version-sync.sh` (wired
+  into CI's `build-and-test`), `scripts/release.sh` and `docs/release-notes-vX.Y.md`.
+  `v1.1` changed no conversion behaviour: its executable is byte-for-byte the `v1.0`
+  build, so the release is the tooling and the corrected documentation. `v1.0` was cut by
+  hand before any of this existed and is left as it is.
 
 ## MCPSearch — Swift, semantic version, 1 release
 
