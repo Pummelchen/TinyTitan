@@ -6,9 +6,11 @@
 #   tools/lint.sh force-cast   # one check
 #
 # Checks:
-#   force-cast   no `as!` / `try!` in sources/ without an audited opt-out
-#   func-length  no NEW function longer than MAX_FUNC_LINES (ratcheted)
-#   arch-path    no hardcoded SwiftPM triple in a build path (see below)
+#   force-cast          no `as!` / `try!` in sources/ without an audited opt-out
+#   func-length         no NEW function longer than MAX_FUNC_LINES (ratcheted)
+#   unchecked-sendable  new `@unchecked Sendable` must document its invariant
+#   converter           routed experts must land at their own index
+#   arch-path           no hardcoded SwiftPM triple in a build path (see below)
 #
 # Opting out of force-cast: put `lint:allow-force <reason>` in a comment on
 # the line immediately above. The reason is mandatory and is what a reviewer

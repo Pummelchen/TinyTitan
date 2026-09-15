@@ -21,7 +21,7 @@ swift test --no-parallel
 ```
 
 CI runs the same three, so a green run here is a green run there. `tools/lint.sh`
-enforces four things the compiler cannot:
+enforces five things the compiler cannot:
 
 - **force-cast** — no `as!` / `try!` under `sources/`. To keep one, put
   `lint:allow-force <reason>` in the comment block directly above it; a marker
@@ -39,7 +39,12 @@ enforces four things the compiler cannot:
   produces installs which load, pass every byte check, and answer from the wrong
   weights; no Swift test can see it, which is why it lives here.
 
-`tools/lint.sh <mode>` runs a single gate.
+- **arch-path** — no hardcoded SwiftPM target triple (for example
+  `arm64-apple-macosx`) in a build path. Such a path points at nothing on a newer
+  toolchain, or at a stale binary on this one. To keep one deliberately, put
+  `lint:allow-arch-path <reason>` on the line above.
+
+`tools/lint.sh <mode>` runs a single gate — `force-cast`, `func-length`, `sendable`, `converter` or `arch-path`.
 
 These checks do not download or load the model. For a change to the runtime or
 the model-load path, also run the golden baseline, which is the only check that
