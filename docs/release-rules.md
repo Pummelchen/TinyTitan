@@ -307,11 +307,18 @@ apply here.*
   single-binary projects to. The committed binary is **hash-gated**: a rebuild must update
   `docs/converter.sha256` *and* `docs/BINARY_PROVENANCE.md` in the same commit, or CI fails.
 - **Mechanism** `scripts/release.sh` — dry run by default, `--publish` only on the flag.
-  It builds in a **fresh scratch path** (so the warning scan cannot pass vacuously over an
-  incremental build), asserts `lipo -archs` is exactly `arm64`, reports the digest and the
-  byte count, and refuses to publish when the tree is dirty, `gh` is not the owner, the
-  rebuilt binary is not the committed one, the Release already exists, an existing tag is
-  not `HEAD`, or the notes carry neither the §1.8 placeholder nor the real digest and size.
+  It removes the build products and rebuilds **in the canonical location** (so the warning
+  scan cannot pass vacuously over an incremental build), asserts `lipo -archs` is exactly
+  `arm64`, reports the digest and the byte count, and refuses to publish when the tree is
+  dirty, `gh` is not the owner, the Release already exists, an existing tag is not `HEAD`,
+  or the notes carry neither the §1.8 placeholder nor the real digest and size.
+- **The build is content-deterministic but not bit-reproducible.** Two canonical builds match
+  in size and in every section, and differ in the linker's `LC_UUID` and the ad-hoc signature
+  over it (measured: 85 bytes of 1 715 256). A `--scratch-path` build is a *different* binary
+  — a different size, and 17 664 bytes different — because the Swift module metadata follows
+  the build directory. `release.sh` therefore publishes the **committed** binary, and the
+  checksum pins the file rather than the sources. Making this reproducible (for example
+  `-Xlinker -no_uuid`, which removes the variable) is an open improvement, not a landed one.
 - **Gates** `scripts/check-format.sh` (**the report is the gate** — `swift format
   lint` exits 0 even when it reports differences), `scripts/lint-budget.sh` (a
   ratchet against `scripts/lint-budget.json`: 151 violations, 21 error-level, pinned
