@@ -17,6 +17,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # install from the release tarball keeps its binaries in `~/.tinytitan/bin`.
 BIN="${TINYTITAN_BIN_DIR:-$ROOT/.build/release}/TinyTitanRepack"
 MODELS="${TINYTITAN_MODELS_DIR:-$ROOT/models}"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
 
 # The install menu's list of models, labels and sizes comes from the shared
 # catalogue so this file and the installer cannot disagree about what exists.
@@ -210,7 +211,7 @@ install_one() {
         fi
         echo "installing $name -> models/$dir"
         "$BIN" --input-snapshot ".build/qwen38-affine-${width}bit" \
-            --model-id qwen3.8-flash-next --output "$MODELS/$dir"
+            --model-id qwen3.8-flash-next --share-ngram-table --output "$MODELS/$dir"
         ;;
       convert_qwen38_mtp)
         # The draft head's 31 tensors, range-fetched from Qwen's original by

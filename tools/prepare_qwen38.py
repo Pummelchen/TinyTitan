@@ -43,10 +43,12 @@ import argparse
 import json
 import math
 import os
+import re
 import struct
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from queue import Queue
 
@@ -60,8 +62,22 @@ except ImportError as exc:  # pragma: no cover - environment, not logic
              f"  install them for the interpreter running this file: {sys.executable}\n"
              "    -m pip install safetensors numpy ml_dtypes\n"
              "  (or point TINYTITAN_PYTHON at another Python 3.10+)")
+SOURCE = os.environ.get("TINYTITAN_SOURCE", "huggingface").lower()
+HF_ENDPOINT = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
 REPO = "Qwen/Qwen3.8-Flash-Next"
-BASE = f"https://huggingface.co/{REPO}/resolve/main"
+BASE = f"{HF_ENDPOINT}/{REPO}/resolve/main"
+
+
+def resolve_shard_url(path: str) -> str:
+    if SOURCE == "modelscope":
+        api = f"https://modelscope.cn/api/v1/models/Qwen/Qwen3.8-Flash-Next/repo?Revision=master&FilePath={path}"
+        res = subprocess.run(["curl", "-s", "--max-time", "15", api], capture_output=True, text=True)
+        if 'href="' in res.stdout:
+            m = re.search(r'href="([^"]+)"', res.stdout)
+            if m:
+                return m.group(1).replace("&amp;", "&")
+        return api
+    return f"{BASE}/{path}"
 GROUP_SIZE = 64
 BITS_4, BITS_8 = 4, 8
 # indexer_n_heads * indexer_head_dim from the config; the remainder of
@@ -429,7 +445,7 @@ def write_config(config: dict, out: Path, tensor_names, width: int) -> dict:
 
 
 def fetch_header(shard: str) -> dict:
-    url = f"{BASE}/{shard}"
+    url = resolve_shard_url(shard)
     raw = subprocess.run(["curl", "-sfL", "--max-time", "60", "-r", "0-7", url],
                          capture_output=True, check=True).stdout
     size = struct.unpack("<Q", raw[:8])[0]
@@ -442,10 +458,19 @@ def download(shard: str, work: Path) -> Path:
     """Fetch one shard, resuming a partial file rather than restarting it."""
     dest = work / shard
     dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["curl", "-fL", "--retry", "5", "--retry-delay", "5",
-                    "--retry-all-errors", "-C", "-", "--silent", "--show-error",
-                    "-o", str(dest), f"{BASE}/{shard}"], check=True)
-    return dest
+    max_retries = 20
+    for attempt in range(1, max_retries + 1):
+        url = resolve_shard_url(shard)
+        cmd = ["curl", "-fL", "--retry", "5", "--retry-delay", "3",
+               "--retry-connrefused", "--retry-all-errors", "-C", "-",
+               "--silent", "--show-error", "-o", str(dest), url]
+        res = subprocess.run(cmd)
+        if res.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
+            return dest
+        print(f"\n    [download retry {attempt}/{max_retries}] {shard} fetch failed, retrying in 5s...",
+              file=sys.stderr, flush=True)
+        time.sleep(5)
+    raise RuntimeError(f"Failed to download {shard} after {max_retries} attempts")
 
 
 # --- conversion ------------------------------------------------------------
@@ -462,6 +487,24 @@ class OutputWriter:
         self.index: dict[str, str] = {}
         self.total = 0
         self.shard_no = 0
+
+        existing_shards = sorted(self.out.glob("model-[0-9][0-9][0-9][0-9][0-9].safetensors"))
+        if existing_shards:
+            print(f"found {len(existing_shards)} existing output shards, resuming index...", flush=True)
+            for shard_path in existing_shards:
+                num = int(shard_path.stem.split("-")[1])
+                if num > self.shard_no:
+                    self.shard_no = num
+                with shard_path.open("rb") as f:
+                    hdr_size = struct.unpack("<Q", f.read(8))[0]
+                    hdr = json.loads(f.read(hdr_size).decode("utf-8"))
+                for key, meta in hdr.items():
+                    if key == "__metadata__":
+                        continue
+                    self.index[key] = shard_path.name
+                    offsets = meta["data_offsets"]
+                    self.total += offsets[1] - offsets[0]
+            print(f"  resumed up to shard {self.shard_no:05d} ({self.total / 1e9:.2f} GB, {len(self.index)} tensors)", flush=True)
 
     def add(self, name: str, value: np.ndarray) -> None:
         self.block[name] = value
@@ -566,9 +609,10 @@ class NgramTable:
                 f"{reuse}: {actual} bytes, expected {expected_bytes} "
                 f"({expected_rows} rows x {dim} x fp16). A table of the wrong "
                 "size is a different model's, or a truncated copy.")
-        if self.path.exists():
-            self.path.unlink()
-        os.link(reuse, self.path)
+        if self.path.resolve() != reuse.resolve():
+            if self.path.exists():
+                self.path.unlink()
+            os.link(reuse, self.path)
 
     @staticmethod
     def index_of(name: str) -> int:
@@ -641,7 +685,7 @@ TOKENIZER_FILES = (
 def fetch_tokenizer(out: Path) -> None:
     """Copy the tokenizer beside the weights, so the snapshot stands alone."""
     for name, required in TOKENIZER_FILES:
-        url = f"https://huggingface.co/{REPO}/resolve/main/{name}"
+        url = resolve_shard_url(name)
         result = subprocess.run(["curl", "-sfL", "--max-time", "300", url],
                                 capture_output=True)
         if result.returncode != 0 or not result.stdout:
@@ -716,6 +760,7 @@ def reusable_table_path(reuse: Path, constants: dict) -> Path:
 
 
 def main() -> int:
+    global SOURCE, HF_ENDPOINT, BASE
     ap = argparse.ArgumentParser()
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--bits", type=int, choices=(4, 8), default=4,
@@ -732,21 +777,35 @@ def main() -> int:
                          "same model cannot differ in it.")
     ap.add_argument("--index", type=Path)
     ap.add_argument("--config", type=Path)
+    ap.add_argument("--source", choices=("huggingface", "modelscope"),
+                    default=SOURCE,
+                    help="source provider for checkpoint shards (default: huggingface, optional: modelscope)")
+    ap.add_argument("--endpoint", default=HF_ENDPOINT,
+                    help="Hugging Face endpoint URL or mirror (default: https://huggingface.co)")
     args = ap.parse_args()
+
+    SOURCE = args.source
+    HF_ENDPOINT = args.endpoint.rstrip("/")
+    BASE = f"{HF_ENDPOINT}/{REPO}/resolve/main"
 
     def fetch_json(path: Path | None, remote: str) -> dict:
         if path and path.exists():
             return json.loads(path.read_text())
-        url = f"https://huggingface.co/{REPO}/raw/main/{remote}"
-        return json.loads(subprocess.run(["curl", "-sfL", url],
+        if SOURCE == "modelscope":
+            url = f"https://modelscope.cn/api/v1/models/Qwen/Qwen3.8-Flash-Next/repo?Revision=master&FilePath={remote}"
+        else:
+            url = f"{HF_ENDPOINT}/{REPO}/raw/main/{remote}"
+        return json.loads(subprocess.run(["curl", "-sfL", "--max-time", "60", url],
                                          capture_output=True, check=True).stdout)
 
     index = fetch_json(args.index, "model.safetensors.index.json")
     if args.rewrite_config:
         snap = args.rewrite_config
         names = json.loads((snap / "model.safetensors.index.json").read_text())["weight_map"]
+        cfg_url = (f"https://modelscope.cn/api/v1/models/Qwen/Qwen3.8-Flash-Next/repo?Revision=master&FilePath=config.json"
+                   if SOURCE == "modelscope" else f"{HF_ENDPOINT}/{REPO}/raw/main/config.json")
         cfg = json.loads(subprocess.run(
-            ["curl", "-sfL", f"https://huggingface.co/{REPO}/raw/main/config.json"],
+            ["curl", "-sfL", cfg_url],
             capture_output=True, check=True).stdout) if not (snap / "config.json").exists() \
             else json.loads((snap / "config.json").read_text())
         cfg.pop("quantization", None)
@@ -773,7 +832,18 @@ def main() -> int:
 
     wm = index["weight_map"]
     shards = sorted(set(wm.values()))
+    by_shard: dict[str, list[str]] = {}
+    for name, shard in wm.items():
+        by_shard.setdefault(shard, []).append(name)
+
     writer = OutputWriter(args.output)
+
+    expected_bytes = padded * constants["ple_head_dim"] * 2
+    if args.reuse_ngram_table is None and args.output is not None:
+        table_file = args.output / "ngram_table.bin"
+        if table_file.exists() and table_file.stat().st_size == expected_bytes:
+            print(f"found existing completed ngram_table.bin ({expected_bytes / 1e9:.1f} GB), reusing automatically", flush=True)
+            args.reuse_ngram_table = table_file
 
     reuse = (None if args.reuse_ngram_table is None
              else reusable_table_path(args.reuse_ngram_table, constants))
@@ -784,15 +854,52 @@ def main() -> int:
         # Skip the shards that carry nothing else. Two of the 131 hold n-gram
         # rows alongside ordinary tensors and are still fetched; convert_shard
         # already ignores the n-gram names inside them.
-        by_shard: dict[str, list[str]] = {}
-        for name, shard in wm.items():
-            by_shard.setdefault(shard, []).append(name)
         skippable = {shard for shard, names in by_shard.items()
                      if all(is_ngram(n) for n in names)}
         shards = [s for s in shards if s not in skippable]
         print(f"reusing n-gram table: {reuse}")
         print(f"  hardlinked, {padded * constants['ple_head_dim'] * 2 / 1e9:.1f} GB not written")
         print(f"  {len(skippable)} of {len(by_shard)} checkpoint shards not fetched")
+
+    if writer.index:
+        def shard_is_complete(shard_name: str) -> bool:
+            names = by_shard[shard_name]
+            has_tensors = False
+            for n in names:
+                if is_multimodal(n) or is_ngram(n) or is_ple_buffer(n):
+                    continue
+                has_tensors = True
+                stem_raw = rename(n)
+                if stem_raw.endswith(".mlp.experts.gate_up_proj"):
+                    st = stem_raw[: -len("experts.gate_up_proj")] + "switch_mlp."
+                    targets = [st + "gate_proj.weight", st + "up_proj.weight"]
+                elif stem_raw.endswith(".mlp.experts.down_proj"):
+                    st = stem_raw[: -len("experts.down_proj")] + "switch_mlp."
+                    targets = [st + "down_proj.weight"]
+                elif stem_raw.endswith(".self_attn.indexer.index_qk_proj.weight"):
+                    st = stem_raw[: -len("index_qk_proj.weight")]
+                    targets = [st + "index_q_proj.weight", st + "index_k_proj.weight"]
+                else:
+                    targets = [stem_raw]
+
+                for t in targets:
+                    bits = quant_bits(t, args.bits)
+                    if bits is None:
+                        if t not in writer.index:
+                            return False
+                    else:
+                        st = t[: -len(".weight")] if t.endswith(".weight") else t
+                        if (st + ".weight") not in writer.index or \
+                           (st + ".scales") not in writer.index or \
+                           (st + ".biases") not in writer.index:
+                            return False
+            return has_tensors
+
+        already_done = {s for s in shards if shard_is_complete(s)}
+        if already_done:
+            shards = [s for s in shards if s not in already_done]
+            print(f"  {len(already_done)} checkpoint shards already converted in existing output shards, skipping them", flush=True)
+            print(f"  remaining {len(shards)} checkpoint shards to fetch and convert", flush=True)
 
     # Fetch shard N+1 while shard N converts.
     queue: Queue = Queue(maxsize=1)
