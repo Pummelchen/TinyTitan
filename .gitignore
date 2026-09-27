@@ -64,3 +64,8 @@ models/gguf/
 
 # Agent scratch (worktrees, caches); keep git status clean
 .claude/
+
+# Audit run artifacts. Findings belong in the wiki tracker/archive, not in the
+# repository: a committed ledger goes stale the moment the tree moves on.
+/AUDIT/
+*.sarif

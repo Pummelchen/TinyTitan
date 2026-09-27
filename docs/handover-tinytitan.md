@@ -8,7 +8,7 @@
 > bytes, sha256 `ec93f640f1d49dfac02d129626117d47f38585b616645886e36d1c8a8040b5e0`,
 > 2026-09-25) and **`main` sits one commit past it** — this brief; the release notes
 > are `docs/release-notes-v5.12.md`. 5.12 is the pre-production audit: every force
-> unwrap is gone, every finding it raised is closed in `AUDIT/ledger.json` (28
+> unwrap is gone, every finding it raised is closed (28
 > tasks), and `tools/lint.sh` now runs **eleven** pinned gates. The product is the
 > engine plus its loopback server — the Mac app is gone — and
 > `tools/install_tinytitan.sh` downloads a built release instead of compiling one;
@@ -72,7 +72,7 @@ traps that one named still bite and are folded in below.
 | Release | **5.12 published** 2026-09-25 — `tinytitan-5.12-macos-arm64.tar.gz`, 15,386,068 bytes, sha256 `ec93f640…` with its `.sha256` beside it |
 | Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
 | Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
-| Audit | `AUDIT/ledger.json` — **28 tasks, all closed**; its findings are what 5.12 fixed, and the eleven gates in `tools/lint.sh` are what it left behind |
+| Audit | **28 findings, all closed**, archived in the wiki's [Tracker Archive](https://github.com/Pummelchen/TinyTitan/wiki/Tracker-Archive) (git history at `0690c61`); the eleven gates in `tools/lint.sh` are what the audit left behind |
 | `.build` | release rebuilt for 5.12; a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.12 section) |
 | DeepSeek Harness | pinned `0.1.6-alpha.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's |
@@ -88,8 +88,8 @@ traps that one named still bite and are folded in below.
   Python-suite CI regressions closed. `tools/lint.sh` now runs **eleven** pinned
   gates (SwiftLint `--strict` and swift-format joined it, plus eslint/prettier for
   the plugin packages with committed lockfiles), the tree is at 0 SwiftLint and 0
-  swift-format findings after a 442-file sweep, and `AUDIT/ledger.json` carries all
-  28 findings with their evidence. Verification: eleven gates clean, **1,493 tests
+  swift-format findings after a 442-file sweep, and all 28 audit findings are closed
+  and archived in the wiki's Tracker Archive. Verification: eleven gates clean, **1,493 tests
   in 223 suites**, 7 goldens byte-identical, a warning-free clean scratch build,
   and a 4B speed record whose first pass read prefill low (28.0 → 23.3 tok/s) and
   whose repeat read the baseline exactly with all thirteen metrics inside the gate

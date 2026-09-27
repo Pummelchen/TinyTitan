@@ -37,7 +37,7 @@ jobs:
       - name: Install the pinned Python linter
         # `tools/lint.sh python` needs the exact pinned ruff and FAILS rather
         # than skipping when it is missing, so CI installs it here. The version
-        # is the one in the gate's RUFF_PIN and in AUDIT/environment.md.
+        # is the one in the gate's RUFF_PIN.
         run: |
           python3 -m pip install --user --disable-pip-version-check --quiet ruff==0.16.7
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"

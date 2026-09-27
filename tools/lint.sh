@@ -551,8 +551,7 @@ check_python() {
 import ast, pathlib, sys
 
 floor = tuple(int(part) for part in sys.argv[1].split("."))
-roots = [pathlib.Path("benchmark"), pathlib.Path("tools"), pathlib.Path("docs"),
-         pathlib.Path("AUDIT")]
+roots = [pathlib.Path("benchmark"), pathlib.Path("tools"), pathlib.Path("docs")]
 bad = []
 for root in roots:
     for path in sorted(root.rglob("*.py")):

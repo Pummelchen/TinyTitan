@@ -20,10 +20,10 @@ reference is the one new artifact.
   swift-format, eslint/prettier for the plugin packages, and ruff for Python.
   Each fails when its tool is missing or is a different version, so none can
   pass by skipping.
-- **A committed audit ledger** (`AUDIT/ledger.json`, rendered to `AUDIT/ledger.md`):
-  every finding with its evidence before and after, the commit that closed it,
-  and a written reason wherever a rule was deliberately configured rather than
-  followed.
+- **A closed audit** (28 findings, each with the evidence that proved it and a
+  written reason wherever a rule was deliberately configured rather than
+  followed): the working ledger was archived to the wiki's Tracker Archive and is
+  preserved in git history at commit `0690c61`, and archived in the wiki's Tracker Archive.
 
 ### What is fixed
 

@@ -77,7 +77,7 @@ let package = Package(
         // `-Werror`, so a new kernel cannot land with a shadowed variable, a
         // narrowing conversion, a dropped qualifier, a non-literal format or a
         // missing prototype. All three C files compile clean under the full set
-        // (AUDIT/tool-coverage.md, proof L8), and `-pedantic-errors` rejects the
+        // (proof recorded when the flags landed, AUD-003), and `-pedantic-errors` rejects the
         // implicit declarations and GNU extensions C99 does not have.
         .target(
             name: "TinyTitanKernelsC",
@@ -279,6 +279,6 @@ let package = Package(
     // The C in this package is written to strict C99; declaring it here makes
     // the compiler enforce it instead of documenting an intention. Together
     // with the TinyTitanKernelsC cSettings below this is the C language
-    // standard in force, and AUDIT/tool-coverage.md proves a violation fails.
+    // standard in force, and a deliberate violation fails the build (AUD-002/003).
     cLanguageStandard: .c99
 )

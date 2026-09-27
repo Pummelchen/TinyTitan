@@ -4,7 +4,7 @@
 # skipped) and that the Phase E host installs before the suite. Both CI
 # workflows install from this file, so the converter gate and the verification
 # suite resolve the same set; `pip-audit -r benchmark/requirements.txt` is run
-# against it (AUDIT/environment.md).
+# against it (pip-audit 2.10.1: no known vulnerabilities).
 numpy==2.5.3
 safetensors==0.8.0
 ml_dtypes==0.6.0

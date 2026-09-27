@@ -62,8 +62,8 @@ disabled_rules:
   - nesting
 
 opt_in_rules:
-  # The audit standard names this one, and the proof in AUDIT/tool-coverage.md
-  # shows a force unwrap failing this configuration under --strict.
+  # The audit standard names this one, and the proof recorded when it was
+  # adopted (AUD-005) shows a force unwrap failing this configuration.
   - force_unwrapping
   # The same crash class, declared rather than written with `!`.
   - implicitly_unwrapped_optional
