@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 16 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 14 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -429,6 +429,15 @@ And two more, both single-group cuts:
 `VerifiedInstallTool.swift` 527 → 491 (the five mirror structs widened, since
 the loader that returns them stays; the new file also needed
 `import TinyTitanFormat`).
+
+Two more type-group cuts, both without widening:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `ContinuityCore/Persistence/JournalTypes.swift` | 84 | the journal record enum, the journal protocol with its no-op defaults, the null journal and the error type |
+| `TinyTitanServer/Core/ServerPromptStateTypes.swift` | 45 | the prompt-state store's configuration, save result and error |
+
+`Journal.swift` 541 → 463 and `ServerPromptStateStore.swift` 512 → 473.
 
 ## Generated and local files
 
