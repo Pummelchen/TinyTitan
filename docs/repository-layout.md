@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 20 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 18 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -405,6 +405,18 @@ also had to go) — because the paths that stay (`eligibleChunk`, `appendShadow`
 `finishChunk`) call into the moved code. The new file's `import TinyTitan` was
 a self-import and the build rejected it, so the original's three imports are
 what it carries.
+
+Two more declaration-group moves followed:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/ModelRouterError.swift` | 338 | the router's failure modes and their wire descriptions |
+| `TinyTitan/Kernels/Prefill/MoE/PrefillGroupedRoutedMoETypes.swift` | 194 | the streamed-tile buffer indices, parameter blocks, fetch results and lifetime tracker |
+
+`ModelRouter.swift` 540 → 207 and `PrefillGroupedRoutedMoE.swift` 548 → 363,
+both with no widening. Each new file carries the original's imports — the
+router's error type needs `import TinyTitan` because it reads `rawValue` off
+the runtime's enums, which the first build caught.
 
 ## Generated and local files
 
