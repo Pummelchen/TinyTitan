@@ -215,4 +215,43 @@ extension RealForwardRunner {
             break
         }
     }
+
+    /// Expert-cache statistics as of the prefill/decode handover, so the
+    /// decode phase's own I/O can be reported (`TINYTITAN_DECODE_IO_TRACE=1`).
+    static let decodeIOTraceEnabled =
+        ProcessInfo.processInfo.environment["TINYTITAN_DECODE_IO_TRACE"] == "1"
+
+    /// Expert I/O attributable to decode alone: totals now, minus the
+    /// handover snapshot.
+    public func decodeExpertIO() -> (hits: UInt64, misses: UInt64, bytes: UInt64)? {
+        guard let baseline = decodeIOBaseline else { return nil }
+        let now = model.routedExpertStatistics()
+        return (
+            now.hits &- baseline.hits,
+            now.misses &- baseline.misses,
+            now.bytesRead &- baseline.bytesRead
+        )
+    }
+
+    /// Prefetch accounting (TINYTITAN_RUNNER_STATS): ring reads issued, and
+    /// prefetched experts the cache plan adopted (each one a miss avoided).
+    public var totalPrefetchIssued: UInt64 { UInt64(predictivePrefetch?.issuedReads ?? 0) }
+    public var prefetchRingSummary: String? { predictivePrefetch?.summary }
+
+    public var usesFusedGreedyHead: Bool { useFusedGreedyHead }
+
+    public func expertStreamingStatistics() -> ExpertStreamingStatistics {
+        model.routedExpertStatistics()
+    }
+
+    // MARK: - Per-command-buffer GPU timing (TINYTITAN_KERNEL_STATS)
+
+    /// One command buffer's GPU span for a named kernel role. The decode path
+    /// is synchronous (commit + wait), so `gpuStartTime`/`gpuEndTime` are
+    /// valid right after completion and cost nothing to read.
+    struct KernelGPUTiming {
+        let role: String
+        let start: TimeInterval
+        let end: TimeInterval
+    }
 }

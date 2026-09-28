@@ -360,4 +360,64 @@ extension RealForwardRunner {
         }
         return selection
     }
+
+    /// The window in which dense attention is exact for this model, or nil
+    /// for a family without sparse attention.
+    var qsaExactness: QSAExactness? {
+        guard cfg.sparseIndexer.enabled else { return nil }
+        return QSAExactness(
+            budget: Self.qsaBudget(cfg.sparseIndexer),
+            compressRatio: cfg.sparseIndexer.compressRatio)
+    }
+
+    /// The indexer's key budget, with `TINYTITAN_QSA_BUDGET` able to lower it.
+    ///
+    /// Verification knob, not a tuning one. At the shipped budget the sparse
+    /// path only engages past 2,051 tokens, which makes every check of it a
+    /// multi-thousand-token run; lowering the budget moves the boundary down
+    /// so the same code runs against a reference at a length that can be
+    /// diffed in seconds. It only ever lowers.
+    static func qsaBudget(_ config: SparseIndexerConfig) -> Int {
+        guard let raw = ProcessInfo.processInfo.environment["TINYTITAN_QSA_BUDGET"],
+            let value = Int(raw), value > 0
+        else { return config.budget }
+        return min(value, config.budget)
+    }
+
+    /// Refuses a position the sparse-attention path cannot serve faithfully.
+    /// See `QSAIndexerRequired` for why this is an error rather than a note.
+    func requireQSAExact(visibleKeys: Int) throws {
+        guard qsaIndexer == nil, let exactness = qsaExactness,
+            !exactness.isDenseExact(visibleKeys: visibleKeys)
+        else { return }
+        throw QSAIndexerRequired(
+            visibleKeys: visibleKeys,
+            exactWindow: exactness.maximumExactVisibleKeys)
+    }
+
+    /// The same gate for prefill.
+    ///
+    /// Both paths select now, so this only fires for a family that declares a
+    /// sparse indexer without one being built -- which nothing does today,
+    /// and which would otherwise attend densely and say nothing about it.
+    func requireQSADensePrefill(visibleKeys: Int) throws {
+        try requireQSAExact(visibleKeys: visibleKeys)
+    }
+
+    /// The full-attention layer whose indexer state the dumps capture: the
+    /// first one, where the decode and prefill paths still share an input.
+    static let qsaSnapshotLayer = 3
+
+    /// Forces the one-token-at-a-time prefill for hyper-connection families
+    /// (`TINYTITAN_SEQUENTIAL_HC_PREFILL=1`). It is the reference the batched
+    /// path is checked against, and far too slow to ship.
+    static let sequentialHyperConnectionPrefill =
+        ProcessInfo.processInfo.environment["TINYTITAN_SEQUENTIAL_HC_PREFILL"] == "1"
+
+    /// Residual width for a config, before `self` is fully initialized.
+    static func residualWidthFor(_ config: ArchConfig) -> Int {
+        config.hyperConnections.enabled
+            ? config.hiddenSize * config.hyperConnections.count
+            : config.hiddenSize
+    }
 }
