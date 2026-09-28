@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 35 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 34 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `RepackPlanner.swift` (720).
+`ANEPrefillAttention.swift` (919) and `QSAIndexer.swift` (712).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -283,6 +283,17 @@ stay, the readers and their cross-checks go.
 All four loaders and both cross-checks widened from `private` to internal —
 `ArchInfo.load` stays in `ArchInfo.swift` and dispatches to them, and the
 cross-checks are called from the loaders, which now live apart.
+
+`RepackPlanner.swift` (720 → 138) keeps the plan types' public entry points and
+sends the value types and the planning helpers elsewhere:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanRepack/Core/Planning/RepackPlanner+Planning.swift` | 488 | name parsing, per-file planning and resident ordering |
+| `TinyTitanRepack/Core/Planning/RepackPlanTypes.swift` | 113 | `Layout` and the plan value types |
+
+`routedExpertRole`, `layerIndex` and `isMultimodalTensorName` widened from
+`private` to internal because the public `plan` entry point stays behind.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check

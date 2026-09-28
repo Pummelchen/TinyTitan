@@ -214,12 +214,12 @@ Feasible, and no architectural blocker. Each row is checked against source:
 
 | Question | Finding | Evidence |
 | --- | --- | --- |
-| Can the planner hold a dense model? | **Yes.** Routed experts are optional: the plan writes `expertsPerLayer: 0, expertStride: 0` when a source has none, and only then errors if a layer *has* routed experts and `numExperts` is zero | `RepackPlanner.swift:301-307`, `:444-447` |
+| Can the planner hold a dense model? | **Yes.** Routed experts are optional: the plan writes `expertsPerLayer: 0, expertStride: 0` when a source has none, and only then errors if a layer *has* routed experts and `numExperts` is zero | `RepackPlanner+Planning.swift:69-75`, `:212-215` |
 | Is the quantization the same? | **Yes, byte-for-byte.** Repacker group size is 64; the dense converter is group-64 affine. A repack copies bytes; it never re-quantizes | `ArchInfo.swift:109` (`quantGroupSize: Int = 64`), `prepare_qwen35.py:146` (`GROUP_SIZE = 64`) |
-| Is the int4 layout the same? | **Yes.** A source `.weight` of dtype `u32` is treated as quantized-packed and mapped to resident `u32`; the snapshot stores four 8-bit levels per word | `RepackPlanner.swift:376`, `:521-523` |
+| Is the int4 layout the same? | **Yes.** A source `.weight` of dtype `u32` is treated as quantized-packed and mapped to resident `u32`; the snapshot stores four 8-bit levels per word | `RepackPlanner+Planning.swift:348-350`, `:289-291` |
 | Can the CPU engine read a `.gturbo`? | **Yes, in principle.** `ResidentIndexEntry` carries `shape`, `dtype`, `fileOffset`, `scaleOffset`, `biasOffset` — exactly the `AffineSnapshot.Matrix` contract (`weights`, `scales`, `biases`, `rows`, `columns`, `bits`, `groupSize`) | `ResidentIndex.swift:15-25`, `AffineSnapshot.swift:24-32` |
 | Does the config carry what `ArchInfo` needs? | **Yes.** All of it: `hidden_size`, `intermediate_size`, `num_attention_heads`, `num_key_value_heads`, `head_dim`, `vocab_size`, `num_hidden_layers`, `tie_word_embeddings`, `layer_types`, `hidden_act`, `attn_output_gate`, `rope_parameters.{rope_theta,partial_rotary_factor}` | `models/qwen3.5_2B_4Bit/config.json` |
-| Is the downstream naming right already? | **Yes for the root head.** `rename()` writes `language_model.lm_head.weight` and `language_model.model.*`, which is the MLX spelling the repacker expects; `residentDestinationName` only special-cases the Qwen3.8 MTP draft | `prepare_qwen35.py` `rename()`, `RepackPlanner.swift:623-631` |
+| Is the downstream naming right already? | **Yes for the root head.** `rename()` writes `language_model.lm_head.weight` and `language_model.model.*`, which is the MLX spelling the repacker expects; `residentDestinationName` only special-cases the Qwen3.8 MTP draft | `prepare_qwen35.py` `rename()`, `RepackPlanner+Planning.swift:459` (`residentDestinationName`) |
 
 ## The work
 
