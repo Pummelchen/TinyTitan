@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 32 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 31 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `KVCacheManager.swift` (703).
+`ANEPrefillAttention.swift` (919) and `CPUCommands.swift` (663).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -320,6 +320,20 @@ became internal, and so did the twelve stored properties they read (`ctx`,
 `selectPSO`, `rms`, `rope`, `gemv`, `rawKeys`, `pooled`, `scoresBuf`,
 `keepBuf`, `keepIndexBuf`, `keepCountBuf`, `queryRowsBuf`), plus `encodePool`,
 which the moved `layerBuffers` calls.
+
+`KVCacheManager.swift` (703 → 470) split three independent groups out of the
+class on the same terms:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift` | 112 | segment lengths, payload append and restore |
+| `TinyTitan/Runtime/KVCache/KVCacheManager+Validation.swift` | 80 | range, slot and view checks, and the residency advice |
+| `TinyTitan/Runtime/KVCache/KVCacheManager+Views.swift` | 72 | the K/V view and range accessors |
+
+Widened here: seven stored properties (`kBuffers`, `vBuffers`, `strides`,
+`kinds`, `capacityTokens`, `positions`, `valueBytes`), the `fp16Size`
+constant, `regionBase`, and the eight validation helpers whose callers stayed
+behind.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check

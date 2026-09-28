@@ -67,12 +67,12 @@ public final class KVCacheManager {
     /// invariant and growth deliberately relaxes it.
     private let device: MTLDevice
 
-    private var kBuffers: [MTLBuffer]
-    private var vBuffers: [MTLBuffer]
-    private let strides: [Int]  // bytes per token, per layer
-    private let kinds: [LayerKind]
-    private var capacityTokens: [Int]
-    private let valueBytes: [Int]
+    var kBuffers: [MTLBuffer]
+    var vBuffers: [MTLBuffer]
+    let strides: [Int]  // bytes per token, per layer
+    let kinds: [LayerKind]
+    var capacityTokens: [Int]
+    let valueBytes: [Int]
 
     /// How many independent sequences share these stores. Each slot owns its own
     /// contiguous region of every layer buffer and its own cursor, so a batched
@@ -91,12 +91,12 @@ public final class KVCacheManager {
 
     /// Logical token cursor per slot. `position` is slot 0's -- the
     /// single-sequence case every existing caller uses.
-    private var positions: [Int]
+    var positions: [Int]
 
     /// Slot 0's cursor.
     public var position: Int { positions[0] }
 
-    private static let fp16Size = 2
+    static let fp16Size = 2
     public static let quantizationGroupSize = 64
 
     public init(
@@ -346,7 +346,7 @@ public final class KVCacheManager {
     }
 
     /// First token index of slot `slot`'s region within a layer buffer.
-    private func regionBase(layer: Int, slot: Int) -> Int {
+    func regionBase(layer: Int, slot: Int) -> Int {
         validateSlot(slot)
         return slot * capacityTokens[layer]
     }
@@ -401,68 +401,6 @@ public final class KVCacheManager {
             regionBase(layer: layer, slot: slot)
             + physicalSlot(layer: layer, position: start)
         return (vBuffers[layer], token * strides[layer], strides[layer])
-    }
-
-    public func keyView(layer: Int) -> KVView {
-        keyView(layer: layer, slot: 0, validTokenCount: positions[0])
-    }
-
-    public func keyView(layer: Int, validTokenCount: Int) -> KVView {
-        keyView(layer: layer, slot: 0, validTokenCount: validTokenCount)
-    }
-
-    public func keyView(layer: Int, slot: Int, validTokenCount: Int) -> KVView {
-        validateSlot(slot)
-        validateValidTokenCount(validTokenCount)
-        return makeView(
-            buffer: kBuffers[layer], layer: layer,
-            offset: regionBase(layer: layer, slot: slot) * strides[layer],
-            validTokenCount: validTokenCount)
-    }
-
-    public func valueView(layer: Int) -> KVView {
-        valueView(layer: layer, slot: 0, validTokenCount: positions[0])
-    }
-
-    func keyBuffer(layer: Int, validTokenCount: Int) -> MTLBuffer {
-        keyView(layer: layer, validTokenCount: validTokenCount).buffer
-    }
-
-    func valueBuffer(layer: Int, validTokenCount: Int) -> MTLBuffer {
-        valueView(layer: layer, validTokenCount: validTokenCount).buffer
-    }
-
-    public func valueView(layer: Int, validTokenCount: Int) -> KVView {
-        valueView(layer: layer, slot: 0, validTokenCount: validTokenCount)
-    }
-
-    public func valueView(layer: Int, slot: Int, validTokenCount: Int) -> KVView {
-        validateSlot(slot)
-        validateValidTokenCount(validTokenCount)
-        return makeView(
-            buffer: vBuffers[layer], layer: layer,
-            offset: regionBase(layer: layer, slot: slot) * strides[layer],
-            validTokenCount: validTokenCount)
-    }
-
-    public func keyRangeView(
-        layer: Int, start: Int, count: Int,
-        slot: Int = 0
-    ) -> KVView {
-        let range = kRange(layer: layer, start: start, count: count, slot: slot)
-        return makeView(
-            buffer: range.buffer, layer: layer, offset: range.offset,
-            validTokenCount: count)
-    }
-
-    public func valueRangeView(
-        layer: Int, start: Int, count: Int,
-        slot: Int = 0
-    ) -> KVView {
-        let range = vRange(layer: layer, start: start, count: count, slot: slot)
-        return makeView(
-            buffer: range.buffer, layer: layer, offset: range.offset,
-            validTokenCount: count)
     }
 
     /// Advance slot 0's cursor once the current token's K/V are written across
@@ -529,175 +467,4 @@ public final class KVCacheManager {
         positions[slot] = 0
     }
 
-    func snapshotSegmentLengths(at snapshotPosition: Int) throws -> [Int] {
-        guard snapshotPosition > 0, snapshotPosition <= maxContext else {
-            throw InferenceStateSnapshotError.invalidPosition(snapshotPosition)
-        }
-        var lengths: [Int] = []
-        lengths.reserveCapacity(config.numLayers * 2)
-        // One sequence's worth: the snapshot is a prefix of a single slot and is
-        // captured/restored at slot 0's region base (offset 0), which is what the
-        // prompt cache keys on. A batched slot's payload is a later phase.
-        for layer in 0..<config.numLayers where kinds[layer] != .linear {
-            let storedTokens = min(snapshotPosition, capacityTokens[layer])
-            let (length, overflow) = storedTokens.multipliedReportingOverflow(
-                by: strides[layer])
-            guard !overflow else { throw InferenceStateSnapshotError.integerOverflow }
-            lengths.append(length)
-            lengths.append(length)
-        }
-        return lengths
-    }
-
-    func appendSnapshotPayload(
-        to payload: inout Data,
-        segmentLengths: [Int]
-    ) throws {
-        let expected = try snapshotSegmentLengths(at: position)
-        guard segmentLengths == expected else {
-            throw InferenceStateSnapshotError.invalidLayout
-        }
-        var segment = 0
-        for layer in 0..<config.numLayers where kinds[layer] != .linear {
-            let kLength = segmentLengths[segment]
-            payload.append(
-                kBuffers[layer].contents().assumingMemoryBound(to: UInt8.self),
-                count: kLength)
-            segment += 1
-            let vLength = segmentLengths[segment]
-            payload.append(
-                vBuffers[layer].contents().assumingMemoryBound(to: UInt8.self),
-                count: vLength)
-            segment += 1
-        }
-    }
-
-    func restoreSnapshot(
-        position snapshotPosition: Int,
-        segmentLengths: [Int],
-        bytes: UnsafeRawBufferPointer,
-        offset: inout Int
-    ) throws {
-        // Grow to the snapshot's position *before* computing the expected
-        // lengths, because those lengths are a function of capacity:
-        // `snapshotSegmentLengths` records `min(position, capacity)`. The saving
-        // runner had grown to hold its prefix; a fresh receiver's full-attention
-        // layers start at `initialCapacityTokens` (8192), so any snapshot past
-        // that produced a different set of lengths and was refused as
-        // `invalidLayout`. The restore could therefore never succeed for a long
-        // prefix — which is the case the disk tier exists for, and why the
-        // feature appeared simply not to work.
-        try reserve(tokens: snapshotPosition)
-        let expected = try snapshotSegmentLengths(at: snapshotPosition)
-        guard segmentLengths == expected else {
-            throw InferenceStateSnapshotError.invalidLayout
-        }
-        reset()
-        var segment = 0
-        for layer in 0..<config.numLayers where kinds[layer] != .linear {
-            let kLength = segmentLengths[segment]
-            try copySnapshotSegment(
-                bytes: bytes,
-                offset: &offset,
-                length: kLength,
-                destination: kBuffers[layer])
-            segment += 1
-            let vLength = segmentLengths[segment]
-            try copySnapshotSegment(
-                bytes: bytes,
-                offset: &offset,
-                length: vLength,
-                destination: vBuffers[layer])
-            segment += 1
-        }
-        positions[0] = snapshotPosition
-    }
-
-    private func copySnapshotSegment(
-        bytes: UnsafeRawBufferPointer,
-        offset: inout Int,
-        length: Int,
-        destination: MTLBuffer
-    ) throws {
-        guard length <= destination.length,
-            offset >= 0,
-            length >= 0,
-            offset <= bytes.count - length,
-            let source = bytes.baseAddress?.advanced(by: offset)
-        else {
-            throw InferenceStateSnapshotError.invalidLayout
-        }
-        memcpy(destination.contents(), source, length)
-        offset += length
-    }
-
-    private func validateRange(start: Int, count: Int) {
-        precondition(count >= 0, "count must be non-negative")
-        precondition(start >= 0, "start must be non-negative")
-        precondition(
-            start + count <= maxContext,
-            "range \(start)..<\(start + count) exceeds maxContext \(maxContext)")
-    }
-
-    private func makeView(
-        buffer: MTLBuffer, layer: Int, offset: Int,
-        validTokenCount: Int
-    ) -> KVView {
-        KVView(
-            buffer: buffer, offset: offset, stride: strides[layer],
-            validTokenCount: validTokenCount, precision: precision,
-            valueBytes: valueBytes[layer], groupSize: Self.quantizationGroupSize)
-    }
-
-    private static func rowLayout(
-        elements: Int,
-        precision: KVCachePrecision
-    ) -> (stride: Int, valueBytes: Int) {
-        if precision == .fp16 {
-            return (elements * fp16Size, elements * fp16Size)
-        }
-        let packed = (elements * precision.rawValue + 7) / 8
-        let alignedPacked = (packed + 1) & ~1
-        let groups = (elements + quantizationGroupSize - 1) / quantizationGroupSize
-        return (alignedPacked + groups * 2 * fp16Size, alignedPacked)
-    }
-
-    private func validateValidTokenCount(_ count: Int) {
-        precondition(count >= 0, "validTokenCount must be non-negative")
-        precondition(
-            count <= maxContext,
-            "validTokenCount \(count) exceeds maxContext \(maxContext)")
-    }
-
-    private func validateSlot(_ slot: Int) {
-        precondition(
-            slot >= 0 && slot < slots,
-            "slot \(slot) is out of range 0..<\(slots)")
-    }
-
-    private func physicalSlot(layer: Int, position: Int) -> Int {
-        precondition(capacityTokens[layer] > 0, "layer has no KV storage")
-        return position % capacityTokens[layer]
-    }
-
-    private func validateContiguousPhysicalRange(layer: Int, start: Int, count: Int) {
-        guard count > 0, fp16RingEnabled, kinds[layer] == .swa else { return }
-        let capacity = capacityTokens[layer]
-        let physicalStart = start % capacity
-        precondition(
-            physicalStart + count <= capacity,
-            "range \(start)..<\(start + count) wraps KV ring capacity \(capacity)")
-    }
-
-    private func advise(_ buffer: MTLBuffer, pageSize: Int, seen: inout Set<ObjectIdentifier>) {
-        let id = ObjectIdentifier(buffer)
-        if seen.contains(id) { return }
-        seen.insert(id)
-        // MTLBuffer allocations are page-aligned; round the length down to a
-        // whole number of pages so we never hand madvise a partial tail page.
-        let len = (buffer.length / pageSize) * pageSize
-        if len > 0 {
-            _ = posix_madvise(buffer.contents(), len, POSIX_MADV_DONTNEED)
-        }
-    }
 }
