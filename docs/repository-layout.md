@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 13 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 12 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -445,6 +445,14 @@ finalisation moves out of `RealForwardRunner+DecodeMoE.swift` (621 → 495) into
 hand-off, the slot publication and the shared-expert commit. No widening;
 `encodeDecodeRoutedMoE` keeps the `lint:allow-long` doc that justifies its
 size.
+
+`ContinuityEngine.swift` (586 → 429) then split the same way for an actor: its
+two value types went to `ContinuityEngineTypes.swift` (49) and the journal
+internals — observer installation, the record/restore path — to
+`ContinuityEngine+Internals.swift` (128). `journalWriteFailed` stayed behind
+with `journalFailure`, whose `private(set)` setter would otherwise have had to
+become public; it widened to internal instead, since three of the moved
+routines call it.
 
 ## Generated and local files
 

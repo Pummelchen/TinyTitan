@@ -1,36 +1,5 @@
 import Foundation
 
-/// How the engine behaves.
-public struct ContinuityConfiguration: Sendable {
-    public var memoryLimits: MemoryLimits
-    public var sessionLogOptions: SessionLogOptions
-    public var defaultBudget: ContextBudget
-    /// Write prompts and replies to the journal.
-    ///
-    /// Separate from journalling memory because the two differ in
-    /// sensitivity: memory holds distilled facts, the session log holds
-    /// everything a person typed. A caller who wants durable continuity
-    /// without a transcript on disk turns this off and keeps the rest.
-    public var journalsSessionContent: Bool
-    /// Compact the journal once it holds more than this many records.
-    /// Zero disables automatic compaction.
-    public var compactionThreshold: Int
-
-    public init(
-        memoryLimits: MemoryLimits = .default,
-        sessionLogOptions: SessionLogOptions = .init(),
-        defaultBudget: ContextBudget = ContextBudget(),
-        journalsSessionContent: Bool = true,
-        compactionThreshold: Int = 20_000
-    ) {
-        self.memoryLimits = memoryLimits
-        self.sessionLogOptions = sessionLogOptions
-        self.defaultBudget = defaultBudget
-        self.journalsSessionContent = journalsSessionContent
-        self.compactionThreshold = compactionThreshold
-    }
-}
-
 /// The public face of the package.
 ///
 /// It owns a `SessionLog`, a `TaskMemory` and a `ContextAssembler`, wires the
@@ -44,11 +13,11 @@ public struct ContinuityConfiguration: Sendable {
 public actor ContinuityEngine {
     public let sessionLog: SessionLog
     public let memory: TaskMemory
-    private let journal: ContinuityJournal
-    private var assembler: ContextAssembler
-    private let configuration: ContinuityConfiguration
-    private var journaledRecords = 0
-    private var started = false
+    let journal: ContinuityJournal
+    var assembler: ContextAssembler
+    let configuration: ContinuityConfiguration
+    var journaledRecords = 0
+    var started = false
     /// The first journal write that failed, or nil while every write has
     /// landed.
     ///
@@ -454,133 +423,7 @@ public actor ContinuityEngine {
         try await compactJournal()
     }
 
-    // MARK: - Internals
-
-    private func installObservers() async {
-        let journal = self.journal
-        let journalsContent = configuration.journalsSessionContent
-
-        // A session event that fails to journal does not fail the turn that
-        // produced it: the event is already in the log and the person is owed
-        // their reply. It is recorded as a durability failure instead.
-        await sessionLog.setObserver { [weak self] event in
-            guard journalsContent || !Self.carriesContent(event) else { return }
-            do {
-                try await journal.append(.event(event))
-            } catch {
-                await self?.journalWriteFailed(error)
-                return
-            }
-            await self?.countRecord()
-        }
-        // A memory mutation that fails to journal does fail its caller. The
-        // value stays in RAM, but whoever wrote it would otherwise believe it
-        // saved, and a fact reported as stored that ends with the process is
-        // the one answer memory must never give.
-        await memory.setObserver { [weak self] mutation in
-            let entry: JournalRecord
-            switch mutation {
-            case .versioned(let version): entry = .memoryVersion(version)
-            case .written(let result): entry = .memory(result.item)
-            case .statusChanged(let item): entry = .memory(item)
-            }
-            do {
-                try await journal.append(entry)
-            } catch {
-                await self?.journalWriteFailed(error)
-                throw ContinuityError.notPersisted(String(describing: error))
-            }
-            await self?.countRecord()
-        }
-    }
-
-    private func journalWriteFailed(_ error: Error) {
+    func journalWriteFailed(_ error: Error) {
         if journalFailure == nil { journalFailure = String(describing: error) }
     }
-
-    /// Whether an event carries what a person or the model actually wrote, as
-    /// opposed to structure and measurements.
-    private static func carriesContent(_ event: SessionEvent) -> Bool {
-        switch event.kind {
-        case .userPrompt, .assistantResponse, .assistantResponseChunk,
-            .assistantResponseCompleted:
-            return true
-        case .sessionStarted, .sessionEnded, .assistantResponseStarted,
-            .memoryWritten, .contextAssembled:
-            return false
-        }
-    }
-
-    private func countRecord() async {
-        journaledRecords += 1
-        guard configuration.compactionThreshold > 0,
-            journaledRecords > configuration.compactionThreshold
-        else { return }
-        try? await compactJournal()
-    }
-
-    private func record(_ entry: JournalRecord) async throws {
-        do {
-            try await journal.append(entry)
-        } catch {
-            journalWriteFailed(error)
-            throw error
-        }
-        journaledRecords += 1
-    }
-
-    private func restoreFromJournal() async throws {
-        let records = try await journal.replay()
-        guard !records.isEmpty else { return }
-        var log = SessionLogSnapshot()
-        var store = MemorySnapshot()
-        var itemsByAddress: [String: MemoryItem] = [:]
-        var tasksByID: [UUID: ContinuityTask] = [:]
-        var sessionsByID: [UUID: Session] = [:]
-
-        for entry in records {
-            switch entry {
-            case .checkpoint(let logSnapshot, let memorySnapshot):
-                log = logSnapshot
-                store = memorySnapshot
-                tasksByID = Dictionary(uniqueKeysWithValues: logSnapshot.tasks.map { ($0.id, $0) })
-                sessionsByID = Dictionary(
-                    uniqueKeysWithValues:
-                        logSnapshot.sessions.map { ($0.id, $0) })
-                itemsByAddress = [:]
-                for item in memorySnapshot.items {
-                    itemsByAddress["\(item.taskID)/\(item.address)"] = item
-                }
-            case .task(let task):
-                tasksByID[task.id] = task
-            case .session(let session):
-                sessionsByID[session.id] = session
-            case .event(let event):
-                log.events.append(event)
-            case .memory(let item):
-                itemsByAddress["\(item.taskID)/\(item.address)"] = item
-            case .memoryVersion(let version):
-                store.versions.append(version)
-            }
-        }
-        log.tasks = Array(tasksByID.values)
-        log.sessions = Array(sessionsByID.values)
-        store.items = Array(itemsByAddress.values)
-        await sessionLog.restore(log)
-        await memory.restore(store)
-        journaledRecords = records.count
-    }
-}
-
-public struct ContinuityStatistics: Sendable, Equatable {
-    public let taskCount: Int
-    public let sessionCount: Int
-    public let eventCount: Int
-    public let memoryItemCount: Int
-    /// Bytes of task memory held in this process.
-    public let memoryBytes: Int
-    /// Bytes of session log held in this process. The journal file may hold
-    /// more; this is what is resident.
-    public let logBytes: Int
-    public let journaledRecords: Int
 }
