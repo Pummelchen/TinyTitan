@@ -109,15 +109,17 @@ readability question, and the convention that came out of this pass is:
   only where the read improves; 95 members of `ServerHTTPHandler` and 4 members
   around `Model` were widened this pass, and nothing else changed.
 
-Files still above 600 lines are, in order: `RealForwardRunner+Decode.swift`
-(1,609), `RealForwardRunner+Prefill.swift` (1,541),
-`RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
-class), `RemoteStreamingRepacker.swift` (1,373), `Model.swift` (1,081; the test
-files below this line are sized by case count, not by design).
-`ServerInference.swift` left this list on 2026-09-27, when it was cut into the
-session files below. Each remaining file is one cohesive type or one phase of a
-pipeline; the next structural gain there is a *design* change (a type doing two
-jobs), not a move, and none is currently doing two jobs.
+The file-size rule is 500 physical lines per source file, comments and blanks
+included. `find sources -name '*.swift' | xargs wc -l` listed 45 production
+files above it on 2026-09-28; the largest are
+`RealForwardRunner+Prefill.swift` (1,541), `RealForwardRunner.swift` (1,449),
+`PreadExpertStreamer.swift` (1,392, one class), `RemoteStreamingRepacker.swift`
+(1,373), `MemoryService.swift` (1,128) and `Model.swift` (1,081). Each is one
+cohesive type or one phase of a pipeline; the next structural gain there is a
+*design* change (a type doing two jobs), not a move, and none is currently doing
+two jobs. Where a phase file is really a phase plus a cluster of helpers around
+it, the cluster moves out on its own (`+DecodeAttention.swift`,
+`+DecodeMoE.swift`).
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -145,6 +147,12 @@ otherwise — every original line is present verbatim in one of the new files:
 | `TinyTitanServer/Core/ServerModelSession+PromptCache.swift` | 269 | same |
 | `TinyTitanServer/Core/ServerModelSession+Generation.swift` | 320 | same |
 | `TinyTitanServer/Core/ServerModelSession+Diagnostics.swift` | 425 | same |
+
+The same move took the routed-MoE stage out of the decode phase file on
+2026-09-28: `Runtime/Inference/RealForwardRunner+DecodeMoE.swift` (622) left
+`+Decode.swift` (1,609 → 1,004), which keeps the token entry points, the layer
+loop and the attention dispatch. No access widened — the moved declarations
+were already internal.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check

@@ -53,7 +53,7 @@ The prefill path already runs **T tokens through one forward pass**:
 - `encodeLinearAttentionPrefill` (`:736`) and `encodeFullAttentionPrefill`
   (`:880`) are chunk-aware and take `tokenCount`/`startPosition`.
 
-Decode (`produceToken`, `RealForwardRunner+Decode.swift:21`) is the single-token
+Decode (`produceToken`, `RealForwardRunner+Decode.swift:64`) is the single-token
 special case. A continuous-batch decode step of B sequences is structurally a
 chunk of B rows — the work is making the chunk's rows **independent sequences**
 instead of one contiguous prefix.
@@ -178,11 +178,10 @@ the runner becomes slot-aware in Phase 4.
 
 **Recon for the attention half.** The decode full-attention call already binds
 `keyView.offset` and reads `keyView` as its `kvFormat`
-(`RealForwardRunner+Decode.swift:1133`), so the slot region base added in Phase 1
-is honoured by `encodeFull` without a kernel change. The SWA branch passes
-`kOffset: 0` explicitly (`:1151`), but Qwen3.5/3.6/3.8 carry only full and linear
-layers, so no shipped family reaches it; it still needs the same treatment
-before a sliding-window family batches. The remaining decode work is therefore
+(`RealForwardRunner+Decode.swift:951-969`), so the slot region base added in Phase 1
+is honoured by `encodeFull` without a kernel change. The SWA branch binds the
+same offsets (`:976-989`); Qwen3.5/3.6/3.8 carry only full and linear
+layers, so no shipped family reaches it. The remaining decode work is therefore
 structural — a batched step that carries B rows through the token-wise stages
 (the chunk kernels already take `tokenCount`) and loops attention and the GDN
 step per row — rather than a new attention kernel.

@@ -66,6 +66,12 @@ and user and engineering documentation lives in the
 in **one** table; the standard, and the reusable prompt for other projects, is
 `docs/task-table-standard.md`.
 
+A source file stays at 500 physical lines or fewer — comments and blank lines
+included. A file over the limit is split along a cohesive seam (one type, one
+phase, or one cluster of helpers) as pure code motion, with the public API and
+import paths preserved; `docs/repository-layout.md` records what is still over
+the limit and which files stay large by design.
+
 The wiki is a **separate repository** (`TinyTitan.wiki.git`, branch `master`,
 usually cloned at the gitignored `.qwen/wiki`), and it is the project's user
 documentation. It is not deployed from here: publishing is **two pushes** —
