@@ -3,45 +3,6 @@ import Foundation
 import Synchronization
 import TinyTitan
 
-struct ServerPromptCacheStorageConfiguration: Sendable, Equatable {
-    let memoryLimitBytes: Int
-    let diskDirectory: URL?
-    let diskLimitBytes: Int
-
-    init(
-        memoryLimitBytes: Int,
-        diskDirectory: URL?,
-        diskLimitBytes: Int
-    ) {
-        precondition(memoryLimitBytes >= 0)
-        precondition(diskLimitBytes >= 0)
-        self.memoryLimitBytes = memoryLimitBytes
-        self.diskDirectory = diskDirectory
-        self.diskLimitBytes = diskLimitBytes
-    }
-}
-
-struct ServerPromptStateSaveResult: Sendable, Equatable {
-    let unbackedEntryIDs: [UUID]
-    let diskError: String?
-    let memoryBytes: Int
-    let diskBytes: Int
-}
-
-enum ServerPromptStateStoreError: Error, CustomStringConvertible {
-    case missing(UUID)
-    case corrupt(UUID, String)
-
-    var description: String {
-        switch self {
-        case .missing(let id):
-            "prompt-cache state \(id.uuidString.lowercased()) is unavailable"
-        case .corrupt(let id, let reason):
-            "prompt-cache state \(id.uuidString.lowercased()) is corrupt: \(reason)"
-        }
-    }
-}
-
 /// Persistent + in-memory backing for published prompt-cache entries.
 ///
 /// Concurrency model: the store is shared between the session actor (restore,
