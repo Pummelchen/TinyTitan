@@ -317,42 +317,6 @@ public enum VerifiedInstallTool {
         return Int(bits)
     }
 
-    private struct ManifestFileEntry: Decodable {
-        let size: UInt64
-        let sha256: String
-    }
-
-    private struct Manifest: Decodable {
-        let files: [String: ManifestFileEntry]
-        let expertsPerLayer: Int
-        let numLayers: Int
-        let expertStride: UInt64
-        let sourceSnapshotHash: String?
-        /// Decoded through `GTurboManifestQuantV1`, whose hand-written `Codable`
-        /// keeps the open set of per-tensor width keys. A synthesised decoder
-        /// would drop them, which is the bug this whole check exists to catch.
-        let quant: GTurboManifestQuantV1?
-    }
-
-    private struct PackedExpertsLayout: Decodable {
-        let expertStride: UInt64
-        let numLayers: Int
-        let expertsPerLayer: Int
-        let layers: [Layer]
-    }
-
-    private struct Layer: Decodable {
-        let layer: Int
-        let file: String
-        let experts: [Expert]
-    }
-
-    private struct Expert: Decodable {
-        let expert: Int?
-        let offset: UInt64
-        let size: UInt64
-    }
-
     /// Reads the manifest through **both** decoders.
     ///
     /// The local struct carries the fields this tool needs, but it performs none
