@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 29 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 28 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -346,6 +346,11 @@ Two more followed on 2026-09-28, both without any widening:
 `CPUCommands.swift` 663 → 342 (an extension with no `private` member), and
 `ModelTypes.swift` 654 → 451 (declaration groups around `ArchConfig`, which
 keeps the file).
+
+`ManifestReader.swift` (626 → 465) then shed its value types: they are read by
+every importer and never by the reader's own validation, so
+`ManifestTypes.swift` (168) now holds the file entry, arch block, quant slots
+and the decoded document, and the reader keeps the two `private` validators.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
