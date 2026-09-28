@@ -22,19 +22,19 @@ struct AttentionSplitGeometry: Sendable, Equatable {
 ///             their separate per-head normalization and RoPE paths.
 ///   - `out` : `[numQHeads, headDim]`
 final class Attention {
-    private let ctx: MetalContext
-    private let psoPartial: MTLComputePipelineState
-    private let psoGQAPartial: MTLComputePipelineState
-    private let psoCombine: MTLComputePipelineState
-    private let psoPartialSWA: MTLComputePipelineState
-    private let psoPartialFull: MTLComputePipelineState
-    private let psoGQAPartialSWA: MTLComputePipelineState
-    private let psoGQAPartialSWAChunks16: MTLComputePipelineState
-    private let psoPartialFullChunks16: MTLComputePipelineState
-    private let psoCombineSWA: MTLComputePipelineState
-    private let psoCombineFull: MTLComputePipelineState
-    private let psoCombineSWAChunks16: MTLComputePipelineState
-    private let psoCombineFullChunks16: MTLComputePipelineState
+    let ctx: MetalContext
+    let psoPartial: MTLComputePipelineState
+    let psoGQAPartial: MTLComputePipelineState
+    let psoCombine: MTLComputePipelineState
+    let psoPartialSWA: MTLComputePipelineState
+    let psoPartialFull: MTLComputePipelineState
+    let psoGQAPartialSWA: MTLComputePipelineState
+    let psoGQAPartialSWAChunks16: MTLComputePipelineState
+    let psoPartialFullChunks16: MTLComputePipelineState
+    let psoCombineSWA: MTLComputePipelineState
+    let psoCombineFull: MTLComputePipelineState
+    let psoCombineSWAChunks16: MTLComputePipelineState
+    let psoCombineFullChunks16: MTLComputePipelineState
 
     /// Mirrors `kAttnThreads` in `attention.metal`. The kernel was authored
     /// with a hardcoded 256-thread group so its threadgroup-memory scratch
@@ -58,9 +58,9 @@ final class Attention {
     // Partial state written by pass 1, read by pass 2. One shared allocation:
     // attention runs once per layer, serially, and pass 2 hazard-tracks pass 1
     // within the same command buffer — no race (mirrors MoE.routerLogits).
-    private let mPartial: MTLBuffer
-    private let dPartial: MTLBuffer
-    private let oPartial: MTLBuffer
+    let mPartial: MTLBuffer
+    let dPartial: MTLBuffer
+    let oPartial: MTLBuffer
 
     init(context: MetalContext) throws {
         self.ctx = context
@@ -164,37 +164,20 @@ final class Attention {
     // so no two encodeSplit calls may be in flight. Guard that contract at
     // runtime: a reentrant encodeSplit would corrupt pass-1 state and is a
     // programming error, so it throws loudly instead of silently corrupting.
-    private let splitStateLock: NSLock
+    let splitStateLock: NSLock
     /// Simdgroup-per-key pass 1 (attention_decode_partial_simd), used when a
     /// sparse selection is in play. Built per (head_dim, heads, chunks) on
     /// first use. TINYTITAN_ATTN_SIMD_PARTIAL=0 keeps the serial kernel.
-    private var simdPartialCache: [String: MTLComputePipelineState] = [:]
+    var simdPartialCache: [String: MTLComputePipelineState] = [:]
     /// Test hook: forces the simd (true) or serial (false) pass 1.
     var simdPartialOverride: Bool?
     private static let simdPartialDefault =
         ProcessInfo.processInfo.environment["TINYTITAN_ATTN_SIMD_PARTIAL"] != "0"
-    private var simdPartialEnabled: Bool { simdPartialOverride ?? Self.simdPartialDefault }
-    private func simdPartialPipeline(
-        headDim: UInt32, numQHeads: UInt32,
-        numKVHeads: UInt32, numChunks: Int
-    ) -> MTLComputePipelineState? {
-        let key = "\(headDim)/\(numQHeads)/\(numKVHeads)/\(numChunks)"
-        if let pso = simdPartialCache[key] { return pso }
-        let specializedChunks = numChunks == 16 ? Optional(UInt32(numChunks)) : nil
-        guard
-            let pso = try? Self.specializedPipeline(
-                ctx, "attention_decode_partial_simd",
-                headDim: headDim, numQHeads: numQHeads,
-                numKVHeads: numKVHeads,
-                numChunks: specializedChunks)
-        else { return nil }
-        simdPartialCache[key] = pso
-        return pso
-    }
+    var simdPartialEnabled: Bool { simdPartialOverride ?? Self.simdPartialDefault }
     /// One byte, bound whenever no selection is in play: Metal requires the
     /// argument, and `use_keep` is what actually turns the mask off.
-    private let emptyKeepMask: MTLBuffer
-    private var splitInFlight: Bool
+    let emptyKeepMask: MTLBuffer
+    var splitInFlight: Bool
 
     /// Number of K/V chunks for a range of `effLen` positions — the split
     /// factor used by the production split path.
@@ -455,99 +438,4 @@ final class Attention {
         Float(1.0) / Float(headDim).squareRoot()
     }
 
-    private static func specializedPipeline(
-        _ context: MetalContext,
-        _ name: String,
-        headDim: UInt32,
-        numQHeads: UInt32,
-        numKVHeads: UInt32,
-        numChunks: UInt32? = nil,
-        ringCapacity: UInt32? = nil
-    ) throws -> MTLComputePipelineState {
-        var constants = [
-            MetalFunctionConstant(index: 60, value: .uint32(headDim)),
-            MetalFunctionConstant(index: 61, value: .uint32(numQHeads)),
-            MetalFunctionConstant(index: 62, value: .uint32(numKVHeads)),
-            MetalFunctionConstant(index: 63, value: .bool(true)),
-        ]
-        if let numChunks {
-            constants.append(MetalFunctionConstant(index: 65, value: .uint32(numChunks)))
-        }
-        if let ringCapacity {
-            constants.append(MetalFunctionConstant(index: 69, value: .uint32(ringCapacity)))
-        }
-        return try context.pipeline(name, constants: constants)
-    }
-
-    private func partialPipeline(
-        headDim: UInt32,
-        numQHeads: UInt32,
-        numKVHeads: UInt32,
-        numChunks: Int,
-        useGQAPartial: Bool,
-        ringCapacity: UInt32 = 0
-    ) -> MTLComputePipelineState {
-        // `attention_decode_gqa_swa_partial` sizes its threadgroup arrays to
-        // `kAttnMaxQPerKV` (2) queries per KV head and *returns without writing
-        // its partials* when the span is wider — so the combine pass would
-        // normalize the previous layer's values instead of failing. The geometry
-        // below already refuses to select this path above that span; stating the
-        // limit here, where the kernel is chosen, means a caller that reaches it
-        // another way fails loudly rather than quietly.
-        if useGQAPartial {
-            precondition(
-                numKVHeads > 0 && numQHeads / numKVHeads <= 2,
-                "attention_decode_gqa_swa_partial needs at most 2 queries "
-                    + "per KV head; got \(numQHeads) queries and "
-                    + "\(numKVHeads) KV heads")
-        }
-        if ringCapacity > 0 {
-            let name =
-                useGQAPartial ? "attention_decode_gqa_swa_partial" : "attention_decode_partial"
-            let specializedChunks = numChunks == 16 ? Optional(UInt32(numChunks)) : nil
-            do {
-                return try Self.specializedPipeline(
-                    ctx,
-                    name,
-                    headDim: headDim,
-                    numQHeads: numQHeads,
-                    numKVHeads: numKVHeads,
-                    numChunks: specializedChunks,
-                    ringCapacity: ringCapacity)
-            } catch {
-                preconditionFailure("failed to build KV ring attention pipeline: \(error)")
-            }
-        }
-        if useGQAPartial && headDim == 256 && numQHeads == 16 && numKVHeads == 8 {
-            if numChunks == 16 {
-                return psoGQAPartialSWAChunks16
-            }
-            return psoGQAPartialSWA
-        }
-        if !useGQAPartial && headDim == 256 && numQHeads == 16 && numKVHeads == 8 {
-            return psoPartialSWA
-        }
-        if !useGQAPartial && headDim == 512 && numQHeads == 16 && numKVHeads == 2 {
-            if numChunks == 16 {
-                return psoPartialFullChunks16
-            }
-            return psoPartialFull
-        }
-        return useGQAPartial ? psoGQAPartial : psoPartial
-    }
-
-    private func combinePipeline(
-        headDim: UInt32,
-        numQHeads: UInt32,
-        numKVHeads: UInt32,
-        numChunks: Int
-    ) -> MTLComputePipelineState {
-        if headDim == 256 && numQHeads == 16 && numKVHeads == 8 {
-            return numChunks == 16 ? psoCombineSWAChunks16 : psoCombineSWA
-        }
-        if headDim == 512 && numQHeads == 16 && numKVHeads == 2 {
-            return numChunks == 16 ? psoCombineFullChunks16 : psoCombineFull
-        }
-        return psoCombine
-    }
 }

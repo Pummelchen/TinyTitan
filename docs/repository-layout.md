@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 10 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 9 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -462,6 +462,12 @@ snapshot split widened six stored properties, the nested `Storage` enum, the
 static matrix helper and `stem(of:)` — one of them, `stem`, only surfaced as a
 "use of local variable before its declaration" error, because an inaccessible
 method made the compiler resolve the name to the local `let stem` instead.
+
+`Attention.swift` (553 → 441) then sent its four pipeline builders to
+`Attention+Pipelines.swift` (113): the simd partial builder, the specialized
+cache lookup and the partial/combine builders. That split widened all
+twenty-one stored properties and the four builders, since both the kept encode
+paths and the moved builders call them.
 
 ## Generated and local files
 
