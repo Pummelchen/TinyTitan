@@ -28,7 +28,7 @@ already implements every *structural* feature the dense family needs:
 | **Partial** RoPE + NeoX subdim | `RealForwardRunner+DecodeAttention.swift:217`, `+PrefillAttention.swift:259-260`, `RealForwardRunner.swift:458-463` | both families declare `partialRotaryFactor 0.25`, `ropeNeoxSubdim true` |
 | Attention output gate | `attnOutputGate` (C44's audit) | dense manifest declares `true` |
 | A dense `gate/up/down` FFN with affine/int8 weights | `SharedExpertRuntime`, `PrefillSharedExpert` | used as the shared expert of every MoE family |
-| Tied or separate LM head | `Model.head()` returns `embedding()` when tied | `Model.swift:194` |
+| Tied or separate LM head | `Model.lmHead()` returns `embedding()` when tied | `Model+Accessors.swift:29` |
 | Per-layer / per-tensor quantization | resident index + `manifest.quant` | the dense install declares every tensor |
 
 The dense install itself is complete and carries all the geometry

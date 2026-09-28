@@ -110,18 +110,18 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 40 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 39 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`Model.swift` (1,081) and `ANEPrefillAttention.swift` (919). Each is one
+`ANEPrefillAttention.swift` (919) and `Tokenizer.swift` (818). Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
 two jobs. Where a file is a phase plus a cluster of helpers around it, or a
-group of independent value types, the cluster moves out on its own
+group of independent value types or accessors, the cluster moves out on its own
 (`+DecodeAttention.swift`, `+DecodeMoE.swift`, `+PrefillLayer.swift`,
 `+PrefillMoE.swift`, `OpenAIWireTypes.swift`, `ResponsesAPIMapper.swift`,
-`Model+Validation.swift`).
+`Model+Validation.swift`, `Model+Accessors.swift`).
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -220,6 +220,20 @@ Three members widened from `private` to internal because their callers stayed
 behind or moved apart: `validateTrustedReceiptLayerLayout` (called by `load`),
 `validateLayerTensors` and `validateRoutedExpertLayout` (called by
 `validateLayerSchema`).
+
+`Model.swift` (1,081 → 377) is the first split that cuts members *out of a type
+declaration* rather than out of an extension, so the moved members became
+extensions: stored properties cannot leave the declaration file, methods and
+computed properties can.
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Runtime/Inference/Model+Accessors.swift` | 324 | the family schema accessor, every named tensor accessor and `bf16Readable` |
+| `Runtime/Inference/Model+LayerStreamers.swift` | 266 | lazy routed-expert and streamer management |
+| `Runtime/Inference/RuntimeSchemaChecks.swift` | 149 | the `RuntimeSchemaChecks` type |
+
+No widening: the only two `private` members involved (`bf16Readable` and
+`openLayerLocked`) moved together with their only callers.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
