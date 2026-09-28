@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 33 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 32 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `QSAIndexer.swift` (712).
+`ANEPrefillAttention.swift` (919) and `KVCacheManager.swift` (703).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -305,6 +305,21 @@ caught as missing:
 | `TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift` | 284 | the outbox drainer, the low-level writers, deadlines and frame helpers |
 
 No widening: this file held no `private` member at all.
+
+`QSAIndexer.swift` (712 → 487) is the first split of a state-heavy class. The
+scratch helpers move; the class declaration, its stored properties and the
+encode paths stay:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitan/Kernels/Attention/QSAIndexer+Scratch.swift` | 237 | the per-layer key buffers, `hiddenColumns` and the four grow-on-demand helpers |
+
+This is the widest widening so far, and it is the price of a class split: the
+six moved helpers are called by the public encode paths that stay, so they
+became internal, and so did the twelve stored properties they read (`ctx`,
+`selectPSO`, `rms`, `rope`, `gemv`, `rawKeys`, `pooled`, `scoresBuf`,
+`keepBuf`, `keepIndexBuf`, `keepCountBuf`, `queryRowsBuf`), plus `encodePool`,
+which the moved `layerBuffers` calls.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
