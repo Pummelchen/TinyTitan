@@ -61,14 +61,19 @@ Generated text goes to **stdout** and the timing footer to **stderr**, so a
 pipeline sees only the answer. The model directory is whatever
 `tools/install_models.sh` reports as `installed`.
 
-*Last verified: 2026-09-28 on macOS 27.0 / Swift 6.4 / arm64 by running
-`tools/install_models.sh`, the CLI command above with
-`models/qwen3.5_4B_4Bit`, `tools/server_launcher.sh --client server --model
-qwen35-4b --bits 4 --port 8084`, `swift build -c release` in a clean clone, and
-the server workflow in [Worked example](#worked-example). Commands this page
-marks with a prerequisite were not executed here: the one-command installer
-calls the GitHub releases API and writes to `~/.tinytitan` and `~/.local/bin`,
-and `--client codex|zed|…` rewrites that client's own provider config.*
+*Last verified: 2026-09-28 on macOS 27.0 / Swift 6.4 / arm64 (Apple M3, 24 GB)
+by running `tools/install_models.sh` and `--help`, the CLI command above with
+`models/qwen3.5_4B_4Bit` (and `TinyTitanCLI/--help`), `swift run -c release
+TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_4B_4Bit`
+("Verified 7 files"), `tools/server_launcher.sh --help` and `--client server
+--model qwen35-4b --bits 4 --port 8084`, `TinyTitanServer --help`, `tools/dsh_route.sh`
+(the print form), `memory_pressure -Q`, the `pgrep` process check,
+`tools/install_tinytitan.sh --help`, `swift build -c release` in a clean clone,
+and the server workflow in [Worked example](#worked-example). Commands this page
+marks with a prerequisite were not executed here: the *full* one-command
+installer calls the GitHub releases API and writes to `~/.tinytitan` and
+`~/.local/bin`, a model download is tens of gigabytes, and `--client
+codex|zed|…` rewrites that client's own provider config.*
 
 ## Install
 
