@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 12 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 10 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -453,6 +453,15 @@ internals — observer installation, the record/restore path — to
 with `journalFailure`, whose `private(set)` setter would otherwise have had to
 become public; it widened to internal instead, since three of the moved
 routines call it.
+
+Two CPU-engine cuts followed: `CPUQwen35.swift` (527 → 492) sent the quantized
+row reader and the bfloat widening to `CPUQwen35+Quant.swift` (48), and
+`AffineSnapshot.swift` (538 → 443) sent the shard lookup and the
+`floats`/`has`/`matrix` accessors to `AffineSnapshot+Access.swift` (107). The
+snapshot split widened six stored properties, the nested `Storage` enum, the
+static matrix helper and `stem(of:)` — one of them, `stem`, only surfaced as a
+"use of local variable before its declaration" error, because an inaccessible
+method made the compiler resolve the name to the local `let stem` instead.
 
 ## Generated and local files
 

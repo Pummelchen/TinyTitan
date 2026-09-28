@@ -75,7 +75,7 @@ public struct AffineSnapshot: Sendable {
     /// quantizers are group-64 affine), so this is a storage difference and
     /// not a semantic one -- which `tools/gturbo_diff_snapshot.py` checks
     /// rather than assumes.
-    private enum Storage {
+    enum Storage {
         case safetensors(
             shards: [String: SafeTensorsFile],
             placement: [String: String])
@@ -106,21 +106,21 @@ public struct AffineSnapshot: Sendable {
 
     public let directory: URL
     public let configuration: Configuration
-    private let storage: Storage
-    private let baseBits: Int
-    private let groupSize: Int
+    let storage: Storage
+    let baseBits: Int
+    let groupSize: Int
     /// Per-tensor width overrides, keyed by stem. The 4-bit build keeps the
     /// tied embedding and the attention K/V at 8 bits, because measuring
     /// said that is where the error actually is.
-    private let widths: [String: Int]
+    let widths: [String: Int]
 
     /// The safetensors shards, for the paths that are only reachable from the
     /// snapshot initializer. Nil for a `.gturbo` install.
-    private var shards: [String: SafeTensorsFile] {
+    var shards: [String: SafeTensorsFile] {
         if case .safetensors(let shards, _) = storage { return shards }
         return [:]
     }
-    private var placement: [String: String] {
+    var placement: [String: String] {
         if case .safetensors(_, let placement) = storage { return placement }
         return [:]
     }
@@ -320,7 +320,7 @@ public struct AffineSnapshot: Sendable {
 
     /// The stem of a `.weight` name, which is how widths and the index are
     /// keyed.
-    private func stem(of name: String) -> String {
+    func stem(of name: String) -> String {
         name.hasSuffix(".weight") ? String(name.dropLast(".weight".count)) : name
     }
 
@@ -331,7 +331,7 @@ public struct AffineSnapshot: Sendable {
     /// resident file is opened read-only and never written, so the pointers
     /// handed out live as long as the mapping and concurrent row-range reads
     /// cannot race -- the same invariant the snapshot case documents.
-    private static func matrix(
+    static func matrix(
         _ name: String,
         index: ResidentIndex,
         weights: ResidentWeights,
@@ -440,99 +440,4 @@ public struct AffineSnapshot: Sendable {
 
     public let modelType: String?
 
-    private func shard(_ name: String) throws -> SafeTensorsFile {
-        guard let file = placement[name], let shard = shards[file] else {
-            throw SafeTensorsFile.Failure.missing(name)
-        }
-        return shard
-    }
-
-    public func floats(_ name: String) throws -> [Float] {
-        if case .gturbo(let index, let weights) = storage {
-            guard let entry = index.entries[name] else {
-                throw SafeTensorsFile.Failure.missing(name)
-            }
-            guard let base = weights.base else {
-                throw SafeTensorsFile.Failure.malformed("model_weights.bin could not be mapped")
-            }
-            let raw = UnsafeRawBufferPointer(
-                start: base.advanced(by: Int(entry.fileOffset)),
-                count: Int(entry.sizeBytes))
-            // Dtype codes are the repacker's (`ietnyDtype`): 0 u32, 1 bf16,
-            // 2 fp16, 3 fp32. The bf16 widening is the same bit trick the
-            // safetensors reader uses -- the top sixteen bits of a float32 are
-            // exactly a bfloat16.
-            switch entry.dtype {
-            case 3:
-                return Array(raw.bindMemory(to: Float.self))
-            case 1:
-                return raw.bindMemory(to: UInt16.self).map {
-                    Float(bitPattern: UInt32($0) << 16)
-                }
-            case 2:
-                return raw.bindMemory(to: Float16.self).map(Float.init)
-            default:
-                throw SafeTensorsFile.Failure.unsupported(
-                    dtype: "resident dtype \(entry.dtype)", name: name)
-            }
-        }
-        return try shard(name).floats(name)
-    }
-
-    public func has(_ name: String) -> Bool {
-        switch storage {
-        case .safetensors: return placement[name] != nil
-        case .gturbo(let index, _): return index.entries[name] != nil
-        }
-    }
-
-    /// A quantized matrix by its `.weight` name.
-    public func matrix(_ name: String) throws -> Matrix {
-        if case .gturbo(let index, let weights) = storage {
-            return try Self.matrix(
-                name, index: index, weights: weights,
-                groupSize: groupSize, bits: bits(forStem: stem(of: name)))
-        }
-        let stem =
-            name.hasSuffix(".weight")
-            ? String(name.dropLast(".weight".count)) : name
-        let shard = try shard(name)
-        let entry = try shard.entry(name)
-        guard entry.shape.count == 2 else {
-            throw SafeTensorsFile.Failure.malformed("\(name) is not a matrix")
-        }
-        let width = bits(forStem: stem)
-        let lanes = 32 / width
-        let rows = entry.shape[0]
-        let columns = entry.shape[1] * lanes
-        // Same division, same reason as the resident-index branch above.
-        guard columns % groupSize == 0 else {
-            throw SafeTensorsFile.Failure.malformed(
-                "\(stem): width \(columns) at \(width) bits is not a whole number "
-                    + "of \(groupSize)-element groups")
-        }
-        let scales = try shard.bytes(stem + ".scales")
-        let biases = try shard.bytes(stem + ".biases")
-        guard scales.count == rows * (columns / groupSize) * 2,
-            biases.count == scales.count
-        else {
-            throw SafeTensorsFile.Failure.malformed(
-                "\(stem): scales and biases do not match \(rows)x\(columns) "
-                    + "at \(width) bits, group \(groupSize)")
-        }
-        guard let scalesBase = scales.baseAddress?.assumingMemoryBound(to: UInt16.self),
-            let biasesBase = biases.baseAddress?.assumingMemoryBound(to: UInt16.self)
-        else {
-            throw SafeTensorsFile.Failure.malformed(
-                "\(stem): scales or biases have no storage")
-        }
-        return Matrix(
-            weights: try shard.bytes(name),
-            scales: scalesBase,
-            biases: biasesBase,
-            rows: rows,
-            columns: columns,
-            bits: width,
-            groupSize: groupSize)
-    }
 }
