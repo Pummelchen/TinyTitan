@@ -41,7 +41,7 @@ separate head (9B).
 ## What is missing (the actual gap)
 
 1. **The routed-MoE stage is unconditional.** `RealForwardRunner+DecodeMoE.swift`
-   and `+Prefill.swift` always encode the router, the prefetch probes, the
+   and `+PrefillMoE.swift` always encode the router, the prefetch probes, the
    residency classification and the streamed routed FFN, clamping with
    `cfg.numExperts - 1` — which is `-1` for a dense model. That is why
    `validateRuntimeSchema` refuses the family

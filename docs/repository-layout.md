@@ -110,16 +110,16 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 45 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 44 production
 files above it on 2026-09-28; the largest are
-`RealForwardRunner+Prefill.swift` (1,541), `RealForwardRunner.swift` (1,449),
-`PreadExpertStreamer.swift` (1,392, one class), `RemoteStreamingRepacker.swift`
-(1,373), `MemoryService.swift` (1,128) and `Model.swift` (1,081). Each is one
-cohesive type or one phase of a pipeline; the next structural gain there is a
-*design* change (a type doing two jobs), not a move, and none is currently doing
-two jobs. Where a phase file is really a phase plus a cluster of helpers around
-it, the cluster moves out on its own (`+DecodeAttention.swift`,
-`+DecodeMoE.swift`).
+`RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
+class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
+`Model.swift` (1,081) and `OpenAIModels.swift` (1,046). Each is one cohesive
+type or one phase of a pipeline; the next structural gain there is a *design*
+change (a type doing two jobs), not a move, and none is currently doing two
+jobs. Where a phase file is really a phase plus a cluster of helpers around it,
+the cluster moves out on its own (`+DecodeAttention.swift`, `+DecodeMoE.swift`,
+`+PrefillLayer.swift`, `+PrefillMoE.swift`).
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -162,6 +162,19 @@ No access widened — the moved declarations were already internal. The same pas
 found `encodeLinearAttentionDecode`'s doc comment stranded in `+Decode.swift`
 since the 2026-09-15 split moved its body; it now sits above the function it
 describes.
+
+The prefill phase file followed on the same day, `+Prefill.swift` 1,541 → 239,
+which took it under the rule in one pass:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Runtime/Inference/RealForwardRunner+PrefillLayer.swift` | 379 | the chunk orchestrator and the per-layer pass it dispatches |
+| `Runtime/Inference/RealForwardRunner+PrefillMoE.swift` | 483 | the dense FFN and the routed-MoE tile stage |
+| `Runtime/Inference/RealForwardRunner+PrefillProjection.swift` | 306 | the per-layer views, the affine GEMV wrapper and the final head |
+| `Runtime/Inference/RealForwardRunner+PrefillKV.swift` | 177 | the KV cache writes and the quantized staging path |
+
+No widening here either: `runPrefillLayer` is `private` and moved together with
+its only caller, so it stayed private.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check

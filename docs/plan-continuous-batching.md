@@ -48,10 +48,11 @@ The prefill path already runs **T tokens through one forward pass**:
   (`encodeAffineProjection(..., tokenCount: t)`), so the quantised GEMM kernels
   for multi-row input exist.
 - `encodeRoutedMoEPrefill` groups routed experts over T tokens
-  (`RealForwardRunner+Prefill.swift:1268`), and `encodeDenseFFNPrefill`
-  (`:1206`) covers the dense family.
-- `encodeLinearAttentionPrefill` (`:736`) and `encodeFullAttentionPrefill`
-  (`:880`) are chunk-aware and take `tokenCount`/`startPosition`.
+  (`RealForwardRunner+PrefillMoE.swift:82`), and `encodeDenseFFNPrefill`
+  (`:18`) covers the dense family.
+- `encodeLinearAttentionPrefill` and `encodeFullAttentionPrefill`
+  (`RealForwardRunner+PrefillAttention.swift:19`, `:177`) are chunk-aware and
+  take `tokenCount`/`startPosition`.
 
 Decode (`produceToken`, `RealForwardRunner+Decode.swift:64`) is the single-token
 special case. A continuous-batch decode step of B sequences is structurally a
