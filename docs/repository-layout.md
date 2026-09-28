@@ -110,11 +110,12 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 39 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 38 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `Tokenizer.swift` (818). Each is one
+`ANEPrefillAttention.swift` (919) and `RealForwardRunner+Residual.swift` (797).
+Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
 two jobs. Where a file is a phase plus a cluster of helpers around it, or a
@@ -234,6 +235,21 @@ computed properties can.
 
 No widening: the only two `private` members involved (`bf16Readable` and
 `openLayerLocked`) moved together with their only callers.
+
+`Tokenizer.swift` (818 → 491) followed the same shape — the struct keeps its
+stored properties, the initializers and the encode/decode surface:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Tokenization/Tokenizer+Helpers.swift` | 146 | the Jinja context, `ResolvedSpecialTokens`, the streaming-decoder check and special-token resolution |
+| `Tokenization/Tokenizer+Loading.swift` | 138 | the sidecar resolution, the public factories and the load coordinator |
+| `Tokenization/TokenizerTypes.swift` | 73 | the error type and the two reasoning-mode enums |
+
+This split did widen four members — `templateContext`, `ResolvedSpecialTokens`,
+`validateStreamingDecoder` and `resolveChatMLTokens` — because the initializer
+that calls them stays in `Tokenizer.swift`, and it widened `imStartMark` and
+`imEndMark` for the moved resolver. The load-source enum and coordinator moved
+with their only user, so they stayed `private`.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
