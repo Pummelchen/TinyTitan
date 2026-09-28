@@ -152,6 +152,26 @@ Verify the Release: the notes quote the digest in the `.sha256` beside it, the
 assets are the archive and its checksum, and the changelog points at the same tag.
 Leave previous releases' notes and performance tables alone.
 
+### Rollback
+
+A published tag and its artifacts are immutable: never move, delete or re-push a
+tag to undo a release, and never overwrite an asset in place. If a release is
+wrong — a bad digest, an archive missing its `.bundle`, a regression the gates
+missed — ship the next patch version instead:
+
+1. Bump the version literal, write the notes for the new version, and name the
+   release it supersedes and what was wrong with it.
+2. Run the whole runbook for the new tag, dry run first, then publish.
+3. Add one line to the wiki changelog marking the earlier version superseded and
+   pointing at its replacement, so a reader who lands on the old entry is not left
+   on a broken artifact.
+
+Rolling the *checkout* back is read-only and needs no approval:
+`git switch --detach vX.Y` reproduces the published tree, and the release staging
+directory is disposable. Unpublishing, deleting or rewriting anything already on
+GitHub needs the repository owner's explicit approval first, exactly like any
+other destructive remote action.
+
 ## 1.10 Rules, agents and other repositories
 
 - **These rules live in this repository and are edited only here.** They are not
@@ -184,7 +204,7 @@ Leave previous releases' notes and performance tables alone.
 
 # Part 2 — This repository
 
-## TinyTitan — Swift, semantic version, 21 releases
+## TinyTitan — Swift, semantic version, 29 release tags
 
 *The reference implementation of this standard.* Runbook:
 `docs/release-process.md`. Mechanism: `tools/release.sh`.
@@ -194,8 +214,9 @@ Leave previous releases' notes and performance tables alone.
 This repository is a GitHub **fork** of `drumih/turbo-fieldfare`, and it is
 **deliberately left as a fork** — do not detach it from the fork network. Leaving
 is permanent, and the standalone repository would not retain its wiki, issues, pull
-requests, stars, watchers or child forks; the wiki alone holds 17 pages across 224
-commits, alongside 21 releases.
+requests, stars, watchers or child forks; the wiki alone holds 21 pages across 336
+commits, alongside 29 semantic-version tags (`v2` through `v5.12`; `git tag | grep
+-cE '^v[0-9]+\.[0-9]+'`).
 
 The fork relationship is inert. Nothing here is upstreamed: **no pull requests,
 cherry-picks or patches go to the parent**, and every change stays inside this
@@ -210,16 +231,18 @@ repository.
   executables** — `TinyTitanServer`, `TinyTitanCLI`,
   `TinyTitanRepack`, `TinyTitanBench` — plus the
   `.bundle` resources, licence and notices.
-- **Gates** `tools/lint.sh` (six gates: force-cast, func-length, sendable,
-  converter, arch-path, shell-portability); `swift test --no-parallel`; **every installed model with
+- **Gates** `tools/lint.sh` (eleven checks: force-cast, func-length,
+  unchecked-sendable, converter, arch-path, shell-portability, shellcheck,
+  swiftlint, swift-format, javascript, python); `swift test --no-parallel`;
+  **every installed model with
   a golden target**, through `tools/golden-baseline.sh --check`; then a clean
   scratch build with the warning scan.
-- **Mandatory, and run by the runbook rather than by `release.sh`**
+- **Mandatory, and run by the runbook rather than by `tools/release.sh`**
   (`docs/release-process.md`): `tools/internal-speeds.py --record --label vX.Y
   --baseline …`. Any metric or duration past a 10% regression blocks the release
   until fixed or explained in `### Verification`. The record is committed with
   the release.
-- **Only models already installed under `models/` are verified**, and `release.sh`
+- **Only models already installed under `models/` are verified**, and `tools/release.sh`
   fingerprints the install set so a gate cannot install one to go green. Missing
   installs are reported *not checked* and must be named in the notes.
 - **Traps** a golden gate that *refused to start* is reported as a "mismatch" —
@@ -228,7 +251,7 @@ repository.
   `.bundle` resources while every gate passes** — `find` does not follow a symlink
   given as its own starting point, so a staging glob over `$SCRATCH/release`
   copies none of them, and the binaries then die with `unable to find bundle
-  named …` on the first model load. `release.sh` now asserts the bundle before
+  named …` on the first model load. `tools/release.sh` now asserts the bundle before
   staging and in the finished tarball; the check that catches the class is
   downloading the published artifact and running it somewhere else.
 - The model install and the checkout are separate jobs; adding a model is

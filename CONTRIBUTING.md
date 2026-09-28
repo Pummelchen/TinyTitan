@@ -21,17 +21,19 @@ swift test --no-parallel
 ```
 
 CI runs the same three, so a green run here is a green run there. `tools/lint.sh`
-enforces five things the compiler cannot:
+enforces eleven checks the compiler cannot — six project-specific probes and five
+pinned third-party linters (shellcheck, swiftlint, swift-format, the plugin
+packages' eslint + prettier, and ruff). The probes:
 
 - **force-cast** — no `as!` / `try!` under `sources/`. To keep one, put
   `lint:allow-force <reason>` in the comment block directly above it; a marker
   without a reason fails exactly like no marker.
 - **func-length** — a ratchet, not a limit: no function over 120 lines without an
   inline `lint:allow-long <reason>` above it. The ratchet file
-  `tools/func-length-baseline.txt` is currently **empty** — the baseline exists
-  so a large refactor can carry a temporary exemption, not because any function
-  needs one today. If you ever add a row, drop it once the function shrinks: the
-  gate fails on a stale exemption so it cannot be reused later.
+  `tools/func-length-baseline.txt` carries the audited exemptions (14 rows, all
+  from the formatter sweep that expanded their bodies). If you ever add a row,
+  drop it once the function shrinks: the gate fails on a stale exemption so it
+  cannot be reused later.
 - **unchecked-sendable** — every `@unchecked Sendable` under `sources/` must
   carry an `unchecked-invariant: <what makes this safe>` note above it.
 - **converter** — feeds routed experts to the converter in shuffled order and
@@ -44,7 +46,9 @@ enforces five things the compiler cannot:
   toolchain, or at a stale binary on this one. To keep one deliberately, put
   `lint:allow-arch-path <reason>` on the line above.
 
-`tools/lint.sh <mode>` runs a single gate — `force-cast`, `func-length`, `sendable`, `converter` or `arch-path`.
+`tools/lint.sh <mode>` runs a single gate — `force-cast`, `func-length`,
+`sendable`, `converter`, `arch-path`, `shell`, `shellcheck`, `swiftlint`,
+`swift-format`, `javascript` or `python`.
 
 These checks do not download or load the model. For a change to the runtime or
 the model-load path, also run the golden baseline, which is the only check that

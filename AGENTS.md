@@ -53,9 +53,13 @@ here may depend on a window existing.
 `sources/` holds one directory per SwiftPM target. `sources/TinyTitan/` is the
 runtime; `sources/TinyTitanFormat/` plus `sources/TinyTitanKernelsC/` are its
 format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
-`sources/TinyTitanServer/` hold the installer, CLI and loopback server.
+`sources/TinyTitanServer/` hold the installer, CLI and loopback server; each of
+those three is a thin executable over a `*Core` library target
+(`TinyTitanRepackCore`, `TinyTitanCLICore`, `TinyTitanServerCore`).
 `sources/TinyTitanMemory/` and `sources/ContinuityCore/` are persistent
-agent memory, `sources/TinyTitanMemoryTool/` inspects it, and
+agent memory, `sources/TinyTitanMemoryTool/` inspects it (executable
+`tinytitan-memory`), `sources/ContinuityDemo/` is the memory demo executable,
+`sources/TinyTitanFleet/` is the LAN manager (executable `ttlanmanager`), and
 `sources/TinyTitanBench/` plus `sources/TinyTitanValidation/` are the benchmark
 driver and the validation/reference target. An executable target keeps its
 top-level or `@main` entry in `Command/`; `plugins/dsh-tinytitan/` is the DeepSeek
@@ -86,6 +90,12 @@ swift run -c release TinyTitanCLI \
   --max-new 64
 ```
 
+`swift build -c release` is the portable build and works in a fresh clone.
+`swift run … TinyTitanCLI` needs a model install under `models/`, which is
+gitignored — a new checkout has none, so install one first
+(`docs/adding-a-model.md`). The same holds for the repack and `--verify-install`
+examples below.
+
 That is the **portable** build and what `tools/release.sh` ships: the target is
 `arm64-apple-macos26.0` with no CPU flag, so the codegen baseline is clang's
 default for the triple — **apple-m1** — and an M3's BF16/I8MM go unused.
@@ -107,7 +117,7 @@ swift build -c release -Xswiftc -target-cpu -Xswiftc apple-m3 -Xcc -mcpu=apple-m
 ```
 
 That artifact is not portable (it may use this core's instructions), so never ship
-it from `release.sh` or hand it to another Mac. The `.unsafeFlags` is also why
+it from `tools/release.sh` or hand it to another Mac. The `.unsafeFlags` is also why
 this package cannot be consumed as a dependency; it is an application package and
 nothing depends on it.
 
@@ -132,7 +142,7 @@ corruption and does not need a re-download — re-issue the receipt in place
 (re-hashes the payload against the manifest and rebinds it to the current path):
 
 ```bash
-swift run -c release TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_2B_4Bit
+swift run -c release TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_4B_4Bit
 ```
 
 Never hand-edit the receipt to match the new path: the path binding is what detects
@@ -164,25 +174,46 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the six gates CI enforces beyond the compiler: no `as!` /
-`try!` under `sources/` without a `lint:allow-force <reason>` comment above it; no
-function over 120 lines without an inline `lint:allow-long <reason>` — the ratchet
-file `tools/func-length-baseline.txt` is currently **empty**, because every long
-function carries its own justification, and the gate fails on a stale exemption row
-as well as on a new offender; every `@unchecked Sendable` carrying an
-`unchecked-invariant:` note; a `converter` probe that files routed experts by index
-rather than arrival order; no hardcoded SwiftPM target triple in a build path,
-which points at nothing on a newer toolchain or at a stale binary on this one; and
-**every shell script parsing and running under `/bin/bash`, which is 3.2.57 on a
-factory Mac** — not the Homebrew 5.x a development machine puts first on `PATH`.
-That last one is not academic: a single-quoted heredoc holding an apostrophe
-inside `$( )` stops 3.2 parsing the file at all; `${v^^}` or `mapfile` parses and
-then dies mid-menu; and a whole-array expansion `"${a[@]}"` on an **empty** array
-is `a[@]: unbound variable` under the `set -u` these scripts set, which 5.x
-accepts silently. Write it `${a[@]+"${a[@]}"}` (likewise `[*]`), which means the
-same thing for a non-empty array on both shells — every script here does, and the
-gate fails on a bare one. `tools/lint.sh <mode>` runs a single gate (`force-cast`,
-`func-length`, `sendable`, `converter`, `arch-path`, `shell`).
+`tools/lint.sh` runs the eleven checks CI enforces beyond the compiler — the
+first six are project-specific probes, the last five are pinned third-party
+linters:
+
+- `force-cast` — no `as!` / `try!` under `sources/` without a
+  `lint:allow-force <reason>` comment above it.
+- `func-length` — no function over 120 lines without an inline `lint:allow-long
+  <reason>`. The ratchet file `tools/func-length-baseline.txt` carries the
+  audited exemptions (14 rows: the formatter sweep's expansions), and the gate
+  fails on a stale exemption row as well as on a new offender.
+- `unchecked-sendable` — every `@unchecked Sendable` carries an
+  `unchecked-invariant:` note.
+- `converter` — a probe that files routed experts by index rather than arrival
+  order.
+- `arch-path` — no hardcoded SwiftPM target triple in a build path, which points
+  at nothing on a newer toolchain or at a stale binary on this one.
+- `shell-portability` — every shell script parses and runs under `/bin/bash`,
+  which is 3.2.57 on a factory Mac, not the Homebrew 5.x a development machine
+  puts first on `PATH`. That one is not academic: a single-quoted heredoc holding
+  an apostrophe inside `$( )` stops 3.2 parsing the file at all; `${v^^}` or
+  `mapfile` parses and then dies mid-menu; and a whole-array expansion
+  `"${a[@]}"` on an **empty** array is `a[@]: unbound variable` under the
+  `set -u` these scripts set, which 5.x accepts silently. Write it
+  `${a[@]+"${a[@]}"}` (likewise `[*]`), which means the same thing for a
+  non-empty array on both shells — every script here does, and the gate fails on
+  a bare one.
+- `shellcheck` (pinned 0.11.0), `swiftlint` (pinned 0.65.1, `--strict`),
+  `swift-format` (the committed `.swift-format`), `javascript` (each plugin
+  package's own eslint + prettier) and `python` (pinned ruff, plus a parse at the
+  declared 3.13 floor). Each pins its tool version and fails when another is on
+  `PATH`.
+
+`tools/lint.sh <mode>` runs a single check (`force-cast`, `func-length`,
+`sendable`, `converter`, `arch-path`, `shell`, `shellcheck`, `swiftlint`,
+`swift-format`, `javascript`, `python`; `format` and `js` are aliases).
+
+In a fresh checkout the `javascript` check needs the plugin packages'
+dependencies first — `npm ci` in `plugins/dsh-lan-manager/` and
+`plugins/dsh-tinytitan/` (all CI installs before the gate); without it the check
+fails with that command in its message and the other ten still run.
 
 `tools/golden-baseline.sh --check <target>` compares greedy, fixed-seed generation
 against `benchmark/golden/`. It is the only check that exercises real inference, so
@@ -209,7 +240,7 @@ because the runner does not carry `numpy`, `safetensors` or `ml_dtypes`.
 
 **Verification uses only the models already installed under `models/`.** `models/`
 is deliberately kept smaller than the full supported set to save disk, so a golden
-target with no install there is *reported as not checked* — by `release.sh` and in
+target with no install there is *reported as not checked* — by `tools/release.sh` and in
 the release notes — and never "fixed" by downloading, converting, repacking or
 re-installing it. No gate, benchmark or release step may fetch a model to satisfy
 itself. Do not download a full checkpoint, duplicate the `.gturbo` model, create a
@@ -270,7 +301,7 @@ server is needed, and stop only a server you launched.
 
 Cutting a release is a runbook, not improvisation: `docs/release-process.md` holds
 the order (notes, changelog, version, tag, dry run, publish), the machine
-preconditions, and what `release.sh`'s failure messages actually mean — including a
+preconditions, and what `tools/release.sh`'s failure messages actually mean — including a
 golden gate that reports a *refused* start as a "mismatch". The cross-repository
 standard is [`RELEASE.md`](RELEASE.md).
 
