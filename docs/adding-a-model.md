@@ -89,7 +89,8 @@ are byte-identical. That answers "will the parser accept its tool calls?" by
 construction rather than by hoping.
 
 **2. Resolve every key the repacker's arch reader requires.** Read the
-`loadQwen35MoE` branch of `sources/TinyTitanRepack/Core/Format/ArchInfo.swift`,
+`loadQwen35MoE` branch of
+`sources/TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift`,
 extract its `try i("…")` keys, and check each against the checkpoint's
 `text_config`. A missing one is a `configJsonInvalid` at the end of the
 conversion; KAT has all seventeen, plus `layer_types` and both rope keys.

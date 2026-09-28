@@ -692,7 +692,7 @@ below exists in this tree today unless marked **new**.
 | Packed-FP4 E2M1 GEMV | `Kernels/Quant/DequantInt4GEMV.swift` (`dequant_int4.metal`) | **New kernel + Swift binding.** Int4 affine ≠ FP4 E2M1; the E2M1 range is ±6.0 and the scale is a power-of-two exponent |
 | Native KV formats (FP4 E2M1/E4M3-16, FP4 E8M0/32, FP8) | `Kernels/Quant/KVCacheQuantizer.swift` | **Extend.** A different scheme at a different granularity; a cache written by the affine quantizer would pass shape checks and change every attention output |
 | Engine family dispatch | `Runtime/Family/TensorSchema.swift`, `Infrastructure/ModelIO/ModelTypes.swift` (`ModelFamily`) | **Extend.** Add `deepseekV41` to `ModelFamily` and `TensorSchema`, plus a **new** `Runtime/Family/DeepseekV41Family.swift` for the forward |
-| Manifest arch + quant scheme | `TinyTitanRepack/Core/Format/ArchInfo.swift` (`loadQwen4Exp` is the first-of-family precedent), `GTurboJSON.swift`, `GTurboEncoders.swift` | **Extend.** A `loadDeepseekV41` branch, a `RepackModelFamily.deepseekV41` case, and `scheme`/`scaleType` values for non-affine formats. `GTurboBinary` stays the single writer |
+| Manifest arch + quant scheme | `TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift` (`loadQwen4Exp` is the first-of-family precedent), `GTurboJSON.swift`, `GTurboEncoders.swift` | **Extend.** A `loadDeepseekV41` branch, a `RepackModelFamily.deepseekV41` case, and `scheme`/`scaleType` values for non-affine formats. `GTurboBinary` stays the single writer |
 | Engram streaming band | `Runtime/Inference/ModelExpertIO.swift`, `RealForwardRunner+Decode.swift` (expert streaming and prefetch) | **Extend.** The mechanism is right; the working set and the row-grained access pattern are not |
 | Per-install tuning row | `Runtime/Configuration/ModelProfile.swift` (`table`, keyed by model id + width) | **Extend.** Note the key carries a width, and §6.6 says this model has none — the row's key is a decision, not a default |
 | Served id → name | `TinyTitanServer/Core/ModelCatalog.swift` (`displayNames`) | **Extend.** Same width caveat |
@@ -719,7 +719,7 @@ Same eight as `adding-a-model.md`, with what each one costs here.
 | 7 | `tests/` | `ModelProfileTests.shipped` and the table count |
 | 8 | ANE prefill sidecar | Likely **skip**: for a model this size the exporter has no graph for the new attention, and the Qwen3.8 precedent already shows the ANE losing where the GPU path attends sparsely (0.72×). Export explicitly to re-measure; never install by default |
 
-Beyond the eight: `ArchInfo.swift` needs a `loadDeepseekV41` branch and a
+Beyond the eight: `ArchInfo+Loaders.swift` needs a `loadDeepseekV41` branch and a
 `RepackModelFamily` case (`deepseekV41`), a new `ModelFamily` case, a new
 `TensorSchema` mapping, and a new `Runtime/Family/DeepseekV41Family.swift`.
 `ArchInfo`'s `crossCheckProduction*` pattern means the new branch either matches

@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 36 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 35 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `ArchInfo.swift` (732).
+`ANEPrefillAttention.swift` (919) and `RepackPlanner.swift` (720).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -271,6 +271,18 @@ helpers with theirs.
 
 No widening: `finishVerifyPair` moved with both of its callers, and the
 `lint:allow-long` marker travelled with its declaration.
+
+`ArchInfo.swift` (732 → 197) split by family: the struct and its stored fields
+stay, the readers and their cross-checks go.
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift` | 458 | the four per-family `config.json` readers |
+| `TinyTitanRepack/Core/Format/ArchInfo+CrossChecks.swift` | 100 | the family cross-checks |
+
+All four loaders and both cross-checks widened from `private` to internal —
+`ArchInfo.load` stays in `ArchInfo.swift` and dispatches to them, and the
+cross-checks are called from the loaders, which now live apart.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
