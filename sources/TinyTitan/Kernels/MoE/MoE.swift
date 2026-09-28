@@ -53,44 +53,44 @@ final class MoE {
     /// k arrives as explicit kernel work, never as silent misexecution.
     let maxStreamedExperts: Int
 
-    private let realDecodeD: UInt32
-    private let realDecodeF: UInt32
+    let realDecodeD: UInt32
+    let realDecodeF: UInt32
     /// The k baked into the specialized pipelines. This was a constant 8 --
     /// the value every shipping model used -- which made the specialization
     /// silently wrong for a family that shares those hidden dimensions but
     /// routes to a different number of experts: phase 1 simply never wrote
     /// the slots past 8, and the reduce summed zeros for them. It is the
     /// model's own top-k now, and `useRealDecodeConstants` checks it.
-    private let realDecodeTopK: UInt32
-    private let realDecodeNumExperts: UInt32
+    let realDecodeTopK: UInt32
+    let realDecodeNumExperts: UInt32
 
-    private let routerGemvPSO: MTLComputePipelineState
-    private let routerGemvSpecializedPSO: MTLComputePipelineState
-    private let routerSelectK8PSO: MTLComputePipelineState
-    private let routerSelectK8SpecializedPSO: MTLComputePipelineState
+    let routerGemvPSO: MTLComputePipelineState
+    let routerGemvSpecializedPSO: MTLComputePipelineState
+    let routerSelectK8PSO: MTLComputePipelineState
+    let routerSelectK8SpecializedPSO: MTLComputePipelineState
     /// Used when top-k is not 8. The k8 kernel stays the golden path.
-    private let routerSelectKNPSO: MTLComputePipelineState
+    let routerSelectKNPSO: MTLComputePipelineState
     /// One-simdgroup top-k for k != 8, same order as the serial kernel.
     /// Default on: both Qwen3.8 goldens are byte-identical with it, and it
     /// takes the router pair (real + next-layer probe) from 11.0 to 3.8
     /// ms/token because the serial kernel's insertion sort over 512 logits
     /// was the router's cost, not the GEMV. TINYTITAN_ROUTER_TOPK_SIMD=0 restores
     /// the serial kernel.
-    private let routerSelectKNSimdPSO: MTLComputePipelineState?
-    private let routerTopKSimd: Bool
-    private let residencyClassifyPSO: MTLComputePipelineState
-    private let routerLogits: MTLBuffer
-    private let phase1U16PSO: MTLComputePipelineState
-    private let phase1U16SpecializedPSO: MTLComputePipelineState
-    private let phase1SubsetU16PSO: MTLComputePipelineState
-    private let phase1SubsetU16SpecializedPSO: MTLComputePipelineState
-    private let phase2ReduceK8PSO: MTLComputePipelineState
-    private let phase2ReduceK8SpecializedPSO: MTLComputePipelineState
+    let routerSelectKNSimdPSO: MTLComputePipelineState?
+    let routerTopKSimd: Bool
+    let residencyClassifyPSO: MTLComputePipelineState
+    let routerLogits: MTLBuffer
+    let phase1U16PSO: MTLComputePipelineState
+    let phase1U16SpecializedPSO: MTLComputePipelineState
+    let phase1SubsetU16PSO: MTLComputePipelineState
+    let phase1SubsetU16SpecializedPSO: MTLComputePipelineState
+    let phase2ReduceK8PSO: MTLComputePipelineState
+    let phase2ReduceK8SpecializedPSO: MTLComputePipelineState
     /// Used when top-k is not 8; the k8 kernels stay the golden path.
-    private let phase2ReduceKNPSO: MTLComputePipelineState
-    private let routedArgEncoder: MTLArgumentEncoder
-    private let reusableRoutedArgBuffer: MTLBuffer
-    private let alwaysReadyIOStatus: MTLBuffer
+    let phase2ReduceKNPSO: MTLComputePipelineState
+    let routedArgEncoder: MTLArgumentEncoder
+    let reusableRoutedArgBuffer: MTLBuffer
+    let alwaysReadyIOStatus: MTLBuffer
 
     /// `specializedD`/`specializedF`/`specializedNumExperts` describe the
     /// production shape this instance specializes for (the specialized
@@ -425,190 +425,4 @@ final class MoE {
         return reusableRoutedArgBuffer
     }
 
-    func encodeRoutedPersistentPhase1U16Load(
-        commandBuffer: MTLCommandBuffer,
-        routedArgBuffer: MTLBuffer,
-        routedBlobs: [MTLBuffer],
-        routedOffsets: MoEExpertOffsets,
-        x: MTLBuffer,
-        xOffset: Int = 0,
-        acts: MTLBuffer,
-        actsOffset: Int = 0,
-        d: UInt32,
-        f: UInt32,
-        topK: UInt32,
-        ioStatus: MTLBuffer? = nil,
-        ioStatusOffset: Int = 0
-    ) throws {
-        validate(routedBlobs: routedBlobs, topK: topK)
-        var dimension = d
-        var intermediate = f
-        var expertCount = topK
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            throw MetalError.commandEncoderFailed
-        }
-        encoder.setComputePipelineState(
-            useRealDecodeConstants(d: d, f: f)
-                ? phase1U16SpecializedPSO
-                : phase1U16PSO)
-        encoder.setBuffer(routedArgBuffer, offset: 0, index: 0)
-        for buffer in routedBlobs { encoder.useResource(buffer, usage: .read) }
-        var offsets = routedOffsets
-        encoder.setBytes(&offsets, length: MemoryLayout<MoEExpertOffsets>.stride, index: 1)
-        encoder.setBuffer(x, offset: xOffset, index: 2)
-        encoder.setBuffer(acts, offset: actsOffset, index: 3)
-        encoder.setBytes(&dimension, length: MemoryLayout<UInt32>.stride, index: 4)
-        encoder.setBytes(&intermediate, length: MemoryLayout<UInt32>.stride, index: 5)
-        encoder.setBytes(&expertCount, length: MemoryLayout<UInt32>.stride, index: 6)
-        encoder.setBuffer(
-            ioStatus ?? alwaysReadyIOStatus,
-            offset: ioStatus == nil ? 0 : ioStatusOffset,
-            index: 7)
-        // Phase-1 uses 16 rows per threadgroup (threadgroup-staged x), so the
-        // dispatch is (topK*f)/16 groups of 512 threads.
-        encoder.dispatchThreadgroups(
-            MTLSize(width: (Int(topK * f) + 15) / 16, height: 1, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: 512, height: 1, depth: 1))
-        encoder.endEncoding()
-    }
-
-    func encodeRoutedPersistentPhase1SubsetU16Load(
-        commandBuffer: MTLCommandBuffer,
-        routedArgBuffer: MTLBuffer,
-        routedBlobs: [MTLBuffer],
-        routedOffsets: MoEExpertOffsets,
-        x: MTLBuffer,
-        acts: MTLBuffer,
-        activeSlots: MTLBuffer,
-        activeSlotIndices: [UInt32],
-        activeCount: UInt32,
-        d: UInt32,
-        f: UInt32,
-        topK: UInt32,
-        ioStatus: MTLBuffer? = nil,
-        ioStatusOffset: Int = 0
-    ) throws {
-        guard activeCount > 0 else { return }
-        validate(routedBlobs: routedBlobs, topK: topK)
-        precondition(activeSlotIndices.count == Int(activeCount))
-        var dimension = d
-        var intermediate = f
-        var expertCount = topK
-        var active = activeCount
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            throw MetalError.commandEncoderFailed
-        }
-        encoder.setComputePipelineState(
-            useRealDecodeConstants(d: d, f: f)
-                ? phase1SubsetU16SpecializedPSO
-                : phase1SubsetU16PSO)
-        encoder.setBuffer(routedArgBuffer, offset: 0, index: 0)
-        for slot in activeSlotIndices {
-            encoder.useResource(routedBlobs[Int(slot)], usage: .read)
-        }
-        var offsets = routedOffsets
-        encoder.setBytes(&offsets, length: MemoryLayout<MoEExpertOffsets>.stride, index: 1)
-        encoder.setBuffer(x, offset: 0, index: 2)
-        encoder.setBuffer(acts, offset: 0, index: 3)
-        encoder.setBytes(&dimension, length: MemoryLayout<UInt32>.stride, index: 4)
-        encoder.setBytes(&intermediate, length: MemoryLayout<UInt32>.stride, index: 5)
-        encoder.setBytes(&expertCount, length: MemoryLayout<UInt32>.stride, index: 6)
-        encoder.setBuffer(activeSlots, offset: 0, index: 7)
-        encoder.setBytes(&active, length: MemoryLayout<UInt32>.stride, index: 8)
-        encoder.setBuffer(
-            ioStatus ?? alwaysReadyIOStatus,
-            offset: ioStatus == nil ? 0 : ioStatusOffset,
-            index: 9)
-        // Phase-1 uses 16 rows per threadgroup (threadgroup-staged x).
-        encoder.dispatchThreadgroups(
-            MTLSize(width: (Int(activeCount * f) + 15) / 16, height: 1, depth: 1),
-            threadsPerThreadgroup: MTLSize(width: 512, height: 1, depth: 1))
-        encoder.endEncoding()
-    }
-
-    func encodeRoutedPersistentPhase2Reduce(
-        commandBuffer: MTLCommandBuffer,
-        routedArgBuffer: MTLBuffer,
-        routedBlobs: [MTLBuffer],
-        routedOffsets: MoEExpertOffsets,
-        acts: MTLBuffer,
-        actsOffset: Int = 0,
-        routingWeights: MTLBuffer,
-        routingWeightsOffset: Int = 0,
-        residual: MTLBuffer,
-        residualOffset: Int = 0,
-        y: MTLBuffer,
-        yOffset: Int = 0,
-        d: UInt32,
-        f: UInt32,
-        topK: UInt32,
-        ioStatus: MTLBuffer? = nil,
-        ioStatusOffset: Int = 0
-    ) throws {
-        validate(routedBlobs: routedBlobs, topK: topK)
-        var dimension = d
-        var intermediate = f
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            throw MetalError.commandEncoderFailed
-        }
-        encoder.setComputePipelineState(
-            maxStreamedExperts == 8
-                ? (useRealDecodeConstants(d: d, f: f)
-                    ? phase2ReduceK8SpecializedPSO
-                    : phase2ReduceK8PSO)
-                : phase2ReduceKNPSO)
-        encoder.setBuffer(routedArgBuffer, offset: 0, index: 0)
-        for buffer in routedBlobs { encoder.useResource(buffer, usage: .read) }
-        var offsets = routedOffsets
-        encoder.setBytes(&offsets, length: MemoryLayout<MoEExpertOffsets>.stride, index: 1)
-        encoder.setBuffer(acts, offset: actsOffset, index: 2)
-        encoder.setBuffer(routingWeights, offset: routingWeightsOffset, index: 3)
-        encoder.setBuffer(residual, offset: residualOffset, index: 4)
-        encoder.setBuffer(y, offset: yOffset, index: 5)
-        encoder.setBytes(&dimension, length: MemoryLayout<UInt32>.stride, index: 6)
-        encoder.setBytes(&intermediate, length: MemoryLayout<UInt32>.stride, index: 7)
-        encoder.setBuffer(
-            ioStatus ?? alwaysReadyIOStatus,
-            offset: ioStatus == nil ? 0 : ioStatusOffset,
-            index: 8)
-        // One simdgroup per expert slot. The kn kernel has no sg >= k guard
-        // precisely because the launch width says k, so this must stay in
-        // step with it: 32 lanes x k.
-        if maxStreamedExperts != 8 {
-            var k = UInt32(maxStreamedExperts)
-            encoder.setBytes(&k, length: MemoryLayout<UInt32>.stride, index: 9)
-        }
-        encoder.dispatchThreadgroups(
-            MTLSize(width: Int(d), height: 1, depth: 1),
-            threadsPerThreadgroup: MTLSize(
-                width: 32 * maxStreamedExperts,
-                height: 1, depth: 1))
-        encoder.endEncoding()
-    }
-
-    private func validate(routedBlobs: [MTLBuffer], topK: UInt32) {
-        precondition(topK == UInt32(maxStreamedExperts))
-        precondition(routedBlobs.count == Int(topK))
-    }
-
-    private func encodeRoutedArgumentBuffer(
-        _ buffer: MTLBuffer,
-        routedBlobs: [MTLBuffer],
-        routedBufferOffsets: [Int]?
-    ) {
-        precondition(
-            routedBufferOffsets == nil
-                || routedBufferOffsets?.count == routedBlobs.count)
-        routedArgEncoder.setArgumentBuffer(buffer, offset: 0)
-        for (index, blob) in routedBlobs.enumerated() {
-            routedArgEncoder.setBuffer(
-                blob,
-                offset: routedBufferOffsets?[index] ?? 0,
-                index: index)
-        }
-    }
-
-    private func useRealDecodeConstants(d: UInt32, f: UInt32) -> Bool {
-        d == realDecodeD && f == realDecodeF
-    }
 }
