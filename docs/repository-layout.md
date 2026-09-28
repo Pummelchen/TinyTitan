@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 41 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 40 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -120,7 +120,8 @@ cohesive type or one phase of a pipeline; the next structural gain there is a
 two jobs. Where a file is a phase plus a cluster of helpers around it, or a
 group of independent value types, the cluster moves out on its own
 (`+DecodeAttention.swift`, `+DecodeMoE.swift`, `+PrefillLayer.swift`,
-`+PrefillMoE.swift`, `OpenAIWireTypes.swift`, `ResponsesAPIMapper.swift`).
+`+PrefillMoE.swift`, `OpenAIWireTypes.swift`, `ResponsesAPIMapper.swift`,
+`Model+Validation.swift`).
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -206,6 +207,19 @@ request types:
 | --- | ---: | --- |
 | `TinyTitanServer/Core/AnthropicMapper.swift` | 469 | the Messages request mapping |
 | `TinyTitanServer/Core/AnthropicBuilder.swift` | 131 | the response builders |
+
+`Model+Loading.swift` (861 → 239) splits one extension by validation stage: the
+load pipeline keeps the file, the schema checks move out.
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Runtime/Inference/Model+SchemaValidation.swift` | 328 | role uniformity, family quant support, layer tensors, routed-expert layout |
+| `Runtime/Inference/Model+Validation.swift` | 302 | receipt layer layout, tile bounds, executable geometry, runtime schema, dense and layer schema |
+
+Three members widened from `private` to internal because their callers stayed
+behind or moved apart: `validateTrustedReceiptLayerLayout` (called by `load`),
+`validateLayerTensors` and `validateRoutedExpertLayout` (called by
+`validateLayerSchema`).
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
