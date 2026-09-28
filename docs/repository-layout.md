@@ -98,11 +98,12 @@ readability question, and the convention that came out of this pass is:
   `HTTPServerSupport.swift` out of `HTTPServer.swift`).
 - **A file should hold one API surface or one phase.** `HTTPServerHandler` had
   grown to 2,111 lines covering routing, three API surfaces and the response
-  plumbing; it is now six files, the largest 604 lines. The forward runner was
-  already split by phase (`+Decode`, `+Prefill`, `+Residual`, `+MTP`), which is
-  why those files stay large: each *is* one phase, and splitting a pipeline
+  plumbing; it is now six files, the largest 604 lines. The forward runner is
+  split by phase (`+Decode`, `+DecodeLayers`, `+Prefill`, `+Residual`, `+MTP`),
+  and each part is now inside the size rule; splitting a pipeline
   mid-sequence trades one long read for several functions with unwieldy
-  signatures — the same argument its `lint:allow-long` comments already make.
+  signatures, which is the argument the remaining `lint:allow-long` comments
+  make.
 - **Extracting a method to another file widens its access.** `private` is
   file-scoped in Swift, so a member reached from a new file of the same module
   becomes `internal`. That is the price of the split and the reason it is done
@@ -110,16 +111,24 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 2 production
-files above it on 2026-09-28; the largest are
-`RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
-class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
-`SessionLog.swift` (642) and `RealForwardRunner+Decode.swift` (629).
-Each is one
-cohesive type or one phase of a pipeline; the next structural gain there is a
-*design* change (a type doing two jobs), not a move, and none is currently doing
-two jobs. Where a file is a phase plus a cluster of helpers around it, or a
-group of independent value types or accessors, the cluster moves out on its own
+included. **No file under `sources/` is above it as of 2026-09-28** —
+`git ls-files 'sources/**/*.swift' | xargs wc -l` lists 353 files and the
+largest is under the limit. The last two came down that day:
+
+- `RealForwardRunner.swift` (1,449 → 496): the 603-line initializer became a
+  convenience initializer that fills a staging `Builder` in two phases
+  (`+BuildCore.swift`, `+BuildScratch.swift`) and a designated initializer that
+  copies the staged values out.
+- `RealForwardRunner+Decode.swift` (629 → 316): the per-layer decode loop moved
+  to `+DecodeLayers.swift`.
+
+Both were code motion; the initializer's move also needed the four mechanical
+edits named in its commit message. The two phase functions and the loop carry
+`lint:allow-long` markers — they are straight-line construction or layer
+sequences, and cutting them further means threading their locals through a new
+signature. Earlier rounds brought the rest of the tree under the rule; where a
+file was a phase plus a cluster of helpers around it, or a group of independent
+value types or accessors, the cluster moved out on its own
 (`+DecodeAttention.swift`, `+DecodeMoE.swift`, `+PrefillLayer.swift`,
 `+PrefillMoE.swift`, `OpenAIWireTypes.swift`, `ResponsesAPIMapper.swift`,
 `Model+Validation.swift`, `Model+Accessors.swift`).
@@ -153,13 +162,15 @@ otherwise — every original line is present verbatim in one of the new files:
 
 The same move took the stage code out of the decode phase file on 2026-09-28,
 in two steps, leaving `+Decode.swift` at 629 lines: the token entry points and
-the layer loop that calls the stages.
+the layer loop that calls the stages. A third step the same day moved that loop
+out as well, taking the file to 316 lines.
 
 | New file | Lines | Out of |
 | --- | ---: | --- |
 | `Runtime/Inference/RealForwardRunner+DecodeMoE.swift` | 621 | `+Decode.swift` (1,609 → 1,004) |
 | `Runtime/Inference/RealForwardRunner+DecodeGEMV.swift` | 201 | `+Decode.swift` (1,004 → 629) |
 | `Runtime/Inference/RealForwardRunner+DecodeAttention.swift` | 299 → 491 | `+Decode.swift`, the `encodeDecodeAttention` dispatch |
+| `Runtime/Inference/RealForwardRunner+DecodeLayers.swift` | 343 | `+Decode.swift` (629 → 316), the per-layer decode loop |
 
 No access widened — the moved declarations were already internal. The same pass
 found `encodeLinearAttentionDecode`'s doc comment stranded in `+Decode.swift`
