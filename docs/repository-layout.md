@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 34 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 33 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -294,6 +294,17 @@ sends the value types and the planning helpers elsewhere:
 
 `routedExpertRole`, `layerIndex` and `isMultimodalTensorName` widened from
 `private` to internal because the public `plan` entry point stays behind.
+
+`HTTPServerHandler+Plumbing.swift` (671 → 284) split along the streaming seam;
+the new file carries the same imports as the original, which a first build
+caught as missing:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/HTTPServerHandler+Streaming.swift` | 408 | the SSE head, chat-event enqueueing, stream lifecycle and frame writers |
+| `TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift` | 284 | the outbox drainer, the low-level writers, deadlines and frame helpers |
+
+No widening: this file held no `private` member at all.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
