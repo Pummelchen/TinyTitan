@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 9 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 8 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -468,6 +468,12 @@ method made the compiler resolve the name to the local `let stem` instead.
 cache lookup and the partial/combine builders. That split widened all
 twenty-one stored properties and the four builders, since both the kept encode
 paths and the moved builders call them.
+
+`ContinuityStore.swift` (605 → 478) split its key/scope mapping out into
+`ContinuityStore+KeyMapping.swift` (135): the prefix plan, the address and key
+text forms, the normalisers, `task(for:)` and the error translation. Seven
+stored properties and `task(for:)` widened, and the new file needed
+`import ContinuityCore`.
 
 ## Generated and local files
 
