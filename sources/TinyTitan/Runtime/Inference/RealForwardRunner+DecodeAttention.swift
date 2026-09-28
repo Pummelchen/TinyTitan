@@ -4,11 +4,15 @@ import Metal
 /// Decode-time attention encoding, split out of `RealForwardRunner+Decode.swift`.
 ///
 /// Gated-DeltaNet (linear attention) and gated full attention for a single
-/// decoded token, plus the packed query/gate projection they share. Pure code
+/// decoded token, plus the packed query/gate projection they share and the
+/// dispatch that chooses between the two branches. Pure code
 /// motion: the same encoder bodies, moved so one file holds one concern and no
 /// file in this directory passes 1,600 lines.
 
 extension RealForwardRunner {
+    /// Gated-DeltaNet linear attention (layer mask 2), one decode step.
+    /// Reads `normed`, updates the layer's recurrent state + conv tail in
+    /// place, and leaves the attention-branch output in `oOut`.
     func encodeLinearAttentionDecode(
         _ cb: inout MTLCommandBuffer, layer L: Int,
         slot: Int = 0
@@ -295,5 +299,193 @@ extension RealForwardRunner {
             biases: o.buffer, biasesOffset: Int(o.biasOffset),
             x: attnOut, y: oOut, m: D, n: qDim)
         try rotate(&cb, role: "qsa.oproj")
+    }
+
+    /// Attention stage of one decode layer: the gated-DeltaNet branch or the
+    /// softmax branch, both writing into `oOut` for the residual add.
+    ///
+    /// lint:allow-long the two branches are alternatives over the same set of
+    /// scratch buffers; splitting them apart again would only re-create the
+    /// dispatch this method exists to hold.
+    func encodeDecodeAttention(
+        attnCB: inout MTLCommandBuffer,
+        tailCB: MTLCommandBuffer,
+        softmaxCB: inout MTLCommandBuffer?,
+        layer L: Int,
+        position: Int,
+        slot: Int = 0,
+        isLinear: Bool,
+        rmsEps eps: Float,
+        keepMask: MTLBuffer? = nil
+    ) throws {
+        let D = UInt32(cfg.hiddenSize)
+        let isFull = cfg.fullAttentionLayerMask[L] == 1
+        let headDimL = isFull ? cfg.fullHeadDim : cfg.headDim
+        let numKVL = isFull ? cfg.numFullKVHeads : cfg.numKVHeads
+        let qDim = UInt32(cfg.numHeads * headDimL)
+        let kvDim = UInt32(numKVL * headDimL)
+        let seqLen = UInt32(position + 1)
+        if isLinear {
+            // Gated-DeltaNet linear attention: no KV slots, no RoPE — a
+            // fixed-size recurrent state updated in place, one per slot.
+            try encodeLinearAttentionDecode(&attnCB, layer: L, slot: slot)
+        } else if cfg.attnOutputGate {
+            // Qwen full attention: packed [query ; gate] q_proj, real
+            // v_proj, no V norm, NeoX sub-dim RoPE, sigmoid output gate.
+            try encodeGatedFullAttentionDecode(
+                &attnCB, layer: L,
+                position: position,
+                slot: slot,
+                seqLen: seqLen,
+                keepMask: keepMask)
+        } else {
+            let kSlot =
+                kv?.kSlot(layer: L, position: position, slot: slot)
+                ?? (buffer: kStage, offset: 0)
+            let vSlot =
+                kv?.vSlot(layer: L, position: position, slot: slot)
+                ?? (buffer: vStage, offset: 0)
+            let quantizedKV = kv?.precision.isQuantized == true
+            let kWrite = quantizedKV ? (buffer: kStage, offset: 0) : kSlot
+            let vWrite = quantizedKV ? (buffer: vStage, offset: 0) : vSlot
+            let q = try model.qProj(layer: L)
+            let k = try model.kProj(layer: L)
+            // Under the K=V quirk full layers reuse k_proj; otherwise
+            // v_proj is a real tensor.
+            let vProj = (isFull && cfg.attentionKEqV) ? k : (try model.vProj(layer: L))
+            let o = try model.oProj(layer: L)
+            let qNorm = try model.qNorm(layer: L)
+            let kNorm = try model.kNorm(layer: L)
+
+            // Width-aware, like the gated branch above: the fused kernel is
+            // int4-only, so an 8-bit attention install would have had its q/k/v
+            // read as packed nibbles. It is also all-or-nothing -- one dispatch
+            // reads q, k and v at one width -- so it is usable only while both
+            // roles are 4-bit; `encodeRoleGEMV` below routes each projection at
+            // its own width, including 8-bit and a promoted bf16.
+            if model.qoProjectionWeightBits == 4 && model.kvProjectionWeightBits == 4 {
+                try fusedQKVGEMV.encode(
+                    commandBuffer: attnCB,
+                    qWeights: q.buffer, qWeightsOffset: Int(q.offset),
+                    qScales: q.buffer, qScalesOffset: Int(q.scaleOffset),
+                    qBiases: q.buffer, qBiasesOffset: Int(q.biasOffset),
+                    kWeights: k.buffer, kWeightsOffset: Int(k.offset),
+                    kScales: k.buffer, kScalesOffset: Int(k.scaleOffset),
+                    kBiases: k.buffer, kBiasesOffset: Int(k.biasOffset),
+                    vWeights: vProj.buffer, vWeightsOffset: Int(vProj.offset),
+                    vScales: vProj.buffer, vScalesOffset: Int(vProj.scaleOffset),
+                    vBiases: vProj.buffer, vBiasesOffset: Int(vProj.biasOffset),
+                    x: normed,
+                    qOut: qScratch,
+                    kOut: kWrite.buffer, kOutOffset: kWrite.offset,
+                    vOut: vWrite.buffer, vOutOffset: vWrite.offset,
+                    qRows: qDim,
+                    kvRows: kvDim,
+                    n: D)
+            } else {
+                // Each projection at its own role's width: the dense Qwen 3.5
+                // installs keep k/v at 8 bits with q/o at 4, and reading an
+                // 8-bit tensor through the 4-bit kernel is nonsense rather than
+                // an error.
+                try encodeRoleGEMV(
+                    commandBuffer: attnCB, projection: q,
+                    weightBits: model.qoProjectionWeightBits,
+                    x: normed, y: qScratch, m: qDim, n: D)
+                try encodeRoleGEMV(
+                    commandBuffer: attnCB, projection: k,
+                    weightBits: model.kvProjectionWeightBits,
+                    x: normed, y: kWrite.buffer,
+                    yOffset: kWrite.offset, m: kvDim, n: D)
+                try encodeRoleGEMV(
+                    commandBuffer: attnCB, projection: vProj,
+                    weightBits: model.kvProjectionWeightBits,
+                    x: normed, y: vWrite.buffer,
+                    yOffset: vWrite.offset, m: kvDim, n: D)
+            }
+
+            let rotated =
+                isFull
+                ? UInt32(Double(cfg.fullHeadDim) * cfg.partialRotaryFactor / 2.0)
+                : UInt32(headDimL / 2)
+            try fusedQKVEpilogue.encode(
+                commandBuffer: attnCB,
+                q: qScratch,
+                k: kWrite.buffer,
+                kOffset: kWrite.offset,
+                v: vWrite.buffer,
+                vOffset: vWrite.offset,
+                qWeight: qNorm.buffer,
+                qWeightOffset: Int(qNorm.offset),
+                kWeight: kNorm.buffer,
+                kWeightOffset: Int(kNorm.offset),
+                headDim: UInt32(headDimL),
+                numQHeads: UInt32(cfg.numHeads),
+                numKVHeads: UInt32(numKVL),
+                position: UInt32(position),
+                theta: isFull ? Float(cfg.fullRopeTheta) : Float(cfg.ropeTheta),
+                rotatedPairs: rotated,
+                eps: eps)
+
+            guard let kv else {
+                throw ModelError.internalInconsistency(
+                    detail: "attention requires a KV cache")
+            }
+            if quantizedKV {
+                try encodeQuantizedKV(
+                    commandBuffer: attnCB, kv: kv, layer: L,
+                    position: position, slot: slot, keySource: kStage,
+                    valueSource: vStage, elementCount: Int(kvDim))
+            }
+            let keyView = kv.keyView(layer: L, slot: slot, validTokenCount: Int(seqLen))
+            let valueView = kv.valueView(layer: L, slot: slot, validTokenCount: Int(seqLen))
+            guard let attentionCB = ctx.queue.makeCommandBuffer() else {
+                throw ModelError.residentBufferWrapFailed
+            }
+            softmaxCB = attentionCB
+            if isFull {
+                try attention.encodeFull(
+                    commandBuffer: attentionCB,
+                    q: qScratch,
+                    k: keyView.buffer, kOffset: keyView.offset,
+                    v: valueView.buffer, vOffset: valueView.offset,
+                    out: attnOut,
+                    headDim: UInt32(headDimL),
+                    numQHeads: UInt32(cfg.numHeads),
+                    numKVHeads: UInt32(numKVL),
+                    seqLen: seqLen,
+                    scale: Float(cfg.attentionScale),
+                    kvFormat: keyView)
+            } else {
+                let ringCapacity = kv.ringCapacity(layer: L)
+                let activeRingCapacity =
+                    ringCapacity > 0 && Int(seqLen) > ringCapacity
+                    ? UInt32(ringCapacity)
+                    : 0
+                try attention.encodeSWA(
+                    commandBuffer: attentionCB,
+                    q: qScratch,
+                    k: kSlot.buffer, kOffset: keyView.offset,
+                    v: vSlot.buffer, vOffset: valueView.offset,
+                    out: attnOut,
+                    headDim: UInt32(headDimL),
+                    numQHeads: UInt32(cfg.numHeads),
+                    numKVHeads: UInt32(numKVL),
+                    seqLen: seqLen,
+                    window: UInt32(cfg.slidingWindow),
+                    scale: Float(cfg.attentionScale),
+                    ringCapacity: activeRingCapacity,
+                    kvFormat: keyView)
+            }
+            // Same width-awareness as the projections above; `int4` here was the
+            // last int4-only call on this branch.
+            try encodeRoleGEMV(
+                commandBuffer: tailCB, projection: o,
+                weightBits: model.qoProjectionWeightBits,
+                x: attnOut, y: oOut, m: D, n: qDim)
+        }
+
+        // Plain pre-norm residual block: hidden += attention branch,
+        // then one post-attention norm feeds router, shared expert,
+        // and routed phase 1 (routedX doubles as moeX).
     }
 }

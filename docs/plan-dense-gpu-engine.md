@@ -25,7 +25,7 @@ already implements every *structural* feature the dense family needs:
 | --- | --- | --- |
 | Gated-DeltaNet linear attention | `Metal/GDN/gdn.metal` + `Kernels/GDN/` | Ornith/Qwen 3.6 use it |
 | Full attention every 4th layer | `fullAttentionLayerMask` handling | Ornith declares `[2,2,2,1,…]` too |
-| **Partial** RoPE + NeoX subdim | `RealForwardRunner+Decode.swift:755`, `+Prefill.swift:927` | both families declare `partialRotaryFactor 0.25`, `ropeNeoxSubdim true` |
+| **Partial** RoPE + NeoX subdim | `RealForwardRunner+DecodeAttention.swift:217`, `+PrefillAttention.swift:259-260`, `RealForwardRunner.swift:458-463` | both families declare `partialRotaryFactor 0.25`, `ropeNeoxSubdim true` |
 | Attention output gate | `attnOutputGate` (C44's audit) | dense manifest declares `true` |
 | A dense `gate/up/down` FFN with affine/int8 weights | `SharedExpertRuntime`, `PrefillSharedExpert` | used as the shared expert of every MoE family |
 | Tied or separate LM head | `Model.head()` returns `embedding()` when tied | `Model.swift:194` |

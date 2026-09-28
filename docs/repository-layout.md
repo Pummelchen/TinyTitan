@@ -148,11 +148,20 @@ otherwise — every original line is present verbatim in one of the new files:
 | `TinyTitanServer/Core/ServerModelSession+Generation.swift` | 320 | same |
 | `TinyTitanServer/Core/ServerModelSession+Diagnostics.swift` | 425 | same |
 
-The same move took the routed-MoE stage out of the decode phase file on
-2026-09-28: `Runtime/Inference/RealForwardRunner+DecodeMoE.swift` (622) left
-`+Decode.swift` (1,609 → 1,004), which keeps the token entry points, the layer
-loop and the attention dispatch. No access widened — the moved declarations
-were already internal.
+The same move took the stage code out of the decode phase file on 2026-09-28,
+in two steps, leaving `+Decode.swift` at 629 lines: the token entry points and
+the layer loop that calls the stages.
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Runtime/Inference/RealForwardRunner+DecodeMoE.swift` | 621 | `+Decode.swift` (1,609 → 1,004) |
+| `Runtime/Inference/RealForwardRunner+DecodeGEMV.swift` | 201 | `+Decode.swift` (1,004 → 629) |
+| `Runtime/Inference/RealForwardRunner+DecodeAttention.swift` | 299 → 491 | `+Decode.swift`, the `encodeDecodeAttention` dispatch |
+
+No access widened — the moved declarations were already internal. The same pass
+found `encodeLinearAttentionDecode`'s doc comment stranded in `+Decode.swift`
+since the 2026-09-15 split moved its body; it now sits above the function it
+describes.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
