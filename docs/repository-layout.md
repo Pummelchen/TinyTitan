@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 21 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 20 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
-class), `MemoryService.swift` (1,128), `ANEPrefillAttention.swift` (919),
-`MemoryBackend.swift` (643) and `SessionLog.swift` (642).
+class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
+`SessionLog.swift` (642) and `RealForwardRunner+Decode.swift` (629).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -395,6 +395,16 @@ twenty methods widened from `private` to internal, because every cluster calls
 across the new file boundaries) and `RawCompletion.swift` 591 → 383 (two
 file-private functions widened for the same reason). Both class files needed
 their imports re-added after the cut, which the first build caught.
+
+`ANEPrefillAttention.swift` (919 → 494) then shed its model lifecycle and
+masks into `ANEPrefillAttention+Models.swift` (437): residency, compilation,
+loading, release, `preload` and the causal/selection mask builders. The
+widening was again broad — the fifteen stored properties, the seven private
+helpers and `LoadedModelBox` (whose `private(set)` setter on `shadowTokens`
+also had to go) — because the paths that stay (`eligibleChunk`, `appendShadow`,
+`finishChunk`) call into the moved code. The new file's `import TinyTitan` was
+a self-import and the build rejected it, so the original's three imports are
+what it carries.
 
 ## Generated and local files
 
