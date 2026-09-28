@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 14 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 13 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -438,6 +438,13 @@ Two more type-group cuts, both without widening:
 | `TinyTitanServer/Core/ServerPromptStateTypes.swift` | 45 | the prompt-state store's configuration, save result and error |
 
 `Journal.swift` 541 → 463 and `ServerPromptStateStore.swift` 512 → 473.
+
+One more, on the file the earlier decode split created: the routed-MoE
+finalisation moves out of `RealForwardRunner+DecodeMoE.swift` (621 → 495) into
+`RealForwardRunner+DecodeMoEFinalize.swift` (137) — the pending-command
+hand-off, the slot publication and the shared-expert commit. No widening;
+`encodeDecodeRoutedMoE` keeps the `lint:allow-long` doc that justifies its
+size.
 
 ## Generated and local files
 
