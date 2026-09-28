@@ -110,16 +110,17 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 44 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 43 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`Model.swift` (1,081) and `OpenAIModels.swift` (1,046). Each is one cohesive
-type or one phase of a pipeline; the next structural gain there is a *design*
-change (a type doing two jobs), not a move, and none is currently doing two
-jobs. Where a phase file is really a phase plus a cluster of helpers around it,
-the cluster moves out on its own (`+DecodeAttention.swift`, `+DecodeMoE.swift`,
-`+PrefillLayer.swift`, `+PrefillMoE.swift`).
+`Model.swift` (1,081) and `ResponsesAPIModels.swift` (1,004). Each is one
+cohesive type or one phase of a pipeline; the next structural gain there is a
+*design* change (a type doing two jobs), not a move, and none is currently doing
+two jobs. Where a file is a phase plus a cluster of helpers around it, or a
+group of independent value types, the cluster moves out on its own
+(`+DecodeAttention.swift`, `+DecodeMoE.swift`, `+PrefillLayer.swift`,
+`+PrefillMoE.swift`, `OpenAIWireTypes.swift`).
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -175,6 +176,19 @@ which took it under the rule in one pass:
 
 No widening here either: `runPrefillLayer` is `private` and moved together with
 its only caller, so it stayed private.
+
+The OpenAI-compatible server models split the same way, by declaration group
+rather than by phase, `OpenAIModels.swift` 1,046 → 235:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/OpenAIRequestValidator.swift` | 471 | the validator enum |
+| `TinyTitanServer/Core/OpenAIRequestValidation.swift` | 194 | `ServerRequestError`, `ValidatedChatRequest` |
+| `TinyTitanServer/Core/OpenAIWireTypes.swift` | 170 | the wire types, message content through template kwargs |
+
+The two `private` members involved — `ValidatedChatRequest.copy` and the
+validator's static helpers — moved with their own declarations, so nothing was
+widened.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
