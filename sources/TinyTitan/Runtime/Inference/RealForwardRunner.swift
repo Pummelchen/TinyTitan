@@ -265,605 +265,150 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
     var rdadviseAdaptiveState: RDAdviceAdaptivePolicyState
     var rdadviseAdaptivePosition: Int = -1
     var rdadviseAdaptivePositionBytes: UInt64 = 0
-    public init(
+    public convenience init(
         model: Model, context: MetalContext, maxContext: Int,
         slots: Int = 1,
         runtimeConfiguration: RuntimeConfiguration = .production,
         enableSpeculativeGDN: Bool = false
     ) throws {
-        self.model = model
-        self.ctx = context
-        self.cfg = model.config
-        self.maxContext = maxContext
-        precondition(
-            slots > 0 && slots <= KVCacheManager.maximumSlots,
-            "slots must be between 1 and \(KVCacheManager.maximumSlots)")
-        self.slots = slots
-        try runtimeConfiguration.validate(maxContext: maxContext)
-        let yarnParameters: YaRNRoPEParameters?
-        if runtimeConfiguration.ropeScalingMode == .yarn {
-            guard model.config.ropeNeoxSubdim else {
-                throw RuntimeConfigurationError.yaRNUnsupportedArchitecture
-            }
-            yarnParameters = YaRNRoPEParameters(
-                headDim: model.config.fullHeadDim,
-                partialRotaryFactor: model.config.partialRotaryFactor,
-                theta: model.config.fullRopeTheta,
-                targetContextTokens: runtimeConfiguration.yarnContextTokens)
-        } else {
-            yarnParameters = nil
-        }
-        // The fused greedy head folds a plain RMSNorm into the vocabulary
-        // GEMV. A hyper-connection model does not end in an RMSNorm: it ends
-        // in the gated mixer that collapses the residual streams, so the
-        // fused path would normalize the wide residual and read stream 0 as
-        // if it were the whole hidden state. Correct output beats one fused
-        // dispatch; the family takes the two-step head.
-        self.useFusedGreedyHead =
-            runtimeConfiguration.headPath == .fusedRows
-            && !cfg.hyperConnections.enabled
-            && model.lmHeadWeightBits == 4
-            && model.attentionWeightBits == 4
-        self.prefillAttentionPath = runtimeConfiguration.prefillAttentionPath
-        // The family's measured optimum is the default; an explicit
-        // TINYTITAN_PREDICTIVE_PREFETCH still wins either way, so a probe can turn
-        // it on where it ships off and off where it ships on.
-        let profile = ModelProfile.resolve(
-            modelID: model.modelID, family: cfg.family,
-            weightBits: model.routedExpertWeightBits)
-        self.profile = profile
-        self.decodeExpertExecution = runtimeConfiguration.decodeExpertExecution
-        self.expertIOSynchronization = runtimeConfiguration.expertIOSynchronization
-        self.expertIOSubmission = runtimeConfiguration.expertIOSubmission
-        self.expertIOBackend = try ExpertIOBackend.environmentValue()
-        if ProcessInfo.processInfo.environment["TINYTITAN_RUNNER_STATS"] != nil
-            || ProcessInfo.processInfo.environment["TINYTITAN_KERNEL_STATS"] != nil
-        {
-            FileHandle.standardError.write(Data(("TinyTitan \(profile.summary)\n").utf8))
-        }
-        // A model with no routed experts has nothing to prefetch -- the ring
-        // reads expert blobs, and `topKExperts`/`prefetchDepth` both describe a
-        // mixture. `(1...0)` is not a range, so the guard below trapped the
-        // runner's construction for a dense install instead of refusing it:
-        // a value from a manifest reaching a range that requires a mixture.
-        let denseFFN = cfg.numExperts == 0
-        let rawPrefetchEnabled = !denseFFN && profile.prefetchDepth > 0
-        // One read deep, not four. The ring depth is a bandwidth decision, not
-        // a coverage one: the SSD is saturated while it reads, so a speculative
-        // read that misses its layer has stolen service from a demand read that
-        // did not. One read has the whole inter-layer window to itself and
-        // lands in time; deeper rings contend with the demand traffic and
-        // arrive too late to be adopted, which shows up as a *lower* hit rate.
-        // Measured on qwen38 4-bit, interleaved against prefetch off:
-        // M=1 +12.2% (hit 78.7%), M=2 +6.0% (77.9%), M=4 -9.8% (77.1%).
-        // The depth is the profile's, one everywhere it ships: an env override
-        // for it was measured negative at every value but 1 and has been
-        // removed, so the ring is one read a layer by construction.
-        let ringDepth = max(1, profile.prefetchDepth)
-        if !denseFFN {
-            guard (1...cfg.topKExperts).contains(ringDepth) else {
-                throw ModelError.internalInconsistency(
-                    detail: "profile prefetch depth \(ringDepth) must be 1...\(cfg.topKExperts)")
-            }
-        }
-        self.predictivePrefetch =
-            rawPrefetchEnabled
-            ? try ExpertPrefetchRing(
-                device: context.device,
-                expertStride: model.routedExpertByteStride(layer: 0),
-                slotCount: ringDepth)
-            : nil
-        // Track A: the ANE prefill sidecar, opt-in. Only the qwen36 target
-        // family qualifies (the one-layer MTP draft has no exported sidecar
-        // and must stay silently on the GPU); with the switch on and the
-        // sidecar missing, construction fails closed with the export command.
-        // Track A: ANE prefill, on by default for the one family that has an
-        // exported sidecar. Measured end to end on an idle machine with a
-        // 9,316-token prompt: 313.6 s against 99.9 s at 4-bit, a 3.14x
-        // request, and 1.91x at 8-bit. It costs about 0.023 s per generated
-        // token in decode, so it does not break even against the ~215 s
-        // prefill saving until roughly 9,200 generated tokens.
-        //
-        // It is not bit-identical to the GPU path: the ANE reduces attention
-        // in fp16 in a different order, so a prompt long enough to reach the
-        // sidecar (>= one full 4,096-token chunk) can decode to different --
-        // equally valid -- greedy text. Shorter prompts never reach it and
-        // are unaffected, which is why the golden baselines still hold.
-        // Any family may carry a sidecar now: the graph is built from the
-        // model's own geometry and `ANEPrefillAttention.init` refuses one that
-        // does not match this model, so the gate is the sidecar itself rather
-        // than a family name. A family that *selects* keys rather than changing
-        // the arithmetic — Qwen 3.8's QSA indexer — is served by folding that
-        // selection into the additive mask the graph already takes, which the
-        // sidecar records as `selectionFolded`. A family the exporter does not
-        // build for (the one-layer MTP draft) simply has none — and 3.8, whose
-        // fold is wired and verified, is measured *slower* on the ANE
-        // (benchmark/ane-prefill/README.md), so no sidecar is installed for it
-        // and the chunk stays here on the GPU.
-        let wantsANE = try RuntimePrefillANE.environmentValue() == .on
-        if wantsANE {
-            do {
-                self.anePrefill = try ANEPrefillAttention(
-                    modelDirectory: model.directoryURL,
-                    device: context.device,
-                    hiddenSize: model.config.hiddenSize,
-                    kvDim: model.config.numFullKVHeads * model.config.fullHeadDim,
-                    weightsSha256: model.weightsDigestFromManifest,
-                    family: model.config.family,
-                    fullAttentionLayerMask: model.config.fullAttentionLayerMask,
-                    sparseIndexer: model.config.sparseIndexer,
-                    configChunkTokens: runtimeConfiguration.prefillChunkTokens)
-            } catch {
-                // An explicit request must fail loudly with the export
-                // command; the default must degrade to the GPU, because a
-                // model without a sidecar is the normal case.
-                guard !RuntimePrefillANE.wasRequestedExplicitly() else { throw error }
-                self.anePrefill = nil
-            }
-        } else {
-            self.anePrefill = nil
-        }
-        let useFP16Ring = runtimeConfiguration.fp16RingEnabled
-        self.rdadvisePolicyMode = runtimeConfiguration.rdadvisePolicy
-        self.rdadviseAdaptiveState = RDAdviceAdaptivePolicyState(
-            config: RDAdviceAdaptivePolicyConfig(
-                missCap: Self.rdadviseAdaptiveMissCap,
-                byteCap: Self.rdadviseAdaptiveByteCap,
-                slowCallNanos: Self.rdadviseAdaptiveSlowCallNanos))
-        self.rdadviseEnabled = runtimeConfiguration.rdadviseEnabled
-        self.kv = try KVCacheManager(
-            device: context.device,
-            config: cfg,
-            maxContext: maxContext,
-            slots: slots,
-            fp16RingEnabled: useFP16Ring,
-            precision: runtimeConfiguration.kvCachePrecision,
-            slidingWindow: cfg.slidingWindow,
-            maxPrefillChunkTokens: runtimeConfiguration.prefillChunkTokens)
+        let bp = Builder()
+        let cfg = model.config
+        let profile = try Self.buildCore(
+            bp, model: model, context: context, maxContext: maxContext, slots: slots,
+            runtimeConfiguration: runtimeConfiguration,
+            enableSpeculativeGDN: enableSpeculativeGDN)
+        try Self.buildScratch(bp, model: model, context: context, cfg: cfg, profile: profile)
+        self.init(bp)
+    }
 
-        let silu = cfg.hiddenActivation == "silu"
-        self.embedInt4 = try EmbedLookupInt4(context: context)
-        self.affineEmbed =
-            model.embeddingWeightBits == 4
-            ? nil
-            : try AffineQuantEmbeddingLookup(
-                context: context,
-                weightBits: model.embeddingWeightBits)
-        self.rms = try RMSNorm(context: context)
-        self.int4 = try DequantInt4GEMV(
-            context: context,
-            additionalShapes: cfg.decodeInt4GEMVShapes)
-        // One affine dispatcher per width the model's *roles* actually use.
-        // Most families need one (their roles share the attention slot); the
-        // dense Qwen 3.5 installs need two at once, because their full-attention
-        // `k_proj`/`v_proj` are 8-bit while `q_proj`/`o_proj` are 4-bit. Asking
-        // the roles rather than the slot is also what keeps an 8-bit tensor
-        // from being read as nibbles.
-        var affineByWidth: [Int: AffineQuantGEMV] = [:]
-        for width in Set([
-            model.attentionWeightBits, model.qoProjectionWeightBits,
-            model.kvProjectionWeightBits,
-            model.gdnProjectionWeightBits,
-            // The three families that read the attention slot
-            // until a per-tensor override promotes them.
-            model.hyperConnectionWeightBits, model.pleKeyWeightBits,
-            model.qsaIndexerWeightBits,
-        ]).sorted() where width != 4 {
-            affineByWidth[width] = try AffineQuantGEMV(context: context, weightBits: width)
-        }
-        self.affineByWidth = affineByWidth
-        self.affine = affineByWidth[model.attentionWeightBits]
-        self.affineKV = affineByWidth[model.kvProjectionWeightBits]
-        // The vocabulary head carries its own bit width. It matched the
-        // attention slot in every earlier family, so the head simply reused
-        // the attention GEMV -- which reads an 8-bit head as packed 4-bit the
-        // moment a model quantizes the two differently, as this one does
-        // (4-bit attention, 8-bit embedding and head). The result is a full
-        // logit vector of confident nonsense, so the width is selected here
-        // rather than inherited.
-        self.affineHead =
-            model.lmHeadWeightBits == 4
-            ? nil
-            : try AffineQuantGEMV(
-                context: context,
-                weightBits: model.lmHeadWeightBits)
-        self.attention = try Attention(context: context)
-        self.attention.simdPartialOverride = profile.attentionSimdPartial
-        self.kvQuantizer =
-            runtimeConfiguration.kvCachePrecision.isQuantized
-            ? try KVCacheQuantizer(context: context) : nil
-        self.shared = try SharedExpertRuntime(
-            context: context,
-            weightBits: model.ffnWeightBits,
-            siluActivation: silu)
-        if ProcessInfo.processInfo.environment["TINYTITAN_DEBUG_PROMOTION"] != nil {
-            FileHandle.standardError.write(
-                Data(
-                    ("promotion: routerBits=\(model.effectiveRouterWeightBits) "
-                        + "slotRouterBits=\(model.routerWeightBits) "
-                        + "gdnAB_bf16=\(model.gdnABIsBF16)\n").utf8))
-        }
-        self.moe = try MoE(
-            context: context,
-            routerTopKSimd: profile.routerTopKSimd,
-            siluActivation: silu,
-            routedWeightBits: model.routedExpertWeightBits,
-            routerWeightBits: model.effectiveRouterWeightBits,
-            eventGatedIO: expertIOSynchronization == .event,
-            specializedD: UInt32(cfg.hiddenSize),
-            specializedF: UInt32(cfg.moeIntermediateSize),
-            specializedNumExperts: UInt32(cfg.numExperts),
-            topKExperts: cfg.topKExperts)
-        self.fusionHead = try LMHeadChainInt4(
-            context: context,
-            maxD: cfg.hiddenSize,
-            maxVocab: cfg.vocabSize)
-        self.fusedQKVGEMV = try FusedQKVGEMV(context: context)
-        self.fusedQKVEpilogue = try FusedQKVEpilogue(context: context)
-        self.prefillEmbed = try PrefillEmbedLookupInt4(
-            context: context,
-            weightBits: model.embeddingWeightBits)
-        self.prefillRMS = try PrefillRMSNorm(context: context)
-        self.prefillQMM = try PrefillInt4QMM(
-            context: context,
-            weightBits: model.attentionWeightBits)
-        self.prefillMPPAffineInt4 = MPPPrefillInt4QMM(
-            context: context,
-            weightBits: model.attentionWeightBits)
-        self.prefillQKVEpilogue = try PrefillQKVEpilogue(
-            context: context,
-            yarn: yarnParameters)
-        self.prefillAttention = try PrefillAttention(context: context)
-        self.prefillRouter = try PrefillRouter(
-            context: context,
-            weightBits: model.effectiveRouterWeightBits)
-        self.prefillSharedExpert = try PrefillSharedExpert(
-            context: context,
-            weightBits: model.ffnWeightBits,
-            siluActivation: silu)
-        self.prefillGroupedMoE = try PrefillGroupedRoutedMoE(
-            context: context,
-            siluActivation: silu,
-            weightBits: model.routedExpertWeightBits)
-        self.prefillMoE = try PrefillMoE(context: context)
-        self.prefillFinalRowHead = try PrefillFinalRowHeadInt4(
-            context: context,
-            maxD: cfg.hiddenSize,
-            weightBits: model.lmHeadWeightBits)
-
-        // Qwen 3.6 kernels, keyed off the data flags so architectures that
-        // never dispatch them pay no PSO compile cost.
-        let needsElementwise =
-            cfg.attnOutputGate
-            || cfg.sharedExpertGated
-            || cfg.hasLinearAttentionLayers
-        self.elementwise = needsElementwise ? try Elementwise(context: context) : nil
-        self.activationDumpDirectory = ProcessInfo.processInfo
-            .environment["TINYTITAN_ACT_DUMP"].map { URL(fileURLWithPath: $0) }
-        // Both gated blocks keep a whole prefill chunk resident: the write
-        // gate consumes what its matching read produced, and the block runs
-        // in between, so the rows cannot be streamed one at a time.
-        let gateRows = max(1, runtimeConfiguration.prefillChunkTokens)
-        self.hyperConnection =
-            cfg.hyperConnections.enabled
-            ? try HyperConnection(
-                context: context,
-                dim: cfg.hiddenSize,
-                streams: cfg.hyperConnections.count,
-                lowRank: cfg.hyperConnections.lowRank,
-                maxRows: gateRows,
-                weightBits: model.hyperConnectionWeightBits)
-            : nil
-        self.qsaIndexer =
-            cfg.sparseIndexer.enabled
-            ? try QSAIndexer(
-                context: context,
-                config: cfg.sparseIndexer,
-                budget: Self.qsaBudget(cfg.sparseIndexer),
-                ropeTheta: Float(cfg.fullRopeTheta),
-                capacity: maxContext,
-                weightBits: model.qsaIndexerWeightBits)
-            : nil
-        if cfg.ple.enabled {
-            let constants = try PLEConstants.load(
-                directoryURL: model.directoryURL)
-            // Before anything derives buffer sizes or row addressing from the
-            // sidecar. Its values are geometry, and `PLEBlock`'s embedding
-            // buffer is sized from `cfg.ple.embedDim` while the gather width
-            // comes from this file -- a disagreement writes past that buffer
-            // (host heap, not a GPU fault) or feeds the block wrong-width rows,
-            // silently. `PLEHash`'s own checks are preconditions, so this has
-            // to run first to make a corrupt sidecar a report rather than a trap.
-            try constants.validate(
-                embedDim: cfg.ple.embedDim,
-                ngramSize: cfg.ple.ngramSize,
-                headsPerNgram: cfg.ple.headsPerNgram)
-            self.pleHash = constants.makeHash()
-            self.ngramTable = try NgramTableReader(
-                path: model.directoryURL.appendingPathComponent(
-                    Qwen38FlashTensors.ngramTableFile
-                ).path,
-                rowDim: constants.pleHeadDim,
-                rowCount: constants.tableRowCount)
-            self.pleBlock = try PLEBlock(
-                context: context,
-                dim: cfg.hiddenSize,
-                streams: cfg.hyperConnections.count,
-                embedDim: cfg.ple.embedDim,
-                kernelSize: cfg.ple.convKernelSize,
-                // The dilation is the n-gram size, not a constant of its own.
-                dilation: cfg.ple.ngramSize,
-                maxRows: gateRows,
-                weightBits: model.pleKeyWeightBits)
-        } else {
-            self.pleHash = nil
-            self.ngramTable = nil
-            self.pleBlock = nil
-        }
-        if cfg.hasLinearAttentionLayers {
-            self.gdn = try GDN(
-                context: context, config: cfg.linearAttention,
-                specializedHiddenSize: cfg.hiddenSize,
-                abBF16: model.gdnABIsBF16)
-            self.gdnState = try GDNStateManager(
-                device: context.device,
-                config: cfg,
-                slots: slots,
-                enableSpeculativeCheckpoint: enableSpeculativeGDN)
-        } else {
-            self.gdn = nil
-            self.gdnState = nil
-        }
-        self.rope =
-            cfg.ropeNeoxSubdim
-            ? try RoPE(context: context, yarn: yarnParameters) : nil
-        self.int8ScalarGate =
-            cfg.sharedExpertGated
-            ? try DequantInt8GEMV(
-                context: context,
-                additionalShapes: cfg.decodeInt8GEMVShapes)
-            : nil
-        self.bf16ScalarGate =
-            cfg.sharedExpertGated
-            ? try BF16GEMV(context: context) : nil
-        self.bf16Projection = try BF16GEMV(context: context)
-
-        let device = context.device
-        let D = cfg.hiddenSize
-        let F = cfg.intermediateSize
-        let maxQ = cfg.numHeads * max(cfg.headDim, cfg.fullHeadDim)
-
-        func buf(
-            _ count: Int,
-            _ stride: Int = MemoryLayout<Float16>.size,
-            label: String
-        ) throws -> MTLBuffer {
-            guard
-                let b = device.makeBuffer(
-                    length: max(count, 1) * stride,
-                    options: .storageModeShared)
-            else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            b.label = label
-            return b
-        }
-        // The residual is the one scratch buffer whose width is not D. A
-        // hyper-connection family carries `hc_count` parallel streams of D and
-        // reads a single D-wide vector out of them per sublayer, so only this
-        // allocation widens -- every downstream buffer stays D. Families
-        // without them get exactly D, as before.
-        let residualElements =
-            cfg.hyperConnections.enabled
-            ? D * cfg.hyperConnections.count
-            : D
-        self.hidden = try buf(residualElements, label: "decode.hidden")
-        self.normed = try buf(D, label: "decode.normed")
-        self.attnOut = try buf(maxQ, label: "decode.attnOut")
-        self.qScratch = try buf(maxQ, label: "decode.qScratch")
-        self.kStage = try buf(
-            max(
-                cfg.numKVHeads * cfg.headDim,
-                cfg.numFullKVHeads * cfg.fullHeadDim), label: "decode.kStage")
-        self.vStage = try buf(
-            max(
-                cfg.numKVHeads * cfg.headDim,
-                cfg.numFullKVHeads * cfg.fullHeadDim), label: "decode.vStage")
-        self.oOut = try buf(D, label: "decode.oOut")
-        self.h1Buf = try buf(D, label: "decode.h1")
-        self.h2Buf = try buf(D, label: "decode.h2")
-        self.routedX = try buf(D, label: "decode.routedX")
-        self.denseX = try buf(D, label: "decode.denseX")
-        self.denseScratchGate = try buf(F, label: "decode.denseScratchGate")
-        self.denseScratchUp = try buf(F, label: "decode.denseScratchUp")
-        self.denseScratchAct = try buf(F, label: "decode.denseScratchAct")
-        self.routerInput = try buf(D, label: "decode.routerInput")
-        self.zeroResidual = try buf(D, label: "decode.zeroResidual")
-        // The routed MoE kernel seeds y[d] = residual[d]; pinning this buffer
-        // to zero once at init makes the routed branch's residual contribution
-        // exactly zero (it's combined with the dense MLP downstream).
-        memset(self.zeroResidual.contents(), 0, self.zeroResidual.length)
-        self.outIndices = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size, label: "decode.outIndices")
-        self.outWeights = try buf(cfg.topKExperts, label: "decode.outWeights")
-        self.prefetchPredictionIndices = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size, label: "decode.prefetchPredictionIndices")
-        self.prefetchPrediction2Indices = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size, label: "decode.prefetchPrediction2Indices")
-        self.prefetchPrediction2Weights = try buf(
-            cfg.topKExperts, MemoryLayout<Float16>.size, label: "decode.prefetchPrediction2Weights")
-        self.prefetchPredictionWeights = try buf(
-            cfg.topKExperts, label: "decode.prefetchPredictionWeights")
-        self.moeActs = try buf(cfg.topKExperts * cfg.moeIntermediateSize, label: "decode.moeActs")
-        self.moeHitActiveSlots = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size, label: "decode.moeHitActiveSlots")
-        self.moeMissActiveSlots = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size, label: "decode.moeMissActiveSlots")
-        self.residencyHitCount = try buf(
-            1, MemoryLayout<UInt32>.size,
-            label: "decode.residencyHitCount")
-        self.residencyHitPositions = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size,
-            label: "decode.residencyHitPositions")
-        self.residencyMissCount = try buf(
-            1, MemoryLayout<UInt32>.size,
-            label: "decode.residencyMissCount")
-        self.residencyMissPositions = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size,
-            label: "decode.residencyMissPositions")
-        self.residencyMissExperts = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size,
-            label: "decode.residencyMissExperts")
-        self.residencyResolvedSlots = try buf(
-            cfg.topKExperts, MemoryLayout<UInt32>.size,
-            label: "decode.residencyResolvedSlots")
-        self.residencyResolvedGenerations = try buf(
-            cfg.topKExperts,
-            MemoryLayout<UInt64>.size,
-            label: "decode.residencyResolvedGenerations")
-        guard
-            let tok = device.makeBuffer(
-                length: MemoryLayout<UInt32>.size,
-                options: .storageModeShared)
-        else {
-            throw ModelError.residentBufferWrapFailed
-        }
-        tok.label = "decode.greedyToken"
-        self.greedyTokenBuf = tok
-        // Two rows of the residual as this family carries it: wide for a
-        // hyper-connection model, because the draft's fusion reads all four
-        // streams rather than a collapsed one.
-        self.verificationHidden = try buf(
-            2 * Self.residualWidthFor(cfg),
-            label: "decode.verificationHidden")
-        self.verificationLogits = try buf(2 * cfg.vocabSize, label: "decode.verificationLogits")
-
-        // Qwen 3.6 decode scratch — allocated once here, never in the hot path.
-        if cfg.attnOutputGate {
-            self.qPackedScratch = try buf(2 * maxQ, label: "decode.qPackedScratch")
-            self.attnGateScratch = try buf(maxQ, label: "decode.attnGateScratch")
-        } else {
-            self.qPackedScratch = nil
-            self.attnGateScratch = nil
-        }
-        if cfg.hasLinearAttentionLayers {
-            let la = cfg.linearAttention
-            self.gdnQKVRaw = try buf(la.qkvDim, label: "decode.gdnQKVRaw")
-            self.gdnConvOut = try buf(la.qkvDim, label: "decode.gdnConvOut")
-            self.gdnZ = try buf(la.valueDim, label: "decode.gdnZ")
-            self.gdnA = try buf(la.numVHeads, label: "decode.gdnA")
-            self.gdnB = try buf(la.numVHeads, label: "decode.gdnB")
-            self.gdnY = try buf(la.valueDim, label: "decode.gdnY")
-            self.gdnOut = try buf(la.valueDim, label: "decode.gdnOut")
-        } else {
-            self.gdnQKVRaw = nil
-            self.gdnConvOut = nil
-            self.gdnZ = nil
-            self.gdnA = nil
-            self.gdnB = nil
-            self.gdnY = nil
-            self.gdnOut = nil
-        }
-        self.sharedScalarGateBuf =
-            cfg.sharedExpertGated ? try buf(1, label: "decode.sharedScalarGate") : nil
-        if cfg.family == .qwen36MTP || cfg.family == .qwen38flashMTP {
-            guard
-                let tokenBlock = ctx.device.makeBuffer(
-                    length: Self.mtpChunkCapacity * MemoryLayout<UInt32>.stride,
-                    options: .storageModeShared)
-            else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            self.mtpTokenBlock = tokenBlock
-            self.mtpEmbeddingBlock = try buf(Self.mtpChunkCapacity * D, label: "mtp.embedding")
-            self.mtpNormalizedEmbeddingBlock = try buf(
-                Self.mtpChunkCapacity * D, label: "mtp.normalizedEmbedding")
-            self.mtpNormalizedHiddenBlock = try buf(
-                Self.mtpChunkCapacity * D, label: "mtp.normalizedHidden")
-            // Qwen 3.6 concatenates the two normalized branches and runs one
-            // projection; Qwen3.8-Flash-Next projects each separately and adds.
-            // The wider block covers the concatenation the first needs and the
-            // wide residual the second reads.
-            let fuseWidth = max(2 * D, Self.residualWidthFor(cfg))
-            self.mtpConcatBlock = try buf(
-                Self.mtpChunkCapacity * fuseWidth,
-                label: "mtp.concat")
-            self.mtpProjectedBlock = try buf(Self.mtpChunkCapacity * D, label: "mtp.projected")
-            self.mtpTargetHiddenBlock = try buf(
-                Self.mtpChunkCapacity * Self.residualWidthFor(cfg),
-                label: "mtp.targetHidden")
-        } else {
-            self.mtpTokenBlock = nil
-            self.mtpEmbeddingBlock = nil
-            self.mtpNormalizedEmbeddingBlock = nil
-            self.mtpNormalizedHiddenBlock = nil
-            self.mtpConcatBlock = nil
-            self.mtpProjectedBlock = nil
-            self.mtpTargetHiddenBlock = nil
-        }
-        self.mtpPrefillReadback = nil
-
-        func sharedProj(_ view: TensorView, rows: UInt32, cols: UInt32) -> SharedExpertProjection {
-            SharedExpertProjection(
-                weights: view.buffer,
-                scales: view.buffer,
-                biases: view.buffer,
-                weightsOffset: Int(view.offset),
-                scalesOffset: Int(view.scaleOffset),
-                biasesOffset: Int(view.biasOffset),
-                rows: rows,
-                cols: cols)
-        }
-        var sharedViews: [LayerSharedExpertProjections] = []
-        sharedViews.reserveCapacity(cfg.numLayers)
-        for L in 0..<cfg.numLayers {
-            let gate = try model.sharedExpertGate(layer: L)
-            let up = try model.sharedExpertUp(layer: L)
-            let down = try model.sharedExpertDown(layer: L)
-            sharedViews.append(
-                LayerSharedExpertProjections(
-                    gate: sharedProj(gate, rows: UInt32(F), cols: UInt32(D)),
-                    up: sharedProj(up, rows: UInt32(F), cols: UInt32(D)),
-                    down: sharedProj(down, rows: UInt32(D), cols: UInt32(F)),
-                    scalarGate: cfg.sharedExpertGated
-                        ? try model.sharedExpertScalarGate(layer: L) : nil))
-        }
-        self.sharedExpertProjections = sharedViews
-
-        func bf16OnesBuffer(count: Int, label: String) throws -> MTLBuffer {
-            // `max(count, 1)`: a dense model has no experts, so its per-expert
-            // scale holds nothing -- and Metal needs a non-empty allocation.
-            // Nothing reads it on that path (the router stage is skipped), so
-            // the one element is a placeholder, not a value.
-            guard
-                let buf = device.makeBuffer(
-                    length: max(count, 1) * MemoryLayout<UInt16>.size,
-                    options: .storageModeShared)
-            else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            let dst = buf.contents().assumingMemoryBound(to: UInt16.self)
-            for i in 0..<count { dst[i] = 0x3F80 }  // BF16 1.0
-            buf.label = label
-            return buf
-        }
-
-        // Plain linear router (Qwen): one shared BF16 ones buffer keeps
-        // the router kernel's effective_scale multiply neutral, and a ones
-        // per_expert_scale keeps the top-k weights untouched. (Softmax
-        // over top-k then renormalize equals Qwen's softmax over all
-        // experts then renormalize the selected top-k.)
-        let ones = try bf16OnesBuffer(count: D, label: "effective_scale.ones")
-        self.effectiveScaleBuffers = [MTLBuffer](
-            repeating: ones,
-            count: cfg.numLayers)
-        self.onesPerExpertScale = try bf16OnesBuffer(
-            count: cfg.numExperts,
-            label: "per_expert_scale.ones")
-        if profile.keepExpertCacheWired {
-            model.setKeepExpertCacheWired(true)
-            model.setExpertCachePinned(true)
-        }
+    /// The designated initializer: every stored property comes from the builder, and an
+    /// unset field is a construction bug rather than a silently nil runner.
+    private init(_ bp: Builder) {
+        self.model = Self.staged(bp.model, "model")
+        self.ctx = Self.staged(bp.ctx, "ctx")
+        self.cfg = Self.staged(bp.cfg, "cfg")
+        self.maxContext = Self.staged(bp.maxContext, "maxContext")
+        self.slots = Self.staged(bp.slots, "slots")
+        self.useFusedGreedyHead = Self.staged(bp.useFusedGreedyHead, "useFusedGreedyHead")
+        self.prefillAttentionPath = Self.staged(bp.prefillAttentionPath, "prefillAttentionPath")
+        self.profile = Self.staged(bp.profile, "profile")
+        self.decodeExpertExecution = Self.staged(bp.decodeExpertExecution, "decodeExpertExecution")
+        self.expertIOSynchronization =
+            Self.staged(bp.expertIOSynchronization, "expertIOSynchronization")
+        self.expertIOSubmission = Self.staged(bp.expertIOSubmission, "expertIOSubmission")
+        self.expertIOBackend = Self.staged(bp.expertIOBackend, "expertIOBackend")
+        self.predictivePrefetch = Self.staged(bp.predictivePrefetch, "predictivePrefetch")
+        self.anePrefill = Self.staged(bp.anePrefill, "anePrefill")
+        self.rdadvisePolicyMode = Self.staged(bp.rdadvisePolicyMode, "rdadvisePolicyMode")
+        self.rdadviseAdaptiveState = Self.staged(bp.rdadviseAdaptiveState, "rdadviseAdaptiveState")
+        self.rdadviseEnabled = Self.staged(bp.rdadviseEnabled, "rdadviseEnabled")
+        self.kv = Self.staged(bp.kv, "kv")
+        self.embedInt4 = Self.staged(bp.embedInt4, "embedInt4")
+        self.affineEmbed = Self.staged(bp.affineEmbed, "affineEmbed")
+        self.rms = Self.staged(bp.rms, "rms")
+        self.int4 = Self.staged(bp.int4, "int4")
+        self.affineByWidth = Self.staged(bp.affineByWidth, "affineByWidth")
+        self.affine = Self.staged(bp.affine, "affine")
+        self.affineKV = Self.staged(bp.affineKV, "affineKV")
+        self.affineHead = Self.staged(bp.affineHead, "affineHead")
+        self.attention = Self.staged(bp.attention, "attention")
+        self.kvQuantizer = Self.staged(bp.kvQuantizer, "kvQuantizer")
+        self.shared = Self.staged(bp.shared, "shared")
+        self.moe = Self.staged(bp.moe, "moe")
+        self.fusionHead = Self.staged(bp.fusionHead, "fusionHead")
+        self.fusedQKVGEMV = Self.staged(bp.fusedQKVGEMV, "fusedQKVGEMV")
+        self.fusedQKVEpilogue = Self.staged(bp.fusedQKVEpilogue, "fusedQKVEpilogue")
+        self.prefillEmbed = Self.staged(bp.prefillEmbed, "prefillEmbed")
+        self.prefillRMS = Self.staged(bp.prefillRMS, "prefillRMS")
+        self.prefillQMM = Self.staged(bp.prefillQMM, "prefillQMM")
+        self.prefillMPPAffineInt4 = Self.staged(bp.prefillMPPAffineInt4, "prefillMPPAffineInt4")
+        self.prefillQKVEpilogue = Self.staged(bp.prefillQKVEpilogue, "prefillQKVEpilogue")
+        self.prefillAttention = Self.staged(bp.prefillAttention, "prefillAttention")
+        self.prefillRouter = Self.staged(bp.prefillRouter, "prefillRouter")
+        self.prefillSharedExpert = Self.staged(bp.prefillSharedExpert, "prefillSharedExpert")
+        self.prefillGroupedMoE = Self.staged(bp.prefillGroupedMoE, "prefillGroupedMoE")
+        self.prefillMoE = Self.staged(bp.prefillMoE, "prefillMoE")
+        self.prefillFinalRowHead = Self.staged(bp.prefillFinalRowHead, "prefillFinalRowHead")
+        self.elementwise = Self.staged(bp.elementwise, "elementwise")
+        self.activationDumpDirectory =
+            Self.staged(bp.activationDumpDirectory, "activationDumpDirectory")
+        self.hyperConnection = Self.staged(bp.hyperConnection, "hyperConnection")
+        self.qsaIndexer = Self.staged(bp.qsaIndexer, "qsaIndexer")
+        self.pleHash = Self.staged(bp.pleHash, "pleHash")
+        self.ngramTable = Self.staged(bp.ngramTable, "ngramTable")
+        self.pleBlock = Self.staged(bp.pleBlock, "pleBlock")
+        self.gdn = Self.staged(bp.gdn, "gdn")
+        self.gdnState = Self.staged(bp.gdnState, "gdnState")
+        self.rope = Self.staged(bp.rope, "rope")
+        self.int8ScalarGate = Self.staged(bp.int8ScalarGate, "int8ScalarGate")
+        self.bf16ScalarGate = Self.staged(bp.bf16ScalarGate, "bf16ScalarGate")
+        self.bf16Projection = Self.staged(bp.bf16Projection, "bf16Projection")
+        self.hidden = Self.staged(bp.hidden, "hidden")
+        self.normed = Self.staged(bp.normed, "normed")
+        self.attnOut = Self.staged(bp.attnOut, "attnOut")
+        self.qScratch = Self.staged(bp.qScratch, "qScratch")
+        self.kStage = Self.staged(bp.kStage, "kStage")
+        self.vStage = Self.staged(bp.vStage, "vStage")
+        self.oOut = Self.staged(bp.oOut, "oOut")
+        self.h1Buf = Self.staged(bp.h1Buf, "h1Buf")
+        self.h2Buf = Self.staged(bp.h2Buf, "h2Buf")
+        self.routedX = Self.staged(bp.routedX, "routedX")
+        self.denseX = Self.staged(bp.denseX, "denseX")
+        self.denseScratchGate = Self.staged(bp.denseScratchGate, "denseScratchGate")
+        self.denseScratchUp = Self.staged(bp.denseScratchUp, "denseScratchUp")
+        self.denseScratchAct = Self.staged(bp.denseScratchAct, "denseScratchAct")
+        self.routerInput = Self.staged(bp.routerInput, "routerInput")
+        self.zeroResidual = Self.staged(bp.zeroResidual, "zeroResidual")
+        self.outIndices = Self.staged(bp.outIndices, "outIndices")
+        self.outWeights = Self.staged(bp.outWeights, "outWeights")
+        self.prefetchPredictionIndices =
+            Self.staged(bp.prefetchPredictionIndices, "prefetchPredictionIndices")
+        self.prefetchPrediction2Indices =
+            Self.staged(bp.prefetchPrediction2Indices, "prefetchPrediction2Indices")
+        self.prefetchPrediction2Weights =
+            Self.staged(bp.prefetchPrediction2Weights, "prefetchPrediction2Weights")
+        self.prefetchPredictionWeights =
+            Self.staged(bp.prefetchPredictionWeights, "prefetchPredictionWeights")
+        self.moeActs = Self.staged(bp.moeActs, "moeActs")
+        self.moeHitActiveSlots = Self.staged(bp.moeHitActiveSlots, "moeHitActiveSlots")
+        self.moeMissActiveSlots = Self.staged(bp.moeMissActiveSlots, "moeMissActiveSlots")
+        self.residencyHitCount = Self.staged(bp.residencyHitCount, "residencyHitCount")
+        self.residencyHitPositions = Self.staged(bp.residencyHitPositions, "residencyHitPositions")
+        self.residencyMissCount = Self.staged(bp.residencyMissCount, "residencyMissCount")
+        self.residencyMissPositions =
+            Self.staged(bp.residencyMissPositions, "residencyMissPositions")
+        self.residencyMissExperts = Self.staged(bp.residencyMissExperts, "residencyMissExperts")
+        self.residencyResolvedSlots =
+            Self.staged(bp.residencyResolvedSlots, "residencyResolvedSlots")
+        self.residencyResolvedGenerations =
+            Self.staged(bp.residencyResolvedGenerations, "residencyResolvedGenerations")
+        self.greedyTokenBuf = Self.staged(bp.greedyTokenBuf, "greedyTokenBuf")
+        self.verificationHidden = Self.staged(bp.verificationHidden, "verificationHidden")
+        self.verificationLogits = Self.staged(bp.verificationLogits, "verificationLogits")
+        self.qPackedScratch = Self.staged(bp.qPackedScratch, "qPackedScratch")
+        self.attnGateScratch = Self.staged(bp.attnGateScratch, "attnGateScratch")
+        self.gdnQKVRaw = Self.staged(bp.gdnQKVRaw, "gdnQKVRaw")
+        self.gdnConvOut = Self.staged(bp.gdnConvOut, "gdnConvOut")
+        self.gdnZ = Self.staged(bp.gdnZ, "gdnZ")
+        self.gdnA = Self.staged(bp.gdnA, "gdnA")
+        self.gdnB = Self.staged(bp.gdnB, "gdnB")
+        self.gdnY = Self.staged(bp.gdnY, "gdnY")
+        self.gdnOut = Self.staged(bp.gdnOut, "gdnOut")
+        self.sharedScalarGateBuf = Self.staged(bp.sharedScalarGateBuf, "sharedScalarGateBuf")
+        self.mtpTokenBlock = Self.staged(bp.mtpTokenBlock, "mtpTokenBlock")
+        self.mtpEmbeddingBlock = Self.staged(bp.mtpEmbeddingBlock, "mtpEmbeddingBlock")
+        self.mtpNormalizedEmbeddingBlock =
+            Self.staged(bp.mtpNormalizedEmbeddingBlock, "mtpNormalizedEmbeddingBlock")
+        self.mtpNormalizedHiddenBlock =
+            Self.staged(bp.mtpNormalizedHiddenBlock, "mtpNormalizedHiddenBlock")
+        self.mtpConcatBlock = Self.staged(bp.mtpConcatBlock, "mtpConcatBlock")
+        self.mtpProjectedBlock = Self.staged(bp.mtpProjectedBlock, "mtpProjectedBlock")
+        self.mtpTargetHiddenBlock = Self.staged(bp.mtpTargetHiddenBlock, "mtpTargetHiddenBlock")
+        self.mtpPrefillReadback = Self.staged(bp.mtpPrefillReadback, "mtpPrefillReadback")
+        self.sharedExpertProjections =
+            Self.staged(bp.sharedExpertProjections, "sharedExpertProjections")
+        self.effectiveScaleBuffers = Self.staged(bp.effectiveScaleBuffers, "effectiveScaleBuffers")
+        self.onesPerExpertScale = Self.staged(bp.onesPerExpertScale, "onesPerExpertScale")
     }
 
     var decodeIOBaseline: ExpertStreamingStatistics?
