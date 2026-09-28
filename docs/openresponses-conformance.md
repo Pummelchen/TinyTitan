@@ -145,7 +145,7 @@ The specification says, under *Streaming HTTP Responses*:
 
 This server deliberately does not send it, and says so in two places:
 
-- `HTTPServerHandler+Responses.swift` — *"The Responses API has no `[DONE]`
+- `HTTPServerHandler+ResponsesStream.swift` — *"The Responses API has no `[DONE]`
   terminator; the final event is it."*
 - `HTTPServerHandler+Chat.swift` — *"chat sends an error object then `[DONE]`; the
   Responses API and the Messages API send a typed `error` event and no
