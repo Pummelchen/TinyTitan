@@ -109,14 +109,15 @@ readability question, and the convention that came out of this pass is:
   only where the read improves; 95 members of `ServerHTTPHandler` and 4 members
   around `Model` were widened this pass, and nothing else changed.
 
-Files still above 600 lines are, in order: `ServerInference.swift` (1,664),
-`RealForwardRunner+Decode.swift` (1,572), `RealForwardRunner+Prefill.swift`
-(1,524), `PreadExpertStreamer.swift` (1,391, one class),
-`RealForwardRunner.swift` (1,357), `RemoteStreamingRepacker.swift` (1,234),
-`Model.swift` (1,024; the test files below this line
-are sized by case count, not by design). Each is one cohesive type or one phase
-of a pipeline; the next structural gain there is a *design* change (a type doing
-two jobs), not a move, and none is currently doing two jobs.
+Files still above 600 lines are, in order: `RealForwardRunner+Decode.swift`
+(1,609), `RealForwardRunner+Prefill.swift` (1,541),
+`RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
+class), `RemoteStreamingRepacker.swift` (1,373), `Model.swift` (1,081; the test
+files below this line are sized by case count, not by design).
+`ServerInference.swift` left this list on 2026-09-27, when it was cut into the
+session files below. Each remaining file is one cohesive type or one phase of a
+pipeline; the next structural gain there is a *design* change (a type doing two
+jobs), not a move, and none is currently doing two jobs.
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
@@ -127,6 +128,23 @@ across the new boundary, so no access was widened:
 | `TinyTitanServer/Core/StructuredOutputDiagnostics.swift` | 245 | `ServerInference.swift` (1,897 → 1,664) |
 | `Runtime/Inference/RealForwardRunner+DecodeAttention.swift` | 268 | `+Decode.swift` (1,829 → 1,572) |
 | `Runtime/Inference/RealForwardRunner+PrefillAttention.swift` | 362 | `+Prefill.swift` (1,875 → 1,524) |
+
+Seven more files came out of `ServerInference.swift` on 2026-09-27, when it
+carried 1,821 lines and held the public API, the coordinator, the per-generation
+decode state and a 1,464-line `ServerModelSession` actor. Unlike the pass above
+this one *did* widen access: `private` is file-scoped in Swift, so every member
+reached from another file became `internal`. The split is pure code motion
+otherwise — every original line is present verbatim in one of the new files:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/ServerInference.swift` (API, events, protocols) | 182 | itself (1,821) |
+| `TinyTitanServer/Core/ServerModelSession.swift` | 186 | same |
+| `TinyTitanServer/Core/ServerCoordinator.swift` | 164 | same |
+| `TinyTitanServer/Core/ServerModelSession+Loading.swift` | 343 | same |
+| `TinyTitanServer/Core/ServerModelSession+PromptCache.swift` | 269 | same |
+| `TinyTitanServer/Core/ServerModelSession+Generation.swift` | 320 | same |
+| `TinyTitanServer/Core/ServerModelSession+Diagnostics.swift` | 425 | same |
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check

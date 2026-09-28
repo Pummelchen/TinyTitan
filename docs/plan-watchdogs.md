@@ -102,9 +102,11 @@ protocol Watchdog {
 enum WatchdogVerdict { case fine, concern(String), stop(String) }
 ```
 
-Driven from `publish(_:)` in `sources/TinyTitanServer/Core/ServerInference.swift`,
-which is already the single point every content chunk passes through and
-already owns a `shouldStop` flag for the stop-string matcher. A `stop`
+Driven from `publish(_:)` in `sources/TinyTitanServer/Core/AssistantOutput.swift`
+(formerly `ServerInference.swift`), which is already the single point every
+content chunk passes through; the `shouldStop` flag it sets lives on
+`ServerModelSession` (`sources/TinyTitanServer/Core/ServerModelSession.swift`)
+and is read by the generation loop. A `stop`
 verdict sets the same flag and records a finish reason of `watchdog`.
 
 `Stall` is the exception: it is a time check, not a content check, so it

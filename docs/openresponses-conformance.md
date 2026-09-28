@@ -214,7 +214,7 @@ nothing in the suite requires the transport of a server that speaks HTTP and SSE
 The suite runs **all 17 tests in parallel** (`runAllTests` maps over
 `testTemplates` with `Promise.all`). This server admits one generation at a time
 with four queued — `queueLimit + 1`, default 5 — and sheds the rest with 429
-(`ServerInference.swift`; the first run's log showed
+(`ServerCoordinator.swift`; the first run's log showed
 `status=429 error=ServerRequestError.queueFull`).
 
 So at least one failure is the suite's concurrency colliding with a
