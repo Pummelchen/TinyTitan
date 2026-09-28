@@ -12,21 +12,21 @@ import Foundation
 /// only removal is `forget(taskID:)`, which exists so a user can delete a
 /// project outright.
 public actor SessionLog {
-    private var tasks: [UUID: ContinuityTask] = [:]
-    private var sessions: [UUID: Session] = [:]
+    var tasks: [UUID: ContinuityTask] = [:]
+    var sessions: [UUID: Session] = [:]
     /// Events per session, in the order they were appended.
-    private var events: [UUID: [SessionEvent]] = [:]
+    var events: [UUID: [SessionEvent]] = [:]
     /// Sessions per task, oldest first.
-    private var sessionsByTask: [UUID: [UUID]] = [:]
+    var sessionsByTask: [UUID: [UUID]] = [:]
     /// Streaming replies still open, keyed by response identifier.
-    private var openResponses: [UUID: OpenResponse] = [:]
+    var openResponses: [UUID: OpenResponse] = [:]
     /// Bytes held per task, kept incrementally.
-    private var bytes: [UUID: Int] = [:]
+    var bytes: [UUID: Int] = [:]
     /// Bytes held per session, so pruning one can be subtracted exactly
     /// instead of triggering a full recount.
-    private var sessionBytes: [UUID: Int] = [:]
-    private let options: SessionLogOptions
-    private var observer: (@Sendable (SessionEvent) async -> Void)?
+    var sessionBytes: [UUID: Int] = [:]
+    let options: SessionLogOptions
+    var observer: (@Sendable (SessionEvent) async -> Void)?
 
     public init(options: SessionLogOptions = .init()) {
         self.options = options
@@ -147,103 +147,6 @@ public actor SessionLog {
         let event = SessionEvent(
             sessionID: sessionID, taskID: session.taskID,
             timestamp: now, kind: .userPrompt, payload: .text(text))
-        await append(event)
-        return event
-    }
-
-    /// Record a reply that is already complete.
-    @discardableResult
-    public func recordAssistantResponse(
-        sessionID: UUID,
-        _ record: ResponseRecord,
-        now: Date = Date()
-    ) async throws -> SessionEvent {
-        let session = try requireOpenSession(sessionID)
-        let event = SessionEvent(
-            sessionID: sessionID, taskID: session.taskID,
-            timestamp: now, kind: .assistantResponse,
-            payload: .response(record))
-        await append(event)
-        return event
-    }
-
-    // MARK: - Streaming replies
-
-    /// Open a streamed reply and return the identifier its chunks belong to.
-    @discardableResult
-    public func beginAssistantResponse(
-        sessionID: UUID,
-        model: String? = nil,
-        requestID: String? = nil,
-        now: Date = Date()
-    ) async throws -> UUID {
-        let session = try requireOpenSession(sessionID)
-        let event = SessionEvent(
-            sessionID: sessionID, taskID: session.taskID,
-            timestamp: now, kind: .assistantResponseStarted,
-            payload: .none)
-        openResponses[event.id] = OpenResponse(
-            sessionID: sessionID,
-            taskID: session.taskID,
-            model: model,
-            requestID: requestID,
-            startedAt: now)
-        await append(event.withResponseID(event.id))
-        return event.id
-    }
-
-    /// Add a piece of a streamed reply.
-    ///
-    /// The text is buffered, not appended as an event, so the completed reply
-    /// appears exactly once in the log. A chunk event is written only when
-    /// `SessionLogOptions.persistsChunks` is set, and readers then ignore
-    /// chunks for any response that also has a completion.
-    public func appendAssistantChunk(
-        responseID: UUID,
-        text: String,
-        now: Date = Date()
-    ) async throws {
-        guard var open = openResponses[responseID] else {
-            throw ContinuityError.unknownSession(responseID)
-        }
-        open.buffer += text
-        open.chunkCount += 1
-        openResponses[responseID] = open
-        guard options.persistsChunks else { return }
-        await append(
-            SessionEvent(
-                sessionID: open.sessionID, taskID: open.taskID,
-                timestamp: now, kind: .assistantResponseChunk,
-                payload: .text(text), responseID: responseID))
-    }
-
-    /// Close a streamed reply, writing the assembled text as one event.
-    @discardableResult
-    public func completeAssistantResponse(
-        responseID: UUID,
-        inputTokens: Int? = nil,
-        outputTokens: Int? = nil,
-        finishReason: String? = nil,
-        responseIdentifier: String? = nil,
-        now: Date = Date()
-    ) async throws -> SessionEvent {
-        guard let open = openResponses.removeValue(forKey: responseID) else {
-            throw ContinuityError.unknownSession(responseID)
-        }
-        let latency = Int(now.timeIntervalSince(open.startedAt) * 1000)
-        let record = ResponseRecord(
-            text: open.buffer,
-            model: open.model,
-            requestID: open.requestID,
-            responseID: responseIdentifier,
-            inputTokens: inputTokens,
-            outputTokens: outputTokens,
-            latencyMilliseconds: latency,
-            finishReason: finishReason)
-        let event = SessionEvent(
-            sessionID: open.sessionID, taskID: open.taskID,
-            timestamp: now, kind: .assistantResponseCompleted,
-            payload: .response(record), responseID: responseID)
         await append(event)
         return event
     }
@@ -499,7 +402,7 @@ public actor SessionLog {
 
     // MARK: - Internals
 
-    private func append(_ event: SessionEvent) async {
+    func append(_ event: SessionEvent) async {
         events[event.sessionID, default: []].append(event)
         let cost = event.storageBytes
         bytes[event.taskID] = (bytes[event.taskID] ?? 0) + cost
@@ -519,7 +422,7 @@ public actor SessionLog {
     /// The newest session is never dropped, even when a single session
     /// exceeds the budget on its own. Evicting the conversation that is
     /// currently happening would be the one eviction nobody could tolerate.
-    private func enforceByteBudget(taskID: UUID) {
+    func enforceByteBudget(taskID: UUID) {
         guard options.maxBytesPerTask > 0 else { return }
         while (bytes[taskID] ?? 0) > options.maxBytesPerTask,
             let ordered = sessionsByTask[taskID], ordered.count > 1
@@ -528,7 +431,7 @@ public actor SessionLog {
         }
     }
 
-    private func drop(sessionID: UUID, taskID: UUID) {
+    func drop(sessionID: UUID, taskID: UUID) {
         let cost = sessionBytes[sessionID] ?? 0
         bytes[taskID] = max(0, (bytes[taskID] ?? 0) - cost)
         sessionBytes[sessionID] = nil
@@ -538,18 +441,18 @@ public actor SessionLog {
         openResponses = openResponses.filter { $0.value.sessionID != sessionID }
     }
 
-    private func requireSession(_ id: UUID) throws -> Session {
+    func requireSession(_ id: UUID) throws -> Session {
         guard let session = sessions[id] else { throw ContinuityError.unknownSession(id) }
         return session
     }
 
-    private func requireOpenSession(_ id: UUID) throws -> Session {
+    func requireOpenSession(_ id: UUID) throws -> Session {
         let session = try requireSession(id)
         guard session.isOpen else { throw ContinuityError.sessionAlreadyEnded(id) }
         return session
     }
 
-    private struct OpenResponse {
+    struct OpenResponse {
         let sessionID: UUID
         let taskID: UUID
         let model: String?
@@ -557,86 +460,5 @@ public actor SessionLog {
         let startedAt: Date
         var buffer: String = ""
         var chunkCount: Int = 0
-    }
-}
-
-public struct SessionLogOptions: Sendable, Equatable {
-    /// Bytes of log a task may hold in memory. Zero disables the bound.
-    ///
-    /// The oldest whole sessions are dropped from memory when it is exceeded.
-    /// They remain in the journal file: this bounds what the process holds,
-    /// not what was recorded.
-    public var maxBytesPerTask: Int
-
-    /// Write one event per streamed chunk in addition to the completed reply.
-    ///
-    /// Off by default. It exists for callers who need a partial reply to
-    /// survive a crash mid-stream; it costs one event per chunk and readers
-    /// must fold, which `transcript` and `turns` already do.
-    public var persistsChunks: Bool
-
-    public init(
-        persistsChunks: Bool = false,
-        maxBytesPerTask: Int = 64 << 20
-    ) {
-        self.persistsChunks = persistsChunks
-        self.maxBytesPerTask = maxBytesPerTask
-    }
-}
-
-/// One exchange. The response is absent when a reply never arrived, which is
-/// itself worth seeing.
-public struct SessionTurn: Sendable, Equatable {
-    public let sessionID: UUID
-    public let promptEventID: UUID?
-    public let prompt: String
-    public let response: String?
-    /// The reply's measurements, when the reply carried any.
-    public let responseRecord: ResponseRecord?
-    /// When the reply landed. Nil while the turn is unanswered.
-    public let completedAt: Date?
-    /// When the prompt arrived.
-    public let timestamp: Date
-
-    public init(
-        sessionID: UUID,
-        promptEventID: UUID?,
-        prompt: String,
-        response: String?,
-        responseRecord: ResponseRecord? = nil,
-        completedAt: Date? = nil,
-        timestamp: Date
-    ) {
-        self.sessionID = sessionID
-        self.promptEventID = promptEventID
-        self.prompt = prompt
-        self.response = response
-        self.responseRecord = responseRecord
-        self.completedAt = completedAt
-        self.timestamp = timestamp
-    }
-}
-
-public struct SessionLogSnapshot: Codable, Sendable, Equatable {
-    public var tasks: [ContinuityTask]
-    public var sessions: [Session]
-    public var events: [SessionEvent]
-
-    public init(
-        tasks: [ContinuityTask] = [],
-        sessions: [Session] = [],
-        events: [SessionEvent] = []
-    ) {
-        self.tasks = tasks
-        self.sessions = sessions
-        self.events = events
-    }
-}
-
-extension SessionEvent {
-    func withResponseID(_ id: UUID) -> SessionEvent {
-        SessionEvent(
-            id: self.id, sessionID: sessionID, taskID: taskID,
-            timestamp: timestamp, kind: kind, payload: payload, responseID: id)
     }
 }
