@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 31 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 29 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `CPUCommands.swift` (663).
+`ANEPrefillAttention.swift` (919) and `MemoryBackend.swift` (643).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -334,6 +334,18 @@ Widened here: seven stored properties (`kBuffers`, `vBuffers`, `strides`,
 `kinds`, `capacityTokens`, `positions`, `valueBytes`), the `fp16Size`
 constant, `regionBase`, and the eight validation helpers whose callers stayed
 behind.
+
+Two more followed on 2026-09-28, both without any widening:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanBench/CPUQwenCommands.swift` | 339 | the Qwen3.5 side-engine commands: continuation, perplexity, generation and batch |
+| `TinyTitan/Infrastructure/ModelIO/ModelTypes+Configs.swift` | 141 | the family configuration structs |
+| `TinyTitan/Infrastructure/ModelIO/ModelTypes+Error.swift` | 73 | `ModelError` |
+
+`CPUCommands.swift` 663 → 342 (an extension with no `private` member), and
+`ModelTypes.swift` 654 → 451 (declaration groups around `ArchConfig`, which
+keeps the file).
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
