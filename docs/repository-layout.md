@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 37 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 36 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `RealForwardRunner+MTP.swift` (788).
+`ANEPrefillAttention.swift` (919) and `ArchInfo.swift` (732).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -261,6 +261,16 @@ its two unrelated stages to their own files:
 
 No widening: `writeQSACaches` moved with both of its callers, and the PLE view
 helpers with theirs.
+
+`RealForwardRunner+MTP.swift` (788 → 326) sent its two verify stages out:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `Runtime/Inference/RealForwardRunner+MTPVerifyRouted.swift` | 286 | the routed-MoE stage of the width-2 verify pass |
+| `Runtime/Inference/RealForwardRunner+MTPVerify.swift` | 198 | the pair schedule and the argmax packaging |
+
+No widening: `finishVerifyPair` moved with both of its callers, and the
+`lint:allow-long` marker travelled with its declaration.
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
