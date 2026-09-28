@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 18 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 16 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -417,6 +417,18 @@ Two more declaration-group moves followed:
 both with no widening. Each new file carries the original's imports — the
 router's error type needs `import TinyTitan` because it reads `rawValue` off
 the runtime's enums, which the first build caught.
+
+And two more, both single-group cuts:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/ServerArguments+Usage.swift` | 117 | the `--help` text |
+| `TinyTitanRepack/Core/Verification/VerifiedInstallManifest.swift` | 44 | the verifier's local manifest mirror |
+
+`ServerArguments.swift` 544 → 436 (no widening) and
+`VerifiedInstallTool.swift` 527 → 491 (the five mirror structs widened, since
+the loader that returns them stays; the new file also needed
+`import TinyTitanFormat`).
 
 ## Generated and local files
 
