@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 7 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 6 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -479,6 +479,12 @@ stored properties and `task(for:)` widened, and the new file needed
 `MoE+PersistentRouted.swift` (199): the U16 load stages, the phase-2 reduce and
 the argument-buffer helpers. Twenty-three private members widened there — the
 encoder's pipeline states and the helpers the kept encode paths call.
+
+`JSONGrammar.swift` (627 → 486) split the number and string arms of its state
+machine into `JSONGrammar+NumbersAndStrings.swift` (158): number continuation,
+key and string reading, escapes and unicode escapes. `state` lost its
+`private(set)`, the four stored properties and nine helpers widened, and the
+six arms widened to internal.
 
 ## Generated and local files
 

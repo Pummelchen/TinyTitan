@@ -106,15 +106,15 @@ public struct JSONGrammar: Hashable, Sendable {
         case object(ObjectFrame)
     }
 
-    private(set) var state: State
-    private var stack: [Frame]
+    var state: State
+    var stack: [Frame]
     /// The schema position the next value must match.
-    private var node: JSONSchemaNode
+    var node: JSONSchemaNode
     /// Decoded bytes of the key currently being read, so a key can be looked up
     /// in `properties` when it completes.
-    private var keyBytes: [UInt8]
+    var keyBytes: [UInt8]
     /// Hex digits of an in-progress `\uXXXX` inside a key.
-    private var unicodeDigits: [UInt8]
+    var unicodeDigits: [UInt8]
 
     /// A grammar for any JSON value.
     public init() {
@@ -189,13 +189,13 @@ public struct JSONGrammar: Hashable, Sendable {
         }
     }
 
-    private var canWriteSomeKey: Bool {
+    var canWriteSomeKey: Bool {
         guard case .object(let frame) = stack.last else { return false }
         if frame.additional { return true }
         return frame.properties.keys.contains { !frame.seen.contains($0) }
     }
 
-    private var canCloseCurrentObject: Bool {
+    var canCloseCurrentObject: Bool {
         guard case .object(let frame) = stack.last else { return false }
         return frame.required.allSatisfy { frame.seen.contains($0) }
     }
@@ -235,7 +235,7 @@ public struct JSONGrammar: Hashable, Sendable {
         return true
     }
 
-    private mutating func step(_ byte: UInt8) -> Bool {
+    mutating func step(_ byte: UInt8) -> Bool {
         if JSONGrammar.isWhitespace(byte), allowsWhitespace { return true }
         switch state {
         case .value:
@@ -289,7 +289,7 @@ public struct JSONGrammar: Hashable, Sendable {
     }
 
     /// Whitespace may separate any two tokens, but may not appear inside one.
-    private var allowsWhitespace: Bool {
+    var allowsWhitespace: Bool {
         switch state {
         case .value, .arrayStart, .objectStart, .objectKey, .objectColon,
             .afterValue, .complete:
@@ -301,7 +301,7 @@ public struct JSONGrammar: Hashable, Sendable {
 
     // MARK: - Values
 
-    private mutating func startValue(_ byte: UInt8) -> Bool {
+    mutating func startValue(_ byte: UInt8) -> Bool {
         switch node {
         case .enumeration(let literals):
             return beginEnumeration(literals, role: .value, first: byte)
@@ -350,7 +350,7 @@ public struct JSONGrammar: Hashable, Sendable {
         }
     }
 
-    private mutating func startScalar(_ byte: UInt8, kinds: Set<JSONScalarKind>) -> Bool {
+    mutating func startScalar(_ byte: UInt8, kinds: Set<JSONScalarKind>) -> Bool {
         if kinds.contains(.string), byte == 0x22 {
             state = .string(.value)
             return true
@@ -369,7 +369,7 @@ public struct JSONGrammar: Hashable, Sendable {
         return false
     }
 
-    private mutating func startLiteral(_ byte: UInt8) -> Bool {
+    mutating func startLiteral(_ byte: UInt8) -> Bool {
         let word: LiteralWord
         switch byte {
         case 0x74: word = .trueWord
@@ -381,150 +381,9 @@ public struct JSONGrammar: Hashable, Sendable {
         return true
     }
 
-    private mutating func startNumber(_ byte: UInt8) -> Bool {
-        switch byte {
-        case 0x2D:
-            state = .number(.minus)
-        case 0x30:
-            state = .number(.zero)
-        default:
-            guard JSONGrammar.isDigit(byte) else { return false }
-            state = .number(.integer)
-        }
-        return true
-    }
-
-    private mutating func continueNumber(_ byte: UInt8, number: NumberState) -> Bool {
-        let full = !node.forbidsFraction
-        switch number {
-        case .minus:
-            guard JSONGrammar.isDigit(byte) else { return false }
-            state = .number(byte == 0x30 ? .zero : .integer)
-            return true
-        case .zero:
-            // A leading zero may not be followed by another digit.
-            if byte == 0x2E, full {
-                state = .number(.fractionStart)
-                return true
-            }
-            if byte == 0x65 || byte == 0x45, full {
-                state = .number(.exponent)
-                return true
-            }
-            return finishValue(consuming: byte)
-        case .integer:
-            if JSONGrammar.isDigit(byte) { return true }
-            if byte == 0x2E, full {
-                state = .number(.fractionStart)
-                return true
-            }
-            if byte == 0x65 || byte == 0x45, full {
-                state = .number(.exponent)
-                return true
-            }
-            return finishValue(consuming: byte)
-        case .fractionStart:
-            guard JSONGrammar.isDigit(byte) else { return false }
-            state = .number(.fraction)
-            return true
-        case .fraction:
-            if JSONGrammar.isDigit(byte) { return true }
-            if byte == 0x65 || byte == 0x45 {
-                state = .number(.exponent)
-                return true
-            }
-            return finishValue(consuming: byte)
-        case .exponent:
-            if byte == 0x2B || byte == 0x2D {
-                state = .number(.exponentSign)
-                return true
-            }
-            if JSONGrammar.isDigit(byte) {
-                state = .number(.exponentDigits)
-                return true
-            }
-            return false
-        case .exponentSign:
-            guard JSONGrammar.isDigit(byte) else { return false }
-            state = .number(.exponentDigits)
-            return true
-        case .exponentDigits:
-            if JSONGrammar.isDigit(byte) { return true }
-            return finishValue(consuming: byte)
-        }
-    }
-
-    // MARK: - Strings
-
-    private mutating func startKey(_ byte: UInt8) -> Bool {
-        if case .object(let frame) = stack.last, !frame.additional {
-            let remaining = frame.properties.keys.filter { !frame.seen.contains($0) }.sorted()
-            guard !remaining.isEmpty else { return false }
-            return beginEnumeration(remaining.map { "\"\($0)\"" }, role: .key, first: byte)
-        }
-        guard byte == 0x22 else { return false }
-        keyBytes.removeAll(keepingCapacity: true)
-        state = .string(.key)
-        return true
-    }
-
-    private mutating func continueString(_ byte: UInt8, role: StringRole) -> Bool {
-        if byte == 0x5C {
-            state = .escape(role)
-            return true
-        }
-        // A raw control character is not legal inside a JSON string.
-        guard byte >= 0x20 else { return false }
-        if byte == 0x22 {
-            guard role == .key else { return finishValue() }
-            return finishKey(keyBytes.lossyUTF8String)
-        }
-        if role == .key { keyBytes.append(byte) }
-        return true
-    }
-
-    private mutating func continueEscape(_ byte: UInt8, role: StringRole) -> Bool {
-        if byte == 0x75 {
-            unicodeDigits.removeAll(keepingCapacity: true)
-            state = .unicode(4, role)
-            return true
-        }
-        let decoded: UInt8
-        switch byte {
-        case 0x22: decoded = 0x22
-        case 0x5C: decoded = 0x5C
-        case 0x2F: decoded = 0x2F
-        case 0x62: decoded = 0x08
-        case 0x66: decoded = 0x0C
-        case 0x6E: decoded = 0x0A
-        case 0x72: decoded = 0x0D
-        case 0x74: decoded = 0x09
-        default: return false
-        }
-        if role == .key { keyBytes.append(decoded) }
-        state = .string(role)
-        return true
-    }
-
-    private mutating func continueUnicode(_ byte: UInt8, remaining: Int, role: StringRole) -> Bool {
-        guard JSONGrammar.isHexDigit(byte) else { return false }
-        unicodeDigits.append(byte)
-        if remaining > 1 {
-            state = .unicode(remaining - 1, role)
-            return true
-        }
-        if role == .key, let scalar = UInt32(unicodeDigits.lossyUTF8String, radix: 16),
-            let unicode = Unicode.Scalar(scalar)
-        {
-            keyBytes.append(contentsOf: Array(String(Character(unicode)).utf8))
-        }
-        state = .string(role)
-        return true
-    }
-
     // MARK: - Enumerations
 
-    private mutating func beginEnumeration(
+    mutating func beginEnumeration(
         _ literals: [String], role: StringRole,
         first byte: UInt8
     ) -> Bool {
@@ -535,7 +394,7 @@ public struct JSONGrammar: Hashable, Sendable {
         return continueEnumeration(byte, enumeration: &enumeration)
     }
 
-    private mutating func continueEnumeration(
+    mutating func continueEnumeration(
         _ byte: UInt8,
         enumeration: inout Enumeration
     ) -> Bool {
@@ -580,19 +439,19 @@ public struct JSONGrammar: Hashable, Sendable {
 
     /// A value is complete: the document ends here, or the enclosing container
     /// decides what may follow.
-    private mutating func finishValue() -> Bool {
+    mutating func finishValue() -> Bool {
         state = stack.isEmpty ? .complete : .afterValue
         return true
     }
 
     /// Same, for a byte that belongs to whatever follows the value rather than
     /// to the value itself (a number or literal ended by `,` or `}`).
-    private mutating func finishValue(consuming byte: UInt8) -> Bool {
+    mutating func finishValue(consuming byte: UInt8) -> Bool {
         state = stack.isEmpty ? .complete : .afterValue
         return step(byte)
     }
 
-    private mutating func finishKey(_ text: String) -> Bool {
+    mutating func finishKey(_ text: String) -> Bool {
         guard case .object(var frame) = stack.last else { return false }
         guard !frame.seen.contains(text) else { return false }
         if !frame.additional, frame.properties[text] == nil { return false }
@@ -603,14 +462,14 @@ public struct JSONGrammar: Hashable, Sendable {
         return true
     }
 
-    private mutating func closeObject() -> Bool {
+    mutating func closeObject() -> Bool {
         guard case .object(let frame) = stack.last else { return false }
         for name in frame.required where !frame.seen.contains(name) { return false }
         stack.removeLast()
         return finishValue()
     }
 
-    private mutating func closeArray() -> Bool {
+    mutating func closeArray() -> Bool {
         guard case .array = stack.last else { return false }
         stack.removeLast()
         return finishValue()
