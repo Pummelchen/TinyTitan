@@ -6,7 +6,7 @@ sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillProjection.swift:en
 sources/TinyTitanBench/TinyTitanBench.swift:main: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
 sources/TinyTitanFormat/GTurboPackedExpertsLayoutV1.swift:validate: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
 sources/TinyTitanFormat/GTurboResidentIndexV1.swift:decodeRegion: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
-sources/TinyTitanMemory/MemoryService.swift:storeConsolidation: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
+sources/TinyTitanMemory/MemoryService+Consolidation.swift:storeConsolidation: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
 sources/TinyTitanRepack/Core/Format/GTurboLayoutValidator.swift:validate: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
 sources/TinyTitanServer/Core/AnthropicMapper.swift:chatRequest: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added
 sources/TinyTitanServer/Core/HTTPServerHandler+Anthropic.swift:handleMessages: AUD-024: the AUD-004 formatter sweep expanded this body past 120 lines; no logic was added

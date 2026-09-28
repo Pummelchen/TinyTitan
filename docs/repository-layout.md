@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 4 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 3 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -498,6 +498,15 @@ consolidation run and the workspace resolution. The actor's stored properties
 and five helpers widened, the new file needed `import TinyTitanMemory`, and an
 orphaned doc comment sitting just inside the actor's closing brace (no
 declaration after it) was removed with the pass.
+
+`MemoryService.swift` (1,128 → 208) is the largest split of the pass: the actor
+kept its declaration, stored state and three methods, and everything else went
+to five sibling files — `MemoryService+Workspaces.swift` (142),
+`+Maintenance.swift` (152), `+Sessions.swift` (206), `+Consolidation.swift`
+(171), `+Store.swift` (178) — with the value types in
+`MemoryServiceTypes.swift` (146). The widening touched the actor's stored
+properties, its nested `Workspace` and `Inspection` types and every moved
+helper, because the methods left behind call into all of them.
 
 ## Generated and local files
 
