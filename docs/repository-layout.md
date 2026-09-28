@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 3 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 2 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -507,6 +507,15 @@ to five sibling files — `MemoryService+Workspaces.swift` (142),
 `MemoryServiceTypes.swift` (146). The widening touched the actor's stored
 properties, its nested `Workspace` and `Inspection` types and every moved
 helper, because the methods left behind call into all of them.
+
+`PreadExpertStreamer.swift` (1,392 → 482) split the cache manager's four
+clusters out: `+Plan.swift` (259) plans and executes a cache plan, `+IO.swift`
+(203) holds the Metal, bounded and cached read paths, `+Residency.swift` (440)
+publishes residency and keeps the statistics, eviction and prefetch machinery,
+and `PreadExpertStreamerTypes.swift` (52) holds `PrefetchDestinations` and
+`ExpertCacheLease`. That split widened every private member those clusters
+touch, `fileprivate` included, and each new file needed the original's four
+imports.
 
 ## Generated and local files
 
