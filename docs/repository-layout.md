@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 25 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 23 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -369,6 +369,16 @@ Three more followed on 2026-09-28, all with clean seams:
 625 → 354 are both extensions with no `private` member, and `Sampler.swift`
 531 → 317 keeps the class while the value types move. No widening in any of the
 three; the `lint:allow-long` marker on `runMoE` travelled with its declaration.
+
+Two more value-type groups followed:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitan/Runtime/Generation/StreamingMTPTypes.swift` | 258 | the MTP memory plan, error type, statistics, checkpoint shapes and verify schedule |
+| `TinyTitan/Runtime/Configuration/RuntimeConfigurationTypes.swift` | 138 | the runtime configuration enums and its error type |
+
+`StreamingMTP.swift` 524 → 273 and `RuntimeConfiguration.swift` 547 → 415, both
+keeping their class or struct, both with no widening.
 
 ## Generated and local files
 
