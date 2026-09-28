@@ -110,11 +110,11 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 23 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 21 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
-class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
-`ANEPrefillAttention.swift` (919) and `MemoryBackend.swift` (643).
+class), `MemoryService.swift` (1,128), `ANEPrefillAttention.swift` (919),
+`MemoryBackend.swift` (643) and `SessionLog.swift` (642).
 Each is one
 cohesive type or one phase of a pipeline; the next structural gain there is a
 *design* change (a type doing two jobs), not a move, and none is currently doing
@@ -379,6 +379,22 @@ Two more value-type groups followed:
 
 `StreamingMTP.swift` 524 → 273 and `RuntimeConfiguration.swift` 547 → 415, both
 keeping their class or struct, both with no widening.
+
+The two largest class splits then followed:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanRepack/Core/Remote/RemoteStreamingRepacker+Local.swift` | 407 | the local-snapshot repack path |
+| `TinyTitanRepack/Core/Remote/RemoteStreamingRepacker+Remote.swift` | 371 | the prepared remote run |
+| `TinyTitanRepack/Core/Remote/RemoteStreamingRepacker+Output.swift` | 256 | completed-range recovery and the output/manifest writers |
+| `TinyTitanRepack/Core/Remote/RemoteStreamingRepackTypes.swift` | 90 | the options and result types |
+| `TinyTitan/Runtime/Generation/RawCompletionHelpers.swift` | 217 | the MTP streaming pass and `sampleOnce` |
+
+`RemoteStreamingRepacker.swift` 1,373 → 288 (three stored properties and all
+twenty methods widened from `private` to internal, because every cluster calls
+across the new file boundaries) and `RawCompletion.swift` 591 → 383 (two
+file-private functions widened for the same reason). Both class files needed
+their imports re-added after the cut, which the first build caught.
 
 ## Generated and local files
 
