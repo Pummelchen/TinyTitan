@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 42 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 41 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -198,6 +198,14 @@ types and sending the other three groups elsewhere:
 | `TinyTitanServer/Core/ResponsesAPIMapper.swift` | 354 | the request-to-chat mapper |
 | `TinyTitanServer/Core/ResponsesAPIBuilder.swift` | 296 | the response builder and the `JSONValue` bridging |
 | `TinyTitanServer/Core/ResponsesAPIStore.swift` | 155 | `ResponseStore` and `ResponsesAPIEcho` |
+
+`AnthropicModels.swift` (721 → 134) followed the same shape, keeping the three
+request types:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/AnthropicMapper.swift` | 469 | the Messages request mapping |
+| `TinyTitanServer/Core/AnthropicBuilder.swift` | 131 | the response builders |
 
 The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
