@@ -16,12 +16,12 @@ import TinyTitanMemory
 /// memory. A memory tool the client would have to run is a memory tool
 /// nothing runs.
 public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, ResidencyManaging {
-    private let inner: any ServerInferenceBackend
-    private let service: MemoryService
-    private let configuration: MemoryConfiguration
+    let inner: any ServerInferenceBackend
+    let service: MemoryService
+    let configuration: MemoryConfiguration
     /// Session contexts by conversation, so a multi-turn conversation keeps
     /// one session and bootstraps once.
-    private var contexts: [String: MemorySessionContext] = [:]
+    var contexts: [String: MemorySessionContext] = [:]
     /// The exact instruction text installed for a conversation, kept for the
     /// life of that conversation.
     ///
@@ -34,29 +34,29 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// conversation and frozen, even though memory keeps changing underneath
     /// it: a stale bootstrap is cheap, and the model can always call a tool
     /// or read the journal for what is current.
-    private var installedInstructions: [String: String] = [:]
+    var installedInstructions: [String: String] = [:]
     /// Turn counter per conversation, for the journal.
-    private var turnIndex: [String: Int] = [:]
+    var turnIndex: [String: Int] = [:]
     /// Read once. The workspace guard needs it per request, and reading the
     /// environment per request is the pattern that once cost 40% of a token.
-    private let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
     /// Declared directories already refused, so each is logged once.
-    private var refusedDirectories: Set<String> = []
+    var refusedDirectories: Set<String> = []
     /// Sessions with turns not yet distilled into memory, by scope. One per
     /// scope: a new session in a scope replaces the pending one, and the
     /// replaced one is consolidated on the rollover it just caused.
-    private var unconsolidated: [MemoryScope: MemorySessionContext] = [:]
+    var unconsolidated: [MemoryScope: MemorySessionContext] = [:]
     /// The idle timer per scope. Reset on every turn; fires consolidation.
-    private var idleTimers: [MemoryScope: Task<Void, Never>] = [:]
+    var idleTimers: [MemoryScope: Task<Void, Never>] = [:]
     /// A session that rolled over before its idle timer fired. Consolidated
     /// as soon as the current request has returned, never before.
-    private var pendingAfterTurn: [MemoryScope: MemorySessionContext] = [:]
+    var pendingAfterTurn: [MemoryScope: MemorySessionContext] = [:]
     /// The last journal turn index each session has been distilled through.
     /// Every idle gap used to re-read the newest forty turns of the whole
     /// session and extract them again; a fifty-turn coding session paid that
     /// on every pause. Only turns after this index are read now, plus the
     /// one before them for context.
-    private var consolidatedThrough: [String: Int] = [:]
+    var consolidatedThrough: [String: Int] = [:]
     /// The distillation in flight for each scope, so a later one can wait for
     /// it before reading what memory holds.
     ///
@@ -69,7 +69,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// benchmark this is exactly what happened: session 3's extraction ran
     /// with an empty key list and wrote `agreement/*` beside session 2's
     /// `msa/*`, although the two were requested four seconds apart (TT-035).
-    private var consolidationChain: [MemoryScope: Task<Void, Never>] = [:]
+    var consolidationChain: [MemoryScope: Task<Void, Never>] = [:]
     /// One generation at a time through this backend.
     ///
     /// The HTTP layer admits one request at a time, but a consolidation is
@@ -78,8 +78,8 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// every call into the inner backend, a person's turn or the engine's
     /// own, takes this gate first. A person never waits behind more than one
     /// consolidation, and a consolidation only starts in a pause.
-    private var innerBusy = false
-    private var innerWaiters: [CheckedContinuation<Void, Never>] = []
+    var innerBusy = false
+    var innerWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         wrapping inner: any ServerInferenceBackend,
@@ -273,7 +273,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// own failures. Only the user's prompt and the assistant's reply text
     /// go in; tool definitions, tool calls and tool results never reach it,
     /// which is what keeps a turn at a few kilobytes.
-    private func journal(
+    func journal(
         request: ValidatedChatRequest,
         completion: ServerCompletion,
         context: MemorySessionContext,
@@ -298,14 +298,14 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
 
     // MARK: - The generation gate
 
-    private func acquireInner() async {
+    func acquireInner() async {
         while innerBusy {
             await withCheckedContinuation { innerWaiters.append($0) }
         }
         innerBusy = true
     }
 
-    private func releaseInner() {
+    func releaseInner() {
         innerBusy = false
         let waiting = innerWaiters
         innerWaiters.removeAll()
@@ -313,7 +313,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     }
 
     /// Runs one inner generation under the gate.
-    private func gated(
+    func gated(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     )
@@ -324,139 +324,9 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
         return try await inner.generate(request, onEvent: onEvent)
     }
 
-    // MARK: - Consolidation
-
-    /// Arms the idle timer for a session that just gained a turn, and fires
-    /// the consolidation of a session that rolled over during this request.
-    ///
-    /// The turn is recorded and the reply has been returned by the time this
-    /// runs, so the person is reading. That is the pause a consolidation is
-    /// allowed to use.
-    private func scheduleConsolidation(after context: MemorySessionContext) {
-        guard configuration.sessionConsolidation else { return }
-        let scope = context.scope
-        unconsolidated[scope] = context
-        idleTimers[scope]?.cancel()
-        let delay = configuration.consolidationIdleSeconds
-        // The timer task only waits. Once the wait is over the consolidation
-        // runs in a task of its own, so a turn arriving later -- which
-        // cancels the timer -- can never cancel a generation already under
-        // way: the gate would release mid-inference and the engine would be
-        // asked to abandon a request for no reason.
-        idleTimers[scope] = Task { [weak self] in
-            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
-            guard !Task.isCancelled, let self else { return }
-            Task { await self.consolidateIfPending(scope: scope, expecting: context.session.id) }
-        }
-        if let previous = pendingAfterTurn.removeValue(forKey: scope) {
-            Task { [weak self] in await self?.consolidate(previous) }
-        }
-    }
-
-    private func consolidateIfPending(scope: MemoryScope, expecting sessionID: String) async {
-        guard let pending = unconsolidated[scope], pending.session.id == sessionID else { return }
-        await consolidate(pending)
-    }
-
-    /// Distils a finished session into memory, after every earlier
-    /// distillation in the same scope has finished writing.
-    ///
-    /// The chaining is the whole point: `runConsolidation` reads what memory
-    /// holds to build its prompt, and a read that overtakes an earlier write
-    /// is how two sessions came to name one fact under two addresses
-    /// (TT-035). Waiting here is cheap — the earlier generation was going to
-    /// occupy the one generation gate anyway — and it makes the order of the
-    /// reads the order of the writes.
-    private func consolidate(_ context: MemorySessionContext) async {
-        let scope = context.scope
-        let previous = consolidationChain[scope]
-        let current = Task { [weak self] in
-            await previous?.value
-            await self?.runConsolidation(context)
-        }
-        consolidationChain[scope] = current
-        await current.value
-        if consolidationChain[scope] == current {
-            consolidationChain[scope] = nil
-        }
-    }
-
-    /// Distils a finished session into memory.
-    ///
-    /// This is the engine writing, not the model choosing to. Measured on a
-    /// hundred-chapter novel, a model given the bible in its prompt made zero
-    /// writes in that session, then found memory empty in the next and
-    /// stored a bible it had invented; a harness that simply forced a
-    /// summary at each boundary carried twice as much. The forcing is what
-    /// works. Writing the result as addressed facts rather than a note is
-    /// what lets a later change supersede an earlier state instead of the
-    /// note copying the old state forward, which is how the summary lost
-    /// every plot event one session after it happened.
-    private func runConsolidation(_ context: MemorySessionContext) async {
-        let scope = context.scope
-        if unconsolidated[scope]?.session.id == context.session.id {
-            unconsolidated[scope] = nil
-        }
-        guard let journal = await service.journalStore(for: scope) else { return }
-        let newestFirst = await journal.turns(
-            session: context.session.id,
-            limit: configuration.consolidationMaximumTurns,
-            in: scope)
-        let chronological = Array(newestFirst.reversed())
-        let through = consolidatedThrough[context.session.id] ?? -1
-        let fresh = chronological.filter { $0.index > through }
-        guard let last = fresh.last else {
-            ServerLog.memory("consolidation skipped session=\(context.session.id): no new turns")
-            return
-        }
-        let characters = fresh.reduce(0) { $0 + $1.prompt.count + $1.reply.count }
-        guard characters >= configuration.consolidationMinimumCharacters else {
-            ServerLog.memory(
-                "consolidation skipped session=\(context.session.id): "
-                    + "\(characters) new characters, nothing to distil")
-            return
-        }
-        // One already-distilled turn ahead of the new ones, so a reply that
-        // answers the previous prompt is read with that prompt.
-        let overlap = chronological.last { $0.index <= through }.map { [$0] } ?? []
-        let turns = overlap + fresh
-        let existing = await service.recordedFacts(in: scope, limit: 400)
-        let request = ServerMemory.consolidationRequest(
-            turns: turns, existing: existing, workspace: scope.workspace)
-        let started = Date()
-        let completion: ServerCompletion
-        do {
-            completion = try await gated(request, onEvent: { _ in })
-        } catch {
-            ServerLog.memory("consolidation failed session=\(context.session.id): \(error)")
-            return
-        }
-        let parsed = ServerMemory.consolidationRecords(from: completion.content)
-        let (records, merged) = ServerMemory.reconcile(parsed, existing: existing)
-        for (from, to) in merged {
-            ServerLog.memory("consolidation routed \(from) -> \(to) session=\(context.session.id)")
-        }
-        if records.isEmpty {
-            // Nothing usable came back. The head of the raw output is the only
-            // way to tell an honest "[]" from a truncated array or a refusal.
-            let head = completion.content.prefix(200).replacingOccurrences(of: "\n", with: " ")
-            ServerLog.memory(
-                "consolidation produced no facts session=\(context.session.id) "
-                    + "finish=\(completion.finishReason) output=\"\(head)\"")
-        }
-        let written = await service.storeConsolidation(records, in: context)
-        consolidatedThrough[context.session.id] = last.index
-        ServerLog.memory(
-            "consolidated session=\(context.session.id) turns=\(fresh.count) "
-                + "facts=\(written) keys=\(records.map(\.key.rawValue).joined(separator: ","))"
-                + " prompt=\(completion.usage.promptTokens) "
-                + "completion=\(completion.usage.completionTokens) "
-                + "seconds=\(Int(Date().timeIntervalSince(started)))")
-    }
-
     /// Identifies a conversation for the purpose of freezing its prompt and
     /// counting its turns.
-    private func conversationKey(for request: ValidatedChatRequest) -> String {
+    func conversationKey(for request: ValidatedChatRequest) -> String {
         let placement = resolvePlacement(for: request)
         return ServerMemory.sessionIdentifier(
             messages: request.messages,
@@ -472,7 +342,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     }
 
     /// Resolves, and caches, the memory session for this conversation.
-    private func sessionContext(for request: ValidatedChatRequest) async
+    func sessionContext(for request: ValidatedChatRequest) async
         -> MemorySessionContext?
     {
         let placement = resolvePlacement(for: request)
@@ -512,7 +382,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     }
 
     /// Where a conversation's memory lives, and why.
-    private struct Placement {
+    struct Placement {
         /// The workspace the session is placed in.
         let workspace: String
         /// The override handed to the service; nil means the launch workspace.
@@ -523,49 +393,6 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
         let source: String
     }
 
-    /// Decides the workspace for a request, in this order:
-    ///
-    /// 1. The `X-TinyTitan-Workspace` header, when the client sent one.
-    /// 2. The working directory the client declared in its system prompt.
-    ///    This is the one that keeps a novel and a codebase apart with no
-    ///    configuration at all: the coding CLIs already say where they are
-    ///    on every request, and where they are is the project.
-    /// 3. The launch directory.
-    ///
-    /// A declared directory that is not a project -- the home directory,
-    /// the root -- falls through to the launch workspace and is logged once,
-    /// rather than being refused: refusing a request over a client's cwd
-    /// would turn a memory nicety into a serving failure.
-    private func resolvePlacement(for request: ValidatedChatRequest) -> Placement {
-        if let header = request.workspace {
-            return Placement(workspace: header, override: header, tag: header, source: "header")
-        }
-        guard configuration.allowsPerRequestWorkspace,
-            let declared = ServerMemory.declaredWorkingDirectory(in: request.messages)
-        else {
-            return Placement(
-                workspace: configuration.workspace, override: nil,
-                tag: nil, source: "launch")
-        }
-        if let reason = MemoryConfiguration.junkDrawerReason(
-            forPath: declared, environment: ["HOME": homeDirectory])
-        {
-            if refusedDirectories.insert(declared).inserted {
-                ServerLog.memory("declared working directory ignored: \(reason)")
-            }
-            return Placement(
-                workspace: configuration.workspace, override: nil,
-                tag: nil, source: "launch")
-        }
-        let workspace = MemoryConfiguration.workspaceIdentifier(forPath: declared)
-        let tag = URL(fileURLWithPath: declared).lastPathComponent
-        return Placement(
-            workspace: workspace, override: workspace, tag: tag,
-            source: "declared-cwd")
-    }
-
-    /// When the round limit stops a conversation mid-memory, say so in the
-    /// finish reason rather than presenting a truncated answer as complete.
 }
 
 extension MemoryBackend {

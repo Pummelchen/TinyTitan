@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 5 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 4 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `MemoryService.swift` (1,128), `MemoryBackend.swift` (643),
@@ -491,6 +491,13 @@ value types out: `SessionLog+Assistant.swift` (106) holds the completed /
 streaming reply path, and `SessionLogTypes.swift` (86) the options, turn,
 snapshot and response-id accessor. The actor's stored properties and helpers
 widened.
+
+`MemoryBackend.swift` (643 → 470) moved consolidation and placement into
+`MemoryBackend+Consolidation.swift` (180): the idle-timer arming, the
+consolidation run and the workspace resolution. The actor's stored properties
+and five helpers widened, the new file needed `import TinyTitanMemory`, and an
+orphaned doc comment sitting just inside the actor's closing brace (no
+declaration after it) was removed with the pass.
 
 ## Generated and local files
 
