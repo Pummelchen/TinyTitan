@@ -110,7 +110,7 @@ readability question, and the convention that came out of this pass is:
   around `Model` were widened this pass, and nothing else changed.
 
 The file-size rule is 500 physical lines per source file, comments and blanks
-included. `find sources -name '*.swift' | xargs wc -l` listed 28 production
+included. `find sources -name '*.swift' | xargs wc -l` listed 25 production
 files above it on 2026-09-28; the largest are
 `RealForwardRunner.swift` (1,449), `PreadExpertStreamer.swift` (1,392, one
 class), `RemoteStreamingRepacker.swift` (1,373), `MemoryService.swift` (1,128),
@@ -356,6 +356,19 @@ The rule for the next split is the one the pass above followed: move a *cluster*
 — an entry point with its own helpers — never half of one pipeline, and check
 for `private` members on both sides of the seam first, because a file-scoped
 `private` reached from another file has to become `internal`.
+
+Three more followed on 2026-09-28, all with clean seams:
+
+| New file | Lines | Out of |
+| --- | ---: | --- |
+| `TinyTitanServer/Core/HTTPServerHandler+ResponsesStream.swift` | 305 | the Responses stream opener, per-event enqueueing and the terminal flush |
+| `TinyTitanBench/MetalMoEBenchmarks.swift` | 289 | the routed-MoE decode benchmark and its expert-offset mirror |
+| `TinyTitan/Runtime/Generation/SamplerTypes.swift` | 221 | the generation defaults, knobs and the two path enums |
+
+`HTTPServerHandler+Responses.swift` 541 → 255 and `MetalBenchmarks.swift`
+625 → 354 are both extensions with no `private` member, and `Sampler.swift`
+531 → 317 keeps the class while the value types move. No widening in any of the
+three; the `lint:allow-long` marker on `runMoE` travelled with its declaration.
 
 ## Generated and local files
 

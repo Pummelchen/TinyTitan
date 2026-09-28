@@ -265,7 +265,7 @@ simply not mistake it for a GPU one:
 | `ModelTypes.swift` (`ModelFamily`) | the new case |
 | `ArchInfo.swift` (`RepackModelFamily`) | the new case, `isDraftHead` false |
 | `ReasoningControl.swift` | binary thinking, like `qwen36` |
-| `Sampler.swift` (`forFamily`) | house defaults — 0.6 for Qwen 3.5 |
+| `SamplerTypes.swift` (`forFamily`) | house defaults — 0.6 for Qwen 3.5 |
 | `TensorSchema.swift` (`schema(for:)`) | not reached by the CPU path; must still compile, so return the dense schema or refuse explicitly |
 | `ManifestReader.validateQuant` | dense has no router at a MoE width; reader must accept the embedded/router widths the converter writes |
 | `Model.swift` (`validate*Schema`) | **not reached** — the CPU engine loads a dense `.gturbo` through its own path. If it were reached, the `qwen36` MoE checks would reject the model |
