@@ -1,15 +1,17 @@
-# Handover: after release 5.12, the engine and its loopback server
+# Handover: after release 5.13, the engine and its loopback server
 
 **Paste this into the next session:**
 
 > Continue the TinyTitan work in this checkout. Read `AGENTS.md`, then
-> `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.12 is cut and
-> published** (`v5.12` → `fc23691`; `tinytitan-5.12-macos-arm64.tar.gz`, 15,386,068
-> bytes, sha256 `ec93f640f1d49dfac02d129626117d47f38585b616645886e36d1c8a8040b5e0`,
-> 2026-09-25) and **`main` sits one commit past it** — this brief; the release notes
-> are `docs/release-notes-v5.12.md`. 5.12 is the pre-production audit: every force
-> unwrap is gone, every finding it raised is closed (28
-> tasks), and `tools/lint.sh` now runs **eleven** pinned gates. The product is the
+> `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.13 is cut and
+> published** (`v5.13` → `89d3317`; `tinytitan-5.13-macos-arm64.tar.gz`, 15,415,573
+> bytes, sha256 `e5359f1881d2dffa3ad8599c912eb44ca199eb42831ce8af4222e1b2a8dfc6e3`,
+> 2026-09-29) and **`main` sits one commit past it** — this brief; the release notes
+> are `docs/release-notes-v5.13.md`. 5.13 carries one diagnostic — a `--model` path
+> that does not exist now names the path instead of blaming the tokenizer — plus a
+> wiki rewritten as a user guide; no engine behaviour changed, and the 50 file
+> splits it carries are pure code motion. `tools/lint.sh` runs **eleven** pinned
+> gates. The product is the
 > engine plus its loopback server — the Mac app is gone — and
 > `tools/install_tinytitan.sh` downloads a built release instead of compiling one;
 > the browser chat window arrives the same way, from the release tag's source
@@ -21,7 +23,7 @@
 > a model to make a gate pass, and never fetch one of the installs the operator
 > deleted. Report measurements, not assurances.
 
-This is the only current brief; the 5.10 handover it replaces is superseded. The
+This is the only current brief; the 5.12 handover it replaces is superseded. The
 traps that one named still bite and are folded in below.
 
 > **The product shape changed: the GUI is gone.** The Mac app, the out-of-process
@@ -68,18 +70,31 @@ traps that one named still bite and are folded in below.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | level with `origin/main`, one commit past `v5.12` (this brief); the release commit is `fc23691` |
-| Release | **5.12 published** 2026-09-25 — `tinytitan-5.12-macos-arm64.tar.gz`, 15,386,068 bytes, sha256 `ec93f640…` with its `.sha256` beside it |
+| `main` | level with `origin/main`, one commit past `v5.13` (this brief); the release commit is `89d3317` |
+| Release | **5.13 published** 2026-09-29 — `tinytitan-5.13-macos-arm64.tar.gz`, 15,415,573 bytes, sha256 `e5359f18…` with its `.sha256` beside it |
 | Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
 | Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
 | Audit | **28 findings, all closed**; the eleven gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
-| `.build` | release rebuilt for 5.12; a clean scratch release build is part of each dry run |
-| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.12 section) |
+| `.build` | release rebuilt for 5.13; a clean scratch release build is part of each dry run |
+| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.13 section); user-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.1.6-alpha.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's |
-| CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the 5.12 push is the run to watch (`gh run list`) |
+| CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the 5.13 push is the run to watch (`gh run list`) |
 
 ## What has landed
 
+- **5.13** (`89d3317`) — one diagnostic plus a documentation rewrite. A `--model`
+  path that does not exist now fails with `model directory not found: <absolute
+  path>` instead of `installed tokenizer is missing chat_template.jinja`, at the
+  CLI, the server's session load and the router's token counter; three tests pin
+  it, and the CLI test fails on the pre-fix tree at `7535ebc`. The wiki became a
+  user guide (21 → 16 pages: new Installation and Configuration, rewritten
+  Runtime Controls and Local Server and API, a larger Cookbook) and the README a
+  verified quickstart. 50 source files were split under the 500-line rule as pure
+  code motion. Verification: eleven gates clean, **1,496 tests in 224 suites**,
+  7 goldens byte-identical, a warning-free clean scratch build, and the 4B
+  internal-speed record inside the 10% gate on all thirteen metrics — after two
+  contended passes were discarded because a 3D game held ~78% of a core and the
+  GPU.
 - **5.12** (`fc23691`) — the pre-production audit, drained to zero open findings:
   every force unwrap gone (171 in `sources/`, 139 in tests and benchmarks), the
   chunked-prefill force cast now the existing `chunkedUnsupported` error, a
