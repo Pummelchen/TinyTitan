@@ -71,6 +71,41 @@ struct TokenizerLoadCoordinatorTests {
         #expect(resolved == nil)
     }
 
+    @Test("A missing model directory names the path, not the tokenizer template")
+    func missingModelDirectoryNamesThePath() async throws {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("no-such-model-\(UUID().uuidString)", isDirectory: true)
+
+        do {
+            _ = try await GFTokenizer.load(forModelDirectory: missing)
+            Issue.record("loading a model directory that does not exist should fail")
+        } catch let error as GFTokenizerError {
+            #expect(
+                error.description
+                    == "model directory not found: \(missing.standardizedFileURL.path)")
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+    }
+
+    @Test("A model path that is a regular file is refused by name")
+    func modelPathThatIsAFileIsRefused() async throws {
+        let root = try temporaryDirectory()
+        let file = root.appendingPathComponent("not-a-directory.gturbo")
+        try Data("{}".utf8).write(to: file)
+
+        do {
+            _ = try await GFTokenizer.load(forModelDirectory: file)
+            Issue.record("loading a regular file as a model directory should fail")
+        } catch let error as GFTokenizerError {
+            #expect(
+                error.description
+                    == "model directory not found: \(file.standardizedFileURL.path)")
+        } catch {
+            Issue.record("unexpected error type: \(error)")
+        }
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("gf-tokenizer-\(UUID().uuidString)", isDirectory: true)

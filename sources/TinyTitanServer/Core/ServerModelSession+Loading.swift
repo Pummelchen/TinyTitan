@@ -33,6 +33,7 @@ extension ServerModelSession {
         mtpMemoryMiB: Int = StreamingMTPMemoryPlan.defaultBudgetMiB,
         reusingContext: MetalContext? = nil
     ) async throws -> ServerModelSession {
+        _ = try GFTokenizer.requireModelDirectory(modelDirectory)
         let tokenizerFolder = GFTokenizer.tokenizerFolder(forModelDirectory: modelDirectory)
         guard let tokenizerFolder else {
             throw GFTokenizerError.missingToolTemplate

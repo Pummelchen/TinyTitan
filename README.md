@@ -268,11 +268,13 @@ it. Run one model process at a time.
 ## Troubleshooting
 
 The wiki [FAQ](https://github.com/Pummelchen/TinyTitan/wiki/FAQ) is the full
-list. The four that catch people first:
+list. The ones that catch people first:
 
-- **`error: installed tokenizer is missing chat_template.jinja`** — the
-  `--model` path does not name a complete install. Check the spelling against
-  `tools/install_models.sh`, which prints the installed directory names.
+- **`error: model directory not found: <path>`** — `--model` named a path that is
+  not a directory. Check the spelling against `tools/install_models.sh`, which
+  prints the installed directory names.
+- **`error: installed tokenizer is missing chat_template.jinja`** — the directory
+  exists but is not a complete install; reinstall that model.
 - **The model stopped loading after it moved.** The verified receipt is bound to
   the original absolute path; reissue it in place with
   `swift run -c release TinyTitanRepack --verify-install --input-gturbo <path>`.

@@ -24,6 +24,7 @@ extension GFTokenizer {
         reasoningEffort: ModelReasoningEffort? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) async throws -> GFTokenizer {
+        _ = try requireModelDirectory(modelDirectory)
         guard
             let folder = tokenizerFolder(
                 forModelDirectory: modelDirectory, environment: environment)
@@ -34,6 +35,26 @@ extension GFTokenizer {
             from: folder,
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort)
+    }
+
+    /// The model directory a load is about to read, checked before anything
+    /// else. A path that is not a directory is the caller's mistake, not a
+    /// damaged install, and it used to surface as "installed tokenizer is
+    /// missing chat_template.jinja; reinstall the model" -- which sends the
+    /// reader to reinstall a model that is simply not at that path (TT-036).
+    public static func requireModelDirectory(
+        _ url: URL,
+        fileManager: FileManager = .default
+    ) throws -> URL {
+        let standardized = url.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard
+            fileManager.fileExists(atPath: standardized.path, isDirectory: &isDirectory),
+            isDirectory.boolValue
+        else {
+            throw GFTokenizerError.modelDirectoryNotFound(standardized.path)
+        }
+        return standardized
     }
 
     public static func tokenizerFolder(

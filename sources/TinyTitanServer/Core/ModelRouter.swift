@@ -141,6 +141,7 @@ extension ModelRouter {
     /// Counts with the named model's tokenizer, rendered as its engine
     /// renders a prompt, without loading any weights.
     public static let standardCounter: Counter = { entry, choice, request in
+        _ = try GFTokenizer.requireModelDirectory(entry.path)
         switch entry.kind {
         case .gpu:
             guard let folder = GFTokenizer.tokenizerFolder(forModelDirectory: entry.path) else {

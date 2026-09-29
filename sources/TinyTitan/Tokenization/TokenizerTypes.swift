@@ -10,6 +10,10 @@ public enum GFTokenizerError: Error, CustomStringConvertible {
     case invalidChatTemplate(String)
     case missingToolTemplate
     case unsupportedForDialect(String)
+    /// The `--model`/catalogue path named a directory that is not there, or is
+    /// a regular file. Reported before any tokenizer work so the message names
+    /// the path instead of surfacing as a missing-template problem.
+    case modelDirectoryNotFound(String)
 
     public var description: String {
         switch self {
@@ -19,6 +23,8 @@ public enum GFTokenizerError: Error, CustomStringConvertible {
             return "installed tokenizer is missing chat_template.jinja; reinstall the model"
         case .unsupportedForDialect(let operation):
             return "operation is not supported for this tokenizer's chat dialect: \(operation)"
+        case .modelDirectoryNotFound(let path):
+            return "model directory not found: \(path)"
         }
     }
 }
