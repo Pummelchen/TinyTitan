@@ -204,7 +204,7 @@ other destructive remote action.
 
 # Part 2 — This repository
 
-## TinyTitan — Swift, semantic version, 29 release tags
+## TinyTitan — Swift, semantic version, 30 release tags
 
 *The reference implementation of this standard.* Runbook:
 `docs/release-process.md`. Mechanism: `tools/release.sh`.
@@ -214,8 +214,8 @@ other destructive remote action.
 This repository is a GitHub **fork** of `drumih/turbo-fieldfare`, and it is
 **deliberately left as a fork** — do not detach it from the fork network. Leaving
 is permanent, and the standalone repository would not retain its wiki, issues, pull
-requests, stars, watchers or child forks; the wiki alone holds 21 pages across 336
-commits, alongside 29 semantic-version tags (`v2` through `v5.12`; `git tag | grep
+requests, stars, watchers or child forks; the wiki alone holds 17 pages across 342
+commits, alongside 30 semantic-version tags (`v2` through `v5.13`; `git tag | grep
 -cE '^v[0-9]+\.[0-9]+'`).
 
 The fork relationship is inert. Nothing here is upstreamed: **no pull requests,
