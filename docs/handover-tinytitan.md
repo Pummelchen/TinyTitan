@@ -72,7 +72,7 @@ traps that one named still bite and are folded in below.
 | Release | **5.12 published** 2026-09-25 — `tinytitan-5.12-macos-arm64.tar.gz`, 15,386,068 bytes, sha256 `ec93f640…` with its `.sha256` beside it |
 | Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
 | Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
-| Audit | **28 findings, all closed**, archived in the wiki's [Tracker Archive](https://github.com/Pummelchen/TinyTitan/wiki/Tracker-Archive) (git history at `0690c61`); the eleven gates in `tools/lint.sh` are what the audit left behind |
+| Audit | **28 findings, all closed**; the eleven gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release rebuilt for 5.12; a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.12 section) |
 | DeepSeek Harness | pinned `0.1.6-alpha.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's |
@@ -89,7 +89,8 @@ traps that one named still bite and are folded in below.
   gates (SwiftLint `--strict` and swift-format joined it, plus eslint/prettier for
   the plugin packages with committed lockfiles), the tree is at 0 SwiftLint and 0
   swift-format findings after a 442-file sweep, and all 28 audit findings are closed
-  and archived in the wiki's Tracker Archive. Verification: eleven gates clean, **1,493 tests
+  (archived in the wiki's history at `6acaa8f`; the wiki page itself was removed on
+  2026-09-29). Verification: eleven gates clean, **1,493 tests
   in 223 suites**, 7 goldens byte-identical, a warning-free clean scratch build,
   and a 4B speed record whose first pass read prefill low (28.0 → 23.3 tok/s) and
   whose repeat read the baseline exactly with all thirteen metrics inside the gate
@@ -182,7 +183,9 @@ on other people:
   goes to a path DeepSeek does not serve. All four fleet nodes were failing every
   turn this way until 2026-09-18. The generated route (`tools/dsh_route.sh`) does
   not make this mistake; config typed by hand does. Full entry under *Traps that
-  have already cost time* in the wiki's Engineering Notes.
+  have already cost time* in the engineering notes, which now live in the wiki
+  repository's history (`git -C .qwen/wiki show 6acaa8f:Engineering-Notes.md`)
+  rather than in the user wiki.
 - **A version gate must be visible, not merely correct.** The harness collects a
   plugin's log records and prints them **only when the boot itself fails**, so a
   refusal reported through the host logger is invisible on a healthy boot. Both

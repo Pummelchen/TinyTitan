@@ -65,8 +65,10 @@ driver and the validation/reference target. An executable target keeps its
 top-level or `@main` entry in `Command/`; `plugins/dsh-tinytitan/` is the DeepSeek
 Harness bundle (route writer + quiet compaction). `docs/repository-layout.md` has
 the conventions, `tests/` mirrors `sources/` path for path and never loads a model,
-and user and engineering documentation lives in the
-[GitHub Wiki](https://github.com/Pummelchen/TinyTitan/wiki). Open work is tracked
+**user documentation lives in the
+[GitHub Wiki](https://github.com/Pummelchen/TinyTitan/wiki) and engineering
+documentation in this repository's `docs/`** — plans, measurements, design notes
+and the handover, which the wiki does not carry. Open work is tracked
 in **one** table; the standard, and the reusable prompt for other projects, is
 `docs/task-table-standard.md`.
 

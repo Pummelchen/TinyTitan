@@ -363,12 +363,18 @@ Per-version measurements and the method live on the wiki
 ## Documentation
 
 - [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)
+- [Installation and configuration](https://github.com/Pummelchen/TinyTitan/wiki/Installation-and-Configuration)
+  — the model catalogue, environment variables, the launcher and the tools
 - [Cookbook — one recipe per task](https://github.com/Pummelchen/TinyTitan/wiki/Cookbook)
+- [Local server and API](https://github.com/Pummelchen/TinyTitan/wiki/OpenAI-Compatible-Server)
+- [Runtime controls](https://github.com/Pummelchen/TinyTitan/wiki/Runtime-Controls) — every flag and default
 - [Features](https://github.com/Pummelchen/TinyTitan/wiki/Features)
-- [Local server and launchers](https://github.com/Pummelchen/TinyTitan/wiki/OpenAI-Compatible-Server)
-- [Runtime controls](https://github.com/Pummelchen/TinyTitan/wiki/Runtime-Controls)
+- [System design](https://github.com/Pummelchen/TinyTitan/wiki/System-Design)
 - [FAQ](https://github.com/Pummelchen/TinyTitan/wiki/FAQ)
+- [Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
+  [Benchmarking guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)
 - [Changelog](https://github.com/Pummelchen/TinyTitan/wiki/Changelog)
+- [Project tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker) — open work only
 - [Repository layout](docs/repository-layout.md) — where everything lives, and
   the naming and file-size conventions
 
