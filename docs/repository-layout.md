@@ -110,10 +110,12 @@ readability question, and the convention that came out of this pass is:
   only where the read improves; 95 members of `ServerHTTPHandler` and 4 members
   around `Model` were widened this pass, and nothing else changed.
 
-The file-size rule is 500 physical lines per source file, comments and blanks
-included. **No file under `sources/` is above it as of 2026-09-28** —
-`git ls-files 'sources/**/*.swift' | xargs wc -l` lists 353 files and the
-largest is under the limit. The last two came down that day:
+The file-size rule is 500 physical lines per **production** source file (under
+`sources/`), comments and blanks included; `tests/` is exempt and is split for
+readability, not to satisfy the number (see `AGENTS.md`). **No file under
+`sources/` is above it as of 2026-09-28** — `git ls-files 'sources/**/*.swift' |
+xargs wc -l` lists 353 files and the largest is under the limit. The last two
+came down that day:
 
 - `RealForwardRunner.swift` (1,449 → 496): the 603-line initializer became a
   convenience initializer that fills a staging `Builder` in two phases
