@@ -638,7 +638,18 @@ cmd_status() {
     warn "node: none found (ensure will fetch one privately)"
   fi
   if [[ -x "$(dsh_bin)" ]]; then
-    ok "dsh:  $(dsh_bin) (pinned $DSH_VERSION)"
+    # The marker, not the binary's presence, is what says which release is
+    # installed: a harness one release behind still has a working `dsh`, and
+    # reporting it as pinned is how a stale private install went unnoticed.
+    local installed=""
+    [[ -f "$VERSION_MARKER" ]] && installed="$(cat "$VERSION_MARKER")"
+    if [[ -z "$installed" ]]; then
+      warn "dsh:  $(dsh_bin) has no version marker — run: tools/dsh_local.sh ensure"
+    elif [[ "$installed" != "$DSH_VERSION" ]]; then
+      warn "dsh:  $(dsh_bin) is $installed, not the pinned $DSH_VERSION — run: tools/dsh_local.sh ensure"
+    else
+      ok "dsh:  $(dsh_bin) ($DSH_VERSION)"
+    fi
   else
     warn "dsh:  not installed — run: tools/dsh_local.sh ensure"
   fi
@@ -657,9 +668,16 @@ cmd_status() {
   else
     warn "plugin: not installed"
   fi
+  # 0.2.0 imports a legacy settings.yaml into the active profile patch at boot
+  # and renames it `.imported`, so the route is in one of two places now: the
+  # file on a harness that has not booted since, the patch after one that has.
   if [[ -f "$DSH_HOME_DIR/settings.yaml" ]] \
      && grep -q '^llm-pi-ai:' "$DSH_HOME_DIR/settings.yaml"; then
     ok "route: written"
+  elif [[ -f "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" ]] \
+     && grep -q 'llm-pi-ai' "$DSH_HOME_DIR/profiles/web/cordis.patch.yml" \
+     && grep -q 'tinytitan:' "$DSH_HOME_DIR/profiles/web/cordis.patch.yml"; then
+    ok "route: written (in the profile patch)"
   else
     warn "route: not written"
   fi

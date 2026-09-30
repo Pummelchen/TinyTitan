@@ -145,6 +145,82 @@ class PrivateHarnessIsolationTests(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
 
+class PrivateHarnessStatusTests(unittest.TestCase):
+    """`status` reports what is installed, not what is pinned.
+
+    The check used to be "is there a `dsh` binary", so a private harness a
+    release behind read as `✓ dsh: … (pinned <new>)` — which is how the 0.2.0-rc.2
+    move left this Mac's private copy on 0.1.6-alpha.2 unnoticed (2026-09-30).
+    0.2.0 also moves the route out of `settings.yaml` on first boot, so the
+    route check has to accept the profile patch as well.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.pinned = re.search(
+            r'^DSH_VERSION="\$\{TINYTITAN_DSH_VERSION:-([^}]+)\}"', DSH_LOCAL.read_text(), re.M
+        ).group(1)
+
+    def private_root(self, version: str | None, *, patch_route: bool = False) -> pathlib.Path:
+        home = pathlib.Path(tempfile.mkdtemp(prefix="dsh-status-home-"))
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        root = home / ".tinytitan" / "dsh"
+        binary = root / "npm-prefix" / "node_modules" / ".bin" / "dsh"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        if version is not None:
+            (root / ".dsh-version").write_text(version)
+        (root / "home" / "profiles" / "web").mkdir(parents=True)
+        if patch_route:
+            (root / "home" / "profiles" / "web" / "cordis.patch.yml").write_text(
+                "- id: llm-pi-ai\n  config:\n    providers:\n      tinytitan:\n        displayName: TinyTitan\n"
+            )
+        return home, root
+
+    def status(self, home: pathlib.Path, root: pathlib.Path) -> str:
+        env = dict(os.environ, HOME=str(home), TINYTITAN_DSH_ROOT=str(root))
+        result = subprocess.run(
+            ["bash", str(DSH_LOCAL), "status"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr[-400:])
+        # `warn` deliberately writes to stderr (it is the unmissable sink), so a
+        # status line can be in either stream.
+        return result.stdout + result.stderr
+
+    def test_a_stale_private_harness_is_reported_as_stale(self) -> None:
+        home, root = self.private_root("0.1.6-alpha.2")
+        output = self.status(home, root)
+        self.assertIn("not the pinned", output)
+        self.assertIn("0.1.6-alpha.2", output)
+        self.assertIn("ensure", output)
+
+    def test_the_pinned_private_harness_reports_the_release(self) -> None:
+        home, root = self.private_root(self.pinned)
+        output = self.status(home, root)
+        self.assertNotIn("not the pinned", output)
+        self.assertIn(f"({self.pinned})", output)
+
+    def test_a_missing_version_marker_is_not_taken_for_pinned(self) -> None:
+        home, root = self.private_root(None)
+        output = self.status(home, root)
+        self.assertIn("no version marker", output)
+
+    def test_a_route_in_the_profile_patch_counts_as_written(self) -> None:
+        home, root = self.private_root(self.pinned, patch_route=True)
+        output = self.status(home, root)
+        self.assertIn("route: written", output)
+
+    def test_no_route_anywhere_is_reported_as_missing(self) -> None:
+        home, root = self.private_root(self.pinned)
+        output = self.status(home, root)
+        self.assertIn("route: not written", output)
+
+
 class ModelsDirectoryTests(unittest.TestCase):
     """The models directory the harness is handed follows the layout.
 
