@@ -468,7 +468,7 @@ export function findModelsDir({
  * @returns `{status, detail, …}` with status `written-self-contained`, `missing`
  *   or `failed`.
  */
-export function generateRoute({
+export function collectRoute({
   port,
   provider,
   context,
@@ -477,15 +477,11 @@ export function generateRoute({
   repoRoot,
   serverBinary,
   modelsDir,
-  dshHome,
-  settingsPath,
   env = process.env,
   run = execFileSync,
   log = () => {},
   isExecutable = defaultIsExecutable,
   isDirectory = defaultIsDirectory,
-  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
-  backup = true,
 } = {}) {
   const directory = findModelsDir({ explicit: modelsDir, env, repoRoot, isDirectory });
   if (directory === null) {
@@ -542,32 +538,58 @@ export function generateRoute({
     log(`dsh-tinytitan: ${detail}; leaving the llm-pi-ai route as it is`);
     return { status: "failed", detail, serverBinary: binary, modelsDir: directory };
   }
+  const block = buildBlock(rows, { port, provider, context, maxTokens, reasoning });
+  return { status: null, block, rows, source, serverBinary: binary, modelsDir: directory };
+}
+
+/**
+ * Refresh the route **file** with the built-in generator.
+ *
+ * The catalogue/self-contained path: a settings file the harness reads. Kept
+ * for older harnesses and installs with no running settings service; DSH 0.2.0
+ * uses {@link applyRouteThroughSettings} instead, because it removed
+ * `settings.yaml`.
+ *
+ * @param options - {@link collectRoute} options plus `settingsPath`/`dshHome`,
+ *   and injectable `stamp`/`backup` for tests.
+ * @returns `{status, detail, …}` with status `written-self-contained`, `missing`
+ *   or `failed`.
+ */
+export function generateRoute({
+  settingsPath,
+  dshHome,
+  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
+  backup = true,
+  ...options
+} = {}) {
+  const collected = collectRoute(options);
+  if (collected.status) return collected;
+  const { block, rows, source, serverBinary, modelsDir } = collected;
 
   const path = settingsPath ?? join(String(dshHome ?? ""), "settings.yaml");
   if (!existsSync(path)) {
     const detail = `no DSH settings file at ${path}`;
-    log(`dsh-tinytitan: ${detail}; leaving the llm-pi-ai route as it is`);
+    options.log?.(`dsh-tinytitan: ${detail}; leaving the llm-pi-ai route as it is`);
     return {
       status: "missing",
       detail,
-      serverBinary: binary,
-      modelsDir: directory,
+      serverBinary,
+      modelsDir,
       settingsPath: path,
     };
   }
   try {
-    const block = buildBlock(rows, { port, provider, context, maxTokens, reasoning });
     const written = writeRouteSettings({ settingsPath: path, block, stamp, backup });
     const detail = written.changed ? "written" : "already current";
-    log(
+    options.log?.(
       `dsh-tinytitan: route refreshed with the built-in generator ` +
         `(${rows.length} model(s) from the ${source}, ${detail})`,
     );
     return {
       status: "written-self-contained",
       detail,
-      serverBinary: binary,
-      modelsDir: directory,
+      serverBinary,
+      modelsDir,
       settingsPath: path,
       models: rows.length,
       source,
@@ -577,13 +599,49 @@ export function generateRoute({
     const detail = String(error?.message ?? error)
       .trim()
       .split("\n")[0];
-    log(`dsh-tinytitan: route refresh failed: ${detail}`);
-    return {
-      status: "failed",
-      detail,
-      serverBinary: binary,
-      modelsDir: directory,
-      settingsPath: path,
-    };
+    options.log?.(`dsh-tinytitan: route refresh failed: ${detail}`);
+    return { status: "failed", detail, serverBinary, modelsDir, settingsPath: path };
+  }
+}
+
+/**
+ * Refresh the route through the harness `settings` service.
+ *
+ * DSH 0.2.0 removed `settings.yaml`; the active configuration lives in the
+ * profile patch and is edited through the `settings` service. This runs the
+ * same discovery as {@link generateRoute}, parses the generated block, and
+ * merges it into the `llm-pi-ai` entry, so installing or removing a model
+ * reaches the picker without a settings file. `settings.update` deep-merges
+ * objects but replaces arrays, so a removed model's entry does not linger.
+ *
+ * @param options - {@link collectRoute} options plus `settings` (the service).
+ * @returns `{status, …}`; `applied`, or a discovery/`failed` result.
+ */
+export async function applyRouteThroughSettings({ settings, ...options } = {}) {
+  const collected = collectRoute(options);
+  if (collected.status) return collected;
+  const { block, rows, source } = collected;
+  try {
+    if (!settings || typeof settings.update !== "function") {
+      throw new Error("no settings service");
+    }
+    const [{ default: yaml }] = await Promise.all([import("js-yaml")]);
+    const parsed = yaml.load(block);
+    const namespace = parsed !== null && typeof parsed === "object" ? Object.keys(parsed)[0] : null;
+    if (namespace === null || typeof parsed[namespace] !== "object") {
+      throw new Error("the generated block is not a single settings section");
+    }
+    await settings.update(namespace, parsed[namespace]);
+    options.log?.(
+      `dsh-tinytitan: route applied through the settings service ` +
+        `(${rows.length} model(s) from the ${source})`,
+    );
+    return { status: "applied", models: rows.length, source };
+  } catch (error) {
+    const detail = String(error?.message ?? error)
+      .trim()
+      .split("\n")[0];
+    options.log?.(`dsh-tinytitan: route refresh failed: ${detail}`);
+    return { status: "failed", detail };
   }
 }

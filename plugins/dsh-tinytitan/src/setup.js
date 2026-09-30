@@ -22,11 +22,23 @@ import { dirname, join } from "node:path";
 /** The backend module a preset row names. */
 export const COMPACTION_BACKEND = "dsh-tinytitan/backend";
 
-/** Where the shipped `standard` preset's composition lives. */
+/**
+ * Where the shipped `standard` preset's composition lives, or `null`.
+ *
+ * DSH 0.2.0 removed `@deepseek-ai/dsh-agent-presets` (and the harness-home
+ * `agent.cordis.yml` presets it shipped); the live composition is a declared
+ * preset row read by {@link module:dsh-tinytitan/preset}. This legacy resolver
+ * therefore answers `null` on 0.2.0 instead of throwing, so a caller that still
+ * reaches it degrades quietly.
+ */
 export function standardPresetPath() {
   const require = createRequire(import.meta.url);
-  const manifest = require.resolve("@deepseek-ai/dsh-agent-presets/package.json");
-  return join(dirname(manifest), "presets", "standard", "agent.cordis.yml");
+  try {
+    const manifest = require.resolve("@deepseek-ai/dsh-agent-presets/package.json");
+    return join(dirname(manifest), "presets", "standard", "agent.cordis.yml");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -198,8 +210,10 @@ export function ensureCompactionPreset({
   stamp = new Date().toISOString().replace(/[:.]/g, "-"),
 }) {
   const result = { preset: null, generated: false, adopted: null, defaultSet: false };
-  if (!existsSync(standardPath)) {
-    log(`dsh-tinytitan: no standard preset at ${standardPath}; not writing a compaction preset`);
+  if (standardPath === null || standardPath === undefined || !existsSync(standardPath)) {
+    log(
+      `dsh-tinytitan: no standard preset file at ${String(standardPath)}; not writing a compaction preset`,
+    );
     return result;
   }
   const presetPath = join(dshHome, ".agent-presets", presetId, "agent.cordis.yml");

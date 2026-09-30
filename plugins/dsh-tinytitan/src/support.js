@@ -2,9 +2,11 @@
  * The one harness release this plugin supports, and how the running one is read.
  *
  * A harness upgrade is not cosmetic here. This plugin generates an agent preset
- * from the *shipped* `standard` preset, so the preset's row ids move under it —
- * 0.1.6-alpha.2 is the release that dropped the row naming a package which no
- * longer exists — and it mounts a compaction backend that subclasses
+ * from the *shipped* `standard` composition, so its row ids and the way presets
+ * are declared move under it — 0.2.0-rc.2 is the release that replaced the
+ * harness-home `agent.cordis.yml` presets (and `@deepseek-ai/dsh-agent-presets`)
+ * with `@deepseek-ai/dsh-agent-preset` rows registered through the
+ * `agentPresets` service — and it mounts a compaction backend that subclasses
  * `dsh-compaction-basic`, so that engine's internals move under it too.
  *
  * The supported range is therefore a single release. Older ones, later ones and
@@ -26,7 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 
 /** The one DeepSeek Harness release this plugin is written and tested against. */
-export const SUPPORTED_DSH_VERSION = "0.1.6-alpha.2";
+export const SUPPORTED_DSH_VERSION = "0.2.0-rc.2";
 
 /** The package whose version is the harness's. */
 const HARNESS = "@deepseek-ai/dsh";

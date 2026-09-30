@@ -31,7 +31,11 @@ import {
 const MANIFEST = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 /** The harness packages this plugin declares. */
-const DSH_PEERS = ["@deepseek-ai/dsh-compaction-basic", "@deepseek-ai/dsh-agent-presets"];
+const DSH_PEERS = [
+  "@deepseek-ai/dsh-agent-preset",
+  "@deepseek-ai/dsh-compaction-basic",
+  "@deepseek-ai/dsh-web-app",
+];
 
 /** A version we positively read as *not* the supported one. */
 const OTHER_VERSIONS = [

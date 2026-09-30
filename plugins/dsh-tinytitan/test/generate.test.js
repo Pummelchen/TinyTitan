@@ -15,6 +15,7 @@ import test from "node:test";
 
 import { registerRoute } from "../src/route.js";
 import {
+  applyRouteThroughSettings,
   applyRouteToSettings,
   findModelsDir,
   findServerBinary,
@@ -574,4 +575,43 @@ test("registerRoute falls back to the generator when the checkout tool is absent
   assert.equal(result.status, "written-self-contained");
   assert.ok(messages.some((message) => message.includes("using the built-in route generator")));
   assert.ok(readFileSync(join(dshHome, "settings.yaml"), "utf8").includes("llm-pi-ai:"));
+});
+
+test("applyRouteThroughSettings merges the route into the llm-pi-ai entry", async () => {
+  const updates = [];
+  const settings = {
+    update: async (ns, patch) => {
+      updates.push({ ns, patch });
+    },
+  };
+  const result = await applyRouteThroughSettings({
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: "/models",
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    run: () => JSON.stringify({ models: FAKE }),
+    settings,
+    log: () => {},
+  });
+  assert.equal(result.status, "applied");
+  assert.equal(result.models, 2);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].ns, "llm-pi-ai");
+  assert.equal(updates[0].patch.providers.tinytitan.models.length, 2);
+});
+
+test("applyRouteThroughSettings reports a missing settings service", async () => {
+  const messages = [];
+  const result = await applyRouteThroughSettings({
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: "/models",
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    run: () => JSON.stringify({ models: FAKE }),
+    log: (message) => messages.push(message),
+  });
+  assert.equal(result.status, "failed");
+  assert.ok(messages.some((message) => message.includes("no settings service")));
 });

@@ -28,12 +28,14 @@ Two jobs, both at boot, both idempotent:
 
 ## Supported harness version
 
-This bundle supports **exactly one DeepSeek Harness release: `0.1.6-alpha.2`** —
+This bundle supports **exactly one DeepSeek Harness release: `0.2.0-rc.2`** —
 not older, not newer, and not a build from `main`. Both jobs above are written
 against that release: the preset is generated from _its_ shipped `standard`
-preset, so the row ids move when the harness does, and the compaction backend
-subclasses that release's `dsh-compaction-basic`. It is also the release
-`tools/dsh_local.sh` installs.
+composition (the `preset-standard` row of
+`@deepseek-ai/dsh-web-app/presets/standard.patch.yml`, read through
+`@deepseek-ai/dsh-agent-preset`'s `agentPresets.register`), so the row ids move
+when the harness does, and the compaction backend subclasses that release's
+`dsh-compaction-basic`. It is also the release `tools/dsh_local.sh` installs.
 
 The pin lives in three places that cannot import each other — `package.json`'s
 `peerDependencies` (exact, no range), the launcher's `DSH_VERSION` default, and

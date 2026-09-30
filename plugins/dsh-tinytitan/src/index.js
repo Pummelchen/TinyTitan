@@ -25,9 +25,9 @@
  * @module dsh-tinytitan
  */
 import { resolveConfig } from "./config.js";
-import { findModelsDir } from "./generate.js";
+import { applyRouteThroughSettings, findModelsDir } from "./generate.js";
 import { registerRoute } from "./route.js";
-import { ensureCompactionPreset } from "./setup.js";
+import { registerTinytitanPreset } from "./preset.js";
 import { watchModels } from "./models-watch.js";
 import { dshVersion, supportDecision } from "./support.js";
 
@@ -45,8 +45,10 @@ export { registerRoute, routeScript } from "./route.js";
 export { DEFAULT_DEBOUNCE_MS, watchModels } from "./models-watch.js";
 export { scanModelsFolder } from "./catalog-scan.js";
 export {
+  applyRouteThroughSettings,
   applyRouteToSettings,
   catalogRows,
+  collectRoute,
   findModelsDir,
   findServerBinary,
   generateBlock,
@@ -54,13 +56,12 @@ export {
   writeRouteSettings,
 } from "./generate.js";
 export {
-  COMPACTION_BACKEND,
-  defaultPreset,
-  ensureCompactionPreset,
-  repointCompactionRow,
-  setDefaultPreset,
+  buildTinytitanPlugins,
+  CHAT_NOISE_ROWS,
+  registerTinytitanPreset,
+  standardPlugins,
   standardPresetPath,
-} from "./setup.js";
+} from "./preset.js";
 export {
   AUXILIARY_PURPOSES,
   auxiliaryThinkingOff,
@@ -125,8 +126,31 @@ export function apply(ctx, config = {}) {
   // A read-only home, a missing checkout or a failed write must not take the
   // profile down: the harness still works, only this convenience does not.
   if (resolved.registerRoute) {
+    // DSH 0.2.0 removed `settings.yaml`; the route lives in the profile patch
+    // and is written through the `settings` service. On that harness the
+    // service is always present, so prefer it and keep the file/shell path for
+    // a harness that has no such service.
+    const refresh = (scoped = ctx) => {
+      const settings = scoped?.get?.("settings");
+      try {
+        if (settings && typeof settings.update === "function") {
+          void applyRouteThroughSettings({ ...resolved, settings, log }).catch((error) => {
+            log(
+              `dsh-tinytitan: route refresh threw: ${error instanceof Error ? error.message : error}`,
+            );
+          });
+        } else {
+          registerRoute({ ...resolved, log });
+        }
+      } catch (error) {
+        log(
+          `dsh-tinytitan: route registration threw: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    };
     try {
-      registerRoute({ ...resolved, log });
+      if (typeof ctx?.inject === "function") ctx.inject(["settings"], refresh);
+      else refresh();
     } catch (error) {
       log(
         `dsh-tinytitan: route registration threw: ${error instanceof Error ? error.message : error}`,
@@ -134,11 +158,26 @@ export function apply(ctx, config = {}) {
     }
   }
   if (resolved.writeCompactionPreset) {
+    // The registry that owns the `agentPresets` service may activate after this
+    // row, so register through `ctx.inject` when the context offers it and fall
+    // back to a direct call otherwise. The preset is built from the shipped
+    // `standard` composition and registers under `resolved.presetId`.
+    const register = (scoped = ctx) => {
+      // `registerTinytitanPreset` never rejects: it reports a failure through
+      // `log`. The wrapper only guards the synchronous gap before its first
+      // await (a malformed config or a throwing `register` call).
+      void registerTinytitanPreset(scoped, { presetId: resolved.presetId, log }).catch((error) => {
+        log(
+          `dsh-tinytitan: preset registration threw: ${error instanceof Error ? error.message : error}`,
+        );
+      });
+    };
     try {
-      ensureCompactionPreset({ ...resolved, log });
+      if (typeof ctx?.inject === "function") ctx.inject(["agentPresets"], register);
+      else register();
     } catch (error) {
       log(
-        `dsh-tinytitan: compaction preset threw: ${error instanceof Error ? error.message : error}`,
+        `dsh-tinytitan: preset registration threw: ${error instanceof Error ? error.message : error}`,
       );
     }
   }

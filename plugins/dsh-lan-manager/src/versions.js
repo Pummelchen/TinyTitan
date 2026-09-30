@@ -143,7 +143,7 @@ export function pluginVersion({ moduleUrl } = {}) {
  * `test/support.test.js` asserts this against the launcher's pin in
  * `tools/dsh_local.sh`, so the two cannot drift apart.
  */
-export const SUPPORTED_DSH_VERSION = "0.1.6-alpha.2";
+export const SUPPORTED_DSH_VERSION = "0.2.0-rc.2";
 
 /**
  * Whether this plugin runs on the harness it was handed, and why not when it does not.
@@ -154,7 +154,7 @@ export const SUPPORTED_DSH_VERSION = "0.1.6-alpha.2";
  * when their constants diverge.
  *
  * A version read as different and a version that cannot be read are both a
- * refusal — failing closed is what keeps "supports `0.1.6-alpha.2`" a statement
+ * refusal — failing closed is what keeps "supports `0.2.0-rc.2`" a statement
  * about the product. A refusal is a **return, never a throw**: this plugin mounts
  * into somebody else's profile, so the harness must boot, every other plugin must
  * load, and removing this one must leave nothing to undo.

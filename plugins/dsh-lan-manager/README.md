@@ -124,7 +124,7 @@ routes from being reachable by anything the harness is later bound to expose.
 
 ## Supported harness version
 
-This plugin supports **exactly one DeepSeek Harness release: `0.1.6-alpha.2`** —
+This plugin supports **exactly one DeepSeek Harness release: `0.2.0-rc.2`** —
 not older, not newer, and not a build from `main`. It registers a route into the
 harness web server and drives the harness through host services, so a release it
 has not been verified against is not something to guess at. It is the same release
