@@ -178,12 +178,15 @@ export function resolveConfig(config = {}) {
     // hand, can turn it off.
     watchModels: config.watchModels !== false,
     watchDebounceMs: resolveDebounce(config.watchDebounceMs),
-    // Re-point the *current* default preset's stock compaction row at this
-    // backend. Off means "only the preset this plugin owns", which the person
-    // then has to select themselves.
-    adoptDefaultPreset: config.adoptDefaultPreset !== false,
-    // Set agent-presets.default only when the file has none: an explicit
-    // choice is never overwritten.
+    // Set the registry's `selectedDefault` only while the profile names none: an
+    // explicit choice is never overwritten. Off means "register the preset and
+    // let the person pick it on the Agent presets page".
+    //
+    // 0.1.6's `adoptDefaultPreset` (re-point the current default preset's stock
+    // compaction row) has no 0.2.0 equivalent: presets are declared rows now, and
+    // re-pointing a shipped one means freezing its whole plugin list in the
+    // profile patch — the drift the generated preset exists to avoid. The
+    // switch is gone rather than silently ignored.
     setDefaultWhenUnset: config.setDefaultWhenUnset !== false,
     log: typeof config.log === "function" ? config.log : null,
   };

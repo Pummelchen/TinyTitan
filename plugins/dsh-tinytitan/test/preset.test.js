@@ -15,6 +15,8 @@ import {
   buildTinytitanPlugins,
   CHAT_NOISE_ROWS,
   COMPACTION_BACKEND,
+  ensureDefaultPreset,
+  PRESET_SETTINGS_NS,
   standardPlugins,
 } from "../src/preset.js";
 
@@ -95,4 +97,83 @@ test("standardPlugins reads the preset-standard declaration", async (t) => {
   assert.ok(Array.isArray(plugins) && plugins.length > 0);
   assert.ok(plugins.some((row) => row.id === "compaction"));
   assert.match(readFileSync(STANDARD_PATCH, "utf8"), /preset-standard/);
+});
+
+/** A settings service stub that records what it was asked to write. */
+function settingsStub({ forms = [], failUpdate = null } = {}) {
+  const updates = [];
+  return {
+    updates,
+    describe: () => forms,
+    update: async (ns, patch) => {
+      if (failUpdate !== null) throw failUpdate;
+      updates.push([ns, patch]);
+    },
+  };
+}
+
+/** The `agent-preset-registry` descriptor with (or without) a user selection. */
+function registryForm(selectedDefault) {
+  return {
+    ns: PRESET_SETTINGS_NS,
+    user: selectedDefault === undefined ? {} : { selectedDefault },
+    value: { default: "standard", selectedDefault },
+  };
+}
+
+test("the preset becomes the default only while nothing is selected", async () => {
+  const settings = settingsStub({ forms: [registryForm(undefined)] });
+  const result = await ensureDefaultPreset({ settings, presetId: "tinytitan", log: () => {} });
+  assert.equal(result.status, "set");
+  assert.deepEqual(settings.updates, [[PRESET_SETTINGS_NS, { selectedDefault: "tinytitan" }]]);
+});
+
+test("an explicit selection is left exactly as it is", async () => {
+  const settings = settingsStub({ forms: [registryForm("ptc")] });
+  const result = await ensureDefaultPreset({ settings, presetId: "tinytitan", log: () => {} });
+  assert.equal(result.status, "kept");
+  assert.equal(result.selectedDefault, "ptc");
+  assert.equal(settings.updates.length, 0);
+});
+
+test("a form the service does not report is not treated as a choice", async () => {
+  const settings = settingsStub({ forms: [{ ns: "some-other-entry" }] });
+  const result = await ensureDefaultPreset({ settings, presetId: "tinytitan", log: () => {} });
+  assert.equal(result.status, "set");
+});
+
+test("a failing write is reported, never thrown", async () => {
+  const lines = [];
+  const settings = settingsStub({
+    forms: [registryForm(undefined)],
+    failUpdate: new Error("read-only profile"),
+  });
+  const result = await ensureDefaultPreset({
+    settings,
+    presetId: "tinytitan",
+    log: (message) => lines.push(message),
+  });
+  assert.equal(result.status, "failed");
+  assert.ok(lines.some((line) => line.includes("read-only profile")));
+});
+
+test("a read that throws leaves the selection alone instead of guessing", async () => {
+  const settings = {
+    describe: () => {
+      throw new Error("no document");
+    },
+    update: async () => {
+      throw new Error("must not be called");
+    },
+  };
+  const result = await ensureDefaultPreset({ settings, presetId: "tinytitan", log: () => {} });
+  assert.equal(result.status, "skipped");
+  assert.match(result.reason, /no document/);
+});
+
+test("no settings service means no write and no throw", async () => {
+  for (const settings of [undefined, null, {}]) {
+    const result = await ensureDefaultPreset({ settings, presetId: "tinytitan", log: () => {} });
+    assert.equal(result.status, "skipped");
+  }
 });

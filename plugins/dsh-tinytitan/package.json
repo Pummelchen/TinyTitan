@@ -8,7 +8,6 @@
   "exports": {
     ".": "./src/index.js",
     "./backend": "./src/backend.js",
-    "./setup": "./src/setup.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },

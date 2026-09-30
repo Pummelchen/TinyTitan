@@ -11,8 +11,10 @@ Two jobs, both at boot, both idempotent:
    installed models under `models/` into the `llm-pi-ai` route block — served
    ids, each template's thinking levels, and the three switches that are easy to
    get wrong by hand (`thinkingFormat: chat-template`, the keyless-route auth
-   header, the long stream idle timeout). The plugin runs it, so the harness's
-   model picker follows `models/` instead of a copy someone typed once.
+   header, the long stream idle timeout). The plugin applies that block through
+   the harness's own `settings` service, so the change lands in the active profile
+   patch and hot-reloads; the model picker follows `models/` instead of a copy
+   someone typed once.
    A plugin installed from a catalogue is a plain package beside no checkout, so
    there is no script to run: only then the same block is generated in-process
    from the server's own catalog (`generate.js`), and the log says so. Wherever
@@ -22,9 +24,12 @@ Two jobs, both at boot, both idempotent:
    titles are marked `purpose: "compaction"` / `"session-title"` and name no
    reasoning level, so the harness fills in the route's default. On a local
    thinking model that spends a summariser's own output cap on thinking and
-   costs tens of seconds on the title of every new session. The generated agent
-   preset points that row at `dsh-tinytitan/backend`, which forces thinking off for
-   those calls only — ordinary turns keep the route's level.
+   costs tens of seconds on the title of every new session. The plugin registers
+   an agent preset built from the harness's shipped `standard` composition with
+   that row pointed at `dsh-tinytitan/backend`, which forces thinking off for
+   those calls only — ordinary turns keep the route's level. While your profile
+   has selected no preset of its own, this one becomes the default; an explicit
+   choice on the Agent presets page is never overwritten.
 
 ## Supported harness version
 
@@ -62,20 +67,23 @@ working. Found by booting a throwaway harness, not by reading.
 dsh plugin --profile web add file:/path/to/TinyTitan/plugins/dsh-tinytitan
 ```
 
-Restart DSH (or start a new session) and the plugin logs what it did. Changes it
-makes, each with a timestamped backup beside the original:
+Restart DSH (or start a new session) and the plugin logs what it did. It writes
+through the harness's own services, so the changes are part of your profile
+configuration and hot-reload with it:
 
-| File                                               | Change                                                                                |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `~/.dsh/settings.yaml`                             | the `llm-pi-ai` route block, refreshed from the catalog                               |
-| `~/.dsh/.agent-presets/tinytitan/agent.cordis.yml` | generated from the shipped `standard` preset, with the compaction row on this backend |
-| `~/.dsh/settings.yaml`                             | `agent-presets.default: tinytitan` — **only** when the file names no default          |
-| the _current_ default preset                       | its stock `compaction-basic` row, re-pointed (never a preset that is not a user file) |
+| What                      | Change                                                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| the `llm-pi-ai` entry     | the route block, refreshed from the catalog                                                                           |
+| the agent-preset registry | a `tinytitan` preset, built from the harness's shipped `standard` composition with the compaction row on this backend |
+| the selected agent preset | set to `tinytitan` **only** while the profile names no selection of its own                                           |
 
-The last one is `adoptDefaultPreset`: if you already chose a preset, that row is
-adopted rather than your choice being overwritten. Set it to `false` to leave
-every file you own untouched — then the plugin only writes its own `tinytitan`
-preset, which you select on the Agent presets page.
+There is no settings file to edit and no preset file to copy: DSH 0.2.0 removed
+both, and the plugin uses the replacements. If you would rather select the preset
+yourself, set `setDefaultWhenUnset: false` — then the plugin registers `tinytitan`
+and leaves your choice alone.
+
+If you remove the plugin, set another preset on the Agent presets page first: the
+selection it made is a normal setting, and nothing is left behind to clean it up.
 
 A `file:` install is a copy, not a link: after editing this package, re-install
 it (`dsh plugin --profile web remove dsh-tinytitan` then `add` again) or DSH keeps
@@ -93,24 +101,31 @@ fallbacks.
 | `port`                  | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
 | `provider`              | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
 | `reasoning`             | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
-| `presetId`              | `tinytitan`                                                             | the agent preset this plugin generates                                                                                                                                                                                                                    |
+| `presetId`              | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
 | `registerRoute`         | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
 | `watchModels`           | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
 | `watchDebounceMs`       | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
 | `selfContained`         | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
 | `serverBinary`          | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
 | `modelsDir`             | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
-| `writeCompactionPreset` | `true`                                                                  | generate the preset / adopt the default's row                                                                                                                                                                                                             |
-| `adoptDefaultPreset`    | `true`                                                                  | re-point the current default preset's stock row                                                                                                                                                                                                           |
-| `setDefaultWhenUnset`   | `true`                                                                  | set `agent-presets.default` only when absent                                                                                                                                                                                                              |
+| `writeCompactionPreset` | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
+| `setDefaultWhenUnset`   | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
 | `repoRoot`              | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
-| `dshHome`               | `$DSH_HOME` or `~/.dsh`                                                 | settings and presets                                                                                                                                                                                                                                      |
+| `dshHome`               | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
 The built-in generator looks for the server at `serverBinary`, then
 `TINYTITAN_SERVER`, then `TinyTitanServer` on `PATH`, then the checkout's
 release build; it looks for models at `modelsDir`, then `TINYTITAN_MODELS_DIR`,
-then `<repoRoot>/models`. It refuses to write when the settings file does not
-exist, and it makes no backup when the refresh would not change a byte.
+then `<repoRoot>/models`. On a harness with no `settings` service it falls back
+to editing the home's `settings.yaml` — the 0.1.6 shape — and refuses to write
+when that file does not exist; through the service it makes no write at all when
+the refresh would not change a byte.
+
+0.1.6's `adoptDefaultPreset` (re-point the current default preset's stock
+compaction row) has no counterpart here and the field is gone: presets are
+declared rows now, so adopting a shipped one would mean freezing its whole plugin
+list in your patch — the drift the generated preset exists to avoid. Select the
+`tinytitan` preset instead; it is the default whenever you have chosen nothing.
 
 **With no server built, the folder is read directly.** The catalog normally comes
 from `TinyTitanServer --catalog`, which is the authority on what an install is.
@@ -145,12 +160,13 @@ falls back to the boot-time refresh with a log line.
 
 ```sh
 dsh plugin --profile web remove dsh-tinytitan
-rm -rf ~/.dsh/.agent-presets/tinytitan
 ```
 
-Then re-point the preset you keep at `@deepseek-ai/dsh-compaction-basic` (a
-`.bak-*` file beside it has the row as it was), and drop
-`agent-presets.default: tinytitan` from `~/.dsh/settings.yaml` if this plugin set it.
+Nothing is left on disk to clean up: the route and the preset are profile
+configuration, and removing the row stops both being refreshed. One thing to
+undo by hand — if this plugin selected the `tinytitan` preset for you, pick
+another preset on the Agent presets page before you remove it, because the
+selection outlives the plugin that made it.
 
 ## Test
 
@@ -158,15 +174,16 @@ Then re-point the preset you keep at `@deepseek-ai/dsh-compaction-basic` (a
 cd plugins/dsh-tinytitan && node --test test/
 ```
 
-Thirty-four tests, no harness packages required: the compaction seam is exercised
-against a stub base, the preset and settings surgery against temporary homes, and
-the route call against a stubbed runner. The built-in generator's block is
-compared byte-for-byte with `tools/dsh_route.sh --print` — on the real catalog
-when the checkout's server binary is built, and on a synthetic catalog (mixed
-backends, re-sorted thinking levels) whenever the shell tool is present; both
-comparisons skip with a clear message when the pieces are absent, so the suite
-stays runnable elsewhere. The `dsh-tinytitan/backend` import itself is resolved
-from the profile's own `node_modules` once installed.
+Seventy-nine tests, no harness packages required: the compaction seam is
+exercised against a stub base, the preset builder, the default-preset rule and
+the route preferences against stubs and temporary homes, and the route call
+against a stubbed runner. The built-in generator's block is compared
+byte-for-byte with `tools/dsh_route.sh --print` — on the real catalog when the
+checkout's server binary is built, and on a synthetic catalog (mixed backends,
+re-sorted thinking levels) whenever the shell tool is present; both comparisons
+skip with a clear message when the pieces are absent, so the suite stays
+runnable elsewhere. The `dsh-tinytitan/backend` import itself is resolved from
+the profile's own `node_modules` once installed.
 
 ## Licence
 

@@ -27,7 +27,7 @@
 import { resolveConfig } from "./config.js";
 import { applyRouteThroughSettings, findModelsDir } from "./generate.js";
 import { registerRoute } from "./route.js";
-import { registerTinytitanPreset } from "./preset.js";
+import { ensureDefaultPreset, registerTinytitanPreset } from "./preset.js";
 import { watchModels } from "./models-watch.js";
 import { dshVersion, supportDecision } from "./support.js";
 
@@ -58,6 +58,8 @@ export {
 export {
   buildTinytitanPlugins,
   CHAT_NOISE_ROWS,
+  ensureDefaultPreset,
+  PRESET_SETTINGS_NS,
   registerTinytitanPreset,
   standardPlugins,
   standardPresetPath,
@@ -76,10 +78,46 @@ export {
 } from "./support.js";
 
 /**
- * Run the plugin.
- * @param ctx - the harness context (used only for logging; nothing is injected).
- * @param config - the row config; see {@link resolveConfig}.
+ * The one route-refresh path, shared by boot and the `models/` watcher.
+ *
+ * DSH 0.2.0 removed `settings.yaml`; the route lives in the profile patch and is
+ * written through the `settings` service. On that harness the service is always
+ * present, so prefer it, and keep the file/shell path for a harness that has no
+ * such service. Boot and the watcher must take the *same* branch: a refresh that
+ * only worked at boot is how a model installed while the harness ran stopped
+ * reaching the picker — the legacy path dies on a home with no settings file.
+ *
+ * `apply` and `legacy` are injectable so a test can pin which branch is taken.
+ *
+ * @param options - `resolved` config, the context, a logger, and the two writers.
+ * @returns a zero-argument callback the watcher can call on every quiet period.
  */
+export function routeRefresher({
+  resolved,
+  ctx,
+  log = () => {},
+  apply = applyRouteThroughSettings,
+  legacy = registerRoute,
+} = {}) {
+  return (scoped = ctx) => {
+    const settings = scoped?.get?.("settings");
+    try {
+      if (settings && typeof settings.update === "function") {
+        void Promise.resolve(apply({ ...resolved, settings, log })).catch((error) => {
+          log(
+            `dsh-tinytitan: route refresh threw: ${error instanceof Error ? error.message : error}`,
+          );
+        });
+      } else {
+        legacy({ ...resolved, log });
+      }
+    } catch (error) {
+      log(
+        `dsh-tinytitan: route registration threw: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  };
+}
 /**
  * Report a refusal where an operator will actually see it.
  *
@@ -104,7 +142,22 @@ function refuse(ctx, config, message) {
   console.error(message);
 }
 
-export function apply(ctx, config = {}) {
+/**
+ * Run the plugin.
+ * @param ctx - the harness context; services are resolved through it.
+ * @param config - the row config; see {@link resolveConfig}.
+ * @param deps - injectable seams for tests: the `models/` watcher, the two route
+ *   writers, the preset registrar, and the environment the models directory is
+ *   resolved from. The harness passes none of them.
+ */
+export function apply(ctx, config = {}, deps = {}) {
+  const {
+    watch = watchModels,
+    applyRoute = applyRouteThroughSettings,
+    legacyRoute = registerRoute,
+    preset = registerTinytitanPreset,
+    env = process.env,
+  } = deps;
   // The gate runs first, and before `resolveConfig`, so a harness this plugin
   // does not support cannot reach a single write. A refusal is a return rather
   // than a throw: the harness must boot, every other plugin must load, and
@@ -123,34 +176,19 @@ export function apply(ctx, config = {}) {
           else console.log(message);
         };
   const resolved = resolveConfig(config);
+  const refreshRoute = routeRefresher({
+    resolved,
+    ctx,
+    log,
+    apply: applyRoute,
+    legacy: legacyRoute,
+  });
   // A read-only home, a missing checkout or a failed write must not take the
   // profile down: the harness still works, only this convenience does not.
   if (resolved.registerRoute) {
-    // DSH 0.2.0 removed `settings.yaml`; the route lives in the profile patch
-    // and is written through the `settings` service. On that harness the
-    // service is always present, so prefer it and keep the file/shell path for
-    // a harness that has no such service.
-    const refresh = (scoped = ctx) => {
-      const settings = scoped?.get?.("settings");
-      try {
-        if (settings && typeof settings.update === "function") {
-          void applyRouteThroughSettings({ ...resolved, settings, log }).catch((error) => {
-            log(
-              `dsh-tinytitan: route refresh threw: ${error instanceof Error ? error.message : error}`,
-            );
-          });
-        } else {
-          registerRoute({ ...resolved, log });
-        }
-      } catch (error) {
-        log(
-          `dsh-tinytitan: route registration threw: ${error instanceof Error ? error.message : error}`,
-        );
-      }
-    };
     try {
-      if (typeof ctx?.inject === "function") ctx.inject(["settings"], refresh);
-      else refresh();
+      if (typeof ctx?.inject === "function") ctx.inject(["settings"], refreshRoute);
+      else refreshRoute();
     } catch (error) {
       log(
         `dsh-tinytitan: route registration threw: ${error instanceof Error ? error.message : error}`,
@@ -166,11 +204,24 @@ export function apply(ctx, config = {}) {
       // `registerTinytitanPreset` never rejects: it reports a failure through
       // `log`. The wrapper only guards the synchronous gap before its first
       // await (a malformed config or a throwing `register` call).
-      void registerTinytitanPreset(scoped, { presetId: resolved.presetId, log }).catch((error) => {
-        log(
-          `dsh-tinytitan: preset registration threw: ${error instanceof Error ? error.message : error}`,
-        );
-      });
+      void preset(scoped, { presetId: resolved.presetId, log })
+        .then((registered) => {
+          // Only a preset that actually registered may become the default: a
+          // selection naming an id the registry does not know would break every
+          // new session, and this order is what makes that impossible.
+          if (registered === null || registered === undefined) return null;
+          if (!resolved.setDefaultWhenUnset) return null;
+          return ensureDefaultPreset({
+            settings: scoped?.get?.("settings"),
+            presetId: resolved.presetId,
+            log,
+          });
+        })
+        .catch((error) => {
+          log(
+            `dsh-tinytitan: preset registration threw: ${error instanceof Error ? error.message : error}`,
+          );
+        });
     };
     try {
       if (typeof ctx?.inject === "function") ctx.inject(["agentPresets"], register);
@@ -188,14 +239,16 @@ export function apply(ctx, config = {}) {
     try {
       const modelsDir = findModelsDir({
         explicit: resolved.modelsDir,
-        env: process.env,
+        env,
         repoRoot: resolved.repoRoot,
       });
-      const handle = watchModels({
+      const handle = watch({
         modelsDir,
         debounceMs: resolved.watchDebounceMs,
         log,
-        refresh: () => registerRoute({ ...resolved, log }),
+        // The same refresher boot used: on 0.2.0 that is the settings service,
+        // not the shell tool, which needs a settings file that no longer exists.
+        refresh: () => refreshRoute(ctx),
       });
       if (handle.watching && typeof ctx?.on === "function") {
         ctx.on("dispose", () => handle.close());

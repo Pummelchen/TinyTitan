@@ -1,9 +1,9 @@
 # Bundle patch: mounts this plugin's own row at the profile root, which is what
-# runs its apply() — the llm-pi-ai route is refreshed from the checkout's
-# tools/dsh_route.sh (or, with no checkout, from the built-in generator), and the
-# compaction preset is generated. No adapter is registered: the harness's own
-# llm-pi-ai adapter serves the models, so this row adds configuration, not a
-# protocol implementation.
+# runs its apply() — the llm-pi-ai route is refreshed through the harness's
+# `settings` service (or, with no checkout, from the built-in generator), and the
+# `tinytitan` agent preset is registered, with the compaction row on this
+# backend. No adapter is registered: the harness's own llm-pi-ai adapter serves
+# the models, so this row adds configuration, not a protocol implementation.
 #
 # Every field is optional; these are the defaults written out. `serverBinary`
 # and `modelsDir` are deliberately absent: they default to discovery plus
@@ -20,9 +20,12 @@
         provider: tinytitan
         registerRoute: true
         # Keep the route in step with models/ after boot, so an install or a
-        # deletion reaches the picker without restarting the harness.
+        # deletion reaches the picker without restarting the harness. The watcher
+        # refreshes through the same path boot used.
         watchModels: true
         selfContained: false
         writeCompactionPreset: true
-        adoptDefaultPreset: true
+        # Select the `tinytitan` preset only while the profile names no preset of
+        # its own; an explicit choice on the Agent presets page is never
+        # overwritten.
         setDefaultWhenUnset: true

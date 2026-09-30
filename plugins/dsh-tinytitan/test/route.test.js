@@ -140,7 +140,6 @@ test("config defaults suit a local server and can be overridden", () => {
     presetId: "tinytitan-thin",
     registerRoute: false,
     writeCompactionPreset: false,
-    adoptDefaultPreset: false,
     setDefaultWhenUnset: false,
     repoRoot: "/repo",
     dshHome: "/home",
@@ -150,7 +149,6 @@ test("config defaults suit a local server and can be overridden", () => {
   assert.equal(configured.presetId, "tinytitan-thin");
   assert.equal(configured.registerRoute, false);
   assert.equal(configured.writeCompactionPreset, false);
-  assert.equal(configured.adoptDefaultPreset, false);
   assert.equal(configured.setDefaultWhenUnset, false);
   // An explicit root is a hint: it is used when it holds the tool, and a stale
   // one falls through to the checkout this test suite lives in.

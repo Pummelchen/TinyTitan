@@ -16,6 +16,10 @@
  * shipped composition as the source of truth means the generated preset tracks
  * the upstream `standard` on every harness upgrade rather than drifting.
  *
+ * {@link ensureDefaultPreset} is the other half of the old plugin's job: a
+ * profile that has chosen no preset of its own starts on this one. An explicit
+ * choice is never overwritten.
+ *
  * @module dsh-tinytitan/preset
  */
 import { readFileSync } from "node:fs";
@@ -23,6 +27,9 @@ import { createRequire } from "node:module";
 
 /** The backend module a preset row names. */
 export const COMPACTION_BACKEND = "dsh-tinytitan/backend";
+
+/** The profile entry whose `selectedDefault` names the preset a new session uses. */
+export const PRESET_SETTINGS_NS = "agent-preset-registry";
 
 /**
  * The rows that make an agent preset expensive for a prompt box, and are not
@@ -169,4 +176,60 @@ export async function registerTinytitanPreset(
     );
     return null;
   }
+}
+
+/**
+ * Make this plugin's preset the one a new session starts on, while nobody has
+ * chosen one.
+ *
+ * 0.1.6 had no notion of a selected preset at the settings plane: the plugin
+ * wrote `agent-presets.default` into `settings.yaml`, and only when that file
+ * named no default, so an explicit choice was never overwritten. 0.2.0 moved the
+ * choice onto the `agent-preset-registry` row's volatile `selectedDefault`, which
+ * is the same field the Agent presets page writes, so the same rule is applied
+ * here: set it only when the profile carries no selection of its own.
+ *
+ * "No selection" is read through the settings service's own projection
+ * (`describe().user`) rather than by parsing the patch, so a value inherited
+ * from a bundle layer does not count as a choice. A read that fails leaves the
+ * selection alone — this runs inside somebody else's profile, and losing a
+ * person's choice is worse than not offering a default.
+ *
+ * @param options - `settings` (the harness service), the preset id, and a logger.
+ * @returns `{status}` — `set`, `kept`, `skipped` or `failed`.
+ */
+export async function ensureDefaultPreset({
+  settings,
+  presetId = "tinytitan",
+  log = () => {},
+} = {}) {
+  if (settings === undefined || settings === null || typeof settings.update !== "function") {
+    return { status: "skipped", reason: "no settings service" };
+  }
+  let chosen;
+  try {
+    const forms = typeof settings.describe === "function" ? settings.describe() : [];
+    const row = Array.isArray(forms) ? forms.find((form) => form?.ns === PRESET_SETTINGS_NS) : null;
+    chosen = row?.user?.selectedDefault;
+  } catch (error) {
+    return { status: "skipped", reason: describeError(error) };
+  }
+  if (typeof chosen === "string" && chosen !== "") {
+    return { status: "kept", selectedDefault: chosen };
+  }
+  try {
+    await settings.update(PRESET_SETTINGS_NS, { selectedDefault: presetId });
+  } catch (error) {
+    log(`dsh-tinytitan: could not make ${presetId} the default preset: ${describeError(error)}`);
+    return { status: "failed", reason: describeError(error) };
+  }
+  log(`dsh-tinytitan: ${presetId} is the default agent preset (nothing else was chosen)`);
+  return { status: "set", selectedDefault: presetId };
+}
+
+/** One line from an unknown throwable, for a log line. */
+function describeError(error) {
+  return String(error instanceof Error ? error.message : error)
+    .trim()
+    .split("\n")[0];
 }
