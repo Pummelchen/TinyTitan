@@ -606,11 +606,15 @@ responses were:
 | drop Engram entirely | 0 | **yes** — it is 196 B of the model's parameters |
 
 So Engram is **streamed at its published FP8**, on a new `.gturbo` band with the
-same design as the expert files: one blob per row, 16 KiB-aligned, prefetched.
-The access pattern is favourable in a way the experts' is not — the four
-preceding tokens of a decode step are already known, so the n-gram hash for the
-next position can be computed one step ahead and its rows prefetched, which is
-what the existing predictive-prefetch machinery is for.
+same design as the expert files: one blob per bucket — the 24 prime-sized buckets
+per layer, each ≈ 16.0 M rows and ≈ 4.2 GB — aligned to 16 KiB so a random row
+inside one is a single 16 KiB-granular read. The rows stay 264 bytes and are
+addressed individually; 16 KiB is the read granularity, **not** a per-row pad —
+padding each of the 768 M rows to 16 KiB would be 12.6 TB. The access pattern is
+favourable in a way the experts' is not — the four preceding tokens of a decode
+step are already known, so the n-gram hash for the next position can be computed
+one step ahead and its rows prefetched, which is what the existing
+predictive-prefetch machinery is for.
 
 Row size to budget with: 256 bytes of E4M3 plus 8 bytes of E8M0 per row = **264
 bytes**. Two layers × 8 heads × 3 n-gram sizes = **48 rows per token = 12.7 KB
@@ -677,6 +681,17 @@ owner before a byte is downloaded, alongside the disk table (which is now the
 same 510 GB for the source and ≈ 510 GB for the install — the conversion no
 longer shrinks anything, so peak space is ≈ 1.1 TB and the snapshot cannot be
 deleted early).
+
+**What the install costs on disk.** Preserving the quants means copying bytes, so
+the install is the checkpoint's own size: **≈ 510 GB**, of which 288.8 GB is
+routed experts and 202.8 GB is Engram — those two are 96% of it, and neither
+shrinks without re-quantizing. The `.gturbo` container adds ~0.8 GB of worst-case
+stride padding across 92,160 experts and a few megabytes of index, manifest and
+receipt. Peak space depends on how the conversion is fed: **≈ 521 GB** if it
+streams shard by shard the way `TinyTitanRepack` installs the Qwen checkpoints
+today (install plus the one ~10.6 GB shard in flight), or **≈ 1.02 TB** if a full
+local snapshot has to exist first, which is the case this section's table
+assumes.
 
 ### 6.6 What the catalog should say
 
