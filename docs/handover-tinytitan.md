@@ -40,7 +40,7 @@ traps that one named still bite and are folded in below.
 > ready banner, and is checked against the release tag by `tools/release.sh`.
 
 > **The replacement window is DeepSeek Harness, installed not built.**
-> `tools/dsh_local.sh` installs a **pinned** `@deepseek-ai/dsh` (`0.1.6-alpha.2`,
+> `tools/dsh_local.sh` installs a **pinned** `@deepseek-ai/dsh` (`0.2.0-rc.2`,
 > into `~/.tinytitan/dsh`, with our `plugins/dsh-tinytitan` bundle from this
 > checkout, and the launcher's `--web` starts the server and opens it in the
 > browser. Two things are load-bearing. **Isolation:** our copy uses its own
@@ -51,13 +51,15 @@ traps that one named still bite and are folded in below.
 > compatibility, which is exactly why the version is pinned and why nothing here
 > may start depending on a window existing. Two traps cost time and are recorded in
 > the script: a fresh `DSH_HOME` has no `settings.yaml`, so we create it before
-> `tools/dsh_route.sh --write` will touch it; and pnpm's npm-installed shim has no
-> shebang, which macOS refuses to `exec` (`spawnSync pnpm ENOEXEC`) — the private
-> shim execs `@pnpm/exe.darwin-arm64` instead. `tools/dsh_local.sh status` says what
-> is installed.
+> `tools/dsh_route.sh --write` will touch it — 0.2.0 then imports that file into the
+> profile patch at boot and renames it to `settings.yaml.imported`, so the plugin's
+> own refresh goes through the `settings` service instead; and pnpm's npm-installed
+> shim has no shebang, which macOS refuses to `exec` (`spawnSync pnpm ENOEXEC`) —
+> the private shim execs `@pnpm/exe.darwin-arm64` instead. `tools/dsh_local.sh
+> status` says what is installed.
 >
 > **Since 5.7 the pin is enforced rather than declared.** Both plugins support
-> exactly `0.1.6-alpha.2` — `dsh-tinytitan`'s peers are exact, not ranges — and
+> exactly `0.2.0-rc.2` — `dsh-tinytitan`'s peers are exact, not ranges — and
 > **refuse to run** on any other harness, including one whose version cannot be
 > read. A refusal never throws: it writes one line to stderr and returns, so DSH
 > boots, every other plugin loads, and removing ours leaves nothing to undo. stderr
@@ -77,7 +79,7 @@ traps that one named still bite and are folded in below.
 | Audit | **28 findings, all closed**; the eleven gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release rebuilt for 5.13; a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.13 section); user-facing only since 2026-09-29 |
-| DeepSeek Harness | pinned `0.1.6-alpha.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's |
+| DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
 | CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the 5.13 push is the run to watch (`gh run list`) |
 
 ## What has landed
