@@ -299,9 +299,10 @@ Note "SWA Bounded Replay" appears only in the card prose — **no code for it in
 ### 3.3 Engram — the decisive subsystem
 
 Two tables at **layers 1 and 14**, `engram.embed.weight` FP8 E4M3 with shapes
-`[384006168, 256]` and `[384016682, 256]` — **98.3 B rows, 196.6 B parameters,
-202.8 GB as stored**, versus a card claim of 196 B parameters. The two tables
-ship as shards 47 and 48 on their own, 101.5 GB each.
+`[384006168, 256]` and `[384016682, 256]` — **384 M rows each (768 M rows, 98.3 B
+values per table), 196.6 B parameters, 202.8 GB as stored**, versus a card claim
+of 196 B parameters. The two tables ship as shards 47 and 48 on their own,
+101.5 GB each.
 
 `engram_vocab_size` = 16,000,000 is *not* the row count; it is the starting
 point of a prime-bucket search. **Inferred** from `inference/engram.py`: per
@@ -593,8 +594,9 @@ The work, in order:
 Engram is the one place where "preserve" collides with arithmetic, and the
 resolution is worth stating plainly.
 
-The two tables are 98.3 B rows and **202.8 GB as published**. They cannot be
-resident beside a ≈ 22 GB core. The available responses were:
+The two tables are 768 M rows — 98.3 B values per table — and **202.8 GB as
+published**. They cannot be resident beside a ≈ 22 GB core. The available
+responses were:
 
 | Option | Size | Degrades? |
 | --- | ---: | --- |
@@ -626,29 +628,49 @@ Preserving the quants does not make the model fit — it makes the model
 | Component | Preserved size | Can it be resident? |
 | --- | ---: | --- |
 | core (attention, router, shared experts, hc, embed/head, MTP core) | ≈ 22 GB | yes on a 64 GB+ machine |
-| routed experts (40 × 384) | ≈ 290.5 GB | **no** — must stream |
+| routed experts (40 × 384) | ≈ 288.8 GB | **no** — must stream |
 | MTP/DSpark experts (3 × 128) | ≈ 7.3 GB | marginal |
 | Engram (streamed) | ≈ 202.8 GB | **no** — streamed by design, §6.4 |
 | **text-only total** | **≈ 510 GB** | the checkpoint's own size |
 
 The per-token expert traffic is the number that decides whether this is usable:
-6 of 384 experts × 40 layers = 240 expert activations per token, at ≈ 10.6 MB
-each (w1 + w2 + w3 + scales), is **≈ 2.55 GB of random reads per token**.
+6 of 384 experts × 40 layers = 240 expert activations per token. One expert is
+`w1` + `w2` + `w3` = 3 × 5120 × 2304 = 35.4 M parameters, which at FP4 E2M1 with
+the per-32 E8M0 scale is **18.8 MB** — and the same number falls out of §5's
+288.8 GB divided by 40 × 384 experts (18.80 MB), so the geometry and the
+checkpoint agree. That is **≈ 4.5 GB of random reads per token**.
 
 | Underlying read throughput | Decode cost per token |
 | ---: | ---: |
-| 100 MB/s | ≈ 25 s |
-| 1 GB/s | ≈ 2.6 s |
-| 3 GB/s (fast NVMe) | ≈ 0.85 s |
+| 100 MB/s | ≈ 45 s |
+| 1 GB/s | ≈ 4.5 s |
+| 3 GB/s (fast NVMe) | ≈ 1.5 s |
 | resident in RAM | bounded by compute, not I/O |
+
+The expert cache does not rescue this the way it rescues the 35B models. The
+cache is budgeted in `bytes per layer`, so the same 8 GiB that holds 64 of
+Qwen3.8's 2.64 MB experts holds about **11** of these 18.8 MB ones: 2.9% of a
+layer's 384 experts, against Qwen3.8's 12.5%. It is routing skew that turns
+Qwen3.8's 12.5% coverage into the 60–85% hit rate measured on this host, and the
+same skew applied to a 2.9% foothold still leaves the great majority of the 240
+activations missing. Working the expectation through —
+`240 × (1 − coverage)` misses per token at 18.8 MB each — puts a 24 GB Mac at
+**≈ 4.4 GB/token, ≈ 1.5 s, ≈ 0.7 tok/s** under uniform routing, and at
+≈ 3.8 GB / 1.3 s / 0.8 tok/s if routing skew lifts the hit rate from 2.9% to
+15%; the answer barely moves, because at this coverage almost everything misses
+either way. What a larger cache would buy is model-dependent — uniform routing
+still leaves three quarters of the activations missing at 64 GiB, while the skew
+that gives Qwen3.8 its measured 60–85% hit rate at 12.5% coverage would close
+much of that gap — so treat anything above ~1 tok/s as contingent on a ≥96 GB
+machine, not on this one.
 
 Today's expert cache is 10–12 GiB (`ModelProfile.table`, measured on 35B
 models) and the 162 GB Qwen3.8-Flash-Next install already streams on this host.
-Even a generous 64 GiB cache covers ≈ 22% of the expert bytes, so the steady
-state here is a miss on most of the 240 activations per token. **Preserving the
-quants makes this a streaming-throughput problem with a ~510 GB working set on a
-machine that cannot hold it**, and no amount of kernel work changes that — only
-storage does.
+Even a 64 GiB cache covers only ≈ 22–24% of the expert bytes, so on this machine
+the steady state is a miss on most of the 240 activations per token.
+**Preserving the quants makes this a streaming-throughput problem with a ~510 GB
+working set on a machine that cannot hold it**, and no amount of kernel work
+changes that — only storage does.
 
 This is the honest consequence of the decision, and it belongs in front of the
 owner before a byte is downloaded, alongside the disk table (which is now the
