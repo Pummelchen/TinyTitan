@@ -577,7 +577,20 @@ test("registerRoute falls back to the generator when the checkout tool is absent
   assert.ok(readFileSync(join(dshHome, "settings.yaml"), "utf8").includes("llm-pi-ai:"));
 });
 
-test("applyRouteThroughSettings merges the route into the llm-pi-ai entry", async () => {
+test("applyRouteThroughSettings merges the route into the llm-pi-ai entry", async (t) => {
+  // The writer parses the generated block with the harness's own `js-yaml`,
+  // which resolves inside a harness (and after `npm ci`) but not in the CI step
+  // that runs these suites before the toolchain is installed. Skip there rather
+  // than reporting a product failure for a missing test dependency.
+  try {
+    await import("js-yaml");
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      t.skip("js-yaml is not installed here; the harness's own copy resolves it");
+      return;
+    }
+    throw error;
+  }
   const updates = [];
   const settings = {
     update: async (ns, patch) => {
