@@ -94,13 +94,24 @@ export async function standardPlugins({ path = standardPresetPath() } = {}) {
  * backend. Every other row, including its `!!js` expressions, is returned
  * unchanged.
  *
+ * `headroomTokens` is written only when the caller supplies one. The engine's
+ * own default is 65536, and it is subtracted from the message budget before the
+ * `thresholdRatio` is applied: `threshold = min(window x ratio, window - maxTokens
+ * - headroomTokens)`. On a declared window of 262,144 with our 32,768-token cap
+ * that holds the trigger at ~62% of the window instead of the documented 80%,
+ * and on a window below ~98,000 the pressure budget goes negative, which the
+ * engine reports once and then never compacts at all. Leaving the field out
+ * keeps the harness's own policy; `compactionHeadroomTokens` lets an operator
+ * put the ratio back in charge (0) or pick their own guard.
+ *
  * @param options - `plugins` (the standard list, from {@link standardPlugins}),
- *   `maxTokens`, `backend`.
+ *   `maxTokens`, `headroomTokens`, `backend`.
  * @returns a new entry list.
  */
 export function buildTinytitanPlugins({
   plugins,
   maxTokens = 32768,
+  headroomTokens = null,
   backend = COMPACTION_BACKEND,
 } = {}) {
   if (!Array.isArray(plugins)) {
@@ -112,7 +123,9 @@ export function buildTinytitanPlugins({
       if (row === null || typeof row !== "object") return [row];
       if (drop.has(row.id)) return [];
       if (row.id === "compaction-basic") {
-        return [{ ...row, name: backend, config: { ...(row.config ?? {}), maxTokens } }];
+        const config = { ...(row.config ?? {}), maxTokens };
+        if (headroomTokens !== null) config.headroomTokens = headroomTokens;
+        return [{ ...row, name: backend, config }];
       }
       if (row.group === true && Array.isArray(row.config)) {
         return [{ ...row, config: walk(row.config) }];
@@ -134,7 +147,8 @@ export function buildTinytitanPlugins({
  * else's profile, so a bad preset must not take the boot down.
  *
  * @param ctx - the harness context; `ctx.agentPresets.register` is the sink.
- * @param options - preset identity, token budget, backend and logger.
+ * @param options - preset identity, token budget, compaction headroom, backend
+ *   and logger.
  * @returns the registration promise, or `null` when no registry is available.
  */
 export async function registerTinytitanPreset(
@@ -145,6 +159,7 @@ export async function registerTinytitanPreset(
     description = "The standard agent with compaction that does not think.",
     order = 10,
     maxTokens = 32768,
+    headroomTokens = null,
     backend = COMPACTION_BACKEND,
     plugins,
     log = () => {},
@@ -159,6 +174,7 @@ export async function registerTinytitanPreset(
     const built = buildTinytitanPlugins({
       plugins: plugins ?? (await standardPlugins()),
       maxTokens,
+      headroomTokens,
       backend,
     });
     const disposer = await registry.register({

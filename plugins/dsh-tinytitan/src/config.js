@@ -130,6 +130,27 @@ function resolveDebounce(value) {
 }
 
 /**
+ * The compaction engine's headroom, when the operator names one.
+ *
+ * `null` (the default) leaves the field out of the generated preset, so the
+ * harness's own default stands. A number is passed through: the engine subtracts
+ * it from the message budget before applying `thresholdRatio`, so 0 puts that
+ * ratio back in charge on a wide window and a small value keeps a guard on a
+ * narrow one — see `buildTinytitanPlugins` for the arithmetic and the trap this
+ * exists for.
+ */
+function resolveCompactionHeadroom(value) {
+  if (value === undefined || value === null) return null;
+  const tokens = Number(value);
+  if (!Number.isInteger(tokens) || tokens < 0) {
+    throw new Error(
+      `dsh-tinytitan: compactionHeadroomTokens must be a whole number of tokens, got ${value}`,
+    );
+  }
+  return tokens;
+}
+
+/**
  * Resolve the plugin config.
  * @param config - the raw row config.
  * @returns the resolved config, with every field a value.
@@ -188,6 +209,9 @@ export function resolveConfig(config = {}) {
     // profile patch — the drift the generated preset exists to avoid. The
     // switch is gone rather than silently ignored.
     setDefaultWhenUnset: config.setDefaultWhenUnset !== false,
+    // The generated preset's compaction row carries no headroom unless one is
+    // named here, so the harness's own default (65536) stands.
+    compactionHeadroomTokens: resolveCompactionHeadroom(config.compactionHeadroomTokens),
     log: typeof config.log === "function" ? config.log : null,
   };
 }

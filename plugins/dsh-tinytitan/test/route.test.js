@@ -132,6 +132,7 @@ test("config defaults suit a local server and can be overridden", () => {
   assert.equal(defaults.presetId, "tinytitan");
   assert.equal(defaults.registerRoute, true);
   assert.equal(defaults.writeCompactionPreset, true);
+  assert.equal(defaults.compactionHeadroomTokens, null, "the harness's headroom stands by default");
   assert.ok(defaults.dshHome.endsWith(".dsh"));
 
   const configured = resolveConfig({
@@ -141,6 +142,7 @@ test("config defaults suit a local server and can be overridden", () => {
     registerRoute: false,
     writeCompactionPreset: false,
     setDefaultWhenUnset: false,
+    compactionHeadroomTokens: 0,
     repoRoot: "/repo",
     dshHome: "/home",
   });
@@ -150,6 +152,7 @@ test("config defaults suit a local server and can be overridden", () => {
   assert.equal(configured.registerRoute, false);
   assert.equal(configured.writeCompactionPreset, false);
   assert.equal(configured.setDefaultWhenUnset, false);
+  assert.equal(configured.compactionHeadroomTokens, 0);
   // An explicit root is a hint: it is used when it holds the tool, and a stale
   // one falls through to the checkout this test suite lives in.
   assert.equal(configured.repoRoot, REPO_ROOT);
@@ -174,6 +177,8 @@ test("config refuses what it cannot use", () => {
   assert.throws(() => resolveConfig({ port: 0 }), /port must be a port number/);
   assert.throws(() => resolveConfig({ port: "http" }), /port must be a port number/);
   assert.throws(() => resolveConfig({ provider: "  " }), /provider must not be empty/);
+  assert.throws(() => resolveConfig({ compactionHeadroomTokens: -1 }), /whole number of tokens/);
+  assert.throws(() => resolveConfig({ compactionHeadroomTokens: 1.5 }), /whole number of tokens/);
   assert.throws(() => resolveConfig({ presetId: "" }), /presetId must not be empty/);
   assert.throws(() => resolveConfig({ reasoning: "" }), /reasoning must not be empty/);
 });

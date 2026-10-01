@@ -204,7 +204,11 @@ export function apply(ctx, config = {}, deps = {}) {
       // `registerTinytitanPreset` never rejects: it reports a failure through
       // `log`. The wrapper only guards the synchronous gap before its first
       // await (a malformed config or a throwing `register` call).
-      void preset(scoped, { presetId: resolved.presetId, log })
+      void preset(scoped, {
+        presetId: resolved.presetId,
+        headroomTokens: resolved.compactionHeadroomTokens,
+        log,
+      })
         .then((registered) => {
           // Only a preset that actually registered may become the default: a
           // selection naming an id the registry does not know would break every

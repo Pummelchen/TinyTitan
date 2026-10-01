@@ -173,6 +173,39 @@ test("the preset becomes the default after it registers", async () => {
   assert.ok(lines.some((line) => line.includes("default agent preset")));
 });
 
+test("the configured compaction headroom reaches the registrar", async () => {
+  const seen = [];
+  runApply({
+    services: { settings: { update: async () => {} } },
+    config: { compactionHeadroomTokens: 8192 },
+    deps: {
+      preset: async (_ctx, options) => {
+        seen.push(options);
+        return () => {};
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].presetId, "tinytitan");
+  assert.equal(seen[0].headroomTokens, 8192);
+});
+
+test("no configured headroom leaves the harness's own policy in place", async () => {
+  const seen = [];
+  runApply({
+    services: { settings: { update: async () => {} } },
+    deps: {
+      preset: async (_ctx, options) => {
+        seen.push(options);
+        return () => {};
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(seen[0].headroomTokens, null);
+});
+
 test("a preset that did not register never becomes the default", async () => {
   const bag = settings([{ ns: PRESET_SETTINGS_NS, user: {} }]);
   let asked = 0;

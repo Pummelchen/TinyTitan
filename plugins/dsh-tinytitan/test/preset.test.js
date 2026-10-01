@@ -17,6 +17,7 @@ import {
   COMPACTION_BACKEND,
   ensureDefaultPreset,
   PRESET_SETTINGS_NS,
+  registerTinytitanPreset,
   standardPlugins,
 } from "../src/preset.js";
 
@@ -62,6 +63,23 @@ test("the compaction backend row is repointed with the token budget", () => {
   const basic = compaction.config.find((row) => row.id === "compaction-basic");
   assert.equal(basic.name, COMPACTION_BACKEND);
   assert.equal(basic.config.maxTokens, 1234);
+  assert.equal(
+    "headroomTokens" in basic.config,
+    false,
+    "the harness's own headroom policy stands unless one is named",
+  );
+});
+
+test("a named compaction headroom reaches the row, 0 included", () => {
+  const built = buildTinytitanPlugins({ plugins: standardList(), headroomTokens: 0 });
+  const compaction = built.find((row) => row.id === "compaction");
+  const basic = compaction.config.find((row) => row.id === "compaction-basic");
+  assert.equal(basic.config.headroomTokens, 0, "0 must be written, not treated as unset");
+  assert.equal(
+    basic.config.maxTokens,
+    32768,
+    "maxTokens stays explicit: the engine derives it from headroom otherwise",
+  );
 });
 
 test("unrelated rows and their expression objects pass through unchanged", () => {
@@ -155,6 +173,57 @@ test("a failing write is reported, never thrown", async () => {
   });
   assert.equal(result.status, "failed");
   assert.ok(lines.some((line) => line.includes("read-only profile")));
+});
+
+test("registerTinytitanPreset hands the registry the built roster", async () => {
+  const registered = [];
+  const ctx = {
+    agentPresets: {
+      register: async (definition) => {
+        registered.push(definition);
+        return () => {};
+      },
+    },
+  };
+  const disposer = await registerTinytitanPreset(ctx, {
+    presetId: "tinytitan",
+    plugins: standardList(),
+    headroomTokens: 0,
+    log: () => {},
+  });
+  assert.equal(typeof disposer, "function");
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].id, "tinytitan");
+  assert.equal(registered[0].name, "TinyTitan");
+  const basic = registered[0].plugins
+    .find((row) => row.id === "compaction")
+    .config.find((row) => row.id === "compaction-basic");
+  assert.equal(basic.name, COMPACTION_BACKEND);
+  assert.equal(basic.config.maxTokens, 32768);
+  assert.equal(basic.config.headroomTokens, 0);
+});
+
+test("registerTinytitanPreset reports a missing registry and a throwing one", async () => {
+  const lines = [];
+  const missing = await registerTinytitanPreset(
+    {},
+    { plugins: standardList(), log: (message) => lines.push(message) },
+  );
+  assert.equal(missing, null);
+  assert.ok(lines.some((line) => line.includes("agentPresets service is unavailable")));
+
+  const failing = await registerTinytitanPreset(
+    {
+      agentPresets: {
+        register: async () => {
+          throw new Error("duplicate agent preset: tinytitan");
+        },
+      },
+    },
+    { plugins: standardList(), log: (message) => lines.push(message) },
+  );
+  assert.equal(failing, null, "a bad preset must not take the boot down");
+  assert.ok(lines.some((line) => line.includes("duplicate agent preset")));
 });
 
 test("a read that throws leaves the selection alone instead of guessing", async () => {

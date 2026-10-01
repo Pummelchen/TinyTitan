@@ -89,6 +89,22 @@ A `file:` install is a copy, not a link: after editing this package, re-install
 it (`dsh plugin --profile web remove dsh-tinytitan` then `add` again) or DSH keeps
 running the copy it made.
 
+## Upgrading from 0.1.6-alpha.2
+
+The preset keeps its id (`tinytitan`), so **sessions that were already on it keep
+working** — the id is what a session records, and only its declaration changed
+from a generated file to a registry entry. Three things are worth knowing:
+
+- On 0.2.0 the default preset is a registry field. The plugin points it at
+  `tinytitan` **only while nothing else is selected**. If you had picked another
+  preset, open the Agent presets page and pick **TinyTitan** to get the quiet
+  compaction back; a choice you make there is never overwritten.
+- `~/.dsh/.agent-presets/tinytitan/` (the 0.1.6 generated preset) is inert — 0.2.0
+  does not read that directory. Deleting it is optional cleanup.
+- `~/.dsh/settings.yaml.imported` is your old settings file, moved there by the
+  harness when it imported it into the profile patch. Keep it; it is the record of
+  what was migrated.
+
 ## Configure
 
 Every field is optional; these are the defaults the `cordis.patch.yml` row writes
@@ -96,22 +112,23 @@ out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_REPO` /
 `TINYTITAN_SERVER` / `TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment
 fallbacks.
 
-| Field                   | Default                                                                 | Meaning                                                                                                                                                                                                                                                   |
-| ----------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`                  | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
-| `provider`              | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
-| `reasoning`             | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
-| `presetId`              | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
-| `registerRoute`         | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
-| `watchModels`           | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
-| `watchDebounceMs`       | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
-| `selfContained`         | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
-| `serverBinary`          | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
-| `modelsDir`             | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
-| `writeCompactionPreset` | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
-| `setDefaultWhenUnset`   | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
-| `repoRoot`              | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
-| `dshHome`               | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
+| Field                      | Default                                                                 | Meaning                                                                                                                                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`                     | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
+| `provider`                 | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
+| `reasoning`                | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
+| `presetId`                 | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
+| `registerRoute`            | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
+| `watchModels`              | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
+| `watchDebounceMs`          | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
+| `selfContained`            | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
+| `serverBinary`             | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
+| `modelsDir`                | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
+| `writeCompactionPreset`    | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
+| `setDefaultWhenUnset`      | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
+| `compactionHeadroomTokens` | unset (the harness's `65536`)                                           | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
+| `repoRoot`                 | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
+| `dshHome`                  | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
 The built-in generator looks for the server at `serverBinary`, then
 `TINYTITAN_SERVER`, then `TinyTitanServer` on `PATH`, then the checkout's
@@ -126,6 +143,20 @@ compaction row) has no counterpart here and the field is gone: presets are
 declared rows now, so adopting a shipped one would mean freezing its whole plugin
 list in your patch — the drift the generated preset exists to avoid. Select the
 `tinytitan` preset instead; it is the default whenever you have chosen nothing.
+
+**The compaction trigger is why `compactionHeadroomTokens` exists.** The engine
+compacts at `min(window × thresholdRatio, window − maxTokens − headroomTokens)`.
+The harness's default headroom is 65,536 tokens, and the generated preset leaves
+that default alone, so on the route this project declares (262,144 window,
+32,768 cap) the trigger sits at ~62% of the window rather than the documented
+80%. That is a safe direction — less context, less KV on a local server — but on
+a _narrow_ declared window the arithmetic flips: below roughly `cap + 65,536`
+the pressure budget goes negative, the engine logs one warning and then **never
+compacts**, and the session eventually fails on the context wall. If you generate
+a route with `tools/dsh_route.sh --context <smaller>`, set the plugin's
+`compactionHeadroomTokens`, e.g. `0` to let the ratio govern again or the cap's
+quarter (`8192`) to keep a guard: both leave a positive budget at every window
+where `window > maxTokens`.
 
 **With no server built, the folder is read directly.** The catalog normally comes
 from `TinyTitanServer --catalog`, which is the authority on what an install is.
