@@ -237,11 +237,13 @@ repository.
   **every installed model with
   a golden target**, through `tools/golden-baseline.sh --check`; then a clean
   scratch build with the warning scan.
-- **Mandatory, and run by the runbook rather than by `tools/release.sh`**
-  (`docs/release-process.md`): `tools/internal-speeds.py --record --label vX.Y
-  --baseline …`. Any metric or duration past a 10% regression blocks the release
-  until fixed or explained in `### Verification`. The record is committed with
-  the release.
+- **Optional since 2026-10-01, and run by the runbook rather than by
+  `tools/release.sh`** (`docs/release-process.md`): the internal-speed record
+  (`tools/internal-speeds.py --record --label vX.Y --baseline …`) is a
+  diagnostic, not a gate. The owner removed it from the release path because
+  this workstation's timings swing past the 10% threshold whenever Chrome,
+  WindowServer or a game holds the GPU; a record taken on a quiet machine is
+  still committed as before.
 - **Only models already installed under `models/` are verified**, and `tools/release.sh`
   fingerprints the install set so a gate cannot install one to go green. Missing
   installs are reported *not checked* and must be named in the notes.

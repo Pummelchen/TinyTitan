@@ -164,13 +164,18 @@ pinned. Every `gh` call is pinned because in a fork `gh` defaults to the
 *parent* repository: `gh release list` would show another project's releases and
 `gh release create` fails with a misleading "tag has not been pushed".
 
-## 4b. Internal-speed benchmark (mandatory)
+## 4b. Internal-speed benchmark (optional, owner decision 2026-10-01)
 
-Every release records the engine's own speeds and compares them with the
-previous release's record. This is the step that catches a speed regression —
-a kernel that got slower, a bandwidth that dropped, prefill or decode that
-traded throughput away — before anyone experiences it. It is data collection,
-not a performance claim: do not put a ceiling in the notes.
+**Releases no longer gate on timing.** The owner removed the mandatory
+internal-speed step on 2026-10-01: a release is verified by the lint gates, the
+serial suite, every installed golden and the clean scratch build, and the timing
+record is a diagnostic anyone may take — not a blocker, and not a claim the notes
+have to carry. The reason is the machine rather than the metric: this
+workstation's numbers move by far more than the 10% threshold whenever Chrome,
+WindowServer or a game holds the GPU, which is why the 5.13 attempts had to be
+discarded twice before a quiet window could be found.
+
+The tooling stays, and a record is worth taking when the machine is quiet:
 
 ```bash
 # on the release machine, with the release build and the 4B install present
@@ -210,13 +215,14 @@ With no `--baseline`, the comparison picks the newest previous record for the
 model with no install is reported **not checked** — never fetched to fill a row.
 An ANE row with no sidecar is recorded not applicable, with the reason.
 
-**The gate:** the command exits non-zero when any bandwidth or tokens-per-second
-metric regressed by more than 10%, or when TTFT/decode/total seconds rose by
-more than 10% (`--threshold` to change it). A non-zero exit blocks the release
-until the regression is fixed or explained in `### Verification` in the notes
-with the metric, both values and the reason. A *changed* greedy response hash is
-reported as a note, not a failure — a deliberate numerics change moves it, and
-`### Verification` should say so.
+**When you take one:** the command exits non-zero when any bandwidth or
+tokens-per-second metric regressed by more than 10%, or when TTFT/decode/total
+seconds rose by more than 10% (`--threshold` to change it). Read a non-zero exit
+as a signal to re-measure on a quiet machine — a contended one moves these
+numbers further than the threshold — and only if it reproduces does it belong in
+`### Verification` with the metric, both values and the reason. A *changed*
+greedy response hash is reported as a note, not a failure — a deliberate
+numerics change moves it, and `### Verification` should say so.
 
 Commit the new `benchmark/internal-speeds/<label>.json` with the release. Do
 not overwrite an older record: the diff against it is the point, and the record
@@ -381,9 +387,10 @@ machine it was measured on, and leave previous releases' tables alone.
       `models/` holds exactly the installs you intend to verify
 - [ ] Dry run green: lint, the serial suite, **every installed golden**, a
       warning-free clean build
-- [ ] **Internal-speed benchmark recorded and compared** against the previous
-      release (`tools/internal-speeds.py --record --label vX.Y --baseline …`);
-      no metric past the 10% threshold, and the new record committed
+- [ ] *(Optional since 2026-10-01)* An internal-speed record, if one was taken on
+      a quiet machine (`tools/internal-speeds.py --record --label vX.Y
+      --baseline …`), committed with the release. A record that was not taken is
+      not a gap, and a contended machine is not a reason to hold the release
 - [ ] **No model was downloaded, converted, repacked or re-installed** to make a
       check run; the golden phase left `models/` byte-identical (`release.sh`
       enforces this)
