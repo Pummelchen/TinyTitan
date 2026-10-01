@@ -210,7 +210,7 @@ The project's bar, in this order:
    it never downloads the model to close the gap. Until the baseline is
    captured, a direct `--check <target>` fails closed with "no verified install"
    or "no baseline", which is the guard working.
-3. **The receipt**: `TinyTitanRepack --verify-install --input-gturbo <dir>` passes,
+3. **The receipt**: `TinyTitanRepack --verify-install --input-ssdai <dir>` passes,
    and the manifest's `sourceSnapshotHash` matches the snapshot that produced
    it.
 4. **The catalog is right**: `/v1/models` lists the id with the name from
@@ -243,7 +243,7 @@ re-download. Re-issue each in place:
 ```bash
 for d in models/*/; do
   [ -f "$d/verified-install.json" ] || continue
-  swift run -c release TinyTitanRepack --verify-install --input-gturbo "$d"
+  swift run -c release TinyTitanRepack --verify-install --input-ssdai "$d"
 done
 ```
 

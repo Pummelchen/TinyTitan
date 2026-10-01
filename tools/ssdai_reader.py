@@ -1,4 +1,4 @@
-"""Read tensors out of a .gturbo `model_weights.bin`.
+"""Read tensors out of a .ssdai `model_weights.bin`.
 
 Exists for parity work: to check the runtime's architecture against a
 reference implementation, the reference has to run on the *same* weights.
@@ -6,7 +6,7 @@ Loading them from the install rather than re-fetching the checkpoint keeps
 quantization out of the comparison, so a mismatch is a bug in the forward
 pass and not in the repack.
 
-Layout, from `TinyTitanFormat/GTurboResidentIndexV1.swift`:
+Layout, from `TinyTitanFormat/SSDAIResidentIndexV1.swift`:
   header   24 B  = indexSize, residentSize, entryCount (all u64 LE)
   entries  72 B each, then a UTF-8 string table, then the payload
   entry    = nameOffset u32, nameLen u16, dtype u8, reserved u8,
@@ -36,7 +36,7 @@ def _bf16_to_f32(raw: np.ndarray) -> np.ndarray:
     return wide.view(np.float32)
 
 
-class GTurboWeights:
+class SSDAIWeights:
     def __init__(self, directory):
         self.root = Path(directory)
         self.path = self.root / "model_weights.bin"

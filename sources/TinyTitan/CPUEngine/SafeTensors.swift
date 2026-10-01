@@ -2,7 +2,7 @@ import Foundation
 
 /// A safetensors file, memory-mapped.
 ///
-/// TinyTitan serves its own models from the GTurbo format, which is built for
+/// TinyTitan serves its own models from the SSDAI format, which is built for
 /// streaming experts off SSD. The side-engine's model is a different
 /// problem: two gigabytes that stay resident, produced by this project's own
 /// converter, and read start to finish for every token. Mapping the

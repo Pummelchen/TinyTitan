@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import TinyTitanFormat
 
-package final class GTurboModelDirectory {
+package final class SSDAIModelDirectory {
     package let rootURL: URL
     private let rootFD: Int32
 
@@ -20,7 +20,7 @@ package final class GTurboModelDirectory {
 
     package func openFile(_ relativePath: String) throws -> Int32 {
         do {
-            try GTurboPathValidator.validateRelativePath(
+            try SSDAIPathValidator.validateRelativePath(
                 relativePath,
                 field: "path.\(relativePath)")
         } catch {

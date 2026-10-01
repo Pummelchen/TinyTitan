@@ -6,7 +6,8 @@
 > `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.14 is cut and
 > published** (`v5.14` → `10e5d0f`; `tinytitan-5.14-macos-arm64.tar.gz`, 15,415,575
 > bytes, sha256 `cef1d4900965333de433aa85bbb7d40e83e28d22a2191d8486e630c83ab38cf9`,
-> 2026-10-01) and **`main` sits one commit past it** — this brief; the release notes
+> 2026-10-01) and **`main` is two commits past it** — the post-release brief and the
+> `.gturbo` → `.ssdai` rename (unreleased, described below); the release notes
 > are `docs/release-notes-v5.14.md`. 5.14 moves the browser chat window and both
 > `dsh-*` plugins to **DeepSeek Harness 0.2.0-rc.2** — the route is applied through
 > the harness's `settings` service, the agent preset is registered with its
@@ -86,6 +87,23 @@ traps that one named still bite and are folded in below.
 
 ## What has landed
 
+- **`.gturbo` → `.ssdai`** (unreleased, after 5.14) — the format's **name only**.
+  `manifest.json`'s magic is written as `"SSDAI"`, and reads accept the legacy
+  `"GTURBO"` for one release (`SSDAIFormatV1.isSupportedMagic`), so every install
+  built before the rename keeps loading untouched: verified with
+  `TinyTitanRepack --verify-install --input-ssdai models/qwen3.5_4B_4Bit`
+  ("Verified 7 files", legacy manifest) and by loading that install through the
+  CLI. Nothing rewrites an existing manifest — the receipt
+  (`verified-install.json`) binds the manifest's digest and the directory path,
+  so editing the magic would invalidate every receipt for a string. The Swift
+  vocabulary (`SSDAIFormatV1`, `SSDAIDirectoryAccess`, `SSDAIBinary`, …), the
+  `--input-ssdai` flag (`--input-gturbo` stays a deprecated alias),
+  `tools/ssdai_reader.py`, `tools/ssdai_diff_snapshot.py` and
+  `docs/ssdai-format.md` carry the new name; the directory suffix is a
+  convention the reader never checks. Dated records — release notes, the v4.x
+  plans, `plan-dense-gturbo-installs.md` — keep the old word on purpose, with
+  their links to the spec updated. Verification: eleven gates clean, 1,496 tests
+  in 224 suites, 45/45 local links, plugin suites green.
 - **5.14** (`10e5d0f`) — the browser window and both plugins on DeepSeek Harness
   **0.2.0-rc.2**. The `llm-pi-ai` route is applied through the harness's `settings`
   service (0.2.0 imports a legacy `settings.yaml` once and renames it
@@ -229,7 +247,7 @@ on other people:
   temporary `DSH_HOME`, not by reading — do that again for any boot-time claim.
 - **Renaming the checkout invalidates every install receipt and `.build`'s debug
   half.** Receipts bind absolute paths; re-issue with
-  `swift run -c release TinyTitanRepack --verify-install --input-gturbo <dir>`
+  `swift run -c release TinyTitanRepack --verify-install --input-ssdai <dir>`
   and never hand-edit one. The debug tree is compiled against absolute paths too
   — after the rename, 7,312 files named the old path and `swift test` died with
   `precompiled file …_Builtin_stdbool….pcm was compiled with module cache path

@@ -60,7 +60,7 @@ figures first recorded here, +0.096 and so on, were single tensors: layer
         --output .build/qwen35-2b-affine-8bit --work .build/qwen35-2b-shards
 
 `tools/install_models.sh qwen35-2b|qwen35-4b|qwen35-9b` runs exactly this
-and then imports the snapshot, so the result is a verified `.gturbo` install
+and then imports the snapshot, so the result is a verified `.ssdai` install
 rather than a bare snapshot the catalog cannot list.
 
 Disk while running: the shard being converted and the one downloading behind

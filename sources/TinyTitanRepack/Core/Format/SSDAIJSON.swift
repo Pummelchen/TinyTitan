@@ -3,9 +3,10 @@ import Foundation
 /// JSON encoders for `manifest.json` and `packed_experts/layout.json`. The
 /// files are small (kilobytes), so we use Foundation's `JSONSerialization`
 /// rather than streaming.
-enum GTurboJSON {
+enum SSDAIJSON {
 
-    static let magic = "GTURBO"
+    /// The magic written into every manifest this repacker produces.
+    static let magic = "SSDAI"
     static let versionMajor = 1
     static let versionMinor = 0
 
@@ -101,9 +102,9 @@ enum GTurboJSON {
         }
 
         let manifest: [String: Any] = [
-            "magic": GTurboJSON.magic,
-            "versionMajor": GTurboJSON.versionMajor,
-            "versionMinor": GTurboJSON.versionMinor,
+            "magic": SSDAIJSON.magic,
+            "versionMajor": SSDAIJSON.versionMajor,
+            "versionMinor": SSDAIJSON.versionMinor,
             "flags": [
                 "streamingPresent": plan.streamingPresent,
                 "turboQuantKV": plan.turboQuantKV,
@@ -134,7 +135,7 @@ enum GTurboJSON {
     /// bits while the slots say `attention: 4`. Both statements are true of
     /// different tensors, and only the per-tensor entries say which is which.
     ///
-    /// This is the bug that was shipped and then found by comparing `.gturbo`
+    /// This is the bug that was shipped and then found by comparing `.ssdai`
     /// logits against the snapshot's: a reader that trusts the slots unpacks
     /// those 8-bit tensors as 4-bit. The word count changes, the strides
     /// still divide evenly, every shape check passes, and the model answers
@@ -182,7 +183,7 @@ enum GTurboJSON {
         expertStride: UInt64
     ) throws -> Data {
         // Every layer that carries experts must share one stride. The manifest
-        // records a single value and `GTurboLayoutValidator` refuses a layout
+        // records a single value and `SSDAILayoutValidator` refuses a layout
         // whose layers disagree, so a plan like that cannot be written correctly
         // -- and the validator runs after the caller has already written the
         // packed payload, which for the 35B families is hundreds of gigabytes.
@@ -247,7 +248,7 @@ enum GTurboJSON {
             "expertStride": expertStride,
             "numLayers": arch.numLayers,
             // Same source as `expertStride`: the first layer that actually
-            // packs experts. GTurboPackedExpertsLayoutCodec.decode requires
+            // packs experts. SSDAIPackedExpertsLayoutCodec.decode requires
             // expertsPerLayer > 0 and consistent across all layers.
             "expertsPerLayer": plan.layers.first(where: { $0.expertsPerLayer > 0 })?.expertsPerLayer
                 ?? 0,
@@ -260,7 +261,7 @@ enum GTurboJSON {
 }
 
 extension RepackPlan {
-    /// The .gturbo layout always streams routed experts from per-layer files;
+    /// The .ssdai layout always streams routed experts from per-layer files;
     /// the remaining flags are fixed for the Qwen 3.6 baseline (no quantized
     /// KV, no ANE shared-expert fusion) and are computed here so the manifest
     /// mirrors the plan rather than a hardcoded dictionary.

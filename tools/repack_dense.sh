@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Repack the dense Qwen 3.5 models as .gturbo installs, and prove the result.
+# Repack the dense Qwen 3.5 models as .ssdai installs, and prove the result.
 #
 # The three (six, with 8-bit) small Qwen 3.5 models were the only installs in
-# this project that were affine safetensors snapshots rather than .gturbo
-# directories. They are .gturbo now, built from the converted snapshot, so the
+# this project that were affine safetensors snapshots rather than .ssdai
+# directories. They are .ssdai now, built from the converted snapshot, so the
 # whole pipeline is one shape: convert -> repack -> receipt -> verify-install.
 #
 # Usage:
@@ -21,11 +21,11 @@
 #      bound to that final path -- a receipt is path-bound, so the install has
 #      to be written where it will live, never moved into place afterwards;
 #   3. byte-diff the residents against the snapshot with
-#      tools/gturbo_diff_snapshot.py -- a repack is a byte copy, so this is an
+#      tools/ssdai_diff_snapshot.py -- a repack is a byte copy, so this is an
 #      exact comparison and not a tolerance;
 #   4. re-issue and check the receipt (TinyTitanRepack --verify-install);
 #   5. run the CPU equivalence gate, which loads both and requires identical
-#      logits (tests/TinyTitan/CPUEngine/DenseGTurboEquivalenceTests.swift).
+#      logits (tests/TinyTitan/CPUEngine/DenseSSDAIEquivalenceTests.swift).
 #
 # Step 5 is the one that matters. Steps 3 and 4 prove the bytes are right and
 # the receipt is right; only step 5 proves the reader interprets them right, and
@@ -90,7 +90,7 @@ for key in "${keys[@]+"${keys[@]}"}"; do
     # name.
     if [[ ! -d "$snapshot" ]]; then
       if [[ -f "$MODELS/$dir/manifest.json" ]]; then
-        echo "  $dir is already a .gturbo install and its snapshot is gone."
+        echo "  $dir is already a .ssdai install and its snapshot is gone."
         echo "  Rebuild it with tools/prepare_qwen35.py --size ${key} --bits $bits"
         echo "  --output $snapshot first, then re-run this; skipping."
         continue
@@ -106,10 +106,10 @@ for key in "${keys[@]+"${keys[@]}"}"; do
         --output "$MODELS/$dir"
 
     echo "  byte-diffing every resident tensor against the snapshot"
-    python3 tools/gturbo_diff_snapshot.py "$MODELS/$dir" "$snapshot"
+    python3 tools/ssdai_diff_snapshot.py "$MODELS/$dir" "$snapshot"
 
     echo "  re-issuing and checking the receipt"
-    "$BIN" --verify-install --input-gturbo "$MODELS/$dir"
+    "$BIN" --verify-install --input-ssdai "$MODELS/$dir"
 
     pairs+=("$snapshot:$MODELS/$dir")
   done
@@ -124,7 +124,7 @@ joined=$(IFS=,; echo "${pairs[*]+"${pairs[*]}"}")
 echo
 echo "logit equivalence gate over ${#pairs[@]} model(s)"
 TINYTITAN_DENSE_EQUIV=1 TINYTITAN_DENSE_EQUIV_PAIRS="$joined" \
-    swift test --no-parallel --filter DenseGTurboEquivalenceTests
+    swift test --no-parallel --filter DenseSSDAIEquivalenceTests
 
 echo
 echo "all checks passed. The snapshots are kept in .build/ so the equivalence"

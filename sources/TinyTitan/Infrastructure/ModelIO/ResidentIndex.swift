@@ -41,7 +41,7 @@ struct ResidentIndex: Sendable {
 }
 
 enum ResidentIndexReader {
-    static let defaultMaxBytes = GTurboFormatV1.residentIndexMaxBytes
+    static let defaultMaxBytes = SSDAIFormatV1.residentIndexMaxBytes
 
     /// `pread` the header + index region out of `model_weights.bin`. The
     /// tensor data region (starting at byte `header.indexSize`) is **not**
@@ -73,17 +73,17 @@ enum ResidentIndexReader {
         displayPath: String,
         maxBytes: UInt64 = defaultMaxBytes
     ) throws -> ResidentIndex {
-        let headerBytes = GTurboFormatV1.residentHeaderBytes
+        let headerBytes = SSDAIFormatV1.residentHeaderBytes
         var headerBuf = [UInt8](repeating: 0, count: headerBytes)
         try headerBuf.withUnsafeMutableBytes {
             try preadExactly(
                 fd: fd, into: $0, offset: 0,
                 field: "IndexHeader")
         }
-        let wireHeader: GTurboResidentIndexHeaderV1
+        let wireHeader: SSDAIResidentIndexHeaderV1
         do {
             wireHeader = try headerBuf.withUnsafeBytes {
-                try GTurboResidentIndexCodec.decodeHeader($0)
+                try SSDAIResidentIndexCodec.decodeHeader($0)
             }
         } catch {
             throw ModelError.indexCorrupt(detail: "\(error)")
@@ -136,10 +136,10 @@ enum ResidentIndexReader {
                 field: "index region")
         }
 
-        let wireEntries: [GTurboResidentIndexEntryV1]
+        let wireEntries: [SSDAIResidentIndexEntryV1]
         do {
             wireEntries = try indexBuf.withUnsafeBytes {
-                try GTurboResidentIndexCodec.decodeRegion($0, header: wireHeader)
+                try SSDAIResidentIndexCodec.decodeRegion($0, header: wireHeader)
             }
         } catch {
             throw ModelError.indexCorrupt(detail: "\(error)")

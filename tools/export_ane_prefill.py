@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the ANE prefill attention sidecar for a `.gturbo` model.
+"""Export the ANE prefill attention sidecar for a `.ssdai` model.
 
 Produces `<model>/ane_prefill/layer_<L>.mlpackage` for every full-attention
 layer: a multifunction Core ML program whose functions `h0, h4096, ...` share
@@ -148,7 +148,7 @@ def _attention_prefix(entries: dict[str, dict], layer: int) -> str:
             return name[: -len(suffix)] + ".layers."
     raise SystemExit(
         f"no tensor named *{suffix} in model_weights.bin; this is not a "
-        f"supported .gturbo attention layout"
+        f"supported .ssdai attention layout"
     )
 
 
@@ -693,7 +693,7 @@ def sidecar_directory(chunk: int) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="path to the installed .gturbo directory")
+    parser.add_argument("--model", required=True, help="path to the installed .ssdai directory")
     parser.add_argument(
         "--max-history",
         type=int,
@@ -724,7 +724,7 @@ def main() -> int:
     model_dir = pathlib.Path(args.model)
     weights_bin = model_dir / "model_weights.bin"
     if not weights_bin.exists():
-        raise SystemExit(f"not a .gturbo directory: {model_dir}")
+        raise SystemExit(f"not a .ssdai directory: {model_dir}")
     if args.max_history % args.chunk != 0:
         raise SystemExit(f"--max-history must be a multiple of --chunk ({args.chunk})")
     histories = list(range(0, args.max_history + 1, args.chunk))

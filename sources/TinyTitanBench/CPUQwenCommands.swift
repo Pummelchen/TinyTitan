@@ -19,7 +19,7 @@ extension TinyTitanBench {
     /// correctness for the numpy reference.
     ///
     /// The token ids come out of the model itself -- its `vocab.json` in a
-    /// snapshot, its tokenizer in a `.gturbo` install -- so this cannot drift
+    /// snapshot, its tokenizer in a `.ssdai` install -- so this cannot drift
     /// from what the reference does.
     static func runCPUQwen35(snapshot path: String, dump: URL? = nil) throws {
         let directory = URL(fileURLWithPath: path)
@@ -315,7 +315,7 @@ extension TinyTitanBench {
     /// GFTokenizer loads asynchronously and these commands are one-shot
     /// tools, so they wait rather than restructuring `main` around it.
     ///
-    /// The folder resolution is the shared one, so a shipped `.gturbo` install
+    /// The folder resolution is the shared one, so a shipped `.ssdai` install
     /// (tokenizer in a `tokenizer/` sidecar) and a flat HF snapshot
     /// (`tokenizer.json` at the top level) are both reached without a second
     /// copy of that rule living here.

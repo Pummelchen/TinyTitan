@@ -153,7 +153,7 @@ extension ModelRouter {
                 reasoningEffort: choice.effort)
             return try ServerModelSession.promptTokenCount(request, tokenizer: tokenizer)
         case .cpu:
-            // The folder, not the model directory: a `.gturbo` install keeps
+            // The folder, not the model directory: a `.ssdai` install keeps
             // `tokenizer.json` in a `tokenizer/` sidecar, so handing
             // `load(from:)` the model directory fails for every installed CPU
             // model (the GPU branch above resolves the same way).

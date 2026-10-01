@@ -5,7 +5,7 @@ import TinyTitanFormat
 @testable import TinyTitan
 @testable import TinyTitanRepackCore
 
-/// Synthetic Qwen 3.6 toy fixture: a tiny runnable `.gturbo/` directory with
+/// Synthetic Qwen 3.6 toy fixture: a tiny runnable `.ssdai/` directory with
 /// the qwen36 tensor-name contract (linear_attn.* on mask-2 layers,
 /// self_attn.* with gate-packed [query ; gate] q_proj on mask-1 layers,
 /// mlp.gate router, gated shared expert, untied lm_head, no auxiliary
@@ -18,7 +18,7 @@ enum QwenToySynthetic {
         precondition([4, 8].contains(weightBits))
         let toy = ArchConfig.qwenToy()
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-qwen-toy-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-qwen-toy-\(UUID().uuidString)")
         let exp = dir.appendingPathComponent("packed_experts")
         try FileManager.default.createDirectory(at: exp, withIntermediateDirectories: true)
 
@@ -200,8 +200,8 @@ enum QwenToySynthetic {
         // 2. Serialize the resident index + payload.
         let names = specs.map(\.name)
         let stringTable = Data(names.joined().utf8)
-        let headerBytes = GTurboBinary.indexHeaderBytes
-        let entryBytes = GTurboBinary.indexEntryBytes
+        let headerBytes = SSDAIBinary.indexHeaderBytes
+        let entryBytes = SSDAIBinary.indexEntryBytes
         let entriesBase = headerBytes
         let stringTableBase = entriesBase + names.count * entryBytes
         var nameAbsOffsets: [UInt32] = []
@@ -211,9 +211,9 @@ enum QwenToySynthetic {
             cursor += n.utf8.count
         }
         let indexBytes = UInt64(stringTableBase + stringTable.count)
-        // Align index to 16KB for the GTurbo v1 format validator.
+        // Align index to 16KB for the SSDAI v1 format validator.
         let alignedIndexBytes =
-            ((indexBytes + GTurboFormatV1.alignmentBytes - 1) & ~(GTurboFormatV1.alignmentBytes - 1))
+            ((indexBytes + SSDAIFormatV1.alignmentBytes - 1) & ~(SSDAIFormatV1.alignmentBytes - 1))
 
         var entries: [ResidentEntry] = []
         entries.reserveCapacity(specs.count)
@@ -252,14 +252,14 @@ enum QwenToySynthetic {
         var fileBuf = [UInt8](repeating: 0, count: totalBytes)
         try fileBuf.withUnsafeMutableBytes { raw in
             let base = try #require(raw.baseAddress)
-            GTurboBinary.writeIndexHeader(
+            SSDAIBinary.writeIndexHeader(
                 into: base,
                 indexSize: alignedIndexBytes,
                 residentSize: residentSize,
                 entryCount: UInt64(entries.count))
             for (i, e) in entries.enumerated() {
                 let dst = base.advanced(by: entriesBase + i * entryBytes)
-                GTurboBinary.writeIndexEntry(
+                SSDAIBinary.writeIndexEntry(
                     into: dst, entry: e,
                     nameOffset: nameAbsOffsets[i])
             }
@@ -440,7 +440,7 @@ enum QwenToySynthetic {
             "fullAttentionLayerMask": toy.fullAttentionLayerMask.map { Int($0) },
         ]
         let manifestRoot: [String: Any] = [
-            "magic": "GTURBO",
+            "magic": "SSDAI",
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": ["streamingPresent": true, "turboQuantKV": false, "aneSharedExpert": false],
@@ -477,7 +477,7 @@ enum QwenToySynthetic {
 
     // MARK: - Native MTP sidecar
 
-    /// Build the MTP sidecar toy: the companion `.gturbo/` directory for the
+    /// Build the MTP sidecar toy: the companion `.ssdai/` directory for the
     /// Qwen 3.6 native multi-token-prediction draft. Mirrors the REAL
     /// installed sidecar schema (see `Model.validateRuntimeSchema` for
     /// `.qwen36MTP`): one full-attention layer, gate-packed q_proj
@@ -493,7 +493,7 @@ enum QwenToySynthetic {
         precondition([4, 8].contains(weightBits))
         let toy = ArchConfig.qwenToyMTP()
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-qwen-mtp-toy-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-qwen-mtp-toy-\(UUID().uuidString)")
         let exp = dir.appendingPathComponent("packed_experts")
         try FileManager.default.createDirectory(at: exp, withIntermediateDirectories: true)
 
@@ -613,8 +613,8 @@ enum QwenToySynthetic {
         // 2. Serialize the resident index + payload (same layout as write()).
         let names = specs.map(\.name)
         let stringTable = Data(names.joined().utf8)
-        let headerBytes = GTurboBinary.indexHeaderBytes
-        let entryBytes = GTurboBinary.indexEntryBytes
+        let headerBytes = SSDAIBinary.indexHeaderBytes
+        let entryBytes = SSDAIBinary.indexEntryBytes
         let entriesBase = headerBytes
         let stringTableBase = entriesBase + names.count * entryBytes
         var nameAbsOffsets: [UInt32] = []
@@ -625,7 +625,7 @@ enum QwenToySynthetic {
         }
         let indexBytes = UInt64(stringTableBase + stringTable.count)
         let alignedIndexBytes =
-            ((indexBytes + GTurboFormatV1.alignmentBytes - 1) & ~(GTurboFormatV1.alignmentBytes - 1))
+            ((indexBytes + SSDAIFormatV1.alignmentBytes - 1) & ~(SSDAIFormatV1.alignmentBytes - 1))
 
         var entries: [ResidentEntry] = []
         entries.reserveCapacity(specs.count)
@@ -661,14 +661,14 @@ enum QwenToySynthetic {
         var fileBuf = [UInt8](repeating: 0, count: totalBytes)
         try fileBuf.withUnsafeMutableBytes { raw in
             let base = try #require(raw.baseAddress)
-            GTurboBinary.writeIndexHeader(
+            SSDAIBinary.writeIndexHeader(
                 into: base,
                 indexSize: alignedIndexBytes,
                 residentSize: residentSize,
                 entryCount: UInt64(entries.count))
             for (i, e) in entries.enumerated() {
                 let dst = base.advanced(by: entriesBase + i * entryBytes)
-                GTurboBinary.writeIndexEntry(
+                SSDAIBinary.writeIndexEntry(
                     into: dst, entry: e,
                     nameOffset: nameAbsOffsets[i])
             }
@@ -834,7 +834,7 @@ enum QwenToySynthetic {
             "fullAttentionLayerMask": toy.fullAttentionLayerMask.map { Int($0) },
         ]
         let manifestRoot: [String: Any] = [
-            "magic": "GTURBO",
+            "magic": "SSDAI",
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": ["streamingPresent": true, "turboQuantKV": false, "aneSharedExpert": false],

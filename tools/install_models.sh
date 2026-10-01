@@ -457,7 +457,7 @@ install_one() {
       # exists" is what this check means. Fall through and let the branch
       # repack it, which is the only way it becomes verifiable in place.
       if [[ "$source" == convert_qwen35 && ! -f "$MODELS/$dir/manifest.json" ]]; then
-        echo "$name is an affine snapshot; repacking it as .gturbo"
+        echo "$name is an affine snapshot; repacking it as .ssdai"
       else
         echo "$name is already installed at models/$dir"
         cleanup_staging "$name" keep
@@ -642,7 +642,7 @@ install_one() {
         #
         # Convert, then repack, then drop the staging directory. The snapshot
         # the converter writes is an intermediate, not the install: every
-        # model this project serves is a .gturbo directory with a manifest and
+        # model this project serves is a .ssdai directory with a manifest and
         # a path-bound receipt, and a snapshot has neither. Keeping the
         # intermediate would double the disk for a 9B and buy nothing, since
         # it is reproducible from the cached shards.
@@ -686,13 +686,13 @@ install_one() {
         rm -rf "${MODELS:?}/${dir:?}"
         "$BIN" --input-snapshot "$stage" --model-id "$model_id" \
             --output "$MODELS/$dir" || return 1
-        "$BIN" --verify-install --input-gturbo "$MODELS/$dir" || return 1
+        "$BIN" --verify-install --input-ssdai "$MODELS/$dir" || return 1
         # The staging snapshot is an intermediate and is reproducible from the
         # cached shards, so it does not outlive the install. Use
         # tools/repack_dense.sh instead if you want it kept for the
         # equivalence gate.
         rm -rf "$stage"
-        echo "installed $name -> models/$dir (.gturbo)"
+        echo "installed $name -> models/$dir (.ssdai)"
         ;;
       unsupported)
         # No catalogue row uses this today, and the message it used to carry was

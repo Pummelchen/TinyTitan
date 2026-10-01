@@ -12,7 +12,7 @@ import Testing
             shape: [1024, 64], absoluteOffset: 0, sizeBytes: 0)
     }
 
-    /// Build a minimal valid `model.gturbo/` directory in a temp dir and
+    /// Build a minimal valid `model.ssdai/` directory in a temp dir and
     /// return the URL. Uses the toy ArchConfig `qwenToy()`: 4 layers
     /// (alternating gated-DeltaNet linear and full attention), 8 experts,
     /// hidden 64, vocab 1024, untied lm_head. Resident contains the embedding,
@@ -23,7 +23,7 @@ import Testing
     static func writeToySynthetic() throws -> URL {
         let toy = ArchConfig.qwenToy()
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-toy-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-toy-\(UUID().uuidString)")
         let exp = dir.appendingPathComponent("packed_experts")
         try FileManager.default.createDirectory(at: exp, withIntermediateDirectories: true)
 
@@ -317,8 +317,8 @@ import Testing
 
         let names = specs.map(\.name)
         let stringTable = Data(names.joined().utf8)
-        let headerBytes = GTurboBinary.indexHeaderBytes
-        let entryBytes = GTurboBinary.indexEntryBytes
+        let headerBytes = SSDAIBinary.indexHeaderBytes
+        let entryBytes = SSDAIBinary.indexEntryBytes
         let entriesBase = headerBytes
         let stringTableBase = entriesBase + names.count * entryBytes
         var nameAbsOffsets: [UInt32] = []
@@ -328,7 +328,7 @@ import Testing
             cursor += n.utf8.count
         }
         let indexBytes = UInt64(stringTableBase + stringTable.count)
-        // Pad the index to 16 KB alignment (GTurbo v1 format requirement).
+        // Pad the index to 16 KB alignment (SSDAI v1 format requirement).
         let alignmentBytes: UInt64 = 16_384
         let alignedIndexBytes =
             ((indexBytes + alignmentBytes - 1) / alignmentBytes)
@@ -364,14 +364,14 @@ import Testing
         var fileBuf = [UInt8](repeating: 0, count: totalBytes)
         try fileBuf.withUnsafeMutableBytes { raw in
             let base = try #require(raw.baseAddress)
-            GTurboBinary.writeIndexHeader(
+            SSDAIBinary.writeIndexHeader(
                 into: base,
                 indexSize: alignedIndexBytes,
                 residentSize: residentSize,
                 entryCount: UInt64(entries.count))
             for (i, e) in entries.enumerated() {
                 let dst = base.advanced(by: entriesBase + i * entryBytes)
-                GTurboBinary.writeIndexEntry(
+                SSDAIBinary.writeIndexEntry(
                     into: dst, entry: e,
                     nameOffset: nameAbsOffsets[i])
             }
@@ -524,7 +524,7 @@ import Testing
             "routedExpert": quantSlotInt4,
         ]
         let manifestRoot: [String: Any] = [
-            "magic": "GTURBO",
+            "magic": "SSDAI",
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": ["streamingPresent": true, "turboQuantKV": false, "aneSharedExpert": false],

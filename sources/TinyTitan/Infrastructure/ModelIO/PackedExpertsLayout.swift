@@ -72,7 +72,7 @@ struct PackedExpertsLayout: Sendable {
 }
 
 enum PackedExpertsLayoutReader {
-    static let defaultMaxBytes: UInt64 = GTurboFormatV1.packedExpertsLayoutMaxBytes
+    static let defaultMaxBytes: UInt64 = SSDAIFormatV1.packedExpertsLayoutMaxBytes
 
     static func load(
         directoryURL: URL,
@@ -94,7 +94,7 @@ enum PackedExpertsLayoutReader {
         manifest: Manifest?,
         maxBytes: UInt64
     ) throws -> PackedExpertsLayout {
-        let directory = try GTurboModelDirectory(rootURL: directoryURL)
+        let directory = try SSDAIModelDirectory(rootURL: directoryURL)
         let data = try directory.readMetadata(
             "packed_experts/layout.json", maxBytes: maxBytes)
         return try decode(data: data, manifest: manifest)
@@ -104,11 +104,11 @@ enum PackedExpertsLayoutReader {
         data: Data,
         manifest: Manifest?
     ) throws -> PackedExpertsLayout {
-        let wire: GTurboPackedExpertsLayoutV1
+        let wire: SSDAIPackedExpertsLayoutV1
         do {
-            wire = try GTurboPackedExpertsLayoutCodec.decode(data)
+            wire = try SSDAIPackedExpertsLayoutCodec.decode(data)
             if let manifest {
-                try GTurboV1StructuralValidator.crossValidate(
+                try SSDAIV1StructuralValidator.crossValidate(
                     manifestNumLayers: manifest.numLayers,
                     manifestExpertsPerLayer: manifest.expertsPerLayer,
                     manifestExpertStride: manifest.expertStride,

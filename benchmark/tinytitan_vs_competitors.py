@@ -429,7 +429,7 @@ ENGINES: dict[str, tuple[Engine, object]] = {
             None,
             TINYTITAN_MODEL,
             "swift build -c release --product TinyTitanServer",
-            "tools/install_models.sh ornith15  (4-bit .gturbo install)",
+            "tools/install_models.sh ornith15  (4-bit .ssdai install)",
         ),
         run_tinytitan,
     ),

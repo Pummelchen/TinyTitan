@@ -23,7 +23,7 @@ const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const MODELS_DIR = join(REPO_ROOT, "models");
 const BINARY = join(REPO_ROOT, ".build", "release", "TinyTitanServer");
 
-/** A `.gturbo` install the way the repacker writes one, minus the weights. */
+/** A `.ssdai` install the way the repacker writes one, minus the weights. */
 function writeInstall(
   root,
   name,
@@ -34,7 +34,7 @@ function writeInstall(
   writeFileSync(
     join(directory, "manifest.json"),
     JSON.stringify({
-      magic: "GTURBO",
+      magic: "SSDAI",
       modelID,
       quant: { routedExpert: { weightBits: bits } },
       arch: { family, hiddenActivation: activation },

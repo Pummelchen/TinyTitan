@@ -5,7 +5,7 @@ import TinyTitanValidationSupport
 
 @testable import TinyTitan
 
-/// End-to-end: write a synthetic .gturbo blob containing one "expert" worth of
+/// End-to-end: write a synthetic .ssdai blob containing one "expert" worth of
 /// affine-quantized weights (packed nibbles + BF16 scales + BF16 biases), open
 /// it through `PreadExpertStreamer`, load it into a bounded cache slot, run
 /// `dequant_int4_gemv`, and compare against an FP32 reference computed on the
@@ -32,7 +32,7 @@ import TinyTitanValidationSupport
         static let biasesBytes = M * groupsPerRow * MemoryLayout<UInt16>.size  // 256
     }
 
-    /// Build the in-memory bytes that we'll write to the fake .gturbo.
+    /// Build the in-memory bytes that we'll write to the fake .ssdai.
     /// Layout inside one expert blob (page-aligned externally):
     ///   [0,        packedBytes)              packed nibbles, row-major
     ///   [scalesOff, scalesOff + scalesBytes) BF16 scales, row-major
@@ -106,7 +106,7 @@ import TinyTitanValidationSupport
         let xFp32: [Float] = (0..<Sizes.N).map { _ in rng.uniform(-1.0, 1.0) }
         let xFp16: [Float16] = xFp32.map { Float16($0) }
 
-        // ----- Build fake .gturbo on disk -----
+        // ----- Build fake .ssdai on disk -----
         let pageSize = Int(getpagesize())
         let (blob, scalesOffset, biasesOffset, blobSize) =
             try Self.buildExpertBlob(weightsFp32: weights, pageSize: pageSize)

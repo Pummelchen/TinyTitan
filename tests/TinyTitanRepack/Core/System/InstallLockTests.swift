@@ -9,7 +9,7 @@ import Testing
     @Test func twoContendersForCanonicalTargetCannotBothAcquire() throws {
         let root = temporaryRoot("contenders")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         var first: InstallLock? = try InstallLock.acquire(outputDirectory: output)
 
         #expect(throws: RepackError.self) {
@@ -24,7 +24,7 @@ import Testing
     @Test func asyncInstallHoldsLockUntilOperationFinishes() async throws {
         let root = temporaryRoot("async-operation")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         HangingInstallURLProtocol.reset()
         let task = Task {
             try await RemoteStreamingRepacker(
@@ -74,11 +74,11 @@ import Testing
             atPath: alias,
             withDestinationPath: physical)
         let first = try InstallLock.acquire(
-            outputDirectory: (physical as NSString).appendingPathComponent("model.gturbo"))
+            outputDirectory: (physical as NSString).appendingPathComponent("model.ssdai"))
 
         #expect(throws: RepackError.self) {
             _ = try InstallLock.acquire(
-                outputDirectory: (alias as NSString).appendingPathComponent("model.gturbo"))
+                outputDirectory: (alias as NSString).appendingPathComponent("model.ssdai"))
         }
         withExtendedLifetime(first) {}
     }
@@ -86,7 +86,7 @@ import Testing
     @Test func symlinkedLockIsRejectedWithoutFollowingIt() throws {
         let root = temporaryRoot("lock-symlink")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         let victim = (root as NSString).appendingPathComponent("victim")
         FileManager.default.createFile(atPath: victim, contents: Data())
         try FileManager.default.createSymbolicLink(
@@ -101,7 +101,7 @@ import Testing
     @Test func lockIsReleasedWhenOwningProcessIsKilled() throws {
         let root = temporaryRoot("process-death")
         defer { try? FileManager.default.removeItem(atPath: root) }
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         let paths = try RemoteInstallPaths(outputDirectory: output)
         let holder = Process()
         holder.executableURL = URL(fileURLWithPath: "/usr/bin/lockf")

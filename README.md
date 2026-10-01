@@ -64,7 +64,7 @@ pipeline sees only the answer. The model directory is whatever
 *Last verified: 2026-09-28 on macOS 27.0 / Swift 6.4 / arm64 (Apple M3, 24 GB)
 by running `tools/install_models.sh` and `--help`, the CLI command above with
 `models/qwen3.5_4B_4Bit` (and `TinyTitanCLI/--help`), `swift run -c release
-TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_4B_4Bit`
+TinyTitanRepack --verify-install --input-ssdai models/qwen3.5_4B_4Bit`
 ("Verified 7 files"), `tools/server_launcher.sh --help` and `--client server
 --model qwen35-4b --bits 4 --port 8084`, `TinyTitanServer --help`, `tools/dsh_route.sh`
 (the print form), `memory_pressure -Q`, the `pgrep` process check,
@@ -277,7 +277,7 @@ list. The ones that catch people first:
   exists but is not a complete install; reinstall that model.
 - **The model stopped loading after it moved.** The verified receipt is bound to
   the original absolute path; reissue it in place with
-  `swift run -c release TinyTitanRepack --verify-install --input-gturbo <path>`.
+  `swift run -c release TinyTitanRepack --verify-install --input-ssdai <path>`.
   Never hand-edit `verified-install.json`.
 - **The first token is slow.** The prompt must be prefilled before decode
   begins, and coding clients send thousands of tokens of instructions. Use

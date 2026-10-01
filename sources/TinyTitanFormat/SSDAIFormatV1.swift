@@ -1,7 +1,23 @@
 import Foundation
 
-package enum GTurboFormatV1 {
-    package static let magic = "GTURBO"
+package enum SSDAIFormatV1 {
+    /// The magic this format writes: `.ssdai`, renamed from `.ssdai` in 5.15.
+    package static let magic = "SSDAI"
+
+    /// The magic every install built before the rename carries.
+    ///
+    /// The rename moved a name, not a byte of payload: the manifest's magic is
+    /// the only field that changed, and rewriting it would invalidate the
+    /// hash-bound receipt (`verified-install.json` binds the manifest's digest
+    /// and the directory path) for every existing install — 244 GB here alone.
+    /// So reads accept both magics for one release and writes emit `magic`.
+    package static let legacyMagic = "GTURBO"
+
+    /// Whether a manifest's magic is one this runtime reads.
+    package static func isSupportedMagic(_ value: String) -> Bool {
+        value == magic || value == legacyMagic
+    }
+
     package static let versionMajor = 1
     package static let versionMinor = 0
     package static let alignmentBytes: UInt64 = 16_384
@@ -46,20 +62,20 @@ package enum TinyTitanFormatError: Error, Equatable, CustomStringConvertible, Se
 }
 
 @inline(__always)
-package func gturboCheckedAdd(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
+package func ssdaiCheckedAdd(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
     let (value, overflow) = lhs.addingReportingOverflow(rhs)
     guard !overflow else { throw TinyTitanFormatError.overflow(field: field) }
     return value
 }
 
 @inline(__always)
-package func gturboCheckedMultiply(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
+package func ssdaiCheckedMultiply(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
     let (value, overflow) = lhs.multipliedReportingOverflow(by: rhs)
     guard !overflow else { throw TinyTitanFormatError.overflow(field: field) }
     return value
 }
 
-package enum GTurboPathValidator {
+package enum SSDAIPathValidator {
     package static func appleFilesystemKey(_ path: String) -> String {
         path.precomposedStringWithCanonicalMapping
             .lowercased(with: Locale(identifier: "en_US_POSIX"))

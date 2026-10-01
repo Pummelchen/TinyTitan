@@ -34,7 +34,7 @@ import Testing
         -> (URL, ArchConfig)
     {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-manifest-test-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-manifest-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: dir.appendingPathComponent("packed_experts"),
@@ -84,7 +84,7 @@ import Testing
         }
 
         var root: [String: Any] = [
-            "magic": "GTURBO",
+            "magic": "SSDAI",
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": flags,
@@ -130,7 +130,7 @@ import Testing
         let (dir, toy) = try Self.writeToyManifest()
         defer { try? FileManager.default.removeItem(at: dir) }
         let m = try ManifestReader.load(directoryURL: dir, expecting: toy)
-        #expect(m.magic == "GTURBO")
+        #expect(m.magic == "SSDAI")
         #expect(m.numLayers == toy.numLayers)
         #expect(m.expertStride == 16384)
     }
@@ -328,7 +328,7 @@ import Testing
 
     @Test func missingManifestThrowsPartialInstall() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-empty-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-empty-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         #expect {
@@ -358,12 +358,27 @@ import Testing
         }
     }
 
-    @Test func wrongMagicThrowsNotAGTurboDirectory() throws {
-        let (dir, toy) = try Self.writeToyManifest(["magic": "NOT_GTURBO"])
+    @Test func wrongMagicThrowsNotASSDAIDirectory() throws {
+        let (dir, toy) = try Self.writeToyManifest(["magic": "NOT_SSDAI"])
         defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(throws: ModelError.notAGTurboDirectory) {
+        #expect(throws: ModelError.notASSDAIDirectory) {
             _ = try ManifestReader.load(directoryURL: dir, expecting: toy)
         }
+    }
+
+    /// The rename's compatibility contract: every install built before 5.15
+    /// carries `GTURBO`, and it must keep loading.
+    ///
+    /// Rewriting the field instead would invalidate each install's receipt —
+    /// `verified-install.json` binds the manifest's digest and the directory
+    /// path — so a legacy read is what makes this a rename rather than a repack
+    /// of every install in existence.
+    @Test func legacyGTURBOMagicStillLoads() throws {
+        let (dir, toy) = try Self.writeToyManifest(["magic": "GTURBO"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let m = try ManifestReader.load(directoryURL: dir, expecting: toy)
+        #expect(m.magic == "GTURBO", "the legacy magic is read as written")
+        #expect(m.numLayers == toy.numLayers)
     }
 
     @Test func versionTwoThrowsUnsupportedVersion() throws {

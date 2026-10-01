@@ -319,8 +319,8 @@ public enum RangeCopyPlanner {
         expectedOutputs: [RemoteExpectedOutput]
     ) throws -> String {
         var writer = FingerprintWriter(domain: "TinyTitan.RemoteInstallPlan.v1")
-        writer.append(UInt64(GTurboJSON.versionMajor))
-        writer.append(UInt64(GTurboJSON.versionMinor))
+        writer.append(UInt64(SSDAIJSON.versionMajor))
+        writer.append(UInt64(SSDAIJSON.versionMinor))
         writer.append(UInt64(rangeChunkBytes))
         writer.append(layoutMode)
         writer.append(layoutOrderSha256 ?? "")

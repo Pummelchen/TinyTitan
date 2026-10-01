@@ -165,8 +165,8 @@ extension RepackPlanner {
         // Index size includes the fixed header, fixed-width entries, and the
         // string table, padded to a 16 KB page boundary.
         let rawIdx = UInt64(
-            GTurboBinary.indexHeaderBytes
-                + entryCount * GTurboBinary.indexEntryBytes
+            SSDAIBinary.indexHeaderBytes
+                + entryCount * SSDAIBinary.indexEntryBytes
                 + stringTable.count)
         let indexSize = roundUpToPage(rawIdx)
 

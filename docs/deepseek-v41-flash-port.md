@@ -181,7 +181,7 @@ surprise at the end of a 510 GB download:
    averages ≈ 5.9 bits per parameter (510.3 GB over 763.2 B). A TinyTitan
    8-bit build at affine group 64 (8.25 effective bits) is therefore **not**
    "the same 8-bit" — it is roughly 40% larger than the checkpoint it converts.
-3. **FP4 experts do not fit the affine scheme at all.** TinyTitan's `.gturbo`
+3. **FP4 experts do not fit the affine scheme at all.** TinyTitan's `.ssdai`
    quant slots are affine (`weightBits`/`scheme`/`scaleType`/`biasType`/
    `groupSize`), and its converters emit affine group-64 snapshots. FP8
    E4M3 + E8M0 per-32×32 and packed FP4 E2M1 + E8M0 per-32 are different
@@ -478,7 +478,7 @@ a new converter with a new rename table, not a new `MODELS` row.
 The router also needs the derived Engram constants — the 99092-entry
 compressed-token map, the 48 bucket primes and sizes, and the per-(layer, shift)
 odd multipliers — which are **not weights** and must be produced by the
-converter into a sidecar the runtime reads. Nothing in `.gturbo` carries
+converter into a sidecar the runtime reads. Nothing in `.ssdai` carries
 non-tensor constants today.
 
 ---
@@ -498,7 +498,7 @@ means concretely, where it is cheap, and where it is not.
 Ruled out, permanently for this model:
 
 - the affine 4-bit / 8-bit re-quantization the rest of the catalog calls
-  "4-Bit" and "8-Bit" (`docs/gturbo-format.md`'s five quant slots, the
+  "4-Bit" and "8-Bit" (`docs/ssdai-format.md`'s five quant slots, the
   `prepare_agentworld.py` pipeline). Re-encoding into affine group 64 changes
   the stored values;
 - any width reduction on any tensor — including the Engram tables, whose 16-bit
@@ -511,7 +511,7 @@ Ruled out, permanently for this model:
 
 Unaffected, and still permitted, because none of it changes a weight value:
 
-- **converting the container** — `.gturbo` instead of safetensors, a single
+- **converting the container** — `.ssdai` instead of safetensors, a single
   index, 16 KiB alignment, per-layer expert files;
 - **streaming and caching** — the access pattern is not part of the model;
 - **dtype widening for compute**, as long as it is exact. Decoding FP8 E4M3 and
@@ -565,7 +565,7 @@ where 160 = 5120/32, and `w2` is `[5120, 1152]` with `[5120, 72]` where
 group-of-64 count, and **2304 is not a multiple of 64** — the group size every
 affine path in this tree assumes. A converter that reshapes these into affine
 groups because the arithmetic happens to divide will produce a file that loads,
-passes shape checks and is wrong (`docs/gturbo-format.md`'s failure mode). The
+passes shape checks and is wrong (`docs/ssdai-format.md`'s failure mode). The
 `--plan` mode must therefore report every scale shape it sees and refuse on any
 tensor it cannot classify, rather than sizing bytes and dividing.
 
@@ -580,7 +580,7 @@ The work, in order:
    step.
 3. **A manifest extension** for non-affine schemes: `scheme` gains
    `blockFP8`/`packedFP4` values and `scaleType` gains an "E8M0 exponent"
-   meaning. `GTurboBinary` remains the single writer, per `docs/gturbo-format.md`.
+   meaning. `SSDAIBinary` remains the single writer, per `docs/ssdai-format.md`.
    The existing per-tensor `weightBits` entries must still be written for every
    tensor, because the old silent-misread failure mode does not care which
    format is being misread.
@@ -605,7 +605,7 @@ responses were:
 | re-quantize to 4-bit affine | 105 GB | **yes** — forbidden by §6.1 |
 | drop Engram entirely | 0 | **yes** — it is 196 B of the model's parameters |
 
-So Engram is **streamed at its published FP8**, on a new `.gturbo` band with the
+So Engram is **streamed at its published FP8**, on a new `.ssdai` band with the
 same design as the expert files: one blob per bucket — the 24 prime-sized buckets
 per layer, each ≈ 16.0 M rows and ≈ 4.2 GB — aligned to 16 KiB so a random row
 inside one is a single 16 KiB-granular read. The rows stay 264 bytes and are
@@ -621,7 +621,7 @@ bytes**. Two layers × 8 heads × 3 n-gram sizes = **48 rows per token = 12.7 KB
 per token**; a 512-token generation streams ≈ 6.5 MB. That is small, and it is
 the one part of this model's memory problem that has a cheap answer.
 
-`docs/gturbo-format.md` describes exactly two regions (`index` + resident
+`docs/ssdai-format.md` describes exactly two regions (`index` + resident
 payload) plus per-layer expert files; this is a third band.
 
 ### 6.5 The cost of preserving: it is time, not quality
@@ -685,7 +685,7 @@ deleted early).
 **What the install costs on disk.** Preserving the quants means copying bytes, so
 the install is the checkpoint's own size: **≈ 510 GB**, of which 288.8 GB is
 routed experts and 202.8 GB is Engram — those two are 96% of it, and neither
-shrinks without re-quantizing. The `.gturbo` container adds ~0.8 GB of worst-case
+shrinks without re-quantizing. The `.ssdai` container adds ~0.8 GB of worst-case
 stride padding across 92,160 experts and a few megabytes of index, manifest and
 receipt. Peak space depends on how the conversion is fed: **≈ 521 GB** if it
 streams shard by shard the way `TinyTitanRepack` installs the Qwen checkpoints
@@ -697,7 +697,7 @@ assumes.
 
 There is no 4-bit build and no 8-bit build. There is one install, at the
 model's own mixed precision: 8-bit dense, 4-bit experts. Under
-`docs/gturbo-format.md`'s rules, `ManifestIdentity.weightBits` reads the
+`docs/ssdai-format.md`'s rules, `ManifestIdentity.weightBits` reads the
 `routedExpert` slot, and the API id appends it — which would produce
 `deepseek-v4.1-flash_4-Bit` and advertise a re-quantized width that does not
 exist. That is a naming change to settle deliberately:
@@ -729,7 +729,7 @@ below exists in this tree today unless marked **new**.
 | Packed-FP4 E2M1 GEMV | `Kernels/Quant/DequantInt4GEMV.swift` (`dequant_int4.metal`) | **New kernel + Swift binding.** Int4 affine ≠ FP4 E2M1; the E2M1 range is ±6.0 and the scale is a power-of-two exponent |
 | Native KV formats (FP4 E2M1/E4M3-16, FP4 E8M0/32, FP8) | `Kernels/Quant/KVCacheQuantizer.swift` | **Extend.** A different scheme at a different granularity; a cache written by the affine quantizer would pass shape checks and change every attention output |
 | Engine family dispatch | `Runtime/Family/TensorSchema.swift`, `Infrastructure/ModelIO/ModelTypes.swift` (`ModelFamily`) | **Extend.** Add `deepseekV41` to `ModelFamily` and `TensorSchema`, plus a **new** `Runtime/Family/DeepseekV41Family.swift` for the forward |
-| Manifest arch + quant scheme | `TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift` (`loadQwen4Exp` is the first-of-family precedent), `GTurboJSON.swift`, `GTurboEncoders.swift` | **Extend.** A `loadDeepseekV41` branch, a `RepackModelFamily.deepseekV41` case, and `scheme`/`scaleType` values for non-affine formats. `GTurboBinary` stays the single writer |
+| Manifest arch + quant scheme | `TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift` (`loadQwen4Exp` is the first-of-family precedent), `SSDAIJSON.swift`, `SSDAIEncoders.swift` | **Extend.** A `loadDeepseekV41` branch, a `RepackModelFamily.deepseekV41` case, and `scheme`/`scaleType` values for non-affine formats. `SSDAIBinary` stays the single writer |
 | Engram streaming band | `Runtime/Inference/ModelExpertIO.swift`, `RealForwardRunner+Decode.swift` (expert streaming and prefetch) | **Extend.** The mechanism is right; the working set and the row-grained access pattern are not |
 | Per-install tuning row | `Runtime/Configuration/ModelProfile.swift` (`table`, keyed by model id + width) | **Extend.** Note the key carries a width, and §6.6 says this model has none — the row's key is a decision, not a default |
 | Served id → name | `TinyTitanServer/Core/ModelCatalog.swift` (`displayNames`) | **Extend.** Same width caveat |
@@ -776,13 +776,13 @@ project: nothing can be installed before the storage question is answered, and a
 
 **Gate 1 — the container, before any forward (§9 Phase 1).** Because the
 conversion re-encodes nothing, its correctness is checkable without a model:
-read each tensor from the source safetensors and from the `.gturbo` install,
+read each tensor from the source safetensors and from the `.ssdai` install,
 dequantize both with the same routine, and compare in fp32. The values must be
 identical, and because the scale exponents are preserved the comparison can
 assert exact equality of every stored quantized value and every E8M0 exponent
 rather than a tolerance. A mismatch is a converter bug, full stop. This is the
 cheapest and highest-value test in the whole project, and it catches the
-`gturbo-format` class of failure — a tensor written at one width and read at
+`ssdai-format` class of failure — a tensor written at one width and read at
 another — at container level.
 
 **Gate 2 — the kernels, on synthetic tensors (§9 Phase 2).** A block-FP8 GEMV
@@ -852,7 +852,7 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
   this is the cheapest possible place to catch a format mistake.
 - **Phase 2 — the decode kernels.** Block-FP8 GEMV, packed-FP4 E2M1 GEMV, the
   FP8 embedding lookup, and the manifest `scheme`/`scaleType` extension with
-  `GTurboBinary` as the only writer. Exit condition: a synthetic tensor of each
+  `SSDAIBinary` as the only writer. Exit condition: a synthetic tensor of each
   format multiplied against the Python reference within fp32 tolerance, and no
   tensor anywhere in the tree unpacked as affine by accident.
 - **Phase 3 — surrogate parity.** §8's synthetic checkpoint through the full
@@ -862,7 +862,7 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
 - **Phase 4 — runtime attention.** `SharedAttentionRuntime` equivalents:
   per-layer windows, four shared compressed caches, indexer publication order,
   the candidate filter, and a streaming band for the caches.
-- **Phase 5 — Engram.** The new `.gturbo` band, the tokenizer-derived constants
+- **Phase 5 — Engram.** The new `.ssdai` band, the tokenizer-derived constants
   sidecar, the streamed lookup, and the one-step-ahead prefetch (§6.4).
 - **Phase 6 — a real install, storage and throughput first.** The operator
   decisions in §11 (≈ 1.1 TB peak space; expected decode throughput from
@@ -974,7 +974,7 @@ The preserve decision (§6) is taken; these are the consequences.
       caches, publication order, candidate filter
 - [ ] Native KV-cache formats (FP4 E2M1/E4M3-16, FP4 E8M0/32, FP8), not the
       affine KV quantizer
-- [ ] A third `.gturbo` band for Engram, streamed at published FP8, plus its
+- [ ] A third `.ssdai` band for Engram, streamed at published FP8, plus its
       constants sidecar
 - [ ] The eight wiring points, with the catalog width question (§6.6) settled
 - [ ] Surrogate parity against `inference/model.py`, including the layer-20,

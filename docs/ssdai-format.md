@@ -1,13 +1,13 @@
-# The `.gturbo` install format
+# The `.ssdai` install format
 
-`GTurboEncoders.swift` has pointed at this file since the resident index was
+`SSDAIEncoders.swift` has pointed at this file since the resident index was
 first written. It did not exist. This is it.
 
-A `.gturbo` install is a directory. It is the only install shape this project
+A `.ssdai` install is a directory. It is the only install shape this project
 ships: the runtime, the installer and `--verify-install` all
 assume it. The dense Qwen 3.5 2B/4B/9B installs used to be the exception — an
 affine safetensors snapshot with no manifest and no receipt — and they are
-`.gturbo` now too (`tools/repack_dense.sh`).
+`.ssdai` now too (`tools/repack_dense.sh`).
 
 ```
 qwen3.5_2B_4Bit/
@@ -24,12 +24,37 @@ qwen3.5_2B_4Bit/
 ```
 
 Everything is little-endian. Every field is read and written in one place,
-`GTurboBinary` (`sources/TinyTitanRepack/Core/Format/GTurboEncoders.swift`), so the
+`SSDAIBinary` (`sources/TinyTitanRepack/Core/Format/SSDAIEncoders.swift`), so the
 on-disk layout changes only there.
+
+## Naming: `.ssdai`, renamed from `.gturbo` in 5.15
+
+The file was called `.gturbo` from the first commit — a fossil of the project's
+Gemma-4/TurboFieldfare era — and **the rename changed one field, not one byte of
+payload**. What that means in practice:
+
+- `manifest.json`'s `magic` is written as `"SSDAI"`, and **reads accept the
+  legacy `"GTURBO"`** for one release (`SSDAIFormatV1.isSupportedMagic`). Every
+  install built before 5.15 therefore keeps loading untouched.
+- Existing manifests are deliberately **not** rewritten in place. The receipt
+  (`verified-install.json`) binds the manifest's digest and the directory path,
+  so editing the magic would invalidate the receipt of every install in
+  existence — 244 GB here alone — for a string. An install moves to the new
+  magic the next time it is rebuilt or repacked anyway, and `--verify-install`
+  accepts either.
+- The directory's `.ssdai` suffix is a **convention, not a check**: nothing in
+  the reader looks at the path's extension, so a directory still named
+  `something.gturbo` works exactly as well.
+- `TinyTitanRepack --input-ssdai <dir>` is the flag; `--input-gturbo` stays
+  accepted as a deprecated alias for one release.
+
+Docs written before 5.15 — release notes, the v4.x design and plan records, and
+`plan-dense-gturbo-installs.md` — keep the old word on purpose: they are records
+of what the format was called when they were written.
 
 ## Why the format exists
 
-The models are 19-200 GB and the machines are 24-128 GB. A `.gturbo` install is
+The models are 19-200 GB and the machines are 24-128 GB. A `.ssdai` install is
 built so that **the runtime never has to hold the whole model**, and so that a
 model can be streamed, laid out, and verified without a second copy anywhere on
 disk:
@@ -43,11 +68,11 @@ disk:
 
 ## `manifest.json`
 
-Written by `GTurboJSON.encodeManifest`. The fields that matter:
+Written by `SSDAIJSON.encodeManifest`. The fields that matter:
 
 | Field | Meaning |
 | --- | --- |
-| `magic`, `versionMajor`, `versionMinor` | `"GTURBO"`, 1, 0 |
+| `magic`, `versionMajor`, `versionMinor` | `"SSDAI"`, 1, 0 |
 | `modelID` | the model's id, e.g. `"qwen3.5-2b"`. **Not** the API id: the catalog appends the width, giving `qwen3.5-2b_4-Bit` |
 | `sourceSnapshotHash` | the source checkpoint's index hash; how an install is traced to what it was built from |
 | `arch` | the architecture the planner read. `arch.family` mirrors `ModelFamily` and is what loaders dispatch on |
@@ -101,10 +126,10 @@ source's base affine width. Left at a default, an 8-bit dense install advertises
 itself as 4-bit and the catalog skips it as a duplicate of the real 4-bit one,
 which is exactly what happened.
 
-`GTurboManifestQuantV1` decodes this object by hand. A synthesised `Codable`
+`SSDAIManifestQuantV1` decodes this object by hand. A synthesised `Codable`
 would drop the open set of per-tensor keys, because the fixed slots are a
 `CodingKeys` enum and the overrides are not — which is exactly the bug that was
-shipped and then found by comparing `.gturbo` logits against the snapshot's.
+shipped and then found by comparing `.ssdai` logits against the snapshot's.
 
 ## `model_weights.bin`
 
@@ -170,7 +195,7 @@ group-64 scales and biases are **not entries of their own**. They are reached
 through the weight's own `scaleOffset`/`scaleSize`/`biasOffset`/`biasSize`
 fields, and they are BF16. This is the sharpest difference from a safetensors
 snapshot, which names `foo.scales` and `foo.biases` as separate tensors. Reading
-a `.gturbo` index by looking up `"foo.scales"` finds nothing.
+a `.ssdai` index by looking up `"foo.scales"` finds nothing.
 
 ### `shape[1]` is the logical width
 
@@ -197,7 +222,7 @@ seconds. `ResidentWeights` carries the invariant.
 
 ## `packed_experts/`
 
-Written by `GTurboJSON.encodeLayout` and the per-layer writers. `layout.json`
+Written by `SSDAIJSON.encodeLayout` and the per-layer writers. `layout.json`
 has `expertStride`, `numLayers`, `expertsPerLayer`, and a `layers` array; each
 layer has `layer`, `file`, and an `experts` array; each expert has `offset`,
 `size`, and a `tensors` object whose keys are `gate`/`up`/`down` with
@@ -219,7 +244,7 @@ match `manifest.numLayers`. **No `layer_NN.bin` is written**, because its size
 would be `0 * expertStride = 0` — 24 empty files to satisfy a check would be
 worse than the check. `VerifiedInstallTool.validatePackedExpertLayout` skips a
 layer whose expected size is zero and still requires the file when it is not.
-`tools/gturbo_diff_snapshot.py` reports this shape directly: 320 resident
+`tools/ssdai_diff_snapshot.py` reports this shape directly: 320 resident
 tensors, no packed experts.
 
 ## `tokenizer/`
@@ -268,7 +293,7 @@ that rule *is* the contract being verified:
 - an explicit per-tensor entry wins;
 - otherwise, for an install with no packed experts, `embed_tokens` and `lm_head`
   take the embedding slot and everything else takes the attention slot, exactly
-  as `AffineSnapshot.init(gturbo:)` does;
+  as `AffineSnapshot.init(ssdai:)` does;
 - a packed-expert install keeps its routed-expert widths in
   `packed_experts/layout.json` and its resident tensors are the GPU path's
   business, so no slot fallback is applied and only explicit entries are checked.
@@ -306,9 +331,9 @@ converter both use affine group-64, so `RepackPlanner` copies a source `u32
 .weight` into the resident payload unchanged. That is what makes the
 verification exact:
 
-- `tools/gturbo_diff_snapshot.py <install> <snapshot>` compares every resident
+- `tools/ssdai_diff_snapshot.py <install> <snapshot>` compares every resident
   tensor, weight plus scales plus biases, byte for byte;
-- `tests/TinyTitan/CPUEngine/DenseGTurboEquivalenceTests.swift` loads both and
+- `tests/TinyTitan/CPUEngine/DenseSSDAIEquivalenceTests.swift` loads both and
   requires **identical logits**.
 
 The second is the one that matters. The first proves the bytes are right, which
@@ -319,7 +344,7 @@ read at the wrong width. `tools/repack_dense.sh` runs both, in that order, then
 ## Building one
 
 ```bash
-swift run -c release TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_2B_4Bit
+swift run -c release TinyTitanRepack --verify-install --input-ssdai models/qwen3.5_2B_4Bit
 ```
 
 Never hand-edit the receipt to match a new path. The binding is the check;

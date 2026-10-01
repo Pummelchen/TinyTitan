@@ -9,7 +9,7 @@ import Testing
             .appendingPathComponent("tinytitan-space-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let target = root.appendingPathComponent("nested/model.gturbo", isDirectory: true)
+        let target = root.appendingPathComponent("nested/model.ssdai", isDirectory: true)
 
         let result = try DiskSpaceChecker.assess(path: target.path, bytes: 100, reserveBytes: 20)
 
@@ -23,7 +23,7 @@ import Testing
             .appendingPathComponent("tinytitan-space-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let target = root.appendingPathComponent("model.gturbo", isDirectory: true)
+        let target = root.appendingPathComponent("model.ssdai", isDirectory: true)
 
         let assessed = try DiskSpaceChecker.assess(path: target.path, bytes: 100, reserveBytes: 20)
         let required = try DiskSpaceChecker.requireAvailable(
@@ -38,7 +38,7 @@ import Testing
             .appendingPathComponent("tinytitan-space-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let target = root.appendingPathComponent("model.gturbo", isDirectory: true)
+        let target = root.appendingPathComponent("model.ssdai", isDirectory: true)
         let required = UInt64.max
 
         #expect {

@@ -9,7 +9,7 @@ import Testing
     @Test func wrapsResidentRegionAndReadsBytes() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-resident-\(UUID().uuidString).bin")
+            .appendingPathComponent("ssdai-resident-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: url) }
 
         // 24-byte fake header (zeros) followed by 16-byte fake index region
@@ -35,7 +35,7 @@ import Testing
     @Test func unalignedFileOffsetStillExposesPayloadAtOffsetZero() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-resident-unaligned-\(UUID().uuidString).bin")
+            .appendingPathComponent("ssdai-resident-unaligned-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: url) }
 
         // Offset that is not a multiple of getpagesize() — say 137.

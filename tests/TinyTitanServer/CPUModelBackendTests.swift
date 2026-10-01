@@ -84,7 +84,7 @@ import Testing
             "weight_map": Dictionary(uniqueKeysWithValues: names.map { ($0, "model.safetensors") })
         ])
         .write(to: directory.appendingPathComponent("model.safetensors.index.json"))
-        // A shipped `.gturbo` install keeps the tokenizer in a `tokenizer/`
+        // A shipped `.ssdai` install keeps the tokenizer in a `tokenizer/`
         // sidecar; a converter's snapshot keeps it at the root. Both shapes
         // ship, so both are fixtures.
         let tokenizerDirectory =
@@ -291,7 +291,7 @@ import Testing
     }
 
     /// A request that switches thinking mode re-renders through a tokenizer
-    /// for the requested mode, and on a `.gturbo` install that tokenizer lives
+    /// for the requested mode, and on a `.ssdai` install that tokenizer lives
     /// in a `tokenizer/` sidecar. The re-render used to hand
     /// `GFTokenizer.load(from:)` the *model directory*, which has no
     /// `tokenizer.json` in that layout, so every thinking switch against an

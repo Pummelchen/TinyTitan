@@ -101,7 +101,7 @@ public struct SupportedModelSource: Sendable, Equatable {
 
     /// One-layer native Qwen3.6 MTP draft. It contains no embedding or LM
     /// head; the runtime reuses those tensors from whichever 4/6/8-bit target
-    /// is loaded. The routed experts remain SSD-streamed in `.gturbo` form.
+    /// is loaded. The routed experts remain SSD-streamed in `.ssdai` form.
     public static let qwen36MTP = SupportedModelSource(
         name: "qwen36-mtp",
         displayName: "Qwen3.6 35B-A3B native MTP draft 4-bit",

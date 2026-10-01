@@ -92,7 +92,7 @@ identifier_name:
 
 type_name:
   # Types keep a real name; only the length window is widened to match the
-  # engine's vocabulary (e.g. `GTurboManifestV1`).
+  # engine's vocabulary (e.g. `SSDAIManifestV1`).
   min_length: 3
   max_length: 60
 

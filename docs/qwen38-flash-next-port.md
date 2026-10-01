@@ -118,7 +118,7 @@ table (16 prime-sized head vocabularies just above 20M each; rows are
   streams before the layer body.
 
 Streaming: one token touches 16 rows × ~100 B (4-bit g32) — ideal SSD reads.
-New `.gturbo` section: `ngram_table.bin` with a row-addressable layout, plus
+New `.ssdai` section: `ngram_table.bin` with a row-addressable layout, plus
 resident buffers for multipliers/offsets/vocab-sizes.
 
 ### 4. Top-10 MoE and 3D expert storage
@@ -282,7 +282,7 @@ replaces `input_layernorm` / `post_attention_layernorm` entirely.
 
 The n-gram table ships **fp16, not quantized** — 3.2x the ~32 GB the plan
 assumed at 4-bit. With 288 GB free the full install fits **only because the
-installer streams into `.gturbo` without staging a second checkpoint**:
+installer streams into `.ssdai` without staging a second checkpoint**:
 downloading the repo first and then repacking would need ~352 GB and fail.
 Quantizing the table during repack is possible but is a lossy change to a
 component whose quality contribution is unmeasured — do not do it silently.
@@ -513,7 +513,7 @@ they would not have been found any other way.
 
 The harness is in `tools/`:
 
-- `gturbo_reader.py` reads tensors straight out of the installed
+- `ssdai_reader.py` reads tensors straight out of the installed
   `model_weights.bin` and `packed_experts/`, dequantizing INT4 and INT8 affine
   groups. Both sides therefore run on the *same* weights, so quantization is
   common-mode and any disagreement is in the forward pass.

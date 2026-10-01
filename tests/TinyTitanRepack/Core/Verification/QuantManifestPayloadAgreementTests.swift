@@ -38,7 +38,7 @@ import TinyTitanFormat
     @Test func aRepackRecordsTheSourcePerTensorWidths() async throws {
         let root = temporaryRoot("quant-agreement-writer")
         let snapshot = (root as NSString).appendingPathComponent("snapshot")
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         defer { try? FileManager.default.removeItem(atPath: root) }
         _ = try SyntheticSnapshot.buildQwen(at: snapshot, weightBits: 4)
         try writeTokenizerFiles(at: snapshot)
@@ -81,7 +81,7 @@ import TinyTitanFormat
     @Test func aFreshRepackVerifies() async throws {
         let root = temporaryRoot("quant-agreement-verify")
         let snapshot = (root as NSString).appendingPathComponent("snapshot")
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         defer { try? FileManager.default.removeItem(atPath: root) }
         _ = try SyntheticSnapshot.buildQwen(at: snapshot, weightBits: 4)
         try writeTokenizerFiles(at: snapshot)
@@ -94,7 +94,7 @@ import TinyTitanFormat
                 minFreeReserveBytes: 0))
 
         let result = try VerifiedInstallTool.run(
-            options: VerifyInstallOptions(inputGTurbo: output))
+            options: VerifyInstallOptions(inputSSDAI: output))
         #expect(result.fileCount > 0)
     }
 
@@ -105,7 +105,7 @@ import TinyTitanFormat
     @Test func aLyingOverrideIsRefused() async throws {
         let root = temporaryRoot("quant-agreement-tamper")
         let snapshot = (root as NSString).appendingPathComponent("snapshot")
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         defer { try? FileManager.default.removeItem(atPath: root) }
         _ = try SyntheticSnapshot.buildQwen(at: snapshot, weightBits: 4)
         try writeTokenizerFiles(at: snapshot)
@@ -131,7 +131,7 @@ import TinyTitanFormat
 
         #expect(throws: RepackError.self) {
             try VerifiedInstallTool.run(
-                options: VerifyInstallOptions(inputGTurbo: output))
+                options: VerifyInstallOptions(inputSSDAI: output))
         }
     }
 
@@ -173,7 +173,7 @@ import TinyTitanFormat
         ]
         let overrides = [
             "language_model.model.layers.3.self_attn.k_proj":
-                GTurboManifestQuantSlotV1(
+                SSDAIManifestQuantSlotV1(
                     weightBits: 8, scheme: "affine",
                     scaleType: "BF16", biasType: "BF16",
                     groupSize: 64)
@@ -198,7 +198,7 @@ import TinyTitanFormat
         // satisfied and only the model-width rule is under test here.
         let overrides = [
             "language_model.model.layers.0.mlp.up_proj":
-                GTurboManifestQuantSlotV1(
+                SSDAIManifestQuantSlotV1(
                     weightBits: 8, scheme: "affine",
                     scaleType: "BF16", biasType: "BF16",
                     groupSize: 64)
@@ -287,7 +287,7 @@ import TinyTitanFormat
             rows: 512, columns: 2048, bits: 8)
         let overrides = [
             "language_model.model.layers.0.self_attn.q_proj":
-                GTurboManifestQuantSlotV1(
+                SSDAIManifestQuantSlotV1(
                     weightBits: 4, scheme: "affine",
                     scaleType: "BF16", biasType: "BF16",
                     groupSize: 64)
@@ -305,9 +305,9 @@ import TinyTitanFormat
     /// A byte extent that cannot be a whole number of values per element is a
     /// broken index, not a width to guess at.
     @Test func aNonIntegralByteExtentIsRefused() throws {
-        let entry = GTurboResidentIndexEntryV1(
+        let entry = SSDAIResidentIndexEntryV1(
             name: "language_model.model.layers.0.mlp.down_proj.weight",
-            dtype: GTurboFormatV1.DType.u32.rawValue,
+            dtype: SSDAIFormatV1.DType.u32.rawValue,
             fileOffset: 0, sizeBytes: 1000,
             shape: [512, 2048, 0, 0],
             scaleOffset: 0, scaleSize: 0, biasOffset: 0, biasSize: 0)
@@ -322,9 +322,9 @@ import TinyTitanFormat
     /// An unquantized (bf16) entry is never dequantized, so it has no width to
     /// agree with and must not be judged.
     @Test func unquantizedEntriesAreNotJudged() throws {
-        let norm = GTurboResidentIndexEntryV1(
+        let norm = SSDAIResidentIndexEntryV1(
             name: "language_model.model.norm.weight",
-            dtype: GTurboFormatV1.DType.bf16.rawValue,
+            dtype: SSDAIFormatV1.DType.bf16.rawValue,
             fileOffset: 0, sizeBytes: 256,
             shape: [128, 0, 0, 0],
             scaleOffset: 0, scaleSize: 0, biasOffset: 0, biasSize: 0)
@@ -340,11 +340,11 @@ import TinyTitanFormat
     private func packed(
         name: String, rows: UInt32, columns: UInt32,
         bits: UInt64
-    ) -> GTurboResidentIndexEntryV1 {
+    ) -> SSDAIResidentIndexEntryV1 {
         let bytes = UInt64(rows) * UInt64(columns) * bits / 8
-        return GTurboResidentIndexEntryV1(
+        return SSDAIResidentIndexEntryV1(
             name: name,
-            dtype: GTurboFormatV1.DType.u32.rawValue,
+            dtype: SSDAIFormatV1.DType.u32.rawValue,
             fileOffset: 0, sizeBytes: bytes,
             shape: [rows, columns, 0, 0],
             scaleOffset: 0, scaleSize: 0, biasOffset: 0, biasSize: 0)
@@ -352,16 +352,16 @@ import TinyTitanFormat
 
     private func slots(
         embedding: Int, attention: Int, routedExpert: Int,
-        overrides: [String: GTurboManifestQuantSlotV1]? = nil
+        overrides: [String: SSDAIManifestQuantSlotV1]? = nil
     )
-        -> GTurboManifestQuantV1
+        -> SSDAIManifestQuantV1
     {
-        func slot(_ bits: Int) -> GTurboManifestQuantSlotV1 {
-            GTurboManifestQuantSlotV1(
+        func slot(_ bits: Int) -> SSDAIManifestQuantSlotV1 {
+            SSDAIManifestQuantSlotV1(
                 weightBits: bits, scheme: "affine",
                 scaleType: "BF16", biasType: "BF16", groupSize: 64)
         }
-        return GTurboManifestQuantV1(
+        return SSDAIManifestQuantV1(
             embedding: slot(embedding),
             attention: slot(attention),
             router: slot(8),

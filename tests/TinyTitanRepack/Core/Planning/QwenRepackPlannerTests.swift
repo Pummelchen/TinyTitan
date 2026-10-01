@@ -402,7 +402,7 @@ struct QwenRepackPlannerTests {
         let plan = try RepackPlanner.plan(
             meta: metadata, arch: arch, shardHeaders: [header], outputDir: outputDir)
 
-        let data = try GTurboJSON.encodeManifest(
+        let data = try SSDAIJSON.encodeManifest(
             plan: plan,
             modelID: "unknown/snapshot",
             sourceSnapshotHash: "sha256:0",
@@ -410,11 +410,14 @@ struct QwenRepackPlannerTests {
             expertsPerLayer: 2,
             numLayers: arch.numLayers,
             expertStride: 16_384,
-            bitWidths: GTurboJSON.QuantBitWidths(
+            bitWidths: SSDAIJSON.QuantBitWidths(
                 embedding: 4, attention: 4, router: 8,
                 sharedExpert: 8, routedExpert: 4))
         let obj = try #require(
             try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        // The rename's other half: reads accept the legacy magic, writes emit
+        // the current one. Pinned here so the on-disk name cannot drift back.
+        #expect(obj["magic"] as? String == "SSDAI")
         let archDict = try #require(obj["arch"] as? [String: Any])
         // Family extension fields are always present for the Qwen families
         // and must round-trip the values `ArchInfo.load` derived.

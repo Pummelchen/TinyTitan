@@ -70,19 +70,19 @@ public struct AffineSnapshot: Sendable {
     ///
     /// Two shapes carry the same architecture: a plain affine safetensors
     /// snapshot, which the converter writes and the CPU engine has always
-    /// read, and a `.gturbo` install, which is what every other model here
-    /// is. A `.gturbo` is a byte copy of the same quantized tensors (both
+    /// read, and a `.ssdai` install, which is what every other model here
+    /// is. A `.ssdai` is a byte copy of the same quantized tensors (both
     /// quantizers are group-64 affine), so this is a storage difference and
-    /// not a semantic one -- which `tools/gturbo_diff_snapshot.py` checks
+    /// not a semantic one -- which `tools/ssdai_diff_snapshot.py` checks
     /// rather than assumes.
     enum Storage {
         case safetensors(
             shards: [String: SafeTensorsFile],
             placement: [String: String])
-        case gturbo(index: ResidentIndex, weights: ResidentWeights)
+        case ssdai(index: ResidentIndex, weights: ResidentWeights)
     }
 
-    /// One read-only mapping of a `.gturbo`'s resident payload, held for the
+    /// One read-only mapping of a `.ssdai`'s resident payload, held for the
     /// life of the snapshot.
     ///
     /// Mapping once matters: `matrix(_:)` is called per tensor (several
@@ -115,7 +115,7 @@ public struct AffineSnapshot: Sendable {
     let widths: [String: Int]
 
     /// The safetensors shards, for the paths that are only reachable from the
-    /// snapshot initializer. Nil for a `.gturbo` install.
+    /// snapshot initializer. Nil for a `.ssdai` install.
     var shards: [String: SafeTensorsFile] {
         if case .safetensors(let shards, _) = storage { return shards }
         return [:]
@@ -193,7 +193,7 @@ public struct AffineSnapshot: Sendable {
         storage = .safetensors(shards: opened, placement: map)
     }
 
-    /// Load a `.gturbo` install as CPU weights.
+    /// Load a `.ssdai` install as CPU weights.
     ///
     /// The install's `manifest.json` carries the same architecture facts the
     /// converter used to write `config.json`, and its resident index carries
@@ -206,7 +206,7 @@ public struct AffineSnapshot: Sendable {
     /// record and which is 1e-6 for every Qwen 3.5-family model. The first is
     /// checked for regularity rather than assumed, because a wrong interval
     /// silently changes which layers use DeltaNet and which use attention.
-    public init(gturbo directory: URL) throws {
+    public init(ssdai directory: URL) throws {
         self.directory = directory
         let manifest = try ManifestReader.read(directoryURL: directory)
         let arch = manifest.arch
@@ -285,7 +285,7 @@ public struct AffineSnapshot: Sendable {
             }
         }
         self.widths = widths
-        storage = .gturbo(index: index, weights: weights)
+        storage = .ssdai(index: index, weights: weights)
     }
 
     /// The `full_attention_interval` the manifest's mask encodes.
@@ -324,7 +324,7 @@ public struct AffineSnapshot: Sendable {
         name.hasSuffix(".weight") ? String(name.dropLast(".weight".count)) : name
     }
 
-    /// One affine matrix out of a `.gturbo` resident payload.
+    /// One affine matrix out of a `.ssdai` resident payload.
     ///
     /// The index already carries the packed shape, the weight extent and the
     /// scale/bias extents, so this is a mapping rather than a parse. The
@@ -353,7 +353,7 @@ public struct AffineSnapshot: Sendable {
         // than as an error.
         let columns = Int(entry.shape.1)
         // The companions are offsets on the weight's own entry, not entries of
-        // their own: a repacked `.gturbo` carries one record per tensor and
+        // their own: a repacked `.ssdai` carries one record per tensor and
         // points at its scale and bias spans. (A safetensors snapshot names
         // them as separate tensors, which is why the two readers differ here.)
         guard entry.sizeBytes > 0, entry.scaleSize > 0, entry.biasSize > 0 else {
@@ -408,8 +408,8 @@ public struct AffineSnapshot: Sendable {
         switch storage {
         case .safetensors:
             return shards.values.reduce(0) { $0 + $1.makeResident() }
-        case .gturbo(_, let weights):
-            // A `.gturbo`'s resident payload is one file, mapped once at load.
+        case .ssdai(_, let weights):
+            // A `.ssdai`'s resident payload is one file, mapped once at load.
             // Faulting it in is the same intent as faulting every snapshot
             // shard in: touch a byte per page so the pages are resident rather
             // than at the page cache's mercy.

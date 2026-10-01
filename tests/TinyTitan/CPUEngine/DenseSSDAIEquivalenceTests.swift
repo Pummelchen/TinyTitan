@@ -3,7 +3,7 @@ import Testing
 
 @testable import TinyTitan
 
-/// A repack is a byte copy, so a dense `.gturbo` install must be *exactly* the
+/// A repack is a byte copy, so a dense `.ssdai` install must be *exactly* the
 /// snapshot it came from. This is the gate that says so.
 ///
 /// It is opt-in, and deliberately not part of the default suite: it loads two
@@ -16,10 +16,10 @@ import Testing
 /// it catches is *silent*. A wrong width, or a wrong per-tensor width, changes
 /// the stride of the dequantize, divides evenly, passes every shape check, and
 /// answers fluently and wrongly. Nothing downstream of the loader can see that.
-@Suite("Dense .gturbo equivalence")
-struct DenseGTurboEquivalenceTests {
+@Suite("Dense .ssdai equivalence")
+struct DenseSSDAIEquivalenceTests {
 
-    /// `<snapshot dir>:<gturbo dir>` pairs, comma separated.
+    /// `<snapshot dir>:<ssdai dir>` pairs, comma separated.
     private static var pairs: [(snapshot: URL, install: URL)] {
         guard let raw = ProcessInfo.processInfo.environment["TINYTITAN_DENSE_EQUIV_PAIRS"] else {
             return []
@@ -54,7 +54,7 @@ struct DenseGTurboEquivalenceTests {
             let snapshot = try CPUQwen35(
                 snapshot: try AffineSnapshot(directory: pair.snapshot), threads: 4)
             let install = try CPUQwen35(
-                snapshot: try AffineSnapshot(gturbo: pair.install), threads: 4)
+                snapshot: try AffineSnapshot(ssdai: pair.install), threads: 4)
 
             var worst: Float = 0
             for token in Self.tokens {

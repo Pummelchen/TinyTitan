@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gturbo_reader import GTurboWeights, PackedExperts  # noqa: E402
+from ssdai_reader import SSDAIWeights, PackedExperts  # noqa: E402
 
 HC = 4
 D = 2560
@@ -60,7 +60,7 @@ def report(label: str, mine: np.ndarray, reference: np.ndarray) -> bool:
 
 def main():
     model_dir, dump_dir, token = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
-    w = GTurboWeights(model_dir)
+    w = SSDAIWeights(model_dir)
     P = "model.language_model."
 
     print(f"token {token}")

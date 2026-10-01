@@ -48,7 +48,7 @@ private enum CatalogFixture {
         ]
         try write(
             [
-                "magic": "GTURBO", "versionMajor": 1, "versionMinor": 0,
+                "magic": "SSDAI", "versionMajor": 1, "versionMinor": 0,
                 "flags": ["streamingPresent": true], "modelID": modelID, "arch": arch,
                 "files": [
                     "model_weights.bin": [
@@ -264,7 +264,7 @@ struct ModelCatalogTests {
         #expect((models[1]["sampling"] as? [String: Any])?["top_p"] as? Double == 0.95)
     }
     /// An install declares which engines can serve it, and only the dense family
-    /// declares two: its `.gturbo` payload is the same file for the CPU and the
+    /// declares two: its `.ssdai` payload is the same file for the CPU and the
     /// GPU engine, so the engine is a request-level choice rather than a
     /// property of the model.
     @Test func onlyTheDenseFamilyIsServedByBothEngines() {
@@ -296,7 +296,7 @@ struct ModelCatalogTests {
             path: URL(fileURLWithPath: "/models/snap"),
             sampling: CPUModelFamily.qwen35Dense.samplingDefaults)
         // A converted snapshot is CPU-only whatever the family: the GPU path
-        // reads `.gturbo` installs, so there is no GPU engine to name.
+        // reads `.ssdai` installs, so there is no GPU engine to name.
         #expect(snapshot.engines == [.cpu])
         #expect(snapshot.served(by: .gpu, id: "snap@gpu") == nil)
         #expect(snapshot.served(by: .cpu, id: "snap@cpu")?.kind == .cpu(.qwen35Dense))

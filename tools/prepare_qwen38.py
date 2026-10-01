@@ -343,8 +343,8 @@ def quant_bits(name: str, width: int = BITS_4) -> int | None:
     derives a tensor's expected size from `manifest.quant.<slot>.weightBits` and
     builds one GEMV per *role*, so a role shares one width — but a tensor whose
     width differs from its slot carries an override keyed by stem, which the
-    repacker writes (`GTurboJSON.quantObject`), the format validates
-    (`GTurboManifestV1`), and the runtime resolves per tensor
+    repacker writes (`SSDAIJSON.quantObject`), the format validates
+    (`SSDAIManifestV1`), and the runtime resolves per tensor
     (`ManifestQuant.slot(forTensorNamed:overrides:fallback:)`). The dense
     Qwen 3.5 installs are built exactly that way: `mlp.*` at 4 bits against an
     8-bit slot, full-attention `k_proj`/`v_proj` at 8 against a 4-bit one.

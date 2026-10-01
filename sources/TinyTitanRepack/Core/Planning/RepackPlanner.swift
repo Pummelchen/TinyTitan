@@ -1,6 +1,6 @@
 import Foundation
 
-/// On-disk page alignment unit for `.gturbo` files. Fixed at 16 KB regardless
+/// On-disk page alignment unit for `.ssdai` files. Fixed at 16 KB regardless
 /// of host page size — the format is the contract, not the kernel.
 
 extension RepackPlanner {

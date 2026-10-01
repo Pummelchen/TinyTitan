@@ -371,7 +371,7 @@ struct StreamingStopMatcherTests {
 struct ServerArgumentTests {
     @Test func defaults() throws {
         let arguments = try ServerArguments.parse(
-            ["--model", "model.gturbo"], environment: [:])
+            ["--model", "model.ssdai"], environment: [:])
         #expect(arguments.mtpModel == nil)
         #expect(arguments.mtpMemoryMiB == 384)
         #expect(arguments.port == 8080)
@@ -390,41 +390,41 @@ struct ServerArgumentTests {
 
     @Test func parsesOnlyBinaryThinkingModes() throws {
         let on = try ServerArguments.parse([
-            "--model", "model.gturbo", "--thinking", "on",
+            "--model", "model.ssdai", "--thinking", "on",
         ])
         #expect(on.thinkingMode == .on)
         let environmentOn = try ServerArguments.parse(
-            ["--model", "model.gturbo"],
+            ["--model", "model.ssdai"],
             environment: ["TINYTITAN_THINKING_MODE": "true"])
         #expect(environmentOn.thinkingMode == .on)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo", "--thinking", "high",
+                "--model", "model.ssdai", "--thinking", "high",
             ])
         }
     }
 
     @Test func parsesKVPrecisionAndYaRNContexts() throws {
         let defaults = try ServerArguments.parse([
-            "--model", "model.gturbo", "--kv-bits", "16",
+            "--model", "model.ssdai", "--kv-bits", "16",
             "--rope-scaling", "yarn",
         ])
         #expect(defaults.kvCachePrecision == .fp16)
         #expect(defaults.ropeScalingMode == .yarn)
         #expect(defaults.maxContext == 1_048_576)
         let halfMillion = try ServerArguments.parse([
-            "--model", "model.gturbo", "--rope-scaling", "yarn",
+            "--model", "model.ssdai", "--rope-scaling", "yarn",
             "--max-context", "524288",
         ])
         #expect(halfMillion.maxContext == 524_288)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo", "--max-context", "524288",
+                "--model", "model.ssdai", "--max-context", "524288",
             ])
         }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo", "--mtp-model", "mtp.gturbo",
+                "--model", "model.ssdai", "--mtp-model", "mtp.ssdai",
                 "--rope-scaling", "yarn",
             ])
         }
@@ -432,13 +432,13 @@ struct ServerArgumentTests {
 
     @Test func acceptsPublicPrefillChunksAndRejectsUnsupportedValues() throws {
         let arguments = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--prefill-chunk", "4096",
         ])
         #expect(arguments.prefillChunkTokens == 4_096)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--prefill-chunk", "8192",
             ])
         }
@@ -446,15 +446,15 @@ struct ServerArgumentTests {
 
     @Test func parsesBoundedMTPOptions() throws {
         let arguments = try ServerArguments.parse([
-            "--model", "qwen.gturbo",
-            "--mtp-model", "qwen-mtp.gturbo",
+            "--model", "qwen.ssdai",
+            "--mtp-model", "qwen-mtp.ssdai",
             "--mtp-memory-mib", "512",
         ])
-        #expect(arguments.mtpModel == "qwen-mtp.gturbo")
+        #expect(arguments.mtpModel == "qwen-mtp.ssdai")
         #expect(arguments.mtpMemoryMiB == 512)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "qwen.gturbo",
+                "--model", "qwen.ssdai",
                 "--mtp-memory-mib", "1024",
             ])
         }
@@ -473,12 +473,12 @@ struct ServerArgumentTests {
 
     @Test func parsesSinglePrefixModeAndRejectsUnknownMode() throws {
         let arguments = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--prompt-cache-mode", "single-prefix",
         ])
         #expect(arguments.promptCacheMode == .singlePrefix)
         let multi = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--prompt-cache-mode", "multi-prefix",
             "--prompt-cache-entries", "8",
             "--prompt-cache-memory-mib", "512",
@@ -491,25 +491,25 @@ struct ServerArgumentTests {
         #expect(multi.promptCacheDiskDirectory == "/tmp/tinytitan-cache")
         #expect(multi.promptCacheDiskMiB == 16_384)
         let rollback = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--prompt-cache-mode", "off",
         ])
         #expect(rollback.promptCacheMode == .off)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--prompt-cache-mode", "many",
             ])
         }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--prompt-cache-entries", "0",
             ])
         }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--prompt-cache-memory-mib", "4097",
             ])
         }
@@ -517,13 +517,13 @@ struct ServerArgumentTests {
 
     @Test func accepts256KContextAndRejectsUnsupportedValues() throws {
         let arguments = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--max-context", "262144",
         ])
         #expect(arguments.maxContext == 262_144)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--max-context", "100000",
             ])
         }
@@ -754,20 +754,20 @@ struct ServerArgumentTests {
 
     @Test func serverArgumentsGateEffortOnThinking() throws {
         let parsed = try ServerArguments.parse([
-            "--model", "model.gturbo",
+            "--model", "model.ssdai",
             "--thinking", "on",
             "--reasoning-effort", "medium",
         ])
         #expect(parsed.reasoningEffort == .medium)
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--reasoning-effort", "medium",
             ])
         }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
-                "--model", "model.gturbo",
+                "--model", "model.ssdai",
                 "--thinking", "on",
                 "--reasoning-effort", "high",
             ])

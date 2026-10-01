@@ -78,7 +78,7 @@ extension GFTokenizer {
 
     /// The folder to hand to `load(from:)` for a model directory, in either
     /// shape this project ships: a safetensors snapshot keeps `tokenizer.json`
-    /// at the directory root, a `.gturbo` install keeps it under `tokenizer/`.
+    /// at the directory root, a `.ssdai` install keeps it under `tokenizer/`.
     ///
     /// `tokenizerFolder(forModelDirectory:)` answers only the second shape --
     /// it is about locating a *sidecar* -- so a caller that has a model

@@ -532,7 +532,7 @@ IFS=',' read -r -a levels <<< "${TINYTITAN_CAT_THINKING[$idx]}"
 # The catalog says which engines can serve an install. Almost every install has
 # exactly one -- a MoE family is GPU-only because the CPU engine does not
 # implement those shapes, and a converted snapshot is CPU-only -- but the dense
-# Qwen 3.5 models (2B/4B/9B) are implemented by *both*, from the same `.gturbo`
+# Qwen 3.5 models (2B/4B/9B) are implemented by *both*, from the same `.ssdai`
 # payload. That is the one case where the engine is a real choice, so it is the
 # one case that asks.
 IFS=',' read -r -a engines <<< "${TINYTITAN_CAT_ENGINES[$idx]:-$MODEL_BACKEND}"

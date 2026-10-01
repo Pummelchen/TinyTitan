@@ -11,7 +11,7 @@ difference between two quantizations of one model is a paired number (mean
 dNLL, standard error, t) rather than two means that could hide a real effect.
 
     python3.13 benchmark/quant_perplexity_ab.py \\
-        models/qwen3.5_4B_4Bit .build/qwen35-4b-uniform.gturbo models/qwen3.5_4B_8Bit
+        models/qwen3.5_4B_4Bit .build/qwen35-4b-uniform.ssdai models/qwen3.5_4B_8Bit
 
 The first install is the baseline; each other is compared against it. A run
 whose token hash does not match the baseline is refused rather than averaged —

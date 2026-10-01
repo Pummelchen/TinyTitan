@@ -1,7 +1,7 @@
 import Foundation
 
 /// Qwen3.5-MoE 35B-A3B family knowledge (Qwen 3.6 and Ornith 1.5): the
-/// tensor-name contract of the repacked `.gturbo`. The MTP sidecar shares
+/// tensor-name contract of the repacked `.ssdai`. The MTP sidecar shares
 /// the layer naming but stores its adapter tensors at the archive root.
 extension TensorSchema {
     private static func qwenLayer(_ layer: Int, _ suffix: String) -> String {

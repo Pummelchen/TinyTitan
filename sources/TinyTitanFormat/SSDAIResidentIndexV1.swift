@@ -1,6 +1,6 @@
 import Foundation
 
-package struct GTurboResidentIndexHeaderV1: Equatable, Sendable {
+package struct SSDAIResidentIndexHeaderV1: Equatable, Sendable {
     package let indexSize: UInt64
     package let residentSize: UInt64
     package let entryCount: UInt64
@@ -12,7 +12,7 @@ package struct GTurboResidentIndexHeaderV1: Equatable, Sendable {
     }
 }
 
-package struct GTurboResidentIndexEntryV1: Equatable, Sendable {
+package struct SSDAIResidentIndexEntryV1: Equatable, Sendable {
     package let name: String
     package let dtype: UInt8
     package let fileOffset: UInt64
@@ -40,17 +40,17 @@ package struct GTurboResidentIndexEntryV1: Equatable, Sendable {
     }
 }
 
-package enum GTurboResidentIndexCodec {
+package enum SSDAIResidentIndexCodec {
     package static func decodeHeader(_ bytes: UnsafeRawBufferPointer) throws
-        -> GTurboResidentIndexHeaderV1
+        -> SSDAIResidentIndexHeaderV1
     {
-        guard bytes.count >= GTurboFormatV1.residentHeaderBytes else {
+        guard bytes.count >= SSDAIFormatV1.residentHeaderBytes else {
             throw TinyTitanFormatError.truncated(field: "resident.header")
         }
         guard let base = bytes.baseAddress else {
             throw TinyTitanFormatError.truncated(field: "resident.header")
         }
-        return GTurboResidentIndexHeaderV1(
+        return SSDAIResidentIndexHeaderV1(
             indexSize: readU64(base, 0),
             residentSize: readU64(base, 8),
             entryCount: readU64(base, 16))
@@ -58,43 +58,43 @@ package enum GTurboResidentIndexCodec {
 
     package static func decodeRegion(
         _ bytes: UnsafeRawBufferPointer,
-        header: GTurboResidentIndexHeaderV1
-    ) throws -> [GTurboResidentIndexEntryV1] {
-        guard header.indexSize <= GTurboFormatV1.residentIndexMaxBytes else {
+        header: SSDAIResidentIndexHeaderV1
+    ) throws -> [SSDAIResidentIndexEntryV1] {
+        guard header.indexSize <= SSDAIFormatV1.residentIndexMaxBytes else {
             throw TinyTitanFormatError.invalid(
                 field: "resident.indexSize", reason: "exceeds v1 metadata cap")
         }
         guard header.indexSize <= UInt64(bytes.count),
-            header.indexSize >= UInt64(GTurboFormatV1.residentHeaderBytes),
-            header.indexSize % GTurboFormatV1.alignmentBytes == 0
+            header.indexSize >= UInt64(SSDAIFormatV1.residentHeaderBytes),
+            header.indexSize % SSDAIFormatV1.alignmentBytes == 0
         else {
             throw TinyTitanFormatError.truncated(field: "resident.index")
         }
-        let tableBytes = try gturboCheckedMultiply(
+        let tableBytes = try ssdaiCheckedMultiply(
             header.entryCount,
-            UInt64(GTurboFormatV1.residentEntryBytes),
+            UInt64(SSDAIFormatV1.residentEntryBytes),
             field: "resident.entryTable")
-        let tableEnd = try gturboCheckedAdd(
-            UInt64(GTurboFormatV1.residentHeaderBytes),
+        let tableEnd = try ssdaiCheckedAdd(
+            UInt64(SSDAIFormatV1.residentHeaderBytes),
             tableBytes, field: "resident.entryTable")
         guard tableEnd <= header.indexSize, header.entryCount <= UInt64(Int.max) else {
             throw TinyTitanFormatError.invalid(
                 field: "resident.entryTable", reason: "outside index")
         }
-        let residentEnd = try gturboCheckedAdd(
+        let residentEnd = try ssdaiCheckedAdd(
             header.indexSize, header.residentSize,
             field: "resident.payload")
         guard let base = bytes.baseAddress else {
             throw TinyTitanFormatError.truncated(field: "resident.entryTable")
         }
-        var result: [GTurboResidentIndexEntryV1] = []
+        var result: [SSDAIResidentIndexEntryV1] = []
         result.reserveCapacity(Int(header.entryCount))
         var names = Set<String>()
         var payloadRanges: [(start: UInt64, end: UInt64, field: String)] = []
         payloadRanges.reserveCapacity(Int(header.entryCount) * 3)
         for index in 0..<Int(header.entryCount) {
             let offset =
-                GTurboFormatV1.residentHeaderBytes + index * GTurboFormatV1.residentEntryBytes
+                SSDAIFormatV1.residentHeaderBytes + index * SSDAIFormatV1.residentEntryBytes
             let entry = base.advanced(by: offset)
             let nameOffset = UInt64(readU32(entry, 0))
             let nameLength = UInt64(readU16(entry, 4))
@@ -103,7 +103,7 @@ package enum GTurboResidentIndexCodec {
                     field: "resident.entries[\(index)].reserved",
                     reason: "must be zero")
             }
-            let nameEnd = try gturboCheckedAdd(
+            let nameEnd = try ssdaiCheckedAdd(
                 nameOffset, nameLength,
                 field: "resident.entries[\(index)].name")
             guard nameOffset >= tableEnd, nameEnd <= header.indexSize,
@@ -124,7 +124,7 @@ package enum GTurboResidentIndexCodec {
                     reason: "invalid UTF-8 or duplicate")
             }
             let dtype = readU8(entry, 6)
-            guard GTurboFormatV1.DType(rawValue: dtype) != nil else {
+            guard SSDAIFormatV1.DType(rawValue: dtype) != nil else {
                 throw TinyTitanFormatError.invalid(
                     field: "resident.entries[\(index)].dtype",
                     reason: "unknown dtype")
@@ -172,7 +172,7 @@ package enum GTurboResidentIndexCodec {
                     ))
             }
             result.append(
-                GTurboResidentIndexEntryV1(
+                SSDAIResidentIndexEntryV1(
                     name: name, dtype: dtype, fileOffset: fileOffset, sizeBytes: sizeBytes,
                     shape: shape,
                     scaleOffset: scaleOffset, scaleSize: scaleSize,
@@ -194,7 +194,7 @@ package enum GTurboResidentIndexCodec {
 
     private static func validatePrimaryPayloadRange(
         offset: UInt64, size: UInt64,
-        header: GTurboResidentIndexHeaderV1,
+        header: SSDAIResidentIndexHeaderV1,
         residentEnd: UInt64,
         field: String
     ) throws {
@@ -209,7 +209,7 @@ package enum GTurboResidentIndexCodec {
 
     private static func validateOptionalPayloadRange(
         offset: UInt64, size: UInt64,
-        header: GTurboResidentIndexHeaderV1,
+        header: SSDAIResidentIndexHeaderV1,
         residentEnd: UInt64,
         field: String
     ) throws {
@@ -228,11 +228,11 @@ package enum GTurboResidentIndexCodec {
 
     private static func validateContainedPayloadRange(
         offset: UInt64, size: UInt64,
-        header: GTurboResidentIndexHeaderV1,
+        header: SSDAIResidentIndexHeaderV1,
         residentEnd: UInt64,
         field: String
     ) throws {
-        let end = try gturboCheckedAdd(offset, size, field: field)
+        let end = try ssdaiCheckedAdd(offset, size, field: field)
         guard offset >= header.indexSize, end <= residentEnd else {
             throw TinyTitanFormatError.invalid(
                 field: field, reason: "range outside resident payload")

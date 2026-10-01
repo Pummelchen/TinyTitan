@@ -5,10 +5,10 @@ private let supportedModelNames = SupportedModelSource.all.map(\.name).joined(se
 
 private let usage = """
     Usage:
-      TinyTitanRepack [--model <\(supportedModelNames)>] --output <model.gturbo> [--overwrite] [--resume]
-      TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id> --output <model.gturbo> [--overwrite]
-      TinyTitanRepack --discard-partial --output <model.gturbo>
-      TinyTitanRepack --verify-install --input-gturbo <model.gturbo>
+      TinyTitanRepack [--model <\(supportedModelNames)>] --output <model.ssdai> [--overwrite] [--resume]
+      TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id> --output <model.ssdai> [--overwrite]
+      TinyTitanRepack --discard-partial --output <model.ssdai>
+      TinyTitanRepack --verify-install --input-ssdai <model.ssdai>  (--input-gturbo still accepted)
       TinyTitanRepack --help
 
     The installer streams the selected Qwen 3.6 or text-only Ornith 1.5 checkpoint
@@ -30,7 +30,7 @@ private struct Arguments {
     var resume = false
     var discardPartial = false
     var verifyInstall = false
-    var inputGTurbo: String?
+    var inputSSDAI: String?
     var inputSnapshot: String?
     var localModelID: String?
     var draftHead = false
@@ -74,14 +74,14 @@ private struct Arguments {
             case "--share-ngram-table":
                 parsed.shareNgramTable = true
                 index += 1
-            case "--output", "--input-gturbo", "--input-snapshot", "--model-id":
+            case "--output", "--input-ssdai", "--input-gturbo", "--input-snapshot", "--model-id":
                 guard index + 1 < values.count else {
                     throw ParseError.missingValue(flag)
                 }
                 if flag == "--output" {
                     parsed.output = values[index + 1]
-                } else if flag == "--input-gturbo" {
-                    parsed.inputGTurbo = values[index + 1]
+                } else if flag == "--input-ssdai" || flag == "--input-gturbo" {
+                    parsed.inputSSDAI = values[index + 1]
                 } else if flag == "--input-snapshot" {
                     parsed.inputSnapshot = values[index + 1]
                 } else {
@@ -100,7 +100,7 @@ private struct Arguments {
             guard parsed.output != nil else {
                 throw ParseError.missingRequired("--output")
             }
-            guard parsed.inputGTurbo == nil,
+            guard parsed.inputSSDAI == nil,
                 parsed.inputSnapshot == nil,
                 parsed.localModelID == nil,
                 !parsed.modelExplicit,
@@ -122,7 +122,7 @@ private struct Arguments {
                 throw ParseError.missingRequired("--output")
             }
             guard !parsed.modelExplicit,
-                parsed.inputGTurbo == nil,
+                parsed.inputSSDAI == nil,
                 !parsed.resume,
                 !parsed.discardPartial,
                 !parsed.verifyInstall
@@ -134,18 +134,18 @@ private struct Arguments {
             return parsed
         }
         if parsed.verifyInstall {
-            guard parsed.inputGTurbo != nil else {
-                throw ParseError.missingRequired("--input-gturbo")
+            guard parsed.inputSSDAI != nil else {
+                throw ParseError.missingRequired("--input-ssdai")
             }
             guard parsed.output == nil, !parsed.overwrite, !parsed.resume else {
-                throw ParseError.invalidMode("verification accepts only --input-gturbo")
+                throw ParseError.invalidMode("verification accepts only --input-ssdai")
             }
         } else {
             guard parsed.output != nil else {
                 throw ParseError.missingRequired("--output")
             }
-            guard parsed.inputGTurbo == nil else {
-                throw ParseError.invalidMode("--input-gturbo requires --verify-install")
+            guard parsed.inputSSDAI == nil else {
+                throw ParseError.invalidMode("--input-ssdai requires --verify-install")
             }
         }
         return parsed
@@ -197,10 +197,10 @@ private func run(_ values: [String]) async -> Int32 {
         }
     }
 
-    if arguments.verifyInstall, let input = arguments.inputGTurbo {
+    if arguments.verifyInstall, let input = arguments.inputSSDAI {
         do {
             let result = try VerifiedInstallTool.run(
-                options: VerifyInstallOptions(inputGTurbo: input))
+                options: VerifyInstallOptions(inputSSDAI: input))
             print("Verified \(result.fileCount) files (\(result.bytesVerified) bytes)")
             print("Receipt: \(result.receiptPath)")
             return 0

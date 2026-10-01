@@ -3,7 +3,7 @@ import Tokenizers
 
 /// Tokenizer wrapper for the compatible Qwen3.5-MoE ChatML model family.
 ///
-/// Loads tokenizer sidecars in a completed `.gturbo/tokenizer/` directory.
+/// Loads tokenizer sidecars in a completed `.ssdai/tokenizer/` directory.
 /// Exposes typed accessors for the IDs the generator actually needs (BOS / EOS /
 /// pad / end-of-turn) and adapts encode/decode to Int32 to match the buffer
 /// types kernels consume.

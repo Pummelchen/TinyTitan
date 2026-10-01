@@ -527,7 +527,7 @@ test("generateRoute reports absent prerequisites and a broken catalog", () => {
   writeFileSync(
     join(directory, "manifest.json"),
     JSON.stringify({
-      magic: "GTURBO",
+      magic: "SSDAI",
       modelID: "qwen3.5-2b",
       quant: { routedExpert: { weightBits: 4 } },
       arch: { family: "qwen3_5_dense", hiddenActivation: "silu" },

@@ -192,7 +192,7 @@ extension ModelLoaderTests {
             root["modelDirectoryPath"] =
                 dir
                 .deletingLastPathComponent()
-                .appendingPathComponent("other.gturbo")
+                .appendingPathComponent("other.ssdai")
                 .standardizedFileURL
                 .path
         }

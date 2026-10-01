@@ -49,7 +49,7 @@ struct TokenizerLoadCoordinatorTests {
     @Test("Model tokenizer sidecar is discovered")
     func modelTokenizerSidecarIsDiscovered() throws {
         let root = try temporaryDirectory()
-        let model = root.appendingPathComponent("model.gturbo", isDirectory: true)
+        let model = root.appendingPathComponent("model.ssdai", isDirectory: true)
         let modelTokenizer = model.appendingPathComponent("tokenizer", isDirectory: true)
         try FileManager.default.createDirectory(
             at: modelTokenizer, withIntermediateDirectories: true)
@@ -63,7 +63,7 @@ struct TokenizerLoadCoordinatorTests {
     @Test("Missing model tokenizer sidecar returns nil")
     func missingModelTokenizerSidecarReturnsNil() throws {
         let root = try temporaryDirectory()
-        let model = root.appendingPathComponent("model.gturbo", isDirectory: true)
+        let model = root.appendingPathComponent("model.ssdai", isDirectory: true)
         try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
 
         let resolved = GFTokenizer.tokenizerFolder(forModelDirectory: model)
@@ -91,7 +91,7 @@ struct TokenizerLoadCoordinatorTests {
     @Test("A model path that is a regular file is refused by name")
     func modelPathThatIsAFileIsRefused() async throws {
         let root = try temporaryDirectory()
-        let file = root.appendingPathComponent("not-a-directory.gturbo")
+        let file = root.appendingPathComponent("not-a-directory.ssdai")
         try Data("{}".utf8).write(to: file)
 
         do {

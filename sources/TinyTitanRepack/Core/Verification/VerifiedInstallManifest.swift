@@ -19,10 +19,10 @@ struct Manifest: Decodable {
     let numLayers: Int
     let expertStride: UInt64
     let sourceSnapshotHash: String?
-    /// Decoded through `GTurboManifestQuantV1`, whose hand-written `Codable`
+    /// Decoded through `SSDAIManifestQuantV1`, whose hand-written `Codable`
     /// keeps the open set of per-tensor width keys. A synthesised decoder
     /// would drop them, which is the bug this whole check exists to catch.
-    let quant: GTurboManifestQuantV1?
+    let quant: SSDAIManifestQuantV1?
 }
 
 struct PackedExpertsLayout: Decodable {

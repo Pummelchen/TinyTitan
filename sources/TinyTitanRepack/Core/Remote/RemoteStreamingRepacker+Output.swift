@@ -175,7 +175,7 @@ extension RemoteStreamingRepacker {
         // 8-bit 2B/4B/9B came back as `qwen3.5-2b_4-Bit` and the catalog
         // skipped them as duplicates of the 4-bit ones. A MoE install is
         // unaffected: the layer-derived width still overrides this below.
-        var bits = GTurboJSON.QuantBitWidths(
+        var bits = SSDAIJSON.QuantBitWidths(
             embedding: metadata.baseBits,
             attention: metadata.baseBits,
             router: 8,
@@ -221,9 +221,9 @@ extension RemoteStreamingRepacker {
             bits.routedExpert = routedBits
         }
         let files = audit.outputFiles.map {
-            ($0.relativePath, GTurboJSON.FileEntry(size: $0.size, sha256: $0.sha256))
+            ($0.relativePath, SSDAIJSON.FileEntry(size: $0.size, sha256: $0.sha256))
         }
-        let data = try GTurboJSON.encodeManifest(
+        let data = try SSDAIJSON.encodeManifest(
             plan: plan,
             modelID: modelIDOverride ?? plan.matchedModelID ?? "unknown/snapshot",
             sourceSnapshotHash: "sha256:" + metadata.indexSha256Hex,

@@ -10,7 +10,7 @@ public enum Quantization {
     // disk and on the GPU as the native `bfloat` type; in Swift we carry the
     // raw bits as `UInt16` and convert via this pair. Round-half-to-even on
     // encode matches the IEEE-754 default. No NaN/Inf special-case: fixtures
-    // are bounded and finite, and the .gturbo importer copies BF16 bytes
+    // are bounded and finite, and the .ssdai importer copies BF16 bytes
     // through unchanged so we never call the encoder on weight data.
 
     @inline(always)

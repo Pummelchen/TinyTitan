@@ -2,12 +2,12 @@ import Darwin
 import Foundation
 import TinyTitanFormat
 
-/// Path validation for GTurbo directory operations uses the single
-/// `GTurboPathValidator` from TinyTitanFormat (there is deliberately no duplicate
+/// Path validation for SSDAI directory operations uses the single
+/// `SSDAIPathValidator` from TinyTitanFormat (there is deliberately no duplicate
 /// here; both this module and the runtime validate against the same rules).
 /// Errors from the validator are wrapped into `RepackError` at the call sites.
 
-package final class GTurboDirectoryAccess {
+package final class SSDAIDirectoryAccess {
     package let rootPath: String
     private let rootFD: Int32
 
@@ -27,7 +27,7 @@ package final class GTurboDirectoryAccess {
 
     package func openFile(_ relativePath: String) throws -> Int32 {
         do {
-            try GTurboPathValidator.validateRelativePath(
+            try SSDAIPathValidator.validateRelativePath(
                 relativePath,
                 field: "path.\(relativePath)")
         } catch {
@@ -267,13 +267,13 @@ package final class GTurboDirectoryAccess {
 
     package func atomicWrite(_ data: Data, to relativePath: String) throws {
         do {
-            try GTurboPathValidator.validateBasename(
+            try SSDAIPathValidator.validateBasename(
                 relativePath, field: "output.\(relativePath)")
         } catch {
             throw RepackError.configurationInvalid(
                 detail: "unsafe output path \(relativePath): \(error)")
         }
-        let temporary = ".gturbo-\(UUID().uuidString).tmp"
+        let temporary = ".ssdai-\(UUID().uuidString).tmp"
         var fd = openat(
             rootFD, temporary,
             O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,

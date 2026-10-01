@@ -2,7 +2,7 @@
 //  Model+Loading.swift
 //  TinyTitan
 //
-//  Opening a `.gturbo` install: the hashing/verification pipeline that turns a
+//  Opening a `.ssdai` install: the hashing/verification pipeline that turns a
 //  directory into a typed `Model`, split out of `Model.swift` so the model's
 //  shape and the code that loads it are separate reads.
 //
@@ -14,7 +14,7 @@ import TinyTitanFormat
 
 extension Model {
 
-    /// Open a `.gturbo/` directory and return a typed handle. Eagerly verifies
+    /// Open a `.ssdai/` directory and return a typed handle. Eagerly verifies
     /// SHA-256 of `model_weights.bin` and `packed_experts/layout.json`; layer
     /// files are verified lazily on first `routedExpert(...)` touch.
     /// lint:allow-long a sequential load pipeline -- open, hash, verify the
@@ -38,7 +38,7 @@ extension Model {
         let resolvedIntegrityPolicy = integrityPolicy ?? .fullSha256
 
         // -- create the directory handle and open manifest
-        let modelDirectory = try GTurboModelDirectory(rootURL: directoryURL)
+        let modelDirectory = try SSDAIModelDirectory(rootURL: directoryURL)
         let manifestFD: Int32
         do {
             manifestFD = try modelDirectory.openFile("manifest.json")

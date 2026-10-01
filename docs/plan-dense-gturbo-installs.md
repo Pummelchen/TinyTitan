@@ -147,7 +147,7 @@ to be scoped. It was caught by reading `TinyTitanServer --catalog` output rather
 than by a test; nothing in the suite compares a manifest's slots to its
 contents.
 
-`docs/gturbo-format.md` now exists, and documents all of the above.
+`docs/ssdai-format.md` now exists, and documents all of the above.
 
 A fifth is a migration concern rather than a format one. `install_one` treats
 "the directory exists" as "installed", so a user who installed the 2B before

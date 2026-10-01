@@ -44,7 +44,7 @@ directory is the name of the target:
   (the `@main`/top-level entry) and a `Core/` library part that the tests
   import. `Package.swift` declares them as two targets each, with
   `exclude: ["Command"]` on the library half.
-- **`TinyTitanFormat`, `TinyTitanMemory`, `ContinuityCore`** — the `.gturbo` format
+- **`TinyTitanFormat`, `TinyTitanMemory`, `ContinuityCore`** — the `.ssdai` format
   types, the memory layer, and the session/continuity engine. Each is a
   standalone library with its own README where its contract needs prose.
 - **`TinyTitanBench`, `TinyTitanValidation`, `TinyTitanKernelsC`** — the benchmark
@@ -545,7 +545,7 @@ stray ones that had accumulated outside `.build/`.
   `RealForwardRunner` → the phase files.
 - The server's is `HTTPServer.swift` (the actor) → `HTTPServerHandler.swift`
   (the per-connection handler) → `HTTPServerHandler+Routes.swift`.
-- The format is `docs/gturbo-format.md`; the memory layer is
+- The format is `docs/ssdai-format.md`; the memory layer is
   `sources/ContinuityCore/README.md` and `docs/agent-memory.md`.
 - The state of the tree, including what is verified and what is not, is the
   project tracker in the wiki (`Project-Tracker`).

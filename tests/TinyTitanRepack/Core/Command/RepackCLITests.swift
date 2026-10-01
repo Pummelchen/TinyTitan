@@ -93,7 +93,7 @@ struct RepackCLITests {
 
     private func temporaryOutput(_ tag: String) -> String {
         (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("tinytitanrepack-\(tag)-\(UUID().uuidString).gturbo")
+            .appendingPathComponent("tinytitanrepack-\(tag)-\(UUID().uuidString).ssdai")
     }
 
     private func clean(_ output: String) {

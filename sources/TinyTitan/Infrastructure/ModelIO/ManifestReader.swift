@@ -20,7 +20,7 @@ public enum ManifestReader {
     public static let defaultMaxBytes: UInt64 = 64 * 1024 * 1024
 
     /// Recognized flag keys. Anything else in `manifest.flags` is an error.
-    public static let knownFlags: Set<String> = GTurboFormatV1.knownFlags
+    public static let knownFlags: Set<String> = SSDAIFormatV1.knownFlags
 
     /// Fixed required entries. Packed-layer filenames come from layout.json and
     /// are cross-validated only after that document is decoded.
@@ -34,7 +34,7 @@ public enum ManifestReader {
         expecting: ArchConfig,
         maxBytes: UInt64 = defaultMaxBytes
     ) throws -> Manifest {
-        let directory = try GTurboModelDirectory(rootURL: directoryURL)
+        let directory = try SSDAIModelDirectory(rootURL: directoryURL)
         let data: Data
         do {
             data = try directory.readMetadata("manifest.json", maxBytes: maxBytes)
@@ -50,26 +50,26 @@ public enum ManifestReader {
     ) throws -> Manifest {
         let manifest: Manifest
         do {
-            let wire = try GTurboManifestCodec.decodeUnchecked(data)
-            guard wire.magic == GTurboFormatV1.magic else {
-                throw ModelError.notAGTurboDirectory
+            let wire = try SSDAIManifestCodec.decodeUnchecked(data)
+            guard SSDAIFormatV1.isSupportedMagic(wire.magic) else {
+                throw ModelError.notASSDAIDirectory
             }
-            guard wire.versionMajor == GTurboFormatV1.versionMajor,
+            guard wire.versionMajor == SSDAIFormatV1.versionMajor,
                 wire.versionMinor >= 0
             else {
                 throw ModelError.unsupportedVersion(
                     major: wire.versionMajor,
                     minor: wire.versionMinor)
             }
-            for key in wire.flags.keys where !GTurboFormatV1.knownFlags.contains(key) {
+            for key in wire.flags.keys where !SSDAIFormatV1.knownFlags.contains(key) {
                 throw ModelError.unknownFlag(name: key)
             }
-            if wire.expertStride % GTurboFormatV1.alignmentBytes != 0 {
+            if wire.expertStride % SSDAIFormatV1.alignmentBytes != 0 {
                 throw ModelError.expertStrideNotPageAligned(
                     stride: wire.expertStride,
-                    pageSize: Int(GTurboFormatV1.alignmentBytes))
+                    pageSize: Int(SSDAIFormatV1.alignmentBytes))
             }
-            try GTurboManifestCodec.validate(wire)
+            try SSDAIManifestCodec.validate(wire)
             manifest = Manifest(wire: wire)
         } catch let error as ModelError {
             throw error
@@ -93,7 +93,7 @@ public enum ManifestReader {
         directoryURL: URL,
         maxBytes: UInt64 = defaultMaxBytes
     ) throws -> Manifest {
-        let directory = try GTurboModelDirectory(rootURL: directoryURL)
+        let directory = try SSDAIModelDirectory(rootURL: directoryURL)
         let data: Data
         do {
             data = try directory.readMetadata("manifest.json", maxBytes: maxBytes)
@@ -102,26 +102,26 @@ public enum ManifestReader {
         }
         let manifest: Manifest
         do {
-            let wire = try GTurboManifestCodec.decodeUnchecked(data)
-            guard wire.magic == GTurboFormatV1.magic else {
-                throw ModelError.notAGTurboDirectory
+            let wire = try SSDAIManifestCodec.decodeUnchecked(data)
+            guard SSDAIFormatV1.isSupportedMagic(wire.magic) else {
+                throw ModelError.notASSDAIDirectory
             }
-            guard wire.versionMajor == GTurboFormatV1.versionMajor,
+            guard wire.versionMajor == SSDAIFormatV1.versionMajor,
                 wire.versionMinor >= 0
             else {
                 throw ModelError.unsupportedVersion(
                     major: wire.versionMajor,
                     minor: wire.versionMinor)
             }
-            for key in wire.flags.keys where !GTurboFormatV1.knownFlags.contains(key) {
+            for key in wire.flags.keys where !SSDAIFormatV1.knownFlags.contains(key) {
                 throw ModelError.unknownFlag(name: key)
             }
-            if wire.expertStride % GTurboFormatV1.alignmentBytes != 0 {
+            if wire.expertStride % SSDAIFormatV1.alignmentBytes != 0 {
                 throw ModelError.expertStrideNotPageAligned(
                     stride: wire.expertStride,
-                    pageSize: Int(GTurboFormatV1.alignmentBytes))
+                    pageSize: Int(SSDAIFormatV1.alignmentBytes))
             }
-            try GTurboManifestCodec.validate(wire)
+            try SSDAIManifestCodec.validate(wire)
             manifest = Manifest(wire: wire)
         } catch let error as ModelError {
             throw error
@@ -141,9 +141,9 @@ public enum ManifestReader {
     /// Read the manifest's model identity and compatible runtime family without
     /// mapping weights or creating a Metal device.
     public static func peekIdentity(directoryURL: URL) throws -> ManifestIdentity {
-        let directory = try GTurboModelDirectory(rootURL: directoryURL)
+        let directory = try SSDAIModelDirectory(rootURL: directoryURL)
         let data = try directory.readMetadata("manifest.json", maxBytes: 4 * 1024 * 1024)
-        let wire = try JSONDecoder().decode(GTurboManifestV1.self, from: data)
+        let wire = try JSONDecoder().decode(SSDAIManifestV1.self, from: data)
         guard !wire.modelID.isEmpty else {
             throw ModelError.indexCorrupt(detail: "manifest modelID is empty")
         }
@@ -365,13 +365,13 @@ public enum ManifestReader {
 }
 
 extension ManifestFileEntry {
-    fileprivate init(wire: GTurboManifestFileV1) {
+    fileprivate init(wire: SSDAIManifestFileV1) {
         self.init(size: wire.size, sha256: wire.sha256)
     }
 }
 
 extension ManifestArch {
-    fileprivate init(wire: GTurboManifestArchV1) {
+    fileprivate init(wire: SSDAIManifestArchV1) {
         self.init(
             hiddenSize: wire.hiddenSize,
             ffnIntermediate: wire.ffnIntermediate,
@@ -426,7 +426,7 @@ extension ManifestArch {
 }
 
 extension ManifestQuantSlot {
-    fileprivate init(wire: GTurboManifestQuantSlotV1) {
+    fileprivate init(wire: SSDAIManifestQuantSlotV1) {
         self.init(
             weightBits: wire.weightBits, scheme: wire.scheme,
             scaleType: wire.scaleType, biasType: wire.biasType,
@@ -435,7 +435,7 @@ extension ManifestQuantSlot {
 }
 
 extension ManifestQuant {
-    fileprivate init(wire: GTurboManifestQuantV1) {
+    fileprivate init(wire: SSDAIManifestQuantV1) {
         self.init(
             embedding: ManifestQuantSlot(wire: wire.embedding),
             attention: ManifestQuantSlot(wire: wire.attention),
@@ -446,7 +446,7 @@ extension ManifestQuant {
 }
 
 extension Manifest {
-    fileprivate init(wire: GTurboManifestV1) {
+    fileprivate init(wire: SSDAIManifestV1) {
         self.init(
             magic: wire.magic,
             versionMajor: wire.versionMajor,

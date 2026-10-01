@@ -80,7 +80,7 @@ extension RemotePayloadCopyTests {
 
         // The finished install passes post-hoc verification.
         let verify = try VerifiedInstallTool.run(
-            options: VerifyInstallOptions(inputGTurbo: remoteOutput))
+            options: VerifyInstallOptions(inputSSDAI: remoteOutput))
         #expect(verify.unexpectedEntries.isEmpty)
         #expect(verify.fileCount > 0)
     }

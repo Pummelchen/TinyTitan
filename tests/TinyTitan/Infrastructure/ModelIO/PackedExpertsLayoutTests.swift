@@ -9,7 +9,7 @@ import Testing
     /// sub-tensors each. Returns the directory URL.
     static func writeToyLayout() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-layout-test-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-layout-test-\(UUID().uuidString)")
         let exp = dir.appendingPathComponent("packed_experts")
         try FileManager.default.createDirectory(at: exp, withIntermediateDirectories: true)
 
@@ -93,7 +93,7 @@ import Testing
 
     @Test func missingLayoutJsonThrowsMissingFile() throws {
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-no-layout-\(UUID().uuidString)")
+            .appendingPathComponent("ssdai-no-layout-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: dir.appendingPathComponent("packed_experts"),

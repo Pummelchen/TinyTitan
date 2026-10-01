@@ -133,7 +133,7 @@ satisfy a check, a gate, a benchmark or a release. The 4-bit download is about
 19.5 GB and the 8-bit about 36.9 GB. The installer streams the pinned checkpoint
 without staging the full source, so it needs `HF_TOKEN` only if one is requested;
 cancellation preserves verified completed ranges, which `--resume` continues and
-`--discard-partial --output <model.gturbo>` removes.
+`--discard-partial --output <model.ssdai>` removes.
 
 ```bash
 swift run -c release TinyTitanRepack --model ornith15-8bit --output models/ornith-1.5_35B_A3B_8Bit
@@ -147,7 +147,7 @@ corruption and does not need a re-download — re-issue the receipt in place
 (re-hashes the payload against the manifest and rebinds it to the current path):
 
 ```bash
-swift run -c release TinyTitanRepack --verify-install --input-gturbo models/qwen3.5_4B_4Bit
+swift run -c release TinyTitanRepack --verify-install --input-ssdai models/qwen3.5_4B_4Bit
 ```
 
 Never hand-edit the receipt to match the new path: the path binding is what detects
@@ -160,7 +160,7 @@ called supported, and how to re-issue install receipts after the checkout moves.
 ## Test rules
 
 Before a model run, require macOS 26+, Swift 6.4+, enough disk, acceptable
-`memory_pressure -Q`, a completed selected `.gturbo` installation, and no process
+`memory_pressure -Q`, a completed selected `.ssdai` installation, and no process
 from `pgrep -fl 'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm'`.
 If a check fails, inform the user and stop; do not terminate apps or delete or
 reinstall the model.
@@ -248,7 +248,7 @@ is deliberately kept smaller than the full supported set to save disk, so a gold
 target with no install there is *reported as not checked* — by `tools/release.sh` and in
 the release notes — and never "fixed" by downloading, converting, repacking or
 re-installing it. No gate, benchmark or release step may fetch a model to satisfy
-itself. Do not download a full checkpoint, duplicate the `.gturbo` model, create a
+itself. Do not download a full checkpoint, duplicate the `.ssdai` model, create a
 worktree, or purge caches just to run tests, a gate or a release.
 
 For performance results, build release once and follow the

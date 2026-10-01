@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from gturbo_reader import GTurboWeights, PackedExperts
+from ssdai_reader import SSDAIWeights, PackedExperts
 
 HC, D, EPS = 4, 2560, 1e-6
 HC_DIM = HC * D
@@ -94,7 +94,7 @@ class Reference:
     def __init__(self, model_dir, budget=INDEXER_BUDGET):
         self.budget = budget
         self.dir = Path(model_dir)
-        self.w = GTurboWeights(model_dir)
+        self.w = SSDAIWeights(model_dir)
         self.experts = PackedExperts(model_dir)
         self.ple = json.loads((self.dir / "ple_constants.json").read_text())
         self.table = np.memmap(self.dir / "ngram_table.bin", dtype=np.float16, mode="r").reshape(

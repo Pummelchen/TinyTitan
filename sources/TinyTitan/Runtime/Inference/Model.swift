@@ -25,7 +25,7 @@ public enum ExpertStreamingMode: Sendable {
     case pread(slotCount: Int)
 }
 
-/// Loaded `.gturbo/` model. Resident weights live behind one mmap'd
+/// Loaded `.ssdai/` model. Resident weights live behind one mmap'd
 /// `MTLBuffer`; routed expert weights live behind per-layer streaming
 /// backends opened lazily on first touch.
 public struct Model {
@@ -190,7 +190,7 @@ public struct Model {
     let packedExpertsLayout: PackedExpertsLayout
     let manifest: Manifest
     let directoryURL: URL
-    let modelDirectory: GTurboModelDirectory
+    let modelDirectory: SSDAIModelDirectory
     let sharedTargetWeights: SharedTargetWeights?
 
     /// Lazy state. Held inside a reference box so `Model` can stay a struct
@@ -241,7 +241,7 @@ public struct Model {
         packedExpertsLayout: PackedExpertsLayout,
         manifest: Manifest,
         directoryURL: URL,
-        modelDirectory: GTurboModelDirectory,
+        modelDirectory: SSDAIModelDirectory,
         sharedTargetWeights: SharedTargetWeights? = nil,
         promotedBF16: [String: TensorView] = [:]
     ) {

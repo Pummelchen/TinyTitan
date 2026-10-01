@@ -7,7 +7,7 @@ import Testing
     @Test func importsMTPWithExplicitModelIdentityAndReceipt() async throws {
         let root = Self.temporaryRoot("local-mtp-import")
         let snapshot = (root as NSString).appendingPathComponent("snapshot")
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         defer { try? FileManager.default.removeItem(atPath: root) }
         _ = try SyntheticSnapshot.buildQwenMTP(at: snapshot)
 

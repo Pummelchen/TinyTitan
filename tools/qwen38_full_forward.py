@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
-from gturbo_reader import GTurboWeights, PackedExperts  # noqa: E402
+from ssdai_reader import SSDAIWeights, PackedExperts  # noqa: E402
 from qwen38_parity import (  # noqa: E402
     HC,
     D,
@@ -45,7 +45,7 @@ def hc_write(w, prefix: str, wide: np.ndarray, block_out: np.ndarray) -> np.ndar
 
 def main():
     model_dir, dump_dir = sys.argv[1], Path(sys.argv[2])
-    w = GTurboWeights(model_dir)
+    w = SSDAIWeights(model_dir)
     experts = PackedExperts(model_dir)
     token = int((dump_dir / "token.txt").read_text().strip())
 

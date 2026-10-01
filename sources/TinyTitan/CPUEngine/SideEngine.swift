@@ -353,13 +353,13 @@ public final class CPUQwen35SideEngineModel: SideEngineModel, @unchecked Sendabl
     private let tokenizer: GFTokenizer
 
     public init(snapshotDirectory: URL, threads: Int? = nil) async throws {
-        // A shipped `.gturbo` install and a flat HF/affine snapshot are both
+        // A shipped `.ssdai` install and a flat HF/affine snapshot are both
         // reached, the same rule the batch command uses.
         let snapshot: AffineSnapshot
         if FileManager.default.fileExists(
             atPath: snapshotDirectory.appendingPathComponent("manifest.json").path)
         {
-            snapshot = try AffineSnapshot(gturbo: snapshotDirectory)
+            snapshot = try AffineSnapshot(ssdai: snapshotDirectory)
         } else {
             snapshot = try AffineSnapshot(directory: snapshotDirectory)
         }

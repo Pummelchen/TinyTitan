@@ -199,7 +199,7 @@ public enum VerifiedInstallReceiptReader {
                     invalidates its receipt. Re-issue it in place (re-hashes \
                     the payload, no re-download) with:
                       swift run -c release TinyTitanRepack --verify-install \
-                    --input-gturbo \(actualPath)
+                    --input-ssdai \(actualPath)
                     """)
         }
     }

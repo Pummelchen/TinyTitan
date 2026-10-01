@@ -1,6 +1,6 @@
 import Foundation
 
-package struct GTurboSubTensorV1: Codable, Equatable, Sendable {
+package struct SSDAISubTensorV1: Codable, Equatable, Sendable {
     package let offset: UInt64
     package let size: UInt64
     package let dtype: String
@@ -19,16 +19,16 @@ package struct GTurboSubTensorV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboExpertV1: Codable, Equatable, Sendable {
+package struct SSDAIExpertV1: Codable, Equatable, Sendable {
     package let expert: Int?
     package let physicalRank: Int?
     package let offset: UInt64
     package let size: UInt64
-    package let tensors: [String: GTurboSubTensorV1]
+    package let tensors: [String: SSDAISubTensorV1]
 
     package init(
         expert: Int?, physicalRank: Int?, offset: UInt64, size: UInt64,
-        tensors: [String: GTurboSubTensorV1]
+        tensors: [String: SSDAISubTensorV1]
     ) {
         self.expert = expert
         self.physicalRank = physicalRank
@@ -38,27 +38,27 @@ package struct GTurboExpertV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboLayerV1: Codable, Equatable, Sendable {
+package struct SSDAILayerV1: Codable, Equatable, Sendable {
     package let layer: Int
     package let file: String
-    package let experts: [GTurboExpertV1]
+    package let experts: [SSDAIExpertV1]
 
-    package init(layer: Int, file: String, experts: [GTurboExpertV1]) {
+    package init(layer: Int, file: String, experts: [SSDAIExpertV1]) {
         self.layer = layer
         self.file = file
         self.experts = experts
     }
 }
 
-package struct GTurboPackedExpertsLayoutV1: Codable, Equatable, Sendable {
+package struct SSDAIPackedExpertsLayoutV1: Codable, Equatable, Sendable {
     package let expertStride: UInt64
     package let numLayers: Int
     package let expertsPerLayer: Int
-    package let layers: [GTurboLayerV1]
+    package let layers: [SSDAILayerV1]
 
     package init(
         expertStride: UInt64, numLayers: Int, expertsPerLayer: Int,
-        layers: [GTurboLayerV1]
+        layers: [SSDAILayerV1]
     ) {
         self.expertStride = expertStride
         self.numLayers = numLayers
@@ -67,21 +67,21 @@ package struct GTurboPackedExpertsLayoutV1: Codable, Equatable, Sendable {
     }
 }
 
-package enum GTurboPackedExpertsLayoutCodec {
-    package static func decode(_ data: Data) throws -> GTurboPackedExpertsLayoutV1 {
-        let layout: GTurboPackedExpertsLayoutV1
-        do { layout = try JSONDecoder().decode(GTurboPackedExpertsLayoutV1.self, from: data) } catch
+package enum SSDAIPackedExpertsLayoutCodec {
+    package static func decode(_ data: Data) throws -> SSDAIPackedExpertsLayoutV1 {
+        let layout: SSDAIPackedExpertsLayoutV1
+        do { layout = try JSONDecoder().decode(SSDAIPackedExpertsLayoutV1.self, from: data) } catch
         {
             throw TinyTitanFormatError.invalid(
                 field: "packed_experts/layout.json", reason: "\(error)")
         }
-        try GTurboV1StructuralValidator.validate(layout)
+        try SSDAIV1StructuralValidator.validate(layout)
         return layout
     }
 }
 
-package enum GTurboV1StructuralValidator {
-    package static func validate(_ layout: GTurboPackedExpertsLayoutV1) throws {
+package enum SSDAIV1StructuralValidator {
+    package static func validate(_ layout: SSDAIPackedExpertsLayoutV1) throws {
         // A dense model packs no experts, and the repacker writes that honestly:
         // `expertsPerLayer: 0`, `expertStride: 0`, an empty `layers` list, while
         // `numLayers` still counts the transformer layers. Everything below is
@@ -107,7 +107,7 @@ package enum GTurboV1StructuralValidator {
         }
         guard layout.numLayers > 0, layout.expertsPerLayer > 0,
             layout.expertStride > 0,
-            layout.expertStride % GTurboFormatV1.alignmentBytes == 0,
+            layout.expertStride % SSDAIFormatV1.alignmentBytes == 0,
             layout.layers.count == layout.numLayers
         else {
             throw TinyTitanFormatError.invalid(
@@ -122,10 +122,10 @@ package enum GTurboV1StructuralValidator {
                 throw TinyTitanFormatError.invalid(
                     field: "layout.layers", reason: "duplicate or invalid layer")
             }
-            try GTurboPathValidator.validateBasename(
+            try SSDAIPathValidator.validateBasename(
                 layer.file,
                 field: "layout.layers[\(layer.layer)].file")
-            let fileKey = GTurboPathValidator.appleFilesystemKey(layer.file)
+            let fileKey = SSDAIPathValidator.appleFilesystemKey(layer.file)
             guard fileKey != "layout.json" else {
                 throw TinyTitanFormatError.invalid(
                     field: "layout.layers[\(layer.layer)].file",
@@ -166,7 +166,7 @@ package enum GTurboV1StructuralValidator {
                         field: "layout.layers[\(layer.layer)].experts",
                         reason: "duplicate or invalid expert mapping")
                 }
-                let expectedOffset = try gturboCheckedMultiply(
+                let expectedOffset = try ssdaiCheckedMultiply(
                     UInt64(physical), layout.expertStride,
                     field: "expert.offset")
                 guard expert.offset == expectedOffset, expert.size == layout.expertStride else {
@@ -186,7 +186,7 @@ package enum GTurboV1StructuralValidator {
                             field: "expert[\(logical)].tensors.\(name)",
                             reason: "invalid dtype or shape")
                     }
-                    let end = try gturboCheckedAdd(
+                    let end = try ssdaiCheckedAdd(
                         tensor.offset, tensor.size,
                         field: "tensor.\(name).range")
                     guard end <= expert.size else {
@@ -210,8 +210,8 @@ package enum GTurboV1StructuralValidator {
     }
 
     package static func crossValidate(
-        manifest: GTurboManifestV1,
-        layout: GTurboPackedExpertsLayoutV1
+        manifest: SSDAIManifestV1,
+        layout: SSDAIPackedExpertsLayoutV1
     ) throws {
         try crossValidate(
             manifestNumLayers: manifest.numLayers,
@@ -226,7 +226,7 @@ package enum GTurboV1StructuralValidator {
         manifestExpertsPerLayer: Int,
         manifestExpertStride: UInt64,
         manifestFileSizes: [String: UInt64],
-        layout: GTurboPackedExpertsLayoutV1
+        layout: SSDAIPackedExpertsLayoutV1
     ) throws {
         guard manifestNumLayers == layout.numLayers,
             manifestExpertsPerLayer == layout.expertsPerLayer,
@@ -236,7 +236,7 @@ package enum GTurboV1StructuralValidator {
                 field: "manifest/layout",
                 reason: "dimension mismatch")
         }
-        let expectedLayerSize = try gturboCheckedMultiply(
+        let expectedLayerSize = try ssdaiCheckedMultiply(
             UInt64(layout.expertsPerLayer),
             layout.expertStride,
             field: "layout.layerSize")

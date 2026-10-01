@@ -3,7 +3,7 @@
 # The whole-model check for the dense CPU models on disk: `TinyTitanBench cpu35`
 # must print "all continuations correct" for each.
 #
-# The equivalence gate (tests/TinyTitan/CPUEngine/DenseGTurboEquivalenceTests.swift,
+# The equivalence gate (tests/TinyTitan/CPUEngine/DenseSSDAIEquivalenceTests.swift,
 # driven by tools/repack_dense.sh) compares logits against the snapshot a repack
 # came from. This asks the other question -- does the engine continue real text
 # correctly end to end -- so the two are complements, not duplicates.
@@ -39,7 +39,7 @@ fi
 cd "$ROOT" || exit 1
 for model in "${targets[@]+"${targets[@]}"}"; do
   [ -f "$MODELS/$model/manifest.json" ] || {
-    echo "no $MODELS/$model (an installed .gturbo)"; exit 1; }
+    echo "no $MODELS/$model (an installed .ssdai)"; exit 1; }
 done
 
 swift build -c release --product TinyTitanBench || exit 1

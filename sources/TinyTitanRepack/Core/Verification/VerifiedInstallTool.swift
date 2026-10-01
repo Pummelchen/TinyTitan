@@ -3,10 +3,10 @@ import Foundation
 import TinyTitanFormat
 
 public struct VerifyInstallOptions: Sendable {
-    public let inputGTurbo: String
+    public let inputSSDAI: String
 
-    public init(inputGTurbo: String) {
-        self.inputGTurbo = inputGTurbo
+    public init(inputSSDAI: String) {
+        self.inputSSDAI = inputSSDAI
     }
 }
 
@@ -36,9 +36,9 @@ public enum VerifiedInstallTool {
     public static let payloadMaxBytes: UInt64 = RepackPlanner.maximumPassthroughFileBytes
 
     public static func run(options: VerifyInstallOptions) throws -> VerifyInstallResult {
-        let access = try GTurboDirectoryAccess(rootPath: options.inputGTurbo)
+        let access = try SSDAIDirectoryAccess(rootPath: options.inputSSDAI)
         let manifestPath = "manifest.json"
-        try GTurboPathValidator.validateRelativePath(
+        try SSDAIPathValidator.validateRelativePath(
             manifestPath, field: "manifest.files.manifest.json")
         let manifestSize = try access.fileSize(manifestPath)
         let manifestSha = try access.hash(manifestPath, noCache: true)
@@ -53,7 +53,7 @@ public enum VerifiedInstallTool {
             guard let entry = manifest.files[relativePath] else { continue }
             // Path validation before any filesystem operation: reject `..`,
             // absolute and non-normalized names, and duplicate filesystem keys.
-            try GTurboPathValidator.validateRelativePath(
+            try SSDAIPathValidator.validateRelativePath(
                 relativePath, field: "manifest.files.\(relativePath)")
             guard entry.size <= payloadMaxBytes else {
                 throw RepackError.configurationInvalid(
@@ -104,8 +104,8 @@ public enum VerifiedInstallTool {
             unexpectedEntries: unexpectedEntries)
     }
 
-    static func validatePackedExpertLayout(inputGTurbo: String) throws {
-        let access = try GTurboDirectoryAccess(rootPath: inputGTurbo)
+    static func validatePackedExpertLayout(inputSSDAI: String) throws {
+        let access = try SSDAIDirectoryAccess(rootPath: inputSSDAI)
         let manifest = try loadManifest(access: access)
         try validatePackedExpertLayout(access: access, manifest: manifest)
     }
@@ -116,7 +116,7 @@ public enum VerifiedInstallTool {
     /// itself, so this reads it in two bounded steps -- the 24-byte header, then
     /// exactly the index it names -- and never touches the payload.
     private static func validateQuantAgainstResident(
-        access: GTurboDirectoryAccess,
+        access: SSDAIDirectoryAccess,
         manifest: Manifest
     ) throws {
         guard let quant = manifest.quant else {
@@ -127,19 +127,19 @@ public enum VerifiedInstallTool {
             throw RepackError.configurationInvalid(detail: "manifest missing \(relativePath)")
         }
         let headerBytes = try access.readPrefix(
-            relativePath, maxBytes: UInt64(GTurboFormatV1.residentHeaderBytes))
-        guard headerBytes.count == GTurboFormatV1.residentHeaderBytes else {
+            relativePath, maxBytes: UInt64(SSDAIFormatV1.residentHeaderBytes))
+        guard headerBytes.count == SSDAIFormatV1.residentHeaderBytes else {
             throw RepackError.configurationInvalid(
                 detail: "\(relativePath) is shorter than the resident index header")
         }
         let header = try headerBytes.withUnsafeBytes {
-            try GTurboResidentIndexCodec.decodeHeader($0)
+            try SSDAIResidentIndexCodec.decodeHeader($0)
         }
-        guard header.indexSize <= UInt64(GTurboFormatV1.residentIndexMaxBytes) else {
+        guard header.indexSize <= UInt64(SSDAIFormatV1.residentIndexMaxBytes) else {
             throw RepackError.configurationInvalid(
                 detail:
                     "\(relativePath) index \(header.indexSize) exceeds the "
-                    + "\(GTurboFormatV1.residentIndexMaxBytes)-byte v1 cap")
+                    + "\(SSDAIFormatV1.residentIndexMaxBytes)-byte v1 cap")
         }
         let indexBytes = try access.readPrefix(relativePath, maxBytes: header.indexSize)
         guard indexBytes.count == Int(header.indexSize) else {
@@ -149,7 +149,7 @@ public enum VerifiedInstallTool {
                     + "claims an index of \(header.indexSize)")
         }
         let entries = try indexBytes.withUnsafeBytes {
-            try GTurboResidentIndexCodec.decodeRegion($0, header: header)
+            try SSDAIResidentIndexCodec.decodeRegion($0, header: header)
         }
         try validateQuantAgainstResident(
             quant: quant,
@@ -187,9 +187,9 @@ public enum VerifiedInstallTool {
     /// makes the failure name the tensors that would be dequantized wrongly
     /// rather than every tensor the writer happened not to annotate.
     static func validateQuantAgainstResident(
-        quant: GTurboManifestQuantV1,
+        quant: SSDAIManifestQuantV1,
         expertsPerLayer: Int,
-        entries: [GTurboResidentIndexEntryV1]
+        entries: [SSDAIResidentIndexEntryV1]
     ) throws {
         // Every dtype-0 entry is a packed u32 `.weight`: the planner only marks a
         // tensor quantized when its source dtype is u32 and its name ends in
@@ -199,7 +199,7 @@ public enum VerifiedInstallTool {
         var impliedCounts: [Int: Int] = [:]
         var unreadable: [String] = []
 
-        for entry in entries where entry.dtype == GTurboFormatV1.DType.u32.rawValue {
+        for entry in entries where entry.dtype == SSDAIFormatV1.DType.u32.rawValue {
             let implied = try impliedWidth(of: entry)
             impliedCounts[implied, default: 0] += 1
             // Overrides are keyed by stem, without the `.weight` suffix.
@@ -211,7 +211,7 @@ public enum VerifiedInstallTool {
             if let declared = quant.overrides?[stem]?.weightBits {
                 resolved = declared
             } else if expertsPerLayer == 0 {
-                // `AffineSnapshot.init(gturbo:)`: the embedding slot covers the
+                // `AffineSnapshot.init(ssdai:)`: the embedding slot covers the
                 // tied head as well, and the attention slot is the default.
                 resolved =
                     stem.hasSuffix("embed_tokens") || stem.hasSuffix("lm_head")
@@ -279,7 +279,7 @@ public enum VerifiedInstallTool {
     /// occupies `rows * columns * bits / 8` bytes and nothing else. The shape is
     /// the *logical* width in the resident index, unlike a safetensors header,
     /// which is what makes this invertible.
-    private static func impliedWidth(of entry: GTurboResidentIndexEntryV1) throws -> Int {
+    private static func impliedWidth(of entry: SSDAIResidentIndexEntryV1) throws -> Int {
         let rows = UInt64(entry.shape[0])
         let columns = UInt64(entry.shape[1])
         guard rows > 0, columns > 0 else {
@@ -328,11 +328,11 @@ public enum VerifiedInstallTool {
     /// refuses — the opposite of what a verifier is for. It also means a manifest
     /// listing `verified-install.json` is rejected rather than hashed and then
     /// overwritten by the receipt this run writes.
-    private static func loadManifest(access: GTurboDirectoryAccess) throws -> Manifest {
+    private static func loadManifest(access: SSDAIDirectoryAccess) throws -> Manifest {
         let data = try loadMetadataJSON(access: access, relativePath: "manifest.json")
         do {
-            let wire = try GTurboManifestCodec.decodeUnchecked(data)
-            try GTurboManifestCodec.validate(wire)
+            let wire = try SSDAIManifestCodec.decodeUnchecked(data)
+            try SSDAIManifestCodec.validate(wire)
         } catch {
             throw RepackError.configurationInvalid(
                 detail: "manifest.json rejected by the format validator: \(error)")
@@ -344,7 +344,7 @@ public enum VerifiedInstallTool {
         }
     }
 
-    private static func loadLayout(access: GTurboDirectoryAccess) throws -> PackedExpertsLayout {
+    private static func loadLayout(access: SSDAIDirectoryAccess) throws -> PackedExpertsLayout {
         do {
             let data = try loadMetadataJSON(
                 access: access,
@@ -357,16 +357,16 @@ public enum VerifiedInstallTool {
     }
 
     private static func loadMetadataJSON(
-        access: GTurboDirectoryAccess,
+        access: SSDAIDirectoryAccess,
         relativePath: String
     ) throws -> Data {
-        try GTurboPathValidator.validateRelativePath(
+        try SSDAIPathValidator.validateRelativePath(
             relativePath, field: "metadata.\(relativePath)")
         return try access.readMetadata(relativePath, maxBytes: metadataMaxBytes)
     }
 
     private static func validatePackedExpertLayout(
-        access: GTurboDirectoryAccess,
+        access: SSDAIDirectoryAccess,
         manifest: Manifest
     ) throws {
         let layoutRelativePath = "packed_experts/layout.json"
@@ -374,7 +374,7 @@ public enum VerifiedInstallTool {
             throw RepackError.configurationInvalid(detail: "manifest missing \(layoutRelativePath)")
         }
         let layout = try loadLayout(access: access)
-        let alignment = GTurboFormatV1.alignmentBytes
+        let alignment = SSDAIFormatV1.alignmentBytes
         guard layout.expertStride == manifest.expertStride,
             layout.numLayers == manifest.numLayers,
             layout.expertsPerLayer == manifest.expertsPerLayer
@@ -400,7 +400,7 @@ public enum VerifiedInstallTool {
                 throw RepackError.configurationInvalid(
                     detail: "packed_experts/\(layer.file) expert count mismatch")
             }
-            try GTurboPathValidator.validateBasename(
+            try SSDAIPathValidator.validateBasename(
                 layer.file, field: "packed_experts/layout.json layers[\(layer.layer)].file")
             // A layer with no routed experts has no file, and writing one
             // empty `layer_NN.bin` per layer to satisfy this loop would be
@@ -443,10 +443,10 @@ public enum VerifiedInstallTool {
                     throw RepackError.configurationInvalid(
                         detail: "\(relativePath) expert \(expertID) size mismatch")
                 }
-                guard expert.offset % GTurboFormatV1.alignmentBytes == 0 else {
+                guard expert.offset % SSDAIFormatV1.alignmentBytes == 0 else {
                     throw RepackError.configurationInvalid(
                         detail:
-                            "\(relativePath) expert \(expertID) offset is not aligned to \(GTurboFormatV1.alignmentBytes) bytes"
+                            "\(relativePath) expert \(expertID) offset is not aligned to \(SSDAIFormatV1.alignmentBytes) bytes"
                     )
                 }
                 guard expert.offset <= actualSize,
@@ -460,7 +460,7 @@ public enum VerifiedInstallTool {
     }
 
     private static func findUnexpectedEntries(
-        access: GTurboDirectoryAccess,
+        access: SSDAIDirectoryAccess,
         manifest: Manifest
     ) throws -> [String] {
         let declaredFiles = Set(manifest.files.keys)

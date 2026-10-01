@@ -1,7 +1,7 @@
 import Foundation
 
 /// Qwen3.8-Flash-Next (`qwen4_exp`) family knowledge: the tensor-name contract
-/// of the repacked `.gturbo`. Every name here was checked against the pinned
+/// of the repacked `.ssdai`. Every name here was checked against the pinned
 /// checkpoint's own index (all 3,164 entries); see
 /// docs/qwen38-flash-next-port.md.
 ///

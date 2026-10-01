@@ -4,7 +4,7 @@ import Foundation
 /// `IndexEntry` records. Used by the resident writer and the
 /// matching loader-side parsers; kept in one place so the on-disk layout
 /// changes only here.
-enum GTurboBinary {
+enum SSDAIBinary {
 
     static let indexHeaderBytes: Int = 24
     static let indexEntryBytes: Int = 72
@@ -22,7 +22,7 @@ enum GTurboBinary {
         writeU64LE(buf, &off, entryCount)
     }
 
-    /// Write one `IndexEntry` (72 bytes, LE) at `dst`. See gturbo-format.md.
+    /// Write one `IndexEntry` (72 bytes, LE) at `dst`. See ssdai-format.md.
     static func writeIndexEntry(
         into dst: UnsafeMutableRawPointer,
         entry: ResidentEntry,

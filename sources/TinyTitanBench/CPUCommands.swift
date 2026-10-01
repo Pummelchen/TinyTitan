@@ -173,7 +173,7 @@ extension TinyTitanBench {
         var description: String {
             switch self {
             case .notAModel(let path):
-                return "\(path) is neither a .gturbo install (no manifest.json) nor a "
+                return "\(path) is neither a .ssdai install (no manifest.json) nor a "
                     + "safetensors snapshot (no config.json)"
             case .unreadableVocabulary(let path):
                 return "\(path) carries neither a vocab.json mapping nor a tokenizer, "
@@ -185,7 +185,7 @@ extension TinyTitanBench {
     /// Loads a dense CPU model in either shape it ships in.
     ///
     /// These commands took an affine safetensors snapshot only. That stopped
-    /// reaching a shipped model once the dense Qwen 3.5 family became `.gturbo`
+    /// reaching a shipped model once the dense Qwen 3.5 family became `.ssdai`
     /// installs: all six carry a `manifest.json` and no `config.json`, so the
     /// whole-model check could only run against a conversion intermediate -- and
     /// the 4B/9B intermediates were deleted to reclaim disk, leaving the 2B
@@ -196,7 +196,7 @@ extension TinyTitanBench {
         if FileManager.default.fileExists(
             atPath: directory.appendingPathComponent("manifest.json").path)
         {
-            return try AffineSnapshot(gturbo: directory)
+            return try AffineSnapshot(ssdai: directory)
         }
         guard
             FileManager.default.fileExists(
@@ -210,7 +210,7 @@ extension TinyTitanBench {
     /// The string-to-id and id-to-string mapping the `cpu35` checks read.
     ///
     /// A safetensors snapshot ships `vocab.json`, the same table the numpy
-    /// reference reads. A shipped `.gturbo` install ships a tokenizer
+    /// reference reads. A shipped `.ssdai` install ships a tokenizer
     /// directory instead and no `vocab.json`, so the engine's own tokenizer
     /// supplies the mapping there. Either way the ids are the model's own
     /// rather than a bench-local table that could drift from the reference.

@@ -15,7 +15,7 @@ extension AffineSnapshot {
     }
 
     public func floats(_ name: String) throws -> [Float] {
-        if case .gturbo(let index, let weights) = storage {
+        if case .ssdai(let index, let weights) = storage {
             guard let entry = index.entries[name] else {
                 throw SafeTensorsFile.Failure.missing(name)
             }
@@ -49,13 +49,13 @@ extension AffineSnapshot {
     public func has(_ name: String) -> Bool {
         switch storage {
         case .safetensors: return placement[name] != nil
-        case .gturbo(let index, _): return index.entries[name] != nil
+        case .ssdai(let index, _): return index.entries[name] != nil
         }
     }
 
     /// A quantized matrix by its `.weight` name.
     public func matrix(_ name: String) throws -> Matrix {
-        if case .gturbo(let index, let weights) = storage {
+        if case .ssdai(let index, let weights) = storage {
             return try Self.matrix(
                 name, index: index, weights: weights,
                 groupSize: groupSize, bits: bits(forStem: stem(of: name)))

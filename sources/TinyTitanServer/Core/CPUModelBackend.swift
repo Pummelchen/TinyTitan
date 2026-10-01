@@ -30,7 +30,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
     /// `(folder, thinking, effort)` cache rather than reusing this one.
     private let snapshotDirectory: URL
     /// The folder the tokenizer was loaded from: the model directory for a
-    /// snapshot, its `tokenizer/` sidecar for a `.gturbo` install. Kept so a
+    /// snapshot, its `tokenizer/` sidecar for a `.ssdai` install. Kept so a
     /// mid-session re-render reads from the same place the load did.
     private let tokenizerFolder: URL
     private let loadedReasoning: RequestReasoning
@@ -69,9 +69,9 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
     public static let contextCeiling = 32_768
 
     /// Accepts either shape the CPU engine can serve: an affine safetensors
-    /// snapshot, which the dense converter writes, or a `.gturbo` install,
+    /// snapshot, which the dense converter writes, or a `.ssdai` install,
     /// which is what every other model in this project is. The two carry the
-    /// same quantized tensors -- `tools/gturbo_diff_snapshot.py` checks that
+    /// same quantized tensors -- `tools/ssdai_diff_snapshot.py` checks that
     /// rather than assuming it -- so this is a storage difference, not a
     /// semantic one.
     ///
@@ -85,14 +85,14 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         resident: Bool = true,
         thinkingMode: ModelThinkingMode = .off
     ) async throws {
-        // A `.gturbo` declares itself with a manifest; a snapshot does not.
+        // A `.ssdai` declares itself with a manifest; a snapshot does not.
         // `manifest.json` is also what the catalog keys on, so the two agree
         // about which shape a directory is.
-        let isGTurbo = FileManager.default.fileExists(
+        let isSSDAI = FileManager.default.fileExists(
             atPath: snapshotDirectory.appendingPathComponent("manifest.json").path)
         let snapshot =
-            isGTurbo
-            ? try AffineSnapshot(gturbo: snapshotDirectory)
+            isSSDAI
+            ? try AffineSnapshot(ssdai: snapshotDirectory)
             : try AffineSnapshot(directory: snapshotDirectory)
         guard let family = snapshot.family else {
             throw CPUBackendError.unsupported(
@@ -103,12 +103,12 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         let engine = try CPUQwen35(snapshot: snapshot)
         threads = engine.threads
         model = engine
-        // A snapshot keeps its tokenizer at the directory root; a `.gturbo`
+        // A snapshot keeps its tokenizer at the directory root; a `.ssdai`
         // keeps it under `tokenizer/`. The folder is kept, not just used: a
         // request that switches thinking mode re-renders through this
         // tokenizer, and re-deriving the folder there is how the re-render
         // came to hand `load(from:)` a directory that has no `tokenizer.json`
-        // -- which every `.gturbo` install has, so the switch failed for all
+        // -- which every `.ssdai` install has, so the switch failed for all
         // of them.
         guard
             let folder = GFTokenizer.resolvedTokenizerFolder(

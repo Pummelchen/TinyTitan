@@ -303,9 +303,9 @@ extension RemoteStreamingRepacker {
             .appendingPathComponent("packed_experts") as NSString)
             .appendingPathComponent("layout.json")
         let expertStride = plan.layers.first(where: { $0.expertsPerLayer > 0 })?.expertStride ?? 0
-        let layoutData = try GTurboJSON.encodeLayout(plan: plan, expertStride: expertStride)
+        let layoutData = try SSDAIJSON.encodeLayout(plan: plan, expertStride: expertStride)
         try writeSmall(path: layoutPath, data: layoutData)
-        try GTurboLayoutValidator.validate(path: layoutPath, plan: plan)
+        try SSDAILayoutValidator.validate(path: layoutPath, plan: plan)
         try recordOutputFile(
             relativePath: "packed_experts/layout.json",
             path: layoutPath,

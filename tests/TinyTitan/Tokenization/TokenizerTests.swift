@@ -295,7 +295,7 @@ struct TokenizerTests {
 /// The folder `load(from:)` can read, for both shapes this project ships.
 ///
 /// A safetensors snapshot keeps `tokenizer.json` at the model directory's root
-/// and a `.gturbo` install keeps it under `tokenizer/`, and
+/// and a `.ssdai` install keeps it under `tokenizer/`, and
 /// `tokenizerFolder(forModelDirectory:)` answers only the second -- it is the
 /// *sidecar* lookup, not the general one. Callers that resolve a model
 /// directory and then load need the resolver below, and getting that wrong is

@@ -1,6 +1,6 @@
 import Foundation
 
-enum GTurboLayoutValidator {
+enum SSDAILayoutValidator {
     static func validate(path: String, plan: RepackPlan) throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],

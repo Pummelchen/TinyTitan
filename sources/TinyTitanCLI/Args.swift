@@ -137,7 +137,7 @@ extension Args {
         usage: TinyTitanCLI --model <dir> (--prompt <string> | --messages-file <path>) [options]
 
         required:
-          --model <dir>             Path to a .gturbo model directory.
+          --model <dir>             Path to a .ssdai model directory.
           --prompt <string>         Raw-completion prompt.
           --messages-file <path>    JSON chat messages with role and content fields.
 

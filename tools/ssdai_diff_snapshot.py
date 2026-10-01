@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diff a repacked `.gturbo` resident payload against the snapshot it came from.
+"""Diff a repacked `.ssdai` resident payload against the snapshot it came from.
 
 A repack is a byte copy -- TinyTitan's quantizer and the repacker both use affine
 group-64, and `RepackPlanner` copies a source `u32 .weight` into the resident
@@ -7,11 +7,11 @@ file unchanged -- so a correct repack is exactly equal to its source. That
 makes this comparison exact rather than approximate, which is the point: it
 catches a misread `ArchInfo` field or a wrong destination name as a byte
 difference here, instead of as fluent nonsense after the CPU engine starts
-reading `.gturbo`.
+reading `.ssdai`.
 
-    python3 tools/gturbo_diff_snapshot.py <model.gturbo> <snapshot-dir>
+    python3 tools/ssdai_diff_snapshot.py <model.ssdai> <snapshot-dir>
 
-Reads the `.gturbo` resident index directly (layout: `GTurboEncoders.swift`,
+Reads the `.ssdai` resident index directly (layout: `SSDAIEncoders.swift`,
 24-byte header and 72-byte entries) and the snapshot's safetensors shards, so
 it needs neither the Swift runtime nor a model in memory.
 """
@@ -27,16 +27,16 @@ INDEX_HEADER_BYTES = 24
 INDEX_ENTRY_BYTES = 72
 
 
-def read_resident(gturbo: Path) -> dict[str, list[tuple[str, bytes]]]:
+def read_resident(ssdai: Path) -> dict[str, list[tuple[str, bytes]]]:
     """name -> [(part, bytes)] for weight/scales/biases of every entry."""
-    raw = (gturbo / "model_weights.bin").read_bytes()
+    raw = (ssdai / "model_weights.bin").read_bytes()
     index_size, resident_size, entry_count = struct.unpack_from("<QQQ", raw, 0)
     entries_base = INDEX_HEADER_BYTES
 
     out: dict[str, list[tuple[str, bytes]]] = {}
     for i in range(entry_count):
         off = entries_base + i * INDEX_ENTRY_BYTES
-        # Layout per GTurboEncoders.writeIndexEntry: nameOffset u32, nameLen u16,
+        # Layout per SSDAIEncoders.writeIndexEntry: nameOffset u32, nameLen u16,
         # dtype u8, reserved u8, fileOffset u64, sizeBytes u64, shape[4] u32,
         # scaleOffset/scaleSize/biasOffset/biasSize u64. Reads as fixed offsets
         # rather than one format string because the mixed widths are easy to
@@ -81,9 +81,9 @@ def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    gturbo, snapshot = Path(argv[1]), Path(argv[2])
+    ssdai, snapshot = Path(argv[1]), Path(argv[2])
 
-    resident = read_resident(gturbo)
+    resident = read_resident(ssdai)
 
     index = json.loads((snapshot / "model.safetensors.index.json").read_text())
     shards: dict[str, dict[str, bytes]] = {}

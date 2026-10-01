@@ -8,7 +8,7 @@ import Foundation
 extension ServerArguments {
 
     public static let usage = """
-        usage: TinyTitanServer --model <completed .gturbo directory> [options]
+        usage: TinyTitanServer --model <completed .ssdai directory> [options]
                TinyTitanServer --models-dir <dir> --model <id or dir> [options]
                TinyTitanServer --catalog --models-dir <dir>
 

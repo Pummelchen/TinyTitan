@@ -3,7 +3,7 @@ import Testing
 @testable import TinyTitan
 
 /// The family tensor schemas are the single source of on-disk names; these
-/// pins keep a schema edit from silently un-mapping an installed `.gturbo`.
+/// pins keep a schema edit from silently un-mapping an installed `.ssdai`.
 @Suite struct FamilySchemaTests {
     @Test func qwen36SchemaMatchesTheRepackedNames() {
         let schema = TensorSchema.schema(for: .qwen36)

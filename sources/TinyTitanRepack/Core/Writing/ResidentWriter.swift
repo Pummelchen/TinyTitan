@@ -27,7 +27,7 @@ enum ResidentWriter {
     static func encodeIndex(plan: ResidentFilePlan) throws -> Data {
         let idxBytes = Int(plan.indexSize)
         // Bounded by the format's own v1 ceiling, which is the same constant
-        // `GTurboResidentIndexCodec` and `VerifiedInstallTool` enforce when they
+        // `SSDAIResidentIndexCodec` and `VerifiedInstallTool` enforce when they
         // read the file back. It was `BoundedScratch.defaultLimitBytes` (under
         // 1 MB), which is the per-worker *staging* budget and has nothing to do
         // with this allocation: the index is the finished output, and it scales
@@ -35,13 +35,13 @@ enum ResidentWriter {
         // staging budget refused an install the format itself can hold -- and
         // would have reported it as a scratch overrun rather than a size the
         // reader would also reject.
-        let limitBytes = Int(GTurboFormatV1.residentIndexMaxBytes)
+        let limitBytes = Int(SSDAIFormatV1.residentIndexMaxBytes)
         guard idxBytes <= limitBytes else {
             throw RepackError.scratchExceeded(requested: idxBytes, limit: limitBytes)
         }
         // A tensor name comes from the source manifest, so its length is input,
         // not an invariant of this build: the index stores it in a UInt16 and
-        // `GTurboBinary.writeIndexEntry` traps on anything longer. Checked here
+        // `SSDAIBinary.writeIndexEntry` traps on anything longer. Checked here
         // so an over-long name is a report naming the tensor -- and so the trap
         // inside the binary writer stays an invariant a caller cannot reach.
         for entry in plan.entries where entry.name.utf8.count > Int(UInt16.max) {
@@ -60,17 +60,17 @@ enum ResidentWriter {
             throw RepackError.configurationInvalid(
                 detail: "the resident index buffer could not be allocated")
         }
-        GTurboBinary.writeIndexHeader(
+        SSDAIBinary.writeIndexHeader(
             into: idxBase,
             indexSize: plan.indexSize,
             residentSize: plan.residentSize,
             entryCount: UInt64(plan.entries.count))
         let entriesBase = 24
-        let stringTableBase = entriesBase + plan.entries.count * GTurboBinary.indexEntryBytes
+        let stringTableBase = entriesBase + plan.entries.count * SSDAIBinary.indexEntryBytes
         for i in 0..<plan.entries.count {
-            let dst = idxBase.advanced(by: entriesBase + i * GTurboBinary.indexEntryBytes)
+            let dst = idxBase.advanced(by: entriesBase + i * SSDAIBinary.indexEntryBytes)
             let nameOff = UInt32(stringTableBase) + plan.stringTableOffsets[i]
-            GTurboBinary.writeIndexEntry(into: dst, entry: plan.entries[i], nameOffset: nameOff)
+            SSDAIBinary.writeIndexEntry(into: dst, entry: plan.entries[i], nameOffset: nameOff)
         }
         plan.stringTable.withUnsafeBufferPointer { src in
             guard let srcBase = src.baseAddress else { return }

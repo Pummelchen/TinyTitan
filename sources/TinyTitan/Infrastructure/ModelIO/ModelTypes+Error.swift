@@ -7,7 +7,7 @@ import Foundation
 /// Failure modes for the validation gates in `Model.load`.
 enum ModelError: Error, CustomStringConvertible, Equatable {
     case partialInstall(path: String)
-    case notAGTurboDirectory
+    case notASSDAIDirectory
     case unsupportedVersion(major: Int, minor: Int)
     case unknownFlag(name: String)
     case archMismatch(field: String, expected: String, actual: String)
@@ -33,9 +33,9 @@ enum ModelError: Error, CustomStringConvertible, Equatable {
     public var description: String {
         switch self {
         case .partialInstall(let p):
-            return "model.gturbo directory at \(p) is missing manifest.json"
-        case .notAGTurboDirectory:
-            return "manifest.json magic does not equal \"GTURBO\""
+            return "model directory at \(p) is missing manifest.json"
+        case .notASSDAIDirectory:
+            return "manifest.json magic is neither \"SSDAI\" nor the legacy \"GTURBO\""
         case .unsupportedVersion(let maj, let min):
             return "manifest version \(maj).\(min) is not supported (need 1.x)"
         case .unknownFlag(let n):
@@ -47,7 +47,7 @@ enum ModelError: Error, CustomStringConvertible, Equatable {
         case .expertStrideNotPageAligned(let s, let p):
             return "expertStride \(s) is not a multiple of page size \(p)"
         case .missingFile(let n):
-            return "model.gturbo is missing required file \(n)"
+            return "model.ssdai is missing required file \(n)"
         case .checksumMismatch(let f):
             return "SHA-256 of \(f) does not match manifest.files[\(f)].sha256"
         case .tensorNotFound(let n):

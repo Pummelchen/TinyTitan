@@ -1,7 +1,7 @@
 import Foundation
 import TinyTitanKernelsC
 
-/// CPU evaluation of one routed expert, reading the packed `.gturbo` expert
+/// CPU evaluation of one routed expert, reading the packed `.ssdai` expert
 /// block directly.
 ///
 /// This exists because decode leaves most of the machine unused: the GPU is

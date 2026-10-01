@@ -1,7 +1,7 @@
 import Foundation
 
 /// Qwen 3.5 **dense** family knowledge (2B, 4B, 9B): the tensor-name contract of
-/// a repacked dense `.gturbo`.
+/// a repacked dense `.ssdai`.
 ///
 /// Structurally this is the Qwen 3.6 layer stack -- Gated-DeltaNet linear
 /// attention, full attention every fourth layer, partial RoPE, an attention

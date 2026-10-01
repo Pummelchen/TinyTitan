@@ -1,6 +1,6 @@
 import Foundation
 
-package struct GTurboManifestFileV1: Codable, Equatable, Sendable {
+package struct SSDAIManifestFileV1: Codable, Equatable, Sendable {
     package let size: UInt64
     package let sha256: String
 
@@ -10,7 +10,7 @@ package struct GTurboManifestFileV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboManifestArchV1: Codable, Equatable, Sendable {
+package struct SSDAIManifestArchV1: Codable, Equatable, Sendable {
     package let hiddenSize: Int
     package let ffnIntermediate: Int
     package let moeIntermediateSize: Int
@@ -171,7 +171,7 @@ package struct GTurboManifestArchV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboManifestQuantSlotV1: Codable, Equatable, Sendable {
+package struct SSDAIManifestQuantSlotV1: Codable, Equatable, Sendable {
     /// Weight widths a reader in this project implements.
     ///
     /// The kernel arithmetic is `32 / bits` lanes per u32 word and `columns / 8`
@@ -199,12 +199,12 @@ package struct GTurboManifestQuantSlotV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
-    package let embedding: GTurboManifestQuantSlotV1
-    package let attention: GTurboManifestQuantSlotV1
-    package let router: GTurboManifestQuantSlotV1
-    package let sharedExpert: GTurboManifestQuantSlotV1
-    package let routedExpert: GTurboManifestQuantSlotV1
+package struct SSDAIManifestQuantV1: Codable, Equatable, Sendable {
+    package let embedding: SSDAIManifestQuantSlotV1
+    package let attention: SSDAIManifestQuantSlotV1
+    package let router: SSDAIManifestQuantSlotV1
+    package let sharedExpert: SSDAIManifestQuantSlotV1
+    package let routedExpert: SSDAIManifestQuantSlotV1
     /// Per-tensor width overrides, keyed by tensor stem.
     ///
     /// The writer emits these beside the five slots and the decoder used to
@@ -213,7 +213,7 @@ package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
     /// dequantizing those as 4-bit unpacks the same bytes wrongly. Absent in
     /// manifests written before this field existed, and in builds that have no
     /// overrides at all.
-    package let overrides: [String: GTurboManifestQuantSlotV1]?
+    package let overrides: [String: SSDAIManifestQuantSlotV1]?
 
     private enum CodingKeys: String, CodingKey {
         case embedding, attention, router, sharedExpert, routedExpert
@@ -225,17 +225,17 @@ package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
     /// K/V got read back as 4-bit.
     package init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        embedding = try container.decode(GTurboManifestQuantSlotV1.self, forKey: .embedding)
-        attention = try container.decode(GTurboManifestQuantSlotV1.self, forKey: .attention)
-        router = try container.decode(GTurboManifestQuantSlotV1.self, forKey: .router)
+        embedding = try container.decode(SSDAIManifestQuantSlotV1.self, forKey: .embedding)
+        attention = try container.decode(SSDAIManifestQuantSlotV1.self, forKey: .attention)
+        router = try container.decode(SSDAIManifestQuantSlotV1.self, forKey: .router)
         sharedExpert = try container.decode(
-            GTurboManifestQuantSlotV1.self,
+            SSDAIManifestQuantSlotV1.self,
             forKey: .sharedExpert)
         routedExpert = try container.decode(
-            GTurboManifestQuantSlotV1.self,
+            SSDAIManifestQuantSlotV1.self,
             forKey: .routedExpert)
         let dynamic = try decoder.container(keyedBy: AnyKey.self)
-        var overrides: [String: GTurboManifestQuantSlotV1] = [:]
+        var overrides: [String: SSDAIManifestQuantSlotV1] = [:]
         for key in dynamic.allKeys {
             guard CodingKeys(stringValue: key.stringValue) == nil else { continue }
             // `try`, not `try?`. A malformed override used to be dropped in
@@ -244,17 +244,17 @@ package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
             // payload unpacks the same bytes wrongly. Every key in this object
             // is one the writer emitted, so a key that does not decode is
             // corruption rather than an extension this build should tolerate.
-            let slot = try dynamic.decode(GTurboManifestQuantSlotV1.self, forKey: key)
+            let slot = try dynamic.decode(SSDAIManifestQuantSlotV1.self, forKey: key)
             // A width no kernel implements would be read by arithmetic that
             // assumes 4 or 8 bits per value (`32 / bits` lanes, `columns / 8`
             // packed words). Refusing here is the difference between a load
             // error and fluent nonsense.
-            guard GTurboManifestQuantSlotV1.supportedWeightBits.contains(slot.weightBits) else {
+            guard SSDAIManifestQuantSlotV1.supportedWeightBits.contains(slot.weightBits) else {
                 throw DecodingError.dataCorruptedError(
                     forKey: key, in: dynamic,
                     debugDescription: "quant override for \(key.stringValue) declares "
                         + "\(slot.weightBits) bits; supported: "
-                        + "\(GTurboManifestQuantSlotV1.supportedWeightBits.sorted())")
+                        + "\(SSDAIManifestQuantSlotV1.supportedWeightBits.sorted())")
             }
             overrides[key.stringValue] = slot
         }
@@ -289,12 +289,12 @@ package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
     }
 
     package init(
-        embedding: GTurboManifestQuantSlotV1,
-        attention: GTurboManifestQuantSlotV1,
-        router: GTurboManifestQuantSlotV1,
-        sharedExpert: GTurboManifestQuantSlotV1,
-        routedExpert: GTurboManifestQuantSlotV1,
-        overrides: [String: GTurboManifestQuantSlotV1]? = nil
+        embedding: SSDAIManifestQuantSlotV1,
+        attention: SSDAIManifestQuantSlotV1,
+        router: SSDAIManifestQuantSlotV1,
+        sharedExpert: SSDAIManifestQuantSlotV1,
+        routedExpert: SSDAIManifestQuantSlotV1,
+        overrides: [String: SSDAIManifestQuantSlotV1]? = nil
     ) {
         self.overrides = overrides
         self.embedding = embedding
@@ -305,29 +305,29 @@ package struct GTurboManifestQuantV1: Codable, Equatable, Sendable {
     }
 }
 
-package struct GTurboManifestV1: Codable, Equatable, Sendable {
+package struct SSDAIManifestV1: Codable, Equatable, Sendable {
     package let magic: String
     package let versionMajor: Int
     package let versionMinor: Int
     package let flags: [String: Bool]
     package let modelID: String
     package let sourceSnapshotHash: String?
-    package let arch: GTurboManifestArchV1
-    package let quant: GTurboManifestQuantV1?
-    package let files: [String: GTurboManifestFileV1]
+    package let arch: SSDAIManifestArchV1
+    package let quant: SSDAIManifestQuantV1?
+    package let files: [String: SSDAIManifestFileV1]
     package let expertsPerLayer: Int
     package let numLayers: Int
     package let expertStride: UInt64
     package let bitWidthOverridesHonored: Int?
 
     package init(
-        magic: String = GTurboFormatV1.magic,
-        versionMajor: Int = GTurboFormatV1.versionMajor,
-        versionMinor: Int = GTurboFormatV1.versionMinor,
+        magic: String = SSDAIFormatV1.magic,
+        versionMajor: Int = SSDAIFormatV1.versionMajor,
+        versionMinor: Int = SSDAIFormatV1.versionMinor,
         flags: [String: Bool], modelID: String,
-        sourceSnapshotHash: String?, arch: GTurboManifestArchV1,
-        quant: GTurboManifestQuantV1?,
-        files: [String: GTurboManifestFileV1],
+        sourceSnapshotHash: String?, arch: SSDAIManifestArchV1,
+        quant: SSDAIManifestQuantV1?,
+        files: [String: SSDAIManifestFileV1],
         expertsPerLayer: Int, numLayers: Int, expertStride: UInt64,
         bitWidthOverridesHonored: Int?
     ) {
@@ -347,32 +347,33 @@ package struct GTurboManifestV1: Codable, Equatable, Sendable {
     }
 }
 
-package enum GTurboManifestCodec {
-    package static func decode(_ data: Data) throws -> GTurboManifestV1 {
+package enum SSDAIManifestCodec {
+    package static func decode(_ data: Data) throws -> SSDAIManifestV1 {
         let manifest = try decodeUnchecked(data)
         try validate(manifest)
         return manifest
     }
 
-    package static func decodeUnchecked(_ data: Data) throws -> GTurboManifestV1 {
-        let manifest: GTurboManifestV1
-        do { manifest = try JSONDecoder().decode(GTurboManifestV1.self, from: data) } catch {
+    package static func decodeUnchecked(_ data: Data) throws -> SSDAIManifestV1 {
+        let manifest: SSDAIManifestV1
+        do { manifest = try JSONDecoder().decode(SSDAIManifestV1.self, from: data) } catch {
             throw TinyTitanFormatError.invalid(field: "manifest.json", reason: "\(error)")
         }
         return manifest
     }
 
-    package static func validate(_ manifest: GTurboManifestV1) throws {
-        guard manifest.magic == GTurboFormatV1.magic else {
-            throw TinyTitanFormatError.invalid(field: "manifest.magic", reason: "expected GTURBO")
+    package static func validate(_ manifest: SSDAIManifestV1) throws {
+        guard SSDAIFormatV1.isSupportedMagic(manifest.magic) else {
+            throw TinyTitanFormatError.invalid(
+                field: "manifest.magic", reason: "expected SSDAI (or the legacy GTURBO)")
         }
-        guard manifest.versionMajor == GTurboFormatV1.versionMajor,
+        guard manifest.versionMajor == SSDAIFormatV1.versionMajor,
             manifest.versionMinor >= 0
         else {
             throw TinyTitanFormatError.invalid(
                 field: "manifest.version", reason: "unsupported version")
         }
-        for flag in manifest.flags.keys where !GTurboFormatV1.knownFlags.contains(flag) {
+        for flag in manifest.flags.keys where !SSDAIFormatV1.knownFlags.contains(flag) {
             throw TinyTitanFormatError.invalid(
                 field: "manifest.flags.\(flag)", reason: "unknown v1 flag")
         }
@@ -385,7 +386,7 @@ package enum GTurboManifestCodec {
             isDense
                 ? (manifest.expertsPerLayer == 0 && manifest.expertStride == 0)
                 : (manifest.expertsPerLayer > 0 && manifest.expertStride > 0),
-            manifest.expertStride % GTurboFormatV1.alignmentBytes == 0
+            manifest.expertStride % SSDAIFormatV1.alignmentBytes == 0
         else {
             throw TinyTitanFormatError.invalid(
                 field: "manifest", reason: "invalid dimensions or stride")
@@ -439,8 +440,8 @@ package enum GTurboManifestCodec {
         let filePaths = manifest.files.keys.sorted()
         var canonicalPaths: [String: String] = [:]
         for path in filePaths {
-            try GTurboPathValidator.validateRelativePath(path, field: "manifest.files.\(path)")
-            let key = GTurboPathValidator.appleFilesystemKey(path)
+            try SSDAIPathValidator.validateRelativePath(path, field: "manifest.files.\(path)")
+            let key = SSDAIPathValidator.appleFilesystemKey(path)
             guard canonicalPaths.updateValue(path, forKey: key) == nil else {
                 throw TinyTitanFormatError.invalid(
                     field: "manifest.files.\(path)", reason: "filesystem-equivalent duplicate path")

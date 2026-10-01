@@ -164,7 +164,7 @@ def selection_mask(t: int, budget: int, compress_ratio: int, seed: int):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True, help="path to an installed .gturbo directory")
+    parser.add_argument("--model", required=True, help="path to an installed .ssdai directory")
     parser.add_argument(
         "--layer", type=int, default=None, help="full-attention layer to check (default: the first)"
     )

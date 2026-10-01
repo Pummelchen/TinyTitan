@@ -29,7 +29,7 @@ import TinyTitanFormat
             entries: [entry],
             stringTable: table,
             stringTableOffsets: [0],
-            indexSize: UInt64(24 + GTurboBinary.indexEntryBytes + table.count),
+            indexSize: UInt64(24 + SSDAIBinary.indexEntryBytes + table.count),
             residentSize: 2)
     }
 
@@ -37,7 +37,7 @@ import TinyTitanFormat
         let data = try ResidentWriter.encodeIndex(
             plan: plan(name: "model.layers.0.mlp.up_proj.weight"))
         #expect(
-            data.count == 24 + GTurboBinary.indexEntryBytes
+            data.count == 24 + SSDAIBinary.indexEntryBytes
                 + "model.layers.0.mlp.up_proj.weight".utf8.count)
     }
 
@@ -53,7 +53,7 @@ import TinyTitanFormat
     @Test func aNameOfExactlyTheLimitEncodes() throws {
         let name = String(repeating: "x", count: Int(UInt16.max))
         let data = try ResidentWriter.encodeIndex(plan: plan(name: name))
-        #expect(data.count == 24 + GTurboBinary.indexEntryBytes + Int(UInt16.max))
+        #expect(data.count == 24 + SSDAIBinary.indexEntryBytes + Int(UInt16.max))
     }
 
     /// The index is the finished output, so its ceiling is the format's, not the
@@ -62,13 +62,13 @@ import TinyTitanFormat
     /// index is about 28 MB, which the v1 reader (`residentIndexMaxBytes`)
     /// accepts.
     @Test func theFormatsOwnCeilingIsTheBoundaryThatEncodes() throws {
-        let limit = Int(GTurboFormatV1.residentIndexMaxBytes)
+        let limit = Int(SSDAIFormatV1.residentIndexMaxBytes)
         let data = try ResidentWriter.encodeIndex(plan: plan(name: "w", indexSize: limit))
         #expect(data.count == limit)
     }
 
     @Test func oneBytePastTheFormatsCeilingIsRefused() {
-        let limit = Int(GTurboFormatV1.residentIndexMaxBytes)
+        let limit = Int(SSDAIFormatV1.residentIndexMaxBytes)
         #expect(throws: RepackError.self) {
             _ = try ResidentWriter.encodeIndex(plan: plan(name: "w", indexSize: limit + 1))
         }
@@ -82,7 +82,7 @@ import TinyTitanFormat
             "model.language_model.layers.\($0 % 40).mlp.experts.\($0).down_proj.weight"
         }
         let expected =
-            24 + count * GTurboBinary.indexEntryBytes + names.reduce(0) { $0 + $1.utf8.count }
+            24 + count * SSDAIBinary.indexEntryBytes + names.reduce(0) { $0 + $1.utf8.count }
         let data = try ResidentWriter.encodeIndex(plan: plan(names: names))
         #expect(data.count == expected)
     }
@@ -110,7 +110,7 @@ import TinyTitanFormat
                     sourceScales: nil,
                     sourceBiases: nil))
         }
-        let natural = 24 + names.count * GTurboBinary.indexEntryBytes + table.count
+        let natural = 24 + names.count * SSDAIBinary.indexEntryBytes + table.count
         return ResidentFilePlan(
             path: "/tmp/model_weights.bin",
             entries: entries,
@@ -142,7 +142,7 @@ import TinyTitanFormat
             stringTableOffsets: [0],
             indexSize: UInt64(
                 indexSize
-                    ?? (24 + GTurboBinary.indexEntryBytes + table.count)),
+                    ?? (24 + SSDAIBinary.indexEntryBytes + table.count)),
             residentSize: 2)
     }
 }

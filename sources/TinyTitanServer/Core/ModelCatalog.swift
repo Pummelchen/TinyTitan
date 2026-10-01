@@ -120,7 +120,7 @@ public struct ModelCatalog: Sendable {
 
         /// The same install served by `backend`, or nil when that engine cannot
         /// serve it. Only the dense Qwen 3.5 family has two engines today: its
-        /// `.gturbo` payload is the same file for either, and the runtime picks
+        /// `.ssdai` payload is the same file for either, and the runtime picks
         /// the engine.
         public func served(by backend: Backend, id aliasID: String) -> Entry? {
             guard engines.contains(backend),
@@ -322,10 +322,10 @@ public struct ModelCatalog: Sendable {
     /// before the model itself is opened.
     ///
     /// Both shapes ship: a safetensors snapshot declares its architecture in
-    /// `config.json`, and a `.gturbo` install declares it in `manifest.json`.
+    /// `config.json`, and a `.ssdai` install declares it in `manifest.json`.
     /// Reading only the first is how `--cpu` against an installed dense model
     /// died with a raw `NSCocoaErrorDomain` "config.json couldn't be opened"
-    /// instead of naming the family -- and a `.gturbo` install is exactly the
+    /// instead of naming the family -- and a `.ssdai` install is exactly the
     /// shape the three dense Qwen 3.5 models are installed as.
     static func snapshotFamily(_ directory: URL) throws -> CPUModelFamily {
         if FileManager.default.fileExists(

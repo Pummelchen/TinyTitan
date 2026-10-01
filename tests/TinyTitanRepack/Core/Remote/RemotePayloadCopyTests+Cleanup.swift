@@ -6,7 +6,7 @@ import Testing
 extension RemotePayloadCopyTests {
     @Test func discardRemovesOnlyOwnedResumeFiles() throws {
         let root = tmpDirForRemote("discard")
-        let output = (root as NSString).appendingPathComponent("model.gturbo")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
         let paths = try RemoteInstallPaths(outputDirectory: output)
         let unrelated = (root as NSString).appendingPathComponent("keep.txt")
         defer { cleanUpRemote([root]) }

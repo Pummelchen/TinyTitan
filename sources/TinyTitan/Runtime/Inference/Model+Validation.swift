@@ -13,7 +13,7 @@ import TinyTitanFormat
 extension Model {
 
     static func validateTrustedReceiptLayerLayout(
-        modelDirectory: GTurboModelDirectory,
+        modelDirectory: SSDAIModelDirectory,
         manifest: Manifest,
         layout: PackedExpertsLayout
     ) throws {

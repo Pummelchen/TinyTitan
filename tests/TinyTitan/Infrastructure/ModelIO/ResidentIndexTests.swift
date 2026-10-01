@@ -21,8 +21,8 @@ import TinyTitanFormat
         // offset to the name inside the index region.
         let names = ["embedding.weight", "layer.0.q_proj.weight"]
         let stringTable = Data(names.joined().utf8)
-        let headerBytes = GTurboBinary.indexHeaderBytes
-        let entryBytes = GTurboBinary.indexEntryBytes
+        let headerBytes = SSDAIBinary.indexHeaderBytes
+        let entryBytes = SSDAIBinary.indexEntryBytes
         let entriesBase = headerBytes
         let stringTableBase = entriesBase + names.count * entryBytes
         var nameOffsets: [UInt32] = []
@@ -36,8 +36,8 @@ import TinyTitanFormat
         // (no padding) since the parser only needs indexSize ≥ that minimum.
         // However, the validator now enforces 16KB alignment on the index size.
         let alignedIndexBytes = Int(
-            ((UInt64(rawIndexBytes) + GTurboFormatV1.alignmentBytes - 1)
-                & ~(GTurboFormatV1.alignmentBytes - 1)))
+            ((UInt64(rawIndexBytes) + SSDAIFormatV1.alignmentBytes - 1)
+                & ~(SSDAIFormatV1.alignmentBytes - 1)))
         let residentBytes = 96
 
         let entries: [ResidentEntry] = [
@@ -64,14 +64,14 @@ import TinyTitanFormat
         var fileBuf = [UInt8](repeating: 0, count: alignedIndexBytes + residentBytes)
         try fileBuf.withUnsafeMutableBytes { raw in
             let base = try #require(raw.baseAddress)
-            GTurboBinary.writeIndexHeader(
+            SSDAIBinary.writeIndexHeader(
                 into: base,
                 indexSize: UInt64(alignedIndexBytes),
                 residentSize: UInt64(residentBytes),
                 entryCount: UInt64(entries.count))
             for (i, e) in entries.enumerated() {
                 let dst = base.advanced(by: entriesBase + i * entryBytes)
-                GTurboBinary.writeIndexEntry(
+                SSDAIBinary.writeIndexEntry(
                     into: dst, entry: e,
                     nameOffset: nameOffsets[i])
             }
@@ -87,7 +87,7 @@ import TinyTitanFormat
         }
 
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-index-roundtrip-\(UUID().uuidString).bin")
+            .appendingPathComponent("ssdai-index-roundtrip-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: url) }
         try Data(fileBuf).write(to: url)
 
@@ -110,7 +110,7 @@ import TinyTitanFormat
 
     @Test func shortFileThrowsIndexCorrupt() throws {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-short-\(UUID().uuidString).bin")
+            .appendingPathComponent("ssdai-short-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: url) }
         try Data(repeating: 0, count: 8).write(to: url)
         #expect {
@@ -132,24 +132,24 @@ extension ResidentIndexTests {
     /// mapped. The CPU dense loader hands those pointers out with no further
     /// size check, so the failure is a SIGBUS or silently wrong weights.
     @Test func aResidentRegionBeyondEOFIsRefused() throws {
-        let headerBytes = GTurboBinary.indexHeaderBytes
-        let entryBytes = GTurboBinary.indexEntryBytes
+        let headerBytes = SSDAIBinary.indexHeaderBytes
+        let entryBytes = SSDAIBinary.indexEntryBytes
         let name = "layer.0.q_proj.weight"
         let stringTableBase = headerBytes + entryBytes
         let rawIndexBytes = stringTableBase + name.utf8.count
         let aligned = Int(
-            ((UInt64(rawIndexBytes) + GTurboFormatV1.alignmentBytes - 1)
-                & ~(GTurboFormatV1.alignmentBytes - 1)))
+            ((UInt64(rawIndexBytes) + SSDAIFormatV1.alignmentBytes - 1)
+                & ~(SSDAIFormatV1.alignmentBytes - 1)))
         // The file is exactly the index; the header claims a payload after it.
         var buf = [UInt8](repeating: 0, count: aligned)
         try buf.withUnsafeMutableBytes { raw in
             let base = try #require(raw.baseAddress)
-            GTurboBinary.writeIndexHeader(
+            SSDAIBinary.writeIndexHeader(
                 into: base,
                 indexSize: UInt64(aligned),
                 residentSize: 4096,
                 entryCount: 1)
-            GTurboBinary.writeIndexEntry(
+            SSDAIBinary.writeIndexEntry(
                 into: base.advanced(by: headerBytes),
                 entry: ResidentEntry(
                     name: name, dtype: 0, logicalShape4: [64, 64, 0, 0],
@@ -166,7 +166,7 @@ extension ResidentIndexTests {
                 name.utf8.count)
         }
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("gturbo-overrun-\(UUID().uuidString).bin")
+            .appendingPathComponent("ssdai-overrun-\(UUID().uuidString).bin")
         defer { try? FileManager.default.removeItem(at: url) }
         try Data(buf).write(to: url)
 

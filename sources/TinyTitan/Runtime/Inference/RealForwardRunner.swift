@@ -3,7 +3,7 @@ import Metal
 
 /// Compatible Qwen3.5-MoE real-forward decode pass.
 ///
-/// Composes the production kernels against the `.gturbo` model:
+/// Composes the production kernels against the `.ssdai` model:
 ///
 ///   embed_lookup_int4(token) * sqrt(H)
 ///   for L in 0..<40:

@@ -96,7 +96,7 @@ function hasTokenizer(directory, env) {
   return Boolean(override) && existsSync(join(override, "tokenizer.json"));
 }
 
-/** A `.gturbo` install. Mirrors `ModelCatalog.probeInstall`. */
+/** A `.ssdai` install. Mirrors `ModelCatalog.probeInstall`. */
 function probeInstall(directory, env) {
   let manifest;
   try {

@@ -2,7 +2,7 @@
 """Track A rehearsal: the 10 real full-attention layers on the ANE.
 
 Reads the actual int4 affine weights (group-64, bf16 scales/biases) of every
-full-attention layer out of the installed 4-bit `.gturbo`, dequantizes them to
+full-attention layer out of the installed 4-bit `.ssdai`, dequantizes them to
 fp16, bakes each layer into the probe's Core ML block (decomposed attention —
 the fused SDPA op NaNs on this ANE from sequence 2048), and replays the exact
 layer-chunk sequence of a 6,103-token prefill: chunk 4096 with no history,
