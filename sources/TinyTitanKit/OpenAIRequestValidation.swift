@@ -6,7 +6,7 @@ import TinyTitan
 ///
 /// Split out of `OpenAIModels.swift` (2026-09-28) under the 500-line-per-file
 /// rule (Task 8 of the cleanup runbook) as pure code motion.
-public enum ServerRequestError: Error, Equatable, Sendable {
+package enum ServerRequestError: Error, Equatable, Sendable {
     case invalid(message: String, param: String?, code: String)
     case unknownModel
     case queueFull
@@ -17,7 +17,7 @@ public enum ServerRequestError: Error, Equatable, Sendable {
     /// does not exist: 404.
     case notFound(message: String, param: String?)
 
-    public var envelope: OpenAIErrorEnvelope {
+    package var envelope: OpenAIErrorEnvelope {
         switch self {
         case .invalid(let message, let param, let code):
             OpenAIErrorEnvelope(message: message, param: param, code: code)
@@ -41,7 +41,7 @@ public enum ServerRequestError: Error, Equatable, Sendable {
     }
 
     /// The HTTP status each error maps to, shared by every API surface.
-    public var httpStatus: Int {
+    package var httpStatus: Int {
         switch self {
         case .invalid: 400
         case .unknownModel, .notFound: 404
@@ -51,30 +51,30 @@ public enum ServerRequestError: Error, Equatable, Sendable {
     }
 }
 
-public struct ValidatedChatRequest: Sendable {
-    public let messages: [GFTokenizer.Message]
-    public let tools: [GFTokenizer.FunctionDefinition]
-    public let stream: Bool
-    public let includeUsage: Bool
-    public let generationConfig: GenerationConfig
-    public let maximumCompletionTokens: Int
+package struct ValidatedChatRequest: Sendable {
+    package let messages: [GFTokenizer.Message]
+    package let tools: [GFTokenizer.FunctionDefinition]
+    package let stream: Bool
+    package let includeUsage: Bool
+    package let generationConfig: GenerationConfig
+    package let maximumCompletionTokens: Int
     /// Set when the request named the "<model>-fast" alias: the CLI-strip
     /// heuristic runs for this request regardless of TINYTITAN_STRIP_CLI_PROMPT.
-    public let stripCLIPrompt: Bool
+    package let stripCLIPrompt: Bool
     /// Memory workspace named by the X-TinyTitan-Workspace header, when the
     /// server allows a request to choose one. Nil means the workspace the
     /// server was launched with.
-    public let workspace: String?
+    package let workspace: String?
     /// True for a generation the engine asked for itself -- memory
     /// consolidation is the only one today. Watchdogs do not police these
     /// (B6): their prompts are repetitive by construction and their answers
     /// are meant to be terse, which is the shape the detectors hunt, and no
     /// person is waiting on the result.
-    public let isEngineInternal: Bool
+    package let isEngineInternal: Bool
     /// The catalog id the request was validated against. The routing backend
     /// loads it; a single-model backend serves what it has and ignores it.
     /// Nil for the engine's own requests, which run on whatever is resident.
-    public let model: String?
+    package let model: String?
     /// Request fields that asked for something the served model cannot do and
     /// were answered by the nearest thing it can. Empty on the common path.
     ///
@@ -82,7 +82,7 @@ public struct ValidatedChatRequest: Sendable {
     /// this project never defined keeps working, and the server says what it
     /// applied in its log. Additive and defaulted so every existing caller is
     /// unchanged.
-    public let reasoningNotes: [String]
+    package let reasoningNotes: [String]
     /// The thinking mode and effort this request should actually render at.
     ///
     /// `nil` means "whatever the model was loaded with", which is the common
@@ -94,7 +94,7 @@ public struct ValidatedChatRequest: Sendable {
     /// Carried on the request rather than passed alongside it because the
     /// prompt cache keys on this value: two levels render different prompts,
     /// and a cached KV range from one must never be spliced onto the other.
-    public let reasoning: RequestReasoning?
+    package let reasoning: RequestReasoning?
     /// The compiled JSON schema this request must produce, when it asked for
     /// structured output. Nil is free text -- the only value every caller but
     /// the three JSON spellings passes.
@@ -102,9 +102,9 @@ public struct ValidatedChatRequest: Sendable {
     /// The schema is compiled here, during validation, so an unsupported
     /// keyword is a 400 before a model is touched rather than a failure in the
     /// middle of a generation.
-    public let jsonSchema: JSONSchemaNode?
+    package let jsonSchema: JSONSchemaNode?
 
-    public init(
+    package init(
         messages: [GFTokenizer.Message],
         tools: [GFTokenizer.FunctionDefinition],
         stream: Bool,
@@ -173,7 +173,7 @@ public struct ValidatedChatRequest: Sendable {
     /// messages, and its continuation paths re-render the tail with the same
     /// template -- so matching on the raw messages would splice an unfiltered
     /// tail onto a filtered prefix (see `ServerPromptCache`).
-    public func replacingMessages(
+    package func replacingMessages(
         _ messages: [GFTokenizer.Message],
         tools: [GFTokenizer.FunctionDefinition]
     ) -> ValidatedChatRequest {
@@ -183,12 +183,12 @@ public struct ValidatedChatRequest: Sendable {
     /// The memory workspace this request names, from the X-TinyTitan-Workspace
     /// header. Nil takes the server's launch-time workspace, which is the
     /// usual case: one server, one checkout.
-    public func withWorkspace(_ workspace: String?) -> ValidatedChatRequest {
+    package func withWorkspace(_ workspace: String?) -> ValidatedChatRequest {
         copy(workspace: .some(workspace))
     }
 
     /// The same request, bound to the catalog model it was validated for.
-    public func withModel(_ model: String) -> ValidatedChatRequest {
+    package func withModel(_ model: String) -> ValidatedChatRequest {
         copy(model: .some(model))
     }
 }

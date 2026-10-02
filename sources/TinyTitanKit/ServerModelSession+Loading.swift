@@ -13,7 +13,7 @@ extension ServerModelSession {
     /// context, runtime config, model, optional MTP sidecar, runner, scratch.
     /// Each step consumes the last, so extracting any of them would return a
     /// tuple straight back into the next -- the same shape as Model.load.
-    public static func load(
+    package static func load(
         modelDirectory: URL,
         maxContext: Int,
         slots: Int = 1,

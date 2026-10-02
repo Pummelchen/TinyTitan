@@ -32,14 +32,14 @@ final class GenerationDecodeState: @unchecked Sendable {
     }
 }
 
-public actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, PromptCacheDescribing
+package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, PromptCacheDescribing
 {
     /// Manifest-derived API model identifier used when --model-id is absent.
-    public nonisolated let defaultModelID: String
+    package nonisolated let defaultModelID: String
     /// The session's configured context window; the HTTP layer validates
     /// max_tokens against it (S11).
-    public nonisolated var maximumContext: Int { maxContext }
-    public nonisolated var samplingDefaults: GenerationDefaults.Sampling {
+    package nonisolated var maximumContext: Int { maxContext }
+    package nonisolated var samplingDefaults: GenerationDefaults.Sampling {
         profileSampling
     }
     nonisolated let profileSampling: GenerationDefaults.Sampling
@@ -74,14 +74,14 @@ public actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, Pr
     let prefillConfig: PrefillRuntimeConfig
     // Long prompts are prefilled chunk by chunk — small enough to keep expert
     // reads tight.
-    public nonisolated let prefillChunkTokens: Int
+    package nonisolated let prefillChunkTokens: Int
     /// Routed-expert slots per layer actually in force, so the ready banner can
     /// report the streaming budget rather than leaving the user to infer it.
-    public nonisolated let expertCacheSlots: Int
+    package nonisolated let expertCacheSlots: Int
     /// How many sequences this session runs at once.
-    public nonisolated let slots: Int
+    package nonisolated let slots: Int
     let maxContext: Int
-    public nonisolated let promptCacheMode: ServerPromptCacheMode
+    package nonisolated let promptCacheMode: ServerPromptCacheMode
     let promptCacheDomain: ServerPromptCacheDomain
     var promptCache: ServerPromptCache
     let promptStateStore: ServerPromptStateStore?
@@ -97,7 +97,7 @@ public actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, Pr
 
     /// A pure function of its arguments, so a caller can reproduce the
     /// effective cache mode for the startup banner without loading a model.
-    public static func effectivePromptCacheMode(
+    package static func effectivePromptCacheMode(
         requested: ServerPromptCacheMode,
         mtpEnabled: Bool,
         slots: Int = 1
@@ -123,8 +123,8 @@ public actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, Pr
     /// attaches MTP, so the engine and the width are the whole rule. Kept here
     /// rather than in the executable so both arms are testable without a
     /// catalog on disk.
-    public static func initialPromptCacheMode(
-        backend: ModelCatalog.Backend,
+    package static func initialPromptCacheMode(
+        backend: ModelBackend,
         requested: ServerPromptCacheMode,
         maxConcurrentSequences: Int
     ) -> ServerPromptCacheMode {

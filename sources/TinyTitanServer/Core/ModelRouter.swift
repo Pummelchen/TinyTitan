@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// What the HTTP layer needs to validate a request for one model before that
 /// model is resident: the omitted-sampling defaults, the max_tokens bound and
@@ -10,9 +11,9 @@ public struct ServedModel: Sendable, Equatable {
     public let displayName: String
     public let maximumContext: Int
     public let sampling: GenerationDefaults.Sampling
-    public let reasoningProfile: ServerReasoningProfile
+    package let reasoningProfile: ServerReasoningProfile
 
-    public init(
+    package init(
         id: String, displayName: String, maximumContext: Int,
         sampling: GenerationDefaults.Sampling,
         reasoningProfile: ServerReasoningProfile
@@ -55,45 +56,12 @@ public struct ReasoningChoice: Sendable, Equatable {
 
 /// Fits one server-wide reasoning level to models that expose different ones.
 ///
-/// The level is chosen once for the server and the models under it differ:
-/// Qwen 3.6 has an on/off switch, Qwen3.8-Flash-Next has effort levels and no
-/// bare "on". Refusing to load a model because the level does not map exactly
-/// would make `--reasoning` useless with a mixed catalog, so each model gets
-/// the closest thing its template defines.
-public enum ReasoningFallback {
-    /// `whenOn` is what the model's template does when thinking is switched
-    /// on with no effort named; `ModelCatalog.Kind.levelWhenOn` supplies it.
-    public static func effectiveLevel(
-        _ requested: ReasoningLevel,
-        supported: [ReasoningLevel],
-        whenOn: ReasoningLevel? = nil
-    ) -> ReasoningLevel {
-        if supported.contains(requested) || requested == .off { return requested }
-        let efforts = supported.filter { $0 != .off && $0 != .on }
-        // An on/off model: any effort means "think".
-        guard !efforts.isEmpty else { return supported.contains(.on) ? .on : .off }
-        // "On" for an effort model: the template's own default, extra high
-        // for Qwen3.8. That is what --thinking on has always loaded on a
-        // single-model server, and the same flag must not think less because
-        // the server was started with a catalog. The middle effort is left
-        // only for a caller that cannot say what the template does.
-        if requested == .on {
-            if let whenOn, efforts.contains(whenOn) { return whenOn }
-            return efforts[(efforts.count - 1) / 2]
-        }
-        // An effort the model lacks: the nearest one it has, ties to the
-        // cheaper, since a client that wanted more can ask for it by name.
-        let order = ReasoningLevel.allCases
-        let rank = { (level: ReasoningLevel) in order.firstIndex(of: level) ?? 0 }
-        let target = rank(requested)
-        return efforts.min { lhs, rhs in
-            let left = abs(rank(lhs) - target)
-            let right = abs(rank(rhs) - target)
-            return left == right ? rank(lhs) < rank(rhs) : left < right
-        } ?? .on
-    }
-
-    public static func choice(
+/// `effectiveLevel` now lives in `TinyTitanKit` (2026-10-02, phase A1 of
+/// `docs/plan-embedded-library.md`), because the request validator there
+/// applies the same mapping; this extension keeps the catalog-aware half,
+/// which reads the server's `ModelCatalog.Kind`.
+extension ReasoningFallback {
+    package static func choice(
         for kind: ModelCatalog.Kind,
         requested: ReasoningLevel
     ) throws -> ReasoningChoice {
@@ -111,7 +79,7 @@ extension ModelRouter {
     /// Loads entries the way the single-model paths do: a GPU install through
     /// `ModelSessionPlan` with every server flag, a CPU snapshot through
     /// `CPUModelBackend`. Reasoning comes from the router, fitted per model.
-    public static func standardLoader(arguments: ServerArguments) -> Loader {
+    package static func standardLoader(arguments: ServerArguments) -> Loader {
         let metal = SharedMetalContext()
         return { entry, reasoning in
             switch entry.kind {
@@ -140,7 +108,7 @@ extension ModelRouter {
 extension ModelRouter {
     /// Counts with the named model's tokenizer, rendered as its engine
     /// renders a prompt, without loading any weights.
-    public static let standardCounter: Counter = { entry, choice, request in
+    package static let standardCounter: Counter = { entry, choice, request in
         _ = try GFTokenizer.requireModelDirectory(entry.path)
         switch entry.kind {
         case .gpu:

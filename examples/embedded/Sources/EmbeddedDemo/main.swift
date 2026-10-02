@@ -2,21 +2,22 @@
 //  main.swift
 //  EmbeddedDemo
 //
-//  The smallest program that proves the engine is usable from a package that is
-//  not this repository: it resolves the dependency, links the `TinyTitan`
-//  module and touches its public surface. With `--model` it opens an install
-//  for real; without one it only proves the link, which is all CI can do -- the
-//  model store is gitignored and no install ships with the repository.
+//  The library, used the way another program uses it: depend on `TinyTitanKit`,
+//  open an install with an `Engine`, take a `Session` and stream tokens. There
+//  is no subprocess and no HTTP anywhere in this file.
 //
-//  What this deliberately cannot do yet is render a prompt or generate: the
-//  session orchestration lives in `TinyTitanServerCore`, which drags in NIO.
-//  That boundary is the first work item of docs/plan-embedded-library.md, and
-//  this file is where it will be visible when it moves.
+//  Usage:
+//    EmbeddedDemo --model <ssdai install> [--prompt <text>] [--max-tokens <n>]
+//
+//  Weights do not ship with this repository and the library never downloads
+//  them, so a run needs an install from the installer or `tools/install_models.sh`.
+//  With no `--model` the demo only proves that the library resolves and links,
+//  which is what CI can check — the model store is gitignored.
 //
 
 import Foundation
 import Metal
-import TinyTitan
+import TinyTitanKit
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("EmbeddedDemo: \(message)\n".utf8))
@@ -24,25 +25,33 @@ func fail(_ message: String) -> Never {
 }
 
 var modelDirectory: String?
+var prompt = "The capital of France is"
+var maxTokens = 16
+
 var arguments = CommandLine.arguments.dropFirst().makeIterator()
 while let argument = arguments.next() {
     switch argument {
     case "--model":
         guard let value = arguments.next() else { fail("--model needs a directory") }
         modelDirectory = value
+    case "--prompt":
+        guard let value = arguments.next() else { fail("--prompt needs text") }
+        prompt = value
+    case "--max-tokens":
+        guard let value = arguments.next(), let parsed = Int(value) else {
+            fail("--max-tokens needs a whole number")
+        }
+        maxTokens = parsed
     case "--help", "-h":
-        print("usage: EmbeddedDemo [--model <ssdai install directory>]")
+        print("usage: EmbeddedDemo --model <ssdai install> [--prompt <text>] [--max-tokens <n>]")
         exit(0)
     default:
         fail("unknown argument \(argument)")
     }
 }
 
-// The link itself: naming a public engine type is what forces the library to be
-// linked rather than merely planned.
-print("EmbeddedDemo: TinyTitan linked (\(String(describing: Model.self)))")
-
 guard let modelDirectory else {
+    print("EmbeddedDemo: TinyTitanKit linked (\(String(describing: Engine.self)))")
     print("no --model given: resolution and link verified, nothing loaded")
     exit(0)
 }
@@ -52,11 +61,27 @@ guard let device = MTLCreateSystemDefaultDevice() else {
 }
 
 do {
-    let model = try Model.load(
-        directoryURL: URL(fileURLWithPath: modelDirectory),
-        device: device
-    )
-    print("loaded: \(String(describing: type(of: model)))")
+    let engine = try await Engine(
+        directory: URL(fileURLWithPath: modelDirectory),
+        device: device)
+    let descriptor = engine.descriptor
+    print(
+        "loaded \(descriptor.id) [\(descriptor.family)], context \(descriptor.contextWindow), "
+            + "\(descriptor.weightBytes / 1_000_000) MB on disk")
+
+    let session = await engine.session()
+    let summary = try await session.respond(
+        to: [ChatMessage(role: .user, content: prompt)],
+        options: GenerationOptions(maxTokens: maxTokens, temperature: 0)
+    ) { event in
+        if case .token(let text) = event {
+            print(text, terminator: "")
+        }
+    }
+    print("")
+    print(
+        "done: \(summary.completionTokens) completion tokens, "
+            + "\(summary.promptTokens) prompt tokens, stop \(summary.stopReason)")
 } catch {
-    fail("load failed: \(error)")
+    fail("\(error)")
 }

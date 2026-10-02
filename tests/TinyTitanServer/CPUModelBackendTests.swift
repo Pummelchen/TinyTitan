@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// The CPU serving path's ceilings, which it enforces rather than promises,

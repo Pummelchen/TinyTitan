@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// Serving a small model from the CPU, through the same HTTP surface as the
 /// big ones.
@@ -49,7 +50,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
     /// The CPU engine has no prompt cache, and says so rather than borrowing the
     /// mode the server was asked for. `.off` is what the launch banner reports
     /// for this backend, so the banner and the residency line agree.
-    public nonisolated var promptCacheMode: ServerPromptCacheMode { .off }
+    package nonisolated var promptCacheMode: ServerPromptCacheMode { .off }
 
     /// Loads a snapshot and, unless told otherwise, makes it resident.
     ///
@@ -153,7 +154,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         model.contention = contention
     }
 
-    public func generate(
+    package func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {
@@ -282,7 +283,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
 /// The Messages API's count_tokens, from the same rendering `generate` uses,
 /// so a client sizing its context against a CPU model gets the real number.
 extension CPUModelBackend: PromptTokenCounting {
-    public func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+    package func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
         // Count through the same tokenizer `generate` would use, so a client
         // sizing the context for a mid-session switch gets the real number
         // rather than the loaded mode's.

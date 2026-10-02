@@ -1,7 +1,7 @@
 import Foundation
 import TinyTitan
 
-public enum ServerPromptCacheMode: String, Codable, Sendable, Equatable {
+package enum ServerPromptCacheMode: String, Codable, Sendable, Equatable {
     case off
     case singlePrefix = "single-prefix"
     case multiPrefix = "multi-prefix"

@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 // The Anthropic response builders.
 //
@@ -22,7 +23,7 @@ public enum AnthropicBuilder {
     /// Anthropic's stop_reason for a completion: tool calls first (a turn
     /// that called a tool ends with tool_use whatever else it said), then the
     /// output cap, then a matched stop string, then a natural end.
-    public static func stopReason(for completion: ServerCompletion) -> (
+    package static func stopReason(for completion: ServerCompletion) -> (
         reason: String, sequence: String?
     ) {
         if !completion.toolCalls.isEmpty { return ("tool_use", nil) }
@@ -61,7 +62,7 @@ public enum AnthropicBuilder {
     /// then the text (when there is any) and one tool_use block per call. An
     /// empty completion is one empty text block, never an empty content
     /// array, and a turn that only thought still carries that text block.
-    public static func contentBlocks(_ completion: ServerCompletion) -> [[String: Any]] {
+    package static func contentBlocks(_ completion: ServerCompletion) -> [[String: Any]] {
         var blocks: [[String: Any]] = []
         if !completion.reasoning.isEmpty {
             blocks.append(thinkingBlock(completion.reasoning))
@@ -75,7 +76,7 @@ public enum AnthropicBuilder {
 
     /// Anthropic counts cache reads apart from input_tokens: the two sum to
     /// what OpenAI reports as prompt_tokens.
-    public static func usageObject(_ usage: OpenAIUsage) -> [String: Any] {
+    package static func usageObject(_ usage: OpenAIUsage) -> [String: Any] {
         let cached = usage.promptTokensDetails.cachedTokens
         return [
             "input_tokens": max(usage.promptTokens - cached, 0),

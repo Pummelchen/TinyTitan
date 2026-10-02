@@ -1,6 +1,7 @@
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// `--ram-budget` names a target for the whole server, and the floor under which

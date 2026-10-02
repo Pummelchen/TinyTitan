@@ -3,6 +3,7 @@ import Testing
 import TinyTitan
 import TinyTitanMemory
 
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// The decorator is where memory meets the request lifecycle: what the model

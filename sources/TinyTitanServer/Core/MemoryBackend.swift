@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 import TinyTitanMemory
 
 /// Adds persistent memory to any inference backend.
@@ -81,7 +82,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     var innerBusy = false
     var innerWaiters: [CheckedContinuation<Void, Never>] = []
 
-    public init(
+    package init(
         wrapping inner: any ServerInferenceBackend,
         service: MemoryService,
         configuration: MemoryConfiguration
@@ -98,7 +99,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// bootstrap are not included: they are added per session at generation
     /// time, and a count endpoint that guessed at them would be wrong more
     /// often than it was useful.
-    public func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+    package func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
         guard let counting = inner as? any PromptTokenCounting else {
             throw ServerRequestError.unsupportedOperation("count_tokens")
         }
@@ -114,7 +115,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
         return await managing.unload()
     }
 
-    public func generate(
+    package func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {
@@ -425,7 +426,7 @@ public enum ServerMemoryFactory {
     ///     on the same read — `isIdle` is its inverse — so T7 runs only in a
     ///     window where nobody is waiting. Nil leaves the width alone and the
     ///     pass ungated, which is what a test or a benchmark wants.
-    public static func wrap(
+    package static func wrap(
         _ backend: any ServerInferenceBackend,
         configuration: MemoryConfiguration = .fromEnvironment(),
         modelsDirectory: String? = nil,

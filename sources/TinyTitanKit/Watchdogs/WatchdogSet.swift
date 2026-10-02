@@ -15,14 +15,14 @@ import Foundation
 ///   * **One report per kind.** A loop reports once, not once per byte.
 ///   * **Never fail a completion.** There is no throwing path here at all;
 ///     the worst a watchdog can do is end a generation early and say so.
-public struct WatchdogSet: Sendable {
-    public struct Trip: Sendable, Equatable {
-        public let kind: WatchdogKind
-        public let message: String
-        public let acted: Bool
+package struct WatchdogSet: Sendable {
+    package struct Trip: Sendable, Equatable {
+        package let kind: WatchdogKind
+        package let message: String
+        package let acted: Bool
     }
 
-    public let configuration: WatchdogConfiguration
+    package let configuration: WatchdogConfiguration
     private var loop: LoopWatchdog
     /// A second loop detector, for the model's reasoning. Its own window,
     /// because an answer that restates the end of its thought is not a loop,
@@ -30,11 +30,11 @@ public struct WatchdogSet: Sendable {
     private var reasoningLoop: LoopWatchdog
     private var stall: StallWatchdog
     private var stub: StubWatchdog
-    public private(set) var trips: [Trip] = []
+    package private(set) var trips: [Trip] = []
     /// Set when a watchdog that is allowed to act has tripped mid-stream.
-    public private(set) var stopMessage: String?
+    package private(set) var stopMessage: String?
 
-    public init(configuration: WatchdogConfiguration) {
+    package init(configuration: WatchdogConfiguration) {
         self.configuration = configuration
         loop = LoopWatchdog(configuration: configuration)
         reasoningLoop = LoopWatchdog(configuration: configuration)
@@ -47,15 +47,15 @@ public struct WatchdogSet: Sendable {
     /// repetitive prompt and a deliberately terse answer -- exactly the
     /// shape the loop and stub detectors look for -- and the person never
     /// sees it, so stopping it would be a cost with no benefit.
-    public static let inert = WatchdogSet(configuration: .off)
+    package static let inert = WatchdogSet(configuration: .off)
 
-    public var isActive: Bool { configuration.isEnabled }
+    package var isActive: Bool { configuration.isEnabled }
 
     /// True when a watchdog allowed to act has decided this generation
     /// should end.
-    public var wantsStop: Bool { stopMessage != nil }
+    package var wantsStop: Bool { stopMessage != nil }
 
-    public mutating func observe(
+    package mutating func observe(
         _ chunk: String,
         at instant: ContinuousClock.Instant = .now
     ) {
@@ -68,7 +68,7 @@ public struct WatchdogSet: Sendable {
     /// until its token budget is gone, and since thinking left the answer
     /// channel nothing saw it. Stall and stub stay on the answer: a long
     /// thought before a short reply is the model working, not stalling.
-    public mutating func observeReasoning(
+    package mutating func observeReasoning(
         _ chunk: String,
         at instant: ContinuousClock.Instant = .now
     ) {
@@ -78,12 +78,12 @@ public struct WatchdogSet: Sendable {
             where: "in reasoning")
     }
 
-    public mutating func check(at instant: ContinuousClock.Instant = .now) {
+    package mutating func check(at instant: ContinuousClock.Instant = .now) {
         guard configuration.isEnabled else { return }
         record(StallWatchdog.kind, stall.check(at: instant))
     }
 
-    public mutating func finish(
+    package mutating func finish(
         visibleBytes: Int, requestBytes: Int,
         finishReason: String
     ) {
@@ -97,7 +97,7 @@ public struct WatchdogSet: Sendable {
 
     /// A ping-pong report from the incoming request (B2), folded in so
     /// every watchdog result reaches the log by one path.
-    public mutating func record(pingPong verdict: WatchdogVerdict) {
+    package mutating func record(pingPong verdict: WatchdogVerdict) {
         guard configuration.isEnabled, let message = verdict.message else { return }
         // `acted` is always false: ping-pong has no safe intervention, and
         // `WatchdogKind.canAct` records why.
@@ -123,14 +123,14 @@ public struct WatchdogSet: Sendable {
     /// be read and tested without a model: the note is appended to the
     /// content and the finish reason is mapped. Nothing else about the
     /// completion changes.
-    public struct Outcome: Sendable, Equatable {
-        public let content: String
-        public let finishReason: String
+    package struct Outcome: Sendable, Equatable {
+        package let content: String
+        package let finishReason: String
         /// The text appended, or nil when nothing was.
-        public let note: String?
+        package let note: String?
     }
 
-    public func resolve(content: String, finishReason: String) -> Outcome {
+    package func resolve(content: String, finishReason: String) -> Outcome {
         guard let explanation else {
             return Outcome(content: content, finishReason: finishReason, note: nil)
         }
@@ -147,7 +147,7 @@ public struct WatchdogSet: Sendable {
     /// "the server stopped this", and inventing one breaks clients -- so the
     /// reason is mapped to the nearest existing value and the truth is told
     /// in the one place that cannot break a client, the text itself.
-    public var explanation: String? {
+    package var explanation: String? {
         var notes: [String] = []
         if let stopMessage {
             notes.append("[TinyTitan stopped this generation: \(stopMessage).]")

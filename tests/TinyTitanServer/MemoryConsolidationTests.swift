@@ -4,6 +4,7 @@ import Testing
 import TinyTitan
 import TinyTitanMemory
 
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// The engine writing memory on its own, and the loop answering when its

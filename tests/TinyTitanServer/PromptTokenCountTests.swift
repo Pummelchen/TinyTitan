@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// `POST /v1/messages/count_tokens` promises "the same encoding generation uses,

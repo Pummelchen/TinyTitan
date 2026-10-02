@@ -1,5 +1,6 @@
 import Testing
 
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 private actor TestGate {

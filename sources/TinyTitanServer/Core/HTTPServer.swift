@@ -4,6 +4,7 @@ import NIOHTTP1
 import NIOPosix
 import Synchronization
 import TinyTitan
+import TinyTitanKit
 
 public actor TinyTitanHTTPServer {
     public static let maximumBodyBytes = 1_048_576
@@ -62,7 +63,7 @@ public actor TinyTitanHTTPServer {
     private var channel: Channel?
     private var shutdownTask: Task<Void, any Error>?
 
-    public init(
+    package init(
         modelID: String,
         queueLimit: Int,
         maxConcurrentSequences: Int = 1,

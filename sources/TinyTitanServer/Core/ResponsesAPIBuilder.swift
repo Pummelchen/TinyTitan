@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// Building the Responses API objects, and the JSONValue bridging they need.
 ///
@@ -16,7 +17,7 @@ public enum ResponsesAPIBuilder {
 
     /// The output item ids of a response, derived from the response id so
     /// that the streamed `output_item.added` and the final object agree.
-    public static func itemIDs(
+    package static func itemIDs(
         responseID: String,
         completion: ServerCompletion
     ) -> (message: String, calls: [String]) {
@@ -53,7 +54,7 @@ public enum ResponsesAPIBuilder {
         return object
     }
 
-    public static func responseObject(
+    package static func responseObject(
         id: String,
         created: Int,
         model: String,
@@ -108,7 +109,7 @@ public enum ResponsesAPIBuilder {
         return object
     }
 
-    public static func usageObject(_ usage: OpenAIUsage) -> [String: Any] {
+    package static func usageObject(_ usage: OpenAIUsage) -> [String: Any] {
         [
             "input_tokens": usage.promptTokens,
             "input_tokens_details": [
@@ -130,7 +131,7 @@ public enum ResponsesAPIBuilder {
     /// `output` holds the caller's instructions verbatim (the spec asks
     /// compaction to preserve system prompts) followed by the `compaction` item
     /// that carries the note.
-    public static func compactResource(
+    package static func compactResource(
         id: String,
         created: Int,
         output: [[String: Any]],
@@ -221,7 +222,7 @@ public enum ResponsesAPIBuilder {
 
     /// Output items for a completed generation: the reasoning when there is
     /// any, then the message, then calls.
-    public static func outputItems(
+    package static func outputItems(
         completion: ServerCompletion,
         responseID: String,
         namespaces: [String: String] = [:]
@@ -252,7 +253,7 @@ public enum ResponsesAPIBuilder {
 
     /// The terminal status of a generation: "incomplete" when the output
     /// cap ended it, which the API reports with `incomplete_details`.
-    public static func terminalStatus(for completion: ServerCompletion) -> (
+    package static func terminalStatus(for completion: ServerCompletion) -> (
         status: String, reason: String?
     ) {
         completion.finishReason == "length"

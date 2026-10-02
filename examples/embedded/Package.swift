@@ -8,10 +8,10 @@ import PackageDescription
 //
 //     .package(url: "https://github.com/Pummelchen/TinyTitan", from: "5.15.0")
 //
-// Both forms are known to resolve (measured 2026-10-02, Swift 6.4 / Xcode 27,
-// debug and release), which is what `tools/embedded-dependency-check.sh` reruns
-// so a later manifest change cannot break it quietly. See
-// docs/plan-embedded-library.md.
+// `TinyTitanKit` is the supported library product — the facade documented in
+// docs/plan-embedded-library.md §4. The engine's own executables are the other
+// product and are not needed here. `tools/embedded-dependency-check.sh` builds
+// and runs this package so both the dependency and the facade stay proven.
 let package = Package(
     name: "EmbeddedDemo",
     platforms: [
@@ -24,7 +24,7 @@ let package = Package(
         .executableTarget(
             name: "EmbeddedDemo",
             dependencies: [
-                .product(name: "TinyTitan", package: "TinyTitan")
+                .product(name: "TinyTitanKit", package: "TinyTitan")
             ]
         )
     ]

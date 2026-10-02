@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// Every model a models directory holds that this server can actually serve,
 /// GPU installs and CPU snapshots alike.
@@ -11,15 +12,18 @@ import TinyTitan
 /// one half-copied model must not take the other nine offline.
 public struct ModelCatalog: Sendable {
 
-    public enum Backend: String, Sendable {
-        case gpu, cpu
-    }
+    /// The engine that serves an install. The concept now lives in
+    /// `TinyTitanKit` (2026-10-02, phase A1 of `docs/plan-embedded-library.md`)
+    /// because the generation path consults it, and only the two cases travel;
+    /// the catalog and everything else about it stay here. This spelling is
+    /// kept so the catalog's own callers read unchanged.
+    package typealias Backend = ModelBackend
 
     public enum Kind: Sendable, Equatable {
         case gpu(ModelFamily)
         case cpu(CPUModelFamily)
 
-        public var backend: Backend {
+        package var backend: Backend {
             switch self {
             case .gpu: .gpu
             case .cpu: .cpu
@@ -28,7 +32,7 @@ public struct ModelCatalog: Sendable {
 
         /// The kind that serves the same install on `backend`, where the
         /// runtime implements the family there too.
-        public func kind(forBackend backend: Backend) -> Kind? {
+        package func kind(forBackend backend: Backend) -> Kind? {
             switch (self, backend) {
             case (.gpu, .gpu), (.cpu, .cpu):
                 return self
@@ -96,9 +100,9 @@ public struct ModelCatalog: Sendable {
         /// what makes `cpu` or `gpu` a request-level choice rather than a
         /// property of the model. `kind` is the default; the others are named by
         /// an `@cpu` / `@gpu` suffix on the id.
-        public let engines: [Backend]
+        package let engines: [Backend]
 
-        public init(
+        package init(
             id: String, name: String, kind: Kind, quant: Int, path: URL,
             sampling: GenerationDefaults.Sampling, contextLimit: Int? = nil,
             sizeBytes: Int64 = 0, engines: [Backend]? = nil
@@ -116,13 +120,13 @@ public struct ModelCatalog: Sendable {
             self.engines = engines ?? [kind.backend]
         }
 
-        public var backend: Backend { kind.backend }
+        package var backend: Backend { kind.backend }
 
         /// The same install served by `backend`, or nil when that engine cannot
         /// serve it. Only the dense Qwen 3.5 family has two engines today: its
         /// `.ssdai` payload is the same file for either, and the runtime picks
         /// the engine.
-        public func served(by backend: Backend, id aliasID: String) -> Entry? {
+        package func served(by backend: Backend, id aliasID: String) -> Entry? {
             guard engines.contains(backend),
                 let kind = kind.kind(forBackend: backend)
             else { return nil }

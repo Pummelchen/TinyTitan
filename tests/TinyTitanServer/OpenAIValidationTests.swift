@@ -3,6 +3,7 @@ import NIOHTTP1
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 @Suite("OpenAI request validation")

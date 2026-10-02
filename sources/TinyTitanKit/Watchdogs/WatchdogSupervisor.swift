@@ -14,14 +14,14 @@ import Foundation
 /// command buffer is a process-level decision, not a watchdog's.
 ///
 /// unchecked-invariant: every stored property is guarded by `lock`.
-public final class WatchdogSupervisor: @unchecked Sendable {
+package final class WatchdogSupervisor: @unchecked Sendable {
     private let lock = NSLock()
     private var set: WatchdogSet
     /// Held separately from the set so the ticker can size its interval
     /// without taking the lock; it is immutable for the generation's life.
-    public let configuration: WatchdogConfiguration
+    package let configuration: WatchdogConfiguration
 
-    public init(configuration: WatchdogConfiguration) {
+    package init(configuration: WatchdogConfiguration) {
         self.configuration = configuration
         set = WatchdogSet(configuration: configuration)
     }
@@ -30,48 +30,48 @@ public final class WatchdogSupervisor: @unchecked Sendable {
     /// are not watched. Their prompts are repetitive by construction and
     /// their answers are meant to be terse, so they look like exactly the
     /// failures these detectors hunt, and no person is waiting on them.
-    public static var inert: WatchdogSupervisor { WatchdogSupervisor(configuration: .off) }
+    package static var inert: WatchdogSupervisor { WatchdogSupervisor(configuration: .off) }
 
-    public var isActive: Bool { configuration.isEnabled }
+    package var isActive: Bool { configuration.isEnabled }
 
-    public var wantsStop: Bool {
+    package var wantsStop: Bool {
         // Polled between tokens. A disabled feature must not appear on that
         // path at all, not even as an uncontended lock.
         guard isActive else { return false }
         return lock.withLock { set.wantsStop }
     }
 
-    public var stopMessage: String? {
+    package var stopMessage: String? {
         lock.withLock { set.stopMessage }
     }
 
-    public var explanation: String? {
+    package var explanation: String? {
         lock.withLock { set.explanation }
     }
 
-    public func resolve(content: String, finishReason: String) -> WatchdogSet.Outcome {
+    package func resolve(content: String, finishReason: String) -> WatchdogSet.Outcome {
         lock.withLock { set.resolve(content: content, finishReason: finishReason) }
     }
 
-    public var trips: [WatchdogSet.Trip] {
+    package var trips: [WatchdogSet.Trip] {
         lock.withLock { set.trips }
     }
 
-    public func observe(_ chunk: String, at instant: ContinuousClock.Instant = .now) {
+    package func observe(_ chunk: String, at instant: ContinuousClock.Instant = .now) {
         guard isActive else { return }
         lock.withLock { set.observe(chunk, at: instant) }
     }
 
-    public func observeReasoning(_ chunk: String, at instant: ContinuousClock.Instant = .now) {
+    package func observeReasoning(_ chunk: String, at instant: ContinuousClock.Instant = .now) {
         guard isActive else { return }
         lock.withLock { set.observeReasoning(chunk, at: instant) }
     }
 
-    public func check(at instant: ContinuousClock.Instant = .now) {
+    package func check(at instant: ContinuousClock.Instant = .now) {
         lock.withLock { set.check(at: instant) }
     }
 
-    public func finish(visibleBytes: Int, requestBytes: Int, finishReason: String) {
+    package func finish(visibleBytes: Int, requestBytes: Int, finishReason: String) {
         lock.withLock {
             set.finish(
                 visibleBytes: visibleBytes, requestBytes: requestBytes,
@@ -79,7 +79,7 @@ public final class WatchdogSupervisor: @unchecked Sendable {
         }
     }
 
-    public func record(pingPong verdict: WatchdogVerdict) {
+    package func record(pingPong verdict: WatchdogVerdict) {
         lock.withLock { set.record(pingPong: verdict) }
     }
 
@@ -89,7 +89,7 @@ public final class WatchdogSupervisor: @unchecked Sendable {
     /// The interval is a fraction of the stall threshold rather than the
     /// threshold itself, so a stall is reported near when it crosses instead
     /// of up to a whole threshold late.
-    public func startTicker() -> Task<Void, Never>? {
+    package func startTicker() -> Task<Void, Never>? {
         guard isActive else { return nil }
         let interval = Duration.seconds(max(1, configuration.stallSeconds / 10))
         return Task.detached(priority: .utility) { [weak self] in

@@ -14,7 +14,7 @@ extension ServerModelSession {
     /// own method; what remains is the sequence plus a nested failure builder
     /// that closes over eight locals -- hoisting it would mean an
     /// eight-parameter signature for a twenty-line body.
-    public func generate(
+    package func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {

@@ -7,11 +7,11 @@ import TinyTitan
 /// Split out of `OpenAIModels.swift` (2026-09-28) under the 500-line-per-file
 /// rule (Task 8 of the cleanup runbook) as pure code motion; its `private`
 /// helpers moved with the enum, so no access widened.
-public enum OpenAIRequestValidator {
+package enum OpenAIRequestValidator {
     /// lint:allow-long a straight-line validation cascade: each guard
     /// rejects one malformed field with its own error. Grouping them into
     /// sub-validators would add indirection without removing a single check.
-    public static func validate(
+    package static func validate(
         _ request: OpenAIChatRequest,
         modelID: String,
         maxContext: Int = RuntimeConfiguration

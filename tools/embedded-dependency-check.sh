@@ -14,7 +14,11 @@
 # resolve, debug and release.
 #
 # --tag takes a full semantic version (the repository tags are `v5.15`, which
-# SwiftPM reads as 5.15.0) and uses file:// so the check needs no network.
+# SwiftPM reads as 5.15.0) and uses file:// so the check needs no network. The
+# tag must carry the library product: `TinyTitanKit` is unreleased, so `5.15.0`
+# and earlier fail this arm by design — the consumer asks for a product that tag
+# does not declare. It becomes meaningful from the first release that ships the
+# library, which is the point of keeping it here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -61,15 +65,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "consumer",
-            dependencies: [.product(name: "TinyTitan", package: "TinyTitan")]
+            dependencies: [.product(name: "TinyTitanKit", package: "TinyTitan")]
         )
     ]
 )
 EOF
   cat > "$scratch/Sources/consumer/main.swift" <<'EOF'
-import TinyTitan
+import TinyTitanKit
 
-print("consumer: linked \(String(describing: Model.self))")
+print("consumer: linked \(String(describing: Engine.self))")
 EOF
   step "throwaway consumer on tag $TAG (file:// dependency)"
   (cd "$scratch" && swift build && swift run consumer)

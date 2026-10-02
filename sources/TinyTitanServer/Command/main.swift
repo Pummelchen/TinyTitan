@@ -4,6 +4,7 @@ import Foundation
 // type) and its `rawValue`, so this file names that module directly rather than
 // relying on TinyTitanServerCore re-exporting it.
 import TinyTitan
+import TinyTitanKit
 import TinyTitanMemory
 import TinyTitanServerCore
 

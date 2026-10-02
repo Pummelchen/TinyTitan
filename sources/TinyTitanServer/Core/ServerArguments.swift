@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 public struct ServerArguments: Equatable, Sendable {
     public let model: String
@@ -25,7 +26,7 @@ public struct ServerArguments: Equatable, Sendable {
     public var sessionSlots: Int {
         mtpModel == nil ? maxConcurrentSequences : 1
     }
-    public let promptCacheMode: ServerPromptCacheMode
+    package let promptCacheMode: ServerPromptCacheMode
     public let promptCacheMaximumEntries: Int
     public let promptCacheMemoryMiB: Int
     public let promptCacheDiskDirectory: String?

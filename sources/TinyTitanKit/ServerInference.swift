@@ -45,7 +45,7 @@ func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
     }
 }
 
-public enum ServerInferenceEvent: Equatable, Sendable {
+package enum ServerInferenceEvent: Equatable, Sendable {
     case content(String)
     /// Thought text from inside the model's `<think>` block. Kept apart from
     /// `content` so each surface can put it where its clients look for
@@ -54,12 +54,12 @@ public enum ServerInferenceEvent: Equatable, Sendable {
     case toolCall(ParsedToolCall)
 }
 
-public struct ServerCompletion: Equatable, Sendable {
-    public let content: String
+package struct ServerCompletion: Equatable, Sendable {
+    package let content: String
     /// Everything the model thought, in order; empty with thinking off.
     /// `usage.completionTokens` already counts these tokens, as it always
     /// has -- only where the text goes has changed.
-    public let reasoning: String
+    package let reasoning: String
     /// Characters of `reasoning` the model wrote although this request's
     /// render had thinking off.
     ///
@@ -69,20 +69,20 @@ public struct ServerCompletion: Equatable, Sendable {
     /// and a client that caps tokens gets an empty answer rather than a short
     /// one. Carried as a count, like the watchdog trips, so the HTTP layer can
     /// log it where generated text does not belong.
-    public let unrequestedReasoning: Int
-    public let toolCalls: [ParsedToolCall]
-    public let finishReason: String
-    public let usage: OpenAIUsage
+    package let unrequestedReasoning: Int
+    package let toolCalls: [ParsedToolCall]
+    package let finishReason: String
+    package let usage: OpenAIUsage
     /// What the watchdogs saw, empty when they are off. Carried on the
     /// completion so the HTTP layer, which owns the request id, can log them
     /// on the one line that already reports how the request ended.
-    public let watchdogTrips: [WatchdogSet.Trip]
+    package let watchdogTrips: [WatchdogSet.Trip]
     /// The client stop string that ended generation, when one did. OpenAI
     /// folds this into finish_reason "stop"; the Anthropic Messages API
     /// distinguishes it as stop_reason "stop_sequence" and names the string.
-    public let stopSequence: String?
+    package let stopSequence: String?
 
-    public init(
+    package init(
         content: String,
         toolCalls: [ParsedToolCall],
         finishReason: String,
@@ -107,7 +107,7 @@ public struct ServerCompletion: Equatable, Sendable {
 /// without generating. Kept apart from `ServerInferenceBackend` so wrappers
 /// and test doubles that cannot count are not forced to pretend; the
 /// Anthropic `count_tokens` endpoint answers 501 when the backend lacks it.
-public protocol PromptTokenCounting: Sendable {
+package protocol PromptTokenCounting: Sendable {
     func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int
 }
 
@@ -119,12 +119,12 @@ public protocol PromptTokenCounting: Sendable {
 /// One resident slot serves a whole catalog, so a residency line that named the
 /// mode from the server's flags rather than from the backend that just loaded
 /// would report the previous model's cache after a switch.
-public protocol PromptCacheDescribing: Sendable {
+package protocol PromptCacheDescribing: Sendable {
     /// The mode in force for this backend, never the one requested.
     var promptCacheMode: ServerPromptCacheMode { get }
 }
 
-public protocol ServerInferenceBackend: Sendable {
+package protocol ServerInferenceBackend: Sendable {
     /// The backend's configured context window, used to validate
     /// max_tokens/max_completion_tokens against the session's maxContext (S11).
     var maximumContext: Int { get }
@@ -140,10 +140,10 @@ public protocol ServerInferenceBackend: Sendable {
 }
 
 extension ServerInferenceBackend {
-    public var maximumContext: Int {
+    package var maximumContext: Int {
         RuntimeConfiguration.supportedContextTokens.max() ?? 262_144
     }
-    public var samplingDefaults: GenerationDefaults.Sampling { GenerationDefaults.house }
+    package var samplingDefaults: GenerationDefaults.Sampling { GenerationDefaults.house }
 }
 
 /// A backend that owns the model's residency and can release it on demand.
@@ -154,7 +154,7 @@ extension ServerInferenceBackend {
 /// Folding it into the inference protocol would make every conforming type —
 /// including the plain session and every test stub — carry a member that only
 /// answers "not me".
-public protocol ResidencyManaging: Sendable {
+package protocol ResidencyManaging: Sendable {
     /// Releases the model's memory, waiting for in-flight requests to drain
     /// first. Returns true when a resident model was actually released.
     func unload() async -> Bool
@@ -168,15 +168,15 @@ public protocol ResidencyManaging: Sendable {
 /// how wide to run a GEMV would cost more than the decision is worth.
 ///
 /// unchecked-invariant: `depth` is only ever read or written under `lock`.
-public final class GenerationSignal: @unchecked Sendable {
+package final class GenerationSignal: @unchecked Sendable {
     let lock = NSLock()
     var depth = 0
 
-    public init() {}
+    package init() {}
 
     /// True while at least one client generation is in flight.
-    public var isBusy: Bool { lock.withLock { depth > 0 } }
+    package var isBusy: Bool { lock.withLock { depth > 0 } }
 
-    func enter() { lock.withLock { depth += 1 } }
-    func leave() { lock.withLock { depth = max(0, depth - 1) } }
+    package func enter() { lock.withLock { depth += 1 } }
+    package func leave() { lock.withLock { depth = max(0, depth - 1) } }
 }

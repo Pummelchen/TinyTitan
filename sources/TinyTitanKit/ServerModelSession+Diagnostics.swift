@@ -134,7 +134,7 @@ extension ServerModelSession {
     /// rendered at that level, and an effort sentence is tens of tokens on a model
     /// that has levels. Counting with the session's tokenizer reported the loaded
     /// level's number for a request that would not be rendered at it.
-    public func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+    package func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
         try Self.promptTokenCount(
             request,
             tokenizer: try await resolvedTokenizer(for: request.reasoning),
@@ -148,7 +148,7 @@ extension ServerModelSession {
     /// *loaded session*; the router's path has no session, so it counts without
     /// one and is the one case that can differ from what a concise-mode server
     /// would spend.
-    static func promptTokenCount(
+    package static func promptTokenCount(
         _ request: ValidatedChatRequest,
         tokenizer: GFTokenizer,
         concisePrompt: String? = nil

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 /// The stored-response store behind `previous_response_id`, `GET` and `DELETE`.

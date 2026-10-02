@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 import TinyTitanMemory
 
 /// The resident CPU side-engine, wearing memory's port.

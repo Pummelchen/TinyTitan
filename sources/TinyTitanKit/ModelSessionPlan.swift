@@ -6,16 +6,16 @@ import TinyTitan
 /// All three are derivable from `manifest.json`, which the installer writes
 /// next to the weights — so the startup banner reports real values even when
 /// the load has been deferred, instead of placeholders that resolve later.
-public struct ModelSessionFacts: Sendable, Equatable {
-    public let modelID: String
-    public let prefillChunkTokens: Int
-    public let promptCacheMode: ServerPromptCacheMode
+package struct ModelSessionFacts: Sendable, Equatable {
+    package let modelID: String
+    package let prefillChunkTokens: Int
+    package let promptCacheMode: ServerPromptCacheMode
     /// Routed-expert slots per layer in force, so the banner can state the
     /// streaming budget instead of leaving the user to infer it from a flag they
     /// may not have passed.
-    public let expertCacheSlots: Int
+    package let expertCacheSlots: Int
 
-    public init(
+    package init(
         modelID: String,
         prefillChunkTokens: Int,
         promptCacheMode: ServerPromptCacheMode,
@@ -28,7 +28,7 @@ public struct ModelSessionFacts: Sendable, Equatable {
     }
 }
 
-enum ServerModelIdentity {
+package enum ServerModelIdentity {
     /// The advertised id, which always ends in the quantization.
     ///
     /// Two installs of the same weights at different widths are different
@@ -36,7 +36,7 @@ enum ServerModelIdentity {
     /// is loaded makes `/v1/models` useless for telling them apart. The width
     /// comes from the manifest's routed-expert slot rather than from parsing
     /// the id, so it is right even when the id says nothing.
-    static func apiModelID(
+    package static func apiModelID(
         manifestModelID: String,
         family: ModelFamily,
         weightBits: Int
@@ -47,7 +47,7 @@ enum ServerModelIdentity {
 
     /// The id with any quantization the manifest already spelled removed, so
     /// the suffix is added exactly once. The catalog names installs by it.
-    static func base(
+    package static func base(
         manifestModelID: String,
         family: ModelFamily
     ) -> String {
@@ -75,32 +75,32 @@ enum ServerModelIdentity {
 /// Both the eager path and the deferred path construct sessions through
 /// `makeSession`, so a parameter added to `ServerModelSession.load` cannot be
 /// wired into one path and forgotten in the other.
-public struct ModelSessionPlan: Sendable {
-    public let modelDirectory: URL
-    public let maxContext: Int
+package struct ModelSessionPlan: Sendable {
+    package let modelDirectory: URL
+    package let maxContext: Int
     /// How many sequences the session's runner and per-slot scratch support.
     /// One is the historical single-generation server; the coordinator's width
     /// is kept equal to it.
-    public let slots: Int
-    public let promptCacheMode: ServerPromptCacheMode
-    public let promptCacheMaximumEntries: Int
-    public let promptCacheMemoryLimitBytes: Int
-    public let promptCacheDiskDirectory: URL?
-    public let promptCacheDiskLimitBytes: Int
-    public let prefillChunkTokens: Int?
-    public let kvCachePrecision: KVCachePrecision
-    public let ropeScalingMode: RuntimeRoPEScalingMode
-    public let thinkingMode: ModelThinkingMode
+    package let slots: Int
+    package let promptCacheMode: ServerPromptCacheMode
+    package let promptCacheMaximumEntries: Int
+    package let promptCacheMemoryLimitBytes: Int
+    package let promptCacheDiskDirectory: URL?
+    package let promptCacheDiskLimitBytes: Int
+    package let prefillChunkTokens: Int?
+    package let kvCachePrecision: KVCachePrecision
+    package let ropeScalingMode: RuntimeRoPEScalingMode
+    package let thinkingMode: ModelThinkingMode
     /// Reasoning-effort override for effort-aware families; nil keeps the
     /// template default. Family support is validated on load and preview.
-    public let reasoningEffort: ModelReasoningEffort?
-    public let expertCacheSlots: Int?
+    package let reasoningEffort: ModelReasoningEffort?
+    package let expertCacheSlots: Int?
     /// Bytes the routed-expert cache may use; slots are derived from it.
-    public let expertCacheBudgetBytes: Int?
-    public let mtpModelDirectory: URL?
-    public let mtpMemoryMiB: Int
+    package let expertCacheBudgetBytes: Int?
+    package let mtpModelDirectory: URL?
+    package let mtpMemoryMiB: Int
 
-    public init(
+    package init(
         modelDirectory: URL,
         maxContext: Int,
         slots: Int = 1,
@@ -138,44 +138,7 @@ public struct ModelSessionPlan: Sendable {
         self.mtpMemoryMiB = mtpMemoryMiB
     }
 
-    /// The one place a plan is built from the server's arguments.
-    ///
-    /// Both the single-model path and the catalog loader go through it, so a
-    /// parameter added for one cannot be forgotten by the other. That is not
-    /// hypothetical: the catalog loader once built its own plan and dropped
-    /// `slots`, so `--models-dir` sessions ran one sequence while the
-    /// coordinator admitted four, and the four silently serialized.
-    public static func from(
-        arguments: ServerArguments,
-        modelDirectory: URL,
-        thinking: ModelThinkingMode,
-        reasoningEffort: ModelReasoningEffort?,
-        mtpModelDirectory: URL?
-    ) -> ModelSessionPlan {
-        ModelSessionPlan(
-            modelDirectory: modelDirectory,
-            maxContext: arguments.maxContext,
-            // MTP overrides the requested width inside `sessionSlots`.
-            slots: arguments.sessionSlots,
-            promptCacheMode: arguments.promptCacheMode,
-            promptCacheMaximumEntries: arguments.promptCacheMaximumEntries,
-            promptCacheMemoryLimitBytes: arguments.promptCacheMemoryMiB * 1_048_576,
-            promptCacheDiskDirectory: arguments.promptCacheDiskDirectory.map {
-                URL(fileURLWithPath: $0).standardizedFileURL
-            },
-            promptCacheDiskLimitBytes: arguments.promptCacheDiskMiB * 1_048_576,
-            prefillChunkTokens: arguments.prefillChunkTokens,
-            kvCachePrecision: arguments.kvCachePrecision,
-            ropeScalingMode: arguments.ropeScalingMode,
-            thinkingMode: thinking,
-            reasoningEffort: reasoningEffort,
-            expertCacheSlots: arguments.expertCacheSlots,
-            expertCacheBudgetBytes: arguments.expertCacheBudgetBytes,
-            mtpModelDirectory: mtpModelDirectory,
-            mtpMemoryMiB: arguments.mtpMemoryMiB)
-    }
-
-    public func makeSession(
+    package func makeSession(
         reusingContext: MetalContext? = nil
     ) async throws -> ServerModelSession {
         try await ServerModelSession.load(
@@ -206,7 +169,7 @@ public struct ModelSessionPlan: Sendable {
     /// `--model` fails at launch rather than on the first request.
     /// The per-family reasoning profile the HTTP layer validates requests
     /// against. Reads `manifest.json` only.
-    public func reasoningProfile() throws -> ServerReasoningProfile {
+    package func reasoningProfile() throws -> ServerReasoningProfile {
         let family = try ManifestReader.peekIdentity(directoryURL: modelDirectory).family
         return ServerReasoningProfile(
             family: family,
@@ -214,7 +177,7 @@ public struct ModelSessionPlan: Sendable {
             reasoningEffort: reasoningEffort)
     }
 
-    public func previewFacts(modelIDOverride: String? = nil) throws -> ModelSessionFacts {
+    package func previewFacts(modelIDOverride: String? = nil) throws -> ModelSessionFacts {
         let identity = try ManifestReader.peekIdentity(directoryURL: modelDirectory)
         let family = identity.family
         // Fail a lazy-load server at launch, not on the first request, when

@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// Manages when the model is resident: loads it on the first inference request
 /// rather than at startup, and optionally releases it again after an idle
@@ -25,7 +26,7 @@ import TinyTitan
 public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, PromptTokenCounting {
     /// Builds a session. Injectable so the residency logic can be tested
     /// against a stub without a model on disk.
-    public typealias Loader =
+    package typealias Loader =
         @Sendable (ModelSessionPlan, MetalContext?) async throws -> any ServerInferenceBackend
 
     /// What the reaper should do next. Returning a duration rather than
@@ -44,7 +45,7 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
     /// Answered from configuration and the manifest, so they are valid before
     /// the first load and identical to what the eager path would report.
     public nonisolated let maximumContext: Int
-    public nonisolated let facts: ModelSessionFacts
+    package nonisolated let facts: ModelSessionFacts
 
     private var session: (any ServerInferenceBackend)?
     /// In-flight load, so concurrent first requests coalesce into one load.
@@ -63,7 +64,7 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
         let continuation: CheckedContinuation<Void, Never>
     }
 
-    public init(
+    package init(
         plan: ModelSessionPlan,
         facts: ModelSessionFacts,
         idleTimeout: Duration?,
@@ -80,7 +81,7 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
 
     // MARK: - ServerInferenceBackend
 
-    public func generate(
+    package func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {
@@ -89,7 +90,7 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
         return try await active.generate(request, onEvent: onEvent)
     }
 
-    public func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+    package func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
         let active = try await acquire()
         defer { release() }
         guard let counting = active as? any PromptTokenCounting else {

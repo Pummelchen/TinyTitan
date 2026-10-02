@@ -1,31 +1,31 @@
 import Foundation
 import TinyTitan
 
-public struct OpenAIChatRequest: Codable, Equatable, Sendable {
-    public let model: String
-    public let messages: [OpenAIChatMessage]
-    public let stream: Bool?
-    public let streamOptions: OpenAIStreamOptions?
-    public let temperature: Float?
-    public let topP: Float?
-    public let maxTokens: Int?
-    public let maxCompletionTokens: Int?
-    public let stop: OpenAIStop?
-    public let seed: UInt64?
-    public let tools: [OpenAITool]?
-    public let toolChoice: JSONValue?
-    public let parallelToolCalls: Bool?
-    public let topK: Int?
-    public let repetitionPenalty: Float?
-    public let n: Int?
-    public let logprobs: Bool?
-    public let presencePenalty: Float?
-    public let frequencyPenalty: Float?
+package struct OpenAIChatRequest: Codable, Equatable, Sendable {
+    package let model: String
+    package let messages: [OpenAIChatMessage]
+    package let stream: Bool?
+    package let streamOptions: OpenAIStreamOptions?
+    package let temperature: Float?
+    package let topP: Float?
+    package let maxTokens: Int?
+    package let maxCompletionTokens: Int?
+    package let stop: OpenAIStop?
+    package let seed: UInt64?
+    package let tools: [OpenAITool]?
+    package let toolChoice: JSONValue?
+    package let parallelToolCalls: Bool?
+    package let topK: Int?
+    package let repetitionPenalty: Float?
+    package let n: Int?
+    package let logprobs: Bool?
+    package let presencePenalty: Float?
+    package let frequencyPenalty: Float?
     /// Requested reasoning-effort level. Validated against the served model
     /// family's chat template and the server's load-time profile.
-    public let reasoningEffort: String?
+    package let reasoningEffort: String?
     /// The same controls in the template-kwargs dialect (see above).
-    public let chatTemplateKwargs: OpenAIChatTemplateKwargs?
+    package let chatTemplateKwargs: OpenAIChatTemplateKwargs?
     /// llama.cpp's hard per-request thinking-token budget.
     ///
     /// Decoded, never refused, and not enforced: this runtime bounds thinking by
@@ -33,18 +33,18 @@ public struct OpenAIChatRequest: Codable, Equatable, Sendable {
     /// that sends this also sends the level it wants. Refusing a field the
     /// runtime does not implement would break that client for the rest of the
     /// session, which is the failure the effort mapping already exists to avoid.
-    public let reasoningBudgetTokens: Int?
+    package let reasoningBudgetTokens: Int?
     /// The requested output format. Decoded so a structured-output request can
     /// be *refused* rather than silently answered as prose: a client that asks
     /// for JSON and gets unconstrained text is worse off than one told no.
     /// `{"type": "text"}`, the API's own default, is accepted.
-    public let responseFormat: JSONValue?
+    package let responseFormat: JSONValue?
 
     /// Explicit, with the two thinking-control extras defaulted, so the protocol
     /// mappers that build a chat request from their own shapes keep compiling
     /// unchanged. A `let` with an inline default would have been skipped by the
     /// synthesised decoder, which is how the budget silently decoded to nil.
-    public init(
+    package init(
         model: String,
         messages: [OpenAIChatMessage],
         stream: Bool? = nil,
@@ -118,12 +118,12 @@ public struct OpenAIChatRequest: Codable, Equatable, Sendable {
 /// was loaded with. Effort is a load-time control because it changes the
 /// rendered prompt, so a request may only confirm the active level, never
 /// switch it.
-public struct ServerReasoningProfile: Sendable, Equatable {
-    public let family: ModelFamily
-    public let thinkingMode: ModelThinkingMode
-    public let reasoningEffort: ModelReasoningEffort?
+package struct ServerReasoningProfile: Sendable, Equatable {
+    package let family: ModelFamily
+    package let thinkingMode: ModelThinkingMode
+    package let reasoningEffort: ModelReasoningEffort?
 
-    public init(
+    package init(
         family: ModelFamily,
         thinkingMode: ModelThinkingMode,
         reasoningEffort: ModelReasoningEffort?
@@ -134,27 +134,27 @@ public struct ServerReasoningProfile: Sendable, Equatable {
     }
 
     /// The compatible Qwen3.5-MoE baseline: binary thinking, off.
-    public static let `default` = ServerReasoningProfile(
+    package static let `default` = ServerReasoningProfile(
         family: .qwen36, thinkingMode: .off, reasoningEffort: nil)
 
     /// The effort the template actually applies under this profile; nil for
     /// binary families and while thinking is off.
-    public var effectiveEffort: ModelReasoningEffort? {
+    package var effectiveEffort: ModelReasoningEffort? {
         family.effectiveReasoningEffort(
             thinkingMode: thinkingMode,
             effort: reasoningEffort)
     }
 }
 
-public struct OpenAIUsage: Codable, Equatable, Sendable {
-    public struct PromptTokensDetails: Codable, Equatable, Sendable {
-        public let cachedTokens: Int
+package struct OpenAIUsage: Codable, Equatable, Sendable {
+    package struct PromptTokensDetails: Codable, Equatable, Sendable {
+        package let cachedTokens: Int
 
         enum CodingKeys: String, CodingKey {
             case cachedTokens = "cached_tokens"
         }
 
-        public init(cachedTokens: Int) {
+        package init(cachedTokens: Int) {
             self.cachedTokens = cachedTokens
         }
     }
@@ -166,23 +166,23 @@ public struct OpenAIUsage: Codable, Equatable, Sendable {
     /// runtime already knows the split, because the decoder puts every token in
     /// one channel or the other. Kept as its own object rather than folded into
     /// `completion_tokens` so a client can see both.
-    public struct CompletionTokensDetails: Codable, Equatable, Sendable {
-        public let reasoningTokens: Int
+    package struct CompletionTokensDetails: Codable, Equatable, Sendable {
+        package let reasoningTokens: Int
 
         enum CodingKeys: String, CodingKey {
             case reasoningTokens = "reasoning_tokens"
         }
 
-        public init(reasoningTokens: Int) {
+        package init(reasoningTokens: Int) {
             self.reasoningTokens = reasoningTokens
         }
     }
 
-    public let promptTokens: Int
-    public let completionTokens: Int
-    public let totalTokens: Int
-    public let promptTokensDetails: PromptTokensDetails
-    public let completionTokensDetails: CompletionTokensDetails
+    package let promptTokens: Int
+    package let completionTokens: Int
+    package let totalTokens: Int
+    package let promptTokensDetails: PromptTokensDetails
+    package let completionTokensDetails: CompletionTokensDetails
 
     enum CodingKeys: String, CodingKey {
         case promptTokens = "prompt_tokens"
@@ -192,7 +192,7 @@ public struct OpenAIUsage: Codable, Equatable, Sendable {
         case completionTokensDetails = "completion_tokens_details"
     }
 
-    public init(
+    package init(
         promptTokens: Int,
         completionTokens: Int,
         totalTokens: Int,
@@ -208,21 +208,21 @@ public struct OpenAIUsage: Codable, Equatable, Sendable {
     }
 }
 
-public struct OpenAIModelList: Codable, Equatable, Sendable {
-    public struct Model: Codable, Equatable, Sendable {
-        public let id: String
-        public let object: String
+package struct OpenAIModelList: Codable, Equatable, Sendable {
+    package struct Model: Codable, Equatable, Sendable {
+        package let id: String
+        package let object: String
         /// Model creation time. Omitted when unknown rather than lying with a
         /// fabricated epoch (S30).
-        public let created: Int?
-        public let ownedBy: String
+        package let created: Int?
+        package let ownedBy: String
 
         enum CodingKeys: String, CodingKey {
             case id, object, created
             case ownedBy = "owned_by"
         }
 
-        public init(id: String, object: String, created: Int?, ownedBy: String) {
+        package init(id: String, object: String, created: Int?, ownedBy: String) {
             self.id = id
             self.object = object
             self.created = created
@@ -230,6 +230,14 @@ public struct OpenAIModelList: Codable, Equatable, Sendable {
         }
     }
 
-    public let object: String
-    public let data: [Model]
+    package let object: String
+    package let data: [Model]
+
+    // Declared rather than left to the memberwise initializer, which is
+    // internal and so invisible to the server target that lists models
+    // (2026-10-02, phase A1 of `docs/plan-embedded-library.md`).
+    package init(object: String, data: [Model]) {
+        self.object = object
+        self.data = data
+    }
 }

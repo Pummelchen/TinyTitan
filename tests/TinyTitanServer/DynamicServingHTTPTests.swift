@@ -3,6 +3,7 @@ import NIOCore
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 private func send(

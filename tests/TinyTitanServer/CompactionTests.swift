@@ -11,6 +11,7 @@ import NIOCore
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 // A summariser stub: it records every request it is handed, answers with a

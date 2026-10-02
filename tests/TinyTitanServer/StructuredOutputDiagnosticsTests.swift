@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 @Suite("Structured output diagnostics")

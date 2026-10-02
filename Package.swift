@@ -29,9 +29,13 @@ let package = Package(
         .macOS(.v26)
     ],
     products: [
-        .library(name: "TinyTitan", targets: ["TinyTitan"]),
-        .library(name: "TinyTitanFormat", targets: ["TinyTitanFormat"]),
-        .library(name: "ContinuityCore", targets: ["ContinuityCore"]),
+        // Product 1 of 2: the library. `TinyTitanKit` is the supported surface
+        // another Swift program depends on; `TinyTitan`, `TinyTitanFormat` and
+        // `ContinuityCore` are its building blocks and stay targets rather than
+        // products, so there is exactly one library to promise anything about.
+        // See `docs/plan-embedded-library.md`.
+        .library(name: "TinyTitanKit", targets: ["TinyTitanKit"]),
+        // Product 2 of 2: the engine, embedding the library above.
         .executable(name: "TinyTitanRepack", targets: ["TinyTitanRepack"]),
         .executable(name: "TinyTitanCLI", targets: ["TinyTitanCLI"]),
         .executable(name: "TinyTitanServer", targets: ["TinyTitanServer"]),
@@ -108,6 +112,17 @@ let package = Package(
             ],
             swiftSettings: tinytitanLanguageStandard
         ),
+        // The supported facade an embedder links: the generation orchestrator,
+        // prompt shaping and templating, with no NIO and no HTTP. It depends on
+        // the engine and the format reader and on nothing else in this package.
+        // `TinyTitanServerCore` is rebuilt on top of it, so the facade cannot
+        // drift from what the server actually needs.
+        .target(
+            name: "TinyTitanKit",
+            dependencies: ["TinyTitan", "TinyTitanFormat"],
+            path: "sources/TinyTitanKit",
+            swiftSettings: tinytitanLanguageStandard
+        ),
         .target(
             name: "TinyTitanRepackCore",
             dependencies: ["TinyTitanFormat"],
@@ -177,6 +192,7 @@ let package = Package(
         .target(
             name: "TinyTitanServerCore",
             dependencies: [
+                "TinyTitanKit",
                 "TinyTitan",
                 "TinyTitanMemory",
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -263,6 +279,7 @@ let package = Package(
             name: "TinyTitanServerTests",
             dependencies: [
                 "TinyTitanServerCore",
+                "TinyTitanKit",
                 "TinyTitanMemory",
                 // `GenerationDefaults.Sampling`, so the mapper tests can pin
                 // that an omitted field follows the served model's profile

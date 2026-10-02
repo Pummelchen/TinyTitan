@@ -7,6 +7,7 @@
 import CryptoKit
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 public actor ServerCoordinator {
     struct Waiter {
@@ -27,7 +28,7 @@ public actor ServerCoordinator {
     /// Raised for the duration of every client generation. The side-engine
     /// reads it to choose its width: one thread while a person is waiting,
     /// four in the gaps.
-    public nonisolated let generating = GenerationSignal()
+    package nonisolated let generating = GenerationSignal()
 
     public init(queueLimit: Int, width: Int = 1) {
         self.queueLimit = queueLimit
@@ -122,43 +123,4 @@ public actor ServerCoordinator {
     public var runningCount: Int { activeCount }
     /// The admission width this coordinator was built with.
     public var concurrencyWidth: Int { width }
-}
-
-/// Snapshot of the runner's lifetime stage counters at request start, so the
-/// TINYTITAN_RUNNER_STATS footer can report this request's per-stage deltas.
-struct RunnerCounterSnapshot {
-    let cb1: UInt64
-    let io: UInt64
-    let cb2: UInt64
-    let head: UInt64
-    let headFused: UInt64
-    let rdadvise: UInt64
-    let rdadviseCalls: UInt64
-    let rdadviseBytes: UInt64
-    let wait: UInt64
-    let body: UInt64
-    let prefetchIssued: UInt64
-    let prefetchAdopted: UInt64
-    let preamble: UInt64
-    let preambleRelease: UInt64
-    let preamblePin: UInt64
-    let preambleReserve: UInt64
-    let embed: UInt64
-    let gather: UInt64
-    let loopSample: UInt64
-    let loopProgress: UInt64
-    let loopOther: UInt64
-    let missIo: UInt64
-    let exposedIo: UInt64
-    let hitFixupLayers: UInt64
-    let routerReadback: UInt64
-    let cachePlan: UInt64
-    let ioQueue: UInt64
-    let ioCompletionToFixup: UInt64
-    let ioHostWaits: UInt64
-    let ioHostWaitsAvoided: UInt64
-    let gpuClassifiedHits: UInt64
-    let gpuClassifiedMisses: UInt64
-    let gpuAllHitLayers: UInt64
-    let expertStreaming: ExpertStreamingStatistics
 }

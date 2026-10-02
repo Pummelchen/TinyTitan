@@ -8,6 +8,7 @@
 
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 /// How a compaction was produced, so a replayed note can say what it is.
 public enum CompactionMode: String, Codable, Sendable {
@@ -245,7 +246,7 @@ public enum ServerCompaction {
     /// Roles are spelled out so a note can say who decided what, and a tool call
     /// is rendered rather than dropped — its arguments are often the fact worth
     /// keeping.
-    public static func transcript(_ messages: [OpenAIChatMessage]) -> String {
+    package static func transcript(_ messages: [OpenAIChatMessage]) -> String {
         messages.map { message in
             var text = ""
             if let content = message.content {

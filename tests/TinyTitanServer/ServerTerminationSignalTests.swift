@@ -2,6 +2,7 @@ import Darwin
 import Synchronization
 import Testing
 
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 @Suite("Server termination signals", .serialized)

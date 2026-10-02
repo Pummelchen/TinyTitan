@@ -16,7 +16,7 @@ import Foundation
 /// stop, and only for the kinds the operator named in `TINYTITAN_WATCHDOG_ACT`.
 /// A false stop costs the user a whole answer, so the policy lives in one
 /// place where it can be read in ten lines.
-public enum WatchdogKind: String, Sendable, CaseIterable {
+package enum WatchdogKind: String, Sendable, CaseIterable {
     case loop
     case stall
     case stub
@@ -36,18 +36,18 @@ public enum WatchdogKind: String, Sendable, CaseIterable {
     /// is not an option either: it is what the transcript is written in.
     ///
     /// So ping-pong reports, and the client, which owns the loop, decides.
-    public var canAct: Bool { self != .pingpong }
+    package var canAct: Bool { self != .pingpong }
 }
 
 /// What a detector has to say. `concern` is a detector's strongest verdict;
 /// `stop` is only ever produced by `WatchdogSet`, from a concern about a kind
 /// that is allowed to act.
-public enum WatchdogVerdict: Sendable, Equatable {
+package enum WatchdogVerdict: Sendable, Equatable {
     case fine
     case concern(String)
     case stop(String)
 
-    public var message: String? {
+    package var message: String? {
         switch self {
         case .fine: nil
         case .concern(let text), .stop(let text): text
@@ -63,7 +63,7 @@ public enum WatchdogVerdict: Sendable, Equatable {
 /// B5: every implementation costs O(1) per chunk. A detector whose cost grew
 /// with the output would tax exactly the long generations most likely to
 /// need watching, and `WatchdogCostTests` asserts it does not.
-public protocol Watchdog: Sendable {
+package protocol Watchdog: Sendable {
     static var kind: WatchdogKind { get }
     mutating func observe(_ chunk: String, at instant: ContinuousClock.Instant) -> WatchdogVerdict
     mutating func check(at instant: ContinuousClock.Instant) -> WatchdogVerdict
@@ -74,12 +74,12 @@ public protocol Watchdog: Sendable {
 }
 
 extension Watchdog {
-    public mutating func observe(
+    package mutating func observe(
         _ chunk: String,
         at instant: ContinuousClock.Instant
     ) -> WatchdogVerdict { .fine }
-    public mutating func check(at instant: ContinuousClock.Instant) -> WatchdogVerdict { .fine }
-    public mutating func finish(
+    package mutating func check(at instant: ContinuousClock.Instant) -> WatchdogVerdict { .fine }
+    package mutating func finish(
         visibleBytes: Int, requestBytes: Int,
         finishReason: String
     ) -> WatchdogVerdict { .fine }
@@ -88,18 +88,18 @@ extension Watchdog {
 /// The whole configuration surface. Off by default, and observation-only
 /// even when on: a watchdog may stop a generation only when its name appears
 /// in `TINYTITAN_WATCHDOG_ACT`.
-public struct WatchdogConfiguration: Sendable, Equatable {
-    public var isEnabled: Bool
+package struct WatchdogConfiguration: Sendable, Equatable {
+    package var isEnabled: Bool
     /// Kinds allowed to stop a generation. Empty is observation only.
-    public var acting: Set<WatchdogKind>
+    package var acting: Set<WatchdogKind>
     /// Seconds without a visible token, measured from the **first** token
     /// (B1). Prefill emits nothing and this project has measured a 10k-token
     /// prompt taking 652 s of it, so a clock started at the request would
     /// stop every long prompt.
-    public var stallSeconds: Double
+    package var stallSeconds: Double
     /// Repeats of one window before a loop is called. Six, measured: see
     /// `loopWindowBytes` for the calibration this came from.
-    public var loopRepeats: Int
+    package var loopRepeats: Int
     /// Length of the repeated window, in bytes.
     ///
     /// Sixty-four and six repeats sit in the middle of a plateau measured
@@ -111,13 +111,13 @@ public struct WatchdogConfiguration: Sendable, Equatable {
     /// bytes at four repeats fired on 8.1% of the corpus, all of it real
     /// code -- repeated SDL calls, repeated struct initialisers -- which is
     /// exactly the false-positive tail B3 predicted.
-    public var loopWindowBytes: Int
+    package var loopWindowBytes: Int
     /// How far back a repeat still counts, in bytes.
-    public var loopHistoryBytes: Int
+    package var loopHistoryBytes: Int
     /// A reply that finished normally with fewer visible bytes than this is
     /// a stub. Roughly 24 tokens at four bytes a token; see `StubWatchdog`
     /// for why the rule is written in bytes rather than tokens.
-    public var stubVisibleBytes: Int
+    package var stubVisibleBytes: Int
     /// Bytes the last user message must reach before a short reply counts as
     /// a stub.
     ///
@@ -128,11 +128,11 @@ public struct WatchdogConfiguration: Sendable, Equatable {
     /// can tell the two apart. Two hundred bytes separates the recorded
     /// corpus cleanly -- the probe is 7 bytes, every real book request is
     /// 657 or more -- and over 289 recorded exchanges it flags none.
-    public var stubAskedBytes: Int
+    package var stubAskedBytes: Int
     /// Identical tool calls in one request's history before it is a loop.
-    public var pingPongRepeats: Int
+    package var pingPongRepeats: Int
 
-    public init(
+    package init(
         isEnabled: Bool = false,
         acting: Set<WatchdogKind> = [],
         stallSeconds: Double = 90,
@@ -157,9 +157,9 @@ public struct WatchdogConfiguration: Sendable, Equatable {
         self.pingPongRepeats = max(2, pingPongRepeats)
     }
 
-    public static let off = WatchdogConfiguration()
+    package static let off = WatchdogConfiguration()
 
-    public func acts(_ kind: WatchdogKind) -> Bool {
+    package func acts(_ kind: WatchdogKind) -> Bool {
         isEnabled && kind.canAct && acting.contains(kind)
     }
 
@@ -167,9 +167,9 @@ public struct WatchdogConfiguration: Sendable, Equatable {
     /// `ProcessInfo.environment` reads have already cost this project about
     /// 40% of a 35B token once; a flag on the per-chunk path must never be
     /// read from the environment.
-    public static let shared = fromEnvironment()
+    package static let shared = fromEnvironment()
 
-    public static func fromEnvironment(
+    package static func fromEnvironment(
         _ environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> WatchdogConfiguration {
         var configuration = WatchdogConfiguration()
@@ -196,7 +196,7 @@ public struct WatchdogConfiguration: Sendable, Equatable {
     }
 
     /// One word for the startup banner.
-    public var summary: String {
+    package var summary: String {
         guard isEnabled else { return "watchdogs=off" }
         guard !acting.isEmpty else { return "watchdogs=observe" }
         let names = WatchdogKind.allCases
@@ -210,7 +210,7 @@ public struct WatchdogConfiguration: Sendable, Equatable {
 extension WatchdogConfiguration {
     /// Say what is watching, at startup, on the channel a server log
     /// actually captures.
-    public func announce() {
+    package func announce() {
         ServerLog.watchdogStartup(summary)
     }
 }

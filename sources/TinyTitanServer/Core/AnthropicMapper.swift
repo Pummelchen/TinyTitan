@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 // The Anthropic Messages request mapping onto the chat request.
 //
@@ -322,7 +323,7 @@ public enum AnthropicMapper {
     /// validator and the one generation path serve both APIs. No server profile
     /// is taken: everything the served model contributes is applied by the
     /// validator, and the reasoning level is the request's own.
-    public static func chatRequest(
+    package static func chatRequest(
         _ request: AnthropicMessagesRequest,
         maxContext: Int = Int.max
     ) throws -> OpenAIChatRequest {
@@ -454,7 +455,7 @@ public enum AnthropicMapper {
     }
 
     /// The count_tokens body, as a Messages request without generation.
-    public static func chatRequest(counting request: AnthropicCountTokensRequest) throws
+    package static func chatRequest(counting request: AnthropicCountTokensRequest) throws
         -> OpenAIChatRequest
     {
         let full = AnthropicMessagesRequest(

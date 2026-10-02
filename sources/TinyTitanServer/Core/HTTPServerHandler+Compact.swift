@@ -10,6 +10,7 @@ import NIOCore
 import NIOHTTP1
 import Synchronization
 import TinyTitan
+import TinyTitanKit
 
 extension ServerHTTPHandler {
     /// Compact a conversation into a note a fresh context can continue from.

@@ -1,15 +1,15 @@
 import Foundation
 
-enum ServerLog {
+package enum ServerLog {
     /// S32: requests log from concurrent tasks; serialize stderr writes so
     /// lines never interleave.
     private static let writeLock = NSLock()
 
-    static func accepted(id: String, streaming: Bool) {
+    package static func accepted(id: String, streaming: Bool) {
         write("request \(id) accepted streaming=\(streaming)")
     }
 
-    static func queued(id: String) {
+    package static func queued(id: String) {
         write("request \(id) queued")
     }
 
@@ -20,17 +20,17 @@ enum ServerLog {
     /// working, so this must not be an error, but an operator staring at a
     /// model that "ignores" `xhigh` deserves to see why. One line per
     /// request, and only when something actually changed.
-    static func reasoningFallback(id: String, notes: [String]) {
+    package static func reasoningFallback(id: String, notes: [String]) {
         for note in notes {
             write("request \(id) reasoning: \(note)")
         }
     }
 
-    static func generating(id: String) {
+    package static func generating(id: String) {
         write("request \(id) generating")
     }
 
-    static func completed(
+    package static func completed(
         id: String,
         duration: Duration,
         completion: ServerCompletion
@@ -58,7 +58,7 @@ enum ServerLog {
         }
     }
 
-    static func failed(
+    package static func failed(
         id: String,
         phase: String,
         status: UInt,
@@ -91,7 +91,7 @@ enum ServerLog {
     /// Always logged rather than hidden behind a debug env var: a server that
     /// silently dropped several GB is exactly what an operator needs to see in
     /// the log when a later request is unexpectedly slow.
-    static func residency(_ transition: String) {
+    package static func residency(_ transition: String) {
         write("model \(transition)")
     }
 
@@ -101,7 +101,7 @@ enum ServerLog {
     /// Worth a line because a compaction that quietly misses its budget, or one
     /// that fell back to trimming, is invisible in the caller's result — the
     /// window looks the same either way.
-    static func compacted(id: String, mode: String, noteTokens: Int, budget: Int) {
+    package static func compacted(id: String, mode: String, noteTokens: Int, budget: Int) {
         write("request \(id) compacted mode=\(mode) note_tokens=\(noteTokens) budget=\(budget)")
     }
 
@@ -112,14 +112,14 @@ enum ServerLog {
     /// come from the backend that just loaded: the server's own flag would
     /// report the previous model's cache after a switch between a GPU install
     /// and a CPU one, which has no cache to report.
-    static func promptCacheField(for backend: any ServerInferenceBackend) -> String {
+    package static func promptCacheField(for backend: any ServerInferenceBackend) -> String {
         guard let described = backend as? any PromptCacheDescribing else { return "" }
         return " prompt_cache=\(described.promptCacheMode.rawValue)"
     }
 
     /// Memory subsystem events. Operational only: never a memory's contents,
     /// which can be anything the model chose to write.
-    static func memory(_ detail: String) {
+    package static func memory(_ detail: String) {
         write("memory \(detail)")
     }
 

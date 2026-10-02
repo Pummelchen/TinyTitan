@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 // The Responses API to chat mapping: request fields onto the chat request,
 // tools and sampling that the server can honour.
@@ -142,7 +143,7 @@ public enum ResponsesAPIMapper {
     /// them and are left out; the model never sees them and never calls
     /// them. Codex sends web_search on every turn, so refusing would refuse
     /// Codex.
-    public static func functionTools(_ tools: [ResponsesAPIRequest.Tool]?)
+    package static func functionTools(_ tools: [ResponsesAPIRequest.Tool]?)
         -> (tools: [OpenAITool], namespaces: [String: String])
     {
         var out: [OpenAITool] = []
@@ -178,7 +179,7 @@ public enum ResponsesAPIMapper {
     /// `/v1/responses/compact`, so the two cannot disagree about what an item
     /// means, and a compacted window replays through exactly the path the
     /// original items did.
-    public static func chatMessages(
+    package static func chatMessages(
         items: [ResponsesAPIRequest.Item],
         instructions: String?
     ) throws -> [OpenAIChatMessage] {
@@ -269,7 +270,7 @@ public enum ResponsesAPIMapper {
     /// merged into a single opening system message. `priorItems` is the
     /// conversation a `previous_response_id` resolved to; it precedes the
     /// request's own input.
-    public static func chatRequest(
+    package static func chatRequest(
         _ request: ResponsesAPIRequest,
         priorItems: [ResponsesAPIRequest.Item] = [],
         inputItems: [ResponsesAPIRequest.Item]? = nil
@@ -323,7 +324,7 @@ public enum ResponsesAPIMapper {
     /// back as input. This is what `previous_response_id` chains on. The
     /// reasoning item is left out: a replayed one is skipped on the way back
     /// in, because thoughts are never part of a prompt.
-    public static func outputAsInput(
+    package static func outputAsInput(
         completion: ServerCompletion,
         responseID: String,
         namespaces: [String: String] = [:]

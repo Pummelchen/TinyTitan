@@ -8,17 +8,17 @@ import TinyTitan
 /// Split out of `OpenAIModels.swift` (2026-09-28) under the 500-line-per-file
 /// rule (Task 8 of the cleanup runbook) as pure code motion: the declarations
 /// are unchanged and remain top-level types of this module.
-public struct OpenAIErrorEnvelope: Codable, Equatable, Sendable {
-    public struct Detail: Codable, Equatable, Sendable {
-        public let message: String
-        public let type: String
-        public let param: String?
-        public let code: String
+package struct OpenAIErrorEnvelope: Codable, Equatable, Sendable {
+    package struct Detail: Codable, Equatable, Sendable {
+        package let message: String
+        package let type: String
+        package let param: String?
+        package let code: String
     }
 
-    public let error: Detail
+    package let error: Detail
 
-    public init(
+    package init(
         message: String, param: String? = nil, code: String, type: String = "invalid_request_error"
     ) {
         error = Detail(
@@ -29,16 +29,16 @@ public struct OpenAIErrorEnvelope: Codable, Equatable, Sendable {
     }
 }
 
-public struct OpenAITextPart: Codable, Equatable, Sendable {
-    public let type: String
-    public let text: String?
+package struct OpenAITextPart: Codable, Equatable, Sendable {
+    package let type: String
+    package let text: String?
 }
 
-public enum OpenAIMessageContent: Codable, Equatable, Sendable {
+package enum OpenAIMessageContent: Codable, Equatable, Sendable {
     case text(String)
     case parts([OpenAITextPart])
 
-    public init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let text = try? container.decode(String.self) {
             self = .text(text)
@@ -47,7 +47,7 @@ public enum OpenAIMessageContent: Codable, Equatable, Sendable {
         }
     }
 
-    public func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .text(let text): try container.encode(text)
@@ -71,47 +71,87 @@ public enum OpenAIMessageContent: Codable, Equatable, Sendable {
     }
 }
 
-public struct OpenAIFunctionCall: Codable, Equatable, Sendable {
-    public let name: String
-    public let arguments: String
+package struct OpenAIFunctionCall: Codable, Equatable, Sendable {
+    package let name: String
+    package let arguments: String
+
+    // Declared rather than left to the memberwise initializer: that one is
+    // internal, so the server target could not build a tool call after this
+    // type moved into the kit (2026-10-02, phase A1 of
+    // `docs/plan-embedded-library.md`).
+    package init(name: String, arguments: String) {
+        self.name = name
+        self.arguments = arguments
+    }
 }
 
-public struct OpenAIToolCall: Codable, Equatable, Sendable {
-    public let id: String
-    public let type: String
-    public let function: OpenAIFunctionCall
+package struct OpenAIToolCall: Codable, Equatable, Sendable {
+    package let id: String
+    package let type: String
+    package let function: OpenAIFunctionCall
+
+    package init(id: String, type: String, function: OpenAIFunctionCall) {
+        self.id = id
+        self.type = type
+        self.function = function
+    }
 }
 
-public struct OpenAIChatMessage: Codable, Equatable, Sendable {
-    public let role: String
-    public let content: OpenAIMessageContent?
-    public let toolCalls: [OpenAIToolCall]?
-    public let toolCallID: String?
-    public let name: String?
+package struct OpenAIChatMessage: Codable, Equatable, Sendable {
+    package let role: String
+    package let content: OpenAIMessageContent?
+    package let toolCalls: [OpenAIToolCall]?
+    package let toolCallID: String?
+    package let name: String?
 
     enum CodingKeys: String, CodingKey {
         case role, content, name
         case toolCalls = "tool_calls"
         case toolCallID = "tool_call_id"
     }
+
+    package init(
+        role: String,
+        content: OpenAIMessageContent?,
+        toolCalls: [OpenAIToolCall]?,
+        toolCallID: String?,
+        name: String?
+    ) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallID = toolCallID
+        self.name = name
+    }
 }
 
-public struct OpenAIFunctionDefinition: Codable, Equatable, Sendable {
-    public let name: String
-    public let description: String?
-    public let parameters: JSONValue
+package struct OpenAIFunctionDefinition: Codable, Equatable, Sendable {
+    package let name: String
+    package let description: String?
+    package let parameters: JSONValue
+
+    package init(name: String, description: String?, parameters: JSONValue) {
+        self.name = name
+        self.description = description
+        self.parameters = parameters
+    }
 }
 
-public struct OpenAITool: Codable, Equatable, Sendable {
-    public let type: String
-    public let function: OpenAIFunctionDefinition
+package struct OpenAITool: Codable, Equatable, Sendable {
+    package let type: String
+    package let function: OpenAIFunctionDefinition
+
+    package init(type: String, function: OpenAIFunctionDefinition) {
+        self.type = type
+        self.function = function
+    }
 }
 
-public enum OpenAIStop: Codable, Equatable, Sendable {
+package enum OpenAIStop: Codable, Equatable, Sendable {
     case one(String)
     case many([String])
 
-    public init(from decoder: Decoder) throws {
+    package init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let one = try? container.decode(String.self) {
             self = .one(one)
@@ -120,7 +160,7 @@ public enum OpenAIStop: Codable, Equatable, Sendable {
         }
     }
 
-    public func encode(to encoder: Encoder) throws {
+    package func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
         case .one(let value): try container.encode(value)
@@ -136,8 +176,8 @@ public enum OpenAIStop: Codable, Equatable, Sendable {
     }
 }
 
-public struct OpenAIStreamOptions: Codable, Equatable, Sendable {
-    public let includeUsage: Bool?
+package struct OpenAIStreamOptions: Codable, Equatable, Sendable {
+    package let includeUsage: Bool?
 
     enum CodingKeys: String, CodingKey {
         case includeUsage = "include_usage"
@@ -154,16 +194,16 @@ public struct OpenAIStreamOptions: Codable, Equatable, Sendable {
 /// switch, which is the case that matters: a client that forces thinking off
 /// for its summarization calls (so the model's own thinking cannot eat the
 /// output cap and truncate the summary) had the fix silently lost.
-public struct OpenAIChatTemplateKwargs: Codable, Equatable, Sendable {
-    public let enableThinking: Bool?
-    public let reasoningEffort: String?
+package struct OpenAIChatTemplateKwargs: Codable, Equatable, Sendable {
+    package let enableThinking: Bool?
+    package let reasoningEffort: String?
 
     enum CodingKeys: String, CodingKey {
         case enableThinking = "enable_thinking"
         case reasoningEffort = "reasoning_effort"
     }
 
-    public init(enableThinking: Bool? = nil, reasoningEffort: String? = nil) {
+    package init(enableThinking: Bool? = nil, reasoningEffort: String? = nil) {
         self.enableThinking = enableThinking
         self.reasoningEffort = reasoningEffort
     }

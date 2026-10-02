@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 // The router's failure modes and their wire descriptions.
 //
@@ -34,11 +35,11 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
 {
     /// Builds a backend for one catalog entry. Injectable so switching can be
     /// tested against stubs without a model on disk.
-    public typealias Loader =
+    package typealias Loader =
         @Sendable (ModelCatalog.Entry, ReasoningChoice) async throws -> any ServerInferenceBackend
     /// Counts a request's prompt tokens for a model that is not resident,
     /// from its tokenizer alone. Injectable for the same reason.
-    public typealias Counter =
+    package typealias Counter =
         @Sendable (ModelCatalog.Entry, ReasoningChoice, ValidatedChatRequest) async throws -> Int
 
     public nonisolated let servedModels: [ServedModel]
@@ -75,7 +76,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
     private var pendingSwitches = 0
     private var waiters: [Waiter] = []
 
-    public init(
+    package init(
         catalog: ModelCatalog,
         initialModelID: String,
         reasoning: ReasoningLevel,
@@ -173,7 +174,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
 
     /// A request with no model -- the engine's own, such as memory
     /// consolidation -- runs on whatever is resident rather than forcing a load.
-    public func generate(
+    package func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {
@@ -186,7 +187,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
     /// a model that is not resident is answered from that model's tokenizer
     /// and the resident model stays loaded; routing it like a generation
     /// made the next generation pay a full reload for a number.
-    public func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+    package func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
         let target = request.model ?? resident?.id ?? initialModelID
         if target != resident?.id, let entry = entries[target], let choice = choices[target] {
             return try await counter(entry, choice, request)

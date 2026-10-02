@@ -14,6 +14,7 @@ import NIOHTTP1
 import NIOPosix
 import Synchronization
 import TinyTitan
+import TinyTitanKit
 
 extension ServerHTTPHandler {
 

@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import TinyTitanKit
 
 // MARK: - Error envelope
 
@@ -28,7 +29,7 @@ public struct AnthropicErrorEnvelope: Codable, Equatable, Sendable {
     /// The Anthropic rendering of a server request error. The validator
     /// speaks OpenAI (message, param, code); the Anthropic API names the
     /// field inside the message, so the two are folded together here.
-    public static func from(_ error: ServerRequestError, requestID: String? = nil)
+    package static func from(_ error: ServerRequestError, requestID: String? = nil)
         -> AnthropicErrorEnvelope
     {
         switch error {

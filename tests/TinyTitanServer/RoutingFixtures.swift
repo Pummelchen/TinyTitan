@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+@testable import TinyTitanKit
 @testable import TinyTitanServerCore
 
 // Shared by the router and dynamic-serving tests: a three-model catalog that

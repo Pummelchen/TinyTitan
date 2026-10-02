@@ -29,8 +29,8 @@ import TinyTitan
 /// The thresholds are calibrated, not guessed: `benchmark/watchdog_calibrate.py`
 /// runs this over every recorded reply and the count of false positives is
 /// asserted to be zero.
-public struct LoopWatchdog: Watchdog {
-    public static let kind = WatchdogKind.loop
+package struct LoopWatchdog: Watchdog {
+    package static let kind = WatchdogKind.loop
 
     private struct Occurrence {
         var first: Int
@@ -61,7 +61,7 @@ public struct LoopWatchdog: Watchdog {
 
     private static let base: UInt64 = 1_000_003
 
-    public init(configuration: WatchdogConfiguration = .off) {
+    package init(configuration: WatchdogConfiguration = .off) {
         window = configuration.loopWindowBytes
         history = configuration.loopHistoryBytes
         repeats = configuration.loopRepeats
@@ -71,7 +71,7 @@ public struct LoopWatchdog: Watchdog {
         leavingFactor = factor
     }
 
-    public mutating func observe(
+    package mutating func observe(
         _ chunk: String,
         at instant: ContinuousClock.Instant
     ) -> WatchdogVerdict {
@@ -147,20 +147,20 @@ public struct LoopWatchdog: Watchdog {
 ///
 /// Reported through `check`, not `observe`, because the evidence for a stall
 /// is the absence of a call.
-public struct StallWatchdog: Watchdog {
-    public static let kind = WatchdogKind.stall
+package struct StallWatchdog: Watchdog {
+    package static let kind = WatchdogKind.stall
 
     private let threshold: Duration
     private let seconds: Double
     private var lastToken: ContinuousClock.Instant?
     private var tripped = false
 
-    public init(configuration: WatchdogConfiguration = .off) {
+    package init(configuration: WatchdogConfiguration = .off) {
         seconds = configuration.stallSeconds
         threshold = .seconds(configuration.stallSeconds)
     }
 
-    public mutating func observe(
+    package mutating func observe(
         _ chunk: String,
         at instant: ContinuousClock.Instant
     ) -> WatchdogVerdict {
@@ -168,7 +168,7 @@ public struct StallWatchdog: Watchdog {
         return .fine
     }
 
-    public mutating func check(at instant: ContinuousClock.Instant) -> WatchdogVerdict {
+    package mutating func check(at instant: ContinuousClock.Instant) -> WatchdogVerdict {
         guard !tripped, let lastToken else { return .fine }
         guard instant - lastToken >= threshold else { return .fine }
         tripped = true
@@ -193,18 +193,18 @@ public struct StallWatchdog: Watchdog {
 /// hundreds of generated tokens and emit nothing -- so a token count would
 /// measure the wrong thing anyway. Ninety-six bytes is about twenty-four
 /// tokens of English.
-public struct StubWatchdog: Watchdog {
-    public static let kind = WatchdogKind.stub
+package struct StubWatchdog: Watchdog {
+    package static let kind = WatchdogKind.stub
 
     private let threshold: Int
     private let asked: Int
 
-    public init(configuration: WatchdogConfiguration = .off) {
+    package init(configuration: WatchdogConfiguration = .off) {
         threshold = configuration.stubVisibleBytes
         asked = configuration.stubAskedBytes
     }
 
-    public mutating func finish(
+    package mutating func finish(
         visibleBytes: Int,
         requestBytes: Int,
         finishReason: String
@@ -230,8 +230,8 @@ public struct StubWatchdog: Watchdog {
 ///
 /// It is a pure function rather than a `Watchdog`: there is no stream and no
 /// state to carry, and a request is inspected once.
-public enum PingPongWatchdog {
-    public static let kind = WatchdogKind.pingpong
+package enum PingPongWatchdog {
+    package static let kind = WatchdogKind.pingpong
 
     /// The rule is a **consecutive** run, not a tally.
     ///
@@ -241,7 +241,7 @@ public enum PingPongWatchdog {
     /// the same arguments three times in a row with nothing else in
     /// between: the model is not getting what it needs and is asking again
     /// identically, which is the failure this watches for.
-    public static func inspect(
+    package static func inspect(
         _ messages: [GFTokenizer.Message],
         configuration: WatchdogConfiguration
     ) -> WatchdogVerdict {
