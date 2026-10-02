@@ -248,7 +248,6 @@ over — each of these is a real gap, and closing one is additive:
 | --- | --- |
 | `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
-| One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
 
 Closed since A1, for the record: the configuration knobs the CLI needed
@@ -292,7 +291,9 @@ earns a reputation. The contract for v1:
 
 1. `Engine` and `Session` are actors: the compiler serialises calls.
 2. **One generation per session at a time.** A second `respond` on the same
-   session waits (or throws `.busy` if the owner prefers — decide in P2).
+   session waits — **decided in P2**, and pinned by a test: the alternative was
+   to throw `.busy`, and waiting is what the engine's slot pool already does, so
+   a second failure mode would have been invented to replace a working one.
 3. **One engine, one `MTLDevice`.** The caller passes it; the engine never
    creates a hidden one. Two engines on the same device must work; the test that
    proves it creates two engines on the 4B install and runs them alternately.
@@ -378,7 +379,7 @@ diff in the dry run, so a break is a build failure rather than a surprise.
 | --- | --- | --- |
 | **P0** | Keep consumability proven: `examples/embedded` (done) plus a CI step that runs `tools/embedded-dependency-check.sh` | The fixture resolves, builds and links in CI; the released-tag variant is runnable by hand (`--tag 5.15.0`) |
 | **P1** | Introduce `TinyTitanLib`: move the session orchestrator, templating and prompt shaping out of `TinyTitanServerCore`; make the engine NIO-free; rebuild the CLI and server on the facade | Goldens byte-identical through the refactored path (they are the regression net); `TinyTitanServerCore` imports the kit, not the engine internals; a public-surface gate lists what is supported |
-| **P2** | Write and test the §5 contract | Tests: one generation per session, two engines on one device, cancel mid-decode, unload while idle |
+| **P2** | Write and test the §5 contract — **done**, in `tests/TinyTitanLib/LibraryContractTests.swift` | Four tests, gated on `TINYTITAN_LIBRARY_CONTRACT_MODEL`: two engines on one device running alternately, two generations on one session both completing, cancel mid-decode arriving as `.cancelled`, and `unload()` making live and newly made sessions report `.engineShutDown`. Run against `models/qwen3.5_4B_4Bit`: four passed in 16 s |
 | **P3** | XCFramework + resource bundle from `release.sh` | The fixture app links the XCFramework (no source) and generates on a clean machine; checksum in the Release; `Bundle` lookup proven by a run |
 | **P4** | C ABI + header + a C++ sample | The sample streams tokens; the header compiles as C99 and C++17 |
 | **P5** | Docs and process: the wiki's "Embedding TinyTitan" page (user-facing), a library section in `docs/repository-layout.md`, release-note entries, and the versioning policy in `RELEASE.md` | A reader who has never seen the repo can build the fixture from the wiki alone |

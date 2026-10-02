@@ -223,6 +223,19 @@ reinstall the model.
 Run package tests serially (`swift test --no-parallel`), passing extra arguments
 like `--filter` through. Run only one CLI or model-using test at a time.
 
+**The library's §5 contract is a model-gated suite.**
+`tests/TinyTitanLib/LibraryContractTests.swift` skips unless
+`TINYTITAN_LIBRARY_CONTRACT_MODEL` names a `.ssdai` install, so the ordinary run
+stays model-free while the contract stays runnable:
+
+```bash
+TINYTITAN_LIBRARY_CONTRACT_MODEL=models/qwen3.5_4B_4Bit \
+  swift test --no-parallel --filter LibraryContractTests
+```
+
+Run it when touching `Engine`/`Session` lifetime or concurrency: it is the only
+thing that checks two engines on one device, cancellation and `unload()`.
+
 **Ad-hoc model runs use the 4B or 9B, not the 2B, unless the task says
 otherwise.** That means any run that exercises a code path against a live model —
 a feature check, a live end-to-end, a hand-driven probe:
