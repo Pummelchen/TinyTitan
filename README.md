@@ -24,6 +24,34 @@ client of that server. It is **not** a fine-tuning toolkit, a vision model, a
 GUI app, or a way to expose a model to your network — the server is
 `127.0.0.1`-only and has no authentication.
 
+## What this repository delivers
+
+1. **The LLM engine as a library — [`TinyTitanKit`](sources/TinyTitanKit).** Embed
+   the engine in your own Swift program: an `Engine` and a `Session`, streaming
+   tokens through a callback. Same kernels, format reader and sampler as the
+   engine, in your process — no subprocess, no HTTP, no model reimplementation.
+2. **The complete local LLM engine — `TinyTitanCLI` + `TinyTitanServer`.** Run a
+   35B or 125B model from the terminal and serve it on a loopback
+   OpenAI-/Anthropic-compatible endpoint for Codex, Claude Code, Qwen Code,
+   OpenCode, Zed or the official SDKs. Native Swift and Metal: no MLX, no GGUF.
+3. **DeepSeek Harness plugins — [`plugins/dsh-tinytitan`](plugins/dsh-tinytitan),
+   [`plugins/dsh-lan-manager`](plugins/dsh-lan-manager).** The harness finds the
+   models you have installed and keeps its route current, with a quiet
+   compaction backend; the LAN manager drives a fleet of harnesses from one
+   console.
+4. **A ready-made DSH bundle install — [`tools/dsh_local.sh`](tools/dsh_local.sh).**
+   A pinned harness with the TinyTitan bundle already wired, entirely under
+   `~/.tinytitan`: it never touches a `dsh`, a `~/.dsh` or a port you already use.
+5. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
+   [`tools/`](tools).** Stream a checkpoint into a hash-verified install that
+   keeps the routed experts on SSD, so a model larger than your RAM still runs —
+   and a truncated, swapped or edited install is refused rather than served.
+
+Those five ship from one branch (`main`) and one release tag. The first two are
+the **products** — a library and an engine — and the rest are the bundles and
+tooling that ship beside them; the split is spelled out under
+[Two products, one repository](#two-products-one-repository).
+
 ## Quickstart
 
 **Prerequisites:** Apple Silicon (arm64, M1 or newer) and macOS 26 or later.
