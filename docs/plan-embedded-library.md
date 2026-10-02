@@ -1,11 +1,20 @@
 # TinyTitan as an embedded LLM engine — plan
 
-**Status: plan. Nothing here is implemented.** Written 2026-10-02, after 5.15.
-**Revised 2026-10-02:** the dependency premise in §2 was tested rather than
+**Status: plan, and phase A1 of P1 is implemented.** Written 2026-10-02, after
+5.15. **Revised 2026-10-02:** the dependency premise in §2 was tested rather than
 assumed, and it is false — a consumer package already resolves, builds, links and
 opens an install against the released tag. P0 therefore shrank from "remove the
 blockers" to "keep it proven". §6, §7 and §8 carry the correction; §2 carries the
 measurement.
+
+**What is implemented (phase A1).** `TinyTitanKit` exists as a target and is the
+one library product; the generation orchestration moved into it out of
+`TinyTitanServerCore`, which now serves through it, and the facade in §4 is
+public. `examples/embedded` depends on the library (not the runtime) and streams
+tokens from a real install: `qwen3.5-4b_4-Bit`, 12 completion tokens, stop
+`length`. Everything else in the kit is `package`, so the facade is the whole
+promise. The facade's gaps are listed at the end of §4; the CLI is the remaining
+front end to fold in (phase A2).
 
 The ask: let another Swift program use TinyTitan as its LLM engine — the way a C++
 program links a `.dll` — instead of shelling out to `TinyTitanCLI` or speaking HTTP
@@ -111,12 +120,18 @@ and `Model` is not formally `Sendable` — several call sites use
 ## 3. The target architecture
 
 ```
-TinyTitanKit          the supported facade: engine, session, options, errors, diagnostics
-   └── TinyTitanEngine   the current TinyTitan + TinyTitanFormat + kernels (no NIO, no HTTP)
-TinyTitanServerCore   HTTP + OpenAI translation, rebuilt ON TinyTitanKit
+TinyTitanKit          the supported facade (public) + the orchestrator it drives (package)
+   └── TinyTitan        the runtime: TinyTitanFormat + TinyTitanKernelsC + the forward runner
+TinyTitanServerCore   HTTP + OpenAI/Anthropic translation, rebuilt ON TinyTitanKit
 TinyTitanCLICore      the CLI, rebuilt ON TinyTitanKit
 TinyTitanC (optional) the C ABI: tinytitan.h over an opaque handle
 ```
+
+The runtime target keeps the name `TinyTitan` (the first draft called it
+`TinyTitanEngine`; renaming it would churn every import in the tree for no
+behavioural gain, and §9.5 is still open on naming). What matters is the layer
+above it: `TinyTitanKit` is a **product**, and the runtime is not — see
+`docs/repository-layout.md`.
 
 - **`TinyTitanKit` is additive and thin.** It does not re-export engine internals;
   it names the handful of types a consumer may depend on. Everything else stays
@@ -214,6 +229,19 @@ Decisions embedded in that sketch:
   draws.
 - **Nothing about the harness, the route or the catalog.** Those are the plugin's
   and the server's business.
+
+What phase A1 could not express, implemented honestly rather than papered over —
+each of these is a real gap in the facade, and closing one is additive:
+
+| Gap | Why |
+| --- | --- |
+| `EngineConfiguration` has no streaming mode or integrity policy | `ServerModelSession.load` derives both from the install |
+| `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
+| No `promptProcessed` event | `ServerInferenceEvent` has no prompt event to forward |
+| Reasoning text and tool calls are dropped | the A1 event/summary types do not carry them, though the orchestrator does |
+| `.unsupportedFormat` / `.integrityFailure` are declared but unreachable | `ModelError` is internal to the `TinyTitan` target, so those failures rethrow unclassified rather than being guessed from a string |
+| The orchestrator writes telemetry to stdout | `ServerLog` predates the facade; an embedder cannot switch it off, which `AGENTS.md` now names as a rule the kit must meet |
+| One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

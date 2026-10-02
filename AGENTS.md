@@ -135,6 +135,37 @@ the property is checked rather than assumed —
 `tools/embedded-dependency-check.sh` builds the fixture and is what would catch a
 change. See `docs/plan-embedded-library.md` §2.
 
+## Two products, one repository
+
+The tree ships two products on one branch, `main`, exactly as the two DeepSeek
+Harness bundles do under `plugins/` — one tree, one release tag, one CI, and
+separate surfaces:
+
+- **The library — `TinyTitanKit` (`sources/TinyTitanKit/`).** The supported
+  surface an embedder depends on: `Engine`, `Session`, `EngineConfiguration`,
+  `CachePrecision`, `ChatMessage`, `GenerationOptions`, the event/summary types
+  and `TinyTitanError`. Every other declaration in that target is `package` on
+  purpose: `public` there is a promise, so nothing becomes `public` by accident.
+- **The engine — the executables** (`TinyTitanCLI`, `TinyTitanServer`,
+  `TinyTitanRepack`, `TinyTitanBench`, the memory tool and the fleet manager).
+  It embeds the library rather than sitting beside it: the server's generation
+  path *is* the library's session.
+
+Rules that follow, and that need a decision recorded in
+`docs/plan-embedded-library.md` to change:
+
+1. **The library imports no NIO and prints nothing.** No HTTP and no server
+   concept may enter `TinyTitanKit`, and the facade must not write to stdout or
+   stderr that an embedder then has to tidy up. The moved orchestrator's
+   `ServerLog` telemetry is still a known violation of this rule (TT-038).
+2. **One generation path.** A front end that reimplements prompt rendering,
+   sampling or the decode loop is drift; move it onto the facade instead. The
+   CLI's own driver is the last one left.
+3. **`package` for everything internal.** Cross-target `package` access is what
+   keeps the facade small enough to promise anything about.
+4. **Both products ship from one tag.** The library's version is the release
+   tag; there is no second version to keep in step.
+
 ## Models
 
 **Installing a model is a separate, operator-requested job** — never run it to

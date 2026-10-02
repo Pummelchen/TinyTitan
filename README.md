@@ -360,6 +360,47 @@ Per-version measurements and the method live on the wiki
   editor are wired by the launcher; `--round clients` on the coder benchmark
   checks every client's wiring without loading a model.
 
+## Two products, one repository
+
+This repository ships **two products**, deliberately separate, on **one branch**
+(`main`) — the same arrangement the two DeepSeek Harness bundles have under
+`plugins/`: one tree, one release tag, one CI, and products with separate
+surfaces. `docs/plan-embedded-library.md` is the design record;
+`docs/repository-layout.md` maps the targets.
+
+**1. The library — `TinyTitanKit`.** A Swift package product you add as a
+dependency and embed in your own program. It is the supported surface: an
+`Engine` and its `Session` actors over the same kernels, format reader and
+sampler the shipped engine uses, with no subprocess and no HTTP.
+
+```swift
+import TinyTitanKit
+
+let engine = try await Engine(directory: installURL, device: device)
+let session = await engine.session()
+let summary = try await session.respond(
+    to: [ChatMessage(role: .user, content: "The capital of France is")]
+) { event in
+    if case .token(let text) = event { print(text, terminator: "") }
+}
+```
+
+`examples/embedded` is a real consumer package — it builds against the released
+tag and streams tokens — and `tools/embedded-dependency-check.sh` builds and runs
+it, so the dependency cannot rot silently. The wiki's
+[Library and engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine)
+page is the user-facing guide.
+
+**2. The engine — the `TinyTitanCLI` and `TinyTitanServer` executables.** The
+terminal product this project is known for: the CLI, the installer and repacker,
+the benchmark driver, and the loopback OpenAI-/Anthropic-compatible server. The
+engine embeds the library rather than carrying a second implementation of it:
+`TinyTitanServerCore` serves generation through the library's session, and the
+CLI's own driver is the last path being folded onto the same facade.
+
+Neither product downloads weights, and neither is a network service — the server
+binds `127.0.0.1` only.
+
 ## Documentation
 
 - [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)

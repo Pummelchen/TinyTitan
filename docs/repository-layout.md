@@ -30,6 +30,22 @@ point of the project and is hundreds of GB; `.build/` is disposable). Nothing
 else in the tree is generated, so a clean checkout is the tree plus whatever
 models you installed.
 
+## Products
+
+`Package.swift` declares exactly two product families, and the split is
+deliberate (`docs/plan-embedded-library.md`):
+
+| Product | Kind | What it is |
+| --- | --- | --- |
+| `TinyTitanKit` | library | The supported surface an embedder depends on: `Engine`, `Session` and their value types. |
+| `TinyTitanCLI`, `TinyTitanServer`, `TinyTitanRepack`, `TinyTitanBench`, `ContinuityDemo`, `tinytitan-memory`, `ttlanmanager` | executables | The engine: the terminal product, which embeds `TinyTitanKit`. |
+
+`TinyTitan`, `TinyTitanFormat`, `ContinuityCore` and the rest are **targets, not
+products**: they are the building blocks of those two, and nothing outside this
+repository should link them directly. That is what keeps the facade small enough
+to make a promise about — adding a product is how a third surface would appear,
+and it needs a decision recorded in the plan first.
+
 ## Targets
 
 `sources/` holds one directory per SwiftPM target, and the name of the
@@ -40,6 +56,11 @@ directory is the name of the target:
   `Kernels/` (Swift dispatch over the shaders), `Metal/` (the `.metal`
   sources), `Runtime/{Inference,Prefill,KVCache,Generation,Configuration,Family}`,
   `Infrastructure/{ModelIO,Streaming,Metal}`, `CPUEngine/`, `Tokenization/`.
+- **`TinyTitanKit`** — the library product: the supported facade (`Engine`,
+  `Session`, their options, events, summary and errors) plus the generation
+  orchestration it drives. No NIO and no HTTP: this is the target another Swift
+  program depends on, and everything in it that is not the facade is `package`,
+  so the promise stays small. See `docs/plan-embedded-library.md`.
 - **`TinyTitanServer`, `TinyTitanCLI`, `TinyTitanRepack`, `TinyTitanMemoryTool`** — the four
   executables, each split into a SwiftPM-invisible `Command/` subdirectory
   (the `@main`/top-level entry) and a `Core/` library part that the tests
