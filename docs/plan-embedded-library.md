@@ -216,8 +216,8 @@ public enum TinyTitanError: Error, Sendable {
     case modelNotFound(URL)
     case notAnInstall(URL)                 // missing/invalid manifest
     case unsupportedFamily(family: String)
-    case unsupportedFormat(magic: String)  // names what was found
-    case integrityFailure(path: String, expected: String, actual: String)
+    case unsupportedFormat(detail: String) // the loader's own wording
+    case integrityFailure(path: String, detail: String)
     case contextWindowExceeded(prompt: Int, window: Int)
     case metalUnavailable(reason: String)
     case cancelled
@@ -250,7 +250,6 @@ over — each of these is a real gap, and closing one is additive:
 | `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
 | No `promptProcessed` event | `ServerInferenceEvent` has no prompt event to forward |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
-| `.unsupportedFormat` / `.integrityFailure` are declared but unreachable | `ModelError` is internal to the `TinyTitan` target, so those failures rethrow unclassified rather than being guessed from a string |
 | One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
 
@@ -259,9 +258,18 @@ Closed since A1, for the record: the configuration knobs the CLI needed
 `reasoningEffort`, `readAhead`, `forceLogitsHead`), the model's own sampling
 defaults, presence penalty, timing on the summary, a raw-completion entry
 point — `Prompt.raw`, which drives the *same* orchestrator with the chat
-template skipped rather than a second decode loop — and a **log sink the
-embedder owns** (`EngineConfiguration.logSink`; `nil` keeps stderr, `{ _ in }`
-silences the library, and the CLI's `--quiet` uses it).
+template skipped rather than a second decode loop — a **log sink the embedder
+owns** (`EngineConfiguration.logSink`; `nil` keeps stderr, `{ _ in }` silences
+the library, and the CLI's `--quiet` uses it), and the **load-failure taxonomy**:
+`ModelError` is now `package`, and `Engine.classify` turns it into
+`unsupportedFormat`, `integrityFailure`, `unsupportedFamily` or `notAnInstall` —
+exhaustively, so a new loader failure must be classified rather than inherited,
+and returning `nil` for the ones that are about the machine rather than the
+install, which are rethrown as they are.
+
+That last one changed the §4 sketch: the two cases carry the loader's own
+wording (`detail:`) rather than an invented digest, because a made-up
+`expected`/`actual` pair is a worse lie than prose.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

@@ -5,7 +5,11 @@ import Foundation
 // Split out of `ModelTypes.swift` (2026-09-28) under the 500-line-per-file rule
 // (Task 8 of the cleanup runbook) as pure code motion.
 /// Failure modes for the validation gates in `Model.load`.
-enum ModelError: Error, CustomStringConvertible, Equatable {
+///
+/// `package` rather than internal: `TinyTitanLib` sits above this target and is
+/// the layer that turns these into the facade's typed errors, so it has to be
+/// able to match on them. It stays out of any product.
+package enum ModelError: Error, CustomStringConvertible, Equatable {
     case partialInstall(path: String)
     case notASSDAIDirectory
     case unsupportedVersion(major: Int, minor: Int)

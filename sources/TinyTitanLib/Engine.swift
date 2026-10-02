@@ -313,6 +313,10 @@ public actor Engine {
             }
         } catch is CancellationError {
             throw TinyTitanError.cancelled
+        } catch let error as ModelError {
+            guard let classified = Self.classify(error, directory: directory, family: family)
+            else { throw error }
+            throw classified
         }
         self.descriptor = Self.describe(
             session: loaded, manifest: manifest)
@@ -404,6 +408,42 @@ public actor Engine {
         return RuntimeConfiguration.allowedPrefillChunkTokens
             .first { $0 >= tokenCount }
             ?? PrefillRuntimeConfig.maxChunkTokens
+    }
+
+    /// Turn the loader's own failure into the facade's, or `nil` to rethrow it.
+    ///
+    /// The taxonomy a caller acts on is three-way: a wrong format is the
+    /// caller's to fix, a corrupt install is a re-download, and an architecture
+    /// this build cannot run is a support question. Failures outside that
+    /// taxonomy — a Metal command buffer that errored, a runtime invariant —
+    /// say something about the machine rather than about the install, and are
+    /// deliberately **not** flattened into a case that would claim more than the
+    /// facade knows.
+    ///
+    /// `package` rather than private so the library's own tests can pin the
+    /// mapping without a model on disk, and exhaustive rather than defaulted so
+    /// a new loader failure has to be classified rather than inherited.
+    package static func classify(
+        _ error: ModelError,
+        directory: URL,
+        family: ModelFamily
+    ) -> TinyTitanError? {
+        switch error {
+        case .notASSDAIDirectory, .unsupportedVersion, .unknownFlag:
+            return .unsupportedFormat(detail: error.description)
+        case .checksumMismatch(let file):
+            return .integrityFailure(path: file, detail: error.description)
+        case .trustedReceiptInvalid(let detail), .indexCorrupt(let detail):
+            return .integrityFailure(path: directory.path, detail: detail)
+        case .archMismatch, .unsupportedArchitecture:
+            return .unsupportedFamily(family: family.rawValue)
+        case .partialInstall, .missingFile, .tensorNotFound, .tensorSizeMismatch,
+            .expertStrideNotPageAligned:
+            return .notAnInstall(directory)
+        case .residentBufferWrapFailed, .posixFailed, .expertCacheUnplaceable,
+            .commandBufferFailed, .internalInconsistency:
+            return nil
+        }
     }
 
     private static func resolveArch(family: ModelFamily, directory: URL) throws -> ArchConfig {

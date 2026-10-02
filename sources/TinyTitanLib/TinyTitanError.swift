@@ -4,10 +4,11 @@
 // §4). A caller fixing a path and a caller waiting for support need to be told
 // apart, so the cases are specific rather than one string.
 //
-// Two cases are declared but not yet produced: `unsupportedFormat` and
-// `integrityFailure` need the loader's `ModelError`, which is internal to the
-// engine target, so a failure there is rethrown unclassified today. See the
-// phase A1 report.
+// The loader's own `ModelError` is `package` rather than internal, so this
+// target can classify it instead of rethrowing an opaque `Error` — which is
+// what a load failure used to be. The two cases that carry free text carry the
+// loader's wording verbatim, because inventing a digest-shaped value for a
+// failure the loader describes in words would be a worse lie than prose.
 import Foundation
 
 public enum TinyTitanError: Error, Sendable {
@@ -17,10 +18,13 @@ public enum TinyTitanError: Error, Sendable {
     case notAnInstall(URL)
     /// The manifest declares a family this build does not implement.
     case unsupportedFamily(family: String)
-    /// The install's format magic is not one this build reads.
-    case unsupportedFormat(magic: String)
-    /// A file's bytes do not match the manifest's digest.
-    case integrityFailure(path: String, expected: String, actual: String)
+    /// The install's format is not one this build reads — a manifest whose
+    /// magic is neither `SSDAI` nor the legacy `GTURBO`, an unknown version, or
+    /// a flag this build does not know. `detail` is the loader's wording.
+    case unsupportedFormat(detail: String)
+    /// The install's bytes are not what its manifest and receipt record.
+    /// `path` is what the loader was reading when it found out.
+    case integrityFailure(path: String, detail: String)
     /// The prompt plus the requested completion do not fit the context window.
     case contextWindowExceeded(prompt: Int, window: Int)
     /// No usable Metal device, or not the one the engine must run on.
@@ -47,10 +51,10 @@ extension TinyTitanError: CustomStringConvertible {
             return "not a TinyTitan install: \(directory.standardizedFileURL.path)"
         case .unsupportedFamily(let family):
             return "unsupported model family: \(family)"
-        case .unsupportedFormat(let magic):
-            return "unsupported model format: \(magic)"
-        case .integrityFailure(let path, let expected, let actual):
-            return "integrity failure for \(path): expected \(expected), got \(actual)"
+        case .unsupportedFormat(let detail):
+            return "unsupported model format: \(detail)"
+        case .integrityFailure(let path, let detail):
+            return "integrity failure for \(path): \(detail)"
         case .contextWindowExceeded(let prompt, let window):
             return "context window exceeded: prompt \(prompt) tokens, window \(window)"
         case .metalUnavailable(let reason):
