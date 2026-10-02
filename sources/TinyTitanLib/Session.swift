@@ -257,7 +257,11 @@ public actor Session {
             modelID: descriptor.id,
             maxContext: modelSession.maximumContext,
             reasoningProfile: reasoningProfile,
-            sampling: modelSession.samplingDefaults
+            sampling: modelSession.samplingDefaults,
+            // The wire's caps are for a third party's request; this caller is
+            // inside the process and was never held to them before the CLI
+            // moved onto the facade.
+            rules: .local
         )
         .withModel(descriptor.id)
         if options.topK == 0 {

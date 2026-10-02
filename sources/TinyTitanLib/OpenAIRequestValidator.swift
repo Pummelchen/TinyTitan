@@ -1,6 +1,21 @@
 import Foundation
 import TinyTitan
 
+/// Which request limits apply.
+///
+/// The structural rules are the same either way — a message needs content,
+/// guidance precedes the conversation, a tool result names an open call. What
+/// differs is the wire's *caps*, and they exist to protect the engine from a
+/// third party's request rather than from its own embedder: four stop strings
+/// and a thousand messages are OpenAI's numbers, and the CLI never had them
+/// before it moved onto the facade.
+package enum RequestRules: Sendable, Equatable {
+    /// What arrived over HTTP.
+    case wire
+    /// A caller inside this process.
+    case local
+}
+
 /// The OpenAI-compatible request validator: model resolution, sampling bounds,
 /// message, tool and schema-key validation.
 ///
@@ -20,7 +35,8 @@ package enum OpenAIRequestValidator {
         // Filled in for a request that omits the value.
         // Defaults to the house settings so callers that
         // do not know the family keep today's behaviour.
-        sampling: GenerationDefaults.Sampling = GenerationDefaults.house
+        sampling: GenerationDefaults.Sampling = GenerationDefaults.house,
+        rules: RequestRules = .wire
     ) throws -> ValidatedChatRequest {
         // The "<model>-fast" alias selects the same weights as the base model
         // but enables the CLI-strip heuristic per request (chat-only speed),
@@ -196,20 +212,24 @@ package enum OpenAIRequestValidator {
                 "value_too_large")
         }
 
-        // S18: stop strings must be non-empty, unique, and bounded.
+        // S18: stop strings must be non-empty and unique. The count and total
+        // length are the wire's caps, so a local caller is not held to them.
         let stopValues = request.stop?.values ?? []
         var stopStrings: [String] = []
         if !stopValues.isEmpty {
             guard stopValues.allSatisfy({ !$0.isEmpty }) else {
                 throw invalid("stop strings must not be empty", "stop", "invalid_value")
             }
-            guard stopValues.count <= 4 else {
-                throw invalid("at most 4 stop strings are supported", "stop", "value_too_large")
-            }
-            let totalLength = stopValues.reduce(0) { $0 + $1.utf8.count }
-            guard totalLength <= 256 else {
-                throw invalid(
-                    "stop strings must total at most 256 bytes", "stop", "value_too_large")
+            if rules == .wire {
+                guard stopValues.count <= 4 else {
+                    throw invalid(
+                        "at most 4 stop strings are supported", "stop", "value_too_large")
+                }
+                let totalLength = stopValues.reduce(0) { $0 + $1.utf8.count }
+                guard totalLength <= 256 else {
+                    throw invalid(
+                        "stop strings must total at most 256 bytes", "stop", "value_too_large")
+                }
             }
             var seen: Set<String> = []
             stopStrings = stopValues.filter { seen.insert($0).inserted }
@@ -240,7 +260,7 @@ package enum OpenAIRequestValidator {
         let tools = try (includeTools ? request.tools ?? [] : []).map {
             try validateTool($0)
         }
-        let messages = try validateMessages(request.messages)
+        let messages = try validateMessages(request.messages, rules: rules)
         // A client-supplied seed makes sampling deterministic.
         let config = GenerationConfig(
             maxNewTokens: maximum,
@@ -364,16 +384,23 @@ package enum OpenAIRequestValidator {
         }
     }
 
-    private static func validateMessages(_ input: [OpenAIChatMessage]) throws -> [GFTokenizer
+    private static func validateMessages(
+        _ input: [OpenAIChatMessage],
+        rules: RequestRules
+    ) throws -> [GFTokenizer
         .Message]
     {
         guard !input.isEmpty else {
             throw invalid("messages must not be empty", "messages", "invalid_message")
         }
-        guard input.count <= 1000 else {
-            throw invalid(
-                "message count exceeds maximum of 1000",
-                "messages", "value_too_large")
+        // The thousand-message ceiling is the wire's; a local caller's history
+        // is its own business.
+        if rules == .wire {
+            guard input.count <= 1000 else {
+                throw invalid(
+                    "message count exceeds maximum of 1000",
+                    "messages", "value_too_large")
+            }
         }
         var knownCalls: [String: (name: String, resolved: Bool)] = [:]
         var result: [GFTokenizer.Message] = []

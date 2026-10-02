@@ -241,12 +241,18 @@ Decisions embedded in that sketch:
 - **Nothing about the harness, the route or the catalog.** Those are the plugin's
   and the server's business.
 
-What the facade still cannot express, implemented honestly rather than papered
-over — each of these is a real gap, and closing one is additive:
+**The gap list is empty.** Every entry the first draft carried is closed or was
+reframed after being measured:
 
-| Gap | Why |
-| --- | --- |
-| Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
+- the unsafe-flag premise was **false** (§2), which is what emptied P0;
+- the configuration knobs the CLI needed, the model's own sampling defaults,
+  presence penalty, timing on the summary and a raw-completion entry point;
+- a log sink the embedder owns, and a load-failure taxonomy that classifies or
+  deliberately declines to;
+- the prompt event, and reasoning and tool calls on the event and summary types;
+- the integrity policy, and the caller's Metal device;
+- one entry was **half wrong** (the streaming mode has no choice to expose) and
+  one was **not a facade gap at all** (a local caller judged by the wire's caps).
 
 Closed since A1, for the record: the configuration knobs the CLI needed
 (`prefillChunkTokens`, `expertCacheSlots`, `ropeScaling`, `thinkingMode`,
@@ -299,8 +305,18 @@ the engine's representation becomes part of the promise. Reasoning is verified
 end to end: a probe on `models/qwen3.5_4B_4Bit` with `thinkingMode: .on` produced
 128 reasoning events (389 characters) matching the summary exactly. Tool calls
 cannot be produced end to end yet, and that is not a mapping gap: the facade
-offers the model no tools, because a request vocabulary of its own is the next
-row.
+offers the model no tools, because a request vocabulary with a `tools` field is
+work nobody has asked for yet. The case is carried so that day is additive.
+
+**The wire's caps belong to the wire.** The facade reaches the orchestrator
+through an `OpenAIChatRequest` and the server's validator, so a local caller used
+to inherit OpenAI's limits — four stop strings, a thousand messages — which the
+CLI had never had before it moved onto the facade. The validator now takes
+`RequestRules` (`.wire` by default, `.local` from the facade), and only the
+*caps* differ: an empty message or an unknown role is malformed whoever sent it.
+Verified at both ends — a five-stop-string CLI run exits 0 where it used to be
+refused, and the three output baselines are unchanged — plus three tests that
+pin the wire refusing what the local path allows.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 
