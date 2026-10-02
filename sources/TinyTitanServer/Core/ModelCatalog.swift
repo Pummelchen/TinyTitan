@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// Every model a models directory holds that this server can actually serve,
 /// GPU installs and CPU snapshots alike.
@@ -13,7 +13,7 @@ import TinyTitanKit
 public struct ModelCatalog: Sendable {
 
     /// The engine that serves an install. The concept now lives in
-    /// `TinyTitanKit` (2026-10-02, phase A1 of `docs/plan-embedded-library.md`)
+    /// `TinyTitanLib` (2026-10-02, phase A1 of `docs/plan-embedded-library.md`)
     /// because the generation path consults it, and only the two cases travel;
     /// the catalog and everything else about it stay here. This spelling is
     /// kept so the catalog's own callers read unchanged.

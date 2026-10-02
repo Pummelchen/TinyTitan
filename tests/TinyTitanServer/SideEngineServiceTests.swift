@@ -3,7 +3,7 @@ import Testing
 import TinyTitan
 import TinyTitanMemory
 
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// The resident side-engine's home in the server: which install it loads, and

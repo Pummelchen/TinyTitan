@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 public struct ServerArguments: Equatable, Sendable {
     public let model: String

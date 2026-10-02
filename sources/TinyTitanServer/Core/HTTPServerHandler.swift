@@ -13,7 +13,7 @@ import NIOHTTP1
 import NIOPosix
 import Synchronization
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// unchecked-invariant: NIO calls every ChannelInboundHandler method on the
 /// channel's own event loop, so the handler's per-request state is already

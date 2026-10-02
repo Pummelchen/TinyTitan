@@ -29,6 +29,8 @@ extension ServerModelSession {
         reasoningEffort: ModelReasoningEffort? = nil,
         expertCacheSlots requestedExpertCacheSlots: Int? = nil,
         expertCacheBudgetBytes: Int? = nil,
+        rdadvisePolicy requestedRDAdvisePolicy: RDAdvicePolicyMode? = nil,
+        forceLogitsHead: Bool = true,
         mtpModelDirectory: URL? = nil,
         mtpMemoryMiB: Int = StreamingMTPMemoryPlan.defaultBudgetMiB,
         reusingContext: MetalContext? = nil
@@ -129,14 +131,14 @@ extension ServerModelSession {
             let targetGib = gib(Double(explicitTarget))
             let floorGib = gib(Double(residentFloor))
             let cacheGib = slotsGib(derivedSlots)
-            print(
+            ServerLog.diagnostic(
                 String(
                     format: "TinyTitan ram target=%.2fG cache=%.2fG slots=%d "
                         + "resident_floor=%.2fG estimate=%.2fG",
                     targetGib, cacheGib, derivedSlots, floorGib,
                     floorGib + cacheGib))
             if targetGib < floorGib + cacheGib {
-                print(
+                ServerLog.diagnostic(
                     String(
                         format: "TinyTitan ram warning: %.2fG is below this install's "
                             + "%.2fG floor (%.2fG resident + the %d-slot minimum cache); "
@@ -149,7 +151,7 @@ extension ServerModelSession {
                 layers: manifest.arch.numLayers,
                 budgetBytes: tunedBudget)
             let floorGib = gib(Double(residentFloor))
-            print(
+            ServerLog.diagnostic(
                 String(
                     format: "TinyTitan ram profile cache=%.2fG slots=%d "
                         + "resident_floor=%.2fG estimate=%.2fG (cache budget, not a "
@@ -172,7 +174,8 @@ extension ServerModelSession {
         let runtime = try RuntimeConfiguration(
             expertCacheSlots: loadSlots,
             expertCachePolicy: loadRuntime.expertCachePolicy,
-            rdadvisePolicy: ProcessInfo.processInfo.environment["TINYTITAN_RDADVISE_POLICY"]
+            rdadvisePolicy: requestedRDAdvisePolicy
+                ?? ProcessInfo.processInfo.environment["TINYTITAN_RDADVISE_POLICY"]
                 .map(RDAdvicePolicyMode.parse)
                 ?? loadRuntime.rdadvisePolicy,
             prefillChunkTokens: requestedPrefillChunkTokens
@@ -184,7 +187,7 @@ extension ServerModelSession {
                     family: model.config.family,
                     fallback: loadRuntime.prefillChunkTokens),
             prefillAttentionPath: loadRuntime.prefillAttentionPath,
-            forceLogitsHead: true,
+            forceLogitsHead: forceLogitsHead,
             decodeExpertExecution: loadRuntime.decodeExpertExecution,
             expertIOSynchronization: loadRuntime.expertIOSynchronization,
             expertIOSubmission: loadRuntime.expertIOSubmission,

@@ -78,7 +78,7 @@ extension ServerModelSession {
                                     ("TinyTitan prompt_cache disk_write_failed error=\(diskError)\n")
                                         .utf8))
                         }
-                        print(
+                        ServerLog.diagnostic(
                             "TinyTitan prompt_cache stored "
                                 + "tokens=\(entry.kvPosition) "
                                 + "state_bytes=\(snapshot.payload.count) "
@@ -252,7 +252,7 @@ extension ServerModelSession {
             let decodeRate =
                 result.decodeSeconds > 0
                 ? Double(result.newTokens) / result.decodeSeconds : 0
-            print(
+            ServerLog.diagnostic(
                 String(
                     format:
                         "TinyTitan mtp drafted=%d accepted=%d acceptance=%.1f%% "
@@ -277,7 +277,7 @@ extension ServerModelSession {
                 // averaged over the request's target passes.
                 let passes = Double(stats.targetBackbonePasses)
                 let ms: (UInt64) -> Double = { Double($0) / passes / 1_000_000 }
-                print(
+                ServerLog.diagnostic(
                     String(
                         format:
                             "TinyTitan mtp-phases per_pass_ms proposal=%.3f checkpoint=%.3f "
@@ -297,7 +297,7 @@ extension ServerModelSession {
             let decodeRate =
                 result.decodeSeconds > 0
                 ? Double(result.newTokens) / result.decodeSeconds : 0
-            print(
+            ServerLog.diagnostic(
                 String(
                     format:
                         "TinyTitan generation prefill_s=%.3f decode_s=%.3f decode_tok_s=%.3f",
@@ -332,7 +332,7 @@ extension ServerModelSession {
         let gpuHits = runner.totalGPUClassifiedHits - snapshot.gpuClassifiedHits
         let gpuMisses = runner.totalGPUClassifiedMisses - snapshot.gpuClassifiedMisses
         let gpuAllHit = runner.totalGPUResidencyAllHitLayers - snapshot.gpuAllHitLayers
-        print(
+        ServerLog.diagnostic(
             String(
                 format: "TinyTitan runner cb1_ms=%.3f io_ms=%.3f cb2_ms=%.3f "
                     + "head_ms=%.3f head_fused_ms=%.3f rdadvise_ms=%.3f "
@@ -383,7 +383,7 @@ extension ServerModelSession {
                 ms(runner.totalLoopSampleNanos, snapshot.loopSample),
                 ms(runner.totalLoopProgressNanos, snapshot.loopProgress),
                 ms(runner.totalLoopOtherNanos, snapshot.loopOther)))
-        if let ring = runner.prefetchRingSummary { print("TinyTitan \(ring)") }
+        if let ring = runner.prefetchRingSummary { ServerLog.diagnostic("TinyTitan \(ring)") }
     }
 
     func emitKernelDiagnostics(result: RawDecodeResult) {
@@ -391,7 +391,7 @@ extension ServerModelSession {
         let summary = runner.kernelGPUTimingSummary()
         let totalGPU = summary.reduce(0) { $0 + $1.millis }
         for entry in summary {
-            print(
+            ServerLog.diagnostic(
                 String(
                     format: "TinyTitan kernel role=%@ gpu_ms=%.3f per_token_ms=%.3f count=%d",
                     entry.role, entry.millis, entry.millis / Double(tokens), entry.count))
@@ -399,19 +399,19 @@ extension ServerModelSession {
         // Role sums overlap by design. Merged busy/span is the actual queue
         // occupancy and distinguishes useful concurrency from idle gaps.
         let occupancy = runner.kernelGPUOccupancy()
-        print(
+        ServerLog.diagnostic(
             String(
                 format: "TinyTitan kernel total_gpu_ms=%.3f gpu_share_of_decode=%.1f%%",
                 totalGPU,
                 result.decodeSeconds > 0
                     ? totalGPU / (result.decodeSeconds * 1000) * 100 : 0))
         for gap in runner.kernelGPUGaps().prefix(8) {
-            print(
+            ServerLog.diagnostic(
                 String(
                     format: "TinyTitan gap %@ total_ms=%.1f per_token_ms=%.3f count=%d",
                     gap.transition, gap.millis, gap.millis / Double(tokens), gap.count))
         }
-        print(
+        ServerLog.diagnostic(
             String(
                 format: "TinyTitan kernel busy_ms=%.3f span_ms=%.3f "
                     + "occupancy=%.1f%% busy_share_of_decode=%.1f%% busy_per_token_ms=%.3f",

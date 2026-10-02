@@ -140,6 +140,20 @@ package enum ServerLog {
                 + "\(trip.acted ? "stopped" : "observed") \(trip.message)")
     }
 
+    /// One engine diagnostic line, without the log's timestamp prefix.
+    ///
+    /// The kit's operational telemetry (`TinyTitan generation …`, the RAM
+    /// profile, the prompt-cache lines, the kernel/runner stage splits) is
+    /// parsed out of a *merged* server log by `benchmark/*.py`, so its text is
+    /// a contract. What is not a contract is the stream: a library must not
+    /// write to stdout, which belongs to the program that embedded it, so every
+    /// one of these goes to stderr byte-for-byte as it was printed before.
+    package static func diagnostic(_ message: String) {
+        writeLock.withLock {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
+        }
+    }
+
     private static func format(_ duration: Duration) -> String {
         let seconds =
             Double(duration.components.seconds)

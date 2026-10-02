@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// Builds a models directory by hand: the shapes the catalog must recognise,

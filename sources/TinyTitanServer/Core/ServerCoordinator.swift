@@ -7,7 +7,7 @@
 import CryptoKit
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 public actor ServerCoordinator {
     struct Waiter {

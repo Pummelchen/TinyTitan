@@ -7,7 +7,7 @@
 
 import Testing
 
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// A whole catalog shares one resident slot, so the `prompt_cache` a load

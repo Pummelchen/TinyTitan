@@ -1,6 +1,15 @@
+// The CLI driver, built on the library.
+//
+// Phase A2 of `docs/plan-embedded-library.md`: the CLI is a front end of
+// `TinyTitanLib`, like the server. It builds one `Engine`, one `Session`, and
+// drives a single generation; it owns no tokenizer, no forward runner and no
+// decode loop. The one flag that cannot be answered from `Args` alone —
+// `--prefill-chunk auto`, which is sized to the prompt — is answered by an
+// `Engine` helper that loads only the tokenizer.
 import Foundation
 import Metal
 import TinyTitan
+import TinyTitanLib
 
 private struct MessageJSON: Decodable {
     let role: String
@@ -40,14 +49,21 @@ private struct MessageJSON: Decodable {
     }
 }
 
+/// A malformed `--messages-file`, reported with the tokenizer loader's wording
+/// so the CLI's error text is unchanged even though the tokenizer is no longer
+/// this target's business.
+private struct MessageFileError: Error, CustomStringConvertible {
+    let description: String
+}
+
 public struct RunResult: Equatable, Sendable {
     public let exitCode: Int32
     public init(exitCode: Int32) { self.exitCode = exitCode }
 }
 
-/// lint:allow-long the CLI driver: parse messages, load the model, run one
-/// completion, print the timing footer. It is the top-level script for a
-/// one-shot tool, and its steps have no other caller.
+/// lint:allow-long the CLI driver: resolve the sampling plan, choose the head,
+/// load the engine, run one generation, print the timing footer. It is the
+/// top-level script for a one-shot tool, and its steps have no other caller.
 public func run(
     args: Args,
     stdout: FileHandle = .standardOutput,
@@ -55,309 +71,199 @@ public func run(
 ) async -> RunResult {
     do {
         let modelURL = URL(fileURLWithPath: args.model)
-        // Reasoning effort is defined per family; check it against the
-        // installed manifest before any heavier work. An unreadable manifest
-        // is left for the model load below, which reports it better.
-        if args.reasoningEffort != nil,
-            let family = try? ManifestReader.peekFamily(directoryURL: modelURL)
-        {
-            try family.validateReasoning(
-                thinkingMode: args.thinkingMode,
-                effort: args.reasoningEffort)
+        let thinkingMode: ThinkingMode = args.thinkingMode == .on ? .on : .off
+        let reasoningEffort = args.reasoningEffort.flatMap {
+            ReasoningEffort(rawValue: $0.rawValue)
         }
-        let tokenizer = try await GFTokenizer.load(
-            forModelDirectory: modelURL,
-            thinkingMode: args.thinkingMode,
-            reasoningEffort: args.reasoningEffort)
-        // Concise mode injects one system prompt for every quantization; there
-        // is no width-dependent variant to select (see `ConcisePrompt`). The
-        // manifest read that used to sit here computed a value nothing consumed,
-        // and named a single family, so it reported 4 bits for every other one.
-        let concisePrompt: String? = args.concise ? ConcisePrompt.standard : nil
-        let promptIds: [Int32]
-        if let rawPrompt = args.prompt {
-            if let concisePrompt {
-                let messages = ConcisePrompt.appendingSystemPrompt(
-                    concisePrompt,
-                    to: [GFTokenizer.Message(role: .user, content: rawPrompt)])
-                let rendered = try tokenizer.applyChatTemplate(messages)
-                promptIds = tokenizer.encode(rendered, addBOS: false)
-            } else {
-                promptIds = tokenizer.encode(rawPrompt, addBOS: true)
-            }
-        } else if let messagesFile = args.messagesFile {
-            let data = try Data(
-                contentsOf: URL(fileURLWithPath: messagesFile),
-                options: [.mappedIfSafe])
-            let rows = try JSONDecoder().decode([MessageJSON].self, from: data)
-            var messages = try rows.map { row -> GFTokenizer.Message in
-                guard let role = GFTokenizer.Role(rawValue: row.role) else {
-                    throw GFTokenizerError.invalidChatTemplate("unsupported role \(row.role)")
-                }
-                return GFTokenizer.Message(role: role, content: row.content)
-            }
-            if let concisePrompt {
-                messages = ConcisePrompt.appendingSystemPrompt(concisePrompt, to: messages)
-            }
-            let rendered = try tokenizer.applyChatTemplate(messages)
-            promptIds = tokenizer.encode(rendered, addBOS: false)
-        } else {
-            return errored(stderr, "one of --prompt or --messages-file is required", 2)
-        }
-        guard !promptIds.isEmpty else { return errored(stderr, "empty prompt", 2) }
-        guard promptIds.count < args.maxContext else {
-            return errored(
-                stderr,
-                "context overflow: prompt \(promptIds.count) reaches maxContext \(args.maxContext)",
-                2)
-        }
-        let effectiveMaxNew = min(args.maxNew, args.maxContext - promptIds.count)
-        // A family whose model card specifies its own sampling gets it here,
-        // where the manifest has been read. Anything the caller named on the
-        // command line wins; this only fills what they left alone.
-        let peekedIdentity = try? ManifestReader.peekIdentity(directoryURL: modelURL)
-        let profileSampling =
-            peekedIdentity
-            .map { ModelProfile.resolve(identity: $0).sampling }
-            ?? GenerationDefaults.forFamily(.qwen36)
-        // Qwen3.8 publishes two rows and the profile carries only the thinking
-        // one, so the mode picks between them here -- the same choice the server
-        // makes during validation.
-        let familySampling: GenerationDefaults.Sampling
-        if let family = peekedIdentity?.family,
-            family == .qwen38flash || family == .qwen38flashMTP
-        {
-            familySampling = GenerationDefaults.forFamily(
-                family, thinking: args.thinkingMode == .on)
-        } else {
-            familySampling = profileSampling
-        }
-        let config = GenerationConfig(
-            maxNewTokens: effectiveMaxNew,
+        // The family's own row, read from the manifest before the engine
+        // exists: which head the load may use depends on whether this plan is
+        // pure greedy. Anything the caller named on the command line wins;
+        // this only fills what they left alone.
+        let declared = SamplingDefaults.forInstall(
+            at: modelURL, thinkingMode: thinkingMode)
+        let options = GenerationOptions(
+            maxTokens: min(args.maxNew, args.maxContext),
             temperature: args.temperatureWasSet
-                ? args.temperature : familySampling.temperature,
-            topK: args.topKWasSet ? args.topK : familySampling.topK,
-            topP: args.topPWasSet ? args.topP : familySampling.topP,
+                ? Double(args.temperature) : declared.temperature,
+            topP: args.topPWasSet ? Double(args.topP ?? 0) : declared.topP,
+            topK: args.topKWasSet ? (args.topK ?? 0) : declared.topK,
+            repetitionPenalty: Double(args.repetitionPenalty),
             presencePenalty: args.presencePenaltyWasSet
-                ? args.presencePenalty : familySampling.presencePenalty,
-            minP: familySampling.minP,
-            repetitionPenalty: args.repetitionPenalty,
+                ? Double(args.presencePenalty) : declared.presencePenalty,
             seed: args.seed,
-            stopStrings: args.stops,
-            extraStopTokens: [])
-        // Select the architecture the manifest declares rather than assuming
-        // the Qwen3.5-MoE baseline; otherwise a payload of any other family
-        // fails on a dimension mismatch instead of loading.
-        let identity = try ManifestReader.peekIdentity(directoryURL: modelURL)
-        let family = identity.family
-        let expectedArch: ArchConfig
-        do {
-            // The family's preset, or -- for a family with more than one
-            // geometry, like the dense Qwen 3.5 models -- the manifest's own
-            // declaration.
-            expectedArch = try ArchConfig.resolved(forFamily: family, directoryURL: modelURL)
-        } catch {
-            return errored(stderr, "\(error)", 2)
-        }
-        // Without an explicit --expert-cache-slots, take the same tuned budget
-        // the server uses, so the two front ends do not disagree about what
-        // this machine should run.
-        let resolvedSlots: Int
-        if let requested = args.expertCacheSlots {
-            resolvedSlots = requested
-        } else if let manifest = try? ManifestReader.load(
-            directoryURL: modelURL,
-            expecting: expectedArch)
-        {
-            resolvedSlots = RuntimeConfiguration.expertCacheSlots(
-                expertStrideBytes: manifest.expertStride,
-                layers: manifest.arch.numLayers,
-                budgetBytes: RuntimeConfiguration.affordableExpertCacheBudget(
-                    ModelProfile.resolve(identity: identity).expertCacheBudgetBytes))
-        } else {
-            resolvedSlots = 64
-        }
-        let loadRuntime = try RuntimeConfiguration(
-            expertCacheSlots: resolvedSlots,
-            rdadvisePolicy: RDAdvicePolicyMode.parse(args.rdadvise),
-            forceLogitsHead: !config.isPureGreedy,
-            decodeExpertExecution: try RuntimeDecodeExpertExecution.environmentValue(),
-            expertIOSynchronization: try RuntimeExpertIOSynchronization.environmentValue(),
-            expertIOSubmission: try RuntimeExpertIOSubmission.environmentValue())
-
-        guard MTLCreateSystemDefaultDevice() != nil else {
+            stop: args.stops)
+        // The head selection is the one load-time setting the sampling plan
+        // decides: a pure-greedy request may use the fused greedy head, and
+        // anything else needs real logits. The pre-facade CLI set exactly this.
+        let isPureGreedy =
+            options.temperature == 0
+            && options.presencePenalty == 0
+            && options.repetitionPenalty == 1
+        let prompt = try buildPrompt(args: args)
+        let prefillChunkTokens = try await resolvePrefillChunk(
+            args: args, prompt: prompt, modelURL: modelURL,
+            thinkingMode: thinkingMode, reasoningEffort: reasoningEffort)
+        let configuration = EngineConfiguration(
+            contextWindow: args.maxContext,
+            cachePrecision: cachePrecision(args.kvCachePrecision),
+            prefillChunkTokens: prefillChunkTokens,
+            expertCacheSlots: args.expertCacheSlots,
+            ropeScaling: args.ropeScalingMode == .yarn ? .yarn : .none,
+            thinkingMode: thinkingMode,
+            reasoningEffort: reasoningEffort,
+            readAhead: readAheadAdvice(args.rdadvise),
+            forceLogitsHead: !isPureGreedy)
+        guard let device = MTLCreateSystemDefaultDevice() else {
             return errored(stderr, "no Metal device", 1)
         }
-        let context = try MetalContext()
-        let model = try Model.load(
-            directoryURL: modelURL,
-            device: context.device,
-            expecting: expectedArch,
-            streamingMode: .pread(slotCount: loadRuntime.expertCacheSlots),
-            expertCachePolicy: loadRuntime.modelExpertCachePolicy,
-            integrityPolicy: .resolved(directoryURL: modelURL))
-        let prefillChunkTokens: Int
-        switch args.prefillChunk {
-        case .fixed(let tokens):
-            prefillChunkTokens = tokens
-        case .auto:
-            prefillChunkTokens =
-                RuntimeConfiguration.allowedPrefillChunkTokens
-                .first(where: { $0 >= promptIds.count })
-                ?? PrefillRuntimeConfig.maxChunkTokens
-        case nil:
-            // The (model, width) row first, so the CLI loads what the server
-            // loads; the family switch below is the fallback for rows that
-            // leave the chunk to the front end.
-            if let tabled = ModelProfile.resolve(identity: identity).prefillChunkTokens {
-                prefillChunkTokens = tabled
+        let engine = try await Engine(
+            directory: modelURL, device: device, configuration: configuration)
+        let session = await engine.session()
+        // The engine's resolved row and the pre-load peek agree; asserting it
+        // here would change no output, so the plan above is what runs.
+        let summary = try await session.respond(to: prompt, options: options) { event in
+            switch event {
+            case .token(let text):
+                if !text.isEmpty { stdout.write(Data(text.utf8)) }
+            case .promptProcessed, .finished:
                 break
             }
-            switch model.config.family {
-            case .qwen36, .qwen35Dense:
-                // The ANE sidecar is a fixed 4,096-token program and
-                // `eligibleChunk` routes a chunk to it only when the configured
-                // chunk is exactly that size, so a family left on the 128
-                // default can never reach the ANE at all — which is why the
-                // dense Qwen 3.5 installs saw no ANE prefill despite shipping a
-                // default-on switch. Measured on the dense 2B: chunk size does
-                // not change the GPU path's output (byte-identical greedy text
-                // at 128 and at 4,096) and prefill time is flat, so this is a
-                // scheduling choice that makes the ANE reachable, not a
-                // numerics change.
-                prefillChunkTokens = RuntimeConfiguration.qwenLongPrefillChunkTokens
-            case .qwen38flash:
-                // Measured on a 1,761-token prompt, interleaved A/B/B/A:
-                // 129.9 s at the 128 default against 75.2 s at 2,048, with the
-                // repeats agreeing to 0.6%. Routed experts are what prefill
-                // spends its time on, and a longer chunk is what amortizes
-                // them.
-                //
-                // That reasoning then stopped at 2,048, "because the
-                // sparse-attention gate caps this model's context at 2,051
-                // anyway, so a larger chunk would only cost scratch". True of
-                // attention and wrong about the experts. Prefill's expert cache
-                // is inert -- a chunk routes essentially every expert in a
-                // layer against 96 slots, so the hit rate is 0.6% and each
-                // chunk re-streams what the last one evicted. The cost tracks
-                // the chunk *count*, which the attention argument never
-                // considered: an 8k prompt is 5 chunks at 2,048 and 3 at 4,096,
-                // measured at 167.5 -> 111.0 GiB of expert reads and
-                // 506.4 -> 450.5 s of prefill (-11%), identical output.
-                prefillChunkTokens = RuntimeConfiguration.qwenLongPrefillChunkTokens
-            default:
-                prefillChunkTokens = loadRuntime.prefillChunkTokens
-            }
-        }
-        let runtime = try RuntimeConfiguration(
-            expertCacheSlots: loadRuntime.expertCacheSlots,
-            expertCachePolicy: loadRuntime.expertCachePolicy,
-            rdadvisePolicy: loadRuntime.rdadvisePolicy,
-            prefillChunkTokens: prefillChunkTokens,
-            prefillAttentionPath: loadRuntime.prefillAttentionPath,
-            forceLogitsHead: !config.isPureGreedy,
-            decodeExpertExecution: loadRuntime.decodeExpertExecution,
-            expertIOSynchronization: loadRuntime.expertIOSynchronization,
-            expertIOSubmission: loadRuntime.expertIOSubmission,
-            kvCachePrecision: args.kvCachePrecision,
-            ropeScalingMode: args.ropeScalingMode,
-            yarnContextTokens: args.ropeScalingMode == .yarn
-                ? args.maxContext : RuntimeConfiguration.defaultYaRNContextTokens)
-        let runner = try RealForwardRunner(
-            model: model,
-            context: context,
-            maxContext: args.maxContext,
-            runtimeConfiguration: runtime)
-        let scratch = try RawCompletionScratch(
-            context: context,
-            vocab: model.config.vocabSize,
-            logitSoftcap: Float(model.config.finalLogitSoftcap))
-        let stats = try await runRawCompletion(
-            producer: runner,
-            tokenizer: tokenizer,
-            promptIds: promptIds,
-            config: config,
-            context: context,
-            scratch: scratch,
-            prefillConfig: runtime.prefillConfig
-        ) { progress in
-            switch progress {
-            case .prefill:
-                break
-            case .token(_, _, let delta):
-                if !delta.isEmpty { stdout.write(Data(delta.utf8)) }
-            case .tail(let tail):
-                stdout.write(Data(tail.utf8))
-            }
-        }
-
-        if ProcessInfo.processInfo.environment["TINYTITAN_KERNEL_STATS"] != nil {
-            // Per-role GPU milliseconds, plus the occupancy that says whether
-            // the gaps are the problem or the kernels are. The runner has
-            // collected both all along and nothing printed them.
-            let summary = runner.kernelGPUTimingSummary()
-            let occupancy = runner.kernelGPUOccupancy()
-            var lines = "\n[gpu by role over \(stats.newTokens) tokens]\n"
-            for entry in summary.prefix(14) {
-                lines += String(
-                    format: "  %@ %8.1f ms  x%d\n",
-                    entry.role.padding(toLength: 24, withPad: " ", startingAt: 0),
-                    entry.millis, entry.count)
-            }
-            lines += String(
-                format: "  busy %.0f ms of %.0f ms span (%.0f%% occupied)\n",
-                occupancy.busyMillis, occupancy.spanMillis,
-                occupancy.spanMillis > 0
-                    ? 100 * occupancy.busyMillis / occupancy.spanMillis : 0)
-            stderr.write(Data(lines.utf8))
-        }
-        if ProcessInfo.processInfo.environment["TURBO_FIELDFARE_PHASES"] == "1" {
-            let ms = { (n: UInt64) in String(format: "%.1f", Double(n) / 1e6) }
-            let total = stats.decodeSeconds * 1000
-            let accounted =
-                Double(
-                    runner.totalCb1Nanos + runner.totalIoNanos
-                        + runner.totalCb2Nanos) / 1e6
-            var lines = "\n[phases over \(stats.newTokens) tokens, decode "
-            lines += String(format: "%.0f", total) + " ms]\n"
-            lines += "  cb1 encode+commit: " + ms(runner.totalCb1Nanos) + " ms\n"
-            lines += "  expert io await:   " + ms(runner.totalIoNanos) + " ms\n"
-            lines += "  cb2 encode+commit: " + ms(runner.totalCb2Nanos) + " ms\n"
-            lines += "  unaccounted (GPU waits): "
-            lines += String(format: "%.1f", total - accounted) + " ms\n"
-            stderr.write(Data(lines.utf8))
-        }
-        if let io = runner.decodeExpertIO() {
-            let total = io.hits + io.misses
-            let rate = total > 0 ? 100.0 * Double(io.hits) / Double(total) : 0
-            var line = "\n[decode expert io] hits \(io.hits) misses \(io.misses)"
-            line += String(format: " (%.1f%% hit)", rate)
-            line += String(
-                format: " %.2f GiB",
-                Double(io.bytes) / 1_073_741_824)
-            if stats.newTokens > 0 {
-                line += String(
-                    format: " = %.1f MiB/token",
-                    Double(io.bytes) / 1_048_576 / Double(stats.newTokens))
-            }
-            stderr.write(Data((line + "\n").utf8))
         }
         if !args.quiet {
             let tokensPerSecond =
-                stats.decodeSeconds > 0
-                ? Double(stats.newTokens) / stats.decodeSeconds
+                summary.decodeSeconds > 0
+                ? Double(summary.completionTokens) / summary.decodeSeconds
                 : 0
             let footer =
-                "\n[stop=\(String(describing: stats.reason)) prefill=\(stats.prefillTokens)tok/\(String(format: "%.2f", stats.prefillSeconds))s new=\(stats.newTokens)tok decode=\(String(format: "%.2f", stats.decodeSeconds))s tok/s=\(String(format: "%.3f", tokensPerSecond))]\n"
+                "\n[stop=\(summary.decodeStopReason.rawValue) prefill=\(summary.promptTokens)tok/\(String(format: "%.2f", summary.prefillSeconds))s new=\(summary.completionTokens)tok decode=\(String(format: "%.2f", summary.decodeSeconds))s tok/s=\(String(format: "%.3f", tokensPerSecond))]\n"
             stderr.write(Data(footer.utf8))
         }
         return RunResult(exitCode: 0)
+    } catch let error as TinyTitanError {
+        switch error {
+        case .contextWindowExceeded(let prompt, let window):
+            // The prompt count is known for a raw completion and not for a
+            // rendered chat prompt; report the window either way.
+            let counted = prompt > 0 ? "prompt \(prompt) " : "prompt "
+            return errored(
+                stderr, "context overflow: \(counted)reaches maxContext \(window)", 2)
+        case .cancelled:
+            stdout.write(Data("\n".utf8))
+            return RunResult(exitCode: 130)
+        default:
+            return errored(stderr, "\(error)", 1)
+        }
     } catch is CancellationError {
         stdout.write(Data("\n".utf8))
         return RunResult(exitCode: 130)
     } catch {
         return errored(stderr, "\(error)", 1)
     }
+}
+
+/// One of `--prompt` (raw, or templated when `--concise` asks for it) or
+/// `--messages-file` (always templated), with concise mode folded in.
+private func buildPrompt(args: Args) throws -> Prompt {
+    let concise = args.concise ? ConcisePrompt.standard : nil
+    if let rawPrompt = args.prompt {
+        // Concise mode turns the raw prompt into a one-turn conversation, the
+        // same shape the pre-facade CLI rendered through the chat template.
+        if let concise {
+            return .messages(
+                applyingConcise(
+                    concise, to: [ChatMessage(role: .user, content: rawPrompt)]))
+        }
+        return .raw(rawPrompt)
+    }
+    guard let messagesFile = args.messagesFile else {
+        throw MessageFileError(description: "one of --prompt or --messages-file is required")
+    }
+    let data = try Data(
+        contentsOf: URL(fileURLWithPath: messagesFile),
+        options: [.mappedIfSafe])
+    let rows = try JSONDecoder().decode([MessageJSON].self, from: data)
+    var messages = try rows.map { row -> ChatMessage in
+        guard let role = chatRole(row.role) else {
+            throw MessageFileError(
+                description: "invalid chat messages: unsupported role \(row.role)")
+        }
+        return ChatMessage(role: role, content: row.content ?? "")
+    }
+    if let concise {
+        messages = applyingConcise(concise, to: messages)
+    }
+    return .messages(messages)
+}
+
+/// The tokenizer's five roles. A role outside them is reported, as before.
+///
+/// `developer` is folded to `system` deliberately: the template renders the
+/// two identically (`Role.templateRole`), but the facade treats a developer
+/// turn as a reason to render through the *tool* template, which the pre-facade
+/// CLI — which always rendered the plain chat template — never did. Folding
+/// keeps the bytes the old path produced.
+private func chatRole(_ raw: String) -> ChatMessage.Role? {
+    switch raw {
+    case "system", "developer": .system
+    case "user": .user
+    case "assistant": .assistant
+    case "tool": .tool
+    default: nil
+    }
+}
+
+/// `ConcisePrompt.appendingSystemPrompt`'s rule over the kit's message type:
+/// fold into the first system/developer turn, or open one.
+private func applyingConcise(
+    _ prompt: String,
+    to messages: [ChatMessage]
+) -> [ChatMessage] {
+    guard
+        let index = messages.firstIndex(where: {
+            $0.role == .system || $0.role == .developer
+        })
+    else {
+        return [ChatMessage(role: .system, content: prompt)] + messages
+    }
+    var result = messages
+    result[index] = ChatMessage(
+        role: .system, content: result[index].content + "\n\n" + prompt)
+    return result
+}
+
+/// `--prefill-chunk`: an explicit size, or the smallest allowed chunk that
+/// covers the prompt. `nil` leaves the install's own profile row in charge.
+private func resolvePrefillChunk(
+    args: Args,
+    prompt: Prompt,
+    modelURL: URL,
+    thinkingMode: ThinkingMode,
+    reasoningEffort: ReasoningEffort?
+) async throws -> Int? {
+    switch args.prefillChunk {
+    case .fixed(let tokens):
+        return tokens
+    case .auto:
+        return try await Engine.prefillChunk(
+            covering: prompt, directory: modelURL,
+            thinkingMode: thinkingMode, reasoningEffort: reasoningEffort)
+    case nil:
+        return nil
+    }
+}
+
+private func cachePrecision(_ precision: KVCachePrecision) -> CachePrecision {
+    switch precision {
+    case .int4: .fourBit
+    case .int8: .eightBit
+    case .fp16: .sixteenBit
+    }
+}
+
+/// `--rdadvise` spells a case `ReadAheadAdvice` already has; the CLI's parser
+/// has validated the string, so this only crosses the vocabulary boundary.
+private func readAheadAdvice(_ raw: String) -> ReadAheadAdvice? {
+    ReadAheadAdvice(rawValue: raw)
 }
 
 private func errored(_ stderr: FileHandle, _ message: String, _ code: Int32) -> RunResult {

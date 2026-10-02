@@ -3,7 +3,7 @@ import Metal
 import Testing
 import TinyTitan
 
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// The batched-serving headroom rule: a worst-case per-slot size computed from

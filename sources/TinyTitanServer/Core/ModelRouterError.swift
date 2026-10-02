@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 // The router's failure modes and their wire descriptions.
 //

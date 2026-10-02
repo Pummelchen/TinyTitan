@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 // The Responses API to chat mapping: request fields onto the chat request,
 // tools and sampling that the server can honour.

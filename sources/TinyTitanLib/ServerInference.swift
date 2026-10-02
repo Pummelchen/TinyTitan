@@ -81,6 +81,13 @@ package struct ServerCompletion: Equatable, Sendable {
     /// folds this into finish_reason "stop"; the Anthropic Messages API
     /// distinguishes it as stop_reason "stop_sequence" and names the string.
     package let stopSequence: String?
+    /// Wall time the engine spent prefilling, and decoding. Zero when the
+    /// backend does not report them.
+    package let prefillSeconds: Double
+    package let decodeSeconds: Double
+    /// The decode loop's own stop reason, before the wire's finish_reason
+    /// mapping flattens it.
+    package let engineStopReason: StopReason?
 
     package init(
         content: String,
@@ -90,7 +97,10 @@ package struct ServerCompletion: Equatable, Sendable {
         watchdogTrips: [WatchdogSet.Trip] = [],
         stopSequence: String? = nil,
         reasoning: String = "",
-        unrequestedReasoning: Int = 0
+        unrequestedReasoning: Int = 0,
+        prefillSeconds: Double = 0,
+        decodeSeconds: Double = 0,
+        engineStopReason: StopReason? = nil
     ) {
         self.content = content
         self.reasoning = reasoning
@@ -100,6 +110,9 @@ package struct ServerCompletion: Equatable, Sendable {
         self.usage = usage
         self.watchdogTrips = watchdogTrips
         self.stopSequence = stopSequence
+        self.prefillSeconds = prefillSeconds
+        self.decodeSeconds = decodeSeconds
+        self.engineStopReason = engineStopReason
     }
 }
 

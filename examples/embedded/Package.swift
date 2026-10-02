@@ -8,7 +8,7 @@ import PackageDescription
 //
 //     .package(url: "https://github.com/Pummelchen/TinyTitan", from: "5.15.0")
 //
-// `TinyTitanKit` is the supported library product — the facade documented in
+// `TinyTitanLib` is the supported library product — the facade documented in
 // docs/plan-embedded-library.md §4. The engine's own executables are the other
 // product and are not needed here. `tools/embedded-dependency-check.sh` builds
 // and runs this package so both the dependency and the facade stay proven.
@@ -24,7 +24,7 @@ let package = Package(
         .executableTarget(
             name: "EmbeddedDemo",
             dependencies: [
-                .product(name: "TinyTitanKit", package: "TinyTitan")
+                .product(name: "TinyTitanLib", package: "TinyTitan")
             ]
         )
     ]

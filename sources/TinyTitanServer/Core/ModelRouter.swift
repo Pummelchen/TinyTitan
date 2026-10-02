@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// What the HTTP layer needs to validate a request for one model before that
 /// model is resident: the omitted-sampling defaults, the max_tokens bound and
@@ -56,7 +56,7 @@ public struct ReasoningChoice: Sendable, Equatable {
 
 /// Fits one server-wide reasoning level to models that expose different ones.
 ///
-/// `effectiveLevel` now lives in `TinyTitanKit` (2026-10-02, phase A1 of
+/// `effectiveLevel` now lives in `TinyTitanLib` (2026-10-02, phase A1 of
 /// `docs/plan-embedded-library.md`), because the request validator there
 /// applies the same mapping; this extension keeps the catalog-aware half,
 /// which reads the server's `ModelCatalog.Kind`.

@@ -2,7 +2,7 @@
 //  main.swift
 //  EmbeddedDemo
 //
-//  The library, used the way another program uses it: depend on `TinyTitanKit`,
+//  The library, used the way another program uses it: depend on `TinyTitanLib`,
 //  open an install with an `Engine`, take a `Session` and stream tokens. There
 //  is no subprocess and no HTTP anywhere in this file.
 //
@@ -17,7 +17,7 @@
 
 import Foundation
 import Metal
-import TinyTitanKit
+import TinyTitanLib
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("EmbeddedDemo: \(message)\n".utf8))
@@ -51,7 +51,7 @@ while let argument = arguments.next() {
 }
 
 guard let modelDirectory else {
-    print("EmbeddedDemo: TinyTitanKit linked (\(String(describing: Engine.self)))")
+    print("EmbeddedDemo: TinyTitanLib linked (\(String(describing: Engine.self)))")
     print("no --model given: resolution and link verified, nothing loaded")
     exit(0)
 }

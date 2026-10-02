@@ -4,7 +4,7 @@ import NIOHTTP1
 import NIOPosix
 import Synchronization
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 public actor TinyTitanHTTPServer {
     public static let maximumBodyBytes = 1_048_576

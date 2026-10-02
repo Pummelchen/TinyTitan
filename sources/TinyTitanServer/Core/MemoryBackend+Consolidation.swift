@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 import TinyTitanMemory
 
 // Memory consolidation and workspace placement: when a session is consolidated,

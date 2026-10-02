@@ -2,7 +2,7 @@ import Foundation
 import Testing
 import TinyTitan
 
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 @Suite struct ResponsesAPIMapperTests {

@@ -3,7 +3,7 @@ import NIOCore
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 // The real coding CLIs against the server, with the model replaced by a

@@ -3,7 +3,7 @@ import NIOCore
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 // A thinking model's generation, as it reaches the HTTP layer once the

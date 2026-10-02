@@ -104,23 +104,57 @@ extension ServerModelSession {
         // it here, so the render, the special tokens and the decoder all
         // follow the switch. `nil` (the common case) reuses the session's.
         let renderTokenizer = try await resolvedTokenizer(for: request.reasoning)
-        let prepared = try preparePrompt(request, renderTokenizer: renderTokenizer)
-        let promptIDs = prepared.promptIDs
-        let cacheRequest = prepared.cacheRequest
-        let needsToolTemplate = prepared.needsToolTemplate
+        // A raw completion carries its own token ids: it is never re-rendered
+        // through the template, never matched against the prompt cache, and
+        // never interpreted by the think/tool decoder. A chat request takes the
+        // path it always did. Both share everything below -- prefill, the
+        // decode loop, diagnostics and the completion -- so there is one
+        // orchestrator, not two.
+        let isRaw = request.renderedPromptIDs != nil
+        let promptIDs: [Int32]
+        let cacheRequest: ValidatedChatRequest
+        let needsToolTemplate: Bool
+        if let renderedPromptIDs = request.renderedPromptIDs {
+            promptIDs = renderedPromptIDs
+            cacheRequest = request
+            needsToolTemplate = false
+        } else {
+            let prepared = try preparePrompt(request, renderTokenizer: renderTokenizer)
+            promptIDs = prepared.promptIDs
+            cacheRequest = prepared.cacheRequest
+            needsToolTemplate = prepared.needsToolTemplate
+        }
 
-        let resolved = try await resolveCacheStart(
-            cacheRequest: cacheRequest,
-            promptIDs: promptIDs,
-            requestedReasoning: request.reasoning)
-        let effectivePromptIDs = resolved.effectivePromptIDs
-        let completionStart = resolved.start
+        let effectivePromptIDs: [Int32]
+        let completionStart: RawCompletionStart
+        if isRaw {
+            guard promptIDs.count < maxContext else {
+                throw ServerRequestError.invalid(
+                    message: "prompt exceeds the configured context",
+                    param: "messages",
+                    code: "context_length_exceeded")
+            }
+            effectivePromptIDs = promptIDs
+            completionStart = .reset
+        } else {
+            let resolved = try await resolveCacheStart(
+                cacheRequest: cacheRequest,
+                promptIDs: promptIDs,
+                requestedReasoning: request.reasoning)
+            effectivePromptIDs = resolved.effectivePromptIDs
+            completionStart = resolved.start
+        }
 
         var config = request.generationConfig
         config.maxNewTokens = min(
             request.maximumCompletionTokens,
             maxContext - effectivePromptIDs.count)
-        config.stopStrings = []
+        // The chat path clears the loop's own stop matcher because the
+        // assistant output applies the same strings after the think/tool
+        // decoder. A raw completion has no decoder, so the loop's matcher is
+        // the one that has to run -- which is exactly the pre-facade CLI's
+        // behaviour.
+        if !isRaw { config.stopStrings = [] }
         // Structured output is a per-request grammar: a fresh constraint per
         // request (its state is the document parsed so far), over a table that
         // is built once per model.
@@ -136,17 +170,28 @@ extension ServerModelSession {
         // runs for every generation, so a thought the *model* opens while the
         // switch is off is still split out of the answer rather than streamed
         // as it.
-        let decoder = StructuredAssistantDecoder.forGeneration(
-            tokenizer: renderTokenizer,
-            promptIDs: promptIDs,
-            allowedTools: needsToolTemplate ? Set(request.tools.map(\.name)) : nil)
+        //
+        // A raw completion gets no decoder: the caller's text was not rendered
+        // with a thought block, and the CLI's `--prompt` mode has always shown
+        // whatever the model wrote, `<think>` markers included.
+        let decoder: StructuredAssistantDecoder? =
+            isRaw
+            ? nil
+            : StructuredAssistantDecoder.forGeneration(
+                tokenizer: renderTokenizer,
+                promptIDs: promptIDs,
+                allowedTools: needsToolTemplate ? Set(request.tools.map(\.name)) : nil)
         // The stall clock starts at the first visible token, so a long
         // thought before the answer cannot trip it. Reasoning is watched for
         // loops alone, in a window of its own.
+        //
+        // A raw completion's output applies no stop matcher of its own: the
+        // loop's owns the strings, and a second identical matcher over already
+        // filtered text would only hold the same text a second time.
         let state = GenerationDecodeState(
             decoder: decoder,
             output: AssistantOutput(
-                stops: request.generationConfig.stopStrings,
+                stops: isRaw ? [] : request.generationConfig.stopStrings,
                 onEvent: onEvent,
                 observeVisible: { watchdogs.observe($0) },
                 observeReasoning: { watchdogs.observeReasoning($0) }))
@@ -206,9 +251,17 @@ extension ServerModelSession {
                     case .prefill:
                         break
                     case .token(_, let tokenID, let delta):
-                        publish(try state.decoder.consume(tokenID: tokenID, delta: delta), true)
+                        if let decoder = state.decoder {
+                            publish(try decoder.consume(tokenID: tokenID, delta: delta), true)
+                        } else {
+                            publish(delta.isEmpty ? [] : [.content(delta)], true)
+                        }
                     case .tail(let text):
-                        publish(try state.decoder.consumeTail(text), false)
+                        if let decoder = state.decoder {
+                            publish(try decoder.consumeTail(text), false)
+                        } else {
+                            publish(text.isEmpty ? [] : [.content(text)], false)
+                        }
                     }
                 } catch {
                     state.decodingError = error
@@ -244,12 +297,14 @@ extension ServerModelSession {
                 kind: .decoderConsume,
                 cause: .classify(decodingError))
         }
-        do {
-            try decoder.finish()
-        } catch {
-            throw structuredFailure(
-                kind: .decoderFinish,
-                cause: .classify(error))
+        if let decoder {
+            do {
+                try decoder.finish()
+            } catch {
+                throw structuredFailure(
+                    kind: .decoderFinish,
+                    cause: .classify(error))
+            }
         }
         if needsToolTemplate, result.reason == .toolCalls, state.output.calls.isEmpty {
             throw structuredFailure(kind: .orphanToolResponse, cause: .none)
@@ -287,12 +342,17 @@ extension ServerModelSession {
             reason = outcome.finishReason
             onEvent(.content(note))
         }
-        publishCacheEntry(
-            cacheRequest: cacheRequest,
-            content: generated,
-            calls: calls,
-            result: result,
-            stopStringFiltered: state.output.isStopped)
+        // A raw completion is never published to the prompt cache: there is no
+        // message list to re-render a continuation tail from, so an entry would
+        // be unusable by the only path that could match it.
+        if !isRaw {
+            publishCacheEntry(
+                cacheRequest: cacheRequest,
+                content: generated,
+                calls: calls,
+                result: result,
+                stopStringFiltered: state.output.isStopped)
+        }
         completed = true
         return ServerCompletion(
             content: content,
@@ -315,6 +375,9 @@ extension ServerModelSession {
             // switched thinking off per request is the one whose thought is
             // unrequested.
             unrequestedReasoning: renderTokenizer.thinkingMode.isEnabled
-                ? 0 : state.output.reasoning.count)
+                ? 0 : state.output.reasoning.count,
+            prefillSeconds: result.prefillSeconds,
+            decodeSeconds: result.decodeSeconds,
+            engineStopReason: result.reason)
     }
 }

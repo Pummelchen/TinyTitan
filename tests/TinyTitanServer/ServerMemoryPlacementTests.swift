@@ -3,7 +3,7 @@ import Testing
 import TinyTitan
 import TinyTitanMemory
 
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// Which project a conversation's memory lands in, and how the server tells.

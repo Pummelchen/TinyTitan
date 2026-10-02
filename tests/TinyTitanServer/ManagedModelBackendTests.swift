@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// Records how often it was built and lets a load be held open, so residency

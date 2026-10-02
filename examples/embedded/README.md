@@ -1,6 +1,6 @@
 # Embedded demo
 
-A consumer package: it depends on the **library product** `TinyTitanKit` and
+A consumer package: it depends on the **library product** `TinyTitanLib` and
 embeds the engine in its own process — no subprocess, no HTTP. This is the
 fixture behind [`docs/plan-embedded-library.md`](../../docs/plan-embedded-library.md),
 and `tools/embedded-dependency-check.sh` builds and runs it.
@@ -15,7 +15,7 @@ swift run EmbeddedDemo --model ../../models/qwen3.5_4B_4Bit \
 The whole API it uses is four types:
 
 ```swift
-import TinyTitanKit
+import TinyTitanLib
 
 let engine = try await Engine(directory: installURL, device: device)
 let session = await engine.session()

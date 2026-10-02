@@ -103,6 +103,15 @@ package struct ValidatedChatRequest: Sendable {
     /// keyword is a 400 before a model is touched rather than a failure in the
     /// middle of a generation.
     package let jsonSchema: JSONSchemaNode?
+    /// Prompt tokens a raw completion was already rendered to, or nil for the
+    /// chat path.
+    ///
+    /// A raw prompt never goes through `applyChatTemplate` and is never
+    /// matched against the prompt cache: the caller tokenized its own text, so
+    /// there is no message list to re-render a tail from. Carried on the
+    /// request so the one orchestrator can serve both, rather than a second
+    /// decode path existing beside it.
+    package let renderedPromptIDs: [Int32]?
 
     package init(
         messages: [GFTokenizer.Message],
@@ -117,7 +126,8 @@ package struct ValidatedChatRequest: Sendable {
         model: String? = nil,
         reasoningNotes: [String] = [],
         reasoning: RequestReasoning? = nil,
-        jsonSchema: JSONSchemaNode? = nil
+        jsonSchema: JSONSchemaNode? = nil,
+        renderedPromptIDs: [Int32]? = nil
     ) {
         self.messages = messages
         self.tools = tools
@@ -132,6 +142,7 @@ package struct ValidatedChatRequest: Sendable {
         self.reasoningNotes = reasoningNotes
         self.reasoning = reasoning
         self.jsonSchema = jsonSchema
+        self.renderedPromptIDs = renderedPromptIDs
     }
 
     /// Every derived request is built through here.
@@ -144,6 +155,7 @@ package struct ValidatedChatRequest: Sendable {
     private func copy(
         messages: [GFTokenizer.Message]? = nil,
         tools: [GFTokenizer.FunctionDefinition]? = nil,
+        generationConfig: GenerationConfig? = nil,
         stripCLIPrompt: Bool? = nil,
         workspace: String?? = nil,
         isEngineInternal: Bool? = nil,
@@ -154,7 +166,7 @@ package struct ValidatedChatRequest: Sendable {
             tools: tools ?? self.tools,
             stream: stream,
             includeUsage: includeUsage,
-            generationConfig: generationConfig,
+            generationConfig: generationConfig ?? self.generationConfig,
             maximumCompletionTokens: maximumCompletionTokens,
             stripCLIPrompt: stripCLIPrompt ?? self.stripCLIPrompt,
             workspace: workspace ?? self.workspace,
@@ -162,7 +174,18 @@ package struct ValidatedChatRequest: Sendable {
             model: model ?? self.model,
             reasoningNotes: reasoningNotes,
             reasoning: reasoning,
-            jsonSchema: jsonSchema)
+            jsonSchema: jsonSchema,
+            renderedPromptIDs: renderedPromptIDs)
+    }
+
+    /// The same request with its generation config replaced.
+    ///
+    /// Used by the facade to honour an option the wire cannot spell (top-k
+    /// off), never by the HTTP surfaces.
+    package func withGenerationConfig(
+        _ config: GenerationConfig
+    ) -> ValidatedChatRequest {
+        copy(generationConfig: config)
     }
 
     /// The post-strip view of this request: the same request carrying the

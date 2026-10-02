@@ -29,12 +29,20 @@ let package = Package(
         .macOS(.v26)
     ],
     products: [
-        // Product 1 of 2: the library. `TinyTitanKit` is the supported surface
+        // Product 1 of 2: the library. `TinyTitanLib` is the supported surface
         // another Swift program depends on; `TinyTitan`, `TinyTitanFormat` and
         // `ContinuityCore` are its building blocks and stay targets rather than
         // products, so there is exactly one library to promise anything about.
         // See `docs/plan-embedded-library.md`.
-        .library(name: "TinyTitanKit", targets: ["TinyTitanKit"]),
+        //
+        // The product is static, which is the right default for a source
+        // consumer: nothing has to be embedded beside their binary. The dynamic
+        // form below is the same library, and it exists because a release ships
+        // both (`tools/build_library.sh` links it with an install name of
+        // `@rpath/libTinyTitanLib.dylib` so the published file can carry the
+        // plain name).
+        .library(name: "TinyTitanLib", targets: ["TinyTitanLib"]),
+        .library(name: "TinyTitanLibDynamic", type: .dynamic, targets: ["TinyTitanLib"]),
         // Product 2 of 2: the engine, embedding the library above.
         .executable(name: "TinyTitanRepack", targets: ["TinyTitanRepack"]),
         .executable(name: "TinyTitanCLI", targets: ["TinyTitanCLI"]),
@@ -118,9 +126,9 @@ let package = Package(
         // `TinyTitanServerCore` is rebuilt on top of it, so the facade cannot
         // drift from what the server actually needs.
         .target(
-            name: "TinyTitanKit",
+            name: "TinyTitanLib",
             dependencies: ["TinyTitan", "TinyTitanFormat"],
-            path: "sources/TinyTitanKit",
+            path: "sources/TinyTitanLib",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
@@ -137,7 +145,10 @@ let package = Package(
         ),
         .target(
             name: "TinyTitanCLICore",
-            dependencies: ["TinyTitan"],
+            // The CLI is a front end of the library (phase A2 of
+            // `docs/plan-embedded-library.md`), so it depends on the facade it
+            // drives. `TinyTitan` stays for the few value types `Args` parses.
+            dependencies: ["TinyTitan", "TinyTitanLib"],
             path: "sources/TinyTitanCLI",
             exclude: ["Command"],
             swiftSettings: tinytitanLanguageStandard
@@ -192,7 +203,7 @@ let package = Package(
         .target(
             name: "TinyTitanServerCore",
             dependencies: [
-                "TinyTitanKit",
+                "TinyTitanLib",
                 "TinyTitan",
                 "TinyTitanMemory",
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -279,7 +290,7 @@ let package = Package(
             name: "TinyTitanServerTests",
             dependencies: [
                 "TinyTitanServerCore",
-                "TinyTitanKit",
+                "TinyTitanLib",
                 "TinyTitanMemory",
                 // `GenerationDefaults.Sampling`, so the mapper tests can pin
                 // that an omitted field follows the served model's profile

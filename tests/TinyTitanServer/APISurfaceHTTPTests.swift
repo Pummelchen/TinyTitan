@@ -3,7 +3,7 @@ import NIOCore
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 // Backends scripted for the two API surfaces. Each records the validated

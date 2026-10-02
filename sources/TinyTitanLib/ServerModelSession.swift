@@ -21,12 +21,16 @@ final class GenerationDecodeState: @unchecked Sendable {
     /// lets the progress closure capture only this box: a closure that also
     /// captured the decoder directly is not Sendable, and Swift 6.4 refuses to
     /// send it into the nonisolated completion call.
-    let decoder: StructuredAssistantDecoder
+    ///
+    /// `nil` for a raw completion, which is emitted verbatim: a caller that
+    /// spelled its own prompt did not ask the engine to interpret think blocks
+    /// or tool markers, and the pre-facade CLI streamed them as text.
+    let decoder: StructuredAssistantDecoder?
     var output: AssistantOutput
     var decodingError: Error?
     var shouldStop = false
 
-    init(decoder: StructuredAssistantDecoder, output: AssistantOutput) {
+    init(decoder: StructuredAssistantDecoder?, output: AssistantOutput) {
         self.decoder = decoder
         self.output = output
     }
@@ -132,6 +136,15 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
         return effectivePromptCacheMode(
             requested: requested, mtpEnabled: false,
             slots: maxConcurrentSequences)
+    }
+
+    /// Tokenize a raw-completion prompt: the text with BOS and no chat
+    /// template.
+    ///
+    /// The one place a facade `.raw` prompt becomes token ids. It runs on the
+    /// actor because the tokenizer lives here, so no front end has to own one.
+    package func tokenizeRawPrompt(_ text: String) -> [Int32] {
+        tokenizer.encode(text, addBOS: true)
     }
 
     init(

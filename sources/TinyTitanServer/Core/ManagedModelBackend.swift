@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// Manages when the model is resident: loads it on the first inference request
 /// rather than at startup, and optionally releases it again after an idle

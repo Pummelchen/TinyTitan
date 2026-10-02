@@ -3,7 +3,7 @@ import Testing
 import TinyTitan
 
 @testable import TinyTitanMemory
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// Consolidation is where the authority comes from, so the flag has to

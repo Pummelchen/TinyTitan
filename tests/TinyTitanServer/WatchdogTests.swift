@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
-@testable import TinyTitanKit
+@testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
 /// The four watchdogs, on synthetic streams.

@@ -5,20 +5,38 @@
 // §4). Every type here is kit-native: the shapes are the engine's, but no
 // engine type appears in a signature. The wrapper in `Session` maps to and
 // from `OpenAIChatRequest`/`ServerInferenceEvent` internally.
+import TinyTitan
 
 /// One turn of a conversation, in the shape the chat template expects.
 public struct ChatMessage: Sendable, Equatable {
     public enum Role: Sendable, Equatable {
         case system
+        /// OpenAI's successor to `system`; the shipped templates normalise it
+        /// to `system` when they render.
+        case developer
         case user
         case assistant
+        case tool
 
         /// The wire spelling the validator's role table is keyed on.
         var openAIRole: String {
             switch self {
             case .system: "system"
+            case .developer: "developer"
             case .user: "user"
             case .assistant: "assistant"
+            case .tool: "tool"
+            }
+        }
+
+        /// The tokenizer's own role, for a render done outside a request.
+        var tokenizerRole: GFTokenizer.Role {
+            switch self {
+            case .system: .system
+            case .developer: .developer
+            case .user: .user
+            case .assistant: .assistant
+            case .tool: .tool
             }
         }
     }
@@ -32,16 +50,36 @@ public struct ChatMessage: Sendable, Equatable {
     }
 }
 
+/// What to generate for: a chat conversation the template renders, or a raw
+/// completion the caller has already spelled as text.
+///
+/// `raw` skips the chat template entirely — the text is tokenized with BOS and
+/// prefilled verbatim, which is what the CLI's `--prompt` mode has always been.
+/// A raw completion is not routed through the reasoning/tool decoder either:
+/// whatever the model writes is the answer, think markers included.
+public enum Prompt: Sendable {
+    case messages([ChatMessage])
+    case raw(String)
+}
+
 /// Sampling and length controls for one generation.
 ///
 /// Every field is sent explicitly, so the served model's profile only fills
-/// what this type cannot express (the penalties and the reasoning controls).
+/// what this type cannot express. `Engine.samplingDefaults` (or
+/// `SamplingDefaults.forInstall(at:thinkingMode:)`) is how a caller fills a
+/// field it wants to leave to the model.
 public struct GenerationOptions: Sendable {
     public var maxTokens: Int
     public var temperature: Double
     public var topP: Double
+    /// Top-k truncation. `0` turns it off — the engine's "no k" — which is
+    /// only legal alongside `topP == 1`, because this sampler has no
+    /// full-vocabulary nucleus path.
     public var topK: Int
     public var repetitionPenalty: Double
+    /// OpenAI presence penalty: subtracted once per distinct id already in the
+    /// history. Zero is neutral.
+    public var presencePenalty: Double
     /// `nil` draws from system entropy, as the server does.
     public var seed: UInt64?
     /// Strings that end the answer when they appear in the visible text.
@@ -53,6 +91,7 @@ public struct GenerationOptions: Sendable {
         topP: Double = 0.95,
         topK: Int = 20,
         repetitionPenalty: Double = 1.0,
+        presencePenalty: Double = 0,
         seed: UInt64? = nil,
         stop: [String] = []
     ) {
@@ -61,6 +100,7 @@ public struct GenerationOptions: Sendable {
         self.topP = topP
         self.topK = topK
         self.repetitionPenalty = repetitionPenalty
+        self.presencePenalty = presencePenalty
         self.seed = seed
         self.stop = stop
     }
@@ -80,6 +120,33 @@ public enum GenerationStopReason: Sendable, Equatable {
     case cancelled
 }
 
+/// Why the engine's decode loop stopped, in the engine's own vocabulary.
+///
+/// Distinct from `GenerationStopReason`, which is the wire's view of the same
+/// end (`endOfTurn` and `eos` both become OpenAI's `stop`): a caller that
+/// reports or measures the loop itself needs the loop's answer.
+public enum DecodeStopReason: String, Sendable, Equatable {
+    case eos
+    case endOfTurn
+    case maxTokens
+    case stopString
+    case toolCalls
+    /// The caller's external stop signal, before any configured stop string.
+    case external
+
+    init(engine: StopReason?) {
+        switch engine {
+        case .eos: self = .eos
+        case .endOfTurn: self = .endOfTurn
+        case .maxTokens: self = .maxTokens
+        case .stopString: self = .stopString
+        case .toolCalls: self = .toolCalls
+        case .external: self = .external
+        case nil: self = .eos
+        }
+    }
+}
+
 /// What a finished generation produced.
 public struct GenerationSummary: Sendable, Equatable {
     /// The visible answer, with any client stop string removed.
@@ -87,6 +154,12 @@ public struct GenerationSummary: Sendable, Equatable {
     public let promptTokens: Int
     public let completionTokens: Int
     public let stopReason: GenerationStopReason
+    /// Wall time the engine spent prefilling this request's prompt.
+    public let prefillSeconds: Double
+    /// Wall time the engine spent decoding, excluding prefill.
+    public let decodeSeconds: Double
+    /// The decode loop's own stop reason.
+    public let decodeStopReason: DecodeStopReason
 }
 
 /// One step of a streaming generation.
@@ -113,7 +186,10 @@ extension GenerationSummary {
                 ? .cancelled
                 : GenerationStopReason(
                     finishReason: completion.finishReason,
-                    stopSequence: completion.stopSequence))
+                    stopSequence: completion.stopSequence),
+            prefillSeconds: completion.prefillSeconds,
+            decodeSeconds: completion.decodeSeconds,
+            decodeStopReason: DecodeStopReason(engine: completion.engineStopReason))
     }
 }
 

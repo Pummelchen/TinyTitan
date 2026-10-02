@@ -8,7 +8,7 @@
 
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// How a compaction was produced, so a replayed note can say what it is.
 public enum CompactionMode: String, Codable, Sendable {

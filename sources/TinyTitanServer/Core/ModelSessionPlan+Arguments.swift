@@ -1,13 +1,13 @@
 // Building a `ModelSessionPlan` from the server's launch flags.
 //
 // Moved out of `ModelSessionPlan.swift` (2026-10-02, phase A1 of
-// `docs/plan-embedded-library.md`) when that type moved into `TinyTitanKit`:
+// `docs/plan-embedded-library.md`) when that type moved into `TinyTitanLib`:
 // the factory reads `ServerArguments`, which is this server's launch surface
 // and not part of the engine an embedder links, so the flags are read here and
 // the kit's plan is built through its own initializer.
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 extension ModelSessionPlan {
     /// The one place a plan is built from the server's arguments.

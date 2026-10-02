@@ -207,7 +207,7 @@ extension ServerModelSession {
                     // position). Anything else falls through to a snapshot
                     // restore or a full prefill instead of resuming from a
                     // stale or mismatched KV.
-                    print(
+                    ServerLog.diagnostic(
                         "TinyTitan prompt_cache hit tier=live "
                             + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())")
                 } else {
@@ -218,7 +218,7 @@ extension ServerModelSession {
                         let tier = try await promptStateStore.restore(
                             entryID: entryID,
                             into: runner)
-                        print(
+                        ServerLog.diagnostic(
                             "TinyTitan prompt_cache hit tier=\(tier) "
                                 + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())"
                         )

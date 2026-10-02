@@ -1,6 +1,6 @@
 import Foundation
 import TinyTitan
-import TinyTitanKit
+import TinyTitanLib
 
 /// Building the Responses API objects, and the JSONValue bridging they need.
 ///
