@@ -1,19 +1,23 @@
-# Handover: after release 5.14, the engine and its loopback server
+# Handover: after release 5.15, the engine and its loopback server
 
 **Paste this into the next session:**
 
 > Continue the TinyTitan work in this checkout. Read `AGENTS.md`, then
-> `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.14 is cut and
-> published** (`v5.14` → `10e5d0f`; `tinytitan-5.14-macos-arm64.tar.gz`, 15,415,575
-> bytes, sha256 `cef1d4900965333de433aa85bbb7d40e83e28d22a2191d8486e630c83ab38cf9`,
-> 2026-10-01) and **`main` is two commits past it** — the post-release brief and the
-> `.gturbo` → `.ssdai` rename (unreleased, described below); the release notes
-> are `docs/release-notes-v5.14.md`. 5.14 moves the browser chat window and both
+> `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.15 is cut and
+> published** (`v5.15` → `4ff6041`; `tinytitan-5.15-macos-arm64.tar.gz`, 15,412,309
+> bytes, sha256 `b0f2e136112328a9abd39a31b6297fe3d6a03d689865adc2a9327f4fc1ef3d1b`,
+> 2026-10-02) and **`main` carries the tag plus a merge of the badge chore**; the
+> release notes are `docs/release-notes-v5.15.md`. 5.15 renames the model format
+> from `.gturbo` to `.ssdai` — manifest magic, Swift vocabulary, CLI, tooling and
+> docs — and **moves a name, not a byte of payload**: reads accept the legacy
+> `GTURBO` magic for one release, no manifest is rewritten in place (the receipt
+> binds its digest and path), and the seven installed goldens are byte-identical
+> while loading manifests that still carry the old magic. Before that, 5.14 moved
+> the browser chat window and both
 > `dsh-*` plugins to **DeepSeek Harness 0.2.0-rc.2** — the route is applied through
 > the harness's `settings` service, the agent preset is registered with its
 > registry, the `models/` watcher refreshes through the same path as boot, and
-> `compactionHeadroomTokens` places the compaction trigger. No engine behaviour
-> changed and the seven installed goldens are byte-identical. `tools/lint.sh` runs
+> `compactionHeadroomTokens` places the compaction trigger. `tools/lint.sh` runs
 > **eleven** pinned gates. The product is the
 > engine plus its loopback server — the Mac app is gone — and
 > `tools/install_tinytitan.sh` downloads a built release instead of compiling one;
@@ -75,19 +79,19 @@ traps that one named still bite and are folded in below.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | level with `origin/main`, one commit past `v5.14` (this brief); the release commit is `10e5d0f` |
-| Release | **5.14 published** 2026-10-01 — `tinytitan-5.14-macos-arm64.tar.gz`, 15,415,575 bytes, sha256 `cef1d490…` with its `.sha256` beside it |
+| `main` | level with `origin/main`: the tag `v5.15` (`4ff6041`), this brief, and a merge of the badge chore |
+| Release | **5.15 published** 2026-10-02 — `tinytitan-5.15-macos-arm64.tar.gz`, 15,412,309 bytes, sha256 `b0f2e136…` with its `.sha256` beside it (verified: the notes' digest matches the asset) |
 | Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
 | Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
 | Audit | **28 findings, all closed**; the eleven gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
-| `.build` | release rebuilt for 5.14; a clean scratch release build is part of each dry run |
-| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.14 section); user-facing only since 2026-09-29 |
+| `.build` | release rebuilt for 5.15 (at the tag); a clean scratch release build is part of each dry run |
+| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.15 section); user-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
-| CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the 5.14 push is the run to watch (`gh run list`) |
+| CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the release commit's push is the run to watch (`gh run list`) |
 
 ## What has landed
 
-- **`.gturbo` → `.ssdai`** (unreleased, after 5.14) — the format's **name only**.
+- **5.15** (`4ff6041`) — `.gturbo` → `.ssdai`: the format's **name only**.
   `manifest.json`'s magic is written as `"SSDAI"`, and reads accept the legacy
   `"GTURBO"` for one release (`SSDAIFormatV1.isSupportedMagic`), so every install
   built before the rename keeps loading untouched: verified with
