@@ -246,7 +246,6 @@ over — each of these is a real gap, and closing one is additive:
 
 | Gap | Why |
 | --- | --- |
-| `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
 
@@ -283,6 +282,15 @@ one case whose only parameter is the slot count, and `expertCacheSlots` and
 `expertCacheBudgetBytes` already choose it. Two names for one decision is a knob
 that lies about being a choice, so the plan's original row was half wrong and is
 recorded that way.
+
+The **device** closed last: `MetalContext` gained `init(device:)` (the
+argument-free one is now a convenience over it), `ServerModelSession.load` takes
+the caller's device, and `Engine.init` passes it instead of refusing anything
+that is not the system default. Every queue, pipeline and buffer the context
+hands out belongs to the device the caller named. What cannot be shown on this
+machine is a *second* GPU — an Apple Silicon Mac reports one — so the link proved
+by test is the one that matters: the context binds the device it was given, and
+the whole engine path runs on an explicitly passed device.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

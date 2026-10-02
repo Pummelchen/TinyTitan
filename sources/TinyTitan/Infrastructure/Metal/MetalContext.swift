@@ -1,7 +1,7 @@
 import Foundation
 import Metal
 
-enum MetalError: Error, CustomStringConvertible {
+package enum MetalError: Error, CustomStringConvertible {
     case noDevice
     case noQueue
     case missingShaderResource(String)
@@ -67,8 +67,20 @@ public final class MetalContext: @unchecked Sendable {
     private var pipelineCache: [PipelineCacheKey: MTLComputePipelineState] = [:]
     private let pipelineCacheLock = NSLock()
 
-    public init() throws {
+    /// The context for the system default device, which is what a command-line
+    /// front end wants.
+    public convenience init() throws {
         guard let dev = MTLCreateSystemDefaultDevice() else { throw MetalError.noDevice }
+        try self.init(device: dev)
+    }
+
+    /// The context for a device the caller owns.
+    ///
+    /// Every queue, pipeline and buffer this context hands out belongs to that
+    /// device, which is the point: a process with more than one GPU, or holding
+    /// a device it took from somewhere other than the system default, runs on
+    /// the one it named rather than on whichever device happens to be default.
+    public init(device dev: MTLDevice) throws {
         guard let q = dev.makeCommandQueue() else { throw MetalError.noQueue }
         self.device = dev
         self.queue = q

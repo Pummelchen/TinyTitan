@@ -6,6 +6,7 @@
 // in another file.
 import CryptoKit
 import Foundation
+import Metal
 import TinyTitan
 
 extension ServerModelSession {
@@ -34,6 +35,7 @@ extension ServerModelSession {
         forceLogitsHead: Bool = true,
         mtpModelDirectory: URL? = nil,
         mtpMemoryMiB: Int = StreamingMTPMemoryPlan.defaultBudgetMiB,
+        device: MTLDevice? = nil,
         reusingContext: MetalContext? = nil
     ) async throws -> ServerModelSession {
         _ = try GFTokenizer.requireModelDirectory(modelDirectory)
@@ -63,7 +65,17 @@ extension ServerModelSession {
         // MTLCommandQueue and one compiled shader library survive across
         // unload/reload cycles (MetalContext.deinit documents that queue
         // teardown is not deinit-safe). Nil for every ordinary caller.
-        let context = try reusingContext ?? MetalContext()
+        //
+        // A caller that named a device gets a context on that device; with
+        // neither, the system default, which is what the server wants.
+        let context: MetalContext
+        if let reusingContext {
+            context = reusingContext
+        } else if let device {
+            context = try MetalContext(device: device)
+        } else {
+            context = try MetalContext()
+        }
         let loadRuntime = try RuntimeConfiguration(
             forceLogitsHead: true,
             decodeExpertExecution: try RuntimeDecodeExpertExecution.environmentValue(),

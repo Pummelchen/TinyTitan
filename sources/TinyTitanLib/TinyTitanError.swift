@@ -27,7 +27,8 @@ public enum TinyTitanError: Error, Sendable {
     case integrityFailure(path: String, detail: String)
     /// The prompt plus the requested completion do not fit the context window.
     case contextWindowExceeded(prompt: Int, window: Int)
-    /// No usable Metal device, or not the one the engine must run on.
+    /// No usable Metal device: none on the machine, or the caller's device
+    /// refused a command queue.
     case metalUnavailable(reason: String)
     /// The caller cancelled the generation.
     case cancelled

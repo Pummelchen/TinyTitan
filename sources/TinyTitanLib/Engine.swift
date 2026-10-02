@@ -310,15 +310,6 @@ public actor Engine {
         } catch {
             throw TinyTitanError.notAnInstall(directory)
         }
-        // The loading path builds its own `MetalContext`, which takes the
-        // system default device. Refusing a different one is the honest
-        // option: ignoring it would run on a device the caller did not choose.
-        guard let systemDevice = MTLCreateSystemDefaultDevice(),
-            systemDevice.registryID == device.registryID
-        else {
-            throw TinyTitanError.metalUnavailable(
-                reason: "the engine loads on the system default Metal device")
-        }
         let arch = try Self.resolveArch(family: family, directory: directory)
         let manifest = try Self.readManifest(directory: directory, arch: arch)
         let loaded: ServerModelSession
@@ -336,7 +327,8 @@ public actor Engine {
                 expertCacheSlots: configuration.expertCacheSlots,
                 expertCacheBudgetBytes: configuration.expertCacheBudgetBytes,
                 rdadvisePolicy: configuration.readAhead?.engineValue,
-                forceLogitsHead: configuration.forceLogitsHead)
+                forceLogitsHead: configuration.forceLogitsHead,
+                device: device)
         } catch is ServerInferenceError {
             // The loader's only typed refusal is "this build cannot run it".
             throw TinyTitanError.unsupportedFamily(family: family.rawValue)
@@ -351,6 +343,17 @@ public actor Engine {
             }
         } catch is CancellationError {
             throw TinyTitanError.cancelled
+        } catch let error as MetalError {
+            // The context could not be built on the caller's device. That is the
+            // one case the facade has language for; a shader or pipeline failure
+            // is not, and is rethrown as it is.
+            switch error {
+            case .noDevice, .noQueue:
+                throw TinyTitanError.metalUnavailable(reason: error.description)
+            case .missingShaderResource, .missingFunction, .libraryCompileFailed,
+                .commandEncoderFailed, .bufferAllocationFailed, .invalidState:
+                throw error
+            }
         } catch let error as ModelError {
             guard let classified = Self.classify(error, directory: directory, family: family)
             else { throw error }
