@@ -323,6 +323,34 @@ BYTES="$(wc -c < "$ARCHIVE" | tr -d ' ')"
 echo "  $(basename "$ARCHIVE")  $BYTES bytes"
 echo "  sha256 $SHA"
 
+# --- the library ------------------------------------------------------------
+# Every release carries the library product in both of its link forms, so this
+# is not a step that can be skipped or remembered: it runs here, and the two
+# `die`s below are what stop a release that staged an archive without them.
+#
+# It is a second archive rather than more files in the first because the two
+# audiences want different things — the engine archive is executables, this one
+# is `libTinyTitanLib.a`, `libTinyTitanLib.dylib`, the Swift module and the
+# resource bundle they have to travel with. `tools/build_library.sh` owns the
+# build and its own assertions; this stages, names and checksums what it wrote.
+step "library"
+LIB_STAGE="$STAGE_ROOT/library"
+LIB_ARCHIVE="$STAGE_ROOT/tinytitan-lib-$VERSION-macos-arm64.tar.gz"
+"$SCRIPT_DIR/build_library.sh" "$VERSION" --out "$LIB_STAGE" --scratch-path "$SCRATCH"
+( cd "$STAGE_ROOT" && tar czf "$LIB_ARCHIVE" "$(basename "$LIB_STAGE")" )
+# Assert on the *archive*, not the staging directory: a dylib that failed to
+# stage is invisible until somebody links against the download.
+for member in libTinyTitanLib.a libTinyTitanLib.dylib TinyTitanLib.swiftmodule/ \
+  TinyTitanKernelsC.modulemap TinyTitan_TinyTitan.bundle/Contents/Resources/Metal/; do
+  tar tzf "$LIB_ARCHIVE" | grep -q "$member" \
+    || die "the library archive carries no $member"
+done
+shasum -a 256 "$LIB_ARCHIVE" | sed "s|$STAGE_ROOT/||" > "$LIB_ARCHIVE.sha256"
+LIB_SHA="$(awk '{print $1}' "$LIB_ARCHIVE.sha256")"
+LIB_BYTES="$(wc -c < "$LIB_ARCHIVE" | tr -d ' ')"
+echo "  $(basename "$LIB_ARCHIVE")  $LIB_BYTES bytes"
+echo "  sha256 $LIB_SHA"
+
 # --- notes ------------------------------------------------------------------
 # Checked whenever --notes is given, not only for --publish. Compaction and its
 # budget are cheap to check here and painful to discover after a full gate run.
@@ -349,14 +377,25 @@ if [ -n "$NOTES" ]; then
   # A wrong digest is worse than none: it tells a careful user their download is
   # corrupt, which is how 3.7 shipped for a few minutes. Both are enforced.
   RENDERED_NOTES="$STAGE_ROOT/notes-rendered.md"
-  sed -e "s/SHA256_PENDING/$SHA/g" -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" "$NOTES" > "$RENDERED_NOTES" \
+  sed -e "s/SHA256_PENDING/$SHA/g" -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" \
+    -e "s/LIBRARY_SHA256_PENDING/$LIB_SHA/g" -e "s/LIBRARY_BYTES_PENDING/$LIB_BYTES/g" \
+    "$NOTES" > "$RENDERED_NOTES" \
     || die "failed to render notes"
   grep -q 'SHA256_PENDING' "$NOTES" && echo "  filled SHA256_PENDING with $SHA"
   grep -q 'ARCHIVE_BYTES_PENDING' "$NOTES" && echo "  filled ARCHIVE_BYTES_PENDING with $BYTES"
+  grep -q 'LIBRARY_SHA256_PENDING' "$NOTES" && echo "  filled LIBRARY_SHA256_PENDING with $LIB_SHA"
+  grep -q 'LIBRARY_BYTES_PENDING' "$NOTES" && echo "  filled LIBRARY_BYTES_PENDING with $LIB_BYTES"
   grep -q "$SHA" "$RENDERED_NOTES" \
     || die "the notes neither contain SHA256_PENDING nor quote this archive's sha256 ($SHA)"
   grep -q "$BYTES" "$RENDERED_NOTES" \
     || die "the notes neither contain ARCHIVE_BYTES_PENDING nor quote this archive's size ($BYTES bytes)"
+  # The library ships on every release, so its digest is enforced exactly like
+  # the engine archive's: a release that publishes a `.a` and a `.dylib` the
+  # notes never mention leaves its readers unable to verify the download.
+  grep -q "$LIB_SHA" "$RENDERED_NOTES" \
+    || die "the notes neither contain LIBRARY_SHA256_PENDING nor quote the library archive's sha256 ($LIB_SHA)"
+  grep -q "$LIB_BYTES" "$RENDERED_NOTES" \
+    || die "the notes neither contain LIBRARY_BYTES_PENDING nor quote the library archive's size ($LIB_BYTES bytes)"
 
   # The Release page gets the COMPACT form: the same claims as bullets, one
   # sentence each, wrapped narrow. The full notes stay in the repo as the record
@@ -375,7 +414,7 @@ if [ -n "$NOTES" ]; then
   COMPACT_NOTES="$STAGE_ROOT/notes-compact.md"
   NOTES_MAX_CHARS="${TINYTITAN_RELEASE_NOTES_MAX_CHARS:-12000}"
   REQUIRE_ARGS=()
-  for required in $GOLDEN_SKIPPED $GOLDEN_ABSENT "$SHA" "$BYTES"; do
+  for required in $GOLDEN_SKIPPED $GOLDEN_ABSENT "$SHA" "$BYTES" "$LIB_SHA" "$LIB_BYTES"; do
     REQUIRE_ARGS+=(--require "$required")
   done
   python3 "$SCRIPT_DIR/compact-release-notes.py" "$RENDERED_NOTES" \
@@ -389,6 +428,7 @@ fi
 if [ "$PUBLISH" -ne 1 ]; then
   step "dry run complete"
   echo "  staged: $STAGE"
+  echo "  library: $(basename "$LIB_ARCHIVE")"
   if [ -n "$NOTES" ]; then
     echo "  release page: the compact form checked above is what --publish would carry"
   else
@@ -401,7 +441,7 @@ fi
 [ -n "$NOTES" ] || die "--publish needs --notes <file> (see the previous release for the shape)"
 
 step "publish"
-gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" "$LIB_ARCHIVE" "$LIB_ARCHIVE.sha256" \
   --repo "$REPO" \
   --title "TinyTitan $VERSION" \
   --notes-file "$COMPACT_NOTES" \

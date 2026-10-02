@@ -1,20 +1,31 @@
 # TinyTitan as an embedded LLM engine — plan
 
-**Status: plan, and phase A1 of P1 is implemented.** Written 2026-10-02, after
-5.15. **Revised 2026-10-02:** the dependency premise in §2 was tested rather than
-assumed, and it is false — a consumer package already resolves, builds, links and
-opens an install against the released tag. P0 therefore shrank from "remove the
-blockers" to "keep it proven". §6, §7 and §8 carry the correction; §2 carries the
-measurement.
+**Status: P1 is implemented (phases A1 and A2), and the library ships as
+binaries.** Written 2026-10-02, after 5.15. **Revised 2026-10-02:** the
+dependency premise in §2 was tested rather than assumed, and it is false — a
+consumer package already resolves, builds, links and opens an install against the
+released tag. P0 therefore shrank from "remove the blockers" to "keep it proven".
+§6, §7 and §8 carry the correction; §2 carries the measurement.
 
-**What is implemented (phase A1).** `TinyTitanKit` exists as a target and is the
-one library product; the generation orchestration moved into it out of
-`TinyTitanServerCore`, which now serves through it, and the facade in §4 is
-public. `examples/embedded` depends on the library (not the runtime) and streams
-tokens from a real install: `qwen3.5-4b_4-Bit`, 12 completion tokens, stop
-`length`. Everything else in the kit is `package`, so the facade is the whole
-promise. The facade's gaps are listed at the end of §4; the CLI is the remaining
-front end to fold in (phase A2).
+**What is implemented.** The library is **`TinyTitanLib`** (the owner's decision;
+the draft called it `TinyTitanKit`), a target and the one library product, with
+the generation orchestration moved into it out of `TinyTitanServerCore`. The
+facade in §4 is public and everything else in the target is `package`; the
+orchestrator imports no NIO and writes nothing to stdout.
+
+- **A1** — the server serves through the library.
+- **A2** — so does the CLI: `Run.swift` builds an `Engine` and a `Session`, and
+  holds no tokenizer, no `Model.load` and no runner. Its output is byte-identical
+  to the pre-move binary on three saved baselines (two raw-completion prompts and
+  one chat request), which is the check that the facade can express what the
+  engine actually does rather than most of it.
+- **S1.5** — every release carries `libTinyTitanLib.a` and
+  `libTinyTitanLib.dylib` with their module set, module maps and resource
+  bundle, in a second archive built by `tools/build_library.sh` and published by
+  `release.sh`. A consumer compiled against the extracted archive (no SwiftPM)
+  was run against a real install in both link forms before this was written.
+
+The facade's remaining gaps are listed at the end of §4.
 
 The ask: let another Swift program use TinyTitan as its LLM engine — the way a C++
 program links a `.dll` — instead of shelling out to `TinyTitanCLI` or speaking HTTP
@@ -120,20 +131,20 @@ and `Model` is not formally `Sendable` — several call sites use
 ## 3. The target architecture
 
 ```
-TinyTitanKit          the supported facade (public) + the orchestrator it drives (package)
+TinyTitanLib          the supported facade (public) + the orchestrator it drives (package)
    └── TinyTitan        the runtime: TinyTitanFormat + TinyTitanKernelsC + the forward runner
-TinyTitanServerCore   HTTP + OpenAI/Anthropic translation, rebuilt ON TinyTitanKit
-TinyTitanCLICore      the CLI, rebuilt ON TinyTitanKit
+TinyTitanServerCore   HTTP + OpenAI/Anthropic translation, rebuilt ON TinyTitanLib
+TinyTitanCLICore      the CLI, rebuilt ON TinyTitanLib
 TinyTitanC (optional) the C ABI: tinytitan.h over an opaque handle
 ```
 
 The runtime target keeps the name `TinyTitan` (the first draft called it
 `TinyTitanEngine`; renaming it would churn every import in the tree for no
 behavioural gain, and §9.5 is still open on naming). What matters is the layer
-above it: `TinyTitanKit` is a **product**, and the runtime is not — see
+above it: `TinyTitanLib` is a **product**, and the runtime is not — see
 `docs/repository-layout.md`.
 
-- **`TinyTitanKit` is additive and thin.** It does not re-export engine internals;
+- **`TinyTitanLib` is additive and thin.** It does not re-export engine internals;
   it names the handful of types a consumer may depend on. Everything else stays
   internal or `package`. This is what makes a versioning policy possible at all.
 - **The server becomes a client of the library.** That is the cheapest way to
@@ -230,18 +241,26 @@ Decisions embedded in that sketch:
 - **Nothing about the harness, the route or the catalog.** Those are the plugin's
   and the server's business.
 
-What phase A1 could not express, implemented honestly rather than papered over —
-each of these is a real gap in the facade, and closing one is additive:
+What the facade still cannot express, implemented honestly rather than papered
+over — each of these is a real gap, and closing one is additive:
 
 | Gap | Why |
 | --- | --- |
 | `EngineConfiguration` has no streaming mode or integrity policy | `ServerModelSession.load` derives both from the install |
 | `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
 | No `promptProcessed` event | `ServerInferenceEvent` has no prompt event to forward |
-| Reasoning text and tool calls are dropped | the A1 event/summary types do not carry them, though the orchestrator does |
+| Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | `.unsupportedFormat` / `.integrityFailure` are declared but unreachable | `ModelError` is internal to the `TinyTitan` target, so those failures rethrow unclassified rather than being guessed from a string |
-| The orchestrator writes telemetry to stdout | `ServerLog` predates the facade; an embedder cannot switch it off, which `AGENTS.md` now names as a rule the kit must meet |
+| Diagnostics cannot be switched off | they now go to stderr through `ServerLog.diagnostic()` rather than stdout, but an embedder still cannot silence them |
 | One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
+| Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
+
+Closed since A1, for the record: the configuration knobs the CLI needed
+(`prefillChunkTokens`, `expertCacheSlots`, `ropeScaling`, `thinkingMode`,
+`reasoningEffort`, `readAhead`, `forceLogitsHead`), the model's own sampling
+defaults, presence penalty, timing on the summary, and a raw-completion entry
+point — `Prompt.raw`, which drives the *same* orchestrator with the chat
+template skipped rather than a second decode loop.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 
@@ -293,9 +312,35 @@ fails there rather than in somebody's package.
 | Stage | Deliverable | Consumer | Notes |
 | --- | --- | --- | --- |
 | **S1 — source package** | `swift build` against the git tag | Swift programs (SwiftPM), like a static library | Already works mechanically (§2): a consumer resolves, links and opens an install. What S1 still lacks is a *supported* API rather than 1,328 public declarations; no ABI promise, only API stability |
-| **S2 — XCFramework** | `TinyTitanKit.xcframework` + `TinyTitanKit_TinyTitanKit.bundle` (Metal resources), built by `release.sh`, attached to the Release with a checksum | Swift programs that cannot or will not build from source | Needs `-enable-library-evolution` + `BUILD_LIBRARY_FOR_DISTRIBUTION` for module stability, and the resource bundle must sit where `Bundle` lookup finds it — for an XCFramework, beside the framework inside the artifact |
+| **S2 — XCFramework** | `TinyTitanLib.xcframework` + `TinyTitanLib_TinyTitanLib.bundle` (Metal resources), built by `release.sh`, attached to the Release with a checksum | Swift programs that cannot or will not build from source | Needs `-enable-library-evolution` + `BUILD_LIBRARY_FOR_DISTRIBUTION` for module stability, and the resource bundle must sit where `Bundle` lookup finds it — for an XCFramework, beside the framework inside the artifact |
 | **S3 — C ABI ("the DLL")** | `libtinytitan.dylib` + `tinytitan.h`, exported over an opaque handle | C, C++, Rust, Python (`ctypes`) | `@_cdecl` functions — `tt_engine_create`, `tt_session_respond(callback)`, `tt_session_cancel`, `tt_engine_destroy` — with the C surface owned and versioned by us; Swift's own ABI underneath is the implementation's business |
 | **S4 — client of itself** | the server/CLI rebuilt on the library | — | Not a distribution stage but the discipline that keeps the API honest (§3) |
+
+**S1.5 — the raw binaries, decided 2026-10-02.** Every release now carries
+`libTinyTitanLib.a` and `libTinyTitanLib.dylib` beside the engine binaries, in a
+second archive (`tinytitan-lib-X.Y-macos-arm64.tar.gz`) with its own checksum.
+`tools/build_library.sh` builds and asserts it, and `release.sh` stages,
+checksums and publishes it, refusing to publish if either artifact is missing
+from the archive. Three things that make it what it is rather than a bare `.a`:
+
+- **The static archive is merged.** `swift build` writes one archive per target,
+  so `libTinyTitanLib.a` on its own has no runtime, no format reader, no C
+  kernels and no tokenizer; the script merges every archive the release build
+  produced with `libtool -static`, because that single file is what a static
+  consumer links.
+- **The dylib's name is its install name.** It is built as a separate dynamic
+  product and linked with `-install_name @rpath/libTinyTitanLib.dylib`, so the
+  shipped file can carry the plain name; `otool -D` is asserted instead of
+  trusted.
+- **The Metal bundle travels with it**, because `Bundle.module` resolves beside
+  the consumer's executable. That is the §10 trap, and it is the reason the
+  script fails closed when `default.metallib` is not in the staged bundle.
+
+What this does **not** yet give a consumer is module stability: a `.swiftmodule`
+from this toolchain imports in this toolchain. `-enable-library-evolution` and a
+`.swiftinterface` are the XCFramework stage's job (S2), and until then the binary
+form is for consumers building with Xcode 27 / Swift 6.4 — which is already the
+package's floor.
 
 Versioning: the library follows the release tag. API stability starts at the
 first documented release (call it 6.0 or a `1.0` library version — an open
@@ -307,7 +352,7 @@ diff in the dry run, so a break is a build failure rather than a surprise.
 | Phase | Work | Acceptance |
 | --- | --- | --- |
 | **P0** | Keep consumability proven: `examples/embedded` (done) plus a CI step that runs `tools/embedded-dependency-check.sh` | The fixture resolves, builds and links in CI; the released-tag variant is runnable by hand (`--tag 5.15.0`) |
-| **P1** | Introduce `TinyTitanKit`: move the session orchestrator, templating and prompt shaping out of `TinyTitanServerCore`; make the engine NIO-free; rebuild the CLI and server on the facade | Goldens byte-identical through the refactored path (they are the regression net); `TinyTitanServerCore` imports the kit, not the engine internals; a public-surface gate lists what is supported |
+| **P1** | Introduce `TinyTitanLib`: move the session orchestrator, templating and prompt shaping out of `TinyTitanServerCore`; make the engine NIO-free; rebuild the CLI and server on the facade | Goldens byte-identical through the refactored path (they are the regression net); `TinyTitanServerCore` imports the kit, not the engine internals; a public-surface gate lists what is supported |
 | **P2** | Write and test the §5 contract | Tests: one generation per session, two engines on one device, cancel mid-decode, unload while idle |
 | **P3** | XCFramework + resource bundle from `release.sh` | The fixture app links the XCFramework (no source) and generates on a clean machine; checksum in the Release; `Bundle` lookup proven by a run |
 | **P4** | C ABI + header + a C++ sample | The sample streams tokens; the header compiles as C99 and C++17 |
@@ -341,7 +386,7 @@ the facade in P1.
 4. **Does the CPU engine need to be embeddable without Metal?** The dense CPU path
    (`CPUQwen35`) runs without the GPU engine, so a CPU-only consumer is plausible;
    it would need its own facade and its own tests.
-5. **Naming.** `TinyTitanKit` vs `TinyTitanEngine` vs reusing `TinyTitan` (which is
+5. **Naming.** `TinyTitanLib` vs `TinyTitanEngine` vs reusing `TinyTitan` (which is
    taken by the current target).
 6. **What does "supported" mean for the first release?** Which parts of the
    surface (streaming, sampling knobs, diagnostics, the ANE sidecar) carry the

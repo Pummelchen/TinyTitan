@@ -220,7 +220,7 @@ is the authority. It holds one row, Blocked on the maintainer:
    released tag, and `examples/embedded` plus `tools/embedded-dependency-check.sh`
    keep that check running in CI. The row waits on a decision rather than on work
    — §9.3 (a separate package or a product of this one) and §9.5 (the name) —
-   after which P1, the `TinyTitanKit` facade, is the first real task.
+   after which P1, the `TinyTitanLib` facade, is the first real task.
 2. **Carried forward, not tracked as tasks:** the Qwen 3.8 port items — QSA
    indexer selections to the GPU, a higher expert slot budget, the n-gram gather a
    token ahead. TT-021–TT-023 were closed on 2026-09-19 (no other machines; no disk

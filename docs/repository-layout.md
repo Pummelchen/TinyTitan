@@ -37,8 +37,8 @@ deliberate (`docs/plan-embedded-library.md`):
 
 | Product | Kind | What it is |
 | --- | --- | --- |
-| `TinyTitanKit` | library | The supported surface an embedder depends on: `Engine`, `Session` and their value types. |
-| `TinyTitanCLI`, `TinyTitanServer`, `TinyTitanRepack`, `TinyTitanBench`, `ContinuityDemo`, `tinytitan-memory`, `ttlanmanager` | executables | The engine: the terminal product, which embeds `TinyTitanKit`. |
+| `TinyTitanLib` | library | The supported surface an embedder depends on: `Engine`, `Session` and their value types. |
+| `TinyTitanCLI`, `TinyTitanServer`, `TinyTitanRepack`, `TinyTitanBench`, `ContinuityDemo`, `tinytitan-memory`, `ttlanmanager` | executables | The engine: the terminal product, which embeds `TinyTitanLib`. |
 
 `TinyTitan`, `TinyTitanFormat`, `ContinuityCore` and the rest are **targets, not
 products**: they are the building blocks of those two, and nothing outside this
@@ -56,7 +56,7 @@ directory is the name of the target:
   `Kernels/` (Swift dispatch over the shaders), `Metal/` (the `.metal`
   sources), `Runtime/{Inference,Prefill,KVCache,Generation,Configuration,Family}`,
   `Infrastructure/{ModelIO,Streaming,Metal}`, `CPUEngine/`, `Tokenization/`.
-- **`TinyTitanKit`** — the library product: the supported facade (`Engine`,
+- **`TinyTitanLib`** — the library product: the supported facade (`Engine`,
   `Session`, their options, events, summary and errors) plus the generation
   orchestration it drives. No NIO and no HTTP: this is the target another Swift
   program depends on, and everything in it that is not the facade is `package`,

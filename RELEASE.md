@@ -138,10 +138,16 @@ repository, so `gh release list` shows another project's releases and
 - Full notes in `docs/release-notes-vX.Y.md` (or the repository's equivalent),
   one section per user-visible change, each naming the check that backs it.
 - End with a checksum block carrying `SHA256_PENDING` and
-  `ARCHIVE_BYTES_PENDING`, substituted at publish time. **Never copy a size out
-  of a dry run** — publish rebuilds, and the archive differs.
+  `ARCHIVE_BYTES_PENDING` for the engine archive and `LIBRARY_SHA256_PENDING`
+  and `LIBRARY_BYTES_PENDING` for the library archive, all substituted at
+  publish time. **Never copy a size out of a dry run** — publish rebuilds, and
+  the archives differ.
 - `--publish` must **refuse** unless the notes carry the placeholder or quote the
   real value. A release quoting the wrong digest is worse than one quoting none.
+- The library archive (`libTinyTitanLib.a`, `libTinyTitanLib.dylib`, the Swift
+  module and its resource bundle) ships with **every** release; `release.sh`
+  builds it, asserts it and publishes it beside the engine archive, and the notes
+  must carry its two placeholders like the engine's.
 - Name **every** check that did not run, and why.
 - The README gets **no release callout**. It changes only when a fact it states
   changes. The changelog is the announcement.

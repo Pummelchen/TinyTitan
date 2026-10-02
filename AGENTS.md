@@ -141,7 +141,7 @@ The tree ships two products on one branch, `main`, exactly as the two DeepSeek
 Harness bundles do under `plugins/` — one tree, one release tag, one CI, and
 separate surfaces:
 
-- **The library — `TinyTitanKit` (`sources/TinyTitanKit/`).** The supported
+- **The library — `TinyTitanLib` (`sources/TinyTitanLib/`).** The supported
   surface an embedder depends on: `Engine`, `Session`, `EngineConfiguration`,
   `CachePrecision`, `ChatMessage`, `GenerationOptions`, the event/summary types
   and `TinyTitanError`. Every other declaration in that target is `package` on
@@ -154,13 +154,16 @@ separate surfaces:
 Rules that follow, and that need a decision recorded in
 `docs/plan-embedded-library.md` to change:
 
-1. **The library imports no NIO and prints nothing.** No HTTP and no server
-   concept may enter `TinyTitanKit`, and the facade must not write to stdout or
-   stderr that an embedder then has to tidy up. The moved orchestrator's
-   `ServerLog` telemetry is still a known violation of this rule (TT-038).
+1. **The library imports no NIO and keeps stdout clean.** No HTTP and no server
+   concept may enter `TinyTitanLib`, and nothing in it may `print`: stdout
+   belongs to the embedding program, and a stray `print` is how a consumer's
+   output stops being its own. Diagnostics go to stderr through
+   `ServerLog.diagnostic()`, which is where the orchestrator's load and
+   generation lines now go. They cannot be switched off yet — that is the
+   remaining gap, not the stream they are on.
 2. **One generation path.** A front end that reimplements prompt rendering,
-   sampling or the decode loop is drift; move it onto the facade instead. The
-   CLI's own driver is the last one left.
+   sampling or the decode loop is drift; move it onto the facade instead. Both
+   the CLI and the server now generate through the library.
 3. **`package` for everything internal.** Cross-target `package` access is what
    keeps the facade small enough to promise anything about.
 4. **Both products ship from one tag.** The library's version is the release

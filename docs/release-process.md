@@ -64,16 +64,24 @@ Three places, and only the first is a literal:
 
   `tinytitan-X.Y-macos-arm64.tar.gz` sha256: `SHA256_PENDING`
   `tinytitan-X.Y-macos-arm64.tar.gz` size: `ARCHIVE_BYTES_PENDING` bytes
+  `tinytitan-lib-X.Y-macos-arm64.tar.gz` sha256: `LIBRARY_SHA256_PENDING`
+  `tinytitan-lib-X.Y-macos-arm64.tar.gz` size: `LIBRARY_BYTES_PENDING` bytes
   ```
 
-Neither placeholder is one to forget: `release.sh --publish` substitutes both
-with the archive it just built, and **refuses to publish unless the notes carry
+No placeholder is one to forget: `release.sh --publish` substitutes all four
+with the archives it just built, and **refuses to publish unless the notes carry
 the placeholder or quote the real value** for each. A release whose notes quote
 the wrong digest is worse than one quoting none — 3.7 shipped that way for a few
 minutes — and a size copied out of a dry run is wrong for the same reason, because
 the publish pass rebuilds from scratch and the archive differs. 5.4's notes
 quoted the dry run's 24,770,128 bytes for an archive that published at
 24,770,200, which is why the size has a placeholder too.
+
+The library archive is the second one the release carries (`libTinyTitanLib.a`,
+`libTinyTitanLib.dylib`, the Swift module and its resource bundle — see
+`tools/build_library.sh`). It is published on **every** release, so its digest is
+enforced exactly like the engine archive's rather than left to the author to
+remember.
 
 The last two sections are a claim about what was verified. Do not write a gate
 result you have not seen; add it after the dry run if you want it in the notes.
@@ -364,11 +372,12 @@ gh release view vX.Y --repo Pummelchen/TinyTitan --json url,assets \
 ```
 
 Check: the notes on the Release quote the digest in the archive's `.sha256`
-next to it; the assets are the tarball and the checksum; the wiki Changelog
-points at the same tag. The binaries are **not** signed or notarized, and
-`README-binaries.txt` in the archive says so and tells the user how to clear the
-quarantine attribute after verifying the checksum — keep that honest rather
-than implying a notarized build.
+next to it; the assets are **two** tarballs with their checksums — the engine
+archive and the library archive (`tinytitan-lib-X.Y-macos-arm64.tar.gz`) — and
+the wiki Changelog points at the same tag. The binaries are **not** signed or
+notarized, and the two `README` files in the archives say so and tell the user
+how to clear the quarantine attribute after verifying the checksum — keep that
+honest rather than implying a notarized build.
 
 If you wrote a `### Performance` table, make sure it says which commit and
 machine it was measured on, and leave previous releases' tables alone.
@@ -401,5 +410,7 @@ machine it was measured on, and leave previous releases' tables alone.
       under the `TINYTITAN_RELEASE_NOTES_MAX_CHARS` budget (`release.sh` compacts
       and enforces this on any run that passes `--notes`)
 - [ ] Staged archive inspected (four executables, bundles, licence, notices)
+- [ ] Library archive inspected (`.a`, `.dylib`, `TinyTitanLib.swiftmodule`,
+      the Metal bundle and `README-library.txt`; `build_library.sh` asserts them)
 - [ ] `--publish --notes docs/release-notes-vX.Y.md`, then `gh release view`
 - [ ] No model process left running afterwards
