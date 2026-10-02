@@ -431,7 +431,7 @@ check_shell_portability() {
   # Every shell script in the tree, not only the ones the installer runs: the
   # rule is a property of the shell, and `docs/paper/build.sh` is a script too.
   while IFS= read -r f; do scripts+=("$f"); done < <(
-    find "$ROOT/tools" "$ROOT/benchmark" "$ROOT/docs" -name '*.sh' -not -path '*/.build/*' 2>/dev/null | sort)
+    find "$ROOT/tools" "$ROOT/benchmark" "$ROOT/docs" "$ROOT/examples" -name '*.sh' -not -path '*/.build/*' 2>/dev/null | sort)
 
   for f in "${scripts[@]+"${scripts[@]}"}"; do
     if ! "$old_bash" -n "$f" >/dev/null 2>&1; then
@@ -600,7 +600,7 @@ check_shellcheck() {
   fi
   local scripts=() f output
   while IFS= read -r f; do scripts+=("$f"); done < <(
-    find "$ROOT/tools" "$ROOT/benchmark" "$ROOT/docs" -name '*.sh' -not -path '*/.build/*' 2>/dev/null | sort)
+    find "$ROOT/tools" "$ROOT/benchmark" "$ROOT/docs" "$ROOT/examples" -name '*.sh' -not -path '*/.build/*' 2>/dev/null | sort)
   if [ "${#scripts[@]}" -eq 0 ]; then
     echo "  FAIL: no shell scripts found to check"
     status=1

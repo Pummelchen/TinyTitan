@@ -141,7 +141,18 @@ done
 # 5. Licensing travels with any binary distribution (Apache-2.0).
 cp "$ROOT/LICENSE" "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$OUT/"
 
-# 6. A consumer needs one `-Xcc -fmodule-map-file=` pair per C module, and those
+# 6. The demo apps, with the source they are built from. An archive whose whole
+#    point is "link this instead of building the package" should arrive with a
+#    program that does, and their build scripts find the library one directory
+#    up from where they land here.
+DEMO_SRC="$ROOT/examples/library-demo"
+[[ -f "$DEMO_SRC/main.swift" ]] || die "no examples/library-demo/main.swift to ship"
+mkdir -p "$OUT/demo"
+cp "$DEMO_SRC/main.swift" "$DEMO_SRC/build-static.sh" "$DEMO_SRC/build-dynamic.sh" \
+  "$DEMO_SRC/README.md" "$OUT/demo/"
+chmod +x "$OUT/demo/build-static.sh" "$OUT/demo/build-dynamic.sh"
+
+# 7. A consumer needs one `-Xcc -fmodule-map-file=` pair per C module, and those
 #    paths only exist after the archive is extracted somewhere, so the flags are
 #    generated on the consumer's side rather than baked in here. `swiftc @file`
 #    reads them back as ordinary arguments (verified: it compiles and runs).
@@ -176,6 +187,9 @@ Contents
                              which SwiftPM normally passes one by one
   make-flags.sh              writes swiftc-flags.txt naming those maps, because
                              the paths only exist once you have extracted this
+  demo/                      two terminal apps built from one source — one
+                             linked against the static archive, one against the
+                             dylib — with the scripts that build them
   TinyTitan_TinyTitan.bundle the Metal shader sources, compiled when the library
                              loads; the bundle must sit next to the executable
                              that uses the library

@@ -7,6 +7,14 @@
 # root, so it follows the tree rather than pinning a second resolution: a
 # committed fixture lockfile would go stale and test a combination nobody ships.
 examples/*/Package.resolved
+# `examples/library-demo` builds in place: the two demo apps, the dylib it copies
+# for the dynamic one to find through its rpath, and the resource bundles both
+# need beside the executable.
+examples/library-demo/tinytitan-demo-static
+examples/library-demo/tinytitan-demo-dynamic
+examples/library-demo/lib/
+examples/library-demo/*.bundle/
+examples/library-demo/swiftc-flags.txt
 
 # Xcode
 DerivedData/

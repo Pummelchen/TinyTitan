@@ -15,7 +15,7 @@ here was checked against the tree, and the counts are from that pass.
 | `tools/` | Build, install, verification and conversion drivers (`*.sh`, `*.py`) | yes |
 | `benchmark/` | Benchmark scripts, the golden outputs the baseline compares against, launch helpers | yes |
 | `plugins/` | Client-side bundles for tools that drive the server; `plugins/dsh-tinytitan/` is the DeepSeek Harness one | yes |
-| `examples/` | Consumer packages that use this one as a dependency; `examples/embedded/` is the fixture behind `tools/embedded-dependency-check.sh` | yes |
+| `examples/` | Consumer packages that use this one as a dependency: `examples/embedded/` is the fixture behind `tools/embedded-dependency-check.sh` (SwiftPM), and `examples/library-demo/` builds two terminal apps against the released `.a` and `.dylib` (no SwiftPM) | yes |
 | `assets/` | Brand assets (wordmark, slogans) | yes |
 | `.build/`, `models/` | SwiftPM's build directory and the installed models | **no** — ignored, and never a source of truth |
 

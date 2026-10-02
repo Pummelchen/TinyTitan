@@ -421,8 +421,10 @@ page is the user-facing guide.
 
 Every release also publishes the library in its **binary form**, in a second
 archive: `libTinyTitanLib.a`, `libTinyTitanLib.dylib`, the Swift module, the
-module maps and the resource bundle. That is for a consumer that cannot or will
-not build from source; depending on the package stays the supported route.
+module maps and the resource bundle — plus `demo/`, two terminal apps built from
+one source, one per link form, with the scripts that build them. That is for a
+consumer that cannot or will not build from source; depending on the package
+stays the supported route.
 
 **2. The engine — the `TinyTitanCLI` and `TinyTitanServer` executables.** The
 terminal product this project is known for: the CLI, the installer and repacker,
