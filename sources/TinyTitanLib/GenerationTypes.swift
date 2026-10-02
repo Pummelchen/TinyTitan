@@ -147,10 +147,40 @@ public enum DecodeStopReason: String, Sendable, Equatable {
     }
 }
 
+/// A tool the model asked to call, in the facade's own vocabulary.
+///
+/// The arguments travel as the JSON text the model emitted. The runtime parses
+/// them into its own value type, and the facade deliberately does not hand that
+/// out: a caller that wants structure parses `argumentsJSON`, and nothing about
+/// the engine's JSON representation becomes part of the promise.
+public struct ToolCall: Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let argumentsJSON: String
+
+    public init(id: String, name: String, argumentsJSON: String) {
+        self.id = id
+        self.name = name
+        self.argumentsJSON = argumentsJSON
+    }
+
+    init(parsed call: ParsedToolCall) {
+        self.init(id: call.id, name: call.name, argumentsJSON: call.argumentsJSON)
+    }
+}
+
 /// What a finished generation produced.
 public struct GenerationSummary: Sendable, Equatable {
     /// The visible answer, with any client stop string removed.
     public let text: String
+    /// Everything the model thought, in order; empty with thinking off.
+    /// `completionTokens` already counts these tokens.
+    public let reasoning: String
+    /// The tools the model asked for, in the order it asked. Empty unless the
+    /// request offered tools — which the facade cannot do yet, so today this is
+    /// always empty and the type is here so the gap is a field rather than a
+    /// missing case. See TT-046.
+    public let toolCalls: [ToolCall]
     public let promptTokens: Int
     public let completionTokens: Int
     public let stopReason: GenerationStopReason
@@ -168,9 +198,15 @@ public struct GenerationSummary: Sendable, Equatable {
 /// length and `cachedTokens` the part of it the prompt cache already held, so a
 /// caller can tell "still prefilling" from "content is coming". A fully cached
 /// prompt emits it too — there is nothing to prefill, but the prompt is read.
+///
+/// `reasoning` is the thought text from inside the model's think block, kept
+/// apart from `token` so a caller can put it where its clients look for it and
+/// so nothing that judges the answer reads it.
 public enum GenerationEvent: Sendable {
     case promptProcessed(tokens: Int, cachedTokens: Int)
     case token(String)
+    case reasoning(String)
+    case toolCall(ToolCall)
     case finished(GenerationSummary)
 }
 
@@ -180,6 +216,8 @@ extension GenerationSummary {
     init(completion: ServerCompletion, cancelled: Bool) {
         self.init(
             text: completion.content,
+            reasoning: completion.reasoning,
+            toolCalls: completion.toolCalls.map(ToolCall.init(parsed:)),
             promptTokens: completion.usage.promptTokens,
             completionTokens: completion.usage.completionTokens,
             stopReason: cancelled

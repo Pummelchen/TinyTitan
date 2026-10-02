@@ -214,19 +214,22 @@ public actor Session {
     }
 
     /// The facade's view of one orchestrator event, or `nil` for the ones this
-    /// surface cannot express yet — reasoning text and tool calls, which the
-    /// header explains and the tracker carries.
+    /// surface cannot express.
     ///
     /// One function for both entry points, so a raw completion and a
-    /// conversation cannot drift apart in what they report.
+    /// conversation cannot drift apart in what they report. Nothing returns
+    /// `nil` today: reasoning and tool calls are carried now, and the `nil` arm
+    /// is what a future event the facade cannot express would use.
     package static func facadeEvent(_ event: ServerInferenceEvent) -> GenerationEvent? {
         switch event {
         case .content(let text):
             return .token(text)
         case .promptProcessed(let tokens, let cachedTokens):
             return .promptProcessed(tokens: tokens, cachedTokens: cachedTokens)
-        case .reasoning, .toolCall:
-            return nil
+        case .reasoning(let text):
+            return .reasoning(text)
+        case .toolCall(let call):
+            return .toolCall(ToolCall(parsed: call))
         }
     }
 

@@ -246,7 +246,6 @@ over — each of these is a real gap, and closing one is additive:
 
 | Gap | Why |
 | --- | --- |
-| Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
 
 Closed since A1, for the record: the configuration knobs the CLI needed
@@ -291,6 +290,17 @@ hands out belongs to the device the caller named. What cannot be shown on this
 machine is a *second* GPU — an Apple Silicon Mac reports one — so the link proved
 by test is the one that matters: the context binds the device it was given, and
 the whole engine path runs on an explicitly passed device.
+
+**Reasoning and tool calls** are carried now too. `GenerationEvent` gained
+`.reasoning(String)` and `.toolCall(ToolCall)`, `GenerationSummary` gained
+`reasoning` and `toolCalls`, and the facade's `ToolCall` exposes the arguments as
+the model's JSON text rather than the runtime's JSON value type — nothing about
+the engine's representation becomes part of the promise. Reasoning is verified
+end to end: a probe on `models/qwen3.5_4B_4Bit` with `thinkingMode: .on` produced
+128 reasoning events (389 characters) matching the summary exactly. Tool calls
+cannot be produced end to end yet, and that is not a mapping gap: the facade
+offers the model no tools, because a request vocabulary of its own is the next
+row.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

@@ -137,6 +137,16 @@ public func run(
             switch event {
             case .token(let text):
                 if !text.isEmpty { stdout.write(Data(text.utf8)) }
+            case .reasoning:
+                // The answer goes to stdout; the model's thoughts do not. This
+                // is what the CLI did before it moved onto the facade, and the
+                // saved baselines pin it.
+                break
+            case .toolCall:
+                // The CLI offers the model no tools, so this cannot arrive; if
+                // the facade ever lets it ask for one, this is where it would
+                // be reported rather than silently dropped.
+                break
             case .promptProcessed, .finished:
                 break
             }
