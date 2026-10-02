@@ -101,6 +101,15 @@ jobs:
         # Checks the compiler cannot express. Runs before the suite so a style
         # regression fails in seconds rather than after a full test run.
         run: tools/lint.sh
+      - name: The package is consumable as a dependency
+        # `examples/embedded` is a package that is not this repository: it depends
+        # on this one and links the engine. SwiftPM can refuse to consume a
+        # package carrying unsafe build flags — this one does, deliberately, for
+        # `-warnings-as-errors` and the `-O2` C kernels — and whether it still
+        # refuses is a property of the toolchain rather than of this file, so the
+        # check builds the real thing instead of asserting it. See
+        # docs/plan-embedded-library.md §2 and §6.
+        run: tools/embedded-dependency-check.sh
       - name: Converter gates (synthetic checkpoint, fault injection)
         # `tools/prepare_qwen38.py` converts a 360 GB checkpoint. The unit suite
         # pins its pieces; the end-to-end suite runs `main()` against a

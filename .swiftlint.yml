@@ -34,6 +34,11 @@ excluded:
   - .build
   - models
   - .qwen
+  # The consumer package under `examples/` is a SwiftPM root of its own, so its
+  # build directory is not the repository's `.build` and the entry above does not
+  # reach it. Without this line the gate lints the dependency checkouts SwiftPM
+  # leaves there.
+  - examples/embedded/.build
 
 disabled_rules:
   # Layout, owned by swift-format.

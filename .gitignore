@@ -3,6 +3,10 @@
 .swiftpm/
 *.xcodeproj
 *.xcworkspace
+# A consumer package under examples/ resolves the same dependency graph as the
+# root, so it follows the tree rather than pinning a second resolution: a
+# committed fixture lockfile would go stale and test a combination nobody ships.
+examples/*/Package.resolved
 
 # Xcode
 DerivedData/

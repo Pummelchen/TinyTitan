@@ -669,12 +669,21 @@ check_swift_format() {
     status=1
     return 1
   fi
+  # `examples/` holds consumer packages, which are SwiftPM roots of their own.
+  # swift-format has no ignore file, so recursing into `examples/` would descend
+  # into the checkouts SwiftPM puts under their `.build`; collect the fixture's
+  # own files instead. (System bash 3.2 runs this, hence the empty-array guard.)
+  local example_files=()
+  while IFS= read -r path; do
+    example_files+=("$path")
+  done < <(find "$ROOT/examples" \( -name .build -o -name .swiftpm \) -prune -o \
+      -name '*.swift' -print 2>/dev/null | sort)
   local output
   if ! output="$(cd "$ROOT" && xcrun swift-format lint --strict --recursive \
-      sources tests benchmark Package.swift 2>&1)"; then
+      sources tests benchmark Package.swift "${example_files[@]+"${example_files[@]}"}" 2>&1)"; then
     printf '%s\n' "$output" | sed "s|$ROOT/||" | head -30
     echo "  FAIL: swift-format found formatting drift"
-    echo "        fix: xcrun swift-format format --in-place --recursive sources tests benchmark Package.swift"
+    echo "        fix: xcrun swift-format format --in-place --recursive sources tests benchmark Package.swift examples"
     status=1
     return 1
   fi

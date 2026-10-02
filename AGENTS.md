@@ -63,7 +63,9 @@ agent memory, `sources/TinyTitanMemoryTool/` inspects it (executable
 `sources/TinyTitanBench/` plus `sources/TinyTitanValidation/` are the benchmark
 driver and the validation/reference target. An executable target keeps its
 top-level or `@main` entry in `Command/`; `plugins/dsh-tinytitan/` is the DeepSeek
-Harness bundle (route writer + quiet compaction). `docs/repository-layout.md` has
+Harness bundle (route writer + quiet compaction). `examples/embedded/` is the
+consumer package that proves another package can depend on this one, built by
+`tools/embedded-dependency-check.sh`. `docs/repository-layout.md` has
 the conventions, `tests/` mirrors `sources/` path for path and never loads a model,
 **user documentation lives in the
 [GitHub Wiki](https://github.com/Pummelchen/TinyTitan/wiki) and engineering
@@ -122,9 +124,16 @@ swift build -c release -Xswiftc -target-cpu -Xswiftc apple-m3 -Xcc -mcpu=apple-m
 ```
 
 That artifact is not portable (it may use this core's instructions), so never ship
-it from `tools/release.sh` or hand it to another Mac. The `.unsafeFlags` is also why
-this package cannot be consumed as a dependency; it is an application package and
-nothing depends on it.
+it from `tools/release.sh` or hand it to another Mac.
+
+The `.unsafeFlags` do **not** stop this package being consumed as a dependency.
+That was the belief here until it was measured on 2026-10-02 (Swift 6.4): a
+package depending on the released tag by URL resolves, builds and links, and
+`examples/embedded` opens a real install through the public engine API. The
+toolchain still carries SwiftPM's "contains unsafe build flags" diagnostic, so
+the property is checked rather than assumed —
+`tools/embedded-dependency-check.sh` builds the fixture and is what would catch a
+change. See `docs/plan-embedded-library.md` §2.
 
 ## Models
 
