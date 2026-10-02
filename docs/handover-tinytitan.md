@@ -28,7 +28,10 @@
 > with `--verify-install` if the folder moves again. **Verification uses only the
 > installs already under `models/`** — never download, convert, repack or re-install
 > a model to make a gate pass, and never fetch one of the installs the operator
-> deleted. Report measurements, not assurances.
+> deleted. The one open task is **TT-038, an embeddable engine**:
+> `docs/plan-embedded-library.md` is the plan, its dependency premise has been
+> measured and corrected, and it waits on §9.3/§9.5 (where the facade lives and
+> what it is called) before P1 starts. Report measurements, not assurances.
 
 This is the only current brief; the 5.12 handover it replaces is superseded. The
 traps that one named still bite and are folded in below.
@@ -206,32 +209,28 @@ traps that one named still bite and are folded in below.
 ## What is open
 
 The [Project Tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker)
-is the authority, and it holds one table with no Open row. Two items are Blocked
-on other people:
+is the authority. It holds one row, Blocked on the maintainer:
 
-1. **TT-018 — the plugin's delivery is settled, one chore is not.** `dsh-tinytitan`
-   **is not published to npm and will not be** (decided 2026-09-25): the installer
-   fetches this project's source archive for the release tag, which carries
-   `plugins/`, and installs the bundle from there, so the code reaches a user from
-   the web with no registry account on either side. The catalogue half is done
-   ([#5396](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/5396)
-   merged 2026-09-19, `dsh-tinytitan` listed, and the listing points at the repo).
-   What is left of the row is the inert `Pummelchen/awesome-dsh-plugin` fork: it
-   **cannot be deleted from this checkout** because the token lacks `delete_repo`,
-   so remove it in the web UI or `gh auth refresh -h github.com -s delete_repo`.
-2. **TT-020 — reaching the LAN manager from another machine.**
-   [Discussion #7111](https://github.com/deepseek-ai/deepseek-harness/discussions/7111)
-   was **answered 2026-09-19 by `PerryLink`**: the gate is the webserver schema,
-   which admits exactly `127.0.0.1` and `0.0.0.0`, not the CLI guard; a
-   specific-interface bind would also need its address folded into
-   `resolveLanTrust`'s `trustedHosts`. Upstream's call, so the plugin works and
-   nothing reaches it remotely yet. `docs/dsh-upstream-asks.md` holds all three
-   asks and the replies.
-3. **Carried forward, not tracked as tasks:** the Qwen 3.8 port items — QSA
+1. **TT-038 — an embeddable engine.** `docs/plan-embedded-library.md` is the
+   design record for letting another Swift program use TinyTitan as its LLM
+   engine instead of shelling out to `TinyTitanCLI` or speaking HTTP to the
+   server. The plan's opening premise was measured on 2026-10-02 and the old
+   belief that `.unsafeFlags` makes the package unconsumable is **false**: a
+   consumer package resolves, builds, links and opens an install against the
+   released tag, and `examples/embedded` plus `tools/embedded-dependency-check.sh`
+   keep that check running in CI. The row waits on a decision rather than on work
+   — §9.3 (a separate package or a product of this one) and §9.5 (the name) —
+   after which P1, the `TinyTitanKit` facade, is the first real task.
+2. **Carried forward, not tracked as tasks:** the Qwen 3.8 port items — QSA
    indexer selections to the GPU, a higher expert slot budget, the n-gram gather a
    token ahead. TT-021–TT-023 were closed on 2026-09-19 (no other machines; no disk
    for the ~360 GB bf16 reference), so the M1–M6 claim stays a design intent and
    Qwen 3.8 long-context stays verified only at a lowered budget.
+
+TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
+machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
+and the LAN capability is verified across hosts with the direct interface bind
+left as an upstream ask in `docs/dsh-upstream-asks.md`.
 
 ## Traps worth carrying forward
 
