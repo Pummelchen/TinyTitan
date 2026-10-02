@@ -112,13 +112,7 @@ public actor Session {
         let completion: ServerCompletion
         do {
             completion = try await modelSession.generate(validated) { event in
-                switch event {
-                case .content(let text):
-                    onEvent(.token(text))
-                case .reasoning, .toolCall:
-                    // Not expressible on the A1 surface yet; see the header.
-                    break
-                }
+                if let mapped = Session.facadeEvent(event) { onEvent(mapped) }
             }
         } catch let error as GeneratorError {
             switch error {
@@ -179,13 +173,9 @@ public actor Session {
         let completion: ServerCompletion
         do {
             completion = try await modelSession.generate(request) { event in
-                switch event {
-                case .content(let text):
-                    onEvent(.token(text))
-                case .reasoning, .toolCall:
-                    // A raw completion has no decoder, so neither is produced.
-                    break
-                }
+                // A raw completion has no decoder, so reasoning and tool calls
+                // are never produced for it; the mapper drops them anyway.
+                if let mapped = Session.facadeEvent(event) { onEvent(mapped) }
             }
         } catch let error as GeneratorError {
             switch error {
@@ -221,6 +211,23 @@ public actor Session {
             return TinyTitanError.contextWindowExceeded(prompt: 0, window: window)
         }
         return error
+    }
+
+    /// The facade's view of one orchestrator event, or `nil` for the ones this
+    /// surface cannot express yet — reasoning text and tool calls, which the
+    /// header explains and the tracker carries.
+    ///
+    /// One function for both entry points, so a raw completion and a
+    /// conversation cannot drift apart in what they report.
+    package static func facadeEvent(_ event: ServerInferenceEvent) -> GenerationEvent? {
+        switch event {
+        case .content(let text):
+            return .token(text)
+        case .promptProcessed(let tokens, let cachedTokens):
+            return .promptProcessed(tokens: tokens, cachedTokens: cachedTokens)
+        case .reasoning, .toolCall:
+            return nil
+        }
     }
 
     private func validate(

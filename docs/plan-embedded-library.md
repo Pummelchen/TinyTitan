@@ -248,7 +248,6 @@ over — each of these is a real gap, and closing one is additive:
 | --- | --- |
 | `EngineConfiguration` has no streaming mode or integrity policy | `ServerModelSession.load` derives both from the install |
 | `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
-| No `promptProcessed` event | `ServerInferenceEvent` has no prompt event to forward |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
@@ -270,6 +269,14 @@ install, which are rethrown as they are.
 That last one changed the §4 sketch: the two cases carry the loader's own
 wording (`detail:`) rather than an invented digest, because a made-up
 `expected`/`actual` pair is a worse lie than prose.
+
+The **prompt event** closed next: `ServerInferenceEvent` gained
+`promptProcessed(tokens:cachedTokens:)`, emitted once when the runtime's prefill
+progress reaches the end of the prompt — or immediately when the cache left
+nothing to prefill — and `Session.facadeEvent` forwards it. The HTTP surfaces
+ignore it deliberately: their clients count prompt tokens from the usage block
+they already send, so OpenAI's and Anthropic's streaming shapes have nowhere for
+it to go.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

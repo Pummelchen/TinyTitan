@@ -145,6 +145,11 @@ extension ServerHTTPHandler {
                         return try await self.backend.generate(request) { event in
                             guard request.stream, let outbox else { return }
                             switch event {
+                            case .promptProcessed:
+                                // Anthropic's stream announces the input token
+                                // count in `message_start`, which this handler
+                                // has already sent by the time generation runs.
+                                break
                             case .content(let text):
                                 self.enqueueAnthropicDelta(
                                     .text, text, blockState: blockState,

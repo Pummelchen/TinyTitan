@@ -29,6 +29,9 @@ final class GenerationDecodeState: @unchecked Sendable {
     var output: AssistantOutput
     var decodingError: Error?
     var shouldStop = false
+    /// The prompt event is published once, and a fully cached prompt never
+    /// produces the prefill progress callback that would otherwise carry it.
+    var publishedPromptProgress = false
 
     init(decoder: StructuredAssistantDecoder?, output: AssistantOutput) {
         self.decoder = decoder

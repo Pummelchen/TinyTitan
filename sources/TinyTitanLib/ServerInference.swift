@@ -60,6 +60,12 @@ func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
 }
 
 package enum ServerInferenceEvent: Equatable, Sendable {
+    /// Emitted once per generation, when the prompt has been read: `tokens` is
+    /// its length and `cachedTokens` how much of it came from the prompt cache
+    /// instead of being prefilled. A caller uses it to tell "still prefilling"
+    /// from "content is coming". The HTTP surfaces ignore it — their clients
+    /// count prompt tokens from the usage block instead.
+    case promptProcessed(tokens: Int, cachedTokens: Int)
     case content(String)
     /// Thought text from inside the model's `<think>` block. Kept apart from
     /// `content` so each surface can put it where its clients look for

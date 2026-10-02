@@ -74,6 +74,10 @@ extension ServerHTTPHandler {
         context: ChannelHandlerContext
     ) {
         switch event {
+        case .promptProcessed:
+            // The Responses stream already carried its input-token count in
+            // `response.created`; there is no event for this one.
+            break
         case .content(let text):
             enqueueResponsesContentDelta(
                 id: id, text: text, itemState: itemState,

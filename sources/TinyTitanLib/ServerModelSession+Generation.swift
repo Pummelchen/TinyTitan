@@ -223,6 +223,22 @@ extension ServerModelSession {
             state.output.publish(events, isToken: isToken)
             if state.output.isStopped { state.shouldStop = true }
         }
+        // The prompt's accounting, published once: at the end of prefill, or
+        // immediately when there is nothing left to prefill — a fully cached
+        // prompt produces no progress callback at all, and a caller still needs
+        // to be told the prompt was read. `tokens` is the prompt's length and
+        // `cachedTokens` the part of it the cache already held.
+        let cachedPromptTokenCount =
+            if case .resume(let cached) = activeStart { cached } else { 0 }
+        let publishPromptProcessed: @Sendable (Int) -> Void = { total in
+            guard !state.publishedPromptProgress else { return }
+            state.publishedPromptProgress = true
+            onEvent(
+                .promptProcessed(tokens: total, cachedTokens: cachedPromptTokenCount))
+        }
+        if activePromptIDs.isEmpty {
+            publishPromptProcessed(promptIDs.count)
+        }
         // `renderTokenizer` is the one this request's reasoning resolves to, and
         // it is already what rendered the prompt and what the assistant decoder
         // was built with. `tokenizer` is the session's -- the level the model was
@@ -248,8 +264,10 @@ extension ServerModelSession {
                 guard state.decodingError == nil else { return }
                 do {
                     switch progress {
-                    case .prefill:
-                        break
+                    case .prefill(let done, let total):
+                        // The runtime reports prefill chunk by chunk; the prompt
+                        // is read when the last chunk lands.
+                        if done >= total { publishPromptProcessed(total) }
                     case .token(_, let tokenID, let delta):
                         if let decoder = state.decoder {
                             publish(try decoder.consume(tokenID: tokenID, delta: delta), true)

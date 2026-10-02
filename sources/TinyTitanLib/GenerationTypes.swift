@@ -164,10 +164,10 @@ public struct GenerationSummary: Sendable, Equatable {
 
 /// One step of a streaming generation.
 ///
-/// `promptProcessed` is declared for the contract the facade is meant to
-/// offer, but the moved orchestrator has no prompt event: its callback carries
-/// visible text, reasoning and tool calls only. It is therefore never emitted
-/// today -- see the phase A1 report.
+/// `promptProcessed` arrives once, before any token: `tokens` is the prompt's
+/// length and `cachedTokens` the part of it the prompt cache already held, so a
+/// caller can tell "still prefilling" from "content is coming". A fully cached
+/// prompt emits it too — there is nothing to prefill, but the prompt is read.
 public enum GenerationEvent: Sendable {
     case promptProcessed(tokens: Int, cachedTokens: Int)
     case token(String)

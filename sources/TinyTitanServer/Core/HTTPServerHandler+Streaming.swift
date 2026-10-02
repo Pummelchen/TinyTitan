@@ -181,6 +181,11 @@ extension ServerHTTPHandler {
         context: ChannelHandlerContext
     ) {
         switch event {
+        case .promptProcessed:
+            // The wire's clients learn the prompt's size from the usage block at
+            // the end, and OpenAI's streaming shape has no chunk for it, so
+            // there is nothing to send here.
+            break
         case .content(let text):
             enqueueStreamChunk(
                 chunk(id: id, created: created, delta: ["content": text], finishReason: nil),
