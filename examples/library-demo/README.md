@@ -110,9 +110,11 @@ confused for one another at the terminal.
 
 ## Requirements
 
-Apple Silicon, macOS 26 or later, and a `.ssdai` install. The released binaries
-are built by one Xcode (27 / Swift 6.4) and their module is not stable across
-toolchains yet — building the package as a SwiftPM dependency remains the
-supported route when you need to compile the library yourself. See the wiki's
+Apple Silicon, macOS 26 or later, **Xcode 27 with Swift 6.4** — the only supported
+toolchain — and a `.ssdai` install. The released binaries are built by that
+toolchain and their module is not stable across other Swifts, which costs nothing
+here because no other Swift is supported; building the package as a SwiftPM
+dependency remains the route when you want to compile the library yourself. See
+the wiki's
 [Library and Engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine)
 page and the plan in `docs/plan-embedded-library.md`.

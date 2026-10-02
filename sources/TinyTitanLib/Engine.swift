@@ -58,6 +58,18 @@ public struct EngineConfiguration: Sendable {
     /// a caller that needs the logits buffer (diagnostics, or matching a run
     /// made against it) sets this. Sampling always forces the logits head.
     public var forceLogitsHead: Bool
+    /// Where this library's diagnostics go.
+    ///
+    /// `nil` — the default — writes them to stderr, which is what the server
+    /// wants and what every line did before this knob existed. An embedder that
+    /// owns its output passes its own sink, and `{ _ in }` silences the library
+    /// entirely (which is what the CLI's `--quiet` does).
+    ///
+    /// The destination is **process-wide**: the orchestrator logs statically
+    /// from deep inside the engine, so the most recently created `Engine` sets
+    /// it for the process. Two engines with different sinks do not each get
+    /// their own; the second one wins.
+    public var logSink: (@Sendable (String) -> Void)?
 
     public init(
         contextWindow: Int = 262_144,
@@ -70,7 +82,8 @@ public struct EngineConfiguration: Sendable {
         thinkingMode: ThinkingMode = .off,
         reasoningEffort: ReasoningEffort? = nil,
         readAhead: ReadAheadAdvice? = nil,
-        forceLogitsHead: Bool = true
+        forceLogitsHead: Bool = true,
+        logSink: (@Sendable (String) -> Void)? = nil
     ) {
         self.contextWindow = contextWindow
         self.expertCacheBudgetBytes = expertCacheBudgetBytes
@@ -83,6 +96,7 @@ public struct EngineConfiguration: Sendable {
         self.reasoningEffort = reasoningEffort
         self.readAhead = readAhead
         self.forceLogitsHead = forceLogitsHead
+        self.logSink = logSink
     }
 }
 
@@ -242,6 +256,9 @@ public actor Engine {
         device: MTLDevice,
         configuration: EngineConfiguration = .init()
     ) async throws {
+        // Before anything that can log: the loader's first line is the RAM
+        // profile, and an embedder that installed a sink should not miss it.
+        ServerLog.useSink(configuration.logSink)
         var isDirectory: ObjCBool = false
         guard
             FileManager.default.fileExists(

@@ -103,6 +103,17 @@ public func run(
         let prefillChunkTokens = try await resolvePrefillChunk(
             args: args, prompt: prompt, modelURL: modelURL,
             thinkingMode: thinkingMode, reasoningEffort: reasoningEffort)
+        // `--quiet` means quiet: the library's load and generation lines go to
+        // the same stderr this command writes its footer on, and a user who
+        // asked for no reporting does not want them either. Written as a
+        // statement rather than a ternary: the closure-and-`nil` conditional
+        // makes the type checker give up rather than pick.
+        let logSink: (@Sendable (String) -> Void)?
+        if args.quiet {
+            logSink = { _ in }
+        } else {
+            logSink = nil
+        }
         let configuration = EngineConfiguration(
             contextWindow: args.maxContext,
             cachePrecision: cachePrecision(args.kvCachePrecision),
@@ -112,7 +123,8 @@ public func run(
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort,
             readAhead: readAheadAdvice(args.rdadvise),
-            forceLogitsHead: !isPureGreedy)
+            forceLogitsHead: !isPureGreedy,
+            logSink: logSink)
         guard let device = MTLCreateSystemDefaultDevice() else {
             return errored(stderr, "no Metal device", 1)
         }

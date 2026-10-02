@@ -302,6 +302,16 @@ let package = Package(
             resources: [.copy("Fixtures")],
             swiftSettings: tinytitanLanguageStandard
         ),
+        // The library's own contract: what the facade promises an embedder,
+        // tested against the kit rather than through the server that consumes
+        // it. `tests/TinyTitanServer` covers the server's use of the kit; this
+        // target is where the facade's own guarantees live.
+        .testTarget(
+            name: "TinyTitanLibTests",
+            dependencies: ["TinyTitanLib"],
+            path: "tests/TinyTitanLib",
+            swiftSettings: tinytitanLanguageStandard
+        ),
     ],
     swiftLanguageModes: [.v6],
     // The C in this package is written to strict C99; declaring it here makes

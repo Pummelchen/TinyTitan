@@ -5,6 +5,39 @@ package enum ServerLog {
     /// lines never interleave.
     private static let writeLock = NSLock()
 
+    /// Where every line goes. `nil` is the default: stderr, which is what a
+    /// server wants and what every line did before this existed.
+    ///
+    /// Process-wide on purpose. The orchestrator logs statically from deep
+    /// inside the engine, and threading a logger through every call site would
+    /// put a parameter on functions that have nothing to do with logging.
+    /// `Engine.init` installs what `EngineConfiguration.logSink` asks for, so
+    /// the most recently created engine owns the destination — stated on the
+    /// configuration rather than implied, because a second engine silently
+    /// inheriting the first one's sink would be a surprise.
+    nonisolated(unsafe) private static var sink: (@Sendable (String) -> Void)?
+
+    /// Install the destination for this library's log lines; `nil` restores
+    /// stderr.
+    ///
+    /// The sink is called with the log lock held, so lines from concurrent
+    /// requests cannot interleave. It must therefore not log through this
+    /// library — that would deadlock, not recurse.
+    package static func useSink(_ target: (@Sendable (String) -> Void)?) {
+        writeLock.withLock { sink = target }
+    }
+
+    /// Hand one finished line (newline included) to the sink, or to stderr.
+    private static func emit(_ text: String) {
+        writeLock.withLock {
+            if let sink {
+                sink(text)
+            } else {
+                FileHandle.standardError.write(Data(text.utf8))
+            }
+        }
+    }
+
     package static func accepted(id: String, streaming: Bool) {
         write("request \(id) accepted streaming=\(streaming)")
     }
@@ -147,11 +180,11 @@ package enum ServerLog {
     /// parsed out of a *merged* server log by `benchmark/*.py`, so its text is
     /// a contract. What is not a contract is the stream: a library must not
     /// write to stdout, which belongs to the program that embedded it, so every
-    /// one of these goes to stderr byte-for-byte as it was printed before.
+    /// one of these goes to stderr byte-for-byte as it was printed before —
+    /// unless the embedder installed a sink, which is the one thing that may
+    /// redirect them.
     package static func diagnostic(_ message: String) {
-        writeLock.withLock {
-            FileHandle.standardError.write(Data((message + "\n").utf8))
-        }
+        emit(message + "\n")
     }
 
     private static func format(_ duration: Duration) -> String {
@@ -162,9 +195,6 @@ package enum ServerLog {
     }
 
     private static func write(_ message: String) {
-        let line = "[\(Date().formatted(.iso8601))] \(message)\n"
-        writeLock.withLock {
-            FileHandle.standardError.write(Data(line.utf8))
-        }
+        emit("[\(Date().formatted(.iso8601))] \(message)\n")
     }
 }

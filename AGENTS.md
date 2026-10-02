@@ -48,6 +48,17 @@ the loopback server like Zed or `curl` — not a front end this repository maint
 Keep it that way: no forking the harness, no GUI code in this tree, and nothing
 here may depend on a window existing.
 
+**One toolchain, and it is a hard rule: Xcode 27 / Swift 6.4.** Nothing else is
+supported — not an earlier 6.x, not a later one — because every guarantee in this
+tree is measured there and nowhere else: the manifest's tools version, the pin
+inside every gate (swiftlint 0.65.1, ruff 0.16.7, shellcheck 0.11.0), the
+formatter, which *is* the toolchain's own `swift-format`, and the compile checks
+`-warnings-as-errors` and the strict C warning set enforce. A different Swift is
+not "probably fine": it is untested, and calling it supported would move the
+promise to a place nobody looked. Scripts that must accept a version check for
+6.4 and say exactly what they support; a build from another toolchain is the
+builder's own risk, and its failure is not a bug this project owes an answer to.
+
 ## Layout and commands
 
 `sources/` holds one directory per SwiftPM target. `sources/TinyTitan/` is the
@@ -202,7 +213,8 @@ called supported, and how to re-issue install receipts after the checkout moves.
 
 ## Test rules
 
-Before a model run, require macOS 26+, Swift 6.4+, enough disk, acceptable
+Before a model run, require macOS 26+, the supported toolchain (Xcode 27 / Swift
+6.4), enough disk, acceptable
 `memory_pressure -Q`, a completed selected `.ssdai` installation, and no process
 from `pgrep -fl 'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm'`.
 If a check fails, inform the user and stop; do not terminate apps or delete or

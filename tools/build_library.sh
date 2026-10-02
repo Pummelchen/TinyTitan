@@ -216,8 +216,9 @@ GenerationSummary and TinyTitanError. See the wiki page "Library and Engine".
 This is the binary form for a consumer that cannot or will not build from
 source. Building the package as a SwiftPM dependency remains the supported
 route and needs none of these flags. The module is built by this release's
-toolchain (Xcode 27 / Swift 6.4) and is not module-stable across toolchains;
-that is the XCFramework stage's job, not this archive's.
+toolchain (Xcode 27 / Swift 6.4), which is the only supported one: it is not
+module-stable across toolchains and does not need to be, because no other
+toolchain is supported.
 
 No model weights are included: the library reads a .ssdai install and never
 downloads one.

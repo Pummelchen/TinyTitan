@@ -251,16 +251,17 @@ over — each of these is a real gap, and closing one is additive:
 | No `promptProcessed` event | `ServerInferenceEvent` has no prompt event to forward |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | `.unsupportedFormat` / `.integrityFailure` are declared but unreachable | `ModelError` is internal to the `TinyTitan` target, so those failures rethrow unclassified rather than being guessed from a string |
-| Diagnostics cannot be switched off | they now go to stderr through `ServerLog.diagnostic()` rather than stdout, but an embedder still cannot silence them |
 | One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
 | Validation rules are the server's | a `--messages-file` with more than four stop strings, or a `tool` role, is refused where the old CLI rendered it — the facade needs a request vocabulary that is not the OpenAI wire format |
 
 Closed since A1, for the record: the configuration knobs the CLI needed
 (`prefillChunkTokens`, `expertCacheSlots`, `ropeScaling`, `thinkingMode`,
 `reasoningEffort`, `readAhead`, `forceLogitsHead`), the model's own sampling
-defaults, presence penalty, timing on the summary, and a raw-completion entry
+defaults, presence penalty, timing on the summary, a raw-completion entry
 point — `Prompt.raw`, which drives the *same* orchestrator with the chat
-template skipped rather than a second decode loop.
+template skipped rather than a second decode loop — and a **log sink the
+embedder owns** (`EngineConfiguration.logSink`; `nil` keeps stderr, `{ _ in }`
+silences the library, and the CLI's `--quiet` uses it).
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 
@@ -336,11 +337,13 @@ from the archive. Three things that make it what it is rather than a bare `.a`:
   the consumer's executable. That is the §10 trap, and it is the reason the
   script fails closed when `default.metallib` is not in the staged bundle.
 
-What this does **not** yet give a consumer is module stability: a `.swiftmodule`
-from this toolchain imports in this toolchain. `-enable-library-evolution` and a
-`.swiftinterface` are the XCFramework stage's job (S2), and until then the binary
-form is for consumers building with Xcode 27 / Swift 6.4 — which is already the
-package's floor.
+What this does **not** offer, deliberately: module stability across toolchains.
+**Xcode 27 / Swift 6.4 is the only supported toolchain** (the owner's rule,
+2026-10-02), so a `.swiftmodule` that imports in that Swift is the whole
+requirement — `-enable-library-evolution` and a `.swiftinterface` would buy
+compatibility with toolchains this project does not support, and are not planned
+for that reason. S2's XCFramework remains an option as a *layout*, not as a fix
+for a promise that is not being made.
 
 Versioning: the library follows the release tag. API stability starts at the
 first documented release (call it 6.0 or a `1.0` library version — an open
@@ -412,9 +415,13 @@ the facade in P1.
   memory budget is therefore an app-level decision, which is why
   `EngineConfiguration` exposes the expert-cache budget rather than inventing its
   own.
-- **The toolchain floor.** macOS 26 and Swift 6.4 are today's floor; a consumer on
-  an older Xcode cannot even resolve the manifest. State it in the wiki page, and
-  keep it in step with the release notes.
+- **The toolchain rule is exact, not a floor.** Xcode 27 / Swift 6.4, and nothing
+  else, is the supported envelope (owner's rule, 2026-10-02; `AGENTS.md` states
+  it). macOS 26 plus that toolchain is what every gate, the formatter, the
+  pinned linters and the reported measurements belong to. A consumer on another
+  Swift is outside the promise entirely, which is also why the binary form needs
+  no module stability — and the wiki and release notes must say so in the same
+  words.
 - **Model licensing stays the user's.** The library reads installs; it must not
   ship, fetch or license weights, and the wiki page has to say so in one sentence.
 - **Drift between the app and the library.** If the CLI/server stop exercising a

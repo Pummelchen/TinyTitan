@@ -13,7 +13,7 @@ release notes are `docs/release-notes-vX.Y.md`.
 
 | Check | Command | Why |
 | --- | --- | --- |
-| macOS 26+, Swift 6.4+ | `sw_vers`, `swift --version` | The runtime's floor; the release notes state it |
+| macOS 26+, Xcode 27 / Swift 6.4 | `sw_vers`, `swift --version` | The runtime's floor and the only supported toolchain; the release notes state both |
 | Disk | `df -h .` | A clean scratch build plus the staged archive wants ~10 GB |
 | Memory | `memory_pressure -Q` | The golden baselines load real models |
 | **No model process** | `pgrep -fl 'TinyTitanServer\|TinyTitanCLI\|TinyTitanPackageTests\|swiftpm-testing-helper\|mlx_lm\|mlx-lm'` | The golden gate refuses to run beside one; see §5 |

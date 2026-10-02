@@ -56,9 +56,10 @@ tooling that ship beside them; the split is spelled out under
 
 **Prerequisites:** Apple Silicon (arm64, M1 or newer) and macOS 26 or later.
 The one-command install needs nothing else — no Xcode, Homebrew, git, Node or
-Python. Building from source additionally needs Swift 6.4+ (Xcode 27 or a
-matching toolchain). Model storage is the real cost: about 19.5 GB for a 35B
-4-bit install, about 162 GB for Qwen3.8-Flash-Next 4-bit.
+Python. Building from source additionally needs **Xcode 27 with Swift 6.4**, which
+is the only supported toolchain: nothing else is tested, and a build from another
+Swift is the builder's own risk. Model storage is the real cost: about 19.5 GB for
+a 35B 4-bit install, about 162 GB for Qwen3.8-Flash-Next 4-bit.
 
 **Nothing installed yet?** One command checks the Mac, downloads the published
 `arm64` engine, offers to download a model, and leaves a `tinytitan` command
@@ -121,7 +122,8 @@ cd TinyTitan
 swift build -c release
 ```
 
-`swift build -c release` needs Swift 6.4+ and an arm64 macOS 26+ machine. It
+`swift build -c release` needs **Xcode 27 / Swift 6.4** — the only supported
+toolchain — on an arm64 macOS 26+ machine. It
 builds every product; add `--product TinyTitanServer` to build only the server
 or `--product TinyTitanCLI` to build only the CLI.
 

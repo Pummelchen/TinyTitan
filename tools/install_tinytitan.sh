@@ -312,8 +312,15 @@ install_from_source() {
   elif (( $(printf '%s' "$swift_ver" | cut -d. -f1) < 6 )) \
     || { [[ "$(printf '%s' "$swift_ver" | cut -d. -f1)" == "6" ]] \
          && (( $(printf '%s' "$swift_ver" | cut -d. -f2) < 4 )); }; then
-    die "TinyTitan needs Swift 6.4 or later; this Mac has $swift_ver.
+    die "TinyTitan needs Swift 6.4 (Xcode 27), the only supported toolchain;
+     this Mac has $swift_ver.
      Update Xcode from the App Store (or set it with xcode-select), then re-run."
+  elif [[ "$swift_ver" != "6.4" ]]; then
+    # Supported is exactly Xcode 27 / Swift 6.4. A newer Swift may well build
+    # this tree, but nothing here is measured on it, so it is not supported and
+    # the user is told that before spending half an hour on a build.
+    warn "The supported toolchain is Xcode 27 / Swift 6.4; this Mac has Swift $swift_ver."
+    ask "Build anyway, knowing it is unsupported?" yes || exit 1
   else
     ok "Swift $swift_ver"
   fi
