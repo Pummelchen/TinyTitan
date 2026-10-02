@@ -246,7 +246,6 @@ over — each of these is a real gap, and closing one is additive:
 
 | Gap | Why |
 | --- | --- |
-| `EngineConfiguration` has no streaming mode or integrity policy | `ServerModelSession.load` derives both from the install |
 | `Engine(device:)` honours only the system default device | the loader builds its own `MetalContext`; a different device is refused with `.metalUnavailable` rather than silently ignored |
 | Reasoning text and tool calls are dropped | the event/summary types do not carry them, though the orchestrator does |
 | One generation per session is not enforced | a second `respond` waits on the slot pool; the `.busy` decision is P2 |
@@ -277,6 +276,14 @@ nothing to prefill — and `Session.facadeEvent` forwards it. The HTTP surfaces
 ignore it deliberately: their clients count prompt tokens from the usage block
 they already send, so OpenAI's and Anthropic's streaming shapes have nowhere for
 it to go.
+
+**Integrity** became a knob (`EngineConfiguration.integrityPolicy`, three cases:
+the loader's own rule, re-hash everything, or trust the receipt — strictly).
+**Streaming mode deliberately did not**: the runtime's `ExpertStreamingMode` has
+one case whose only parameter is the slot count, and `expertCacheSlots` and
+`expertCacheBudgetBytes` already choose it. Two names for one decision is a knob
+that lies about being a choice, so the plan's original row was half wrong and is
+recorded that way.
 
 ## 5. Concurrency and lifetime contract (must be written down and tested)
 

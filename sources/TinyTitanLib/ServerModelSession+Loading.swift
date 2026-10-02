@@ -27,6 +27,7 @@ extension ServerModelSession {
         ropeScalingMode: RuntimeRoPEScalingMode = .none,
         thinkingMode: ModelThinkingMode = .off,
         reasoningEffort: ModelReasoningEffort? = nil,
+        integrityPolicy requestedIntegrityPolicy: ModelIntegrityPolicy? = nil,
         expertCacheSlots requestedExpertCacheSlots: Int? = nil,
         expertCacheBudgetBytes: Int? = nil,
         rdadvisePolicy requestedRDAdvisePolicy: RDAdvicePolicyMode? = nil,
@@ -164,13 +165,20 @@ extension ServerModelSession {
             derivedSlots = RuntimeConfiguration.allowedExpertCacheSlots.first ?? 8
         }
         let loadSlots = requestedExpertCacheSlots ?? slotOverride ?? derivedSlots
+        // `nil` keeps the long-standing rule: an installer receipt means the
+        // payload's digests were pinned at install time, so the check is against
+        // the manifest and the path; without one, hash the payload. An explicit
+        // policy is the caller's and applies to the draft head too — it is a
+        // file the engine computes on, not a document.
+        let integrityPolicy =
+            requestedIntegrityPolicy ?? .resolved(directoryURL: modelDirectory)
         let model = try Model.load(
             directoryURL: modelDirectory,
             device: context.device,
             expecting: expectedArch,
             streamingMode: .pread(slotCount: loadSlots),
             expertCachePolicy: loadRuntime.modelExpertCachePolicy,
-            integrityPolicy: .resolved(directoryURL: modelDirectory))
+            integrityPolicy: integrityPolicy)
         let runtime = try RuntimeConfiguration(
             expertCacheSlots: loadSlots,
             expertCachePolicy: loadRuntime.expertCachePolicy,
@@ -245,7 +253,8 @@ extension ServerModelSession {
                 expecting: sidecarArch,
                 streamingMode: .pread(slotCount: StreamingMTPMemoryPlan.expertSlots),
                 expertCachePolicy: runtime.modelExpertCachePolicy,
-                integrityPolicy: .resolved(directoryURL: mtpModelDirectory))
+                integrityPolicy: requestedIntegrityPolicy
+                    ?? .resolved(directoryURL: mtpModelDirectory))
             let decoder = try StreamingMTPDecoder(
                 targetModel: model,
                 mtpSidecar: sidecar,

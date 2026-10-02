@@ -58,6 +58,14 @@ public struct EngineConfiguration: Sendable {
     /// a caller that needs the logits buffer (diagnostics, or matching a run
     /// made against it) sets this. Sampling always forces the logits head.
     public var forceLogitsHead: Bool
+    /// How much of the install to re-read before running it.
+    ///
+    /// There is no streaming-mode knob beside this one on purpose: the runtime's
+    /// `ExpertStreamingMode` has a single case whose only parameter is the slot
+    /// count, and `expertCacheSlots` and `expertCacheBudgetBytes` above are how
+    /// a caller chooses it. A second name for the same decision would be a knob
+    /// that lies about being a choice.
+    public var integrityPolicy: InstallIntegrity
     /// Where this library's diagnostics go.
     ///
     /// `nil` — the default — writes them to stderr, which is what the server
@@ -83,6 +91,7 @@ public struct EngineConfiguration: Sendable {
         reasoningEffort: ReasoningEffort? = nil,
         readAhead: ReadAheadAdvice? = nil,
         forceLogitsHead: Bool = true,
+        integrityPolicy: InstallIntegrity = .automatic,
         logSink: (@Sendable (String) -> Void)? = nil
     ) {
         self.contextWindow = contextWindow
@@ -96,7 +105,35 @@ public struct EngineConfiguration: Sendable {
         self.reasoningEffort = reasoningEffort
         self.readAhead = readAhead
         self.forceLogitsHead = forceLogitsHead
+        self.integrityPolicy = integrityPolicy
         self.logSink = logSink
+    }
+}
+
+/// How much of an install the engine re-reads before it runs it.
+///
+/// The trade is startup time against trust: a 125B install is a quarter of a
+/// terabyte, and hashing all of it is minutes, which is what the installer's
+/// receipt exists to avoid.
+public enum InstallIntegrity: Sendable, Equatable {
+    /// Today's rule, and the default: trust the installer's receipt when the
+    /// directory carries one — the check is then against the manifest and the
+    /// install's path — and hash the payload when it does not.
+    case automatic
+    /// Hash the payload regardless of any receipt. Slow on a large install, and
+    /// the point of the knob: a caller who does not trust the directory.
+    case verifyEveryFile
+    /// Trust the receipt's recorded digests. Fast, and strict: an install
+    /// without a valid receipt is refused rather than quietly re-hashed, which
+    /// would mask a moved directory or a tampered receipt and defeat the point.
+    case trustInstallerReceipt
+
+    var engineValue: ModelIntegrityPolicy? {
+        switch self {
+        case .automatic: nil  // the loader resolves it from the directory
+        case .verifyEveryFile: .fullSha256
+        case .trustInstallerReceipt: .sizeCheckTrustedReceipt
+        }
     }
 }
 
@@ -295,6 +332,7 @@ public actor Engine {
                 ropeScalingMode: configuration.ropeScaling.engineValue,
                 thinkingMode: configuration.thinkingMode.engineValue,
                 reasoningEffort: configuration.reasoningEffort?.engineValue,
+                integrityPolicy: configuration.integrityPolicy.engineValue,
                 expertCacheSlots: configuration.expertCacheSlots,
                 expertCacheBudgetBytes: configuration.expertCacheBudgetBytes,
                 rdadvisePolicy: configuration.readAhead?.engineValue,
