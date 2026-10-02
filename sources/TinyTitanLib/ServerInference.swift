@@ -41,6 +41,20 @@ func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
     // of prefill on a 10k prompt against ~2 s of a 512-token generation.
     // A short-prompt, long-generation workload would want 2,048 back.
     case .qwen38flash: return RuntimeConfiguration.qwenLongPrefillChunkTokens
+    // The dense Qwen 3.5 family wants the long chunk as well, and for a second
+    // reason: the ANE prefill sidecar is a fixed 4,096-token program, and
+    // `eligibleChunk` routes a chunk to it only when the configured chunk is
+    // exactly that size — so a family left on the 128 default can never reach
+    // the ANE at all, which is how the dense installs saw no ANE prefill
+    // despite shipping a default-on switch. Measured on the dense 2B: chunk size
+    // does not change the GPU path's output (byte-identical greedy text at 128
+    // and at 4,096) and prefill time is flat, so this is a scheduling choice
+    // that makes the ANE reachable, not a numerics change.
+    //
+    // The CLI's own switch did this before the library took the path over; when
+    // the switch moved here the case did not come with it, and dense Qwen 3.5
+    // quietly dropped to 128. That was a regression, not a preference.
+    case .qwen35Dense: return RuntimeConfiguration.qwenLongPrefillChunkTokens
     default: return fallback
     }
 }

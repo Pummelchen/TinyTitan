@@ -308,7 +308,7 @@ let package = Package(
         // target is where the facade's own guarantees live.
         .testTarget(
             name: "TinyTitanLibTests",
-            dependencies: ["TinyTitanLib"],
+            dependencies: ["TinyTitanLib", "TinyTitan"],
             path: "tests/TinyTitanLib",
             swiftSettings: tinytitanLanguageStandard
         ),
