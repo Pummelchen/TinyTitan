@@ -134,6 +134,15 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_dsh_isolation test_install_models_menu
+      - name: T6 reply-check labels and the gate scorer
+        # The reply-check measurement is only as good as its labels, and every
+        # label comes from a detector a hand review already corrected. These
+        # tests pin the traps that cost a wrong label (a negation, a
+        # possessive, a rumour, the weather's weekday) and the gate's own
+        # arithmetic. No model, no server, no dependencies.
+        run: |
+          cd benchmark
+          python3 -m unittest test_t6_prose_cases
       - name: Run serial tests
         # `swift test` implicitly performs its own DEBUG build, which also
         # produces the `.build/debug/TinyTitanRepack` binary that RepackCLITests
