@@ -125,10 +125,16 @@ class ConfessionTests(unittest.TestCase):
 
 class StateClaimTests(unittest.TestCase):
     def test_speculation_about_being_alive_is_not_found(self):
+        # The reply does assert "still missing" -- that is a claim, and the
+        # detector is right to report it. What must not appear is "found":
+        # "who knew if he was still alive?" is speculation, not a state change.
         claims = cases.state_detector(
             "tomas", "found alive|was found|has been found", "missing|vanished", "found", "missing"
         )
-        self.assertEqual([], claims("Tomas was still missing; who knew if he was still alive?"))
+        values = [
+            value for value, _ in claims("Tomas was still missing; who knew if he was still alive?")
+        ]
+        self.assertEqual(values, ["missing"])
 
     def test_an_inn_that_stood_firm_is_standing(self):
         claims = cases.state_detector(
