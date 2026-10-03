@@ -378,8 +378,14 @@ if [ -n "$NOTES" ]; then
   # A wrong digest is worse than none: it tells a careful user their download is
   # corrupt, which is how 3.7 shipped for a few minutes. Both are enforced.
   RENDERED_NOTES="$STAGE_ROOT/notes-rendered.md"
-  sed -e "s/SHA256_PENDING/$SHA/g" -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" \
-    -e "s/LIBRARY_SHA256_PENDING/$LIB_SHA/g" -e "s/LIBRARY_BYTES_PENDING/$LIB_BYTES/g" \
+  # Order matters. `SHA256_PENDING` is a *substring* of `LIBRARY_SHA256_PENDING`,
+  # so substituting the engine's token first rewrites the library's name into
+  # `LIBRARY_<engine digest>` — the library's own rule then matches nothing and
+  # the notes publish a digest that belongs to the other archive. The guard below
+  # catches it (it did, on the first release that carried these placeholders),
+  # but the fix is not to write it that way: specific token first.
+  sed -e "s/LIBRARY_SHA256_PENDING/$LIB_SHA/g" -e "s/SHA256_PENDING/$SHA/g" \
+    -e "s/LIBRARY_BYTES_PENDING/$LIB_BYTES/g" -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" \
     "$NOTES" > "$RENDERED_NOTES" \
     || die "failed to render notes"
   grep -q 'SHA256_PENDING' "$NOTES" && echo "  filled SHA256_PENDING with $SHA"
