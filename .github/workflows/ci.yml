@@ -116,6 +116,9 @@ jobs:
         # synthetic one served from 127.0.0.1 (real curl downloads, injected
         # transport failures, a killed process, a table copied across a disk
         # image) and requires every recovery to produce the clean-run snapshot.
+        # The same venv runs `tools/prepare_agentworld.py`'s unit suite, which
+        # covers the Qwen3.5-MoE per-expert fusion at both widths from a
+        # synthetic in-memory shard (issue #19).
         # A venv because the runner does not carry the converter's three
         # dependencies. No real shard is ever fetched.
         run: |
@@ -123,7 +126,8 @@ jobs:
           /tmp/tt-converter/bin/pip install --quiet --disable-pip-version-check \
             -r benchmark/requirements.txt
           cd benchmark
-          /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e
+          /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
+            test_prepare_agentworld
       - name: Installer gates (private DSH isolation, model-menu answers)
         # The installer and `tools/dsh_local.sh` promise a factory-new Mac stays
         # untouched: one private root, no PATH or shell-rc edit, and npm, pnpm and

@@ -334,12 +334,19 @@ class FusedExperts:
 
     def __init__(self) -> None:
         self._layers: dict[tuple[int, str], dict] = {}
-        self._seen: set[str] = set()
+        # Keyed by width as well as name: `convert_shard` adds one source
+        # tensor once per requested width, so a name-only key makes the second
+        # width look like a duplicate. Every `--bits 4 8` conversion of a
+        # per-expert checkpoint (KAT-Coder-V2.5-Dev) died on the first routed
+        # expert of the first shard that carried one. The width has to be part
+        # of the key because the two widths are separate output stacks, which
+        # is what `_layers` is already keyed by.
+        self._seen: set[tuple[int, str]] = set()
 
     def add(self, name: str, value: np.ndarray, width: int, writer: "OutputWriter") -> None:
-        if name in self._seen:
+        if (width, name) in self._seen:
             raise ValueError(f"duplicate source tensor {name}")
-        self._seen.add(name)
+        self._seen.add((width, name))
         # The expert index comes from the *source* name: `routed_slices`
         # retargets a per-expert tensor to its fused name, which no longer
         # carries one.
