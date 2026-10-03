@@ -179,10 +179,17 @@ public actor Session {
     /// One generation at a time; the engine serialises across sessions.
     public func respond(
         to messages: [ChatMessage],
+        tools: [ToolDefinition] = [],                // what the model may call
         options: GenerationOptions = .init(),
         onEvent: @Sendable (GenerationEvent) -> Void
     ) async throws -> GenerationSummary
     public func cancel() async
+}
+
+public struct ToolDefinition: Sendable, Equatable {
+    public let name: String
+    public let description: String
+    public let parametersJSON: String                 // JSON Schema, as text
 }
 
 public struct GenerationOptions: Sendable {
@@ -303,10 +310,17 @@ the whole engine path runs on an explicitly passed device.
 the model's JSON text rather than the runtime's JSON value type — nothing about
 the engine's representation becomes part of the promise. Reasoning is verified
 end to end: a probe on `models/qwen3.5_4B_4Bit` with `thinkingMode: .on` produced
-128 reasoning events (389 characters) matching the summary exactly. Tool calls
-cannot be produced end to end yet, and that is not a mapping gap: the facade
-offers the model no tools, because a request vocabulary with a `tools` field is
-work nobody has asked for yet. The case is carried so that day is additive.
+128 reasoning events (389 characters) matching the summary exactly.
+
+**Tools are offerable now**, which is what made `.toolCall` reachable. `respond`
+takes `tools: [ToolDefinition]`, the schema travelling as JSON text for the same
+reason a call's arguments do, and `ChatMessage` gained `toolCalls` and
+`toolCallID` so a caller can replay the assistant turn that asked and feed the
+result back — the validator refuses a result that names no open call, so the pair
+has to be expressible. Verified as a whole loop against `models/qwen3.5_4B_4Bit`:
+offered `get_weather`, the model called it (`get_weather({"city":"Paris"})`,
+`stop=toolCalls`), and the replayed turn with `18 degrees and sunny` produced
+"The weather in Paris right now is 18 degrees and sunny."
 
 **The wire's caps belong to the wire.** The facade reaches the orchestrator
 through an `OpenAIChatRequest` and the server's validator, so a local caller used

@@ -14,6 +14,7 @@
 //     so they are dropped. Closing that is additive.
 //   * Request validation failures are rethrown as the validator's own error;
 //     `TinyTitanError` has no case for a malformed request.
+import Foundation
 import TinyTitan
 
 public actor Session {
@@ -44,6 +45,7 @@ public actor Session {
     /// orchestrator's slot pool.
     public func respond(
         to messages: [ChatMessage],
+        tools: [ToolDefinition] = [],
         options: GenerationOptions = .init(),
         onEvent: @escaping @Sendable (GenerationEvent) -> Void
     ) async throws -> GenerationSummary {
@@ -52,7 +54,8 @@ public actor Session {
         // lets `cancel()` in. The orchestrator already stops on task
         // cancellation, the same way the server stops a disconnected client.
         try await runOneShot {
-            try await self.generate(messages: messages, options: options, onEvent: onEvent)
+            try await self.generate(
+                messages: messages, tools: tools, options: options, onEvent: onEvent)
         }
     }
 
@@ -103,12 +106,13 @@ public actor Session {
 
     private func generate(
         messages: [ChatMessage],
+        tools: [ToolDefinition],
         options: GenerationOptions,
         onEvent: @escaping @Sendable (GenerationEvent) -> Void
     ) async throws -> GenerationSummary {
         guard let modelSession else { throw TinyTitanError.engineShutDown }
         let validated = try validate(
-            messages: messages, options: options, modelSession: modelSession)
+            messages: messages, tools: tools, options: options, modelSession: modelSession)
         let completion: ServerCompletion
         do {
             completion = try await modelSession.generate(validated) { event in
@@ -235,17 +239,19 @@ public actor Session {
 
     private func validate(
         messages: [ChatMessage],
+        tools: [ToolDefinition],
         options: GenerationOptions,
         modelSession: ServerModelSession
     ) throws -> ValidatedChatRequest {
         let request = OpenAIChatRequest(
             model: descriptor.id,
-            messages: wireMessages(messages),
+            messages: Self.wireMessages(system: system, messages: messages),
             temperature: Float(options.temperature),
             topP: Float(options.topP),
             maxTokens: options.maxTokens,
             stop: options.stop.isEmpty ? nil : .many(options.stop),
             seed: options.seed,
+            tools: try Self.wireTools(tools),
             // The validator requires 1...256 and fills a missing k from the
             // model's row, so "off" is passed as missing and then restored on
             // the validated config below.
@@ -272,21 +278,68 @@ public actor Session {
         return validated
     }
 
-    private func wireMessages(_ messages: [ChatMessage]) -> [OpenAIChatMessage] {
+    /// The wire's view of a conversation: the session's system prompt first,
+    /// then the caller's turns with their tool calls and results intact.
+    ///
+    /// `package` and pure so the mapping can be tested without a model; it is
+    /// the only place a `ChatMessage` becomes something the validator reads.
+    package static func wireMessages(
+        system: String?,
+        messages: [ChatMessage]
+    ) -> [OpenAIChatMessage] {
         var result: [OpenAIChatMessage] = []
         if let system, !system.isEmpty {
-            result.append(wireMessage(role: "system", content: system))
+            result.append(
+                OpenAIChatMessage(
+                    role: "system", content: .text(system),
+                    toolCalls: nil, toolCallID: nil, name: nil))
         }
         result.append(
-            contentsOf: messages.map {
-                wireMessage(role: $0.role.openAIRole, content: $0.content)
+            contentsOf: messages.map { message in
+                OpenAIChatMessage(
+                    role: message.role.openAIRole,
+                    content: .text(message.content),
+                    toolCalls: message.toolCalls.isEmpty
+                        ? nil
+                        : message.toolCalls.map(Self.wireToolCall),
+                    toolCallID: message.toolCallID,
+                    name: nil)
             })
         return result
     }
 
-    private func wireMessage(role: String, content: String) -> OpenAIChatMessage {
-        OpenAIChatMessage(
-            role: role, content: .text(content),
-            toolCalls: nil, toolCallID: nil, name: nil)
+    /// The wire's view of a call the model made: the arguments stay the model's
+    /// own JSON text, which is how this type carries them.
+    private static func wireToolCall(_ call: ToolCall) -> OpenAIToolCall {
+        OpenAIToolCall(
+            id: call.id, type: "function",
+            function: OpenAIFunctionCall(name: call.name, arguments: call.argumentsJSON))
+    }
+
+    /// The wire's view of the tools the caller offered, parsing each schema out
+    /// of the text the facade carries.
+    ///
+    /// A schema that is not JSON at all is the caller's mistake and is reported
+    /// as one; everything else about a tool — the name's shape, that the schema
+    /// is an object, that its keys and numbers can be rendered — is the
+    /// validator's, which is where the engine's own rules already live.
+    /// `package` and pure for the same reason as `wireMessages`: the schema
+    /// parse is the part a caller can get wrong, so it is worth a test.
+    package static func wireTools(_ tools: [ToolDefinition]) throws -> [OpenAITool]? {
+        guard !tools.isEmpty else { return nil }
+        return try tools.map { tool in
+            guard let data = tool.parametersJSON.data(using: .utf8),
+                let parameters = try? JSONDecoder().decode(JSONValue.self, from: data)
+            else {
+                throw TinyTitanError.invalidToolDefinition(
+                    tool: tool.name, detail: "parameters are not JSON")
+            }
+            return OpenAITool(
+                type: "function",
+                function: OpenAIFunctionDefinition(
+                    name: tool.name,
+                    description: tool.description.isEmpty ? nil : tool.description,
+                    parameters: parameters))
+        }
     }
 }

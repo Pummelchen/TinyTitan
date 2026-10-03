@@ -415,6 +415,10 @@ let summary = try await session.respond(
 }
 ```
 
+Tools are part of the same loop: pass `tools:` to `respond` with each schema as
+JSON text, read the model's `toolCall` events, and feed the result back as a
+`tool` message that names the call it answers.
+
 `examples/embedded` is a real consumer package — it builds against the released
 tag and streams tokens — and `tools/embedded-dependency-check.sh` builds and runs
 it, so the dependency cannot rot silently. The wiki's

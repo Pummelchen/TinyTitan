@@ -43,10 +43,45 @@ public struct ChatMessage: Sendable, Equatable {
 
     public var role: Role
     public var content: String
+    /// The calls an assistant turn made, in order.
+    ///
+    /// A caller feeding a tool loop back in has to replay the assistant turn
+    /// that asked for the tool, because a result is matched to the call it
+    /// answers — the template renders the pair, and the validator refuses a
+    /// result that names no open call.
+    public var toolCalls: [ToolCall]
+    /// For a `tool` message: the id of the call this is the result of.
+    public var toolCallID: String?
 
-    public init(role: Role, content: String) {
+    public init(
+        role: Role,
+        content: String,
+        toolCalls: [ToolCall] = [],
+        toolCallID: String? = nil
+    ) {
         self.role = role
         self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallID = toolCallID
+    }
+}
+
+/// A tool the model may ask to call.
+///
+/// The parameters are JSON Schema **as text**, for the same reason a `ToolCall`'s
+/// arguments are: the engine parses them into a value type of its own, and that
+/// representation is not part of the facade's promise. A caller that prefers to
+/// build the schema in Swift spells it as a string literal or serializes its own
+/// type into one.
+public struct ToolDefinition: Sendable, Equatable {
+    public let name: String
+    public let description: String
+    public let parametersJSON: String
+
+    public init(name: String, description: String = "", parametersJSON: String) {
+        self.name = name
+        self.description = description
+        self.parametersJSON = parametersJSON
     }
 }
 

@@ -141,8 +141,8 @@ struct LibraryContractTests {
     }
 }
 
-/// The install these tests run against, or `nil` when the suite should skip.
-private func contractModel() -> URL? {
+/// The install the model-gated suites run against, or `nil` when they skip.
+func contractModel() -> URL? {
     guard
         let path = ProcessInfo.processInfo.environment["TINYTITAN_LIBRARY_CONTRACT_MODEL"],
         !path.isEmpty

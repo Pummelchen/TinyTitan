@@ -25,6 +25,10 @@ public enum TinyTitanError: Error, Sendable {
     /// The install's bytes are not what its manifest and receipt record.
     /// `path` is what the loader was reading when it found out.
     case integrityFailure(path: String, detail: String)
+    /// A tool the caller offered is not one the engine can render: a name that
+    /// is not `[A-Za-z0-9_-]{1,64}`, parameters that are not an object schema,
+    /// or parameters that are not JSON at all.
+    case invalidToolDefinition(tool: String, detail: String)
     /// The prompt plus the requested completion do not fit the context window.
     case contextWindowExceeded(prompt: Int, window: Int)
     /// No usable Metal device: none on the machine, or the caller's device
@@ -58,6 +62,8 @@ extension TinyTitanError: CustomStringConvertible {
             return "integrity failure for \(path): \(detail)"
         case .contextWindowExceeded(let prompt, let window):
             return "context window exceeded: prompt \(prompt) tokens, window \(window)"
+        case .invalidToolDefinition(let tool, let detail):
+            return "invalid tool \"\(tool)\": \(detail)"
         case .metalUnavailable(let reason):
             return "no usable Metal device: \(reason)"
         case .cancelled:
