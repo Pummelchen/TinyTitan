@@ -375,8 +375,15 @@ Wired:
 
 Not wired:
 
-- **T6 reply check** — the 4B catches 0 of 3 contradicting replies; a 9B, or the
-  served model, is what decides it. The served model is measured below.
+- **T6 reply check** — closed 2026-10-03: measured and not worth wiring. The 4B
+  stays one-sided (1 of 10 contradictions caught on real replies), and the
+  served 35B — 100% on the eight authored cases above — falls to **66.7%
+  precision and 38.5% recall** on 417 real recorded replies against a
+  pre-registered gate of 95% and 50%, so a note raised by it would be wrong
+  roughly one time in three. `docs/t6-reply-check-offline.md` is the
+  measurement; the failure is attribution inside multi-character prose, so the
+  reopening experiment is a resolved, quoted claim rather than free text, on
+  the same case set.
 
 ## Asking the served model instead of the 4B (2026-09-19)
 
@@ -442,3 +449,9 @@ which is why the worlds carry a test rather than a comment.
 T2/T5; the served model is the candidate for T6, which the 4B cannot do and a 9B
 or the 35B does perfectly. Moving a task to the served model is a config choice
 the port does not yet express, and this measurement comes first.
+
+That measurement ran on 2026-10-03 and **T6 is closed**: on 417 real recorded
+replies the served 35B scores 66.7% precision and 38.5% recall, so the authored
+100% did not survive real prose and the task is not wired
+(`docs/t6-reply-check-offline.md`). The 4B keeps T2/T5; nothing moves to the
+served model for now.

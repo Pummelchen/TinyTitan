@@ -1,5 +1,10 @@
 # T6 (reply check) on real replies — offline measurement
 
+**Status: closed 2026-10-03.** Measured, the pre-registered gate failed
+(66.7% precision, 38.5% recall), and T6 is not wired — see the verdict at the
+end. The document is kept whole as the record of the gate as it was fixed
+before the run.
+
 T6 is the one side-engine task the 4B cannot do: given one stored fact and one
 assistant reply, does the reply contradict the fact? It was measured on eight
 authored cases (`docs/side-engine-tasks.md`): 4B 62% (0/3 contradicting replies
