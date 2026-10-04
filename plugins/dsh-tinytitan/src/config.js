@@ -212,8 +212,10 @@ function resolveHandoffHops(value) {
  * The prompt-token budget that starts a handoff, or `null` to derive it.
  *
  * Only read when `handoff` is on. Unset means auto: `handoffWindowRatio` of the
- * routed model's declared context window, so a 256K route moves on at 131,072
- * and a 1M route at 524,288. An explicit positive integer pins one number.
+ * routed model's declared context window, held at least the reserve above the
+ * window's end — so a 256K route moves on at 131,072 (the reserve binds), a
+ * 1,000,000-token route at 600,000, and a 1,048,576-token one at 629,145. An
+ * explicit positive integer pins one number.
  * `0` is refused on purpose: a zero budget hands off at the first turn, which is
  * how an unbounded chain was found once already.
  */
@@ -230,8 +232,10 @@ function resolveHandoffAtTokens(value) {
  * The fraction of the routed model's context window the auto budget uses.
  *
  * Only read when `handoff` is on and `handoffAtTokens` is unset. It must stay
- * below the compaction trigger (~0.62 of the window with this plugin's preset),
- * or compaction continues the session in place instead.
+ * below the compaction trigger, or compaction continues the session in place
+ * instead — and that trigger is a different fraction per shape, ~0.625 of a
+ * 262,144-token window with this plugin's preset but 0.8 of a 1M one, so the
+ * ratio clears the narrowest shape or it clears nothing.
  */
 function resolveHandoffWindowRatio(value) {
   if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_WINDOW_RATIO;

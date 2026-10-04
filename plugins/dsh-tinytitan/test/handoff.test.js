@@ -23,6 +23,7 @@ import {
   DEFAULT_HANDOFF_AT_TOKENS,
   DEFAULT_HANDOFF_HOPS,
   DEFAULT_HANDOFF_MAX_CHILDREN,
+  DEFAULT_HANDOFF_RESERVE_TOKENS,
   DEFAULT_HANDOFF_WINDOW_RATIO,
   HANDOFF_PROVIDER,
   handoffPrompt,
@@ -552,30 +553,51 @@ test("disposal releases a child that is still working", async () => {
 });
 
 test("the budget follows the routed model's context window", () => {
-  // The two shapes this project declares: a 256K route and a 1M route.
+  // The shapes this project declares and serves: a 256K route, a 1M route with
+  // a round million, and the binary 1M. The reserve binds on the narrow one and
+  // the ratio on the wide ones, so both bounds are visible here.
   assert.equal(budgetForWindow({ window: 262144, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 131072);
-  assert.equal(budgetForWindow({ window: 1048576, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 524288);
-  assert.equal(budgetForWindow({ window: 100000, ratio: 0.75 }), 75000);
-  // Both stay below the harness's compaction trigger for the shipped preset.
-  assert.ok(131072 < 163840, "256K: below the ~62% compaction trigger");
-  assert.ok(524288 < 838860, "1M: below the ~80% compaction trigger");
-  // An unknown window must not become a handoff at the first turn.
-  for (const window of [undefined, null, 0, -5, Number.NaN, "262144"]) {
-    assert.equal(budgetForWindow({ window, ratio: 0.5 }), DEFAULT_HANDOFF_AT_TOKENS);
+  assert.equal(budgetForWindow({ window: 1000000, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 600000);
+  assert.equal(budgetForWindow({ window: 1048576, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 629145);
+  // The ratio alone, on a window wide enough that the reserve cannot bind.
+  assert.equal(budgetForWindow({ window: 2000000, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 1200000);
+  // Every budget leaves a full output turn below the compaction trigger the
+  // shipped preset produces (32,768 maxTokens, 65,536 headroom, ratio 0.8).
+  for (const [window, trigger] of [
+    [262144, 163840],
+    [1000000, 800000],
+    [1048576, 838860],
+  ]) {
+    const budget = budgetForWindow({ window, ratio: DEFAULT_HANDOFF_WINDOW_RATIO });
+    assert.ok(budget + 32768 <= trigger, `${window}: one output turn before compaction`);
   }
-  assert.equal(budgetForWindow({ window: 10, ratio: 0.5 }), 5, "never rounds to zero");
+  // An unknown window must not become a handoff at the first turn, and neither
+  // must one too small to hold the reserve.
+  for (const window of [undefined, null, 0, -5, Number.NaN, "262144", 10]) {
+    assert.equal(
+      budgetForWindow({ window, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }),
+      DEFAULT_HANDOFF_AT_TOKENS,
+    );
+  }
+  assert.equal(
+    budgetForWindow({
+      window: DEFAULT_HANDOFF_RESERVE_TOKENS - 1,
+      ratio: DEFAULT_HANDOFF_WINDOW_RATIO,
+    }),
+    DEFAULT_HANDOFF_AT_TOKENS,
+  );
 });
 
-test("an auto budget fires at half the window the adapter reports", async () => {
+test("an auto budget fires at the reserved value on a 256K window", async () => {
   const { ctx, starts, lines } = installed({ window: 262144 }, { handoffAtTokens: undefined });
   // The first check opens the route and runs before the adapter answers, so it
   // uses the fallback; the answer lands before the next turn.
   await step(ctx, "session-1", { inputTokens: 1 });
   await tick();
   await step(ctx, "session-1", { inputTokens: 131071 });
-  assert.equal(starts.length, 0, "one below half the window");
+  assert.equal(starts.length, 0, "one below the budget");
   await step(ctx, "session-1", { inputTokens: 131072 });
-  assert.equal(starts.length, 1, "half the window hands off");
+  assert.equal(starts.length, 1, "the budget hands off");
   assert.ok(
     lines.some((line) =>
       line.includes("handoff budget for tinytitan/qwen3.5-4b_4-Bit is 131072 tokens"),
@@ -583,14 +605,19 @@ test("an auto budget fires at half the window the adapter reports", async () => 
   );
 });
 
-test("a 1M window gets a 1M budget", async () => {
-  const { ctx, starts } = installed({ window: 1048576 }, { handoffAtTokens: undefined });
-  await step(ctx, "session-1", { inputTokens: 1 });
-  await tick();
-  await step(ctx, "session-1", { inputTokens: 524287 });
-  assert.equal(starts.length, 0);
-  await step(ctx, "session-1", { inputTokens: 524288 });
-  assert.equal(starts.length, 1);
+test("a 1M window gets the ratio's budget", async () => {
+  for (const [window, budget] of [
+    [1000000, 600000],
+    [1048576, 629145],
+  ]) {
+    const { ctx, starts } = installed({ window }, { handoffAtTokens: undefined });
+    await step(ctx, "session-1", { inputTokens: 1 });
+    await tick();
+    await step(ctx, "session-1", { inputTokens: budget - 1 });
+    assert.equal(starts.length, 0, `${window}: one below the budget`);
+    await step(ctx, "session-1", { inputTokens: budget });
+    assert.equal(starts.length, 1, `${window}: the budget hands off`);
+  }
 });
 
 test("an explicit budget wins over the window, and a missing one falls back", async () => {

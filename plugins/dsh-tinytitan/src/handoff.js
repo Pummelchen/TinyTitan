@@ -15,11 +15,13 @@
  * So the trigger is a budget, judged when a turn opens, against the prompt
  * tokens the previous step reported. The objective moves on before the window
  * fills, and a child that reaches the same budget moves it again. The budget
- * follows the route: with `handoffAtTokens` unset it is `handoffWindowRatio`
- * (half) of the context window the routed model declares — 131,072 on a 256K
- * route, 524,288 on 1M — because "still has room" is a fraction of the route
- * rather than a constant. An explicit `handoffAtTokens` pins one number, and a
- * route whose window cannot be resolved falls back to 120,000.
+ * follows the route: with `handoffAtTokens` unset it is `handoffWindowRatio` of
+ * the context window the routed model declares, but never within
+ * `DEFAULT_HANDOFF_RESERVE_TOKENS` of the window's end — 131,072 on a 256K
+ * route (the reserve binds), 600,000 on a 1,000,000-token route and 629,145 on a
+ * 1,048,576-token one (the ratio binds) — because "still has room" is a fraction
+ * of the route rather than a constant. An explicit `handoffAtTokens` pins one
+ * number, and a route whose window cannot be resolved falls back to 120,000.
  *
  * The budget is the normal path; the wall itself is the fallback. A single turn
  * can jump past the window (a huge tool result) and end on `max-tokens`, and the
@@ -117,36 +119,66 @@ export const DEFAULT_HANDOFF_AT_TOKENS = 120000;
 /**
  * The fraction of the routed model's context window that starts a handoff.
  *
- * The budget has to sit below the harness's compaction trigger (~62% of a
- * 262,144-token window with this plugin's preset) or compaction continues the
- * session in place and the handoff never fires. Half the window keeps a wide
- * margin on both shapes this project uses:
+ * The budget has to stay below the harness's compaction trigger, or compaction
+ * continues the session in place and the handoff never fires. That trigger is
+ * `min(window x thresholdRatio, window - maxTokens - headroomTokens)`, and it is
+ * *not* the same fraction on every shape: with this plugin's preset (32,768
+ * output, 65,536 headroom, the harness's 0.8 ratio) a 262,144-token window
+ * compacts at ~0.625 of it, while a 1M window compacts at 0.8. A ratio that
+ * clears the narrowest shape therefore clears them all, and 0.6 is the highest
+ * round one that does.
+ *
+ * It is also what a live 1M route was pinned to after measuring its sessions at
+ * ~400,000 prompt tokens with compaction at ~800,000: `0.6 x 1,000,000` is
+ * exactly that pin's 600,000. The reserve below is the second bound, and it is
+ * the one that binds on the 256K shape.
  *
  * | declared window | auto budget | compaction trigger |
  * | --------------- | ----------- | ------------------ |
  * | 262,144 (256K)  | 131,072     | ~163,840           |
- * | 1,048,576 (1M)  | 524,288     | ~838,860           |
- *
- * A window-aware default beats one number because the handoff only helps while
- * the session still has room to finish the turn that is already in flight, and
- * "room" is a fraction of the route, not a constant.
+ * | 1,000,000       | 600,000     | ~800,000           |
+ * | 1,048,576 (1M)  | 629,145     | ~838,860           |
  */
-export const DEFAULT_HANDOFF_WINDOW_RATIO = 0.5;
+export const DEFAULT_HANDOFF_WINDOW_RATIO = 0.6;
+
+/**
+ * The room a hop must leave at the bottom of the window, in prompt tokens.
+ *
+ * {@link budgetForWindow} never spends this, so the compaction trigger always
+ * has at least one full output turn in hand: a step whose prompt is below the
+ * budget can still grow past the trigger before the next turn opens, and the
+ * hop is only judged at that opening. The number is the preset's own
+ * arithmetic — `2 x maxTokens (32,768) + headroom (65,536)` — which is exactly
+ * what the 256K shape leaves between its 131,072 budget and its ~163,840
+ * trigger. A window smaller than the reserve cannot host a safe hop at all; it
+ * gets {@link DEFAULT_HANDOFF_AT_TOKENS}, which never fires on it.
+ */
+export const DEFAULT_HANDOFF_RESERVE_TOKENS = 131072;
 
 /**
  * The budget one context window implies.
  *
- * Pure so the arithmetic can be pinned without a harness. An unknown or
- * nonsensical window falls back to {@link DEFAULT_HANDOFF_AT_TOKENS} rather than
+ * Pure so the arithmetic can be pinned without a harness. The budget is the
+ * smaller of `ratio` of the window and the window minus
+ * {@link DEFAULT_HANDOFF_RESERVE_TOKENS}: the ratio keeps the parent working
+ * while it still has room, and the reserve keeps the hop from being outrun by
+ * one long step. An unknown or nonsensical window, and a window too small to
+ * hold the reserve, fall back to {@link DEFAULT_HANDOFF_AT_TOKENS} rather than
  * handing off at the first turn.
  *
- * @param options - `window` in tokens (may be absent), `ratio`, `fallback`.
+ * @param options - `window` in tokens (may be absent), `ratio`, `reserve`, `fallback`.
  * @returns a positive integer token budget.
  */
-export function budgetForWindow({ window, ratio, fallback = DEFAULT_HANDOFF_AT_TOKENS } = {}) {
+export function budgetForWindow({
+  window,
+  ratio,
+  reserve = DEFAULT_HANDOFF_RESERVE_TOKENS,
+  fallback = DEFAULT_HANDOFF_AT_TOKENS,
+} = {}) {
   if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) return fallback;
-  const scaled = Math.floor(window * ratio);
-  return Math.max(1, scaled);
+  const room = Math.floor(window - reserve);
+  if (room < 1) return fallback;
+  return Math.min(Math.floor(window * ratio), room);
 }
 
 /**
@@ -344,7 +376,7 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
         announced.add(route.key);
         log(
           `dsh-tinytitan: handoff budget for ${route.key} is ${budget} tokens ` +
-            `(${windowRatio} of its ${window}-token window)`,
+            `(${windowRatio} of its ${window}-token window, ${DEFAULT_HANDOFF_RESERVE_TOKENS} held back)`,
         );
       }
       return budget;
