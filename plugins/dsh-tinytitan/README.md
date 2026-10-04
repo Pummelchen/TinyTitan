@@ -127,6 +127,8 @@ fallbacks.
 | `writeCompactionPreset`    | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
 | `setDefaultWhenUnset`      | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
 | `compactionHeadroomTokens` | unset (the harness's `65536`)                                           | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
+| `autoGoal`                 | `false`                                                                 | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                              |
+| `autoGoalRounds`           | `12`                                                                    | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                         |
 | `repoRoot`                 | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
 | `dshHome`                  | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
@@ -172,6 +174,42 @@ route is rebuilt once the folder goes quiet (`watchDebounceMs`). Deletions count
 too: a removed model stops being offered. The watcher is non-persistent and
 unref'd — it never keeps the process alive — and a platform where watching fails
 falls back to the boot-time refresh with a log line.
+
+### Keep going without `/goal`
+
+A goal is what makes the harness continue by itself: `@deepseek-ai/dsh-goal`
+keeps one objective per session, `@deepseek-ai/dsh-goal-round-driver` queues the
+next round while the agent is idle, and `@deepseek-ai/dsh-tool-goal` lets the
+model complete or block it. Out of the box a person starts one by typing
+`/goal …`; the model may also decide a request is goal-shaped.
+
+With `autoGoal: true`, an ordinary manual prompt starts one too. The message
+becomes the objective and the goal is created and armed exactly as `/goal` would
+create it; everything after that is the harness's own machinery — no round is
+scheduled here and no completion is judged here, so the round cap, the blocking
+policy, the authority rules, and the arming rules after a session resume or fork
+all still apply. A prompt that arrives while an unfinished goal exists is left
+alone, so a follow-up steers the work already under way, and after a goal
+completes the next prompt starts a fresh one. Subagent sessions are ignored: only
+the session a person is driving turns a prompt into an objective.
+
+```yaml
+- id: dsh-tinytitan
+  config:
+    autoGoal: true
+    autoGoalRounds: 24 # default 12
+```
+
+Two things to know before switching it on:
+
+- **Every** manual prompt becomes a goal, including a question you meant as a
+  chat turn. The model is told to continue until it judges the goal complete, so
+  it answers and then completes it; a model that instead keeps working spends
+  rounds from the cap above.
+- Completion needs the goal tool mounted. The shipped `standard` composition
+  mounts `command-goal` and `tool-goal`, and the `tinytitan` preset inherits that
+  list, so this works as-is here. A harness composed without goals leaves the
+  switch a no-op with one log line, and boot is unchanged either way.
 
 ## What it does not do
 

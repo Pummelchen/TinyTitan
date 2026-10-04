@@ -30,6 +30,7 @@ import { registerRoute } from "./route.js";
 import { ensureDefaultPreset, registerTinytitanPreset } from "./preset.js";
 import { watchModels } from "./models-watch.js";
 import { dshVersion, supportDecision } from "./support.js";
+import { installAutoGoal } from "./keep-going.js";
 
 /** Plugin name, as the harness registry shows it. */
 export const name = "dsh-tinytitan";
@@ -76,6 +77,13 @@ export {
   siblingPackage,
   supportDecision,
 } from "./support.js";
+export {
+  DEFAULT_AUTO_GOAL_ROUNDS,
+  GOALS_SERVICE,
+  installAutoGoal,
+  isDirectHuman,
+  messageText,
+} from "./keep-going.js";
 
 /**
  * The one route-refresh path, shared by boot and the `models/` watcher.
@@ -235,6 +243,14 @@ export function apply(ctx, config = {}, deps = {}) {
         `dsh-tinytitan: preset registration threw: ${error instanceof Error ? error.message : error}`,
       );
     }
+  }
+  // The keep-going switch: a manual prompt becomes a goal so the harness's own
+  // round driver continues it, exactly as `/goal <prompt>` would. Off unless the
+  // profile asks; a harness with no goal service logs why and boots unchanged.
+  try {
+    installAutoGoal({ ctx, resolved, log });
+  } catch (error) {
+    log(`dsh-tinytitan: autoGoal setup threw: ${error instanceof Error ? error.message : error}`);
   }
   // Boot writes the route once; a folder that changes during the session has to
   // reach the picker too, because installing a model and using it are the same

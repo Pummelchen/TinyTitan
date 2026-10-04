@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DEFAULT_AUTO_GOAL_ROUNDS } from "./keep-going.js";
 
 /** The checkout this plugin was authored in: `<repo>/plugins/dsh-tinytitan/src/config.js`. */
 export const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -151,6 +152,24 @@ function resolveCompactionHeadroom(value) {
 }
 
 /**
+ * Rounds an auto-created goal may run before the harness blocks it.
+ *
+ * Only read when `autoGoal` is on. The cap is deliberately much smaller than the
+ * goal service's own default (256): it bounds prompts a person did not mark as
+ * long-running work, while `/goal` keeps the harness default for the ones they
+ * did. A positive integer is required — the value is a promise about how much
+ * unattended work a stray prompt may buy, so it is never derived or guessed.
+ */
+function resolveAutoGoalRounds(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_AUTO_GOAL_ROUNDS;
+  const rounds = Number(value);
+  if (!Number.isSafeInteger(rounds) || rounds <= 0) {
+    throw new Error(`dsh-tinytitan: autoGoalRounds must be a positive integer, got ${value}`);
+  }
+  return rounds;
+}
+
+/**
  * Resolve the plugin config.
  * @param config - the raw row config.
  * @returns the resolved config, with every field a value.
@@ -212,6 +231,11 @@ export function resolveConfig(config = {}) {
     // The generated preset's compaction row carries no headroom unless one is
     // named here, so the harness's own default (65536) stands.
     compactionHeadroomTokens: resolveCompactionHeadroom(config.compactionHeadroomTokens),
+    // Off by default: it changes what every manual prompt means (each one
+    // becomes a persistent objective that continues by itself), which is a
+    // choice an operator makes once for a profile rather than a default.
+    autoGoal: config.autoGoal === true,
+    autoGoalRounds: resolveAutoGoalRounds(config.autoGoalRounds),
     log: typeof config.log === "function" ? config.log : null,
   };
 }
