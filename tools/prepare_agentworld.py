@@ -45,7 +45,7 @@ import threading
 import time
 from functools import lru_cache
 from pathlib import Path
-from queue import Queue
+from queue import Full, Queue
 
 try:
     import ml_dtypes
@@ -677,6 +677,13 @@ def stop_download() -> None:
             proc.kill()
 
 
+# Set when the fetch pool must wind down: the caller left `prefetch_shards` by
+# raising (SIGTERM's SystemExit, a keyboard interrupt, a failed shard), so
+# nobody is draining the ready queue any more. Fetchers check it instead of
+# blocking on a queue that will never move.
+_stopping = threading.Event()
+
+
 # How far ahead to download, and with how many connections. The host throttles
 # per connection, so this is the lever on how long a conversion takes: one
 # connection measured ~205 KB/s while a second beside it added ~490 KB/s, and
@@ -702,43 +709,70 @@ def prefetch_shards(
     each output tensor once, and the snapshot's index is built from what was
     actually written. Order only changes which layer completes first.
     """
+    _stopping.clear()  # one conversion per process; tests re-enter
     ready: Queue = Queue(maxsize=depth)
     pending: Queue = Queue()
     for shard in shards:
         pending.put(shard)
 
+    def post(item) -> None:
+        """Hand an item to the consumer, unless the run is stopping.
+
+        Never waits forever. `ready` is deliberately small, so a fetcher that
+        has run ahead waits here while the caller converts -- and that wait is
+        exactly what a shutdown has to be able to reach.
+        """
+        while not _stopping.is_set():
+            try:
+                ready.put(item, timeout=0.5)
+                return
+            except Full:
+                continue
+
     def fetcher() -> None:
         try:
-            while True:
+            while not _stopping.is_set():
                 try:
                     shard = pending.get_nowait()
                 except Exception:  # noqa: BLE001
                     break
-                ready.put(fetch(shard))
+                post(fetch(shard))
         except Exception as exc:  # noqa: BLE001
-            ready.put(exc)
+            post(exc)
         finally:
-            ready.put(None)
+            post(None)
 
-    for _ in range(fetchers):
-        threading.Thread(target=fetcher, daemon=True).start()
+    threads = [threading.Thread(target=fetcher, daemon=True) for _ in range(fetchers)]
+    for thread in threads:
+        thread.start()
     sentinels = 0
-    while True:
-        item = ready.get()
-        if isinstance(item, Exception):
-            # The generator closes here, so the remaining fetchers unwind on
-            # their next queue operation.
-            raise item
-        if item is None:
-            # Count the sentinels that actually arrived; do not read a shared
-            # counter. A fetcher posts its sentinel from a `finally`, so a
-            # sentinel can reach this loop before another fetcher's shards are
-            # queued, and ending the run on the first one would drop them.
-            sentinels += 1
-            if sentinels == fetchers:
-                return
-            continue
-        yield item
+    try:
+        while True:
+            item = ready.get()
+            if isinstance(item, Exception):
+                # The generator closes here, so the remaining fetchers unwind
+                # on their next queue operation.
+                raise item
+            if item is None:
+                # Count the sentinels that actually arrived; do not read a shared
+                # counter. A fetcher posts its sentinel from a `finally`, so a
+                # sentinel can reach this loop before another fetcher's shards are
+                # queued, and ending the run on the first one would drop them.
+                sentinels += 1
+                if sentinels == fetchers:
+                    return
+                continue
+            yield item
+    finally:
+        # The caller can leave this generator by raising, and the fetchers are
+        # daemon threads. A daemon thread still writing to stdout when the
+        # interpreter finalizes is a fatal error in CPython 3.14 -- which
+        # aborts the process and files a crash report -- so a SIGTERM during a
+        # download must not leave one alive. Stop the pool, then join it.
+        _stopping.set()
+        stop_download()
+        for thread in threads:
+            thread.join(timeout=10)
 
 
 def fetch_tokenizer(out: Path) -> None:

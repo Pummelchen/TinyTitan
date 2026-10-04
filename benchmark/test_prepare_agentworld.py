@@ -166,5 +166,46 @@ class ConvertShardBothWidthsTests(unittest.TestCase):
             )
 
 
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class PrefetchShutdownTests(unittest.TestCase):
+    """A SIGTERM during the download must not leave a daemon fetcher alive.
+
+    Observed in the field as a macOS crash report: the fetchers were daemon
+    threads left blocked on the ready queue (nobody drains it once the caller
+    raises), and CPython 3.14 turns a daemon thread writing stdout at
+    interpreter finalization into a fatal error that calls `abort()`.
+    """
+
+    def test_closing_the_generator_leaves_no_fetcher_thread_running(self):
+        import threading
+        import time
+
+        baseline = threading.active_count()
+
+        def fetch(shard):
+            time.sleep(0.05)
+            return shard
+
+        generator = prepare.prefetch_shards(
+            [f"shard-{n}" for n in range(6)], fetch, fetchers=3, depth=1
+        )
+        self.assertIsInstance(next(generator), str)  # one consumed, the rest queue up
+        time.sleep(0.4)  # let the other fetchers fill the one-slot queue and wait
+        generator.close()
+        deadline = time.time() + 3
+        while threading.active_count() > baseline and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(threading.active_count(), baseline)
+
+    def test_the_pool_still_fetches_every_shard_in_the_normal_case(self):
+        def fetch(shard):
+            return shard
+
+        self.assertEqual(
+            sorted(prepare.prefetch_shards(["a", "b", "c", "d"], fetch, fetchers=2, depth=2)),
+            ["a", "b", "c", "d"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
