@@ -31,6 +31,7 @@ import { ensureDefaultPreset, registerTinytitanPreset } from "./preset.js";
 import { watchModels } from "./models-watch.js";
 import { dshVersion, supportDecision } from "./support.js";
 import { installAutoGoal } from "./keep-going.js";
+import { installHandoff } from "./handoff.js";
 
 /** Plugin name, as the harness registry shows it. */
 export const name = "dsh-tinytitan";
@@ -84,6 +85,16 @@ export {
   isDirectHuman,
   messageText,
 } from "./keep-going.js";
+export {
+  DEFAULT_HANDOFF_AT_TOKENS,
+  DEFAULT_HANDOFF_HOPS,
+  DEFAULT_HANDOFF_MAX_CHILDREN,
+  HANDOFF_PROVIDER,
+  handoffPrompt,
+  installHandoff,
+  startHandoff,
+  usageTokens,
+} from "./handoff.js";
 
 /**
  * The one route-refresh path, shared by boot and the `models/` watcher.
@@ -254,6 +265,14 @@ export function apply(ctx, config = {}, deps = {}) {
     installAutoGoal({ ctx, resolved, log });
   } catch (error) {
     log(`dsh-tinytitan: autoGoal setup threw: ${error instanceof Error ? error.message : error}`);
+  }
+  // The handoff driver: when a session approaches its token budget with the
+  // objective unfinished, the work continues in a fresh forked context rather
+  // than stopping. Off unless the profile asks; a missing service logs a no-op.
+  try {
+    installHandoff({ ctx, resolved, log });
+  } catch (error) {
+    log(`dsh-tinytitan: handoff setup threw: ${error instanceof Error ? error.message : error}`);
   }
   // Boot writes the route once; a folder that changes during the session has to
   // reach the picker too, because installing a model and using it are the same

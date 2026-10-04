@@ -132,6 +132,10 @@ fallbacks.
 | `autonomy`                  | `false`                                                                 | the preset half of "work it until it is done": append the autonomy policy to the preset's `persona`, so the model chooses the best technical solution instead of asking, and enable the fresh-agent `ralph` loop — see below                              |
 | `autonomyRounds`            | `64`                                                                    | the `maxRounds` the enabled `ralph` row carries; the harness enforces its own ceiling on a call override                                                                                                                                                  |
 | `autonomySuppressQuestions` | `false`                                                                 | also remove the `ask_user_question` tool from the preset, so the model cannot ask. Off by default because plan mode's own instructions use that tool                                                                                                      |
+| `handoff`                   | `false`                                                                 | continue an unfinished objective in a fresh child context before the session's window fills, so a task survives its own context limit — see below                                                                                                         |
+| `handoffHops`               | `3`                                                                     | how many times one goal may be handed on before the chain stops and is left to a person                                                                                                                                                                   |
+| `handoffAtTokens`           | `120000`                                                                | the prompt-token count at which the next turn hands the objective on. Must be positive; the default sits below this preset's compaction trigger                                                                                                           |
+| `handoffMaxChildren`        | `8`                                                                     | how many handoff children may be alive at once in the process, ancestors included; has to sit above `handoffHops`                                                                                                                                         |
 | `repoRoot`                  | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
 | `dshHome`                   | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
@@ -273,6 +277,70 @@ and provider errors, quota and disk remain real ceilings.
     autonomy: true
     autonomyRounds: 64
 ```
+
+### Handoff: continue past the context wall
+
+`autoGoal` and `autonomy` both keep working _in the same session_, and a session
+has a window. `handoff: true` is the option that moves the objective somewhere
+else before that window fills, which is the only part of "until it is done" the
+harness does not do by itself.
+
+At the start of a turn — the one moment a plugin may start a subagent, because
+the turn's agent loop is active — the driver looks at the previous step's prompt
+tokens. If they reached `handoffAtTokens` and the session's goal is active and
+armed, one **hop** happens:
+
+1. a `fork` subagent is started: a real child session, seeded from this one's
+   completed turns, handed a prompt that leads with the objective verbatim and
+   tells it the workspace is the authority;
+2. the handing-off session is disarmed, so only one context works the objective
+   at a time;
+3. the child's inherited goal is **armed** (a fork seed copies the goal's events,
+   but its activation is process-local, so the child would otherwise sit there
+   with an objective and no rounds);
+4. the child is held while its goal is actively continuing, and released — leaf
+   first — when it is idle and no longer continuing. Disposing a parent disposes
+   its subagent children, so a chain unwinds from its end.
+
+Two honest limits. **The successor is a child session, not a successor root
+session**: it has its own log and context and keeps working autonomously through
+the same goal driver, but it is not a chat you steer. And **nothing here is
+unbounded**: `handoffHops` caps one goal's chain, `handoffAtTokens` must be
+positive (a zero budget hands off at the very first turn), `handoffMaxChildren`
+caps the process, every hop is released when it stops, and a goal the model
+blocked is never handed on.
+
+```yaml
+- id: dsh-tinytitan
+  config:
+    autoGoal: true
+    handoff: true
+    handoffHops: 3
+    handoffAtTokens: 120000
+```
+
+**How it is checked.** `test/handoff.test.js` pins the driver without a harness
+or a model — 20 cases covering the budget (including cached input), the trigger
+conditions, the hop counter's fork-bomb regression, the in-flight guard, the
+refund of a refused start, the process cap, and the release rules. The live
+behaviour was verified on DSH 0.2.0-rc.2 against a local Qwen 3.5 4B in a
+scratch home, driven from inside the booted profile — `dsh headless` cannot show
+this, because it exits as soon as its one agent is idle and that kills a handoff
+child mid-turn:
+
+- a prompt whose second turn spent the budget produced **hop 1/2** with a real
+  child session, and the log shows the handing-off session disarmed and the
+  child's inherited goal armed;
+- that child's own next turn produced **hop 2/2**, from the child rather than the
+  original session — the chain, not a fan of siblings;
+- the last child's next trigger logged **"reached 2 hops"** and no third child
+  was created, so the cap holds live;
+- each child was **released** once its goal stopped continuing, leaf first, and
+  the driver then saw a quiet process: three sessions, every agent disposed, no
+  hang. An earlier version released the one-shot run when it settled, which
+  killed the child before its round driver could queue the continuation; the
+  grandchild's turn ended `aborted/disposed` 3 ms after its parent was released,
+  which is why the release rule is what it is.
 
 ## What it does not do
 

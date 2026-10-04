@@ -13,6 +13,11 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DEFAULT_AUTO_GOAL_ROUNDS } from "./keep-going.js";
 import { AUTONOMY_DEFAULT_ROUNDS } from "./preset.js";
+import {
+  DEFAULT_HANDOFF_AT_TOKENS,
+  DEFAULT_HANDOFF_HOPS,
+  DEFAULT_HANDOFF_MAX_CHILDREN,
+} from "./handoff.js";
 
 /** The checkout this plugin was authored in: `<repo>/plugins/dsh-tinytitan/src/config.js`. */
 export const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -188,6 +193,55 @@ function resolveAutonomyRounds(value) {
 }
 
 /**
+ * How many times one objective may be handed to a fresh context.
+ *
+ * Only read when `handoff` is on. Each hop is a child session with its own
+ * context and model calls, so the chain needs a number: "keep going until it is
+ * done" is a policy, not an unbounded budget.
+ */
+function resolveHandoffHops(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_HOPS;
+  const hops = Number(value);
+  if (!Number.isSafeInteger(hops) || hops <= 0) {
+    throw new Error(`dsh-tinytitan: handoffHops must be a positive integer, got ${value}`);
+  }
+  return hops;
+}
+
+/**
+ * The prompt-token budget that starts a handoff.
+ *
+ * Only read when `handoff` is on. The default sits below this plugin's
+ * compaction trigger on a 262,144-token window, so the objective moves while
+ * there is still room. `0` is refused on purpose: a zero budget hands off at the
+ * first turn, which is how an unbounded chain was found once already.
+ */
+function resolveHandoffAtTokens(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_AT_TOKENS;
+  const tokens = Number(value);
+  if (!Number.isSafeInteger(tokens) || tokens <= 0) {
+    throw new Error(`dsh-tinytitan: handoffAtTokens must be a positive integer, got ${value}`);
+  }
+  return tokens;
+}
+
+/**
+ * How many handoff children may be alive at once.
+ *
+ * Only read when `handoff` is on. The per-goal cap bounds one chain; this is the
+ * process-wide ceiling that makes a runaway impossible even across several
+ * goals, which is the shape the one observed runaway took.
+ */
+function resolveHandoffMaxChildren(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_MAX_CHILDREN;
+  const children = Number(value);
+  if (!Number.isSafeInteger(children) || children <= 0) {
+    throw new Error(`dsh-tinytitan: handoffMaxChildren must be a positive integer, got ${value}`);
+  }
+  return children;
+}
+
+/**
  * Resolve the plugin config.
  * @param config - the raw row config.
  * @returns the resolved config, with every field a value.
@@ -261,6 +315,13 @@ export function resolveConfig(config = {}) {
     autonomy: config.autonomy === true,
     autonomyRounds: resolveAutonomyRounds(config.autonomyRounds),
     autonomySuppressQuestions: config.autonomySuppressQuestions === true,
+    // Handoff is what makes "no matter how long" survive a context wall: an
+    // unfinished objective moves to a fresh child context before the window
+    // fills. Off by default — it starts sessions on its own.
+    handoff: config.handoff === true,
+    handoffHops: resolveHandoffHops(config.handoffHops),
+    handoffAtTokens: resolveHandoffAtTokens(config.handoffAtTokens),
+    handoffMaxChildren: resolveHandoffMaxChildren(config.handoffMaxChildren),
     log: typeof config.log === "function" ? config.log : null,
   };
 }
