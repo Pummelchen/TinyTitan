@@ -184,6 +184,20 @@ async function step(ctx, session, usage) {
   await fire(ctx, "session/event", { id: session }, { type: "turn/start" });
 }
 
+/**
+ * End a turn on the token wall, as the round driver does when it disarms.
+ * The recovery is deferred by a microtask, so this waits one extra tick.
+ */
+async function wall(ctx, session) {
+  await fire(
+    ctx,
+    "session/event",
+    { id: session },
+    { type: "turn/end", data: { reason: { kind: "max-tokens" } } },
+  );
+  await tick();
+}
+
 /** A harness with the driver installed over one armed goal. */
 function installed(options = {}, resolved = {}) {
   const h = harness(options);
@@ -284,6 +298,93 @@ test("a later turn in the parent cannot spend a second hop", async () => {
   assert.equal(starts.length, 1);
   await step(ctx, "session-1", { inputTokens: 9000 });
   assert.equal(starts.length, 1, "the parent is disarmed, so it is no longer a handoff source");
+});
+
+test("a session that handed off never becomes a handoff source again", async () => {
+  // A person can `/goal resume` the handing-off session; without the retirement
+  // mark it would fork a sibling chain beside the one already running.
+  const { ctx, starts, agents } = installed({}, { handoffAtTokens: 1000, handoffHops: 5 });
+  await step(ctx, "session-1", { inputTokens: 5000 });
+  assert.equal(starts.length, 1);
+  ctx.get("goals").resume(agents.get("session-1"), { id: "goal-1", revision: 1 });
+  await step(ctx, "session-1", { inputTokens: 9000 });
+  assert.equal(starts.length, 1, "the objective already moved on");
+});
+
+test("a turn that ends on the token wall re-arms its goal so the next turn hands off", async () => {
+  const { ctx, starts, calls, agents, goalStates, lines } = installed(
+    {},
+    { handoffAtTokens: 1000 },
+  );
+  await fire(ctx, "session/event", { id: "session-1" }, { type: "turn/start" });
+  await fire(
+    ctx,
+    "session/event",
+    { id: "session-1" },
+    { type: "assistant/message", data: { usage: { inputTokens: 5000 } } },
+  );
+  // The round driver's own disarm for this wall.
+  ctx.get("goals").disarm(agents.get("session-1"));
+  assert.equal(goalStates.get("session-1").activation, "disarmed");
+  await wall(ctx, "session-1");
+  assert.equal(calls.resume.length, 1, "the wall re-armed the goal");
+  assert.ok(lines.some((line) => line.includes("hit its token wall at 5000 tokens")));
+  await fire(ctx, "session/event", { id: "session-1" }, { type: "turn/start" });
+  assert.equal(starts.length, 1, "the re-armed goal's next turn hands the objective on");
+});
+
+test("a wall from the output cap alone is left alone", async () => {
+  // `max-tokens` can also mean the model was verbose with a small context; that
+  // stop belongs to the harness and the plugin must not undo it.
+  const { ctx, calls, agents, lines } = installed({}, { handoffAtTokens: 1000 });
+  await fire(
+    ctx,
+    "session/event",
+    { id: "session-1" },
+    { type: "assistant/message", data: { usage: { inputTokens: 10 } } },
+  );
+  ctx.get("goals").disarm(agents.get("session-1"));
+  await wall(ctx, "session-1");
+  assert.equal(calls.resume.length, 0);
+  assert.equal(
+    lines.some((line) => line.includes("token wall")),
+    false,
+  );
+});
+
+test("a wall with no hop left is left to a person", async () => {
+  const { ctx, agents, addSession, calls, lines } = installed(
+    {},
+    { handoffAtTokens: 1000, handoffHops: 1 },
+  );
+  await step(ctx, "session-1", { inputTokens: 5000 });
+  addSession("session-2", goalView());
+  await fire(
+    ctx,
+    "session/event",
+    { id: "session-2" },
+    { type: "assistant/message", data: { usage: { inputTokens: 5000 } } },
+  );
+  ctx.get("goals").disarm(agents.get("session-2"));
+  await wall(ctx, "session-2");
+  assert.equal(calls.resume.filter((each) => each.session === "session-2").length, 0);
+  assert.ok(lines.some((line) => line.includes("no hop is available (hops)")));
+});
+
+test("the wall recovery is bounded", async () => {
+  const { ctx, agents, calls, lines } = installed({}, { handoffAtTokens: 1000 });
+  await fire(
+    ctx,
+    "session/event",
+    { id: "session-1" },
+    { type: "assistant/message", data: { usage: { inputTokens: 5000 } } },
+  );
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    ctx.get("goals").disarm(agents.get("session-1"));
+    await wall(ctx, "session-1");
+  }
+  assert.equal(calls.resume.length, 2, "two attempts, then the stop stands");
+  assert.ok(lines.some((line) => line.includes("hit its wall again after 2 attempts")));
 });
 
 test("a settled run is not released while its goal is still being continued", async () => {

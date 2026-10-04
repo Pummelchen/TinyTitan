@@ -16,6 +16,17 @@
  * tokens the previous step reported. The objective moves on before the window
  * fills, and a child that reaches the same budget moves it again.
  *
+ * The budget is the normal path; the wall itself is the fallback. A single turn
+ * can jump past the window (a huge tool result) and end on `max-tokens`, and the
+ * round driver's own disarm for that event leaves no next `turn/start` to hand
+ * off from. The driver therefore watches `turn/end` and, when the wall was a
+ * context wall (the reported prompt tokens reached the budget) and a hop is
+ * still available, re-arms the goal with `goals.resume` — the only lever that
+ * creates another turn, because `start` needs a running loop. That is bounded:
+ * the disarm must be a context wall, not just an output cap; a hop must be
+ * available; and each goal gets at most two re-arms, so a chain that cannot
+ * start cannot loop on the wall forever.
+ *
  * ## What a hop actually does
  *
  * Measured on a live run (2026-10-04), a forked child inherits the parent's
@@ -205,6 +216,10 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
   const inFlight = new Set();
   /** The last prompt-token count each session reported. */
   const usage = new Map();
+  /** Sessions that handed their objective on; they never work it again. */
+  const retired = new Set();
+  /** Wall recoveries per goal, so a failing chain cannot loop on `max-tokens`. */
+  const recoveries = new Map();
   /** Live children, so the process cap and plugin disposal can see them. */
   const runs = new Set();
   /** Child session id -> { key, run, agent }, for the release rule. */
@@ -227,6 +242,10 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
 
     /** Stop the handing-off session; the objective now lives in the child. */
     const stopParent = (agent) => {
+      // Retired for good, not just disarmed: a wall-recovery or a person's
+      // `/goal resume` must not turn this session into a second handoff source
+      // and fork a sibling chain beside the one already running.
+      retired.add(agent.id);
       try {
         goals.disarm(agent);
         log("dsh-tinytitan: disarmed the handing-off session so only the child continues");
@@ -326,9 +345,23 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
       return entry;
     };
 
-    /** Move an unfinished objective on, if its budget is spent and hops remain. */
+    /** Why this goal cannot hand on right now, or `null` when it can. */
+    const blockReason = (key) => {
+      if ((hops.get(key) ?? 0) >= hopBudget) return "hops";
+      if (inFlight.has(key)) return "in-flight";
+      if (runs.size >= childCap) return "cap";
+      return null;
+    };
+
+    /**
+     * Move an unfinished objective on, if its budget is spent and hops remain.
+     *
+     * @param sessionId - the session whose turn just opened.
+     * @param inputTokens - the prompt tokens its previous step reported.
+     */
     const handoff = (sessionId, inputTokens) => {
       if (!(inputTokens >= budget)) return;
+      if (retired.has(sessionId)) return;
       const agent = agents.get(sessionId);
       if (!agent) return;
       const goal = goals.get(agent);
@@ -337,15 +370,16 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
       if (!goal || goal.phase !== "active" || goal.activation !== "armed") return;
       const key = goal.id;
       const claimed = hops.get(key) ?? 0;
-      if (claimed >= hopBudget) {
+      const blocked = blockReason(key);
+      if (blocked === "hops") {
         log(
           `dsh-tinytitan: handoff chain for "${goal.objective.slice(0, 60)}" reached ` +
             `${hopBudget} hops; leaving it to a person`,
         );
         return;
       }
-      if (inFlight.has(key)) return;
-      if (runs.size >= childCap) {
+      if (blocked === "in-flight") return;
+      if (blocked === "cap") {
         log(
           `dsh-tinytitan: ${runs.size} handoff children are already live (cap ${childCap}); ` +
             `not handing on "${goal.objective.slice(0, 60)}"`,
@@ -385,6 +419,54 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
         });
     };
 
+    /**
+     * Re-arm a goal the harness disarmed on a `max-tokens` turn.
+     *
+     * The budget trigger normally moves the objective long before the window
+     * fills, but one turn can jump past it (a huge tool result) and end on
+     * `max-tokens` — and that disarm (the round driver's own, on this event)
+     * leaves no next `turn/start` to hand off from. Re-arming is the only lever
+     * that creates one, because `start` needs a running loop. It is bounded
+     * three ways: the wall must be a *context* wall (the reported prompt tokens
+     * reached the budget, not just the output cap), a hop must actually be
+     * available, and each goal gets at most two attempts — otherwise a chain
+     * that cannot start would loop on the wall forever.
+     */
+    const recoverFromWall = (session) => {
+      const agent = agents.get(session?.id);
+      if (!agent || retired.has(agent.id)) return;
+      const tokens = usage.get(session.id) ?? 0;
+      if (!(tokens >= budget)) return;
+      const goal = goals.get(agent);
+      if (!goal || goal.phase !== "active" || goal.activation === "armed") return;
+      const blocked = blockReason(goal.id);
+      if (blocked !== null) {
+        log(
+          `dsh-tinytitan: "${goal.objective.slice(0, 60)}" hit its wall at ${tokens} tokens, ` +
+            `but no hop is available (${blocked}); leaving it to a person`,
+        );
+        return;
+      }
+      const attempts = recoveries.get(goal.id) ?? 0;
+      if (attempts >= 2) {
+        log(
+          `dsh-tinytitan: "${goal.objective.slice(0, 60)}" hit its wall again after ` +
+            `${attempts} attempts; leaving it to a person`,
+        );
+        return;
+      }
+      recoveries.set(goal.id, attempts + 1);
+      try {
+        goals.resume(agent, { id: goal.id, revision: goal.revision });
+        log(
+          `dsh-tinytitan: the session hit its token wall at ${tokens} tokens; re-armed the goal ` +
+            `so the next turn hands the objective on`,
+        );
+      } catch (error) {
+        log(`dsh-tinytitan: could not re-arm a walled goal: ${describe(error)}`);
+      }
+    };
+
     // Remember what each step cost; judge the budget when the next turn opens,
     // which is the moment `start` is legal.
     ctx.on("session/event", (session, event) => {
@@ -392,6 +474,19 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
         if (event?.type === "assistant/message") {
           const tokens = usageTokens(event.data?.usage);
           if (tokens > 0) usage.set(session?.id, tokens);
+          return;
+        }
+        if (event?.type === "turn/end") {
+          if (event.data?.reason?.kind !== "max-tokens") return;
+          // Deferred by a microtask: the round driver disarms the goal in its
+          // own listener for this very event, and the recovery has to see that.
+          void Promise.resolve().then(() => {
+            try {
+              recoverFromWall(session);
+            } catch (error) {
+              log(`dsh-tinytitan: wall recovery failed: ${describe(error)}`);
+            }
+          });
           return;
         }
         if (event?.type !== "turn/start") return;

@@ -302,6 +302,15 @@ armed, one **hop** happens:
    first — when it is idle and no longer continuing. Disposing a parent disposes
    its subagent children, so a chain unwinds from its end.
 
+The budget is the normal path, and the session's own token limit is the fallback.
+One turn can jump straight past the window and end on `max-tokens`; the round
+driver disarms the goal for that event, which would leave no next turn to hand
+off from. The driver therefore watches `turn/end`: when the wall was a _context_
+wall (the reported prompt tokens reached the budget, not just the output cap) and
+a hop is still available, it re-arms the goal so the next turn hands the objective
+on. Each goal gets at most two such re-arms, so a chain that cannot start cannot
+loop on the wall.
+
 Two honest limits. **The successor is a child session, not a successor root
 session**: it has its own log and context and keeps working autonomously through
 the same goal driver, but it is not a chat you steer. And **nothing here is
@@ -320,13 +329,13 @@ blocked is never handed on.
 ```
 
 **How it is checked.** `test/handoff.test.js` pins the driver without a harness
-or a model — 20 cases covering the budget (including cached input), the trigger
+or a model — 25 cases covering the budget (including cached input), the trigger
 conditions, the hop counter's fork-bomb regression, the in-flight guard, the
-refund of a refused start, the process cap, and the release rules. The live
-behaviour was verified on DSH 0.2.0-rc.2 against a local Qwen 3.5 4B in a
-scratch home, driven from inside the booted profile — `dsh headless` cannot show
-this, because it exits as soon as its one agent is idle and that kills a handoff
-child mid-turn:
+refund of a refused start, the process cap, the release rules, and the wall
+recovery's three bounds. The live behaviour was verified on DSH 0.2.0-rc.2
+against a local Qwen 3.5 4B in a scratch home, driven from inside the booted
+profile — `dsh headless` cannot show this, because it exits as soon as its one
+agent is idle and that kills a handoff child mid-turn:
 
 - a prompt whose second turn spent the budget produced **hop 1/2** with a real
   child session, and the log shows the handing-off session disarmed and the
@@ -341,6 +350,20 @@ child mid-turn:
   killed the child before its round driver could queue the continuation; the
   grandchild's turn ended `aborted/disposed` 3 ms after its parent was released,
   which is why the release rule is what it is.
+
+The wall path was verified separately and deterministically, by running the same
+scratch profile with the route's `maxTokens` at **8** so that every turn ends on
+`max-tokens` — the harness's own full-session disarm:
+
+- the first turn ended on the wall, the driver logged _"the session hit its token
+  wall at 792 tokens; re-armed the goal so the next turn hands the objective
+  on"_, and the next turn produced **hop 1/2**;
+- the child's turn hit the same wall and produced **hop 2/2**;
+- the next wall logged _"hit its wall at 1126 tokens, but no hop is available
+  (hops); leaving it to a person"_, no third child appeared, and every child was
+  released leaf first — three sessions, clean exit. The session logs carry the
+  `turn/end max-tokens` → `goal/change resume` → `turn/start` sequence for each
+  hop, which is the loop requirement 6 asks for.
 
 ## What it does not do
 
