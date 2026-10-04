@@ -211,6 +211,29 @@ Two things to know before switching it on:
   list, so this works as-is here. A harness composed without goals leaves the
   switch a no-op with one log line, and boot is unchanged either way.
 
+**How it is checked.** `test/keep-going.test.js` pins the four things the switch
+must not do — feed on the driver's own round, arm a goal for a subagent, replace
+an unfinished goal, or take a boot down when the harness has no goal service —
+twelve cases, with no harness and no model.
+
+The behaviour itself was verified on DSH 0.2.0-rc.2 against a local Qwen 3.5 4B,
+in a scratch home carrying this plugin with the option on, driven by
+`dsh headless --json` (which waits for quiescence, so goal rounds run inside the
+one invocation):
+
+- **`autoGoal: false`** — a prompt completed its turn with **no** `goal/change`
+  in the session log and no rounds. The control: the switch is what creates them.
+- **`autoGoal: true`, cap 3** — the same prompt wrote a `goal/change` **create**
+  carrying that prompt as its objective and cap 3; its own turn completed; then,
+  with no further input, the driver queued **goal round 1** and the model called
+  `get_goal` and `update_goal` and completed it. Exit 0.
+- **the same session, a second prompt** — a second create and complete, each
+  with its own objective, and no cross-contamination.
+
+Not exercised live: the round-limit block, because the model completed in round 1
+both times. The configured cap does reach the goal — the create event carries it
+— and the blocking policy belongs to `dsh-goal-round-driver`, not to this plugin.
+
 ## What it does not do
 
 - **No adapter.** It registers no LLM provider: the harness's `llm-pi-ai` route
