@@ -207,5 +207,45 @@ class PrefetchShutdownTests(unittest.TestCase):
         )
 
 
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class DownloadStopTests(unittest.TestCase):
+    """The download itself has to notice the stop, not just the queue.
+
+    Joining the fetchers is worthless while one of them sits in a chunk retry
+    that can wait two minutes: the join times out, the interpreter finalizes
+    with the thread alive, and the abort comes back.
+    """
+
+    def setUp(self):
+        prepare._stopping.clear()
+
+    def tearDown(self):
+        prepare._stopping.clear()
+
+    def test_a_shard_is_not_started_when_the_run_is_stopping(self):
+        prepare._stopping.set()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(InterruptedError):
+                prepare.download("model-00000-of-00013.safetensors", pathlib.Path(tmp))
+
+    def test_a_stop_during_a_retry_wait_ends_the_download(self):
+        from unittest import mock
+
+        def fake_popen(*_args, **_kwargs):
+            proc = mock.MagicMock()
+            proc.wait.return_value = 1  # curl failed
+            return proc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                mock.patch.object(prepare, "expected_size", return_value=1024),
+                mock.patch.object(prepare, "resolve_url", return_value="http://example.invalid/x"),
+                mock.patch.object(prepare.subprocess, "Popen", side_effect=fake_popen),
+                mock.patch.object(prepare, "_sleep_unless_stopped", return_value=True),
+            ):
+                with self.assertRaises(InterruptedError):
+                    prepare.download("model-00000-of-00013.safetensors", pathlib.Path(tmp))
+
+
 if __name__ == "__main__":
     unittest.main()

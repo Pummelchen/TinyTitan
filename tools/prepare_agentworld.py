@@ -584,6 +584,10 @@ def download(shard: str, work: Path) -> Path:
     file whose size is not the header's, so it is rejected instead of being
     decoded into silently wrong weights.
     """
+    if _stopping.is_set():
+        # Do not start (or resume) a shard during a shutdown: the caller has
+        # gone, and the bytes would be fetched for nobody.
+        raise InterruptedError(f"{shard}: stopped before this shard started")
     dest = work / shard
     dest.parent.mkdir(parents=True, exist_ok=True)
     expected = expected_size(shard)
@@ -606,6 +610,8 @@ def download(shard: str, work: Path) -> Path:
             want = min(CHUNK_BYTES, expected - done)
             chunk = work / f".{shard}.chunk"
             for attempt in range(1, CHUNK_ATTEMPTS + 1):
+                if _stopping.is_set():
+                    raise InterruptedError(f"{shard}: stopped before an attempt")
                 url = resolve_url(shard)
                 proc = subprocess.Popen(
                     [
@@ -649,7 +655,8 @@ def download(shard: str, work: Path) -> Path:
                     f"attempt {attempt}/{CHUNK_ATTEMPTS}), waiting {wait} s",
                     flush=True,
                 )
-                time.sleep(wait)
+                if _sleep_unless_stopped(wait):
+                    raise InterruptedError(f"{shard}: stopped while retrying")
             else:
                 raise RuntimeError(
                     f"{shard}: chunk at {done} failed after {CHUNK_ATTEMPTS} attempts"
@@ -682,6 +689,22 @@ def stop_download() -> None:
 # nobody is draining the ready queue any more. Fetchers check it instead of
 # blocking on a queue that will never move.
 _stopping = threading.Event()
+
+
+def _sleep_unless_stopped(seconds: float) -> bool:
+    """Sleep in slices, waking early when the run is stopping.
+
+    A chunk retry waits up to two minutes, and a shutdown that has to sit
+    through one is a shutdown that has not happened: the interpreter would
+    still be finalizing with fetcher threads alive, which is what aborts.
+    Returns True when the run stopped instead of sleeping.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _stopping.is_set():
+            return True
+        time.sleep(min(0.5, deadline - time.monotonic()))
+    return _stopping.is_set()
 
 
 # How far ahead to download, and with how many connections. The host throttles
