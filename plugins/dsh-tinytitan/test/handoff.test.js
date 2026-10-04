@@ -19,9 +19,11 @@ import test from "node:test";
 
 import { resolveConfig } from "../src/config.js";
 import {
+  budgetForWindow,
   DEFAULT_HANDOFF_AT_TOKENS,
   DEFAULT_HANDOFF_HOPS,
   DEFAULT_HANDOFF_MAX_CHILDREN,
+  DEFAULT_HANDOFF_WINDOW_RATIO,
   HANDOFF_PROVIDER,
   handoffPrompt,
   installHandoff,
@@ -77,13 +79,21 @@ function goalView(overrides = {}) {
  * child inherits the parent's goal **disarmed**, its run settles on demand, and
  * service mutations announce themselves on the bus.
  */
-function harness({ goal = goalView(), child = "local", gate = null, failFirst = false } = {}) {
+function harness({
+  goal = goalView(),
+  child = "local",
+  gate = null,
+  failFirst = false,
+  window = null,
+  llmFails = false,
+} = {}) {
   const bus = makeBus();
   const starts = [];
   const runs = [];
   const calls = { disarm: [], resume: [] };
   const sessions = new Set(["session-1"]);
-  const agents = new Map([["session-1", { id: "session-1", status: "running" }]]);
+  const route = { provider: "tinytitan", model: "qwen3.5-4b_4-Bit" };
+  const agents = new Map([["session-1", { id: "session-1", status: "running", options: route }]]);
   const goalStates = new Map([["session-1", { ...goal }]]);
   let created = 0;
 
@@ -92,7 +102,7 @@ function harness({ goal = goalView(), child = "local", gate = null, failFirst = 
   };
   const addSession = (id, state = goalView({ id: `goal-${id}`, objective: `objective ${id}` })) => {
     sessions.add(id);
-    agents.set(id, { id, status: "running" });
+    agents.set(id, { id, status: "running", options: route });
     goalStates.set(id, { ...state });
     return agents.get(id);
   };
@@ -139,7 +149,7 @@ function harness({ goal = goalView(), child = "local", gate = null, failFirst = 
         const id = `child-${++created}`;
         const run = { id, localAgent: undefined, result: undefined, disposed: false };
         if (child !== "remote") {
-          const childAgent = { id, session: { id }, status: "running" };
+          const childAgent = { id, session: { id }, status: "running", options: route };
           agents.set(id, childAgent);
           sessions.add(id);
           if (child !== "no-goal") {
@@ -158,6 +168,14 @@ function harness({ goal = goalView(), child = "local", gate = null, failFirst = 
       },
     },
   };
+  if (window !== null || llmFails) {
+    services.llm = {
+      resolveModelInfo: () =>
+        llmFails
+          ? Promise.reject(new Error("no window"))
+          : Promise.resolve({ context: { contextWindow: window } }),
+    };
+  }
   return {
     bus,
     services,
@@ -533,26 +551,97 @@ test("disposal releases a child that is still working", async () => {
   assert.equal(runs[0].disposed, true);
 });
 
+test("the budget follows the routed model's context window", () => {
+  // The two shapes this project declares: a 256K route and a 1M route.
+  assert.equal(budgetForWindow({ window: 262144, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 131072);
+  assert.equal(budgetForWindow({ window: 1048576, ratio: DEFAULT_HANDOFF_WINDOW_RATIO }), 524288);
+  assert.equal(budgetForWindow({ window: 100000, ratio: 0.75 }), 75000);
+  // Both stay below the harness's compaction trigger for the shipped preset.
+  assert.ok(131072 < 163840, "256K: below the ~62% compaction trigger");
+  assert.ok(524288 < 838860, "1M: below the ~80% compaction trigger");
+  // An unknown window must not become a handoff at the first turn.
+  for (const window of [undefined, null, 0, -5, Number.NaN, "262144"]) {
+    assert.equal(budgetForWindow({ window, ratio: 0.5 }), DEFAULT_HANDOFF_AT_TOKENS);
+  }
+  assert.equal(budgetForWindow({ window: 10, ratio: 0.5 }), 5, "never rounds to zero");
+});
+
+test("an auto budget fires at half the window the adapter reports", async () => {
+  const { ctx, starts, lines } = installed({ window: 262144 }, { handoffAtTokens: undefined });
+  // The first check opens the route and runs before the adapter answers, so it
+  // uses the fallback; the answer lands before the next turn.
+  await step(ctx, "session-1", { inputTokens: 1 });
+  await tick();
+  await step(ctx, "session-1", { inputTokens: 131071 });
+  assert.equal(starts.length, 0, "one below half the window");
+  await step(ctx, "session-1", { inputTokens: 131072 });
+  assert.equal(starts.length, 1, "half the window hands off");
+  assert.ok(
+    lines.some((line) =>
+      line.includes("handoff budget for tinytitan/qwen3.5-4b_4-Bit is 131072 tokens"),
+    ),
+  );
+});
+
+test("a 1M window gets a 1M budget", async () => {
+  const { ctx, starts } = installed({ window: 1048576 }, { handoffAtTokens: undefined });
+  await step(ctx, "session-1", { inputTokens: 1 });
+  await tick();
+  await step(ctx, "session-1", { inputTokens: 524287 });
+  assert.equal(starts.length, 0);
+  await step(ctx, "session-1", { inputTokens: 524288 });
+  assert.equal(starts.length, 1);
+});
+
+test("an explicit budget wins over the window, and a missing one falls back", async () => {
+  const pinned = installed({ window: 1048576 }, { handoffAtTokens: 5000 });
+  await step(pinned.ctx, "session-1", { inputTokens: 4999 });
+  assert.equal(pinned.starts.length, 0);
+  await step(pinned.ctx, "session-1", { inputTokens: 5000 });
+  assert.equal(pinned.starts.length, 1, "the pinned number is the budget");
+
+  for (const options of [{}, { llmFails: true }]) {
+    const h = installed(options, { handoffAtTokens: undefined });
+    await step(h.ctx, "session-1", { inputTokens: 1 });
+    assert.equal(h.starts.length, 0, "one token never hands off");
+    await tick();
+    await step(h.ctx, "session-1", { inputTokens: DEFAULT_HANDOFF_AT_TOKENS - 1 });
+    assert.equal(h.starts.length, 0, "below the fallback");
+    await step(h.ctx, "session-1", { inputTokens: DEFAULT_HANDOFF_AT_TOKENS });
+    assert.equal(h.starts.length, 1, "an unresolvable window uses the fallback");
+  }
+});
+
 test("resolveConfig carries the handoff switches and refuses a zero budget", () => {
   const base = resolveConfig({ log: () => {} });
   assert.equal(base.handoff, false);
   assert.equal(base.handoffHops, DEFAULT_HANDOFF_HOPS);
-  assert.equal(base.handoffAtTokens, DEFAULT_HANDOFF_AT_TOKENS);
+  assert.equal(base.handoffAtTokens, null, "unset means auto, from the window");
+  assert.equal(base.handoffWindowRatio, DEFAULT_HANDOFF_WINDOW_RATIO);
   assert.equal(base.handoffMaxChildren, DEFAULT_HANDOFF_MAX_CHILDREN);
   const on = resolveConfig({
     handoff: true,
     handoffHops: 9,
     handoffAtTokens: 50000,
+    handoffWindowRatio: 0.25,
     handoffMaxChildren: 2,
     log: () => {},
   });
   assert.equal(on.handoff, true);
   assert.equal(on.handoffHops, 9);
   assert.equal(on.handoffAtTokens, 50000);
+  assert.equal(on.handoffWindowRatio, 0.25);
   assert.equal(on.handoffMaxChildren, 2);
   assert.equal(resolveConfig({ handoff: "true", log: () => {} }).handoff, false);
   assert.throws(() => resolveConfig({ handoffHops: 0, log: () => {} }), /positive integer/);
   assert.throws(() => resolveConfig({ handoffAtTokens: 0, log: () => {} }), /positive integer/);
   assert.throws(() => resolveConfig({ handoffAtTokens: -1, log: () => {} }), /positive integer/);
   assert.throws(() => resolveConfig({ handoffMaxChildren: 0, log: () => {} }), /positive integer/);
+  for (const ratio of [0, -1, 1.5, "half"]) {
+    assert.throws(
+      () => resolveConfig({ handoffWindowRatio: ratio, log: () => {} }),
+      /above 0 and at most 1/,
+      `ratio ${ratio}`,
+    );
+  }
 });

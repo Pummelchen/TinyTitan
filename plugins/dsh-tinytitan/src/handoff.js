@@ -14,7 +14,12 @@
  *
  * So the trigger is a budget, judged when a turn opens, against the prompt
  * tokens the previous step reported. The objective moves on before the window
- * fills, and a child that reaches the same budget moves it again.
+ * fills, and a child that reaches the same budget moves it again. The budget
+ * follows the route: with `handoffAtTokens` unset it is `handoffWindowRatio`
+ * (half) of the context window the routed model declares — 131,072 on a 256K
+ * route, 524,288 on 1M — because "still has room" is a fraction of the route
+ * rather than a constant. An explicit `handoffAtTokens` pins one number, and a
+ * route whose window cannot be resolved falls back to 120,000.
  *
  * The budget is the normal path; the wall itself is the fallback. A single turn
  * can jump past the window (a huge tool result) and end on `max-tokens`, and the
@@ -99,15 +104,50 @@ export const DEFAULT_HANDOFF_HOPS = 3;
 export const DEFAULT_HANDOFF_MAX_CHILDREN = 8;
 
 /**
- * The prompt-token budget that starts a handoff.
+ * The fallback prompt-token budget, used only when the routed model's context
+ * window cannot be resolved.
  *
- * Below the harness's own compaction trigger (~62% of a 262,144-token window
- * with this plugin's preset), so the objective moves while there is still room.
- * Must be a positive integer: a zero budget hands off at the first turn, which
- * is how the unbounded chain was found, and is not a policy anyone wants by
- * accident.
+ * The normal default is derived from the window (see
+ * {@link DEFAULT_HANDOFF_WINDOW_RATIO}); this number is what a harness with no
+ * `llm` service, or an adapter that declines to report a window, gets instead.
+ * It is tuned for the 262,144-token route this project declares.
  */
 export const DEFAULT_HANDOFF_AT_TOKENS = 120000;
+
+/**
+ * The fraction of the routed model's context window that starts a handoff.
+ *
+ * The budget has to sit below the harness's compaction trigger (~62% of a
+ * 262,144-token window with this plugin's preset) or compaction continues the
+ * session in place and the handoff never fires. Half the window keeps a wide
+ * margin on both shapes this project uses:
+ *
+ * | declared window | auto budget | compaction trigger |
+ * | --------------- | ----------- | ------------------ |
+ * | 262,144 (256K)  | 131,072     | ~163,840           |
+ * | 1,048,576 (1M)  | 524,288     | ~838,860           |
+ *
+ * A window-aware default beats one number because the handoff only helps while
+ * the session still has room to finish the turn that is already in flight, and
+ * "room" is a fraction of the route, not a constant.
+ */
+export const DEFAULT_HANDOFF_WINDOW_RATIO = 0.5;
+
+/**
+ * The budget one context window implies.
+ *
+ * Pure so the arithmetic can be pinned without a harness. An unknown or
+ * nonsensical window falls back to {@link DEFAULT_HANDOFF_AT_TOKENS} rather than
+ * handing off at the first turn.
+ *
+ * @param options - `window` in tokens (may be absent), `ratio`, `fallback`.
+ * @returns a positive integer token budget.
+ */
+export function budgetForWindow({ window, ratio, fallback = DEFAULT_HANDOFF_AT_TOKENS } = {}) {
+  if (typeof window !== "number" || !Number.isFinite(window) || window <= 0) return fallback;
+  const scaled = Math.floor(window * ratio);
+  return Math.max(1, scaled);
+}
 
 /**
  * The user message a handoff child receives.
@@ -208,7 +248,16 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
   if (resolved?.handoff !== true) return { installed: false, reason: "disabled" };
   if (typeof ctx?.on !== "function") return { installed: false, reason: "no-context" };
   const hopBudget = resolved.handoffHops ?? DEFAULT_HANDOFF_HOPS;
-  const budget = resolved.handoffAtTokens ?? DEFAULT_HANDOFF_AT_TOKENS;
+  // `handoffAtTokens` pins one number; without it the budget follows the window
+  // the routed model declares.
+  const fixedBudget =
+    Number.isSafeInteger(resolved.handoffAtTokens) && resolved.handoffAtTokens > 0
+      ? resolved.handoffAtTokens
+      : null;
+  const windowRatio =
+    typeof resolved.handoffWindowRatio === "number" && resolved.handoffWindowRatio > 0
+      ? resolved.handoffWindowRatio
+      : DEFAULT_HANDOFF_WINDOW_RATIO;
   const childCap = resolved.handoffMaxChildren ?? DEFAULT_HANDOFF_MAX_CHILDREN;
 
   /** Hops already claimed per goal, and the goals currently starting one. */
@@ -239,6 +288,67 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
     }
 
     const describe = (error) => (error instanceof Error ? error.message : String(error));
+
+    /** Resolved context windows per route, routes in flight, routes announced. */
+    const windows = new Map();
+    const resolving = new Set();
+    const announced = new Set();
+
+    /** The route one agent uses, or `null` when it cannot be named. */
+    const routeOf = (agent) => {
+      const provider = agent?.options?.provider ?? resolved.provider;
+      const model = agent?.options?.model;
+      if (typeof provider !== "string" || provider.length === 0) return null;
+      if (typeof model !== "string" || model.length === 0) return null;
+      return { provider, model, key: `${provider}/${model}` };
+    };
+
+    /** Ask the adapter for one route's window; cache `null` when it declines. */
+    const resolveWindow = (route) => {
+      if (windows.has(route.key) || resolving.has(route.key)) return;
+      const llm = scoped.get?.("llm");
+      if (!llm || typeof llm.resolveModelInfo !== "function") {
+        windows.set(route.key, null);
+        return;
+      }
+      resolving.add(route.key);
+      void Promise.resolve()
+        .then(() => llm.resolveModelInfo(route.provider, route.model))
+        .then((info) => {
+          const window = info?.context?.contextWindow;
+          windows.set(route.key, typeof window === "number" && window > 0 ? window : null);
+        })
+        .catch(() => windows.set(route.key, null))
+        .finally(() => resolving.delete(route.key));
+    };
+
+    /**
+     * The prompt-token budget this agent's route implies.
+     *
+     * A route's first trigger may land before the adapter answered, so an
+     * unresolved window uses the fallback for that check and the derived number
+     * from the next one — the trigger is re-judged at every turn start.
+     */
+    const budgetFor = (agent) => {
+      if (fixedBudget !== null) return fixedBudget;
+      const route = routeOf(agent);
+      if (route === null) return DEFAULT_HANDOFF_AT_TOKENS;
+      if (!windows.has(route.key)) {
+        resolveWindow(route);
+        return DEFAULT_HANDOFF_AT_TOKENS;
+      }
+      const window = windows.get(route.key);
+      if (typeof window !== "number" || window <= 0) return DEFAULT_HANDOFF_AT_TOKENS;
+      const budget = budgetForWindow({ window, ratio: windowRatio });
+      if (!announced.has(route.key)) {
+        announced.add(route.key);
+        log(
+          `dsh-tinytitan: handoff budget for ${route.key} is ${budget} tokens ` +
+            `(${windowRatio} of its ${window}-token window)`,
+        );
+      }
+      return budget;
+    };
 
     /** Stop the handing-off session; the objective now lives in the child. */
     const stopParent = (agent) => {
@@ -360,10 +470,10 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
      * @param inputTokens - the prompt tokens its previous step reported.
      */
     const handoff = (sessionId, inputTokens) => {
-      if (!(inputTokens >= budget)) return;
       if (retired.has(sessionId)) return;
       const agent = agents.get(sessionId);
       if (!agent) return;
+      if (!(inputTokens >= budgetFor(agent))) return;
       const goal = goals.get(agent);
       // Only an actively continuing goal moves: a complete, paused, blocked or
       // disarmed one is a decision someone already made.
@@ -436,7 +546,7 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
       const agent = agents.get(session?.id);
       if (!agent || retired.has(agent.id)) return;
       const tokens = usage.get(session.id) ?? 0;
-      if (!(tokens >= budget)) return;
+      if (!(tokens >= budgetFor(agent))) return;
       const goal = goals.get(agent);
       if (!goal || goal.phase !== "active" || goal.activation === "armed") return;
       const blocked = blockReason(goal.id);
@@ -528,7 +638,8 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
     return {
       installed: true,
       hops: hopBudget,
-      atTokens: budget,
+      atTokens: fixedBudget,
+      windowRatio,
       maxChildren: childCap,
     };
   };
@@ -540,7 +651,8 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
         installed: true,
         deferred: true,
         hops: hopBudget,
-        atTokens: budget,
+        atTokens: fixedBudget,
+        windowRatio,
         maxChildren: childCap,
       };
     }

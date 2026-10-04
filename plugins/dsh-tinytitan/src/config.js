@@ -14,9 +14,9 @@ import { dirname, join, resolve } from "node:path";
 import { DEFAULT_AUTO_GOAL_ROUNDS } from "./keep-going.js";
 import { AUTONOMY_DEFAULT_ROUNDS } from "./preset.js";
 import {
-  DEFAULT_HANDOFF_AT_TOKENS,
   DEFAULT_HANDOFF_HOPS,
   DEFAULT_HANDOFF_MAX_CHILDREN,
+  DEFAULT_HANDOFF_WINDOW_RATIO,
 } from "./handoff.js";
 
 /** The checkout this plugin was authored in: `<repo>/plugins/dsh-tinytitan/src/config.js`. */
@@ -209,20 +209,39 @@ function resolveHandoffHops(value) {
 }
 
 /**
- * The prompt-token budget that starts a handoff.
+ * The prompt-token budget that starts a handoff, or `null` to derive it.
  *
- * Only read when `handoff` is on. The default sits below this plugin's
- * compaction trigger on a 262,144-token window, so the objective moves while
- * there is still room. `0` is refused on purpose: a zero budget hands off at the
- * first turn, which is how an unbounded chain was found once already.
+ * Only read when `handoff` is on. Unset means auto: `handoffWindowRatio` of the
+ * routed model's declared context window, so a 256K route moves on at 131,072
+ * and a 1M route at 524,288. An explicit positive integer pins one number.
+ * `0` is refused on purpose: a zero budget hands off at the first turn, which is
+ * how an unbounded chain was found once already.
  */
 function resolveHandoffAtTokens(value) {
-  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_AT_TOKENS;
+  if (value === undefined || value === null || value === "") return null;
   const tokens = Number(value);
   if (!Number.isSafeInteger(tokens) || tokens <= 0) {
     throw new Error(`dsh-tinytitan: handoffAtTokens must be a positive integer, got ${value}`);
   }
   return tokens;
+}
+
+/**
+ * The fraction of the routed model's context window the auto budget uses.
+ *
+ * Only read when `handoff` is on and `handoffAtTokens` is unset. It must stay
+ * below the compaction trigger (~0.62 of the window with this plugin's preset),
+ * or compaction continues the session in place instead.
+ */
+function resolveHandoffWindowRatio(value) {
+  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_WINDOW_RATIO;
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
+    throw new Error(
+      `dsh-tinytitan: handoffWindowRatio must be above 0 and at most 1, got ${value}`,
+    );
+  }
+  return ratio;
 }
 
 /**
@@ -320,7 +339,9 @@ export function resolveConfig(config = {}) {
     // fills. Off by default — it starts sessions on its own.
     handoff: config.handoff === true,
     handoffHops: resolveHandoffHops(config.handoffHops),
+    // null means auto: handoffWindowRatio of the routed model's context window.
     handoffAtTokens: resolveHandoffAtTokens(config.handoffAtTokens),
+    handoffWindowRatio: resolveHandoffWindowRatio(config.handoffWindowRatio),
     handoffMaxChildren: resolveHandoffMaxChildren(config.handoffMaxChildren),
     log: typeof config.log === "function" ? config.log : null,
   };

@@ -86,9 +86,11 @@ export {
   messageText,
 } from "./keep-going.js";
 export {
+  budgetForWindow,
   DEFAULT_HANDOFF_AT_TOKENS,
   DEFAULT_HANDOFF_HOPS,
   DEFAULT_HANDOFF_MAX_CHILDREN,
+  DEFAULT_HANDOFF_WINDOW_RATIO,
   HANDOFF_PROVIDER,
   handoffPrompt,
   installHandoff,

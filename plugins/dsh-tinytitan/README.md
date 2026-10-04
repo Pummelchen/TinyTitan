@@ -112,32 +112,33 @@ out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_REPO` /
 `TINYTITAN_SERVER` / `TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment
 fallbacks.
 
-| Field                       | Default                                                                 | Meaning                                                                                                                                                                                                                                                   |
-| --------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`                      | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
-| `provider`                  | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
-| `reasoning`                 | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
-| `presetId`                  | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
-| `registerRoute`             | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
-| `watchModels`               | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
-| `watchDebounceMs`           | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
-| `selfContained`             | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
-| `serverBinary`              | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
-| `modelsDir`                 | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
-| `writeCompactionPreset`     | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
-| `setDefaultWhenUnset`       | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
-| `compactionHeadroomTokens`  | unset (the harness's `65536`)                                           | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
-| `autoGoal`                  | `false`                                                                 | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                              |
-| `autoGoalRounds`            | `12`                                                                    | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                         |
-| `autonomy`                  | `false`                                                                 | the preset half of "work it until it is done": append the autonomy policy to the preset's `persona`, so the model chooses the best technical solution instead of asking, and enable the fresh-agent `ralph` loop — see below                              |
-| `autonomyRounds`            | `64`                                                                    | the `maxRounds` the enabled `ralph` row carries; the harness enforces its own ceiling on a call override                                                                                                                                                  |
-| `autonomySuppressQuestions` | `false`                                                                 | also remove the `ask_user_question` tool from the preset, so the model cannot ask. Off by default because plan mode's own instructions use that tool                                                                                                      |
-| `handoff`                   | `false`                                                                 | continue an unfinished objective in a fresh child context before the session's window fills, so a task survives its own context limit — see below                                                                                                         |
-| `handoffHops`               | `3`                                                                     | how many times one goal may be handed on before the chain stops and is left to a person                                                                                                                                                                   |
-| `handoffAtTokens`           | `120000`                                                                | the prompt-token count at which the next turn hands the objective on. Must be positive; the default sits below this preset's compaction trigger                                                                                                           |
-| `handoffMaxChildren`        | `8`                                                                     | how many handoff children may be alive at once in the process, ancestors included; has to sit above `handoffHops`                                                                                                                                         |
-| `repoRoot`                  | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
-| `dshHome`                   | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
+| Field                       | Default                                                                         | Meaning                                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`                      | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`                     | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
+| `provider`                  | `tinytitan`                                                                     | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
+| `reasoning`                 | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium`         | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
+| `presetId`                  | `tinytitan`                                                                     | the agent preset this plugin registers                                                                                                                                                                                                                    |
+| `registerRoute`             | `true`                                                                          | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
+| `watchModels`               | `true`                                                                          | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
+| `watchDebounceMs`           | `2000`                                                                          | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
+| `selfContained`             | `false`                                                                         | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
+| `serverBinary`              | discovered                                                                      | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
+| `modelsDir`                 | `<repoRoot>/models`                                                             | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
+| `writeCompactionPreset`     | `true`                                                                          | register the `tinytitan` preset                                                                                                                                                                                                                           |
+| `setDefaultWhenUnset`       | `true`                                                                          | select that preset only while the profile has selected none                                                                                                                                                                                               |
+| `compactionHeadroomTokens`  | unset (the harness's `65536`)                                                   | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
+| `autoGoal`                  | `false`                                                                         | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                              |
+| `autoGoalRounds`            | `12`                                                                            | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                         |
+| `autonomy`                  | `false`                                                                         | the preset half of "work it until it is done": append the autonomy policy to the preset's `persona`, so the model chooses the best technical solution instead of asking, and enable the fresh-agent `ralph` loop — see below                              |
+| `autonomyRounds`            | `64`                                                                            | the `maxRounds` the enabled `ralph` row carries; the harness enforces its own ceiling on a call override                                                                                                                                                  |
+| `autonomySuppressQuestions` | `false`                                                                         | also remove the `ask_user_question` tool from the preset, so the model cannot ask. Off by default because plan mode's own instructions use that tool                                                                                                      |
+| `handoff`                   | `false`                                                                         | continue an unfinished objective in a fresh child context before the session's window fills, so a task survives its own context limit — see below                                                                                                         |
+| `handoffHops`               | `3`                                                                             | how many times one goal may be handed on before the chain stops and is left to a person                                                                                                                                                                   |
+| `handoffAtTokens`           | unset (auto: half the routed model's window — `131072` on 256K, `524288` on 1M) | the prompt-token count at which the next turn hands the objective on. A positive integer pins one number; unset follows the context window the LLM route declares, which is what keeps the hop below compaction on every window size                      |
+| `handoffWindowRatio`        | `0.5`                                                                           | the fraction of that window the auto budget uses. Above ~0.62 compaction continues the session in place instead, so the handoff may never fire                                                                                                            |
+| `handoffMaxChildren`        | `8`                                                                             | how many handoff children may be alive at once in the process, ancestors included; has to sit above `handoffHops`                                                                                                                                         |
+| `repoRoot`                  | this checkout                                                                   | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
+| `dshHome`                   | `$DSH_HOME` or `~/.dsh`                                                         | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
 The built-in generator looks for the server at `serverBinary`, then
 `TINYTITAN_SERVER`, then `TinyTitanServer` on `PATH`, then the checkout's
@@ -287,8 +288,8 @@ harness does not do by itself.
 
 At the start of a turn — the one moment a plugin may start a subagent, because
 the turn's agent loop is active — the driver looks at the previous step's prompt
-tokens. If they reached `handoffAtTokens` and the session's goal is active and
-armed, one **hop** happens:
+tokens. If they reached the budget and the session's goal is active and armed,
+one **hop** happens:
 
 1. a `fork` subagent is started: a real child session, seeded from this one's
    completed turns, handed a prompt that leads with the objective verbatim and
@@ -302,6 +303,15 @@ armed, one **hop** happens:
    first — when it is idle and no longer continuing. Disposing a parent disposes
    its subagent children, so a chain unwinds from its end.
 
+**Where the budget comes from.** Unset, it is half of the context window the
+routed model declares — `131072` on a 256K route, `524288` on 1M — because "still
+has room" is a fraction of the route, not a constant. That keeps the hop below
+the harness's compaction trigger on both shapes this project uses (≈163,840 on
+256K, ≈838,860 on 1M), and a route whose window the adapter cannot report falls
+back to `120000`. Set `handoffAtTokens` to pin one number, or move
+`handoffWindowRatio` (e.g. `0.75` for fewer, later hops); above ~0.62 compaction
+acts first and the handoff mostly only fires on the `max-tokens` wall.
+
 The budget is the normal path, and the session's own token limit is the fallback.
 One turn can jump straight past the window and end on `max-tokens`; the round
 driver disarms the goal for that event, which would leave no next turn to hand
@@ -314,10 +324,11 @@ loop on the wall.
 Two honest limits. **The successor is a child session, not a successor root
 session**: it has its own log and context and keeps working autonomously through
 the same goal driver, but it is not a chat you steer. And **nothing here is
-unbounded**: `handoffHops` caps one goal's chain, `handoffAtTokens` must be
-positive (a zero budget hands off at the very first turn), `handoffMaxChildren`
-caps the process, every hop is released when it stops, and a goal the model
-blocked is never handed on.
+unbounded**: `handoffHops` caps one goal's chain, an explicit `handoffAtTokens`
+must be positive and `handoffWindowRatio` must be above 0 and at most 1 (a zero
+budget would hand off at the very first turn), `handoffMaxChildren` caps the
+process, every hop is released when it stops, and a goal the model blocked is
+never handed on.
 
 ```yaml
 - id: dsh-tinytitan
@@ -325,14 +336,15 @@ blocked is never handed on.
     autoGoal: true
     handoff: true
     handoffHops: 3
-    handoffAtTokens: 120000
+    # unset follows the route: 131072 on a 256K window, 524288 on 1M
+    handoffWindowRatio: 0.5
 ```
 
 **How it is checked.** `test/handoff.test.js` pins the driver without a harness
-or a model — 25 cases covering the budget (including cached input), the trigger
-conditions, the hop counter's fork-bomb regression, the in-flight guard, the
-refund of a refused start, the process cap, the release rules, and the wall
-recovery's three bounds. The live behaviour was verified on DSH 0.2.0-rc.2
+or a model — 29 cases covering the budget (including cached input and the
+window-aware default), the trigger conditions, the hop counter's fork-bomb
+regression, the in-flight guard, the refund of a refused start, the process cap,
+the release rules, and the wall recovery's three bounds. The live behaviour was verified on DSH 0.2.0-rc.2
 against a local Qwen 3.5 4B in a scratch home, driven from inside the booted
 profile — `dsh headless` cannot show this, because it exits as soon as its one
 agent is idle and that kills a handoff child mid-turn:
