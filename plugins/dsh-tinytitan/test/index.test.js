@@ -14,6 +14,7 @@
  * the filesystem, a socket, or a harness.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { apply, PRESET_SETTINGS_NS, routeRefresher, SUPPORTED_DSH_VERSION } from "../src/index.js";
@@ -246,4 +247,26 @@ test("an explicit selection survives a boot", async () => {
     lines.some((line) => line.includes("default agent preset")),
     false,
   );
+});
+
+test("the shipped bundle patch starts nothing on its own", () => {
+  // Installing the bundle must not create goals, run the ralph loop, or start a
+  // child session: each of those changes what every prompt in the profile means,
+  // so a person opts in per profile. The patch is read as text (no yaml
+  // dependency) and both halves are pinned — none of the three is on, and the
+  // handoff switch the docs call off is written out as off.
+  const patch = readFileSync(new URL("../cordis.patch.yml", import.meta.url), "utf8");
+  for (const field of ["autoGoal", "autonomy", "handoff"]) {
+    assert.ok(
+      !new RegExp(`^\\s*${field}:\\s*true\\s*$`, "m").test(patch),
+      `${field} must not be on in the shipped patch`,
+    );
+  }
+  for (const field of ["autoGoal", "autonomy", "handoff"]) {
+    assert.match(
+      patch,
+      new RegExp(`^\\s*${field}: false\\s*$`, "m"),
+      `${field} written out as off`,
+    );
+  }
 });

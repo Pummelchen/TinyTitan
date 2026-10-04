@@ -112,6 +112,12 @@ out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_REPO` /
 `TINYTITAN_SERVER` / `TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment
 fallbacks.
 
+The three switches that start work nobody asked for — `autoGoal` (a goal from
+every prompt), `autonomy` (the fresh-agent `ralph` loop) and `handoff` (a child
+session when the window's budget is spent) — are written out as `false` in that
+row. Each one changes what every prompt in a profile means, so a profile opts in
+by naming the field with `true`; installing the bundle never does it for you.
+
 | Field                       | Default                                                                                                                                         | Meaning                                                                                                                                                                                                                                                                                                                 |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `port`                      | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`                                                                                     | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                                                                                             |

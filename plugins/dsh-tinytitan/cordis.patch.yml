@@ -29,3 +29,10 @@
         # its own; an explicit choice on the Agent presets page is never
         # overwritten.
         setDefaultWhenUnset: true
+        # The three switches that start work nobody asked for — a goal from every
+        # prompt, the fresh-agent ralph loop, and a child session when the window
+        # fills — are written out as off. A profile opts in by listing the field
+        # it wants with `true`; the shipped bundle never does it for them.
+        autoGoal: false
+        autonomy: false
+        handoff: false
