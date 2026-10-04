@@ -28,10 +28,13 @@
 > with `--verify-install` if the folder moves again. **Verification uses only the
 > installs already under `models/`** — never download, convert, repack or re-install
 > a model to make a gate pass, and never fetch one of the installs the operator
-> deleted. The one open task is **TT-038, an embeddable engine**:
-> `docs/plan-embedded-library.md` is the plan, its dependency premise has been
-> measured and corrected, and it waits on §9.3/§9.5 (where the facade lives and
-> what it is called) before P1 starts. Report measurements, not assurances.
+> deleted. The open row is **TT-048, a fresh KAT-Coder install** (the embeddable
+> engine closed on 2026-10-02; the facade shipped as `TinyTitanLib`): a converter
+> guard keyed the per-expert duplicate check on the tensor name instead of name +
+> width, so `tools/install_models.sh katcoder [both]` died on the first routed
+> expert (issue #19). `025dacb` keys it correctly and the failure point is
+> verified on the real checkpoint; the full install and §4 verification are what
+> remains. Report measurements, not assurances.
 
 This is the only current brief; the 5.12 handover it replaces is superseded. The
 traps that one named still bite and are folded in below.
@@ -209,18 +212,22 @@ traps that one named still bite and are folded in below.
 ## What is open
 
 The [Project Tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker)
-is the authority. It holds one row, Blocked on the maintainer:
+is the authority. On 2026-10-04 it holds one Open row:
 
-1. **TT-038 — an embeddable engine.** `docs/plan-embedded-library.md` is the
-   design record for letting another Swift program use TinyTitan as its LLM
-   engine instead of shelling out to `TinyTitanCLI` or speaking HTTP to the
-   server. The plan's opening premise was measured on 2026-10-02 and the old
-   belief that `.unsafeFlags` makes the package unconsumable is **false**: a
-   consumer package resolves, builds, links and opens an install against the
-   released tag, and `examples/embedded` plus `tools/embedded-dependency-check.sh`
-   keep that check running in CI. The row waits on a decision rather than on work
-   — §9.3 (a separate package or a product of this one) and §9.5 (the name) —
-   after which P1, the `TinyTitanLib` facade, is the first real task.
+1. **TT-048 — re-verify a fresh KAT-Coder-V2.5-Dev install.** Issue #19: the
+   converter's per-expert duplicate guard was keyed on the source tensor name
+   alone, while `convert_shard` adds one tensor once per requested width and
+   `install_models.sh` always converts this family with `--bits 4 8`, so every
+   fresh `katcoder` install stopped at the first routed expert with
+   `duplicate source tensor …`. Fixed in `025dacb` (guard keyed by
+   `(width, name)`), along with two shutdown defects the verification exposed
+   (`14cc6e7`, `f1c70b7`). Verified on the real checkpoint: shard
+   `model-00000`'s 2,075 per-expert routed tensors convert at both widths and
+   write fused `switch_mlp.*` stacks with a 256-expert axis. What remains is the
+   rest of the 13-shard fetch, both repacks, and the `docs/adding-a-model.md` §4
+   checklist before the model is called supported again; the installs already
+   under `models/` are unaffected. TT-038 (an embeddable engine) closed on
+   2026-10-02 — the facade shipped as `TinyTitanLib`.
 2. **Carried forward, not tracked as tasks:** the Qwen 3.8 port items — QSA
    indexer selections to the GPU, a higher expert slot budget, the n-gram gather a
    token ahead. TT-021–TT-023 were closed on 2026-09-19 (no other machines; no disk
