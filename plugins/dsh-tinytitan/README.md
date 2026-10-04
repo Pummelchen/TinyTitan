@@ -112,25 +112,28 @@ out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_REPO` /
 `TINYTITAN_SERVER` / `TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment
 fallbacks.
 
-| Field                      | Default                                                                 | Meaning                                                                                                                                                                                                                                                   |
-| -------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`                     | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
-| `provider`                 | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
-| `reasoning`                | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
-| `presetId`                 | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
-| `registerRoute`            | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
-| `watchModels`              | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
-| `watchDebounceMs`          | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
-| `selfContained`            | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
-| `serverBinary`             | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
-| `modelsDir`                | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
-| `writeCompactionPreset`    | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
-| `setDefaultWhenUnset`      | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
-| `compactionHeadroomTokens` | unset (the harness's `65536`)                                           | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
-| `autoGoal`                 | `false`                                                                 | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                              |
-| `autoGoalRounds`           | `12`                                                                    | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                         |
-| `repoRoot`                 | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
-| `dshHome`                  | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
+| Field                       | Default                                                                 | Meaning                                                                                                                                                                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`                      | resolved: `config.port`, else `TINYTITAN_PORT`, else `8080`             | the port the TinyTitan server serves on. Nothing in this bundle pins it, so the environment can point the route at a server on another port                                                                                                               |
+| `provider`                  | `tinytitan`                                                             | the `llm-pi-ai` provider route name                                                                                                                                                                                                                       |
+| `reasoning`                 | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium` | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer |
+| `presetId`                  | `tinytitan`                                                             | the agent preset this plugin registers                                                                                                                                                                                                                    |
+| `registerRoute`             | `true`                                                                  | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                         |
+| `watchModels`               | `true`                                                                  | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                 |
+| `watchDebounceMs`           | `2000`                                                                  | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                               |
+| `selfContained`             | `false`                                                                 | use the built-in generator even where `tools/dsh_route.sh` exists                                                                                                                                                                                         |
+| `serverBinary`              | discovered                                                              | the `TinyTitanServer` the built-in generator runs (`$TINYTITAN_SERVER`)                                                                                                                                                                                   |
+| `modelsDir`                 | `<repoRoot>/models`                                                     | the installs it describes (`$TINYTITAN_MODELS_DIR`)                                                                                                                                                                                                       |
+| `writeCompactionPreset`     | `true`                                                                  | register the `tinytitan` preset                                                                                                                                                                                                                           |
+| `setDefaultWhenUnset`       | `true`                                                                  | select that preset only while the profile has selected none                                                                                                                                                                                               |
+| `compactionHeadroomTokens`  | unset (the harness's `65536`)                                           | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                      |
+| `autoGoal`                  | `false`                                                                 | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                              |
+| `autoGoalRounds`            | `12`                                                                    | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                         |
+| `autonomy`                  | `false`                                                                 | the preset half of "work it until it is done": append the autonomy policy to the preset's `persona`, so the model chooses the best technical solution instead of asking, and enable the fresh-agent `ralph` loop — see below                              |
+| `autonomyRounds`            | `64`                                                                    | the `maxRounds` the enabled `ralph` row carries; the harness enforces its own ceiling on a call override                                                                                                                                                  |
+| `autonomySuppressQuestions` | `false`                                                                 | also remove the `ask_user_question` tool from the preset, so the model cannot ask. Off by default because plan mode's own instructions use that tool                                                                                                      |
+| `repoRoot`                  | this checkout                                                           | where `tools/dsh_route.sh` lives                                                                                                                                                                                                                          |
+| `dshHome`                   | `$DSH_HOME` or `~/.dsh`                                                 | the harness home, for the built-in generator's file fallback                                                                                                                                                                                              |
 
 The built-in generator looks for the server at `serverBinary`, then
 `TINYTITAN_SERVER`, then `TinyTitanServer` on `PATH`, then the checkout's
@@ -233,6 +236,43 @@ one invocation):
 Not exercised live: the round-limit block, because the model completed in round 1
 both times. The configured cap does reach the goal — the create event carries it
 — and the blocking policy belongs to `dsh-goal-round-driver`, not to this plugin.
+
+### Autonomy: work it until it is done
+
+`autoGoal` keeps a session working; it cannot stop a model from politely stopping
+to ask. `autonomy: true` is the preset half of that policy, and it changes three
+things in the generated `tinytitan` preset:
+
+- the `persona` row gains the autonomy policy — never ask what you can decide,
+  choose the best technical solution and state it as an assumption, keep going,
+  and treat "done" as the tests and gates passing with the evidence shown, with
+  the workspace rather than the conversation as the authority;
+- the shipped `tool-ralph` row, **disabled by default**, is enabled with
+  `maxRounds: autonomyRounds`. Ralph is the harness's fresh-agent loop: each
+  round is a new child agent that sees only the immutable objective, its round
+  and cap, the shared-workspace-as-authority instruction, and the previous
+  round's bounded structured report. That is what carries a task past a session's
+  context limit — the work moves to a fresh context instead of dying with the old
+  one;
+- with `autonomySuppressQuestions: true` the `ask_user_question` tool is removed
+  from the preset, so asking becomes impossible rather than discouraged. It is
+  off by default because the shipped plan-mode instructions use that tool for
+  user-owned choices, and a session that needs plan mode wants it kept.
+
+Two honest limits. **Ralph's rounds are child sessions, not successor root
+sessions**: the session you are looking at stays the one you are in, and the
+recap across rounds is the bounded report plus the workspace, not your
+conversation. And **none of this is unbounded**: ralph stops at `maxRounds`, an
+auto-goal stops at `autoGoalRounds`, a `max-tokens` turn still disarms a goal,
+and provider errors, quota and disk remain real ceilings.
+
+```yaml
+- id: dsh-tinytitan
+  config:
+    autoGoal: true
+    autonomy: true
+    autonomyRounds: 64
+```
 
 ## What it does not do
 

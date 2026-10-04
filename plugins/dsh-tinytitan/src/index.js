@@ -215,6 +215,9 @@ export function apply(ctx, config = {}, deps = {}) {
       void preset(scoped, {
         presetId: resolved.presetId,
         headroomTokens: resolved.compactionHeadroomTokens,
+        autonomy: resolved.autonomy,
+        autonomyRounds: resolved.autonomyRounds,
+        autonomySuppressQuestions: resolved.autonomySuppressQuestions,
         log,
       })
         .then((registered) => {

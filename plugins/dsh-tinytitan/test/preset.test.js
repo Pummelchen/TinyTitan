@@ -12,6 +12,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  AUTONOMY_INSTRUCTIONS,
   buildTinytitanPlugins,
   CHAT_NOISE_ROWS,
   COMPACTION_BACKEND,
@@ -26,7 +27,11 @@ const STANDARD_PATCH = fileURLToPath(new URL("./fixtures/standard-patch.yml", im
 /** A minimal standard list, mirroring the shipped shape. */
 function standardList() {
   return [
-    { id: "persona", name: "@deepseek-ai/dsh-persona" },
+    {
+      id: "persona",
+      name: "@deepseek-ai/dsh-persona",
+      config: { suffix: "Your working directory is {{cwd}}." },
+    },
     { id: "agent-instructions", name: "@deepseek-ai/dsh-agent-instructions" },
     { id: "tool-bash", name: "@deepseek-ai/dsh-tool-bash", disabled: { __jsExpr: "x" } },
     {
@@ -38,6 +43,21 @@ function standardList() {
         { id: "command-compact", name: "@deepseek-ai/dsh-command-compact" },
       ],
     },
+    {
+      id: "delegation",
+      name: "cordis:group",
+      group: true,
+      config: [
+        { id: "tool-subagent", name: "@deepseek-ai/dsh-tool-subagent" },
+        {
+          id: "tool-ralph",
+          name: "@deepseek-ai/dsh-tool-ralph",
+          disabled: true,
+          config: { subagentProvider: "spawn", maxRounds: 64 },
+        },
+      ],
+    },
+    { id: "tool-ask-user", name: "@deepseek-ai/dsh-tool-ask-user" },
     { id: "skill-filesystem", name: "@deepseek-ai/dsh-skill-filesystem" },
     { id: "tool-skill", name: "@deepseek-ai/dsh-tool-skill" },
   ];
@@ -99,6 +119,69 @@ test("the input list is not mutated", () => {
 
 test("a non-array plugins argument is rejected, not silently ignored", () => {
   assert.throws(() => buildTinytitanPlugins({}), /plugins array/);
+});
+
+/** Depth-first lookup by row id, the way the transform walks the list. */
+function findRow(rows, id) {
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    if (row.id === id) return row;
+    if (Array.isArray(row.config)) {
+      const nested = findRow(row.config, id);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+test("autonomy writes the policy and enables the fresh-agent loop", () => {
+  const built = buildTinytitanPlugins({
+    plugins: standardList(),
+    autonomy: true,
+    autonomyRounds: 25,
+  });
+  const persona = findRow(built, "persona");
+  assert.match(persona.config.suffix, /\{\{cwd\}\}/, "the shipped template survives");
+  assert.ok(
+    persona.config.suffix.includes(AUTONOMY_INSTRUCTIONS),
+    "the policy is appended to the persona",
+  );
+  const ralph = findRow(built, "tool-ralph");
+  assert.equal(ralph.disabled, false, "the loop ships disabled; autonomy is the opt-in");
+  assert.equal(ralph.config.maxRounds, 25, "the configured budget reaches the row");
+  assert.equal(ralph.config.subagentProvider, "spawn", "the provider selection is preserved");
+  assert.ok(findRow(built, "tool-ask-user"), "the question tool stays unless removal is asked for");
+});
+
+test("questions are removed only when that is asked for, and only with autonomy", () => {
+  const kept = buildTinytitanPlugins({ plugins: standardList(), autonomy: true });
+  assert.ok(findRow(kept, "tool-ask-user"));
+
+  const removed = buildTinytitanPlugins({
+    plugins: standardList(),
+    autonomy: true,
+    autonomySuppressQuestions: true,
+  });
+  assert.equal(findRow(removed, "tool-ask-user"), null);
+
+  const flaggedButOff = buildTinytitanPlugins({
+    plugins: standardList(),
+    autonomy: false,
+    autonomySuppressQuestions: true,
+  });
+  assert.ok(findRow(flaggedButOff, "tool-ask-user"), "the flag is scoped to autonomy");
+});
+
+test("autonomy off leaves the policy rows exactly as shipped", () => {
+  const built = buildTinytitanPlugins({ plugins: standardList() });
+  assert.equal(
+    findRow(built, "persona").config.suffix,
+    "Your working directory is {{cwd}}.",
+    "no policy text without the switch",
+  );
+  const ralph = findRow(built, "tool-ralph");
+  assert.equal(ralph.disabled, true);
+  assert.equal(ralph.config.maxRounds, 64, "the shipped budget is untouched");
 });
 
 test("standardPlugins reads the preset-standard declaration", async (t) => {

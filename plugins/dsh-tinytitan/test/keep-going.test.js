@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { resolveConfig } from "../src/config.js";
+import { AUTONOMY_DEFAULT_ROUNDS } from "../src/preset.js";
 import {
   DEFAULT_AUTO_GOAL_ROUNDS,
   GOALS_SERVICE,
@@ -206,4 +207,27 @@ test("resolveConfig defaults the switch off and validates the cap", () => {
   assert.throws(() => resolveConfig({ autoGoalRounds: 0, log: () => {} }), /positive integer/);
   assert.throws(() => resolveConfig({ autoGoalRounds: -3, log: () => {} }), /positive integer/);
   assert.throws(() => resolveConfig({ autoGoalRounds: "many", log: () => {} }), /positive integer/);
+});
+
+test("resolveConfig carries the autonomy switches and validates their budget", () => {
+  const base = resolveConfig({ log: () => {} });
+  assert.equal(base.autonomy, false);
+  assert.equal(base.autonomyRounds, AUTONOMY_DEFAULT_ROUNDS);
+  assert.equal(base.autonomySuppressQuestions, false);
+  const on = resolveConfig({
+    autonomy: true,
+    autonomyRounds: 30,
+    autonomySuppressQuestions: true,
+    log: () => {},
+  });
+  assert.equal(on.autonomy, true);
+  assert.equal(on.autonomyRounds, 30);
+  assert.equal(on.autonomySuppressQuestions, true);
+  assert.equal(resolveConfig({ autonomy: "true", log: () => {} }).autonomy, false);
+  assert.equal(
+    resolveConfig({ autonomySuppressQuestions: "yes", log: () => {} }).autonomySuppressQuestions,
+    false,
+  );
+  assert.throws(() => resolveConfig({ autonomyRounds: 0, log: () => {} }), /positive integer/);
+  assert.throws(() => resolveConfig({ autonomyRounds: "lots", log: () => {} }), /positive integer/);
 });

@@ -45,6 +45,32 @@ export const PRESET_SETTINGS_NS = "agent-preset-registry";
  */
 export const CHAT_NOISE_ROWS = ["agent-instructions", "skill-filesystem", "tool-skill"];
 
+/**
+ * Rounds a `ralph` run may take when autonomy enables the loop.
+ *
+ * The shipped row is disabled and carries 64; the harness enforces its own
+ * ceiling on a call override, so this is only the default this preset writes.
+ */
+export const AUTONOMY_DEFAULT_ROUNDS = 64;
+
+/**
+ * The prompt policy autonomy appends to the preset's `persona` row.
+ *
+ * It exists because the two halves of "keep going" are in different places: the
+ * goal driver (and `ralph`) supply the *continuation*, while nothing in the
+ * harness can stop a model from politely stopping to ask. This text is the
+ * policy half. It is written to be read by the model, not by a person, so it
+ * states the failure modes it is preventing rather than describing a feature.
+ */
+export const AUTONOMY_INSTRUCTIONS = [
+  "Autonomy: you are working toward one objective, and the person wants it finished rather than discussed.",
+  "- Do not ask questions you can answer yourself, and do not wait for a decision you can make. Choose the best technical solution, state it as an explicit assumption, and continue. The only things worth stopping for are a missing credential, spending the person's money, or destroying data they did not ask you to touch.",
+  '- Keep going until the work is solved, tested and verified. "Done" means the change is in place, the relevant tests and gates pass, and you have shown the evidence: the command, its output and its exit status. Never report success without evidence, and never stop at a plan when the objective asks for the change.',
+  "- The workspace is the authority. Re-read the code and the task state instead of trusting this conversation.",
+  "- If you are genuinely blocked, say exactly what is blocked, what you already tried, and what a person would have to do. That is the only reason to stop.",
+  "- When the work will not fit in one session, call the `ralph` tool with the objective and a round budget: it runs fresh-agent rounds against the immutable objective, with the shared workspace as the memory between them.",
+].join("\n");
+
 /** The shipped standard composition, as a patch file rather than a preset file. */
 const STANDARD_PRESET = "@deepseek-ai/dsh-web-app/presets/standard.patch.yml";
 
@@ -113,11 +139,20 @@ export function buildTinytitanPlugins({
   maxTokens = 32768,
   headroomTokens = null,
   backend = COMPACTION_BACKEND,
+  autonomy = false,
+  autonomyRounds = AUTONOMY_DEFAULT_ROUNDS,
+  autonomySuppressQuestions = false,
 } = {}) {
   if (!Array.isArray(plugins)) {
     throw new TypeError("dsh-tinytitan: buildTinytitanPlugins needs a plugins array");
   }
   const drop = new Set(CHAT_NOISE_ROWS);
+  // Autonomy instructs the model not to ask; removing the tool makes it
+  // impossible instead of discouraged. That is a bigger hammer than it looks:
+  // the shipped plan-mode instructions tell the model to use
+  // `ask_user_question` for user-owned choices, so a session that needs plan
+  // mode should keep the row and rely on the policy text alone.
+  if (autonomy && autonomySuppressQuestions) drop.add("tool-ask-user");
   const walk = (rows) =>
     rows.flatMap((row) => {
       if (row === null || typeof row !== "object") return [row];
@@ -126,6 +161,18 @@ export function buildTinytitanPlugins({
         const config = { ...(row.config ?? {}), maxTokens };
         if (headroomTokens !== null) config.headroomTokens = headroomTokens;
         return [{ ...row, name: backend, config }];
+      }
+      if (autonomy && row.id === "persona") {
+        const config = { ...(row.config ?? {}) };
+        config.suffix = [config.suffix, AUTONOMY_INSTRUCTIONS].filter(Boolean).join("\n\n");
+        return [{ ...row, config }];
+      }
+      // `ralph` ships disabled: a fresh-agent loop is not what most sessions
+      // want. Autonomy is the profile saying that this one does.
+      if (autonomy && row.id === "tool-ralph") {
+        return [
+          { ...row, disabled: false, config: { ...(row.config ?? {}), maxRounds: autonomyRounds } },
+        ];
       }
       if (row.group === true && Array.isArray(row.config)) {
         return [{ ...row, config: walk(row.config) }];
@@ -161,6 +208,9 @@ export async function registerTinytitanPreset(
     maxTokens = 32768,
     headroomTokens = null,
     backend = COMPACTION_BACKEND,
+    autonomy = false,
+    autonomyRounds = AUTONOMY_DEFAULT_ROUNDS,
+    autonomySuppressQuestions = false,
     plugins,
     log = () => {},
   } = {},
@@ -176,6 +226,9 @@ export async function registerTinytitanPreset(
       maxTokens,
       headroomTokens,
       backend,
+      autonomy,
+      autonomyRounds,
+      autonomySuppressQuestions,
     });
     const disposer = await registry.register({
       id: presetId,

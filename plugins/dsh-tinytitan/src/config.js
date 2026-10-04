@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DEFAULT_AUTO_GOAL_ROUNDS } from "./keep-going.js";
+import { AUTONOMY_DEFAULT_ROUNDS } from "./preset.js";
 
 /** The checkout this plugin was authored in: `<repo>/plugins/dsh-tinytitan/src/config.js`. */
 export const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -170,6 +171,23 @@ function resolveAutoGoalRounds(value) {
 }
 
 /**
+ * Rounds one `ralph` run may take, when autonomy enables the loop.
+ *
+ * Only read when `autonomy` is on. The harness enforces its own ceiling on a
+ * call override, so this is a policy default rather than a hard stop; a positive
+ * integer is still required, because "keep going" without a number is not a
+ * budget anyone can reason about.
+ */
+function resolveAutonomyRounds(value) {
+  if (value === undefined || value === null || value === "") return AUTONOMY_DEFAULT_ROUNDS;
+  const rounds = Number(value);
+  if (!Number.isSafeInteger(rounds) || rounds <= 0) {
+    throw new Error(`dsh-tinytitan: autonomyRounds must be a positive integer, got ${value}`);
+  }
+  return rounds;
+}
+
+/**
  * Resolve the plugin config.
  * @param config - the raw row config.
  * @returns the resolved config, with every field a value.
@@ -236,6 +254,13 @@ export function resolveConfig(config = {}) {
     // choice an operator makes once for a profile rather than a default.
     autoGoal: config.autoGoal === true,
     autoGoalRounds: resolveAutoGoalRounds(config.autoGoalRounds),
+    // Autonomy is the preset half of "work it until it is done": the policy text
+    // that stops the model asking, the fresh-agent `ralph` loop, and optionally
+    // the removal of the question tool. Off by default, because it changes what
+    // every prompt in the profile means.
+    autonomy: config.autonomy === true,
+    autonomyRounds: resolveAutonomyRounds(config.autonomyRounds),
+    autonomySuppressQuestions: config.autonomySuppressQuestions === true,
     log: typeof config.log === "function" ? config.log : null,
   };
 }
