@@ -2,9 +2,12 @@
 
 Two features, one subsystem. The **guard** is a store rule and needs no
 model. The **shadow** is a small resident model that proposes facts and
-checks replies. They ship separately, both off by default, and the guard
-does not depend on the shadow — which matters, because the guard is the part
-the measurements already justify.
+checks replies. They ship separately, and the guard does not depend on the
+shadow — which matters, because the guard is the part the measurements
+already justify. The defaults have moved since this plan was written: the
+guard now ships **on** wherever memory is on (`TINYTITAN_MEMORY_GUARD=0`
+turns it off, see Configuration), while the reply-checking half of the shadow
+is still unwired.
 
 Companion plan: `plan-watchdogs.md`. That work is independent and shares
 nothing but the release.
@@ -139,11 +142,14 @@ still marks disputed, the guard additionally refuses the supersession.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TINYTITAN_MEMORY_GUARD` | `0` | `1` enables the precedence rule |
+| `TINYTITAN_MEMORY_GUARD` | `1` | `0` turns the precedence rule off |
 
-Off by default. With it off, `ServerMemory` still asks for and stores the
-`source` flag — provenance is free to record and worth having in the journal
-before the rule that uses it is trusted. The startup line gains `guard=on|off`.
+On by default, which is a change from this plan's original stance: it stayed
+off until the `source` field was measured — under 5% mislabelled and no
+mislabel at all on an invented fact — and it is now the shipped default
+(`docs/agent-memory.md`, "The guard"). `ServerMemory` asks for and stores the
+`source` flag either way, because provenance is free to record and worth
+having in the journal. The startup line carries `guard=on|off`.
 
 ## Tests
 

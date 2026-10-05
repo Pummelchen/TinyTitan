@@ -105,7 +105,7 @@ memory may be stale and worth verifying. It lists bootstrap keys with
 one-line summaries, never their full values: the bootstrap says what exists,
 and the text is a tool call away.
 
-The bootstrap is bounded twice, by record count and by bytes — forty records
+The bootstrap is bounded twice, by record count and by bytes — sixty records
 and 16 KiB by default, each value summarised to 200 characters, ties going to
 the older fact so a foundation outranks last session's state. Twenty was too
 few: a novel's bible plus its running state passed thirty keys by the fourth
