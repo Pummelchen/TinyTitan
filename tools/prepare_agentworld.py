@@ -47,6 +47,12 @@ from functools import lru_cache
 from pathlib import Path
 from queue import Full, Queue
 
+# The progress line lives beside the shell helpers, not in this file, because
+# prepare_qwen38.py draws the identical line: a whole install has to read as one
+# story, and two renderers would drift.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from progress import Progress  # noqa: E402
+
 try:
     import ml_dtypes
     import numpy as np
@@ -568,7 +574,7 @@ def resolve_url(shard: str) -> str:
     return locations[-1] if locations else f"{BASE}/{shard}"
 
 
-def download(shard: str, work: Path) -> Path:
+def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
     """Fetch one shard in verified chunks, continuing a partial file.
 
     The host cannot deliver 5.3 GB in one connection: it truncates the response
@@ -583,7 +589,19 @@ def download(shard: str, work: Path) -> Path:
     dangerous case -- appending a fresh copy to a truncated prefix -- produces a
     file whose size is not the header's, so it is rejected instead of being
     decoded into silently wrong weights.
+
+    `progress` is the caller's line for the whole stage: this function reports
+    the bytes it lands into it, and routes its own resume and retry messages
+    through it so a message never lands in the middle of the bar. Without one it
+    prints exactly what it always did, which is what `--plan` and the tests see.
     """
+
+    def tell(text: str) -> None:
+        if progress is not None:
+            progress.note(text)
+        else:
+            print(text, flush=True)
+
     if _stopping.is_set():
         # Do not start (or resume) a shard during a shutdown: the caller has
         # gone, and the bytes would be fetched for nobody.
@@ -594,15 +612,13 @@ def download(shard: str, work: Path) -> Path:
     have = dest.stat().st_size if dest.exists() else 0
     if have > expected:
         # Longer than the shard can be: a previous run appended wrongly.
-        print(f"    {shard}: {have} bytes exceeds {expected}, discarding", flush=True)
+        tell(f"    {shard}: {have} bytes exceeds {expected}, discarding")
         dest.unlink()
         have = 0
     if have == expected:
         return dest
     if have:
-        print(
-            f"    {shard}: resuming at {have / 1e9:.2f} GB of {expected / 1e9:.2f} GB", flush=True
-        )
+        tell(f"    {shard}: resuming at {have / 1e9:.2f} GB of {expected / 1e9:.2f} GB")
     mode = "ab" if have else "wb"
     with open(dest, mode) as out:
         done = have
@@ -650,10 +666,9 @@ def download(shard: str, work: Path) -> Path:
                 if code == 0 and got == want:
                     break
                 wait = min(15 * attempt, 120)
-                print(
+                tell(
                     f"    {shard} @{done}: chunk {got}/{want} bytes (curl {code}, "
-                    f"attempt {attempt}/{CHUNK_ATTEMPTS}), waiting {wait} s",
-                    flush=True,
+                    f"attempt {attempt}/{CHUNK_ATTEMPTS}), waiting {wait} s"
                 )
                 if _sleep_unless_stopped(wait):
                     raise InterruptedError(f"{shard}: stopped while retrying")
@@ -665,6 +680,8 @@ def download(shard: str, work: Path) -> Path:
             out.flush()
             chunk.unlink()
             done += want
+            if progress is not None:
+                progress.add(want)
     if dest.stat().st_size != expected:
         raise RuntimeError(f"{shard}: finished at {dest.stat().st_size}, expected {expected}")
     return dest
@@ -1024,16 +1041,33 @@ def main() -> int:
     # shards the next run resumes. Turn it into one so the handler below stops
     # them.
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(143)))
+
+    # The whole stage on one line: bytes fetched and shards converted. The two
+    # run at once (a small fetch pool feeds the converter), so a download bar
+    # and a convert bar would fight over the terminal; one line carrying both
+    # numbers says exactly where the run is.
+    def stage_total() -> float | None:
+        total = 0.0
+        for name in shards:
+            try:
+                total += expected_size(name)
+            except Exception:  # noqa: BLE001  # an unreadable header is not fatal here
+                return None
+        return total or None
+
+    progress = Progress("converting", stage_total())
     done = 0
     try:
-        for path in prefetch_shards(shards, lambda s: download(s, work)):
+        for path in prefetch_shards(shards, lambda s: download(s, work, progress)):
             done += 1
-            print(f"[{done}/{len(shards)}] {path.name}", flush=True)
+            progress.show(f"{done}/{len(shards)} shards  {progress.amount}")
             convert_shard(path, writers, fused, experts_per_layer)
             path.unlink()
     except BaseException:
         stop_download()
+        progress.finish()
         raise
+    progress.finish(f"  fetched and converted {done} of {len(shards)} shards")
     leftovers = fused.pending()
     if leftovers:
         # A layer whose experts did not all arrive would otherwise be dropped,

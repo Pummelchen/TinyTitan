@@ -40,6 +40,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import errno
 import json
 import math
@@ -52,6 +53,12 @@ import threading
 import time
 from pathlib import Path
 from queue import Queue
+
+# The progress line lives beside the shell helpers, not in this file, because
+# prepare_agentworld.py draws the identical line: a whole install has to read as
+# one story, and two renderers would drift.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from progress import Progress  # noqa: E402
 
 try:
     import ml_dtypes
@@ -548,7 +555,51 @@ CURL_RETRY_ATTEMPTS = 3
 CURL_RETRY_DELAY_SECONDS = 3
 
 
-def download(shard: str, work: Path) -> Path:
+def remote_size(shard: str) -> int | None:
+    """The shard's size from the server's own `Content-Length`, or `None`.
+
+    A percentage needs a total, and the safetensors index does not carry file
+    sizes -- only tensor names. One HEAD request per shard is the cheap way to
+    get them (131 of them, probed in parallel before the fetch); a mirror that
+    does not answer with a length simply leaves the line without a percentage
+    rather than guessing one.
+    """
+    url = f"{BASE}/{shard}"
+    try:
+        result = subprocess.run(
+            ["curl", "-sIL", "--http1.1", "--max-time", "60", url],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    for line in reversed(result.stdout.splitlines()):
+        if not line.lower().startswith("content-length:"):
+            continue
+        _, _, value = line.partition(":")
+        value = value.strip()
+        if value.isdigit() and int(value) > 0:
+            return int(value)
+    return None
+
+
+def watch_size(dest: Path, progress: Progress, base: float, stop: threading.Event) -> None:
+    """Report a shard's growing file size while curl writes it.
+
+    curl writes the destination itself, so the file's size is the only live
+    signal a download has. A watcher thread polls it while the (blocking) curl
+    runs, which keeps `subprocess.run` as the seam the tests inject a failure
+    through. Never raises: a line is not worth failing an install over.
+    """
+    while not stop.wait(0.5):
+        try:
+            progress.set(base + dest.stat().st_size)
+        except OSError:  # curl has not created the file yet, or it is gone
+            continue
+
+
+def download(shard: str, work: Path, progress: Progress | None = None, base: float = 0.0) -> Path:
     """Fetch one shard, resuming a partial file rather than restarting it.
 
     A resume that the endpoint will not serve is not retried as a resume: curl
@@ -558,48 +609,70 @@ def download(shard: str, work: Path) -> Path:
     such an endpoint is permanently stuck (measured against ModelScope's file
     API: `-C -` exits 33, and an open-ended `-r 100-` returns a 4 KiB chunk with
     status 200 instead of the remainder).
+
+    `progress` is the caller's line for the whole stage, and `base` the bytes
+    the shards before this one already landed: together they turn a 2 GB shard
+    from one silent hour into a percentage and an ETA. With no line the watcher
+    is not started and the call is exactly what it always was.
     """
+
+    def tell(text: str) -> None:
+        if progress is not None:
+            progress.note(text)
+        else:
+            print(text, file=sys.stderr, flush=True)
+
     dest = work / shard
     dest.parent.mkdir(parents=True, exist_ok=True)
     delay = 5
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         url = f"{BASE}/{shard}"
-        result = subprocess.run(
-            [
-                "curl",
-                "-fL",
-                "--retry",
-                str(CURL_RETRY_ATTEMPTS),
-                "--retry-delay",
-                str(CURL_RETRY_DELAY_SECONDS),
-                "--retry-connrefused",
-                "--retry-all-errors",
-                "-C",
-                "-",
-                "--max-time",
-                str(DOWNLOAD_TIMEOUT_SECONDS),
-                "--silent",
-                "--show-error",
-                "-o",
-                str(dest),
-                url,
-            ]
-        )
+        stop_watch = threading.Event()
+        watcher = None
+        if progress is not None:
+            watcher = threading.Thread(
+                target=watch_size, args=(dest, progress, base, stop_watch), daemon=True
+            )
+            watcher.start()
+        try:
+            result = subprocess.run(
+                [
+                    "curl",
+                    "-fL",
+                    "--retry",
+                    str(CURL_RETRY_ATTEMPTS),
+                    "--retry-delay",
+                    str(CURL_RETRY_DELAY_SECONDS),
+                    "--retry-connrefused",
+                    "--retry-all-errors",
+                    "-C",
+                    "-",
+                    "--max-time",
+                    str(DOWNLOAD_TIMEOUT_SECONDS),
+                    "--silent",
+                    "--show-error",
+                    "-o",
+                    str(dest),
+                    url,
+                ]
+            )
+        finally:
+            stop_watch.set()
+            if watcher is not None:
+                watcher.join(timeout=2)
         if result.returncode == 0 and dest.exists() and dest.stat().st_size > 0:
+            if progress is not None:
+                progress.set(base + dest.stat().st_size)
             return dest
         if result.returncode == 33 and dest.exists():
-            print(
+            tell(
                 f"    {shard}: the endpoint will not serve a range request; "
-                "downloading it from the start",
-                file=sys.stderr,
-                flush=True,
+                "downloading it from the start"
             )
             dest.unlink()
-        print(
+        tell(
             f"    [download {attempt}/{DOWNLOAD_ATTEMPTS}] {shard} failed "
-            f"(curl {result.returncode}); retrying in {delay}s",
-            file=sys.stderr,
-            flush=True,
+            f"(curl {result.returncode}); retrying in {delay}s"
         )
         time.sleep(delay)
         delay = min(delay * 2, 120)
@@ -1262,15 +1335,26 @@ def main() -> int:
             )
 
     # Fetch shard N+1 while shard N converts.
+    #
+    # One progress line covers both, because both are happening: the bytes the
+    # fetcher lands (with a real percentage, from the sizes the server reports,
+    # probed in parallel before the first byte) and the shards the converter
+    # finishes. Two bars would fight over the same terminal row.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        sizes = list(pool.map(remote_size, shards))
+    total = sum(size for size in sizes if size) if all(sizes) else None
+    progress = Progress("converting", total)
     queue: Queue = Queue(maxsize=1)
 
     def fetcher() -> None:
-        for shard in shards:
+        base = 0.0
+        for shard, size in zip(shards, sizes, strict=True):
             try:
-                queue.put(download(shard, work))
+                queue.put(download(shard, work, progress, base))
             except Exception as exc:  # noqa: BLE001
                 queue.put(exc)
                 return
+            base += size or 0
         queue.put(None)
 
     threading.Thread(target=fetcher, daemon=True).start()
@@ -1280,11 +1364,13 @@ def main() -> int:
         if item is None:
             break
         if isinstance(item, Exception):
+            progress.finish()
             raise item
         done += 1
-        print(f"[{done}/{len(shards)}] {item.name}", flush=True)
+        progress.show(f"{done}/{len(shards)} shards  {progress.amount}")
         convert_shard(item, writer, ngram, args.bits)
         item.unlink()
+    progress.finish(f"  fetched and converted {done} of {len(shards)} shards")
 
     writer.finish()
     ngram.finish()
