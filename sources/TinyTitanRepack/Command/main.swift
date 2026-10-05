@@ -210,6 +210,7 @@ private func run(_ values: [String]) async -> Int32 {
         }
     }
 
+    let progressDisplay = InstallProgressDisplay()
     if let input = arguments.inputSnapshot,
         let modelID = arguments.localModelID,
         let output = arguments.output
@@ -222,7 +223,8 @@ private func run(_ values: [String]) async -> Int32 {
                     modelID: modelID,
                     draftHead: arguments.draftHead,
                     shareNgramTable: arguments.shareNgramTable,
-                    overwrite: arguments.overwrite))
+                    overwrite: arguments.overwrite),
+                progress: { progress in progressDisplay.handle(progress) })
             print("Imported local snapshot")
             print("Source fingerprint: \(result.resolvedCommit)")
             print("Model: \(result.outputDir)")
@@ -241,7 +243,8 @@ private func run(_ values: [String]) async -> Int32 {
         token: ProcessInfo.processInfo.environment["HF_TOKEN"],
         resume: arguments.resume)
     do {
-        let result = try await RemoteStreamingRepacker(options: options).run()
+        let result = try await RemoteStreamingRepacker(options: options).run(
+            progress: { progress in progressDisplay.handle(progress) })
         print("Installed \(source.displayName)")
         print("Source revision: \(result.resolvedCommit)")
         print("Model: \(result.outputDir)")

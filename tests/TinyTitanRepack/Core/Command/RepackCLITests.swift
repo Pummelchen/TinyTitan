@@ -68,6 +68,34 @@ struct RepackCLITests {
         #expect(result.stderr.contains("no resumable install state exists"))
     }
 
+    /// A local snapshot import reaches the copy phase without any network, so
+    /// the CLI must report progress even when stdout is a pipe (no tty), which
+    /// is how an install redirected into a log file is seen.
+    @Test func localImportReportsProgressToAPipe() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("tinytitanrepack-progress-\(UUID().uuidString)")
+        let snapshot = (root as NSString).appendingPathComponent("snapshot")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        _ = try SyntheticSnapshot.buildQwenMTP(at: snapshot)
+
+        let result = try run([
+            "--input-snapshot", snapshot,
+            "--model-id", "cli-progress-fixture",
+            "--output", output,
+        ])
+
+        #expect(result.status == 0, "stderr: \(result.stderr)")
+        #expect(
+            result.stdout.contains("installing") || result.stdout.contains("%"),
+            "stdout: \(result.stdout)")
+        // The final line must be terminated: the summary the CLI prints next
+        // must not be appended to the progress line.
+        #expect(
+            result.stdout.contains("100%\n"),
+            "stdout: \(result.stdout)")
+    }
+
     private func run(_ arguments: [String]) throws
         -> (status: Int32, stdout: String, stderr: String)
     {
@@ -80,6 +108,11 @@ struct RepackCLITests {
         process.arguments = arguments
         process.standardOutput = stdout
         process.standardError = stderr
+        // The progress assertion needs the display on: a developer running the
+        // suite with TINYTITAN_NO_PROGRESS exported must not flip it off.
+        var environment = ProcessInfo.processInfo.environment
+        environment.removeValue(forKey: "TINYTITAN_NO_PROGRESS")
+        process.environment = environment
         try process.run()
         process.waitUntilExit()
         let out = stdout.fileHandleForReading.readDataToEndOfFile()
