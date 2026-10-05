@@ -25,7 +25,8 @@
 #              models define the binary thinking switch, so their levels are
 #              exactly off|on -- off for a direct answer, on to reason first.
 #   <ram>      resident-memory target for the server in GB: any whole number
-#              from 4 up (the interactive question offers 4, 8, 16 or 32).
+#              from 4 up (the interactive question offers 4, 6, 8, 10, 12, 14
+#              or 16, a Custom value, or the install's own profile).
 #              Anything over 30% of this Mac's physical memory is warned about
 #              in red and used anyway. Omit it to use the install's own measured
 #              profile, whose cache budget the runtime holds to a third of
@@ -51,8 +52,9 @@
 #   --answers <default|concise>
 #   --thinking <level>
 #   --ram <n>   resident-memory target for the server in GB (GPU models only),
-#              any whole number from 4 up -- the menu offers 4, 8, 16 and 32, and
-#              the benchmark harnesses pass others (9, for instance). The expert
+#              any whole number from 4 up -- the menu offers 4, 6, 8, 10, 12, 14
+#              and 16, a Custom value, or the install's own profile, and the
+#              benchmark harnesses pass others (9, for instance). The expert
 #              cache gets what is left after the resident weights and the runtime.
 #              4 GB is the floor (the weights plus a minimum cache are ~4.7 GB on
 #              the 125B install); over 30% of this Mac's physical memory is
@@ -202,7 +204,8 @@ ram_tier() {
   # A whole number of GB, with or without the "G" suffix, from 4 up. The
   # runtime's --ram-budget enforces the same floor and the benchmark profile
   # passes its own value through TINYTITAN_BENCH_RAM_BUDGET. The interactive
-  # question offers 4/8/16/32 or the install's own profile.
+  # question offers 4/6/8/10/12/14/16, a Custom value parsed here, or the
+  # install's own profile.
   local value="${1%[Gg]}"
   case "$value" in
     *[!0-9]*|"") return 1 ;;
@@ -968,15 +971,32 @@ else
   else
     rule_hint="recommended"
   fi
-  echo "  1) 4 GB    2) 8 GB    3) 16 GB   4) 32 GB"
-  echo "  (1 and 2 GB are not offered: the weights plus the minimum expert"
-  echo "   cache are about 4.7 GB on a 125B install, so they cannot be met)"
-  echo "  5) Model default (measured per install; ${rule_hint})"
-  printf "Choice [1-5] (default 5): "
+  echo "  1) 4 GB     2) 6 GB     3) 8 GB    4) 10 GB"
+  echo "  5) 12 GB    6) 14 GB    7) 16 GB   8) Custom"
+  echo "  (4 GB is the floor: the weights plus the minimum expert cache are"
+  echo "   about 4.7 GB on a 125B install, so a smaller target cannot be met)"
+  echo "  9) Model default (measured per install; ${rule_hint})"
+  printf "Choice [1-9] (default 9): "
   read -r ram_choice || exit 1
-  case "${ram_choice:-5}" in
-    1) ram_gb=4 ;;  2) ram_gb=8 ;;  3) ram_gb=16 ;; 4) ram_gb=32 ;;
-    5) ram_gb="" ;;
+  case "${ram_choice:-9}" in
+    1) ram_gb=4 ;;  2) ram_gb=6 ;;  3) ram_gb=8 ;;   4) ram_gb=10 ;;
+    5) ram_gb=12 ;; 6) ram_gb=14 ;; 7) ram_gb=16 ;;
+    8)
+      # Any whole number of GB, through the same parser the flag uses, so the
+      # floor and the "with or without a G" spelling cannot differ between the
+      # two ways in. The recommended 30% is the default, because that is the
+      # number the paragraph above just argued for.
+      custom_default="${ram_rule_gb:-16}"
+      printf "RAM target in whole GB (4 or more) [default %s]: " "$custom_default"
+      read -r custom_ram || exit 1
+      custom_ram="${custom_ram:-$custom_default}"
+      if ! custom_gb="$(ram_tier "$custom_ram")"; then
+        echo "invalid choice: $custom_ram (a whole number of GB from 4 up)" >&2
+        exit 2
+      fi
+      ram_gb="$custom_gb"
+      ;;
+    9) ram_gb="" ;;
     *) echo "invalid choice: $ram_choice" >&2; exit 2 ;;
   esac
   if [[ -n "$ram_gb" ]]; then warn_ram_over_rule; fi

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import subprocess
 import unittest
 
@@ -70,6 +71,102 @@ def dry_run(*args: str, physical_bytes: int) -> subprocess.CompletedProcess[str]
         check=False,
         env=environment,
     )
+
+
+def answer_ram(model: str, answer: str, *, physical_bytes: int) -> subprocess.CompletedProcess[str]:
+    """Answer the interactive RAM question and nothing else.
+
+    Every other question is pre-answered by a flag, so the piped input is the
+    RAM choice; without that the answers would be consumed in some other order
+    and this would be testing the question order, not the tiers.
+    """
+    environment = dict(os.environ)
+    environment["TINYTITAN_PHYSICAL_RAM_BYTES"] = str(physical_bytes)
+    environment["TINYTITAN_LAUNCHER_DRY_RUN"] = "1"
+    environment["TINYTITAN_LAUNCHER_ASSUME_TTY"] = "1"
+    return subprocess.run(
+        [
+            "bash",
+            str(LAUNCHER),
+            "--client",
+            "server",
+            "--dry-run",
+            "--model",
+            model,
+            "--thinking",
+            "off",
+            "--answers",
+            "default",
+            "--engine",
+            "gpu",
+            "--concurrency",
+            "1",
+            "--port",
+            "8080",
+        ],
+        input=answer,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+        timeout=180,
+    )
+
+
+def target_of(run: subprocess.CompletedProcess[str]) -> str:
+    """The `--ram-budget <n>G` the launcher would pass, or an empty string."""
+    match = re.search(r"--ram-budget (\d+)G", run.stdout)
+    return match.group(1) if match else ""
+
+
+class RamMenuTests(unittest.TestCase):
+    """The interactive tiers: 4, 6, 8, 10, 12, 14, 16, Custom, model default."""
+
+    # 24 GB of physical memory, so the 30% rule is 7 GB and the Custom default
+    # is a number the tier list does not contain -- a value that happens to be
+    # a tier could come from either the default or the list.
+    MEMORY = 24 * 2**30
+    TIERS = {"1": "4", "2": "6", "3": "8", "4": "10", "5": "12", "6": "14", "7": "16"}
+
+    def setUp(self) -> None:
+        model = installed_model()
+        if model is None:
+            self.skipTest("no install under models/ and no built server to list one")
+        self.model = model
+
+    def menu(self, answer: str) -> subprocess.CompletedProcess[str]:
+        return answer_ram(self.model, answer, physical_bytes=self.MEMORY)
+
+    def test_the_menu_offers_the_seven_tiers_and_a_custom_value(self) -> None:
+        run = self.menu("\n")
+        menu = run.stdout
+        for label in ("4 GB", "6 GB", "8 GB", "10 GB", "12 GB", "14 GB", "16 GB"):
+            self.assertIn(label, menu, f"{label} is not offered")
+        self.assertIn("Custom", menu)
+        self.assertIn("Model default", menu)
+        self.assertIn("Choice [1-9] (default 9)", menu)
+
+    def test_each_tier_passes_its_own_budget(self) -> None:
+        for choice, gb in self.TIERS.items():
+            with self.subTest(choice=choice, gb=gb):
+                self.assertEqual(target_of(self.menu(f"{choice}\n")), gb)
+
+    def test_custom_takes_any_whole_number_of_gb(self) -> None:
+        # 20 is above every tier and above the 7 GB rule, so it also exercises
+        # the warning path rather than a silent accept.
+        run = self.menu("8\n20\n")
+        self.assertEqual(target_of(run), "20")
+
+    def test_custom_refuses_below_the_floor(self) -> None:
+        run = self.menu("8\n3\n")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("invalid choice: 3", run.stderr)
+        self.assertEqual(target_of(run), "")
+
+    def test_enter_takes_the_model_default_and_passes_no_budget(self) -> None:
+        run = self.menu("\n")
+        self.assertEqual(target_of(run), "", "the default must not pin a budget")
+        self.assertIn("model default", run.stdout)
 
 
 class RamRuleTests(unittest.TestCase):
