@@ -207,6 +207,83 @@ tinytitan_resolve_quant() {
   esac
 }
 
+# tinytitan_install_key <stem> <4|8> -> the install_models.sh target for it.
+#
+# The launcher names a model by its runtime stem (`kat-coder-v2.5_35B_A3B`) and
+# the installer is addressed by its own catalogue keys (`katcoder`,
+# `katcoder-8bit`). This is the one place those two spellings meet, so the
+# launcher can fetch a model that is not on disk yet; `test_launcher_install`
+# asserts every key returned here exists in TINYTITAN_MODEL_CHOICES, which is
+# what keeps the two lists from drifting apart.
+tinytitan_install_key() {
+  local key
+  case "${1:-}" in
+    ornith-1.5_35B_A3B)            key=ornith15 ;;
+    qwen3.6_35B_A3B)               key=qwen36 ;;
+    qwen-agentworld_35B_A3B)       key=agentworld ;;
+    kat-coder-v2.5_35B_A3B)        key=katcoder ;;
+    qwen3.8-flash-next_125B_A6B)   key=qwen38flash ;;
+    qwen3.5_2B)                    key=qwen35-2b ;;
+    qwen3.5_4B)                    key=qwen35-4b ;;
+    qwen3.5_9B)                    key=qwen35-9b ;;
+    *) return 1 ;;
+  esac
+  [[ "${2:-4}" == "8" ]] && key="$key-8bit"
+  printf '%s\n' "$key"
+}
+
+# tinytitan_install_size_gb <key> -> the installed size the menu prints, or
+# nothing for a key the menu does not carry.
+tinytitan_install_size_gb() {
+  local entry
+  for entry in "${TINYTITAN_MODEL_CHOICES[@]+"${TINYTITAN_MODEL_CHOICES[@]}"}"; do
+    [[ "${entry%%|*}" == "${1:-}" ]] || continue
+    local rest="${entry#*|}"; rest="${rest#*|}"; rest="${rest#*|}"
+    printf '%s\n' "${rest%%|*}"
+    return 0
+  done
+  return 1
+}
+
+# tinytitan_missing_offers <models-dir> -> one row per supported width this
+# checkout does not have, in the order the launcher's menu appends them:
+#
+#   <launcher name>|<4|8>|<install key>|<label>|<installed GB>|<engines>|<thinking>
+#
+# The last two are what let the menu print an uninstalled row in the same
+# columns as an installed one — engine and levels are what a person is choosing
+# between, so a row without them would be the only row they cannot compare.
+#
+# The launcher's menu is built from the server's catalog, which is held to what
+# is on disk — and it is about to load one, so that is right. Without this a
+# person who has never run the installer sees a short list and no way to know
+# more; with it the menu can offer the rest and fetch the pick.
+#
+# It reads the built-in list rather than the server's catalog, because the whole
+# point is the models a catalog of installed things cannot report. A name whose
+# width has no catalogue key (an MTP sidecar, which is not a model on its own)
+# is skipped rather than offered as something that cannot be fetched.
+tinytitan_missing_offers() {
+  local models_dir="${1:-}" name stem label engines thinking quant bits key size
+  [[ -n "$models_dir" ]] || return 1
+  for name in "${TINYTITAN_ALL_MODELS[@]+"${TINYTITAN_ALL_MODELS[@]}"}"; do
+    tinytitan_resolve_model "$name" 2>/dev/null || continue
+    stem="$TINYTITAN_MODEL_STEM"
+    label="$TINYTITAN_MODEL_LABEL"
+    engines="$TINYTITAN_MODEL_ENGINES"
+    thinking="$TINYTITAN_MODEL_THINKING"
+    for quant in 4Bit 8Bit; do
+      [[ -e "$models_dir/${stem}_${quant}" ]] && continue
+      bits=4
+      [[ "$quant" == "8Bit" ]] && bits=8
+      key="$(tinytitan_install_key "$stem" "$bits")" || continue
+      size="$(tinytitan_install_size_gb "$key" || true)"
+      printf '%s|%s|%s|%s|%s|%s|%s\n' \
+        "$name" "$bits" "$key" "$label" "$size" "$engines" "$thinking"
+    done
+  done
+}
+
 # tinytitan_model_port -> the one port every model is served on. Kept as a
 # function because callers and notes still ask for it by name.
 tinytitan_model_port() {

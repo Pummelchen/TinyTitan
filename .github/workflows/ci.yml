@@ -134,10 +134,14 @@ jobs:
         # the XDG caches redirected into it. These tests pin that contract —
         # static checks plus a dry run that must write nothing — and the model
         # menu's answer handling (an EOF must not start the recommended
-        # download). Neither needs dependencies beyond the runner's python3.
+        # download). `test_launcher_install` pins the launcher's own fetch path:
+        # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
+        # can start a download. `test_progress` pins the line those downloads
+        # draw. None needs dependencies beyond the runner's python3.
         run: |
           cd benchmark
-          python3 -m unittest test_dsh_isolation test_install_models_menu
+          python3 -m unittest test_dsh_isolation test_install_models_menu \
+            test_launcher_install test_progress
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

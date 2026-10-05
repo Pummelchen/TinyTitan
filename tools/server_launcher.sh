@@ -15,10 +15,11 @@
 #   <model>    an install key (ornith|qwen36|agentworld|katcoder|qwen38, or
 #              qwen35-2b|qwen35-4b|qwen35-9b) optionally followed by 4|8, or a
 #              catalog id such as ornith-1.5-35b-a3b_8-Bit, which names its own
-#              width. The three qwen35-* keys are the dense Qwen 3.5 models
-#              (2B, 4B, 9B): both engines implement their family
-#              (`qwen3_5_dense`), so they are the one install shape whose engine
-#              is a real choice -- GPU by default, CPU on request.
+#              width. A model that is not on disk is offered for download and
+#              conversion at that point (see --install). The three qwen35-* keys
+#              are the dense Qwen 3.5 models (2B, 4B, 9B): both engines implement
+#              their family (`qwen3_5_dense`), so they are the one install shape
+#              whose engine is a real choice -- GPU by default, CPU on request.
 #   <thinking> off, on, or any level the chosen model lists
 #              (minimal, low, medium, high, xhigh, max). The dense Qwen 3.5
 #              models define the binary thinking switch, so their levels are
@@ -78,6 +79,14 @@
 #              installed under ~/.tinytitan and isolated from any dsh you run
 #              yourself (see tools/dsh_local.sh). 7788 is its port, or the next
 #              free one.
+#   --install       download and convert a model that is not on disk yet without
+#              asking. The interactive menu lists the supported models this
+#              checkout does not have as extra rows, marked "not installed";
+#              picking one fetches it and then starts normally. By default the
+#              launcher asks before such a download when a person is there, and
+#              a piped or --dry-run invocation never downloads at all: it prints
+#              the `tools/install_models.sh <key>` command instead. Both the
+#              download and the conversion report a percentage while they run.
 #   --dry-run       print the server command and client setup; start nothing
 #   --prompt-cache <multi-prefix|off>  prompt-state reuse (default multi-prefix,
 #              a 256 MiB cache). `off` is for the cache A/B harnesses, which
@@ -170,6 +179,11 @@ if [[ "${TINYTITAN_LAUNCHER_ASSUME_TTY:-0}" == "1" ]]; then INTERACTIVE=1; fi
 CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
 RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
+# --install: fetch a model that is not on disk yet instead of stopping. The
+# default is to ask, because the download is 20-220 GB; a pipe or a dry run
+# never downloads on its own, and `--install` is how a caller says yes ahead of
+# time (a first-run script, a CI image).
+INSTALL_MISSING=0
 # --web: after the server is up, hand the terminal over to TinyTitan's own
 # DeepSeek Harness, which opens a prompt box in the default browser. It is a
 # mode rather than a `--client` entry on purpose: the client list in
@@ -231,6 +245,10 @@ while [[ $# -gt 0 ]]; do
     --concurrency) CONCURRENCY_ARG="${2:?--concurrency needs a power of two}"; shift 2 ;;
     --memory)   MEMORY=1; shift ;;
     --web)      WEB=1; shift ;;
+    # Answer the "download and convert it?" question ahead of time. Without it
+    # the launcher asks when a person is there, and never downloads on its own
+    # from a pipe or a dry run.
+    --install)  INSTALL_MISSING=1; shift ;;
     --dry-run)  DRY_RUN=1; shift ;;
     --help|-h)  usage; exit 0 ;;
     --)         shift; while [[ $# -gt 0 ]]; do positional+=("$1"); shift; done ;;
@@ -406,6 +424,72 @@ fi
 # 3) Model and quantization
 # ============================================================
 
+# Ask once, then install one catalogue key.
+#
+# Answers, in order: `--install` says yes ahead of time; a person at a terminal
+# is asked (Enter takes the yes, because they asked for the model); a pipe, a
+# log or `--dry-run` never downloads and is told the exact command instead. The
+# installer streams a percentage for the download and for the conversion, so
+# nothing here has to draw progress -- it only has to say what is about to
+# happen.
+#
+# <key> is an install_models.sh target (katcoder-8bit), <label> what to call it
+# in the question, <bits> 4 or 8. Returns 0 once it is on disk.
+install_model_key() {
+  local key="$1" label="$2" bits="$3" gb="" reply=""
+  gb="$(tinytitan_install_size_gb "$key" || true)"
+  say ""
+  if [[ -n "$gb" ]]; then
+    say "$label ${bits}-bit is not installed. It is a ${gb} GB install, and"
+    say "the download before it is larger."
+  else
+    say "$label ${bits}-bit is not installed."
+  fi
+  if (( ! INSTALL_MISSING )); then
+    if (( ! INTERACTIVE )); then
+      say "Install it with:  tools/install_models.sh $key"
+      return 1
+    fi
+    printf 'Download and convert it now? [Y/n] '
+    if ! read -r reply; then
+      say ""
+      say "No answer given; nothing was installed." >&2
+      return 1
+    fi
+    case "${reply:-y}" in
+      y|Y|yes|YES) ;;
+      *)
+        say "Nothing was installed. When you want it:"
+        say "    tools/install_models.sh $key"
+        return 1 ;;
+    esac
+  fi
+  # A dry run starts nothing, and a 70 GB download is the largest thing this
+  # script could ever start. It says what it would do and stops.
+  if (( DRY_RUN )); then
+    say "Would install:  tools/install_models.sh $key"
+    return 1
+  fi
+  say ""
+  say "Installing $key. The download and the conversion each report a percentage;"
+  say "this takes a while (hours for a 125B model, minutes on a fast line)."
+  if ! "$SCRIPT_DIR/install_models.sh" "$key"; then
+    echo "ERROR: installing $key failed; the model is still not on disk." >&2
+    return 1
+  fi
+  return 0
+}
+
+# The same, for a caller that has the runtime stem (a model named on the command
+# line) rather than the catalogue key the installer is addressed by.
+install_missing_model() {
+  local key=""
+  if ! key="$(tinytitan_install_key "$1" "$2")"; then
+    return 1
+  fi
+  install_model_key "$key" "$3" "$2"
+}
+
 # The installed models: the server's own catalog, or the built-in list. Both
 # are held to installs that are really on disk, so the menu never offers a model
 # or a width that cannot be loaded.
@@ -471,13 +555,61 @@ if [[ -z "$MODEL_ARG" ]]; then
       "$( engine_column "${TINYTITAN_CAT_ENGINES[$i]:-${TINYTITAN_CAT_BACKEND[$i]}}" )" \
       "$size" "${TINYTITAN_CAT_ID[$i]}" "${TINYTITAN_CAT_THINKING[$i]//,/, }" "$note"
   done
-  printf "Choice [1-%d] (default %d): " "$count" "$((default_idx + 1))"
+  # What this checkout supports but does not have, as rows rather than a note:
+  # the menu is where a person sees what TinyTitan can run, and a model they
+  # cannot pick is a model they will not discover. Picking one fetches it and
+  # then takes the same path as an installed one, so nothing downstream has to
+  # know where the bytes came from.
+  offers=()
+  for (( i = 0; i < count; i++ )); do offers+=("installed|$i"); done
+  missing_count=0
+  while IFS='|' read -r m_name m_bits m_key m_label m_gb _; do
+    [[ -n "$m_name" ]] || continue
+    offers+=("missing|$m_name|$m_bits|$m_key|$m_label|$m_gb")
+    missing_count=$((missing_count + 1))
+  done < <(tinytitan_missing_offers "$MODELS_DIR")
+  first_missing=$((count + 1))
+  for (( i = 0; i < missing_count; i++ )); do
+    IFS='|' read -r _ m_name m_bits m_key m_label m_gb <<< "${offers[$((count + i))]}"
+    # The same columns as an installed row: engine and levels are what the
+    # choice is between, and a row without them is a row nobody can compare.
+    tinytitan_resolve_model "$m_name" 2>/dev/null || continue
+    size=""
+    [[ -n "$m_gb" ]] && size="$m_gb GB"
+    printf "  %2d) %-28s %s-bit  %-4s %8s  %-22s %-24s%s\n" "$((first_missing + i))" \
+      "$m_label" "$m_bits" \
+      "$( engine_column "${TINYTITAN_MODEL_ENGINES:-${TINYTITAN_MODEL_FAMILY:-}}" )" \
+      "$size" "not installed" "${TINYTITAN_MODEL_THINKING//,/, }" "  fetches it first"
+  done
+  if (( missing_count > 0 )); then
+    echo ""
+    echo "Rows $first_missing-$((first_missing + missing_count - 1)) are not installed yet:"
+    echo "choosing one downloads and converts it first (a percentage is shown)."
+  fi
+  printf "Choice [1-%d] (default %d): " "$((count + missing_count))" "$((default_idx + 1))"
   read -r pick || exit 1
   pick="${pick:-$((default_idx + 1))}"
-  if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= count )); then
-    idx=$((pick - 1))
+  if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= count + missing_count )); then
+    choice="${offers[$((pick - 1))]}"
   else
     echo "invalid choice: $pick" >&2; exit 2
+  fi
+  if [[ "${choice%%|*}" == "missing" ]]; then
+    IFS='|' read -r _ m_name m_bits m_key m_label m_gb <<< "$choice"
+    if ! install_model_key "$m_key" "$m_label" "$m_bits"; then
+      exit 1
+    fi
+    # The install landed: the catalog has to name it before the rest of this
+    # script can use it, and its directory is what the arrays carry.
+    if ! tinytitan_load_catalog "$BINARY" "$MODELS_DIR" \
+      || ! tinytitan_resolve_model "$m_name" 2>/dev/null \
+      || ! tinytitan_resolve_quant "$m_bits" 2>/dev/null \
+      || ! idx="$(tinytitan_catalog_find_dir "${TINYTITAN_MODEL_STEM}_${TINYTITAN_QUANT_DIR}")"; then
+      echo "ERROR: installed $m_key, but the catalog does not list it under $MODELS_DIR." >&2
+      exit 1
+    fi
+  else
+    idx="${choice#installed|}"
   fi
 else
   if idx="$(tinytitan_catalog_find_id "$MODEL_ARG")"; then
@@ -512,8 +644,19 @@ else
       if [[ -n "$installed_widths" ]]; then
         echo "       installed here:$installed_widths" >&2
       fi
-      echo "       Install it first: tools/install_models.sh (see --help for the target names)" >&2
-      exit 1
+      # Fetch it and carry on, or stop with the exact command. The catalog is
+      # re-read afterwards: the install that just landed is what the index has
+      # to name before the rest of this script can use it.
+      if install_missing_model "$TINYTITAN_MODEL_STEM" "${TINYTITAN_QUANT%bit}" "$TINYTITAN_MODEL_LABEL"; then
+        if ! tinytitan_load_catalog "$BINARY" "$MODELS_DIR" \
+          || ! idx="$(tinytitan_catalog_find_dir "${TINYTITAN_MODEL_STEM}_${TINYTITAN_QUANT_DIR}")"; then
+          echo "ERROR: $TINYTITAN_MODEL_LABEL ${TINYTITAN_QUANT%bit}-bit installed, but the" >&2
+          echo "       catalog still does not list it under $MODELS_DIR." >&2
+          exit 1
+        fi
+      else
+        exit 1
+      fi
     fi
   fi
 fi
@@ -1280,8 +1423,16 @@ if lsof -i :"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 if [[ ! -e "$MODEL_DIR" ]]; then
+  # Reached when the catalog named a directory that is not there (removed
+  # between the catalog read and here). The install path above is the normal
+  # route, so this only has to say which command fixes it.
   echo "ERROR: $MODEL_NAME ${MODEL_QUANT}-bit not found at $MODEL_DIR" >&2
-  echo "Install it first: tools/install_models.sh (see --help for the target names)" >&2
+  missing_key="$(tinytitan_install_key "${TINYTITAN_MODEL_STEM:-}" "${MODEL_QUANT%bit}" 2>/dev/null || true)"
+  if [[ -n "$missing_key" ]]; then
+    echo "       Fetch it with:  tools/install_models.sh $missing_key" >&2
+  else
+    echo "       Install it first: tools/install_models.sh (see --help for the target names)" >&2
+  fi
   exit 1
 fi
 

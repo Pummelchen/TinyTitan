@@ -114,7 +114,7 @@ even though the converter would not complain.
 | --- | --- | --- |
 | 1 | `tools/prepare_agentworld.py` — `MODELS` | The repo and the **pinned sha**, with a comment recording what was verified about the checkpoint |
 | 2 | `tools/install_models.sh` — `CATALOGUE` | Two rows (`<key>`, `<key>-8bit`) and the preset→served-id `case` |
-| 3 | `tools/tinytitan_models.sh` | The key/stem/label `case` with the fallback fields it carries beside them — `ENGINES`, `THINKING` and `FAMILY` — because that list is what the launcher offers when the server cannot report a catalog; plus the unknown-model help text and `TINYTITAN_ALL_MODELS` |
+| 3 | `tools/tinytitan_models.sh` | The key/stem/label `case` with the fallback fields it carries beside them — `ENGINES`, `THINKING` and `FAMILY` — because that list is what the launcher offers when the server cannot report a catalog; plus the unknown-model help text, `TINYTITAN_ALL_MODELS`, and the `tinytitan_install_key` stem→catalogue-key row (without it the launcher cannot fetch the new model for you, and `test_launcher_install` says so) |
 | 4 | `tools/server_launcher.sh` | The model-key list in the header comment and in the unknown-model error |
 | 5 | `ModelProfile.swift` | One row per width. Sample from the **checkpoint's** config; say in the comment when cache/prefetch values are inherited from identical geometry rather than measured |
 | 6 | `ModelCatalog.swift` — `displayNames` | The served id → human name (`/v1/models` reads this) |
