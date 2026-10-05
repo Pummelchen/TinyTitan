@@ -26,13 +26,16 @@
 #              exactly off|on -- off for a direct answer, on to reason first.
 #   <ram>      resident-memory target for the server in GB: any whole number
 #              from 4 up (the interactive question offers 4, 6, 8, 10, 12, 14
-#              or 16, a Custom value, or the install's own profile).
-#              Anything over 30% of this Mac's physical memory is warned about
-#              in red and used anyway. Omit it to use the install's own measured
-#              profile, whose cache budget the runtime holds to a third of
-#              physical memory (a third of the cache plus the resident weights is
-#              what the process then holds). The CPU engine has no expert cache,
-#              so it does not ask and the flag does not apply there.
+#              or 16, a Custom value, or its default of half this Mac's physical
+#              memory).
+#              Anything over 50% of this Mac's physical memory is warned about
+#              in red and used anyway. Omit it and an interactive run asks the
+#              question, whose default passes half of physical memory as an
+#              explicit target; an unattended run passes nothing and the
+#              install's own measured profile applies, which the runtime holds to
+#              a third of physical memory (a third of the cache plus the resident
+#              weights is what the process then holds). The CPU engine has no
+#              expert cache, so it does not ask and the flag does not apply there.
 #
 # Flags (override the positional form, and work in any order):
 #
@@ -53,12 +56,12 @@
 #   --thinking <level>
 #   --ram <n>   resident-memory target for the server in GB (GPU models only),
 #              any whole number from 4 up -- the menu offers 4, 6, 8, 10, 12, 14
-#              and 16, a Custom value, or the install's own profile, and the
-#              benchmark harnesses pass others (9, for instance). The expert
-#              cache gets what is left after the resident weights and the runtime.
-#              4 GB is the floor (the weights plus a minimum cache are ~4.7 GB on
-#              the 125B install); over 30% of this Mac's physical memory is
-#              warned about, not refused
+#              and 16, a Custom value, or its default of half this Mac's memory,
+#              and the benchmark harnesses pass others (9, for instance). The
+#              expert cache gets what is left after the resident weights and the
+#              runtime. 4 GB is the floor (the weights plus a minimum cache are
+#              ~4.7 GB on the 125B install); over 50% of this Mac's physical
+#              memory is warned about, not refused
 #   --context <n|native|max> native 262144, or 524288/1048576 with --yarn
 #   --kv <4|8|16>   KV-cache precision (default 8)
 #   --yarn          enable YaRN context scaling
@@ -110,7 +113,7 @@
 # resident weights and a measured runtime reserve and gives the routed-expert
 # cache what is left, stepping down the slot ladder so the server stays under
 # the number. On a Qwen3.8 4-bit install the floor is about 3.7 GB, so --ram 4
-# lands at the 8-slot minimum (~4.7 GB) and anything below 4 is refused. Past 30% of physical
+# lands at the 8-slot minimum (~4.7 GB) and anything below 4 is refused. Past 50% of physical
 # memory the server starts competing with the rest of the machine -- the cache
 # is wired and cannot be paged out -- so this launcher warns above that line and
 # passes the size on as asked; the runtime separately holds the *profile's* own
@@ -882,25 +885,28 @@ think_word="$(thinking_label "$thinking_level")"
 # 6) RAM target: what the whole server may hold (the cache gets the rest)
 # ============================================================
 
-# 30% of physical memory: the point past which this launcher recommends against
-# the expert cache, and warns.
+# Half of physical memory: the target this launcher recommends, and the point
+# past which it warns.
 #
-# The slot cache is wired and cannot be paged out, so it is not the only
-# resident claim: the dense weights, the KV cache, the prompt cache, macOS and
-# whatever else the person is running all have to fit in what is left. Measured
-# on a 24 GB Mac with Qwen 3.8 4-bit, the install's own 12 GiB profile (half of
-# that machine) left 11% of memory free and glitched CoreAudio while the model
-# was merely loaded -- so this launcher's rule is the tighter one. It is 30% and
-# not 40% because the cache is only part of what a running server holds: real
-# usage ran past half of physical memory even with the cache at 40%, so the
-# recommendation that overshot is the one that had to move. It is a
-# recommendation, not a limit: the runtime clamps the *install's* profile
-# **cache budget** to a third of physical memory on the default path, and an
-# explicit budget passes through as `--ram-budget` -- a target for the whole
-# process, not just the cache -- which is the person's call, so this script warns
-# in red and starts anyway. (`BatchedMemoryBudget` separately holds the batched
-# KV/slot headroom to half of physical memory less the expert cache; that half is
-# about concurrency, not about this flag.)
+# The number has moved twice, and the history is the reason the warning exists
+# rather than a hard rule:
+#
+#   * 5.10 measured the half and rejected it. On a 24 GiB Mac a 12 GiB budget /
+#     64 slots paged (swap 855 -> 1,610 MB) at 5.58 tok/s, against flat swap and
+#     7.29 tok/s for the 40 slots a third selects.
+#   * The launcher then recommended 30%: at 40% real usage ran past half of
+#     physical memory, leaving 11% free and glitching CoreAudio while the model
+#     was merely loaded.
+#   * It is **50%** now, by the owner's decision (2026-10-05): the half is the
+#     target they want the machine to give, and the menu says so plainly.
+#
+# What that changes in practice is narrower than it looks. An *unset* budget is
+# still clamped by the runtime to a third of physical memory, so the install's
+# own profile cannot reach the half the 5.10 run measured; only an explicit
+# target does — this question's default, or `--ram-budget`. The cache is wired
+# and cannot be paged out, so everything else resident (dense weights, KV, the
+# prompt cache, macOS, whatever else is running) shares what is left, and the
+# warning above the rule is what says so.
 #
 # `TINYTITAN_PHYSICAL_RAM_BYTES` is the test seam: this mapping has to be checkable
 # on a machine of any size.
@@ -912,15 +918,18 @@ case "$physical_ram_bytes" in
   *[!0-9]*|"") physical_ram_bytes=0 ;;
 esac
 physical_ram_gb=$(( (physical_ram_bytes + 1073741823) / 1073741824 ))
-# Three tenths, floored to whole GB -- 2 on an 8 GB Mac, 4 on 16, 7 on 24, 9 on
-# 32, 19 on 64 -- because `--ram` names whole gigabytes.
-ram_rule_gb=$(( physical_ram_bytes * 3 / 10 / 1073741824 ))
+# Half, floored to whole GB -- 4 on an 8 GB Mac, 8 on 16, 12 on 24, 16 on 32,
+# 32 on 64 -- because `--ram` names whole gigabytes. 4 is also the floor the
+# runtime accepts, so the smallest machines land exactly on it.
+ram_rule_gb=$(( physical_ram_bytes * 5 / 10 / 1073741824 ))
 # An unreadable size means no warning rather than a warning at 1 GB: the same
 # thing the runtime's own guard does, and the launcher must not invent a limit
 # it cannot justify.
 (( physical_ram_bytes > 0 )) || ram_rule_gb=0
 
 ram_over_rule=0
+# 1 when the RAM target is the question's default rather than a named choice.
+ram_default=0
 warn_ram_over_rule() {
   # A budget past this launcher's rule is allowed and warned about, never
   # reduced: the runtime takes an explicit --ram-budget verbatim, and this is
@@ -930,7 +939,7 @@ warn_ram_over_rule() {
   (( ram_gb > ram_rule_gb )) || return 0
   ram_over_rule=1
   warn_red "WARNING: the server would hold about ${ram_gb} GB, more than the ${ram_rule_gb} GB"
-  warn_red "         this launcher recommends (30% of this Mac's ${physical_ram_gb} GB). The"
+  warn_red "         this launcher recommends (50% of this Mac's ${physical_ram_gb} GB). The"
   warn_red "         expert cache is wired, so it cannot be paged out and everything"
   warn_red "         else has to fit beside it. Expect:"
   warn_red "           * system instability while the model is loaded"
@@ -952,9 +961,10 @@ elif [[ "$ENGINE" == "cpu" ]]; then
   ram_gb=""
 elif (( ! INTERACTIVE )); then
   # Unattended or dry run: keep the install's own measured profile, whose cache
-  # budget the runtime holds to a third of physical memory. That profile is why this
-  # rule is a warning: on the machine it was tuned on it is the right number,
-  # and on a smaller one the runtime's own clamp already applies.
+  # budget the runtime holds to a third of physical memory. The 50% target is a
+  # person's choice, taken in the question below; a script gets the shipped
+  # default, which is also what the benchmark protocol measures
+  # (`TINYTITAN_BENCH_RAM_BUDGET` pins one when a harness wants a specific size).
   ram_gb=""
 else
   echo ""
@@ -964,10 +974,10 @@ else
   echo "  and faster answers, and less left for everything else on the Mac."
   if (( ram_rule_gb > 0 )); then
     echo "  It is wired, so it cannot be paged out. This launcher recommends"
-    echo "  at most 30% of this Mac's ${physical_ram_gb} GB (${ram_rule_gb} GB): asking for"
-    echo "  more is allowed and warned about, because past that point the"
-    echo "  Mac starts swapping."
-    rule_hint="30% of this Mac is ${ram_rule_gb} GB"
+    echo "  half of this Mac's ${physical_ram_gb} GB (${ram_rule_gb} GB) and warns above"
+    echo "  that, because the rest of the server and everything else you run"
+    echo "  has to fit in what is left."
+    rule_hint="50% of this Mac is ${ram_rule_gb} GB"
   else
     rule_hint="recommended"
   fi
@@ -975,7 +985,7 @@ else
   echo "  5) 12 GB    6) 14 GB    7) 16 GB   8) Custom"
   echo "  (4 GB is the floor: the weights plus the minimum expert cache are"
   echo "   about 4.7 GB on a 125B install, so a smaller target cannot be met)"
-  echo "  9) Model default (measured per install; ${rule_hint})"
+  echo "  9) Model default (${rule_hint})"
   printf "Choice [1-9] (default 9): "
   read -r ram_choice || exit 1
   case "${ram_choice:-9}" in
@@ -984,8 +994,8 @@ else
     8)
       # Any whole number of GB, through the same parser the flag uses, so the
       # floor and the "with or without a G" spelling cannot differ between the
-      # two ways in. The recommended 30% is the default, because that is the
-      # number the paragraph above just argued for.
+      # two ways in. The recommended half is the default, because that is the
+      # number the paragraph above just named.
       custom_default="${ram_rule_gb:-16}"
       printf "RAM target in whole GB (4 or more) [default %s]: " "$custom_default"
       read -r custom_ram || exit 1
@@ -996,23 +1006,41 @@ else
       fi
       ram_gb="$custom_gb"
       ;;
-    9) ram_gb="" ;;
+    9)
+      # The default is the recommendation now, not the install's profile: it is
+      # passed as an explicit target, which is the only way to reach the half --
+      # an unset budget is clamped by the runtime to a third of physical memory.
+      # With no readable memory size there is nothing to recommend, so the
+      # profile stands as it did before.
+      ram_default=1
+      ram_gb=""
+      if (( ram_rule_gb > 0 )); then ram_gb="$ram_rule_gb"; fi
+      ;;
     *) echo "invalid choice: $ram_choice" >&2; exit 2 ;;
   esac
   if [[ -n "$ram_gb" ]]; then warn_ram_over_rule; fi
 fi
 if (( ram_rule_gb > 0 )); then
-  ram_note="model default (measured; 30% of this Mac is ${ram_rule_gb} GB)"
+  ram_note="model default (measured; 50% of this Mac is ${ram_rule_gb} GB)"
 else
   ram_note="model default (measured)"
 fi
 if [[ -n "$ram_gb" ]]; then
   ram_note="${ram_gb} GB (your choice)"
+  # The question's default is the recommended half, and it is passed as an
+  # explicit target, so the banner has to say which of the two it is: a person
+  # cannot otherwise tell their own choice from the recommendation.
+  if (( ram_default )); then
+    ram_note="${ram_gb} GB (default: 50% of this Mac)"
+  fi
   # The banner is the last thing printed before the model starts, so the
   # summary line carries the risk once more for anyone who scrolled past the
   # warning itself.
   if (( ram_over_rule )); then
-    ram_note="${ram_gb} GB (your choice; over 30% of this Mac's RAM)"
+    ram_note="${ram_gb} GB (your choice; over 50% of this Mac's RAM)"
+    if (( ram_default )); then
+      ram_note="${ram_gb} GB (default; over 50% of this Mac's RAM)"
+    fi
   fi
 fi
 
@@ -1364,7 +1392,7 @@ print_setup() {
   echo "Thinking: $think_word | RAM: $ram_note | At once: $concurrency | Port: $PORT | Ctrl-C to stop"
   if (( ram_over_rule )); then
     warn_red "WARNING: ${ram_gb} GB of RAM is over the ${ram_rule_gb} GB this launcher"
-    warn_red "         recommends for this Mac (30%). Expect swapping, a less stable"
+    warn_red "         recommends for this Mac (50%). Expect swapping, a less stable"
     warn_red "         system and slower tokens."
   fi
   if (( concurrency > 1 )); then

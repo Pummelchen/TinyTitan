@@ -1,10 +1,10 @@
-"""The launcher's expert-cache rule: 30% of physical memory, warned not capped.
+"""The launcher's expert-cache rule: 50% of physical memory, warned not capped.
 
 The rule belongs to the launcher, and it is a recommendation rather than a
 limit: a larger `--ram` is warned about in red and passed on, because the
-machine is the operator's. These tests pin the arithmetic (three tenths,
-floored to whole GB, which is what `--ram` takes) and both sides of the
-boundary.
+machine is the operator's. These tests pin the arithmetic (a half, floored to
+whole GB, which is what `--ram` takes), both sides of the boundary, and the
+interactive question whose default is that half.
 
 `TINYTITAN_PHYSICAL_RAM_BYTES` is the launcher's seam for exactly this: the mapping
 has to be checkable on a machine of any size.
@@ -28,13 +28,13 @@ LAUNCHER = ROOT / "tools/server_launcher.sh"
 SERVER = ROOT / ".build/release/TinyTitanServer"
 MODELS = ROOT / "models"
 
-# Installed memory in bytes, and the launcher's rule for it: 30%, floored.
+# Installed memory in bytes, and the launcher's rule for it: half, floored.
 MACHINES = {
-    8 * 2**30: 2,
-    16 * 2**30: 4,
-    24 * 2**30: 7,
-    32 * 2**30: 9,
-    64 * 2**30: 19,
+    8 * 2**30: 4,
+    16 * 2**30: 8,
+    24 * 2**30: 12,
+    32 * 2**30: 16,
+    64 * 2**30: 32,
 }
 
 
@@ -122,9 +122,10 @@ def target_of(run: subprocess.CompletedProcess[str]) -> str:
 class RamMenuTests(unittest.TestCase):
     """The interactive tiers: 4, 6, 8, 10, 12, 14, 16, Custom, model default."""
 
-    # 24 GB of physical memory, so the 30% rule is 7 GB and the Custom default
-    # is a number the tier list does not contain -- a value that happens to be
-    # a tier could come from either the default or the list.
+    # 24 GB of physical memory, so the rule (and the Custom prompt's default)
+    # is 12 GB, which is also tier 5 -- the two must agree, and the equality is
+    # the assertion: a Custom default that disagreed with the recommendation
+    # would be a second, quieter rule.
     MEMORY = 24 * 2**30
     TIERS = {"1": "4", "2": "6", "3": "8", "4": "10", "5": "12", "6": "14", "7": "16"}
 
@@ -152,10 +153,14 @@ class RamMenuTests(unittest.TestCase):
                 self.assertEqual(target_of(self.menu(f"{choice}\n")), gb)
 
     def test_custom_takes_any_whole_number_of_gb(self) -> None:
-        # 20 is above every tier and above the 7 GB rule, so it also exercises
+        # 20 is above every tier and above the 12 GB rule, so it also exercises
         # the warning path rather than a silent accept.
         run = self.menu("8\n20\n")
         self.assertEqual(target_of(run), "20")
+
+    def test_custom_default_is_the_recommended_half(self) -> None:
+        run = self.menu("8\n\n")
+        self.assertEqual(target_of(run), "12", "the Custom prompt defaults to the rule")
 
     def test_custom_refuses_below_the_floor(self) -> None:
         run = self.menu("8\n3\n")
@@ -163,10 +168,23 @@ class RamMenuTests(unittest.TestCase):
         self.assertIn("invalid choice: 3", run.stderr)
         self.assertEqual(target_of(run), "")
 
-    def test_enter_takes_the_model_default_and_passes_no_budget(self) -> None:
+    def test_enter_takes_the_default_and_passes_half_of_memory(self) -> None:
+        # The question's default is the recommendation, and it is passed as an
+        # explicit target: an unset budget is clamped to a third by the runtime,
+        # so only an explicit one can reach the half the menu advertises.
         run = self.menu("\n")
-        self.assertEqual(target_of(run), "", "the default must not pin a budget")
-        self.assertIn("model default", run.stdout)
+        self.assertEqual(target_of(run), "12")
+        self.assertIn("RAM: 12 GB (default: 50% of this Mac)", run.stdout)
+        self.assertIn("Model default (50% of this Mac is 12 GB)", run.stdout)
+
+    def test_the_unattended_path_still_leaves_the_budget_to_the_install(self) -> None:
+        # A script gets the shipped profile -- which is what the benchmark
+        # protocol measures -- so the half is a choice a person makes, not a
+        # silent change to every unattended run.
+        run = dry_run("--model", self.model, physical_bytes=self.MEMORY)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(target_of(run), "")
+        self.assertIn("model default (measured; 50% of this Mac is 12 GB)", run.stdout)
 
 
 class RamRuleTests(unittest.TestCase):
@@ -176,31 +194,31 @@ class RamRuleTests(unittest.TestCase):
             self.skipTest("no install under models/ and no built server to list one")
         self.model = model
 
-    def test_rule_is_thirty_percent_rounded_down(self) -> None:
+    def test_rule_is_half_rounded_down(self) -> None:
         for memory, expected in MACHINES.items():
             with self.subTest(memory_gb=memory // 2**30):
                 run = dry_run("--model", self.model, physical_bytes=memory)
                 self.assertEqual(run.returncode, 0, run.stderr)
                 self.assertIn(
-                    f"RAM: model default (measured; 30% of this Mac is {expected} GB)",
+                    f"RAM: model default (measured; 50% of this Mac is {expected} GB)",
                     run.stdout,
                 )
 
     def test_at_the_rule_is_silent_and_above_it_warns(self) -> None:
         memory = 24 * 2**30
-        at_rule = dry_run("--model", self.model, "--ram", "7", physical_bytes=memory)
+        at_rule = dry_run("--model", self.model, "--ram", "12", physical_bytes=memory)
         self.assertEqual(at_rule.returncode, 0, at_rule.stderr)
         self.assertNotIn("WARNING", at_rule.stderr)
-        self.assertIn("--ram-budget 7G", at_rule.stdout)
+        self.assertIn("--ram-budget 12G", at_rule.stdout)
 
-        above = dry_run("--model", self.model, "--ram", "8", physical_bytes=memory)
+        above = dry_run("--model", self.model, "--ram", "14", physical_bytes=memory)
         self.assertEqual(above.returncode, 0, above.stderr)
-        self.assertIn("WARNING: the server would hold about 8 GB", above.stderr)
-        self.assertIn("30% of this Mac's 24 GB", above.stderr)
-        self.assertIn("Starting anyway with 8 GB", above.stderr)
+        self.assertIn("WARNING: the server would hold about 14 GB", above.stderr)
+        self.assertIn("50% of this Mac's 24 GB", above.stderr)
+        self.assertIn("Starting anyway with 14 GB", above.stderr)
         # Warned, not capped: the requested size is what the server is given.
-        self.assertIn("--ram-budget 8G", above.stdout)
-        self.assertIn("over 30% of this Mac's RAM", above.stdout)
+        self.assertIn("--ram-budget 14G", above.stdout)
+        self.assertIn("over 50% of this Mac's RAM", above.stdout)
 
     def test_default_path_warns_about_nothing(self) -> None:
         run = dry_run("--model", self.model, physical_bytes=24 * 2**30)
@@ -213,19 +231,24 @@ class RamRuleTests(unittest.TestCase):
         run = dry_run("--model", self.model, "--ram", "32", physical_bytes=0)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertNotIn("WARNING", run.stderr)
-        self.assertNotIn("30% of this Mac", run.stdout)
+        self.assertNotIn("50% of this Mac", run.stdout)
         self.assertIn("--ram-budget 32G", run.stdout)
         # …and the default's note claims no percentage either.
         default = dry_run("--model", self.model, physical_bytes=0)
         self.assertIn("RAM: model default (measured) |", default.stdout)
 
     def test_boundary_scales_with_the_machine(self) -> None:
-        # The rule is 2 GB on an 8 GB Mac, so the smallest accepted target (4)
-        # is above it there and below it on a 24 GB Mac (rule 7).
-        small = dry_run("--model", self.model, "--ram", "4", physical_bytes=8 * 2**30)
-        self.assertEqual(small.returncode, 0, small.stderr)
-        self.assertIn("WARNING: the server would hold about 4 GB", small.stderr)
-        self.assertIn("--ram-budget 4G", small.stdout)
+        # The rule is 4 GB on an 8 GB Mac -- the floor exactly -- so the
+        # smallest accepted target sits on it there, and 6 warns.
+        at_floor = dry_run("--model", self.model, "--ram", "4", physical_bytes=8 * 2**30)
+        self.assertEqual(at_floor.returncode, 0, at_floor.stderr)
+        self.assertNotIn("WARNING", at_floor.stderr)
+        self.assertIn("--ram-budget 4G", at_floor.stdout)
+
+        above = dry_run("--model", self.model, "--ram", "6", physical_bytes=8 * 2**30)
+        self.assertEqual(above.returncode, 0, above.stderr)
+        self.assertIn("WARNING: the server would hold about 6 GB", above.stderr)
+        self.assertIn("--ram-budget 6G", above.stdout)
 
         large = dry_run("--model", self.model, "--ram", "4", physical_bytes=24 * 2**30)
         self.assertEqual(large.returncode, 0, large.stderr)
