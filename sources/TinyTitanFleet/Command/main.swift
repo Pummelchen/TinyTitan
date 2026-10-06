@@ -44,7 +44,9 @@ let usage = """
     the member an action is sent to. Every action then goes directly to the Mac that
     owns it — nothing is relayed through another instance. --json prints the raw
     answer. --version prints the name. Keys resolve in this order: --key,
-    DSH_LAN_KEY, DSH_LAN_TOKEN, the plugin's shipped default.
+    DSH_LAN_KEY, DSH_LAN_TOKEN, the plugin's shipped default. Prefer the
+    environment forms: --key puts the key in argv, where every other local
+    account can read it with ps.
     """
 
 func fail(_ message: String) -> Never {
@@ -110,11 +112,11 @@ let intervalOption = takeOption("--interval").flatMap(Int.init)
 let fromOption = takeOption("--from")
 
 let environment = ProcessInfo.processInfo.environment
-let key =
-    keyOption
-    ?? environment["DSH_LAN_KEY"]
-    ?? environment["DSH_LAN_TOKEN"]
-    ?? "tinytitan-lan"
+let keyResolution = FleetGroupKey.resolve(option: keyOption, environment: environment)
+let key = keyResolution.key
+if let warning = keyResolution.warning {
+    FileHandle.standardError.write(Data("\(FleetBrand.command): \(warning)\n".utf8))
+}
 
 guard let command = arguments.first else {
     print(usage)
