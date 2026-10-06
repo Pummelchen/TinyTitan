@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 46,
-    "done": 28,
-    "open": 17,
+    "done": 30,
+    "open": 15,
     "blocked": 1
   },
   "tasks": [
@@ -103,13 +103,13 @@
       "file_line": "docs/handover-tinytitan.md:1-37",
       "title": "The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published",
       "category": "documentation drift",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "recon of main vs tags/releases",
       "evidence-before": "AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "Confirmed against the repo, not the reporter's summary: v5.16 -> 0fd9df2 (2026-10-03), v5.17 -> 1904be4, v5.18 -> d30de44 (2026-10-05), and models/ holds 2 installs at 163 GB while the brief described 8 at 244 GB. Rewrote the title and the paste block: 5.18 is the current release with what each of 5.16-5.18 changed, the KAT-Coder install bug is credited to the release that fixed it, the open work is the audit ledger (its path, its render rule, and the row discipline), and the two rows a fresh session would otherwise re-learn the hard way are named -- AUD-143 with its three measured-and-reverted approaches, AUD-139 blocked on the owner because v5.18 published no tools tarball (re-confirmed against the release assets). Records the rules that cost sessions: the eleven gates fail closed rather than skip, SHA256_PENDING in the tree is the house pattern release.sh fills at publish time, the model receipt rules with the never-hand-edit caveat, and TT-048 still open. The body below the block, which already describes the product shape, is kept.",
+      "evidence-after": "Markdown-only change; all eleven gates exit 0 over it. Every release, tag and date in the new block is the value git and the release assets report (list above), and the install set is described by its rule rather than a count, so the brief cannot go stale on the next prune.",
+      "commit": "97fb5ed",
       "blocked-reason": null
     },
     {
@@ -630,13 +630,13 @@
       "file_line": "sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146",
       "title": "reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced",
       "category": "surface wired to nothing, publicly disclosed (§5)",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "§5 facade sweep",
       "evidence-before": "Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as accepted-and-ignored with disclosure at plugins/dsh-tinytitan/README.md (~:227), so it is not a silent facade. Either enforce or reject with a clear error: a field that is silently ignored changes what the client believes it asked for.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "Verified first: the decision not to enforce is deliberate and stated in the validator, so the row's real defect was the disclosure, not the behaviour. The comment claimed \"documented instead\" for parallel_tool_calls and the only text behind it was plugins/dsh-tinytitan/README.md, which covers reasoning_budget_tokens alone; Grep over the wiki for either field returned no matches. Fixed at the two places a client can read: the server guide's Function tools and Thinking sections now state what an accepted-but-unenforced field gets (the decoder emits the model's calls as it produces them; thinking is bounded by the requested level, not a token count) and where the deviation is visible (Responses echoes, Chat Completions logs), and the validator now appends a note for parallel_tool_calls == true. The note is gated on the surprising value: Codex sends false on every turn, so an ungated note would put a line in the log for every request and bury the ones that mean something. The comment now points at the page that carries the text. Sibling check: n and logprobs are refused, and chat_template_kwargs is read, so neither is the same defect. Wiki committed as 5780057.",
+      "evidence-after": "OpenAIValidationTests 36 tests pass. Mutation: deleting the new note fails parallelToolCallsIsAcceptedAndReported with 1 issue, restoring it is green again, so the test pins the disclosure rather than the decode. Three-way bound check in that test: true -> note, false -> none, field absent -> none. 98 tests across the request-path suites pass, full serial suite exit 0 (1615 tests, 7 runs, 0 failures), all eleven gates exit 0 (swiftlint --strict, swift-format --strict, shellcheck 0.11.0 over 24 scripts, ruff 0.16.7, eslint+prettier over both plugin packages, converter suites ok).",
+      "commit": "6b742ec",
       "blocked-reason": ""
     },
     {

@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:17  Done:28  Blocked:1  Total:46**
+**Open:15  Done:30  Blocked:1  Total:46**
 
 ## Table
 
@@ -20,7 +20,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
-| AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
@@ -29,10 +28,10 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
-| AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
+| AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | DONE | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
@@ -47,6 +46,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
+| AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
@@ -256,18 +256,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Expected: opening a packed MoE install validates the role records of every expert in every layer, or the load path says in one line which experts it did not check and why. Either outcome needs the load cost measured before and after.
 
-### AUD-106 — The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published
-
-- **Severity / tier:** S2 / Tier C
-- **Project:** docs
-- **Location:** `docs/handover-tinytitan.md:1-37`
-- **Category:** documentation drift
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** recon of main vs tags/releases
-
-**Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
-
 ### AUD-120 — No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source
 
 - **Severity / tier:** S2 / Tier B
@@ -380,20 +368,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-136 — reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** server
-- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146`
-- **Category:** surface wired to nothing, publicly disclosed (§5)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as accepted-and-ignored with disclosure at plugins/dsh-tinytitan/README.md (~:227), so it is not a silent facade. Either enforce or reject with a clear error: a field that is silently ignored changes what the client believes it asked for.
-
-**Evidence after.** None yet.
-
 ### AUD-140 — The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest
 
 - **Severity / tier:** S2 / Tier A
@@ -446,6 +420,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Four dependency states probed with `tools/lint.sh converter`: (1) pins present -> `ok`, rc 0; (2) interpreter without numpy (venv wrapper on PATH) -> `FAIL: converter deps unavailable (No module named 'numpy'); run: python3 -m pip install -r benchmark/requirements.txt`, rc 1 -- the case that used to be rc 0; (3) same with ALLOW_MISSING_CONVERTER_DEPS=1 -> `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ...`, rc 0; (4) no interpreter on PATH (`env -i PATH=/bin`) -> `FAIL: no python3 on PATH; the converter check cannot run`, rc 1, and rc 0 only with the opt-out. The gate still catches the real defect after the change: filing at `len(target["experts")]` instead of `expert` in tools/prepare_agentworld.py:387 produced `FAIL: experts landed by arrival order: [3.0, 0.0, 7.0, 1.0, 5.0, 2.0, 6.0, 4.0] (want [0.0..7.0])`, rc 1, and the file was restored (empty git diff) before the commit. A broken probe (SyntaxError in the module) also rc 1, so an unexpected exit is not read as a pass. All eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0.
 
 **Commit.** `218a210`
+
+### AUD-106 — The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published
+
+- **Severity / tier:** S2 / Tier C
+- **Project:** docs
+- **Location:** `docs/handover-tinytitan.md:1-37`
+- **Category:** documentation drift
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** recon of main vs tags/releases
+
+**Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
+
+**Fix.** Confirmed against the repo, not the reporter's summary: v5.16 -> 0fd9df2 (2026-10-03), v5.17 -> 1904be4, v5.18 -> d30de44 (2026-10-05), and models/ holds 2 installs at 163 GB while the brief described 8 at 244 GB. Rewrote the title and the paste block: 5.18 is the current release with what each of 5.16-5.18 changed, the KAT-Coder install bug is credited to the release that fixed it, the open work is the audit ledger (its path, its render rule, and the row discipline), and the two rows a fresh session would otherwise re-learn the hard way are named -- AUD-143 with its three measured-and-reverted approaches, AUD-139 blocked on the owner because v5.18 published no tools tarball (re-confirmed against the release assets). Records the rules that cost sessions: the eleven gates fail closed rather than skip, SHA256_PENDING in the tree is the house pattern release.sh fills at publish time, the model receipt rules with the never-hand-edit caveat, and TT-048 still open. The body below the block, which already describes the product shape, is kept.
+
+**Evidence after.** Markdown-only change; all eleven gates exit 0 over it. Every release, tag and date in the new block is the value git and the release assets report (list above), and the install set is described by its rule rather than a count, so the brief cannot go stale on the next prune.
+
+**Commit.** `97fb5ed`
 
 ### AUD-110 — openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs
 
@@ -699,6 +691,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** New `tests/TinyTitanMemory/ExpireSessionLogTests.swift`, 4 tests, against a real `FileJournal` written through the engine: a clean expiry drops the transcript and keeps the fact (asserted by replaying the file and reading the store back, not by counting bytes); a compaction that cannot write -- a non-empty, unwritable directory planted at the predicted `<journal>.compacting` name, so `writeCheckpoint`'s `removeItem` fails and the create cannot proceed -- returns the reason and leaves the transcript on disk; a directory in place of the journal reports "could not be opened"; and the sweep, run twice over the same stuck file, produces exactly one `degraded during expire` line naming the file and the step, and no "expired the session log" event. Mutation check: restoring `try? await engine.compactJournal()` + `return nil` fails the two refusal tests with 4 issues, including the false `.expired` claim, and the success-path tests stay green.
 
 **Commit.** `a9ab3c5`
+
+### AUD-136 — reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146`
+- **Category:** surface wired to nothing, publicly disclosed (§5)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as accepted-and-ignored with disclosure at plugins/dsh-tinytitan/README.md (~:227), so it is not a silent facade. Either enforce or reject with a clear error: a field that is silently ignored changes what the client believes it asked for.
+
+**Fix.** Verified first: the decision not to enforce is deliberate and stated in the validator, so the row's real defect was the disclosure, not the behaviour. The comment claimed "documented instead" for parallel_tool_calls and the only text behind it was plugins/dsh-tinytitan/README.md, which covers reasoning_budget_tokens alone; Grep over the wiki for either field returned no matches. Fixed at the two places a client can read: the server guide's Function tools and Thinking sections now state what an accepted-but-unenforced field gets (the decoder emits the model's calls as it produces them; thinking is bounded by the requested level, not a token count) and where the deviation is visible (Responses echoes, Chat Completions logs), and the validator now appends a note for parallel_tool_calls == true. The note is gated on the surprising value: Codex sends false on every turn, so an ungated note would put a line in the log for every request and bury the ones that mean something. The comment now points at the page that carries the text. Sibling check: n and logprobs are refused, and chat_template_kwargs is read, so neither is the same defect. Wiki committed as 5780057.
+
+**Evidence after.** OpenAIValidationTests 36 tests pass. Mutation: deleting the new note fails parallelToolCallsIsAcceptedAndReported with 1 issue, restoring it is green again, so the test pins the disclosure rather than the decode. Three-way bound check in that test: true -> note, false -> none, field absent -> none. 98 tests across the request-path suites pass, full serial suite exit 0 (1615 tests, 7 runs, 0 failures), all eleven gates exit 0 (swiftlint --strict, swift-format --strict, shellcheck 0.11.0 over 24 scripts, ruff 0.16.7, eslint+prettier over both plugin packages, converter suites ok).
+
+**Commit.** `6b742ec`
 
 ### AUD-144 — Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer
 
