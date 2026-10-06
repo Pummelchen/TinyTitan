@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:7  Done:51  Blocked:1  Total:59**
+**Open:7  Done:52  Blocked:1  Total:60**
 
 ## Table
 
@@ -54,8 +54,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-153 | S2 | C | tooling | `tests/TinyTitanServer/RoutingFixtures.swift RoutingGate (wait/open); tests/TinyTitanServer/RoutingGateTests.swift` | The router test fixture's gate held one continuation for any number of waiters, so a second concurrent waiter hung the run | test-infrastructure lost wake, found by AUD-143's own regression test | DONE | Mac (primary) |
 | AUD-157 | S2 | B | plugins | `plugins/dsh-tinytitan/test/generate.test.js:30-35, :93-107` | The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads | a check that does not run (test harness path vs tool path) | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-149 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
 | AUD-158 | S3 | C | lint-gates | `AGENTS.md 'Two products, one repository' rules 1 and 3, sources/TinyTitanLib/*.swift (22 public types, 88 public declarations, 291 package), tools/lint.sh (no facade check)` | Nothing enforces the library facade: `public` in `TinyTitanLib` is a promise carried only by the reviewer's memory, and so are 'imports no NIO' and 'keeps stdout clean' | unenforced documented standard (missing gate) | OPEN | Mac (primary) |
+| AUD-160 | S3 | C | docs-gates | `AGENTS.md ('runs the thirteen checks'), RELEASE.md:240, .github/workflows/ci.yml:109, docs/handover-tinytitan.md:23 (all enumerate the gate set); docs/handover-tinytitan.md:8-22 and this ledger's AUD-106 fix-summary (release shas)` | Nothing compares a documented count or citation to the thing it documents: four files enumerate the gate set, three were wrong, and three release shas cited tag objects as commits | missing gate / derived facts restated as prose | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
@@ -63,6 +63,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-146 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:245 (pre-fix), :310 (pre-fix)` | Two expert-cache derivations read the rung list's literal order as a promise that it holds the largest value | implicit invariant on a public constant | DONE | Mac (primary) |
 | AUD-147 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:61-87` | readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist | single-layer CSRF defence recorded as two-layer | DONE | Mac (primary) |
 | AUD-148 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:244` | isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape | trust boundary decided by an attacker-supplied header pair | DONE | Mac (primary) |
+| AUD-149 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | DONE | Mac (primary) |
 | AUD-151 | S3 | C | lint-gates | `docs/repository-layout.md:135-140 (the claim), sources/TinyTitanLib/Engine.swift:529, sources/TinyTitanLib/OpenAIRequestValidator.swift:521, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:519 (the tree)` | The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do | missing gate, contract drift / stale documentation on a load-bearing rule | DONE | Mac (primary) |
 | AUD-152 | S3 | C | tooling | `observed while running `swift build -c release --build-tests` on the tree at 65bf241; log /tmp/audit143-build.log (not committed — scratch), against Package.swift's test targets` | `swift build -c release --build-tests` failed to resolve every test module's dependency on a tree that builds clean, and did not re-produce | build invocation that cannot pass on this tree, mis-read as a flake: a release `--build-tests` compiles product libraries without -enable-testing, so a @testable import has nothing to bind | DONE | Mac (primary) |
 | AUD-154 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js (/health, /peers, /inventory bodies) and src/peers.js:302-312` | Every group-facing response echoes the shared group key in cleartext, so the string that authorises the API lands in logs, dumps and screenshots | secret disclosure on an authenticated surface, found by the AUD-123/147/148 sibling audit | DONE | Mac (primary) |
@@ -917,20 +918,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
-### AUD-149 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
-
-- **Severity / tier:** S3 / Tier C
-- **Project:** docs
-- **Location:** `docs/handover-tinytitan.md:103-106`
-- **Category:** stated state that the tree disproves
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-127 sibling audit
-
-**Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
-
-**Evidence after.** None yet.
-
 ### AUD-158 — Nothing enforces the library facade: `public` in `TinyTitanLib` is a promise carried only by the reviewer's memory, and so are 'imports no NIO' and 'keeps stdout clean'
 
 - **Severity / tier:** S3 / Tier C
@@ -944,6 +931,20 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** AGENTS.md states three properties of `sources/TinyTitanLib/` as rules: every public declaration there is deliberate and 'nothing becomes `public` by accident' (rule 3, with `package` named as the default for everything internal); the library 'imports no NIO' (rule 1); and nothing in it may `print`, because stdout belongs to the embedding program. `tools/lint.sh` has fourteen checks and none of them looks at access level, imports or stdout in that target; swiftlint's config has no such rule either; and `Package.swift` grants `TinyTitanLib` whatever it declares. Measured 2026-10-06, all three properties hold: 22 public types (Engine, Session, EngineConfiguration and its seven vocabulary enums/structs, ChatMessage/Role/Prompt/GenerationOptions/GenerationEvent/GenerationSummary/GenerationStopReason/DecodeStopReason/ToolCall/ToolDefinition, ModelDescriptor, TinyTitanError), 88 public declarations against 291 `package`, no `import NIO*` in the target, and zero `print(` / `FileHandle.standardOutput` occurrences. The finding is not a violation today, it is that the standard has no teeth: adding one `public func` to `ServerModelSession.swift` or one stray `print("loaded")` to the loading path is a permanent API promise or a corrupted consumer stdout, and the compiler, the fourteen gates and the tests all stay silent. That is the same failure mode AUD-151 just closed for file length - a number stated in prose, carried by habit, and quietly out of date within a week - and this one is on the surface an external package depends on, which is what `examples/embedded` exists to prove still builds.
 
 **Evidence after.** Expected: one gate, `tools/lint.sh facade`, holding the three properties as data rather than prose - an allow-list of the public surface of `TinyTitanLib` (the 22 types plus their members, in a committed file that fails on a new public declaration *and* on a stale list row, the way `func-length` fails on a stale exemption), a grep for `NIO` in that target's imports, and a grep for `print(`/`standardOutput` there. The probe must be shown to bite: a temporary `public func` in a `TinyTitanLib` file fails it, an un-annotated `print` fails it, and the clean tree exits 0 with a receipt naming the counts it scanned. Whether the public list should be the whole promise (every member) or one row per public type is a decision for `docs/plan-embedded-library.md` and needs the owner; the sweep itself does not.
+
+### AUD-160 — Nothing compares a documented count or citation to the thing it documents: four files enumerate the gate set, three were wrong, and three release shas cited tag objects as commits
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs-gates
+- **Location:** `AGENTS.md ('runs the thirteen checks'), RELEASE.md:240, .github/workflows/ci.yml:109, docs/handover-tinytitan.md:23 (all enumerate the gate set); docs/handover-tinytitan.md:8-22 and this ledger's AUD-106 fix-summary (release shas)`
+- **Category:** missing gate / derived facts restated as prose
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-149 fix, sibling sweep (asking why a table this visible stayed wrong for a week)
+
+**Evidence before.** AUD-149 is the defect; this row is the reason it could happen. Four current files state the size of the gate set: `AGENTS.md` says thirteen, `RELEASE.md` and `.github/workflows/ci.yml:109` said twelve, and `docs/handover-tinytitan.md` said twelve in its paste block - while `tools/lint.sh` ran fourteen after AUD-142 and AUD-151 each added a gate on 2026-10-06. Measured by mutation: with both counts typed back to `twelve`, `tools/lint.sh` still exits 0 - no gate reads a document - so the only thing that keeps such a sentence true is the person who happens to notice. The same shape appears in citations: the brief and AUD-106's own record named `v5.18` -> `d30de44`, `v5.17` -> `1904be4`, `v5.16` -> `0fd9df2`, but `git cat-file -t` on all three says `tag`, and the tagged commits are `ea5de8c`, `701bb2e`, `551522a`. A commit sha is the key `tools/ci-green.sh`, `tools/release.sh` and `gh run list --commit` need, so a reader following the citation gets a tag stanza and no run. Both are the same failure: a fact the repository can compute is restated in prose, and prose does not fail when the computation changes. Note the difference from AUD-151's file-length case - there the number was a *standard*; here the numbers and shas are *derived values*, so the fix is not to enforce a limit but to forbid restating a derivable fact where it can be generated or checked.
+
+**Evidence after.** Expected: one gate, `tools/lint.sh docs`, that recomputes what documents claim from the repository - (1) every enumeration of the gate set in `AGENTS.md`, `RELEASE.md`, `ci.yml` step names and `docs/handover-tinytitan.md` must match the count and the names in `tools/lint.sh`'s usage header, failing on a stale count *and* on a name that no longer exists; (2) every `<tag> -> <sha>` citation in the docs must satisfy `git rev-parse <tag>^{commit} == <sha>`, so a tag-object sha in a brief is a build failure rather than a mystery in the next session. The probe is the mutation above: type `twelve` into one of those files and a tag-object sha into another and show the gate names both, then restore and show it clean. Whether `AGENTS.md`'s count should be checked (the owner's file, and the one most likely to lag) or merely reported is the owner's call; the gate can read it either way.
 
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
@@ -1070,6 +1071,38 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Commit ef30d5f. `test/router.test.js` pins the rebinding shape end to end: Origin `http://attacker.invalid:3080` presented with the matching Host -> 403, where it was 200 before the fix; `trustedHosts: ["lan-desk.local"]` makes that pair 200 while `elsewhere.example` with its own matching Host stays 403, so the allowlist is an addition rather than a removal of the equality rule. `isKnownHost` has its own table test: `localhost`, `127.0.0.1:3080`, `::1`, `10.0.0.5:3080` and `[fe80::1%en0]:3080` trusted; `attacker.invalid:3080`, `8.8.8.8` and the empty string refused. Mutation check M2 (bare `parsed.host === host` restored) fails 3 tests.
 
 **Commit.** `ef30d5f`
+
+### AUD-149 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** `docs/handover-tinytitan.md:103-106`
+- **Category:** stated state that the tree disproves
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-127 sibling audit
+
+**Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
+
+**Fix.** Fixed against the tree, not against the row: every claim in the table was re-measured and the table now says what the measurement says, with the date it was taken and the command that re-takes it. Six of its eleven rows were stale - release (5.15 -> **5.18**, published 2026-10-05), models (**8 installs / 244 GB** -> 2 installs / 163 GB), goldens (**7 checked** -> 1 checkable: only `qwen38-4` has an install here), `main` (**level with `origin/main`** -> 41 commits ahead and nothing pushed), audit (**28 findings, all closed** -> this audit's 59 rows / 7 open / 1 blocked, plus the September audit's 28 named separately), and the wiki (**level with `origin/master`** -> 1 commit ahead). The `.build` and CI rows were rewritten to the same form.
+
+The `main` row now states the consequence out loud rather than leaving it to be inferred: CI runs on push, so **no CI run covers any of the 41 local commits**, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit. That is the reason the work is not pushed yet, written where the next session cannot miss it.
+
+Two things the row did not name and the re-measurement found. (1) **The brief's release citations were tag objects, not commits.** `v5.18` resolves to `d30de44`, which is a tag object; the tagged commit is `ea5de8c`. Same for 5.17 (`1904be4` vs `701bb2e`) and 5.16 (`0fd9df2` vs `551522a`) - and 5.15's `4ff6041` was right only because that line happened to name the commit. AUD-106's own fix-summary recorded those three object shas as the measured values (its text stands, corrected forward here), so the error came from reading `git tag -l --format` output as a commit. It matters operationally: `tools/ci-green.sh`, `tools/release.sh` and every `gh run list --commit` lookup take the **commit**, and `git show <tag-object-sha>` prints a tag stanza, not a diff. The paste block now cites the tagged commit for 5.16-5.18 and states the convention in one sentence. (2) **The gate count was stale in two more current files**: `.github/workflows/ci.yml:109` said `Production gates (all twelve)` and RELEASE.md enumerated twelve checks, omitting both `unbounded-read` and `file-length`. Both now say fourteen, with RELEASE.md naming `tools/lint.sh`'s usage header as the authoritative list and requiring the same-commit edit. `AGENTS.md` reads thirteen - the owner's file, so it is reported here and not edited.
+
+The row's `file_line` named only `docs/handover-tinytitan.md:103-106`; the drift reached lines 107, 109 and 111 too (audit counts, `.build`, CI), and the fix covers the whole table.
+
+**Evidence after.** Done at 83476fd.
+
+Re-measured after the edit, each value printed by the command the cell now names: `git rev-list --count @{u}..HEAD` = 41 and `git rev-parse --short HEAD` = `eb21c43`; `git tag --sort=-creatordate | head -1` = `v5.18`, whose tagged commit is `ea5de8c`; `ServerVersion.current` = `5.18`; `grep -c 'echo "== ' tools/lint.sh` = 14; `counts` in `ledger.json` = 59 / 51 / 7 / 1; `du -sh models/*` = 162G + 1.4G, two directories; `ls benchmark/golden | wc -l` = 16 against the 16 targets in `tools/golden-baseline.sh`, of which exactly one (`qwen38-4`) has a matching install directory; `git -C .qwen/wiki status -sb` = `master...origin/master [ahead 1]`; `gh release list` = 5.18 latest, published 2026-10-05T06:17:34Z, with four assets and no `tinytitan-5.18-tools.tar.gz` (which is AUD-139, still blocked on the owner - re-confirmed here, not assumed).
+
+Tag-object proof: `git cat-file -t v5.18` = `tag`, `git rev-parse v5.18` = `d30de44`, `git rev-parse v5.18^{commit}` = `ea5de8c`.
+
+Gates and CI: `tools/lint.sh` exit 0 over the whole change (`/tmp/tt-audit/lint-aud149.log`); `ruby -ryaml` parses `ci.yml` and `codeql.yml`; the CI `Check Markdown links` step, run locally as the workflow runs it, reports `Checked 49 local link(s); 0 broken.` with exit 0. No Swift or model behaviour changed, so the golden gate was not driven for this commit.
+
+Mutation check - the honest one for a documentation row: the two stale counts were typed back in (`fourteen` -> `twelve` in the handover, `fourteen checks as of 2026-10-06` -> `twelve checks as of 2026-09-30` in RELEASE.md) and **all fourteen gates exited 0** (`/tmp/tt-audit/lint-mutation-aud149.log`), then both files were restored by copy and re-grepped. That is the finding this closure cannot fix: the corrected prose is true today and has no guard, which is filed as AUD-160. Sibling sweep also confirmed the historical `eleven gates` mentions in the release notes and in this ledger are records of runs that really did have eleven gates, and are left alone.
+
+**Commit.** `83476fd`
 
 ### AUD-151 — The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do
 
