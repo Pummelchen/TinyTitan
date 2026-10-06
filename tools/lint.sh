@@ -312,7 +312,7 @@ check_func_length() {
 # Measured 2026-10-06, three files were over it (529, 521 and 519) and had been
 # for a week after the layout doc last claimed none were; this sweep's own
 # AUD-142 commit added 4 lines to one of them and 7 to another, and neither the
-# compiler nor any of the other twelve gates objected. A number nobody checks is
+# compiler nor any of the other thirteen gates objected. A number nobody checks is
 # a suggestion.
 #
 # There is no opt-out and no baseline file on purpose. func-length ratchets

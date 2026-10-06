@@ -5,19 +5,24 @@
 > Continue the TinyTitan work in this checkout. Read `AGENTS.md`, then
 > `docs/handover-tinytitan.md`, then the audit ledger
 > `docs/audit-2026-10-06/ledger.md`, then the wiki `Project-Tracker`.
-> **5.18 is cut and published** (`v5.18` → `d30de44`, 2026-10-05: the launcher
-> fetches a model that is not on disk, the menu offers the ones the checkout
-> lacks, and every long download, conversion and repack draws a real
-> percentage). Before it, **5.17** (`v5.17` → `1904be4`, 2026-10-04) fixed the
-> converter guard that keyed the per-expert duplicate check on the tensor name
+> **5.18 is cut and published** (`v5.18` → commit `ea5de8c`, 2026-10-05: the
+> launcher fetches a model that is not on disk, the menu offers the ones the
+> checkout lacks, and every long download, conversion and repack draws a real
+> percentage). Before it, **5.17** (`v5.17` → commit `701bb2e`, 2026-10-04) fixed
+> the converter guard that keyed the per-expert duplicate check on the tensor name
 > instead of name + width, so `tools/install_models.sh katcoder [both]`
 > installs again (issue #19), and moved the user documentation into the wiki;
-> **5.16** (`v5.16` → `0fd9df2`, 2026-10-03) made the engine a library —
+> **5.16** (`v5.16` → commit `551522a`, 2026-10-03) made the engine a library —
 > `TinyTitanLib` is a shipped product, the CLI and the server both generate
 > through it, and the toolchain is pinned **exactly**: Xcode 27 / Swift 6.4,
-> nothing else. `tools/lint.sh` runs **twelve** pinned gates, and every one of
-> them **fails** when its dependency is missing rather than reporting a skip —
-> a check that did not run is not a pass. Release notes in the tree keep
+> nothing else. These three citations name the **tagged commit**, not the tag
+> object — `git rev-parse v5.18` is `d30de44`, which is a tag object and is what
+> this brief said until 2026-10-06 — because CI, `tools/ci-green.sh` and
+> `tools/release.sh` all key on the commit, and `git show <tag-object-sha>` does
+> not print a diff.
+> `tools/lint.sh` runs **fourteen** pinned gates, and every one
+> of them **fails** when its dependency is missing rather than reporting a
+> skip — a check that did not run is not a pass. Release notes in the tree keep
 > `SHA256_PENDING`; `tools/release.sh` fills them in the staged copy at publish
 > time, so a placeholder there is the house pattern, not a defect.
 >
@@ -27,14 +32,17 @@
 > `render_ledger.py`, which refuses stale ones). Row discipline: verify against
 > the code before fixing anything, fix only what is true and unfixed, test the
 > fix, re-verify on current `main`, then audit for the sibling defect and close
-> with the measured evidence and the commit hash. The hardest row still open is
-> **AUD-143** (S1): a pending model switch can be overtaken by new work for the
-> resident model, and the release-build test aborts with signal 6 on this host
-> while passing in CI — three approaches have been measured and reverted, so
-> read that row before trying a fourth. **AUD-139** (S1) is blocked on the
-> repository owner: `v5.18` published no `tinytitan-5.18-tools.tar.gz`
-> (confirmed against the release assets on 2026-10-06), so the installer's
-> closed check refuses the newest release until someone re-publishes it.
+> with the measured evidence and the commit hash. **Do not read a list of open
+> rows out of this brief** — name the severity you want and ask the ledger:
+> `python3 -c "import json;[print(t['id'],t['severity'],t['title']) for t in
+> json.load(open('docs/audit-2026-10-06/ledger.json'))['tasks']
+> if t['status']=='OPEN']"`. This block used to point at **AUD-143** as the
+> hardest open row; it closed at `07e867b`, and a session that trusted the prose
+> would have re-learned that for nothing. One row needs a human and not a fix:
+> **AUD-139** (S1) is blocked on the repository owner, because `v5.18` published
+> no `tinytitan-5.18-tools.tar.gz` (confirmed against the release assets on
+> 2026-10-06), so the installer's closed check refuses the newest release until
+> someone re-publishes it.
 >
 > The product is the engine plus its loopback server — the Mac app is gone — and
 > `tools/install_tinytitan.sh` downloads a built release instead of compiling
@@ -96,19 +104,31 @@ traps that one named still bite and are folded in below.
 
 ## Where the work stands
 
+Every measured cell below carries the date it was measured and the command that
+re-measures it. That is the point of the format: this table was a hand-copied
+snapshot, and six of its eleven rows had drifted by 2026-10-06 — it named 5.15 as
+the current release after 5.16, 5.17 and 5.18 shipped, "8 installs, 244 GB"
+after the model set was pruned to two, "7 checked" goldens when one target has
+an install here, "level with `origin/main`" on a tree with work no remote has
+seen, "28 findings, all closed" beside an open audit, and "level with
+`origin/master`" for a wiki with an unpushed commit. **When a fact here changes,
+re-run the command and rewrite the cell with the new value and today's date** —
+do not edit the number to match what you expect, and do not trust it as current
+if the date is old.
+
 | Piece | State |
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | level with `origin/main`: the tag `v5.15` (`4ff6041`), this brief, and a merge of the badge chore |
-| Release | **5.15 published** 2026-10-02 — `tinytitan-5.15-macos-arm64.tar.gz`, 15,412,309 bytes, sha256 `b0f2e136…` with its `.sha256` beside it (verified: the notes' digest matches the asset) |
-| Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
-| Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
-| Audit | **28 findings, all closed**; the twelve gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
-| `.build` | release rebuilt for 5.15 (at the tag); a clean scratch release build is part of each dry run |
-| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.15 section); user-facing only since 2026-09-29 |
+| `main` | as of 2026-10-06, **41 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count @{u}..HEAD`); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `eb21c43`. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
+| Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
+| Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-06, `counts` in `ledger.json` is **59 rows / 51 closed / 7 open / 1 blocked**, and the fourteen gates in `tools/lint.sh` are partly what it left behind. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
+| Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
-| CI | every `main` push runs CI (twelve gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the release commit's push is the run to watch (`gh run list`) |
+| CI | every `main` push runs the `test` job (fourteen gates, plugin/ converter/ installer/ release gates, the embedded-dependency check, serial tests, Markdown links) and the `thread-sanitizer` job, plus CodeQL (`languages: swift`); the release commit's push is the run to watch (`gh run list`). As of 2026-10-06 nothing has been pushed, so **no run covers the 41 commits above** — that is the `main` row, not a secret |
 
 ## What has landed
 
