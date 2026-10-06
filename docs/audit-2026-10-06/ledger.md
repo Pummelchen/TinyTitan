@@ -2,12 +2,13 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:30  Done:11  Blocked:1  Total:42**
+**Open:30  Done:13  Blocked:1  Total:44**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AUD-143 | S1 | A | tests | `tests/TinyTitanServer/ModelRouterTests.swift:57-78 (failing test); sources/TinyTitanServer/Core/ModelRouterError.swift:33 (the actor that traps)` | TinyTitanServerTests aborts with signal 6 at a ModelRouter actor-executor trap, so the whole server bundle reports nothing | crashing test target / concurrency trap (found while verifying AUD-110 and AUD-111) | OPEN | Mac (primary) |
 | AUD-139 | S1 | A | release | `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276` | v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled | release artifact gap created by a fix; needs an action on a published release | BLOCKED | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
@@ -21,8 +22,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
-| AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:29-35` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | OPEN | Mac (primary) |
-| AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | OPEN | Mac (primary) |
 | AUD-114 | S2 | B | build-config | `Package.swift:81-83` | A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02 | contract drift / stale documentation on a load-bearing rule | OPEN | Mac (primary) |
 | AUD-115 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321` | bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read | dead contract field | OPEN | Mac (primary) |
 | AUD-116 | S2 | A | repack | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149` | A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix | silent drop on a numerics-affecting field | OPEN | Mac (primary) |
@@ -43,6 +42,9 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
+| AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | OPEN | Mac (primary) |
+| AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
+| AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
 | AUD-113 | S2 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:33 (before); PLEConstants.swift:35-46, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:172-189, sources/TinyTitanServer/Core/ModelCatalog.swift:278-293 (after)` | ple_constants.json is read with an uncapped Data(contentsOf:) although its sibling receipts cap the same file class | unbounded memory on a model-supplied file | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
@@ -52,6 +54,22 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 
 ## Detail
+
+### AUD-143 — TinyTitanServerTests aborts with signal 6 at a ModelRouter actor-executor trap, so the whole server bundle reports nothing
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** tests
+- **Location:** `tests/TinyTitanServer/ModelRouterTests.swift:57-78 (failing test); sources/TinyTitanServer/Core/ModelRouterError.swift:33 (the actor that traps)`
+- **Category:** crashing test target / concurrency trap (found while verifying AUD-110 and AUD-111)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-110/AUD-111 verification, full serial suite
+
+**Evidence before.** Two manifestations, both measured on this host. (1) Isolated: `swift test -c release --no-parallel --filter 'ModelRouterTests'` exits 1 in 20 consecutive runs, each ending `error: Process '.../swiftpm-testing-helper --test-bundle-path .../TinyTitanServerTests.xctest/... ' exited with unexpected signal code 6`, after printing `Incorrect actor executor assumption; expected 'TinyTitanServerCore.ModelRouter' executor.` The log stops at `Test workForTheResidentModelQueuesBehindAPendingSwitch() started.` (2) In the full serial run the same bundle dies the same way (`tail` of the run: the signal-6 line, then `Note: Some test targets reported failures: - TinyTitanServerTests (Swift Testing)`), while the other six bundles pass: 744 + 131 + 162 + 28 + 44 + 89. In an earlier full run the same test instead recorded a plain assertion failure (`Expectation failed: log.loads == ["load alpha_4-Bit", "load small-2b", "load alpha_4-Bit"]`, bundle summary `384 tests in 46 suites failed ... with 1 issue`), so the assertion and the trap are two outcomes of one ordering defect and the crash is not merely a harness hiccup.
+    It is not caused by the opener work it was found under: with `Posix.swift`, `RealForwardRunner.swift` and `RealForwardRunner+Diagnostics.swift` reverted to HEAD and both new test files moved out of the tree, the filtered run still aborted with the identical `recorded an issue at ModelRouterTests.swift:75:9` line. `git log` shows neither `ModelRouter` nor `ModelRouterTests.swift` is touched by any commit on this audit branch -- last changed by 0cdba76 and 715df2c, both of which are on `main`. So `main` carries this today, which makes it a red-test-on-main finding, not an audit-branch regression, and it is why this row is S1: a bundle that aborts reports nothing, so every server-side test after the trap is silently lost from the count the release gate reads.
+    Root cause is not yet established. Facts to start from: `ModelRouter` is a plain `public actor` (ModelRouterError.swift:33) with no `serialExecutor` and no custom executor found in `sources/TinyTitanServer*`; the failing test constructs the actor inside the test body and then drives it from three detached `Task`s while polling `router.waiterCount` through `Fixture.eventually`; and the testing helper reports `Target Platform: arm64e-apple-macos14.0` while the package builds for `arm64-apple-macos26.0`.
+
+**Evidence after.** Expected: `swift test -c release --no-parallel --filter 'ModelRouterTests'` exits 0 on this host and the full serial run prints a TinyTitanServerTests summary line with its real test count. Whether the fix lands in the router or in the test depends on the verdict: if a resident-model request really can starve a pending switch, the ordering is a production bug and the assertion is the test doing its job; if the trap is an executor-assumption artifact of the harness, the server bundle still has to be made to report rather than abort, because a lost bundle is how a red suite reads as a small suite.
 
 ### AUD-139 — v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled
 
@@ -256,34 +274,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** recon of main vs tags/releases
 
 **Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
-
-### AUD-110 — openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** repack
-- **Location:** `sources/TinyTitanRepack/Core/System/Posix.swift:29-35`
-- **Category:** symlink following / TOCTOU on a predicted path
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L4 security pass
-
-**Evidence before.** Posix.swift:33 `open(path, O_RDWR | O_CREAT | O_TRUNC, 0o600)` — no O_NOFOLLOW, no O_EXCL, no O_CLOEXEC, while :38 openExistingRW, :44 openDirectory, :50 openLock and :212 atomic-temp all set O_NOFOLLOW. Callers: ResidentWriter.swift:16, RemoteStreamingRepacker.swift:172, :183 — the .partial weight outputs. A symlink planted at a predicted output path is followed and truncated.
-
-**Evidence after.** None yet (S2 gate: OPEN → PROGRESS → TEST → DONE).
-
-### AUD-111 — Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** engine
-- **Location:** `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489`
-- **Category:** permissive file mode + symlink following
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L4 security pass
-
-**Evidence before.** Both `open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)` for TINYTITAN_ROUTE_TRACE (:478) and TINYTITAN_PREFETCH_TRACE (:489). Contrast Posix.swift:31-33, which documents 0600 because 'model, partial and temp files are never shared with other users of the machine'. The path is operator-chosen, so the exposure is a local information leak and a symlink write, not a remote hole.
-
-**Evidence after.** None yet.
 
 ### AUD-114 — A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02
 
@@ -572,6 +562,57 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Expected: group (1) reads under a stated bound and says so on refusal, with a test per site in the shape AUD-113's `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` uses (the bound fires, not the decoder); `ServerPromptStateStore.swift:121` moves to read-then-check so its bound stops being a TOCTOU; groups (2) and (3) get a limit written down where the operator can see it, or an explicit note that the operator's own checkpoint is out of scope; group (4) classified as a self-check rather than left to look like an unfixed hole. Load-path sites need `tools/golden-baseline.sh --check qwen38-4` before and after.
 
+### AUD-144 — Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416`
+- **Category:** symlink following on a predicted path
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-110/AUD-111 fix, sibling sweep
+
+**Evidence before.** `grep -rn O_CREAT sources/` after AUD-110: every creating opener in `TinyTitan` and `TinyTitanRepack` now refuses links, and the four left are here -- :116 `open(lockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)` (the `flock` anchor), :137 the append handle, and :382 and :416 both `O_WRONLY | O_CREAT | O_TRUNC`, the compaction temp and `truncate()`. The mode and O_CLOEXEC are already right; only the link guard is missing, and `grep -rn 'isSymbolicLink|symlink' sources/ContinuityCore/` returns nothing, so there is no equivalent of the repack's `InstallLockTests.symlinkedLockIsRejectedWithoutFollowingIt` anywhere in this target either. The two O_TRUNC sites are the sharp pair: a link planted at a predicted journal or checkpoint name turns a memory-store write into a destructive write elsewhere, reachable by anything that can create a file in the store directory. Weaker boundary than AUD-110 -- the store lives under the operator's own `~/.tinytitan`, so it needs local write access to that directory, which is why this is a sibling row and not the same severity -- but the same primitive, and the installer's precedent says the fix costs nothing at the open.
+    Not fixed with AUD-110 because it is a different target (Tier A per `docs/audit-2026-10-06/inventory.md:120`, `TinyTitanMemory` + `ContinuityCore`), it needs the memory suite (`tests/ContinuityCore/JournalTests.swift`, `JournalFailureTests.swift`) rather than the repack's, and `:116` deserves thought the sweep did not have time for: refusing a link at the lock path changes who can contend for the lock, which is the one behaviour here that is load-bearing.
+
+**Evidence after.** Expected: the four opens carry O_NOFOLLOW, or `:116` is argued out with the reason recorded; a test per site in the shape `PosixOpenTests.aSymlinkAtTheOutputPathIsRefusedAndItsTargetSurvives` asserting the victim's bytes survive, not merely that an error was thrown; and the memory suites green in the full serial run.
+
+### AUD-110 — openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** repack
+- **Location:** `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)`
+- **Category:** symlink following / TOCTOU on a predicted path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L4 security pass
+
+**Evidence before.** Posix.swift:33 `open(path, O_RDWR | O_CREAT | O_TRUNC, 0o600)` — no O_NOFOLLOW, no O_EXCL, no O_CLOEXEC, while :38 openExistingRW, :44 openDirectory, :50 openLock and :212 atomic-temp all set O_NOFOLLOW. Callers: ResidentWriter.swift:16, RemoteStreamingRepacker.swift:172, :183 — the .partial weight outputs. A symlink planted at a predicted output path is followed and truncated.
+
+**Fix.** O_NOFOLLOW | O_CLOEXEC added, so `openCreateRW` now carries the same flags as `openLock` (Posix.swift:59) and the atomic-temp opener (:221) in the very same file. No O_EXCL: the resume path reopens a payload that already exists, and a test pins that reopening still truncates. The comment records why the guard exists rather than just the mode, including the part that decides whether this is safe for operators: O_NOFOLLOW applies to the last path component only, so symlinking a whole model directory -- the ordinary way to keep weights on a second disk -- keeps working, and only a link standing where a payload file is about to be written is refused.
+
+**Evidence after.** Five new tests in `tests/TinyTitanRepack/Core/System/PosixOpenTests.swift`, all green. The control is what makes them evidence: with `\| O_NOFOLLOW` deleted from the flags and everything else unchanged, the suite fails 2 issues -- `#expect(throws:)` sees no error at all AND the victim's canary bytes are gone, i.e. the open was followed and O_TRUNC destroyed the file behind it -- while the other four stay green, so the tests pin the guard and not something incidental. With the fix in place all five pass, including the two that prove the guard did not become a wall: the directory-symlink case still installs, and an existing regular file is still reopened and truncated to 0 for the resume path. The mode is pinned at 0600 and FD_CLOEXEC is pinned through `fcntl(F_GETFD)`, because the installer shells out to curl and an unconditionally-inheritable weight descriptor is the same leak in a different shape. Restored from the control afterwards; `git diff` shows only the intended change. Same verification as AUD-111 (one commit, one fix): build clean, nine new tests green, eleven lint gates ok, golden `qwen38-4` identical, and the full serial suite red ONLY in `TinyTitanServerTests`, which aborts at a routing test this change does not touch and which reproduces at clean HEAD -- see AUD-143. Commit 7896ad5.
+
+**Commit.** `7896ad5`
+
+### AUD-111 — Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)`
+- **Category:** permissive file mode + symlink following
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L4 security pass
+
+**Evidence before.** Both `open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)` for TINYTITAN_ROUTE_TRACE (:478) and TINYTITAN_PREFETCH_TRACE (:489). Contrast Posix.swift:31-33, which documents 0600 because 'model, partial and temp files are never shared with other users of the machine'. The path is operator-chosen, so the exposure is a local information leak and a symlink write, not a remote hole.
+
+**Fix.** The two opens were one duplicated expression, so they are now one `RealForwardRunner.openTraceFile(path:)` in the diagnostics extension, where the writers that consume the descriptor already live: 0600 (the installer's own rule, quoted in the doc comment), O_NOFOLLOW, O_CLOEXEC, and the same -1-on-failure answer the writers already guard on. The helper reports a refusal on stderr rather than returning -1 in silence -- an operator who sets TINYTITAN_ROUTE_TRACE and gets no file is otherwise looking at a runner that appears not to route, and this runner routes silently by design, so silence is indistinguishable from a bug. Chosen over guarding inline because `RealForwardRunner.swift` sits at 496 of the 500-line production budget, and an untestable two-line change in a file that cannot grow is not the fix.
+
+**Evidence after.** Four new tests in `tests/TinyTitan/Runtime/TraceFileOpenTests.swift`, all green: the fresh file is 0600 by `posixPermissions`; a link at the trace path returns -1 AND the victim's canary survives (the truncation is the defect, so the test asserts the bytes, not just the refusal); an unopenable path returns -1 rather than trapping, which is the contract `recordRouteTrace`'s `guard routeTraceFD >= 0` depends on; and a symlinked directory still opens. Control measured: with the helper's flags restored to the pre-fix `O_WRONLY | O_CREAT | O_TRUNC, 0o644`, the suite fails 3 issues -- the mode test plus both halves of the symlink case -- and the other two stay green. Verified in the same run as AUD-110: `swift build -c release` clean; eleven lint gates ok; this is a change to the runner's stored-property initialisation, so the golden gate ran: `tools/golden-baseline.sh --check qwen38-4` exit 0, `ok — output identical to baseline`, on the qwen3.8-flash-next _125B_A6B_4Bit install, with the preconditions checked immediately before (macOS 27.0.1, Swift 6.4, 79% memory free, 332 GB free, no competing model process); Ornith 1.5 8-bit not checked, nothing fetched. Sibling sweep: every `O_CREAT` open in `sources/` now carries O_NOFOLLOW except four in `ContinuityCore/Persistence/Journal.swift` (:116 lock, :137 append, :382 and :416 both O_TRUNC), which are Tier A per the inventory and got their own row -- AUD-144 -- because that store lives under the operator's own home directory and a fix there needs the memory suite, not this commit. Commit 7896ad5.
+
+**Commit.** `7896ad5`
+
 ### AUD-112 — Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path
 
 - **Severity / tier:** S2 / Tier A
@@ -604,7 +645,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Fix.** All four sites named in the row now carry the bound the manifest already carries, `ManifestReader.defaultMaxBytes` (64 MiB, ManifestReader.swift:20), threaded as a defaulted `maxBytes:` parameter exactly as `ManifestReader.load`, `VerifiedInstallReceiptReader.load`, `PackedExpertsLayoutReader.load` and `ResidentIndex.load` each do. Two mechanisms, because the two kinds of reader differ: `PLEConstants.load` goes through `SSDAIModelDirectory.readMetadata`, so it is root-anchored, O_NOFOLLOW at every level and capped *before* the allocation; the ANE prefill sidecar and the catalog's `config.json` are read by URL, so they use the K17 convention the receipt already documents — read, then check the size of the bytes actually read, because stat-then-re-read is a TOCTOU window. The sidecar's read moved out of `init` into `ANEPrefillAttention.loadSidecarMetadata(at:maxBytes:)`, which is what makes it testable at all; the catalog's two reads (`probeSnapshot` and `snapshotFamily`) moved into one shared `ModelCatalog.readSnapshotConfig(_:maxBytes:)`, because two copies of a bound is two that can drift. Error types are unchanged and stay in their own domain: `ModelError`, `PrefillError.chunkedUnsupported` (which now says the byte count, the cap and to re-export the sidecar), and `CPUBackendError.unsupported` for the catalog — the last of these matters, because `probeSnapshot` catches it and turns it into a `ProbeFailure` reason, so an oversized file in a scanned directory makes the catalog report that directory as refused instead of taking the server down. Public API gains only defaulted parameters; no call site changed.
 
-**Evidence after.** Six new tests, all green, and the pair that matters is the one that pins *which* check fires: `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` pads a real sidecar JSON and refuses it at `maxBytes: 64`, well below anything a decoder could misparse, then loads the same file under the default bound — so the guard is proven to be the bound and not a JSON error wearing its clothes. `aScannedConfigOverTheBoundIsRefusedAndSaysSo` pins the catalog's user-visible half (the refusal reaches `ProbeFailure.reason` with the size and the cap in it) and `theFamilyProbeStillReadsAnOrdinaryConfig` pins that the shared helper did not break the family probe. `PLEHashTests` goes 20 -> 23 (`loadsFromDirectory`, `refusesOverBoundSidecar`, `refusesMissingSidecar`), `ANEPrefillAttentionTests` 13 -> 14, `ModelCatalogTests` 10 -> 12. `swift build -c release` clean; full `swift test --no-parallel` exit 0, 1573 tests in seven bundles, 0 failures (740 + 384 + 126 + 162 + 28 + 44 + 89, read from the saved log rather than a pipe); all eleven `tools/lint.sh` gates ok, with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH`. Golden gate because this is the model-load path: `tools/golden-baseline.sh --check qwen38-4` exit 0, `ok — output identical to baseline`, on the qwen3.8-flash-next _125B_A6B_4Bit install — which is also the model that reads this sidecar, so the new bound ran for real. Ornith 1.5 8-bit, the default target, has no install on this host and is reported not checked; nothing was fetched.
+**Evidence after.** Six new tests, all green, and the pair that matters is the one that pins *which* check fires: `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` pads a real sidecar JSON and refuses it at `maxBytes: 64`, well below anything a decoder could misparse, then loads the same file under the default bound — so the guard is proven to be the bound and not a JSON error wearing its clothes. `aScannedConfigOverTheBoundIsRefusedAndSaysSo` pins the catalog's user-visible half (the refusal reaches `ProbeFailure.reason` with the size and the cap in it) and `theFamilyProbeStillReadsAnOrdinaryConfig` pins that the shared helper did not break the family probe. `PLEHashTests` goes 20 -> 23 (`loadsFromDirectory`, `refusesOverBoundSidecar`, `refusesMissingSidecar`), `ANEPrefillAttentionTests` 13 -> 14, `ModelCatalogTests` 10 -> 12. `swift build -c release` clean; full `swift test --no-parallel` exit 0, 1573 tests in seven bundles, 0 failures (740 + 384 + 126 + 162 + 28 + 44 + 89, read from the saved log rather than a pipe); `tools/lint.sh` **was not clean**: ten of the eleven gates passed with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH`, but `swift-format lint --strict` flagged two files this row's own fix added -- `tests/TinyTitanServer/ModelCatalogTests.swift:343` and `tests/TinyTitan/Runtime/PLEHashTests.swift:392`, one AddLines break each. The claim as first written here ('all eleven gates ok') was wrong and is corrected forward rather than deleted: the drift was formatted away with the toolchain's own `swift-format` in commit 7896ad5, which is where the gate is genuinely eleven-for-eleven. The lesson is recorded in the runbook: a gate claim needs the failing output re-read after the last test file is written, because a formatter complaint in a test added late is exactly what an earlier clean run misses. Golden gate because this is the model-load path: `tools/golden-baseline.sh --check qwen38-4` exit 0, `ok — output identical to baseline`, on the qwen3.8-flash-next _125B_A6B_4Bit install — which is also the model that reads this sidecar, so the new bound ran for real. Ornith 1.5 8-bit, the default target, has no install on this host and is reported not checked; nothing was fetched.
     Sibling sweep, and it is recorded rather than fixed (AUD-142). Fourteen `Data(contentsOf:)` code lines remain in the tree after this fix (the fourth site this row named no longer appears at all, because `PLEConstants.load` reads through `SSDAIModelDirectory.readMetadata`), and they were measured against their trust boundaries rather than counted: seven are genuinely uncapped, six are already bounded — three of them by this very commit, one being the receipt whose K17 convention this fix copied, and two by protocol caps that hold before the allocation — and one is a mapped weight file of a different class. The commit message for this fix said "10 `Data(contentsOf:)` reads of non-model-directory documents remain unbounded": that number included three of the already-bounded sites and left the mapped file out of the list entirely, so it is wrong in both directions and AUD-142 carries the corrected seven with the reason each one is or is not the same threat as this row's.
 
 **Commit.** `7b614a8`
