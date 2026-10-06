@@ -324,9 +324,14 @@ export function createHandler(options) {
         return;
       }
       log(`handler threw: ${error instanceof Error ? (error.stack ?? error.message) : error}`);
+      // The detail stays in the log and out of the answer. An unexpected throw is
+      // most often a filesystem or child-process one, and Node puts the absolute
+      // path in its message, so echoing it tells any peer that can reach this port
+      // where this Mac keeps its profiles. `ApiError` messages are authored here and
+      // still go out, because they are the documented answer for a known failure.
       sendJson(res, 500, {
         error: "internal-error",
-        message: error instanceof Error ? error.message : String(error),
+        message: "the manager failed to answer; the reason is in its log",
       });
     }
   };

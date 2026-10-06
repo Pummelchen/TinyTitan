@@ -250,7 +250,7 @@ async function setup(overrides = {}) {
     ctx,
     config,
     messageFactory: factory,
-    log: () => {},
+    log: overrides.log ?? (() => {}),
     peers: overrides.peers,
     self: overrides.self,
   });
@@ -1186,6 +1186,40 @@ test("POST /sessions delegates to the harness session controller", async () => {
     assert.ok(
       !ctx._serviceReads.includes("sessions"),
       "and never the raw session store of the same name",
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+// AUD-171: the catch-all used to answer with the thrown error's own message. The
+// throw that reaches it is an unexpected one -- most often from `node:fs` or a
+// child process -- and Node puts the absolute path in its message, so the answer
+// told any peer that can reach this port where this Mac keeps its profiles. The
+// detail must still be *recorded* or the fix is a silent failure, which is the
+// half of this the assertion on `logs` is for. `ApiError` messages keep going out
+// unchanged: they are authored here, and the 501 case above pins that.
+test("an unexpected throw answers a fixed 500 and keeps its detail in the log", async () => {
+  const logs = [];
+  const sessionController = fakeSessions(
+    new Error("ENOENT: no such file or directory, open '/Users/me/.dsh/home/profiles/web/x.json'"),
+  );
+  const { handler, store } = await setup({ sessionController, log: (line) => logs.push(line) });
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions",
+      body: { workspaceId: "ws-1" },
+    });
+    assert.equal(res.status, 500);
+    assert.equal(res.body.error, "internal-error");
+    assert.ok(
+      !JSON.stringify(res.body).includes("/Users/me"),
+      `the answer leaked a local path: ${JSON.stringify(res.body)}`,
+    );
+    assert.ok(
+      logs.some((line) => line.includes("/Users/me/.dsh")),
+      "and the operator can still find out what happened",
     );
   } finally {
     store.cleanup();

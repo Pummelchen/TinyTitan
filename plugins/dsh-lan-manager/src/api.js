@@ -805,11 +805,15 @@ export async function startSession(ctx, selector = {}) {
       agentPreset: created?.agentPreset ?? null,
     };
   } catch (error) {
-    // The controller's own code is kept, so a caller can tell "no such workspace"
-    // from "the preset is wrong" without parsing prose.
-    const code = typeof error?.code === "string" ? error.code : "session-create-failed";
-    const status = code.includes("not-found") ? 404 : 400;
-    throw new ApiError(code, error instanceof Error ? error.message : String(error), status);
+    // Only an error the controller *authored* keeps its code and its message: that
+    // is how a caller tells "no such workspace" from "the preset is wrong". A throw
+    // with no code is not a documented failure -- it is `node:fs`, a child process,
+    // or a bug -- and its message can name a path on this Mac, so it goes back out
+    // unchanged and the router's catch-all logs it and answers a fixed 500. It is
+    // also not the caller's bad request, which is what the old fallback said.
+    if (typeof error?.code !== "string") throw error;
+    const status = error.code.includes("not-found") ? 404 : 400;
+    throw new ApiError(error.code, error.message, status);
   }
 }
 
