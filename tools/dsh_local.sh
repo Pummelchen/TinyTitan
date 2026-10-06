@@ -60,6 +60,7 @@
 #   TINYTITAN_DSH_VERSION         pinned DeepSeek Harness version
 #   TINYTITAN_DSH_NODE_VERSION    pinned Node, used only when the Mac has none
 #   TINYTITAN_DSH_PNPM_VERSION    pinned pnpm, installed into the private prefix
+#   TINYTITAN_DSH_PLAYWRIGHT_VERSION  pinned Playwright, used by `smoke` only
 #   TINYTITAN_DSH_PORT            browser UI port (default 7788)
 #   TINYTITAN_DSH_DRY_RUN=1       print what would happen, change nothing
 set -euo pipefail
@@ -102,6 +103,12 @@ DSH_VERSION="${TINYTITAN_DSH_VERSION:-0.2.0-rc.2}"
 WELCOME_NOTICE_VERSION="2026-08-13.1"
 NODE_VERSION="${TINYTITAN_DSH_NODE_VERSION:-26.8.2}"
 PNPM_VERSION="${TINYTITAN_DSH_PNPM_VERSION:-12.4.2}"
+# The same rule as the two pins above, and it applies to the smoke path too: this
+# is the Playwright whose browser bundle drove the real page when the pin was set,
+# and the headless Chromium that bundle downloads is chosen by it. A floating
+# `playwright` here would make `smoke` test whatever upstream calls latest on the
+# day someone runs it — which is AUD-156.
+PLAYWRIGHT_VERSION="${TINYTITAN_DSH_PLAYWRIGHT_VERSION:-1.63.0}"
 DSH_PORT="${TINYTITAN_DSH_PORT:-7788}"
 # The served id the harness should open on. Empty means "the first one the route
 # serves", which is what a bare `ensure` from the installer uses.
@@ -816,22 +823,36 @@ cmd_port() { resolve_port "$DSH_PORT"; }
 
 # Playwright and its headless Chromium, into the private root. One-time, ~150 MB,
 # and never exported to the repo or the system.
+# What `smoke` has actually got, read from the package's own manifest. A leftover
+# from before this was pinned would otherwise satisfy an existence check and get
+# used unversioned forever — which is how the floating install stayed working.
+playwright_installed() {
+  if [[ -f "$SMOKE_DIR/node_modules/playwright/package.json" ]]; then
+    sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' \
+      "$SMOKE_DIR/node_modules/playwright/package.json" | head -1
+  fi
+}
+
 ensure_smoke_deps() {
-  if [[ ! -x "$SMOKE_DIR/node_modules/.bin/playwright" ]]; then
-    say "Installing Playwright into the private root (one time)"
+  local installed; installed="$(playwright_installed)"
+  if [[ "$installed" != "$PLAYWRIGHT_VERSION" ]]; then
+    say "Installing the pinned Playwright $PLAYWRIGHT_VERSION${installed:+ (found $installed)}"
     private_env
-    run "install playwright" env PATH="$(tool_path)" \
+    run "install playwright@$PLAYWRIGHT_VERSION" env PATH="$(tool_path)" \
       npm_config_cache="$DSH_NPM_CACHE" \
       npm_config_userconfig="$DSH_NPMRC" \
-      "$(npm_bin)" install --prefix "$SMOKE_DIR" --no-fund --no-audit playwright
-    (( DRY_RUN )) || ok "Playwright installed"
+      "$(npm_bin)" install --prefix "$SMOKE_DIR" --no-fund --no-audit \
+      "playwright@$PLAYWRIGHT_VERSION"
+    (( DRY_RUN )) || ok "Playwright $(playwright_installed)"
   fi
   local browsers; browsers="$(compgen -G "$SMOKE_BROWSERS/chromium*" | head -1 || true)"
   if [[ -z "$browsers" ]]; then
     say "Downloading the headless browser (one time, about 150 MB)"
     run "download headless chromium" env PLAYWRIGHT_BROWSERS_PATH="$SMOKE_BROWSERS" \
       "$SMOKE_DIR/node_modules/.bin/playwright" install chromium --only-shell
-    (( DRY_RUN )) || ok "Headless browser installed"
+    (( DRY_RUN )) || ok "Headless browser for Playwright $PLAYWRIGHT_VERSION"
+  elif (( ! DRY_RUN )); then
+    ok "Headless browser already at $(basename "$browsers"), which Playwright $PLAYWRIGHT_VERSION chose"
   fi
 }
 

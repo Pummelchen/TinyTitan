@@ -75,6 +75,39 @@ class PrivateHarnessIsolationTests(unittest.TestCase):
             self.assertIn("npm_config_cache=", command, head)
             self.assertIn("npm_config_userconfig=", command, head)
 
+    def test_the_smoke_playwright_is_pinned_and_checked_against_what_it_got(self) -> None:
+        # The file's own header argues that a floating version "would turn a
+        # working install into a broken one overnight". `playwright` was the one
+        # install that did not hold (AUD-156), so the rule is now written down:
+        # every npm install names a version, and the pin is an overridable
+        # constant beside the others rather than a literal buried in the call.
+        installs = [
+            command
+            for command in self.commands
+            if re.search(r'"\$\(?npm(?:_bin)?\)?"\s+install', command)
+        ]
+        self.assertEqual(len(installs), 3, "expected the DSH, pnpm and Playwright installs")
+        for command in installs:
+            with self.subTest(install=command.strip()[:60]):
+                self.assertRegex(
+                    command,
+                    r'"[A-Za-z@][A-Za-z0-9._/@-]*@[0-9$][A-Za-z0-9._/${}-]*"',
+                    "an npm install with no version in its package spec",
+                )
+        pin = re.search(
+            r'^PLAYWRIGHT_VERSION="\$\{TINYTITAN_DSH_PLAYWRIGHT_VERSION:-([^}]+)\}"',
+            self.script,
+            re.M,
+        )
+        self.assertIsNotNone(pin, "the Playwright pin is not an overridable constant")
+        # Installing it is only half of it: a leftover from before the pin must
+        # not satisfy a bare existence test forever.
+        self.assertRegex(
+            self.script,
+            r'\[\[ "\$installed" != "\$PLAYWRIGHT_VERSION" \]\]',
+            "smoke must compare the installed Playwright with the pin",
+        )
+
     def test_the_plugin_install_redirects_pnpm_home_and_xdg(self) -> None:
         # `--store-dir` moves the store; PNPM_HOME is what stops pnpm creating
         # ~/Library/pnpm, and the XDG pair catches its cache and state.
