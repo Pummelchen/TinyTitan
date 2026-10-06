@@ -29,7 +29,16 @@ public enum Posix {
     public static func openCreateRW(_ path: String) throws -> Int32 {
         // 0600: model, partial and temp files are never shared with other
         // users of the machine.
-        let fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0o600)
+        //
+        // O_NOFOLLOW because this is the one opener that *creates* at a
+        // predicted path: with O_TRUNC a symlink planted at an output name
+        // would be followed and the file behind it destroyed, which is a write
+        // primitive outside the root the install is confined to. Every sibling
+        // opener here already refuses links, so this is the last gap, not a new
+        // rule. O_NOFOLLOW applies to the final component only, so an operator
+        // who symlinks a whole model *directory* still works — a link standing
+        // where a payload file is about to be written does not.
+        let fd = open(path, O_RDWR | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
         if fd < 0 { throw RepackError.fileOpenFailed(path: path, errno: errno) }
         return fd
     }

@@ -7,6 +7,26 @@ import Metal
 /// (docs/modularity-refactor.md) as pure code motion: one concern
 /// per file, no signature or behavior changes.
 extension RealForwardRunner {
+    /// Open one of the operator-named trace files, or -1 when it cannot be
+    /// opened — the value the writers above treat as "tracing is off".
+    ///
+    /// 0600 because a routing trace says which experts this machine holds and
+    /// when, which is this process's business and not another user's; the
+    /// installer's own openers already say the same (`Posix.openCreateRW`).
+    /// O_NOFOLLOW because the name came from the environment, so a link
+    /// planted at it is a write outside whatever directory the operator meant.
+    /// A refusal is reported rather than left silent: an operator who asked for
+    /// a trace and gets none is otherwise looking at a runner that appears not
+    /// to route.
+    package static func openTraceFile(path: String) -> Int32 {
+        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        if fd < 0 {
+            FileHandle.standardError.write(
+                Data("trace file \(path) not opened: errno \(errno)\n".utf8))
+        }
+        return fd
+    }
+
     func recordRDAdvice(_ result: ExpertIOAdviceResult, wallNanos: UInt64) {
         totalRDAdviseNanos &+= wallNanos
         totalRDAdviseCalls &+= UInt64(result.calls)

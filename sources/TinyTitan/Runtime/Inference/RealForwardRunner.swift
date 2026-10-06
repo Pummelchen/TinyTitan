@@ -475,7 +475,7 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
         guard let path = ProcessInfo.processInfo.environment["TINYTITAN_ROUTE_TRACE"],
             !path.isEmpty
         else { return -1 }
-        return open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        return RealForwardRunner.openTraceFile(path: path)
     }()
 
     /// JSONL trace for the v4.3 predictive-prefetch qualification probe.
@@ -486,7 +486,7 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
         guard let path = ProcessInfo.processInfo.environment["TINYTITAN_PREFETCH_TRACE"],
             !path.isEmpty
         else { return -1 }
-        return open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        return RealForwardRunner.openTraceFile(path: path)
     }()
 
     // MARK: - Chunked prefill helpers

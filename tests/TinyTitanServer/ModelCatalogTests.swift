@@ -340,7 +340,8 @@ struct ModelCatalogTests {
             CatalogFixture.cpuConfig(),
             to: root.appendingPathComponent("config.json"))
         let size = try Data(
-            contentsOf: root.appendingPathComponent("config.json")).count
+            contentsOf: root.appendingPathComponent("config.json")
+        ).count
         #expect(size > 8, "the fixture is too small to cross an 8-byte bound")
 
         var described = ""

@@ -389,7 +389,8 @@ struct PLEConstantsGeometryTests {
         let root = try writeSidecar(sidecarJSON)
         defer { try? FileManager.default.removeItem(at: root) }
         let size = try Data(
-            contentsOf: root.appendingPathComponent("ple_constants.json")).count
+            contentsOf: root.appendingPathComponent("ple_constants.json")
+        ).count
         #expect(size > 64, "the fixture is too small to cross a 64-byte bound")
         let described = try #require(
             refusal { _ = try PLEConstants.load(directoryURL: root, maxBytes: 64) },
