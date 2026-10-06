@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:14  Done:31  Blocked:1  Total:46**
+**Open:13  Done:32  Blocked:1  Total:46**
 
 ## Table
 
@@ -17,7 +17,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
-| AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
@@ -31,6 +30,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
+| AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | DONE | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
@@ -217,18 +217,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** `tests/TinyTitanRepack/Core/Verification/PackedExpertWidthTests.swift`: 22 tests in 1 suite, all green, no model and no network. 16 go straight through `PackedExpertBytes.validate` on hand-built tables and pin the arithmetic: the real 125B-A6B expert record at its own width (2,764,800 bytes -> 2,768,896 stride at 4-bit) and at 8-bit; a declared width that disagrees with the bytes; an annotation that disagrees with its own slice; the truthful withdrawn 6-bit accepted while a mislabelled one is refused; a width derived with no annotation at all; a missing slice; a duplicated slice; an expert that fills its stride exactly; a byte extent that does not divide; a tensor with no elements; an implied width outside the format's 1...32; a scale slice the wrong size; an unknown dtype; overflow refused rather than wrapped (element count, byte sum, and expert-index multiply); and the same complaint printed from ten shuffled dictionaries. 6 go through the real `VerifiedInstallTool.validatePackedExpertLayout` on a temporary install, three of which repack the synthetic MoE snapshot: a fresh 8-bit install verifies, a manifest that misdeclares the routed width is refused, and a layout that misannotates an expert is refused before the hashes. The two dense-row cases are the sibling guards: `aDenseLayoutHasNoWidthToDeclare` pins that the empty-layer shortcut runs before the `quant` block is asked for, and `everyExpertInTheLayerIsCheckedNotOnlyTheFirst` pins that a lie in expert 1 is caught when the load path only ever looks at expert 0. Both controls re-measured at closure, not inherited from the fix run: commenting the `PackedExpertBytes.validate` call out makes three end-to-end tests fail, two of them with `expected a refusal, and the check passed`; moving the layout check to after the file-hash loop makes exactly one fail -- `aLayoutThatMisannotatesAnExpertIsRefusedBeforeTheHashes`, whose `annotated 8-bit` expectation goes false because the digest complaint now arrives first. Full suite `swift test --no-parallel` exit 0: 1562 tests in seven bundles, 0 failures (the closure commit first wrote `1518 in six`, which is what the pipe hid rather than what the run printed -- corrected here against the saved log, and the seven bundle summaries are 731 + 382 + 126 + 162 + 28 + 44 + 89). `swift build -c release` clean. All eleven `tools/lint.sh` gates ok, the python one run with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH` -- see environment.md.
 
 **Commit.** `53b64d5`
-
-### AUD-105 — Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** release
-- **Location:** `tools/release.sh, docs/release-process.md:3`
-- **Category:** missing gate
-- **Status:** START
-- **Host:** Mac (primary) + GitHub
-- **Discovered by:** gh release v5.18 published 2026-10-05T06:17:34Z vs CI on ea5de8c (the tag) failing at 05:59:23Z
-
-**Evidence before.** docs/release-process.md opens 'This is the runbook for turning a green main into a tagged, published release', but the green-main precondition is a sentence, not a check: tools/release.sh gates the gates it runs locally and nothing queries the Actions run for HEAD. v5.18 is a live instance: published an hour after its own tag commit failed the Installer gates job.
 
 ### AUD-141 — The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly
 
@@ -426,6 +414,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Four dependency states probed with `tools/lint.sh converter`: (1) pins present -> `ok`, rc 0; (2) interpreter without numpy (venv wrapper on PATH) -> `FAIL: converter deps unavailable (No module named 'numpy'); run: python3 -m pip install -r benchmark/requirements.txt`, rc 1 -- the case that used to be rc 0; (3) same with ALLOW_MISSING_CONVERTER_DEPS=1 -> `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ...`, rc 0; (4) no interpreter on PATH (`env -i PATH=/bin`) -> `FAIL: no python3 on PATH; the converter check cannot run`, rc 1, and rc 0 only with the opt-out. The gate still catches the real defect after the change: filing at `len(target["experts")]` instead of `expert` in tools/prepare_agentworld.py:387 produced `FAIL: experts landed by arrival order: [3.0, 0.0, 7.0, 1.0, 5.0, 2.0, 6.0, 4.0] (want [0.0..7.0])`, rc 1, and the file was restored (empty git diff) before the commit. A broken probe (SyntaxError in the module) also rc 1, so an unexpected exit is not read as a pass. All eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0.
 
 **Commit.** `218a210`
+
+### AUD-105 — Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** release
+- **Location:** `tools/release.sh, docs/release-process.md:3`
+- **Category:** missing gate
+- **Status:** DONE
+- **Host:** Mac (primary) + GitHub
+- **Discovered by:** gh release v5.18 published 2026-10-05T06:17:34Z vs CI on ea5de8c (the tag) failing at 05:59:23Z
+
+**Evidence before.** docs/release-process.md opens 'This is the runbook for turning a green main into a tagged, published release', but the green-main precondition is a sentence, not a check: tools/release.sh gates the gates it runs locally and nothing queries the Actions run for HEAD. v5.18 is a live instance: published an hour after its own tag commit failed the Installer gates job.
+
+**Fix.** Verified first: the runbook's "a green main" is prose, and tools/release.sh's preconditions list (clean tree, tag exists, HEAD is the tag, tag pushed, no existing Release) never queried Actions. Confirmed the live instance against the API: the commit v5.18 names (ea5de8cb2d7b1cf61a1e5e57956cc47a1b72b351) carries CI | completed | failure (run 37270213543) beside CodeQL | completed | success, and the release page exists anyway. Added tools/ci-green.sh as the rule and called it from the preconditions, before the gates, the scratch build and the goldens. It asks for runs on the FULL commit sha -- head_sha with a short one returns nothing, and the helper rejects a non-40-character argument rather than reporting "no runs" for what is really a bad query, which is how this kind of check goes vacuously green. Refusals: a run not completed, zero runs, and any conclusion other than success or skipped (cancelled, timed_out, action_required, stale); a workflow GitHub itself skipped is not evidence about the commit. Overriding needs TINYTITAN_RELEASE_ALLOW_RED_CI plus a non-empty _REASON, and the helper's machine line hands the failing run URL back to release.sh, which adds it to the compactor's --require list so --publish refuses unless the notes quote it -- the same bargain as a skipped golden baseline. Wired into CI as its own step, and documented in release-process.md §0/§3/§4/§7 and AGENTS.md's release non-negotiables. Sibling defect found and fixed in the same file: the dry-run summary printed the tools archive line twice (release.sh:545-546).
+
+**Evidence after.** Live, against the real repository: tools/ci-green.sh on v5.18's commit exits 1 and prints "CI is red on ea5de8c...: CI (failure)" with the run URL and the remedy; the same call with --allow-red "..." exits 0, prints the !! pair and `result<TAB>overridden<TAB><url>`; on v5.17's commit (701bb2e...) it exits 0 printing "CI green on 701bb2e... (2 run(s))". Tests: benchmark/test_release_ci_green.py, 15 tests OK in 0.943s with a stubbed gh (green, skipped, failure, the four non-success conclusions via subTest, in_progress, zero runs, short sha, gh transport error, missing args, override with and without a reason, unknown option, and three wiring guards on release.sh). Mutation: inverting the zero-runs refusal to pass makes test_no_run_at_all_is_refused fail with "AssertionError: 0 != 1" (15 tests, 1 failure); restoring it is green again. Gates: ci-green.sh and release.sh pass bash -n, shell-portability (now 25 scripts on system bash 3.2.57) and shellcheck 0.11.0 with no warnings; ci.yml parses; all eleven gates exit 0.
+
+**Commit.** `43bba1b`
 
 ### AUD-106 — The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published
 

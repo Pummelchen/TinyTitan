@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 46,
-    "done": 31,
-    "open": 14,
+    "done": 32,
+    "open": 13,
     "blocked": 1
   },
   "tasks": [
@@ -86,13 +86,13 @@
       "file_line": "tools/release.sh, docs/release-process.md:3",
       "title": "Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing",
       "category": "missing gate",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary) + GitHub",
       "discovered-by": "gh release v5.18 published 2026-10-05T06:17:34Z vs CI on ea5de8c (the tag) failing at 05:59:23Z",
       "evidence-before": "docs/release-process.md opens 'This is the runbook for turning a green main into a tagged, published release', but the green-main precondition is a sentence, not a check: tools/release.sh gates the gates it runs locally and nothing queries the Actions run for HEAD. v5.18 is a live instance: published an hour after its own tag commit failed the Installer gates job.",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "Verified first: the runbook's \"a green main\" is prose, and tools/release.sh's preconditions list (clean tree, tag exists, HEAD is the tag, tag pushed, no existing Release) never queried Actions. Confirmed the live instance against the API: the commit v5.18 names (ea5de8cb2d7b1cf61a1e5e57956cc47a1b72b351) carries CI | completed | failure (run 37270213543) beside CodeQL | completed | success, and the release page exists anyway. Added tools/ci-green.sh as the rule and called it from the preconditions, before the gates, the scratch build and the goldens. It asks for runs on the FULL commit sha -- head_sha with a short one returns nothing, and the helper rejects a non-40-character argument rather than reporting \"no runs\" for what is really a bad query, which is how this kind of check goes vacuously green. Refusals: a run not completed, zero runs, and any conclusion other than success or skipped (cancelled, timed_out, action_required, stale); a workflow GitHub itself skipped is not evidence about the commit. Overriding needs TINYTITAN_RELEASE_ALLOW_RED_CI plus a non-empty _REASON, and the helper's machine line hands the failing run URL back to release.sh, which adds it to the compactor's --require list so --publish refuses unless the notes quote it -- the same bargain as a skipped golden baseline. Wired into CI as its own step, and documented in release-process.md §0/§3/§4/§7 and AGENTS.md's release non-negotiables. Sibling defect found and fixed in the same file: the dry-run summary printed the tools archive line twice (release.sh:545-546).",
+      "evidence-after": "Live, against the real repository: tools/ci-green.sh on v5.18's commit exits 1 and prints \"CI is red on ea5de8c...: CI (failure)\" with the run URL and the remedy; the same call with --allow-red \"...\" exits 0, prints the !! pair and `result<TAB>overridden<TAB><url>`; on v5.17's commit (701bb2e...) it exits 0 printing \"CI green on 701bb2e... (2 run(s))\". Tests: benchmark/test_release_ci_green.py, 15 tests OK in 0.943s with a stubbed gh (green, skipped, failure, the four non-success conclusions via subTest, in_progress, zero runs, short sha, gh transport error, missing args, override with and without a reason, unknown option, and three wiring guards on release.sh). Mutation: inverting the zero-runs refusal to pass makes test_no_run_at_all_is_refused fail with \"AssertionError: 0 != 1\" (15 tests, 1 failure); restoring it is green again. Gates: ci-green.sh and release.sh pass bash -n, shell-portability (now 25 scripts on system bash 3.2.57) and shellcheck 0.11.0 with no warnings; ci.yml parses; all eleven gates exit 0.",
+      "commit": "43bba1b",
       "blocked-reason": null
     },
     {
