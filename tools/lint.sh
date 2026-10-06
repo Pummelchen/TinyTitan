@@ -17,6 +17,8 @@
 #   test-hollow         no @Test body that cannot fail (see below)
 #   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
 #                       no stdout write (AGENTS.md "Two products" rules 1 and 3)
+#   docs                a documented count, mode name or tag->commit sha must
+#                       match what the repository computes (see below)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -1372,27 +1374,67 @@ check_library_facade() {
   fi
 }
 
+# --- documented facts --------------------------------------------------------
+# A fact the repository can compute and a document restates is a defect waiting
+# for the next commit that changes the computation. Measured 2026-10-06: the gate
+# count was written down in four documents and derived in none, so all four
+# disagreed with the script -- `AGENTS.md` thirteen, `CONTRIBUTING.md` eleven, the
+# handover and `RELEASE.md` both fifteen -- four mode names in the usage header
+# were not runnable at all, and the release brief cited three tag-object shas
+# where every consumer of a sha needs the tagged commit.
+#
+# `tools/docs-facts.py` derives the gate set from this script's own `all` chain,
+# `case` arms, usage header and unknown-check message -- they must agree with each
+# other before any document is judged -- then compares every tracked Markdown
+# and workflow YAML against it. This audit's own ledger is excluded on purpose: it
+# quotes wrong numbers and shas verbatim as the thing it later refutes, and it is
+# corrected forward, so failing on a quotation would demand an edit to the record
+# instead of an addition to it.
+check_docs() {
+  echo "== docs: a documented count, name or sha must match the repository =="
+  local out rc
+  out="$(python3 "$SCRIPT_DIR/docs-facts.py")"
+  rc=$?
+  if [ -n "$out" ]; then
+    echo "$out" | sed 's/^/  /'
+  fi
+  if [ "$rc" -ne 0 ]; then
+    status=1
+  fi
+}
+
+# Modes come in two shapes: one per check under its short name, plus the longer
+# names the usage header above and `AGENTS.md` teach (`unchecked-sendable`,
+# `silent-test-skip`, `shell-portability`, `shell-lint`, `format`, `js`). Four of
+# them were documented and *not runnable* — `tools/lint.sh shell-portability`, the
+# exact name in `AGENTS.md`, exited 2 — which is what `tools/lint.sh docs` now
+# refuses. Every spelling must appear in the unknown-check message below.
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_library_facade; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_library_facade; check_docs; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
   file-length)   check_file_length ;;
   sendable)    check_unchecked_sendable ;;
+  unchecked-sendable) check_unchecked_sendable ;;
   converter)   check_converter_expert_order ;;
   arch-path)   check_arch_path ;;
   test-skip)   check_silent_test_skip ;;
+  silent-test-skip) check_silent_test_skip ;;
   test-hollow) check_test_hollow ;;
   library-facade) check_library_facade ;;
+  docs)        check_docs ;;
   shell)       check_shell_portability ;;
+  shell-portability) check_shell_portability ;;
   shellcheck)  check_shellcheck ;;
+  shell-lint)  check_shellcheck ;;
   swiftlint)   check_swiftlint ;;
   swift-format) check_swift_format ;;
   format)      check_swift_format ;;
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|test-hollow|library-facade|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|unchecked-sendable|converter|arch-path|test-skip|silent-test-skip|test-hollow|library-facade|docs|shell|shell-portability|shellcheck|shell-lint|swiftlint|swift-format|format|javascript|js|python)" >&2; exit 2 ;;
 esac
 
 exit $status

@@ -21,9 +21,13 @@ swift test --no-parallel
 ```
 
 CI runs the same three, so a green run here is a green run there. `tools/lint.sh`
-enforces eleven checks the compiler cannot — six project-specific probes and five
+enforces seventeen checks the compiler cannot — project-specific probes and the
 pinned third-party linters (shellcheck, swiftlint, swift-format, the plugin
-packages' eslint + prettier, and ruff). The probes:
+packages' eslint + prettier, and ruff). That number is not free to rot:
+`tools/lint.sh docs` compares every documented count, gate name and tag citation
+against the script and the repository, and fails on a disagreement. The full list
+is the script's own usage header; the probes that most often bite a first
+change:
 
 - **force-cast** — no `as!` / `try!` under `sources/`. To keep one, put
   `lint:allow-force <reason>` in the comment block directly above it; a marker
@@ -46,9 +50,9 @@ packages' eslint + prettier, and ruff). The probes:
   toolchain, or at a stale binary on this one. To keep one deliberately, put
   `lint:allow-arch-path <reason>` on the line above.
 
-`tools/lint.sh <mode>` runs a single gate — `force-cast`, `func-length`,
-`sendable`, `converter`, `arch-path`, `shell`, `shellcheck`, `swiftlint`,
-`swift-format`, `javascript` or `python`.
+`tools/lint.sh <mode>` runs a single gate — `tools/lint.sh force-cast` after a
+cast, `tools/lint.sh swift-format` before pushing — and the script's usage header
+lists every mode name, including the longer spellings each gate also answers to.
 
 These checks do not download or load the model. For a change to the runtime or
 the model-load path, also run the golden baseline, which is the only check that
