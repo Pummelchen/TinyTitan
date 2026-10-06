@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { groupDigest } from "../src/config.js";
 import {
   MAX_GOSSIP_ENTRIES,
   PeerTable,
@@ -179,6 +180,50 @@ test("a member reporting another group is refused even when it answers 200", asy
     }),
   });
   assert.equal((await table.refresh()).length, 0);
+});
+
+// AUD-154: a member now names its group by digest. Every spelling that a peer on
+// an older build can still send stays accepted, because a rollout that emptied the
+// peer table would be a worse outage than the plaintext it removed.
+test("the group matches by digest, by the old literal, and by the default label", async () => {
+  const digest = groupDigest("tinytitan-lan");
+  const cases = [
+    ["the digest", { group: digest }],
+    ["a peer still sending the literal", { group: "tinytitan-lan" }],
+    ["a digest with the published label", { group: digest, groupLabel: "tinytitan-lan" }],
+    ["no group field at all", {}],
+  ];
+  for (const [name, group] of cases) {
+    const table = new PeerTable({
+      config: { ...CONFIG, groupDigest: digest },
+      discovery: async () => [{ address: "192.168.18.25", port: 3080 }],
+      fetch: async () => ({
+        status: 200,
+        body: { ok: true, self: { name: "node-a" }, workspaces: [], sessions: [], ...group },
+      }),
+    });
+    assert.equal((await table.refresh()).length, 1, `${name} is one of ours`);
+  }
+});
+
+test("a foreign group string is refused without being copied into our log", async () => {
+  const lines = [];
+  const table = new PeerTable({
+    config: { ...CONFIG, groupKey: "ours", token: "ours", groupDigest: groupDigest("ours") },
+    log: (line) => lines.push(line),
+    discovery: async () => [{ address: "192.168.18.25", port: 3080 }],
+    fetch: async () => ({
+      status: 200,
+      body: { ok: true, group: "their-secret-literal", self: { name: "x" } },
+    }),
+  });
+  assert.equal((await table.refresh()).length, 0);
+  assert.match(lines.join("\n"), /reports a group that is not ours/);
+  assert.equal(
+    lines.join("\n").includes("their-secret-literal"),
+    false,
+    "a peer's group string is that peer's credential, not a diagnostic",
+  );
 });
 
 test("get resolves by id, address or name", async () => {

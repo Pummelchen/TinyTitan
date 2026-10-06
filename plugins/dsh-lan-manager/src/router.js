@@ -12,13 +12,22 @@
  *    published literal, it distinguishes nothing until an operator changes it, so
  *    a **mutating** request from outside loopback while the key is still the
  *    default is refused: the default is a group tag, and the trade it represents
- *    is one a user makes with their own machine and no one else's.
+ *    is one a user makes with their own machine and no one else's. And a request
+ *    from a **link-local** source while the key is still the default gets the
+ *    group routes and nothing else: `169.254/16` and `fe80::/10` are where a host
+ *    lands when nothing assigned it an address, so membership there is claimed,
+ *    not granted, and reading another machine's prompts on that basis is not the
+ *    zero-setup trade anyone agreed to.
  * 3. **Origin, on mutating verbs only** — a browser on an allowed host must not be
  *    usable as a confused deputy by a page from elsewhere. Absent Origin (curl,
  *    another dsh instance) is fine; a foreign Origin is refused. Same-origin is
  *    judged against hosts this server can name, not against the request's own
  *    `Host` header, because an equality the caller's DNS chose is the rebinding
  *    shape.
+ *
+ * Responses are JSON, and a response never repeats the group key: the group is
+ * named by its digest, so the string that authorises a write does not end up in a
+ * log, a capture, or a screenshot of the `/health` banner (AUD-154).
  *
  * Responses are JSON. Bodies are capped so a stray client cannot stream the host
  * out of memory, and a body is only read as JSON when its `content-type` says so:
@@ -46,7 +55,7 @@ import {
   readSessionMessages,
   startSession,
 } from "./api.js";
-import { checkAddress, isLoopback, peerAddress } from "./net.js";
+import { checkAddress, isLinkLocal, isLoopback, peerAddress } from "./net.js";
 
 /** Default request body cap: prompts are text, not uploads. */
 export const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
@@ -62,6 +71,35 @@ function safeEqual(a, b) {
   const right = Buffer.from(String(b ?? ""), "utf8");
   if (left.length !== right.length || left.length === 0) return false;
   return timingSafeEqual(left, right);
+}
+
+/**
+ * The routes that answer with membership rather than content.
+ *
+ * Guard 2c lets a link-local source carrying the shipped key have these and
+ * nothing else. Without them the mesh cannot form at all — `/health` is what a
+ * probe reads and `/peers` is what a member gossips from — and what they carry is
+ * a name, an address, and counts. Everything past them is content: workspace
+ * titles, session lists, and under `/sessions/:id/messages` the prompts
+ * themselves.
+ *
+ * @param route - the sub-path after the configured prefix.
+ * @returns true when the route names the group instead of reading it.
+ */
+function isGroupRoute(route) {
+  return route === "/" || route === "/health" || route === "/peers";
+}
+
+/**
+ * The refusal both default-key guards answer with, in their own words.
+ * @param code - which guard fired.
+ * @returns the 403 body.
+ */
+function defaultKeyRefusal(code) {
+  return {
+    error: code,
+    hint: "the shipped group key is public, so it groups rather than protects: set groupKey (or DSH_LAN_KEY) to a value you chose",
+  };
 }
 
 /**
@@ -216,14 +254,32 @@ export function createHandler(options) {
     // fence above widens past that on purpose (LAN, tailnet, and link-local and
     // CGNAT included, so a fleet needs no setup), and a caller from one of those
     // ranges is not the user. So past loopback the key has to be one an operator
-    // chose. Reads stay allowed: an unconfigured peer still has to be listed and
-    // inventoried before it can be driven.
+    // chose. Reads stay allowed from a range the operator chose — a peer on a LAN
+    // or tailnet still has to be inventoried before it can be driven — and
+    // Guard 2c takes that back for the one class of source that did not get its
+    // address from the operator at all.
     if (mutating && config.token === DEFAULT_GROUP_KEY && !isLoopback(verdict.address)) {
       log(`default group key from ${verdict.address} on ${method} ${req.url}`);
-      sendJson(res, 403, {
-        error: "default-group-key-outside-loopback",
-        hint: "the shipped group key is public, so it groups rather than protects: set groupKey (or DSH_LAN_KEY) to a value you chose",
-      });
+      sendJson(res, 403, defaultKeyRefusal("default-group-key-outside-loopback"));
+      return;
+    }
+
+    // Guard 2c: the shipped key plus a self-assigned source buys membership only.
+    //
+    // `169.254.0.0/16` is what a host answers with when nothing handed it an
+    // address, and every IPv6 host holds an `fe80::/10` one whether or not a
+    // network was ever configured — so on those ranges Guard 1's "is this my LAN"
+    // is really "did this host name itself". That is fine for being *listed*, and
+    // it is not fine for reading another machine's prompts while the key is still
+    // the published default. An operator who means the pair — a Mac linked
+    // directly to a Mac — has set a key, and is untouched by this.
+    if (
+      config.token === DEFAULT_GROUP_KEY &&
+      isLinkLocal(verdict.address) &&
+      !isGroupRoute(route)
+    ) {
+      log(`default group key from link-local ${verdict.address} on ${method} ${req.url}`);
+      sendJson(res, 403, defaultKeyRefusal("default-group-key-link-local-source"));
       return;
     }
 
@@ -378,7 +434,8 @@ async function dispatch({
         plugin: "dsh-lan-manager",
         version: config.version ?? null,
         dshHome: process.env.DSH_HOME ?? null,
-        group: config.groupKey ?? null,
+        group: config.groupDigest ?? null,
+        ...(config.groupLabel ? { groupLabel: config.groupLabel } : {}),
         self: self ?? null,
         peerCount: peers?.list().length ?? 0,
         discoveryIntervalSeconds: config.discoveryIntervalSeconds ?? null,
@@ -427,7 +484,8 @@ async function dispatch({
     return {
       body: {
         ok: true,
-        group: config.groupKey ?? null,
+        group: config.groupDigest ?? null,
+        ...(config.groupLabel ? { groupLabel: config.groupLabel } : {}),
         self: self ?? null,
         lastDiscovery: peers?.lastRefresh ?? null,
         discoveryIntervalSeconds: config.discoveryIntervalSeconds ?? null,
@@ -445,7 +503,8 @@ async function dispatch({
     return {
       body: {
         ok: true,
-        group: config.groupKey ?? null,
+        group: config.groupDigest ?? null,
+        ...(config.groupLabel ? { groupLabel: config.groupLabel } : {}),
         self: self ?? null,
         lastDiscovery: peers?.lastRefresh ?? null,
         workspaces: own.workspaces ?? [],

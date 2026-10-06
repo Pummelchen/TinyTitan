@@ -17,7 +17,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { DEFAULT_GROUP_KEY, resolveConfig } from "../src/config.js";
+import { DEFAULT_GROUP_KEY, groupDigest, resolveConfig } from "../src/config.js";
 import { resolveMessageFactory, setContextOverrides } from "../src/api.js";
 import {
   createHandler,
@@ -847,7 +847,8 @@ test("GET /peers is the light list, with no inventories embedded", async () => {
   try {
     const res = await call(handler, { url: "/dsh-lan/peers" });
     assert.equal(res.status, 200);
-    assert.equal(res.body.group, DEFAULT_GROUP_KEY);
+    assert.equal(res.body.group, groupDigest(DEFAULT_GROUP_KEY));
+    assert.equal(res.body.groupLabel, DEFAULT_GROUP_KEY);
     assert.equal(res.body.peers.length, 1);
     assert.equal(res.body.peers[0].sessionCount, 2);
     assert.equal(
@@ -1411,8 +1412,8 @@ test("the published default group key does not open a mutating route beyond loop
     assert.equal(res.status, 403);
     assert.equal(res.body.error, "default-group-key-outside-loopback");
 
-    // A read from the same caller is unaffected: an unconfigured fleet still has
-    // to be listed before it can be driven.
+    // A read of the group from the same caller is unaffected: an unconfigured
+    // fleet still has to be listed before anyone can decide what to do with it.
     const listed = await call(handler, {
       url: "/dsh-lan/peers",
       headers: { host: "169.254.9.9:3080" },
@@ -1449,6 +1450,120 @@ test("the published default group key does not open a mutating route beyond loop
   } finally {
     local.store.cleanup();
   }
+});
+
+// --- AUD-155: a self-assigned source with the shipped key gets the group ------
+//
+// `169.254/16` and `fe80::/10` are inside the fence because a fleet is meant to
+// need no setup, and they are also where a host lands when nothing assigned it an
+// address. Membership there is claimed, so with the published key it must not
+// extend to another machine's prompts.
+test("the shipped default key buys a link-local source membership, not content", async () => {
+  const membership = ["/dsh-lan/health", "/dsh-lan/peers"];
+  const content = [
+    "/dsh-lan/inventory",
+    "/dsh-lan/workspaces",
+    "/dsh-lan/sessions",
+    "/dsh-lan/sessions/s-a1/messages",
+    "/dsh-lan/workspaces/w-1/sessions",
+    "/dsh-lan/peers/192.168.18.25%3A3080",
+  ];
+  const { handler, store } = await setup();
+  try {
+    for (const remote of ["169.254.9.9", "fe80::1%en0"]) {
+      for (const url of membership) {
+        const listed = await call(handler, { url, remote, headers: { host: `${remote}:3080` } });
+        assert.equal(listed.status, 200, `${url} from ${remote}: this is how a member is found`);
+      }
+      for (const url of content) {
+        const denied = await call(handler, { url, remote, headers: { host: `${remote}:3080` } });
+        assert.equal(denied.status, 403, `${url} from ${remote} is content`);
+        assert.equal(denied.body.error, "default-group-key-link-local-source");
+      }
+    }
+  } finally {
+    store.cleanup();
+  }
+
+  // A source in a range the operator's network actually owns is untouched: this is
+  // the tailnet manager's inventory read, still working with the shipped key.
+  const tailnet = await setup();
+  try {
+    const res = await call(tailnet.handler, {
+      url: "/dsh-lan/inventory",
+      remote: "100.64.9.9",
+      headers: { host: "100.64.9.9:3080" },
+    });
+    assert.equal(res.status, 200);
+  } finally {
+    tailnet.store.cleanup();
+  }
+
+  // And the directly-coupled pair reads the same content once the key is one an
+  // operator chose — which is the whole suggestion the README makes anyway.
+  const keyed = await setup({ config: { token: "s3cret" } });
+  try {
+    const res = await call(keyed.handler, {
+      url: "/dsh-lan/inventory",
+      remote: "169.254.9.9",
+      headers: { host: "169.254.9.9:3080", "x-dsh-token": "s3cret" },
+    });
+    assert.equal(res.status, 200);
+  } finally {
+    keyed.store.cleanup();
+  }
+});
+
+// --- AUD-154: the key that opens the API is not what the API says out loud ----
+test("a group-facing body names the group by digest, never by the key", async () => {
+  const secret = "a-key-nobody-published";
+  const { handler, store } = await setup({ config: { groupKey: secret } });
+  try {
+    for (const url of ["/dsh-lan/health", "/dsh-lan/peers", "/dsh-lan/inventory"]) {
+      const res = await call(handler, { url, headers: { "x-dsh-token": secret } });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.group, groupDigest(secret), `${url} names the group by digest`);
+      assert.equal(res.body.groupLabel, undefined, `${url} has no public label to give`);
+      assert.equal(
+        JSON.stringify(res.body).includes(secret),
+        false,
+        `${url} repeated the group key in its body`,
+      );
+    }
+  } finally {
+    store.cleanup();
+  }
+
+  // The shipped default keeps its readable name, because it is a published
+  // literal and an unconfigured fleet identifies itself by it on screen.
+  const fresh = await setup();
+  try {
+    const res = await call(fresh.handler, { url: "/dsh-lan/health" });
+    assert.equal(res.body.group, groupDigest(DEFAULT_GROUP_KEY));
+    assert.equal(res.body.groupLabel, DEFAULT_GROUP_KEY);
+  } finally {
+    fresh.store.cleanup();
+  }
+});
+
+// The digest is the group's public name, so its two boring properties are load
+// bearing: every instance must arrive at the same one, and two keys must not.
+test("groupDigest is stable, key-specific, and absent with no key", () => {
+  assert.equal(groupDigest("tinytitan-lan"), groupDigest("tinytitan-lan"));
+  assert.notEqual(groupDigest("tinytitan-lan"), groupDigest("tinytitan-lam"));
+  assert.equal(groupDigest("tinytitan-lan").length, 16);
+  assert.equal(/^[0-9a-f]{16}$/.test(groupDigest("anything")), true);
+  for (const empty of [null, undefined, ""]) {
+    assert.equal(groupDigest(empty), null, "no key means no group to name");
+  }
+  // Resolution carries it alongside the key, so a body can name the group without
+  // the caller having to know the secret to render a banner.
+  const resolved = resolveConfig({ groupKey: "chosen-by-operator" }, {});
+  assert.equal(resolved.groupDigest, groupDigest("chosen-by-operator"));
+  assert.equal(resolved.groupLabel, null);
+  const shipped = resolveConfig({}, {});
+  assert.equal(shipped.groupDigest, groupDigest(DEFAULT_GROUP_KEY));
+  assert.equal(shipped.groupLabel, DEFAULT_GROUP_KEY);
 });
 
 // AUD-133, the reader's half: the reason has to reach whoever lists the fleet.

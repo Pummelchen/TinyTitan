@@ -12,6 +12,7 @@ import {
   ipv4InNetwork,
   ipv4ToInt,
   ipv6InNetwork,
+  isLinkLocal,
   isLoopback,
   normalizeIpv6,
   peerAddress,
@@ -37,6 +38,39 @@ test("isLoopback admits only the machine itself", () => {
   // predicates must disagree, or the rule they both feed is not the one claimed.
   for (const address of ["10.0.0.1", "169.254.9.9", "100.64.0.1", "fe80::1%en0"]) {
     assert.equal(checkAddress(address).allowed, true);
+    assert.equal(isLoopback(address), false);
+  }
+});
+
+test("isLinkLocal names the ranges a host gives itself", () => {
+  // Both halves of the boundary: the range a host lands in when nothing assigned
+  // it an address, and the addresses an operator did assign.
+  for (const address of ["169.254.1.1", "169.254.255.255", "fe80::1", "febf::9", "fe80::1%en0"]) {
+    assert.equal(isLinkLocal(address), true, address);
+  }
+  // The IPv4-mapped spelling of the same address has to reach the same verdict.
+  assert.equal(isLinkLocal("::ffff:169.254.5.6"), true);
+  for (const address of [
+    "10.0.0.1",
+    "192.168.1.9",
+    "127.0.0.1",
+    "100.64.0.1",
+    "fec0::1",
+    "fd00::1",
+  ]) {
+    assert.equal(isLinkLocal(address), false, address);
+  }
+  // `fe80::/10` ends at febf, so the /10 has to be the mask rather than a prefix
+  // match on the string; `fec0::/10` was the old site-local range and is refused.
+  assert.equal(isLinkLocal("febf::1"), true);
+  assert.equal(isLinkLocal("fec0::1"), false);
+  assert.equal(isLinkLocal("mordor.local"), false);
+  assert.equal(isLinkLocal(""), false);
+  // Everything this says yes to is also inside the default fence — the guard that
+  // uses it narrows a decision the fence already made, it does not replace one.
+  for (const address of ["169.254.9.9", "fe80::1%en0"]) {
+    assert.equal(checkAddress(address).allowed, true);
+    assert.equal(isLinkLocal(address), true);
     assert.equal(isLoopback(address), false);
   }
 });

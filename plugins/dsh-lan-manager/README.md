@@ -39,7 +39,8 @@ gossip is what carries discovery from one member to the rest. Each member keeps
 the others' active workspaces and sessions, and members trade address lists with
 each other so one found Mac is enough to find the rest. Every gossiped address is
 validated against the same LAN/Tailscale allowlist the request fence uses before
-anything is dialled, and a member must answer with our group key to be listed.
+anything is dialled, and a member must answer naming our group — by digest, or by
+the key itself if it is still on the previous build — to be listed.
 
 **Bonjour is browse-only, and on the pinned harness it is idle.** Nothing in this
 project registers `_dsh-lan._tcp`, and registering it would be a _false beacon_
@@ -85,13 +86,23 @@ layers, checked in this order:
    request presents, and the tag that decides which instances are one fleet.
    **It ships with a default (`tinytitan-lan`), so by default it groups rather
    than protects** — every Mac that installs this plugin joins the same group
-   with no setup. Because a published string protects nothing, a **mutating**
-   request that carries the shipped default and arrives from outside loopback is
-   refused (`403 default-group-key-outside-loopback`): the zero-setup trade is
-   one you make with your own machine, and the address fence is wider than your
-   machine on purpose. Reads are unaffected, so an unconfigured fleet is still
-   listed and inventoried before anything is driven. Change the key on every Mac
-   when the network is not entirely yours.
+   with no setup. Because a published string protects nothing, two things follow
+   while the key is still the default:
+   - a **mutating** request from outside loopback is refused
+     (`403 default-group-key-outside-loopback`). The zero-setup trade is one you
+     make with your own machine, and the address fence is wider than your machine
+     on purpose.
+   - a request from a **link-local** source (`169.254.0.0/16`, `fe80::/10`) gets
+     the group routes — `/health` and `/peers`, which is how a member is found and
+     listed — and nothing else (`403 default-group-key-link-local-source`). Those
+     ranges are what a host answers with when nothing assigned it an address, so
+     membership there is claimed rather than granted, and reading another
+     machine's workspaces, sessions and prompt history on that basis is not the
+     trade anyone agreed to. A source in a range your network actually owns — a
+     LAN address, a `100.64/10` tailnet address — is unaffected, which is why the
+     manager's `/inventory` read still works unconfigured. A deliberately coupled
+     pair of Macs sets a key and reads everything again.
+     Change the key on every Mac when the network is not entirely yours.
 3. **Origin**, on mutating verbs only: a foreign site in an allowlisted browser must
    not be usable as a confused deputy. _Same-origin_ is decided against hosts this
    server can name — loopback, a host inside the address fence, or one listed in
@@ -107,6 +118,17 @@ layers, checked in this order:
    documented way to switch it off. A request with **no** body sends no content-type
    and still passes; `ttlanmanager` sets the header for every body it writes
    (`FleetClient.swift:89`), as do the `curl` examples above.
+
+**The key is never in a response.** `/health`, `/peers` and `/inventory` name the
+group by a 16-hex digest of the key, not the key: a `/health` call is the first
+thing an operator runs, and its output ends up in log files, issue pastes and
+screenshots. The digest is not a second secret — against a low-entropy key it is
+offline-testable — so what it removes is the copy, which is the case that actually
+happens. Use a key with entropy in it. The shipped default keeps a readable
+`groupLabel` as well, because that string is published anyway and an unconfigured
+fleet uses it to recognise itself on screen. A member still on the previous build
+answers with the literal, and is accepted: an upgrade that emptied every peer
+table would be a worse outage than the plaintext it removed.
 
 ### Reaching it from another machine
 

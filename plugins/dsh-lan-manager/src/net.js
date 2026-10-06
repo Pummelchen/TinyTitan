@@ -21,6 +21,15 @@
  * Everything else — public addresses, and any address the parser cannot make
  * sense of — is refused. The default is deny.
  *
+ * **Range membership is not identity**, so two narrower questions are answered
+ * separately: {@link isLoopback} ("could anyone but this machine have sent it?")
+ * and {@link isLinkLocal} ("did this source name itself?"). Both feed the
+ * router's guards, which are where the *consequences* of a range are decided —
+ * the shipped group key buys mutations only inside loopback (AUD-123) and
+ * content only outside the self-assigned ranges (AUD-155). This file keeps no
+ * such rule, because a fence that quietly changes what a range is worth is a
+ * fence nobody can read.
+ *
  * @module dsh-lan-manager/net
  */
 
@@ -244,6 +253,28 @@ export function isLoopback(address) {
   if (family === "ipv4") return ipv4InNetwork(normalized, "127.0.0.0", 8);
   // `normalizeIpv6` expands, so `::1` arrives as its full group form.
   if (family === "ipv6") return normalized === "0:0:0:0:0:0:0:1";
+  return false;
+}
+
+/**
+ * Is an address link-local — `169.254.0.0/16` or `fe80::/10`?
+ *
+ * The range the fence admits for a *reason* (a directly coupled pair of Macs has
+ * nothing else to talk on) and the range an attacker lands in *by accident* are
+ * the same range here: `169.254/16` is what a host self-assigns when DHCP is
+ * absent, and every IPv6 host on every segment holds an `fe80::/10` address
+ * whether or not anyone configured a network. So this predicate exists to let a
+ * rule rest on "this source named itself" rather than on "the operator put it
+ * here" — which is what AUD-155 needed, and what neither `checkAddress` (it says
+ * only *reachable*) nor `isLoopback` (it says only *this machine*) can say.
+ *
+ * @param address - dotted quad, IPv6 literal, or a socket address.
+ * @returns true for the two link-local ranges.
+ */
+export function isLinkLocal(address) {
+  const { family, address: normalized } = unwrapAddress(address);
+  if (family === "ipv4") return ipv4InNetwork(normalized, "169.254.0.0", 16);
+  if (family === "ipv6") return ipv6InNetwork(normalized, "fe80::", 10);
   return false;
 }
 

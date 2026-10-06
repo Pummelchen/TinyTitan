@@ -26,9 +26,18 @@
  * (AUD-123): the trade is only ever meant to be made with yourself, and a peer
  * address the fence also admits — link-local and CGNAT included — is not you.
  *
+ * **The key never goes on the wire.** The group-facing bodies name the group by
+ * {@link groupDigest}, not by the key (AUD-154): a value that authorises writes
+ * has no business appearing in a `/health` response, which is the one thing
+ * every operator curls, pastes into an issue, and leaves in a log file. The
+ * digest is not a second secret — with a low-entropy key it is offline-testable
+ * against one — so it buys the case that actually happens, which is the secret
+ * being *copied*, not the secret being *attacked*.
+ *
  * @module dsh-lan-manager/config
  */
 
+import { createHash } from "node:crypto";
 import { networkInterfaces } from "node:os";
 
 /** The route prefix an unconfigured install mounts. */
@@ -40,6 +49,24 @@ export const DEFAULT_BASE_PATH = "/dsh-lan";
  * the first thing to change on a network you do not solely own.
  */
 export const DEFAULT_GROUP_KEY = "tinytitan-lan";
+
+/**
+ * Name the group without naming the key that opens it.
+ *
+ * Sixteen hex characters, domain-separated so a digest of this key is not a
+ * digest of anything else the operator hashed, and truncated so it fits on a
+ * terminal line. Truncation costs nothing here: an attacker who can reach a
+ * group route has already presented the key, so the digest is not the thing
+ * standing between them and the API — it only has to be stable enough to match
+ * a peer's and short enough to read.
+ *
+ * @param key - the resolved group key.
+ * @returns the digest, or `null` when no key is configured.
+ */
+export function groupDigest(key) {
+  if (key === null || key === undefined || key === "") return null;
+  return createHash("sha256").update(`dsh-lan-group:${key}`).digest("hex").slice(0, 16);
+}
 
 /** How often discovery runs, in seconds, before an operator changes it. */
 export const DEFAULT_DISCOVERY_SECONDS = 60;
@@ -148,6 +175,12 @@ export function resolveConfig(raw = {}, env = process.env) {
     basePath,
     groupKey,
     token: groupKey,
+    // What the API says out loud about the group (AUD-154). The literal label
+    // survives only for the shipped default, which is public anyway and which an
+    // unconfigured fleet reads on its screen to recognise itself; anything an
+    // operator chose is named only by its digest.
+    groupDigest: groupDigest(groupKey),
+    groupLabel: groupKey === DEFAULT_GROUP_KEY ? groupKey : null,
     allowAddresses,
     ipv4Networks: Array.isArray(raw.ipv4Networks) ? raw.ipv4Networks : undefined,
     ipv6Networks: Array.isArray(raw.ipv6Networks) ? raw.ipv6Networks : undefined,

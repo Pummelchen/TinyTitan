@@ -8,8 +8,13 @@
  * 1. **Nothing is dialled before it is validated.** A candidate address — from a
  *    seed, from Bonjour (a hostname), or from another member's gossip — must
  *    resolve to an address inside the same LAN/Tailscale allowlist the request
- *    fence uses, and must answer with our group key, or it is dropped. Without
- *    that, gossip would let one member make the others knock on arbitrary doors.
+ *    fence uses, and must answer naming our group (by digest since AUD-154, by
+ *    the key itself from a peer still on the previous build), or it is dropped.
+ *    Without that, gossip would let one member make the others knock on arbitrary
+ *    doors. One consequence is worth naming: the probe reads `/inventory`, so a
+ *    member that the router's Guard 2c will not give content to — a link-local
+ *    source while the key is still the shipped default — never becomes a peer. It
+ *    is not unreachable, it is unconfigured, and setting a key is the fix.
  * 2. **A peer's list is a hint, never authority.** Gossiped addresses join the
  *    candidate set for the *next* cycle and are validated then like any other;
  *    nothing a peer says bypasses rule 1.
@@ -308,12 +313,23 @@ export class PeerTable {
         this.log(`peer ${candidate.address}:${candidate.port} is not in our group (401)`);
       return undefined;
     }
-    if (
-      body.group !== undefined &&
-      this.config.groupKey !== undefined &&
-      String(body.group) !== String(this.config.groupKey)
-    ) {
-      this.log(`peer ${candidate.address}:${candidate.port} reports group ${body.group}, not ours`);
+    // AUD-154: a member names its group by digest. The literal spellings stay
+    // accepted, because a peer running the previous build sends the key itself
+    // and an update that emptied the peer table would be a worse outage than the
+    // plaintext it removed; they go once no member in the wild answers that way.
+    const digest = this.config.groupDigest;
+    const reported = body.group === undefined ? undefined : String(body.group);
+    const literal = this.config.groupKey === undefined ? undefined : String(this.config.groupKey);
+    const ours =
+      literal === undefined ||
+      reported === undefined ||
+      (digest !== undefined && reported === String(digest)) ||
+      reported === literal ||
+      (body.groupLabel !== undefined && String(body.groupLabel) === literal);
+    if (!ours) {
+      // The value is not interpolated: a foreign peer's group string is that
+      // peer's credential, and logging it puts someone else's secret in our logs.
+      this.log(`peer ${candidate.address}:${candidate.port} reports a group that is not ours`);
       return undefined;
     }
     const address = candidate.address;
