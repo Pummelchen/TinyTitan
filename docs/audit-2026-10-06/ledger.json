@@ -4,9 +4,9 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 44,
-    "done": 23,
-    "open": 20,
+    "total": 45,
+    "done": 26,
+    "open": 18,
     "blocked": 1
   },
   "tasks": [
@@ -69,13 +69,13 @@
       "file_line": "tools/lint.sh:319-330",
       "title": "The converter expert-order gate reports nothing when the converter dependencies are missing",
       "category": "gate fails open",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "gate reading + probe",
       "evidence-before": "The probe imports numpy and prepare_agentworld; on ImportError it prints 'SKIP: ... (converter deps unavailable)' and exits 0, so lint.sh reports the check line and keeps status 0. This is the defect class the gate exists for: experts filed by arrival order are invisible to every downstream check (the docstring in tools/prepare_agentworld.py:325-334 says exactly that). Verified the gate does catch the real sabotage when numpy is present: filing by len(target['experts']) produced 'FAIL: experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]'. Expected-correct: missing converter deps FAIL the gate with the install command, unless an explicit documented opt-out is passed.",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "tools/lint.sh:304-345: the gate now fails closed. Missing python3 or a missing converter dependency prints `FAIL: ... run: python3 -m pip install -r benchmark/requirements.txt` and sets status=1, mirroring the javascript gate's `npm ci` message; the probe's ImportError branch exits 3 so a genuine probe failure stays distinguishable. The only quiet path is the documented `ALLOW_MISSING_CONVERTER_DEPS=1`, which prints `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ... the probe did not run` instead of silence, and is written down in the script header, AGENTS.md and docs/release-process.md. ci.yml gains an `Install the converter's pinned dependencies` step in the lint job (`pip install --user -r benchmark/requirements.txt`), so the gate actually runs in CI rather than skipping there too -- the lint job previously installed only ruff, and the converter venv is created after it.",
+      "evidence-after": "Four dependency states probed with `tools/lint.sh converter`: (1) pins present -> `ok`, rc 0; (2) interpreter without numpy (venv wrapper on PATH) -> `FAIL: converter deps unavailable (No module named 'numpy'); run: python3 -m pip install -r benchmark/requirements.txt`, rc 1 -- the case that used to be rc 0; (3) same with ALLOW_MISSING_CONVERTER_DEPS=1 -> `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ...`, rc 0; (4) no interpreter on PATH (`env -i PATH=/bin`) -> `FAIL: no python3 on PATH; the converter check cannot run`, rc 1, and rc 0 only with the opt-out. The gate still catches the real defect after the change: filing at `len(target[\"experts\")]` instead of `expert` in tools/prepare_agentworld.py:387 produced `FAIL: experts landed by arrival order: [3.0, 0.0, 7.0, 1.0, 5.0, 2.0, 6.0, 4.0] (want [0.0..7.0])`, rc 1, and the file was restored (empty git diff) before the commit. A broken probe (SyntaxError in the module) also rc 1, so an unexpected exit is not read as a pass. All eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0.",
+      "commit": "218a210",
       "blocked-reason": null
     },
     {
@@ -341,13 +341,13 @@
       "file_line": "AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5",
       "title": "Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce",
       "category": "documentation drift / stale measurement quoted as fact",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "baseline + L0 repository pass",
       "evidence-before": "AGENTS.md gives `cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e`; .github/workflows/ci.yml:129-130 runs those plus test_prepare_agentworld, whose own comment (ci.yml:118-120) says it covers the Qwen3.5-MoE fusion at both widths. requirements.txt:4-5 asserts the baseline ran '299 tests, 52 skipped'; measured here with the pins installed: Ran 87 tests, OK, 0 skipped. Nothing in the build compares the docs to the run, so both claims are unfalsifiable as written.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "AGENTS.md:299-321 now names three suites and prints the exact command CI runs (the third is test_prepare_agentworld, the Qwen3.5-MoE per-expert fusion at both widths from issue #19), with `Run all three` and the dependency note. benchmark/requirements.txt:3-8 replaces the \"299 tests, 52 skipped\" claim: the number is traced to docs/release-notes-v5.12.md:51, where it was the *benchmark* suite's count in a historical release note, not this gate's; the comment now records the measured converter run (75 for the first two, 87 for all three, none skipped) as a record of the run and says explicitly that what CI enforces is the three suites exiting 0. The historical note is left alone -- it is a record of a past release, not a live claim. Nothing else in the tree carried the stale text: the only other hits for '299 tests'/'52 skipped' are this audit's own ledger and baseline files.",
+      "evidence-after": "Measured on current main with the pins installed (numpy 25.3/safetensors 0.8.0/ml_dtypes 0.6.0 as pinned): `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` -> `Ran 75 tests in 34.630s`, OK; `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e test_prepare_agentworld` -> `Ran 87 tests in 35.395s`, OK, 0 skipped. Both match the numbers now written into requirements.txt, and the command in AGENTS.md is the one that produced the 87-test run. ci.yml:129-130 unchanged, and it is still the authority the docs now agree with.",
+      "commit": "218a210",
       "blocked-reason": ""
     },
     {
@@ -647,13 +647,13 @@
       "file_line": "sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33",
       "title": "An unreachable ?? 262_144 fallback on a non-empty constant array",
       "category": "defensive code for a case that cannot happen",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "§5 facade sweep",
       "evidence-before": "Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "Verified true, then fixed: `supportedContextTokens.max() ?? 262_144` at ServerInference.swift:176 and OpenAIRequestValidator.swift:32 both named a literal for a branch that cannot happen -- `.max()` of a seven-element constant array is never nil. Both now use the existing `RuntimeConfiguration.nativeMaximumContextTokens` (same 262_144, so the ceiling is unchanged), and the constant carries a doc comment stating the declaration-equals-`.last` relation and naming the test that pins it. The two sites wanted the same thing -- the ceiling for a backend with no model card to ask -- so they now say it in one name instead of twice in two numbers.",
+      "evidence-after": "New test `OpenAIValidationTests.theDefaultCeilingIsTheNativeMaximum` pins both defaults: a backend that does not override reports nativeMaximumContextTokens, the constant is 262_144 and not the wider YaRN 1_048_576, and a request at the ceiling validates while one token past it is refused. Mutation-checked: replacing the constant with RuntimeConfiguration.maximumContextTokens at both call sites made the test record 2 issues (`BackendWithoutACard().maximumContext == nativeMaximumContextTokens` and the missing throw for max_tokens=262_145, which returned maximumCompletionTokens: 262145); restoring the files returned it to green. Suite `OpenAIValidationTests` 35 tests in 3 suites passed; the validator/request-rule run (OpenAIValidationTests|RequestRulesTests|StructuredOutput|ToolWiringTests) 58 tests passed; RuntimeConfigurationTests+CLIArgumentsTests 25 tests passed; `swift build` clean; all eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0. Sibling found during the audit step and filed as AUD-145 rather than folded in here: the identical unreachable fallback on `allowedExpertCacheSlots` (five `.first ?? 8` sites plus the `.min { } ?? allowedExpertCacheSlots.first ?? 8` in RuntimeConfiguration.swift:213-220, 295-310 and ServerModelSession+Loading.swift:177). Not the same class, and left alone: `fitting.last ??` (RuntimeConfiguration.swift:310) and `entries.map{...}.max() ?? -1` are over computed values that really can be empty.",
+      "commit": "218a210",
       "blocked-reason": ""
     },
     {
@@ -758,6 +758,23 @@
       "evidence-after": "`grep -rn O_CREAT sources/ | grep -vc O_NOFOLLOW` -> 0. New `tests/ContinuityCore/JournalSymlinkTests.swift` (5 tests) asserts the damage property, not the throw: journal path refused, lock path refused *and* no journal file created behind it, `truncate()` refused, the compaction temp refused, plus the directory-symlink regression guard that an operator's link still works. Two more in `tests/TinyTitanMemory/SweepStaleWorkspacesTests.swift`: a regular unheld lock still reads as free (the guard must not switch the cap off), and a symlinked lock reads as held with its target's bytes intact. Pre-fix behaviour was measured by restoring the code, not asserted: without the flags the truncate test's victim file is destroyed, and without the probe guard `isLockHeld` answered false and the sweep deleted the live journal. Eleven gates clean (`tools/lint.sh`, pinned toolchain on PATH); full serial run green at 1612 tests in 7 targets, exit 0, +17 over the recorded 1595 baseline, which is exactly the 17 tests this batch adds.",
       "commit": "a9ab3c5",
       "blocked-reason": ""
+    },
+    {
+      "id": "AUD-145",
+      "severity": "S3",
+      "tier": "B",
+      "project": "runtime",
+      "file_line": "sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177",
+      "title": "The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times",
+      "category": "defensive code for a case that cannot happen",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "discovered-by": "AUD-137 sibling audit",
+      "evidence-before": "`allowedExpertCacheSlots` is a thirteen-element `public static let` constant ([8, 16, 24, 32, 40, 48, 64, 96, 112, 128, 160, 192, 256]), so `.first ?? 8` has no reachable nil branch at the five sites that use it, and the `allowedExpertCacheSlots.min { ... } ?? allowedExpertCacheSlots.first ?? 8` at :220 carries two. The 8 is a magic number standing in for a branch that cannot happen -- and it is the value that decides the expert-cache floor for a model whose manifest cannot be read (ServerModelSession+Loading.swift:177), so a future edit that reorders the array and forgets the literal would drift silently. Not the same class and not in scope: `fitting.last ??` at :310 is over a `filter` that really can be empty.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null
     }
   ]
 }

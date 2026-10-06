@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:20  Done:23  Blocked:1  Total:44**
+**Open:18  Done:26  Blocked:1  Total:45**
 
 ## Table
 
@@ -18,11 +18,9 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
-| AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
-| AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | OPEN | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
@@ -34,6 +32,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
+| AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
@@ -43,14 +42,16 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-116 | S2 | A | repack | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149` | A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix | silent drop on a numerics-affecting field | DONE | Mac (primary) |
 | AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | DONE | Mac (primary) |
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
+| AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
+| AUD-145 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177` | The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times | defensive code for a case that cannot happen | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
+| AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
 
 ## Detail
@@ -228,18 +229,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence before.** Proven: E722, B006, S101, F632 each fire on a probe. Silent on the same probe: subprocess.run(check=False), time.sleep() used to synchronise, open() without encoding=, datetime.datetime.now() without a timezone, and a test body that asserts nothing. pyproject.toml says 'the rest are the families the audit standard names', which is a claim broader than select = [E4,E7,E9,F,W,B,E722,S101,PT].
 
-### AUD-104 — The converter expert-order gate reports nothing when the converter dependencies are missing
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** lint-gates
-- **Location:** `tools/lint.sh:319-330`
-- **Category:** gate fails open
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** gate reading + probe
-
-**Evidence before.** The probe imports numpy and prepare_agentworld; on ImportError it prints 'SKIP: ... (converter deps unavailable)' and exits 0, so lint.sh reports the check line and keeps status 0. This is the defect class the gate exists for: experts filed by arrival order are invisible to every downstream check (the docstring in tools/prepare_agentworld.py:325-334 says exactly that). Verified the gate does catch the real sabotage when numpy is present: filing by len(target['experts']) produced 'FAIL: experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]'. Expected-correct: missing converter deps FAIL the gate with the install command, unless an explicit documented opt-out is passed.
-
 ### AUD-105 — Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing
 
 - **Severity / tier:** S2 / Tier B
@@ -277,20 +266,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** recon of main vs tags/releases
 
 **Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
-
-### AUD-119 — Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce
-
-- **Severity / tier:** S2 / Tier C
-- **Project:** docs
-- **Location:** `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5`
-- **Category:** documentation drift / stale measurement quoted as fact
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** baseline + L0 repository pass
-
-**Evidence before.** AGENTS.md gives `cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e`; .github/workflows/ci.yml:129-130 runs those plus test_prepare_agentworld, whose own comment (ci.yml:118-120) says it covers the Qwen3.5-MoE fusion at both widths. requirements.txt:4-5 asserts the baseline ran '299 tests, 52 skipped'; measured here with the pins installed: Ran 87 tests, OK, 0 skipped. Nothing in the build compares the docs to the run, so both claims are unfalsifiable as written.
-
-**Evidence after.** None yet.
 
 ### AUD-120 — No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source
 
@@ -452,6 +427,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
     Not fixed with AUD-113 because none of these seven is the file that row named, three of the four groups need a cap chosen for their boundary rather than the manifest's, and the three engine-side sites are load-path changes that each need a golden-baseline run to close.
 
 **Evidence after.** Expected: group (1) reads under a stated bound and says so on refusal, with a test per site in the shape AUD-113's `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` uses (the bound fires, not the decoder); `ServerPromptStateStore.swift:121` moves to read-then-check so its bound stops being a TOCTOU; groups (2) and (3) get a limit written down where the operator can see it, or an explicit note that the operator's own checkpoint is out of scope; group (4) classified as a self-check rather than left to look like an unfixed hole. Load-path sites need `tools/golden-baseline.sh --check qwen38-4` before and after.
+
+### AUD-104 — The converter expert-order gate reports nothing when the converter dependencies are missing
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** lint-gates
+- **Location:** `tools/lint.sh:319-330`
+- **Category:** gate fails open
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** gate reading + probe
+
+**Evidence before.** The probe imports numpy and prepare_agentworld; on ImportError it prints 'SKIP: ... (converter deps unavailable)' and exits 0, so lint.sh reports the check line and keeps status 0. This is the defect class the gate exists for: experts filed by arrival order are invisible to every downstream check (the docstring in tools/prepare_agentworld.py:325-334 says exactly that). Verified the gate does catch the real sabotage when numpy is present: filing by len(target['experts']) produced 'FAIL: experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]'. Expected-correct: missing converter deps FAIL the gate with the install command, unless an explicit documented opt-out is passed.
+
+**Fix.** tools/lint.sh:304-345: the gate now fails closed. Missing python3 or a missing converter dependency prints `FAIL: ... run: python3 -m pip install -r benchmark/requirements.txt` and sets status=1, mirroring the javascript gate's `npm ci` message; the probe's ImportError branch exits 3 so a genuine probe failure stays distinguishable. The only quiet path is the documented `ALLOW_MISSING_CONVERTER_DEPS=1`, which prints `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ... the probe did not run` instead of silence, and is written down in the script header, AGENTS.md and docs/release-process.md. ci.yml gains an `Install the converter's pinned dependencies` step in the lint job (`pip install --user -r benchmark/requirements.txt`), so the gate actually runs in CI rather than skipping there too -- the lint job previously installed only ruff, and the converter venv is created after it.
+
+**Evidence after.** Four dependency states probed with `tools/lint.sh converter`: (1) pins present -> `ok`, rc 0; (2) interpreter without numpy (venv wrapper on PATH) -> `FAIL: converter deps unavailable (No module named 'numpy'); run: python3 -m pip install -r benchmark/requirements.txt`, rc 1 -- the case that used to be rc 0; (3) same with ALLOW_MISSING_CONVERTER_DEPS=1 -> `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: ...`, rc 0; (4) no interpreter on PATH (`env -i PATH=/bin`) -> `FAIL: no python3 on PATH; the converter check cannot run`, rc 1, and rc 0 only with the opt-out. The gate still catches the real defect after the change: filing at `len(target["experts")]` instead of `expert` in tools/prepare_agentworld.py:387 produced `FAIL: experts landed by arrival order: [3.0, 0.0, 7.0, 1.0, 5.0, 2.0, 6.0, 4.0] (want [0.0..7.0])`, rc 1, and the file was restored (empty git diff) before the commit. A broken probe (SyntaxError in the module) also rc 1, so an unexpected exit is not read as a pass. All eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0.
+
+**Commit.** `218a210`
 
 ### AUD-110 — openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs
 
@@ -616,6 +609,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `this commit`
 
+### AUD-119 — Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce
+
+- **Severity / tier:** S2 / Tier C
+- **Project:** docs
+- **Location:** `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5`
+- **Category:** documentation drift / stale measurement quoted as fact
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** baseline + L0 repository pass
+
+**Evidence before.** AGENTS.md gives `cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e`; .github/workflows/ci.yml:129-130 runs those plus test_prepare_agentworld, whose own comment (ci.yml:118-120) says it covers the Qwen3.5-MoE fusion at both widths. requirements.txt:4-5 asserts the baseline ran '299 tests, 52 skipped'; measured here with the pins installed: Ran 87 tests, OK, 0 skipped. Nothing in the build compares the docs to the run, so both claims are unfalsifiable as written.
+
+**Fix.** AGENTS.md:299-321 now names three suites and prints the exact command CI runs (the third is test_prepare_agentworld, the Qwen3.5-MoE per-expert fusion at both widths from issue #19), with `Run all three` and the dependency note. benchmark/requirements.txt:3-8 replaces the "299 tests, 52 skipped" claim: the number is traced to docs/release-notes-v5.12.md:51, where it was the *benchmark* suite's count in a historical release note, not this gate's; the comment now records the measured converter run (75 for the first two, 87 for all three, none skipped) as a record of the run and says explicitly that what CI enforces is the three suites exiting 0. The historical note is left alone -- it is a record of a past release, not a live claim. Nothing else in the tree carried the stale text: the only other hits for '299 tests'/'52 skipped' are this audit's own ledger and baseline files.
+
+**Evidence after.** Measured on current main with the pins installed (numpy 25.3/safetensors 0.8.0/ml_dtypes 0.6.0 as pinned): `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` -> `Ran 75 tests in 34.630s`, OK; `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e test_prepare_agentworld` -> `Ran 87 tests in 35.395s`, OK, 0 skipped. Both match the numbers now written into requirements.txt, and the command in AGENTS.md is the one that produced the 87-test run. ci.yml:129-130 unchanged, and it is still the authority the docs now agree with.
+
+**Commit.** `218a210`
+
 ### AUD-125 — memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing)
 
 - **Severity / tier:** S2 / Tier A
@@ -721,19 +732,17 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
-### AUD-137 — An unreachable ?? 262_144 fallback on a non-empty constant array
+### AUD-145 — The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times
 
 - **Severity / tier:** S3 / Tier B
-- **Project:** server
-- **Location:** `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33`
+- **Project:** runtime
+- **Location:** `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177`
 - **Category:** defensive code for a case that cannot happen
 - **Status:** OPEN
 - **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
+- **Discovered by:** AUD-137 sibling audit
 
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.
-
-**Evidence after.** None yet.
+**Evidence before.** `allowedExpertCacheSlots` is a thirteen-element `public static let` constant ([8, 16, 24, 32, 40, 48, 64, 96, 112, 128, 160, 192, 256]), so `.first ?? 8` has no reachable nil branch at the five sites that use it, and the `allowedExpertCacheSlots.min { ... } ?? allowedExpertCacheSlots.first ?? 8` at :220 carries two. The 8 is a magic number standing in for a branch that cannot happen -- and it is the value that decides the expert-cache floor for a model whose manifest cannot be read (ServerModelSession+Loading.swift:177), so a future edit that reorders the array and forgets the literal would drift silently. Not the same class and not in scope: `fitting.last ??` at :310 is over a `filter` that really can be empty.
 
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
@@ -752,6 +761,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** docs/release-notes-v5.8.md carries the Superseded block in the form release-notes-v5.1.md:57 already uses: it names 3eb11cf, points at ModelProfile as the thing that decides now, cites ModelProfileTests:119-122 as the record that the override is gone, and keeps the bullet as what 5.8 shipped. Verified each claim against the code before writing it (`git show --stat 3eb11cf`, the test comment, and the absence of the token anywhere under sources/). Markdown has no lint gate here, so the check is factual rather than mechanical: no other doc claims a retired knob as current except three dated measurement records, which are left alone deliberately because they describe what was measured then, not what the engine does now.
 
 **Commit.** `dbb8bf6`
+
+### AUD-137 — An unreachable ?? 262_144 fallback on a non-empty constant array
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33`
+- **Category:** defensive code for a case that cannot happen
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.
+
+**Fix.** Verified true, then fixed: `supportedContextTokens.max() ?? 262_144` at ServerInference.swift:176 and OpenAIRequestValidator.swift:32 both named a literal for a branch that cannot happen -- `.max()` of a seven-element constant array is never nil. Both now use the existing `RuntimeConfiguration.nativeMaximumContextTokens` (same 262_144, so the ceiling is unchanged), and the constant carries a doc comment stating the declaration-equals-`.last` relation and naming the test that pins it. The two sites wanted the same thing -- the ceiling for a backend with no model card to ask -- so they now say it in one name instead of twice in two numbers.
+
+**Evidence after.** New test `OpenAIValidationTests.theDefaultCeilingIsTheNativeMaximum` pins both defaults: a backend that does not override reports nativeMaximumContextTokens, the constant is 262_144 and not the wider YaRN 1_048_576, and a request at the ceiling validates while one token past it is refused. Mutation-checked: replacing the constant with RuntimeConfiguration.maximumContextTokens at both call sites made the test record 2 issues (`BackendWithoutACard().maximumContext == nativeMaximumContextTokens` and the missing throw for max_tokens=262_145, which returned maximumCompletionTokens: 262145); restoring the files returned it to green. Suite `OpenAIValidationTests` 35 tests in 3 suites passed; the validator/request-rule run (OpenAIValidationTests|RequestRulesTests|StructuredOutput|ToolWiringTests) 58 tests passed; RuntimeConfigurationTests+CLIArgumentsTests 25 tests passed; `swift build` clean; all eleven gates rc 0; full serial suite 1,613 tests in 241 suites, exit 0. Sibling found during the audit step and filed as AUD-145 rather than folded in here: the identical unreachable fallback on `allowedExpertCacheSlots` (five `.first ?? 8` sites plus the `.min { } ?? allowedExpertCacheSlots.first ?? 8` in RuntimeConfiguration.swift:213-220, 295-310 and ServerModelSession+Loading.swift:177). Not the same class, and left alone: `fitting.last ??` (RuntimeConfiguration.swift:310) and `entries.map{...}.max() ?? -1` are over computed values that really can be empty.
+
+**Commit.** `218a210`
 
 ### AUD-138 — Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller
 
