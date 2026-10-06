@@ -412,5 +412,11 @@ The non-negotiables:
 - **Identity is single-sourced and enforced** — never bump one declaration of the
   version or build number on its own; the build or CI must fail on a mismatch.
 - **Dry run first**; publish only on an explicit flag.
+- **CI is green on the commit being tagged.** `tools/release.sh` asks
+  `tools/ci-green.sh` and refuses a `failure`, a run still in flight, and a commit
+  with no run at all — the local gates are one machine's view, and only CI runs a
+  clean clone on the pinned toolchains. Going over a red CI is a recorded decision:
+  both `TINYTITAN_RELEASE_ALLOW_RED_CI` and `..._REASON`, with the failing run's URL
+  quoted in the release notes.
 - **Never fetch a model, dataset or dependency to make a gate pass.** A check that
   cannot run is reported *not checked*, and the release notes must name it.

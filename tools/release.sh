@@ -66,6 +66,37 @@ git ls-remote --tags origin 2>/dev/null | grep -q "refs/tags/$TAG$" \
   || die "$TAG is not pushed to origin; run: git push origin $TAG"
 gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
   && die "a Release for $TAG already exists on $REPO"
+
+# --- CI green on the commit being tagged ------------------------------------
+# tools/ci-green.sh holds the rule and the reasons -- that CI is the only run
+# which sees a clean clone on the pinned toolchains, that a short sha queries
+# nothing, and that "no runs" and "still running" are refusals rather than
+# warnings. What belongs here is where the answer is demanded: before the gates,
+# the build and the golden baselines, and with a recorded reason for going over
+# it that then has to survive into the published notes.
+TAG_SHA="$(git rev-parse "$TAG^{commit}")"
+CI_ALLOW_RED="${TINYTITAN_RELEASE_ALLOW_RED_CI:-}"
+CI_ALLOW_RED_REASON="${TINYTITAN_RELEASE_ALLOW_RED_CI_REASON:-}"
+if [ -n "$CI_ALLOW_RED" ] && [ -z "$CI_ALLOW_RED_REASON" ]; then
+  die "TINYTITAN_RELEASE_ALLOW_RED_CI=$CI_ALLOW_RED without TINYTITAN_RELEASE_ALLOW_RED_CI_REASON; a release over a red CI must record why, and say it in the notes"
+fi
+CI_ARGS=()
+if [ -n "$CI_ALLOW_RED_REASON" ]; then
+  CI_ARGS=(--allow-red "$CI_ALLOW_RED_REASON")
+fi
+if ! CI_REPORT="$("$SCRIPT_DIR/ci-green.sh" "$REPO" "$TAG_SHA" ${CI_ARGS[@]+"${CI_ARGS[@]}"})"; then
+  die "CI does not pass on $TAG_SHA: $CI_REPORT"
+fi
+# The helper's last line is `result<TAB>green|overridden<TAB><first red run URL>`,
+# which is how a green run stays quiet and an overridden one learns which URL the
+# notes must then quote.
+CI_STATUS="$(printf '%s\n' "$CI_REPORT" | tail -1 | cut -f2)"
+CI_RED_URL="$(printf '%s\n' "$CI_REPORT" | tail -1 | cut -f3)"
+if [ "$CI_STATUS" = "overridden" ]; then
+  CI_NOTES_REQUIRE="$CI_RED_URL"
+  printf '%s\n' "$CI_REPORT" | sed '$d'
+fi
+
 # A skipped baseline needs its reason before anything expensive starts, so a
 # forgotten TINYTITAN_RELEASE_SKIP_GOLDENS_REASON fails here and not an hour later.
 if [ -n "${TINYTITAN_RELEASE_SKIP_GOLDENS:-}" ] && [ -z "${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}" ]; then
@@ -464,6 +495,12 @@ if [ -n "$NOTES" ]; then
     "$TOOLS_SHA" "$TOOLS_BYTES"; do
     REQUIRE_ARGS+=(--require "$required")
   done
+  # When CI was red and the operator chose to release over it, the run that says
+  # so has to survive into the published notes: the override is honest while it is
+  # written down, and a reader of the Release page is the audience that matters.
+  if [ -n "$CI_NOTES_REQUIRE" ]; then
+    REQUIRE_ARGS+=(--require "$CI_NOTES_REQUIRE")
+  fi
   python3 "$SCRIPT_DIR/compact-release-notes.py" "$RENDERED_NOTES" \
     --out "$COMPACT_NOTES" \
     --max-chars "$NOTES_MAX_CHARS" \
@@ -476,7 +513,6 @@ if [ "$PUBLISH" -ne 1 ]; then
   step "dry run complete"
   echo "  staged: $STAGE"
   echo "  library: $(basename "$LIB_ARCHIVE")"
-  echo "  tools: $(basename "$TOOLS_ARCHIVE")"
   echo "  tools: $(basename "$TOOLS_ARCHIVE")"
   if [ -n "$NOTES" ]; then
     echo "  release page: the compact form checked above is what --publish would carry"

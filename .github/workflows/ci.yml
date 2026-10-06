@@ -151,6 +151,17 @@ jobs:
           cd benchmark
           python3 -m unittest test_dsh_isolation test_install_models_menu \
             test_launcher_install test_progress
+      - name: Release gates (the CI-green precondition)
+        # `tools/ci-green.sh` is what stops a tag going out over a commit whose CI
+        # has not passed — the gap that let v5.18 publish an hour after its own
+        # tag commit failed the Installer gates job. These tests drive it with a
+        # stubbed `gh`, so they need no token and no network, and they cover the
+        # shapes that would otherwise let a vacuous pass through: a commit with no
+        # run at all, a short sha the API matches against nothing, a run still in
+        # flight, and the override with and without its reason.
+        run: |
+          cd benchmark
+          python3 -m unittest test_release_ci_green
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

@@ -18,6 +18,7 @@ release notes are `docs/release-notes-vX.Y.md`.
 | Memory | `memory_pressure -Q` | The golden baselines load real models |
 | **No model process** | `pgrep -fl 'TinyTitanServer\|TinyTitanCLI\|TinyTitanPackageTests\|swiftpm-testing-helper\|mlx_lm\|mlx-lm'` | The golden gate refuses to run beside one; see §5 |
 | `gh` authenticated | `gh auth status` | Publishing uses it; it must be the repo owner's account |
+| CI green on the commit to be tagged | `tools/ci-green.sh Pummelchen/TinyTitan "$(git rev-parse vX.Y^{commit})"` | `release.sh` refuses without it; the gates in §4 are this machine's view, and only CI sees a clean clone on the pinned toolchains — see §3 |
 | A release build exists | `ls .build/release/TinyTitanCLI` | The golden gate drives that binary and runs *before* the clean scratch build; `release.sh` refuses to start without it |
 | The installs to verify | `ls models/*/verified-install.json` | The gate verifies only what is installed, and never fetches a model; see §5 |
 | Clean tree, HEAD on the tag | `git status --porcelain` | `release.sh` enforces both |
@@ -140,6 +141,40 @@ Push the wiki's Changelog too (`git -C .qwen/wiki commit && git -C .qwen/wiki pu
 `release.sh` requires HEAD to *be* the tag and the tag to be *pushed*; a tag
 that exists only locally fails the precondition with a clear message.
 
+### CI has to be green on the commit the tag names
+
+`release.sh` refuses to continue until every GitHub Actions run on the tagged
+commit is `completed` with a conclusion of `success` or `skipped`. The rule lives in
+`tools/ci-green.sh <repo> <full-commit-sha>`, which is runnable on its own and is
+tested by `python3 -m unittest test_release_ci_green`. This is not a formality: the
+gates in §4 are one machine's view of the tree, and only CI runs against a clean
+clone on the runner's pinned toolchains. v5.18 was published an hour after its own
+tag commit came back `CI | completed | failure` (run 37270213543, the Installer
+gates job) because nothing in this runbook asked.
+
+Three answers are refusals, and each says which it is:
+
+- **a run that has not finished** — wait for it. An in-flight run is not what the
+  override below is for.
+- **no run at all for that commit** — CI never saw it. A query that matches nothing
+  must not read as a pass, which is also why the helper insists on the *full* sha:
+  `head_sha` with a short one returns no runs, and the release would be published on
+  an answer nobody collected.
+- **a conclusion that is not success or skipped** — including `cancelled`,
+  `timed_out` and `action_required`, each of which means CI did not check this
+  commit and report it fine.
+
+Going over a red CI has to be deliberate, so it takes both the flag and a reason, and
+`--publish` then refuses unless the failing run's URL is quoted in the release notes —
+the same bargain as a skipped golden baseline (§5): it is a documented skip, not an
+invisible one.
+
+```bash
+TINYTITAN_RELEASE_ALLOW_RED_CI=1 \
+TINYTITAN_RELEASE_ALLOW_RED_CI_REASON="the only failing job is the runner's disk, reran green at ..." \
+  tools/release.sh vX.Y --publish --notes docs/release-notes-vX.Y.md
+```
+
 ## 4. Dry run, then publish
 
 ```bash
@@ -154,7 +189,8 @@ the tarball — before re-running with `--publish`.
 What the dry run does, in order:
 
 1. **Preconditions** — clean tree, `vX.Y` exists locally, HEAD is that commit,
-   the tag is on `origin`, and no Release for it exists yet.
+   the tag is on `origin`, no Release for it exists yet, and **CI is green on the
+   commit the tag names** (`tools/ci-green.sh`, see §3b).
 2. **Gates** — `tools/lint.sh`; `swift test --no-parallel`, which must print
    `Test run with N tests in M suites passed`; then **every installed model that
    has a golden target** (`benchmark/golden/`), each through
@@ -417,7 +453,12 @@ machine it was measured on, and leave previous releases' tables alone.
       `ARCHIVE_BYTES_PENDING`, `LIBRARY_SHA256_PENDING` and
       `LIBRARY_BYTES_PENDING`, `TOOLS_SHA256_PENDING` and `TOOLS_BYTES_PENDING` —
       never a size copied out of a dry run
-- [ ] Tree clean, `git tag -a vX.Y`, tag pushed, `release.sh` preconditions pass
+- [ ] Tree clean, `git tag -a vX.Y`, tag pushed, `release.sh` preconditions pass,
+      and **CI is green on the commit the tag names** (`release.sh` asks
+      `tools/ci-green.sh`; see §3)
+- [ ] If CI was red and the release went over it anyway: both
+      `TINYTITAN_RELEASE_ALLOW_RED_CI` and `..._REASON` were set, and the failing
+      run's URL is quoted in the notes (`release.sh --publish` enforces the quote)
 - [ ] A release build exists (`.build/release/TinyTitanCLI`) and
       `models/` holds exactly the installs you intend to verify
 - [ ] Dry run green: lint, the serial suite, **every installed golden**, a
