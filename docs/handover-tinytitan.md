@@ -1,40 +1,55 @@
-# Handover: after release 5.15, the engine and its loopback server
+# Handover: after release 5.18, the pre-production audit
 
 **Paste this into the next session:**
 
 > Continue the TinyTitan work in this checkout. Read `AGENTS.md`, then
-> `docs/handover-tinytitan.md`, then the wiki `Project-Tracker`. **5.15 is cut and
-> published** (`v5.15` → `4ff6041`; `tinytitan-5.15-macos-arm64.tar.gz`, 15,412,309
-> bytes, sha256 `b0f2e136112328a9abd39a31b6297fe3d6a03d689865adc2a9327f4fc1ef3d1b`,
-> 2026-10-02) and **`main` carries the tag plus a merge of the badge chore**; the
-> release notes are `docs/release-notes-v5.15.md`. 5.15 renames the model format
-> from `.gturbo` to `.ssdai` — manifest magic, Swift vocabulary, CLI, tooling and
-> docs — and **moves a name, not a byte of payload**: reads accept the legacy
-> `GTURBO` magic for one release, no manifest is rewritten in place (the receipt
-> binds its digest and path), and the seven installed goldens are byte-identical
-> while loading manifests that still carry the old magic. Before that, 5.14 moved
-> the browser chat window and both
-> `dsh-*` plugins to **DeepSeek Harness 0.2.0-rc.2** — the route is applied through
-> the harness's `settings` service, the agent preset is registered with its
-> registry, the `models/` watcher refreshes through the same path as boot, and
-> `compactionHeadroomTokens` places the compaction trigger. `tools/lint.sh` runs
-> **eleven** pinned gates. The product is the
-> engine plus its loopback server — the Mac app is gone — and
-> `tools/install_tinytitan.sh` downloads a built release instead of compiling one;
-> the browser chat window arrives the same way, from the release tag's source
-> archive, with no registry account on either side. The eight installs under
-> `models/` have
-> receipts **valid for this folder**, because a rename invalidates them; re-issue
-> with `--verify-install` if the folder moves again. **Verification uses only the
-> installs already under `models/`** — never download, convert, repack or re-install
-> a model to make a gate pass, and never fetch one of the installs the operator
-> deleted. The open row is **TT-048, a fresh KAT-Coder install** (the embeddable
-> engine closed on 2026-10-02; the facade shipped as `TinyTitanLib`): a converter
-> guard keyed the per-expert duplicate check on the tensor name instead of name +
-> width, so `tools/install_models.sh katcoder [both]` died on the first routed
-> expert (issue #19). `025dacb` keys it correctly and the failure point is
-> verified on the real checkpoint; the full install and §4 verification are what
-> remains. Report measurements, not assurances.
+> `docs/handover-tinytitan.md`, then the audit ledger
+> `docs/audit-2026-10-06/ledger.md`, then the wiki `Project-Tracker`.
+> **5.18 is cut and published** (`v5.18` → `d30de44`, 2026-10-05: the launcher
+> fetches a model that is not on disk, the menu offers the ones the checkout
+> lacks, and every long download, conversion and repack draws a real
+> percentage). Before it, **5.17** (`v5.17` → `1904be4`, 2026-10-04) fixed the
+> converter guard that keyed the per-expert duplicate check on the tensor name
+> instead of name + width, so `tools/install_models.sh katcoder [both]`
+> installs again (issue #19), and moved the user documentation into the wiki;
+> **5.16** (`v5.16` → `0fd9df2`, 2026-10-03) made the engine a library —
+> `TinyTitanLib` is a shipped product, the CLI and the server both generate
+> through it, and the toolchain is pinned **exactly**: Xcode 27 / Swift 6.4,
+> nothing else. `tools/lint.sh` runs **eleven** pinned gates, and every one of
+> them **fails** when its dependency is missing rather than reporting a skip —
+> a check that did not run is not a pass. Release notes in the tree keep
+> `SHA256_PENDING`; `tools/release.sh` fills them in the staged copy at publish
+> time, so a placeholder there is the house pattern, not a defect.
+>
+> The open work is the **pre-production audit** in
+> `docs/audit-2026-10-06/` — `ledger.json` is the single source of truth and
+> `ledger.md` is rendered from it (recompute `counts` by hand before
+> `render_ledger.py`, which refuses stale ones). Row discipline: verify against
+> the code before fixing anything, fix only what is true and unfixed, test the
+> fix, re-verify on current `main`, then audit for the sibling defect and close
+> with the measured evidence and the commit hash. The hardest row still open is
+> **AUD-143** (S1): a pending model switch can be overtaken by new work for the
+> resident model, and the release-build test aborts with signal 6 on this host
+> while passing in CI — three approaches have been measured and reverted, so
+> read that row before trying a fourth. **AUD-139** (S1) is blocked on the
+> repository owner: `v5.18` published no `tinytitan-5.18-tools.tar.gz`
+> (confirmed against the release assets on 2026-10-06), so the installer's
+> closed check refuses the newest release until someone re-publishes it.
+>
+> The product is the engine plus its loopback server — the Mac app is gone — and
+> `tools/install_tinytitan.sh` downloads a built release instead of compiling
+> one; the browser chat window arrives the same way, from the release tag's
+> source archive, with no registry account on either side. The installs under
+> `models/` have receipts **valid for this folder**, because a rename invalidates
+> them; re-issue in place with `--verify-install` if the folder moves again, and
+> never hand-edit a receipt. **Verification uses only the installs already under
+> `models/`** — never download, convert, repack or re-install a model to make a
+> gate pass, and never fetch one of the installs the operator deleted; a gate
+> that cannot run is reported *not checked*. The open model row is still
+> **TT-048, a fresh KAT-Coder install**: the install-path bug is fixed and its
+> failure point verified on the real checkpoint (2,075 per-expert tensors, both
+> widths, fused `[256, …]` stacks), while the ~69 GB fetch and both repacks
+> remain. Report measurements, not assurances.
 
 This is the only current brief; the 5.12 handover it replaces is superseded. The
 traps that one named still bite and are folded in below.
