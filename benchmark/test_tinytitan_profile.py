@@ -1,9 +1,11 @@
 import os
+import pathlib
 import sys
 import unittest
 from unittest.mock import patch
 
 import coder_cli_benchmark
+import launcher_fixture
 import tinytitan_benchmark
 from tinytitan_profile import (
     DEFAULT_API_MODEL,
@@ -23,19 +25,21 @@ from tinytitan_profile import (
 
 
 class BenchmarkProfileTests(unittest.TestCase):
-    def installed_model(self):
-        """An install the harness can name, or skip.
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
+    def installed_model(self) -> pathlib.Path:
+        """An install the harness can name, from the fixture rather than `models/`.
 
         A command names an install by the catalog id read from that install's
         manifest, so the shape test needs one installed. A checkout is not
         required to hold any particular one -- the operator prunes `models/`
-        deliberately -- so the protocol's own default is asserted as a constant
-        instead of by reading it.
+        deliberately, and a clean clone holds none -- so the synthetic tree stands
+        in for it. The protocol's own defaults are asserted as constants instead
+        of by reading them.
         """
-        candidates = sorted(DEFAULT_MODEL_PATH.parent.glob("*/manifest.json"))
-        if not candidates:
-            self.skipTest("no install under models/ to name")
-        return candidates[0].parent
+        return pathlib.Path(self.installs.rows[0]["path"])
 
     def test_server_command_goes_through_the_launcher(self) -> None:
         model = self.installed_model()
@@ -48,6 +52,10 @@ class BenchmarkProfileTests(unittest.TestCase):
         self.assertTrue(command[1].endswith("tools/server_launcher.sh"))
         self.assertEqual(command[command.index("--client") + 1], "server")
         self.assertEqual(command[command.index("--model") + 1], catalog_id_for(model))
+        # Not an identity: the manifest under the synthetic install reads back as
+        # a catalog id that is one of the launcher's rows, so the harness names an
+        # install the way the catalog does rather than echoing its own argument.
+        self.assertIn(catalog_id_for(model), self.installs.ids)
         self.assertEqual(command[command.index("--port") + 1], "8081")
         self.assertEqual(command[command.index("--thinking") + 1], "off")
         self.assertEqual(command[command.index("--engine") + 1], "gpu")

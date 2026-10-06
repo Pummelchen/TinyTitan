@@ -137,7 +137,7 @@ jobs:
           cd benchmark
           /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
             test_prepare_agentworld
-      - name: Installer gates (private DSH isolation, model-menu answers)
+      - name: Installer and launcher gates (private DSH isolation, model-menu and launcher choices)
         # The installer and `tools/dsh_local.sh` promise a factory-new Mac stays
         # untouched: one private root, no PATH or shell-rc edit, and npm, pnpm and
         # the XDG caches redirected into it. These tests pin that contract —
@@ -153,10 +153,24 @@ jobs:
         # bytes must stop the install. They drive the real scripts against a stub
         # `curl`, so they fetch nothing and need no token. None needs dependencies
         # beyond the runner's python3.
+        # The five `test_launcher_*`/`test_coder_clients`/`test_tinytitan_profile`
+        # suites are the launcher's own arithmetic — the RAM half and its warning
+        # boundary, the port's three ways in, the concurrency width and its red
+        # warning, the client catalogue, and the benchmark profile's server
+        # command. They name their model through `launcher_fixture`, which turns
+        # `tools/testdata/catalog-example.json` into empty directories under a
+        # temporary `models/`: a runner has no install by policy and none may be
+        # fetched to satisfy a gate, so before that seam existed these suites
+        # skipped here — 47 of the 59 tests on an install-free tree — and the
+        # launcher's rules were checked on no machine at all. `launcher_fixture`
+        # runs its own invariants so a fixture that stopped standing in for an
+        # install fails rather than quietly skipping again.
         run: |
           cd benchmark
-          python3 -m unittest test_dsh_isolation test_install_models_menu \
-            test_launcher_install test_progress \
+          python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
+            test_launcher_install test_launcher_ram test_launcher_port \
+            test_launcher_concurrency test_coder_clients test_tinytitan_profile \
+            launcher_fixture test_progress \
             test_release_installer_verification test_dsh_node_digest
       - name: Release gates (the CI-green precondition)
         # `tools/ci-green.sh` is what stops a tag going out over a commit whose CI

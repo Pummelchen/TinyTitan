@@ -7,7 +7,9 @@ whole GB, which is what `--ram` takes), both sides of the boundary, and the
 interactive question whose default is that half.
 
 `TINYTITAN_PHYSICAL_RAM_BYTES` is the launcher's seam for exactly this: the mapping
-has to be checkable on a machine of any size.
+has to be checkable on a machine of any size. The model it is asked about comes
+from `launcher_fixture`, so these run on a checkout with no install and no built
+server — which is the only kind of checkout a clean clone is.
 
 Run from this directory, like the other benchmark tests:
 
@@ -16,17 +18,15 @@ Run from this directory, like the other benchmark tests:
 
 from __future__ import annotations
 
-import json
-import os
 import pathlib
 import re
 import subprocess
 import unittest
 
+import launcher_fixture
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "tools/server_launcher.sh"
-SERVER = ROOT / ".build/release/TinyTitanServer"
-MODELS = ROOT / "models"
 
 # Installed memory in bytes, and the launcher's rule for it: half, floored.
 MACHINES = {
@@ -38,32 +38,10 @@ MACHINES = {
 }
 
 
-def installed_model() -> str | None:
-    """The first served id under models/, or None when nothing is installed.
-
-    The launcher's dry run needs a model that is really there — its catalog is
-    the only place a served id comes from — and this test has to be runnable on
-    a checkout whose models/ is empty.
-    """
-    if not SERVER.is_file():
-        return None
-    try:
-        listing = subprocess.run(
-            [str(SERVER), "--catalog", "--models-dir", str(MODELS)],
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=120,
-        ).stdout
-        models = json.loads(listing)["models"]
-    except Exception:
-        return None
-    return models[0]["id"] if models else None
-
-
-def dry_run(*args: str, physical_bytes: int) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
-    environment["TINYTITAN_PHYSICAL_RAM_BYTES"] = str(physical_bytes)
+def dry_run(
+    installs: launcher_fixture.SyntheticInstalls, *args: str, physical_bytes: int
+) -> subprocess.CompletedProcess[str]:
+    environment = installs.env(TINYTITAN_PHYSICAL_RAM_BYTES=str(physical_bytes))
     return subprocess.run(
         ["bash", str(LAUNCHER), "--client", "server", *args, "--dry-run"],
         text=True,
@@ -73,17 +51,24 @@ def dry_run(*args: str, physical_bytes: int) -> subprocess.CompletedProcess[str]
     )
 
 
-def answer_ram(model: str, answer: str, *, physical_bytes: int) -> subprocess.CompletedProcess[str]:
+def answer_ram(
+    installs: launcher_fixture.SyntheticInstalls,
+    model: str,
+    answer: str,
+    *,
+    physical_bytes: int,
+) -> subprocess.CompletedProcess[str]:
     """Answer the interactive RAM question and nothing else.
 
     Every other question is pre-answered by a flag, so the piped input is the
     RAM choice; without that the answers would be consumed in some other order
     and this would be testing the question order, not the tiers.
     """
-    environment = dict(os.environ)
-    environment["TINYTITAN_PHYSICAL_RAM_BYTES"] = str(physical_bytes)
-    environment["TINYTITAN_LAUNCHER_DRY_RUN"] = "1"
-    environment["TINYTITAN_LAUNCHER_ASSUME_TTY"] = "1"
+    environment = installs.env(
+        TINYTITAN_PHYSICAL_RAM_BYTES=str(physical_bytes),
+        TINYTITAN_LAUNCHER_DRY_RUN="1",
+        TINYTITAN_LAUNCHER_ASSUME_TTY="1",
+    )
     return subprocess.run(
         [
             "bash",
@@ -129,14 +114,15 @@ class RamMenuTests(unittest.TestCase):
     MEMORY = 24 * 2**30
     TIERS = {"1": "4", "2": "6", "3": "8", "4": "10", "5": "12", "6": "14", "7": "16"}
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
     def setUp(self) -> None:
-        model = installed_model()
-        if model is None:
-            self.skipTest("no install under models/ and no built server to list one")
-        self.model = model
+        self.model = self.installs.first_gpu()
 
     def menu(self, answer: str) -> subprocess.CompletedProcess[str]:
-        return answer_ram(self.model, answer, physical_bytes=self.MEMORY)
+        return answer_ram(self.installs, self.model, answer, physical_bytes=self.MEMORY)
 
     def test_the_menu_offers_the_seven_tiers_and_a_custom_value(self) -> None:
         run = self.menu("\n")
@@ -181,23 +167,24 @@ class RamMenuTests(unittest.TestCase):
         # A script gets the shipped profile -- which is what the benchmark
         # protocol measures -- so the half is a choice a person makes, not a
         # silent change to every unattended run.
-        run = dry_run("--model", self.model, physical_bytes=self.MEMORY)
+        run = dry_run(self.installs, "--model", self.model, physical_bytes=self.MEMORY)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(target_of(run), "")
         self.assertIn("model default (measured; 50% of this Mac is 12 GB)", run.stdout)
 
 
 class RamRuleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
     def setUp(self) -> None:
-        model = installed_model()
-        if model is None:
-            self.skipTest("no install under models/ and no built server to list one")
-        self.model = model
+        self.model = self.installs.first_gpu()
 
     def test_rule_is_half_rounded_down(self) -> None:
         for memory, expected in MACHINES.items():
             with self.subTest(memory_gb=memory // 2**30):
-                run = dry_run("--model", self.model, physical_bytes=memory)
+                run = dry_run(self.installs, "--model", self.model, physical_bytes=memory)
                 self.assertEqual(run.returncode, 0, run.stderr)
                 self.assertIn(
                     f"RAM: model default (measured; 50% of this Mac is {expected} GB)",
@@ -206,12 +193,14 @@ class RamRuleTests(unittest.TestCase):
 
     def test_at_the_rule_is_silent_and_above_it_warns(self) -> None:
         memory = 24 * 2**30
-        at_rule = dry_run("--model", self.model, "--ram", "12", physical_bytes=memory)
+        at_rule = dry_run(
+            self.installs, "--model", self.model, "--ram", "12", physical_bytes=memory
+        )
         self.assertEqual(at_rule.returncode, 0, at_rule.stderr)
         self.assertNotIn("WARNING", at_rule.stderr)
         self.assertIn("--ram-budget 12G", at_rule.stdout)
 
-        above = dry_run("--model", self.model, "--ram", "14", physical_bytes=memory)
+        above = dry_run(self.installs, "--model", self.model, "--ram", "14", physical_bytes=memory)
         self.assertEqual(above.returncode, 0, above.stderr)
         self.assertIn("WARNING: the server would hold about 14 GB", above.stderr)
         self.assertIn("50% of this Mac's 24 GB", above.stderr)
@@ -221,36 +210,42 @@ class RamRuleTests(unittest.TestCase):
         self.assertIn("over 50% of this Mac's RAM", above.stdout)
 
     def test_default_path_warns_about_nothing(self) -> None:
-        run = dry_run("--model", self.model, physical_bytes=24 * 2**30)
+        run = dry_run(self.installs, "--model", self.model, physical_bytes=24 * 2**30)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertNotIn("WARNING", run.stderr)
         self.assertNotIn("--ram-budget", run.stdout)
 
     def test_unreadable_memory_means_no_rule(self) -> None:
         # No rule, so nothing to warn about even for a large explicit size…
-        run = dry_run("--model", self.model, "--ram", "32", physical_bytes=0)
+        run = dry_run(self.installs, "--model", self.model, "--ram", "32", physical_bytes=0)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertNotIn("WARNING", run.stderr)
         self.assertNotIn("50% of this Mac", run.stdout)
         self.assertIn("--ram-budget 32G", run.stdout)
         # …and the default's note claims no percentage either.
-        default = dry_run("--model", self.model, physical_bytes=0)
+        default = dry_run(self.installs, "--model", self.model, physical_bytes=0)
         self.assertIn("RAM: model default (measured) |", default.stdout)
 
     def test_boundary_scales_with_the_machine(self) -> None:
         # The rule is 4 GB on an 8 GB Mac -- the floor exactly -- so the
         # smallest accepted target sits on it there, and 6 warns.
-        at_floor = dry_run("--model", self.model, "--ram", "4", physical_bytes=8 * 2**30)
+        at_floor = dry_run(
+            self.installs, "--model", self.model, "--ram", "4", physical_bytes=8 * 2**30
+        )
         self.assertEqual(at_floor.returncode, 0, at_floor.stderr)
         self.assertNotIn("WARNING", at_floor.stderr)
         self.assertIn("--ram-budget 4G", at_floor.stdout)
 
-        above = dry_run("--model", self.model, "--ram", "6", physical_bytes=8 * 2**30)
+        above = dry_run(
+            self.installs, "--model", self.model, "--ram", "6", physical_bytes=8 * 2**30
+        )
         self.assertEqual(above.returncode, 0, above.stderr)
         self.assertIn("WARNING: the server would hold about 6 GB", above.stderr)
         self.assertIn("--ram-budget 6G", above.stdout)
 
-        large = dry_run("--model", self.model, "--ram", "4", physical_bytes=24 * 2**30)
+        large = dry_run(
+            self.installs, "--model", self.model, "--ram", "4", physical_bytes=24 * 2**30
+        )
         self.assertEqual(large.returncode, 0, large.stderr)
         self.assertNotIn("WARNING", large.stderr)
         self.assertIn("--ram-budget 4G", large.stdout)
@@ -262,7 +257,9 @@ class RamRuleTests(unittest.TestCase):
         # number is refused too instead of being ignored as an unknown word.
         for ram in ("1", "2", "3", "2G"):
             with self.subTest(placement="flag", ram=ram):
-                run = dry_run("--model", self.model, "--ram", ram, physical_bytes=24 * 2**30)
+                run = dry_run(
+                    self.installs, "--model", self.model, "--ram", ram, physical_bytes=24 * 2**30
+                )
                 self.assertEqual(run.returncode, 2, run.stdout)
                 self.assertIn("unknown RAM target", run.stderr)
                 self.assertNotIn("--ram-budget", run.stdout)
@@ -271,7 +268,7 @@ class RamRuleTests(unittest.TestCase):
         # "off") and the optional-value loop reads those first.
         for ram in ("2", "3", "2G"):
             with self.subTest(placement="positional", ram=ram):
-                run = dry_run("--model", self.model, ram, physical_bytes=24 * 2**30)
+                run = dry_run(self.installs, "--model", self.model, ram, physical_bytes=24 * 2**30)
                 self.assertEqual(run.returncode, 2, run.stdout)
                 self.assertIn("unknown RAM target", run.stderr)
                 self.assertNotIn("--ram-budget", run.stdout)

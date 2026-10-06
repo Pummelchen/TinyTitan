@@ -7,6 +7,9 @@ builders. A client added to the catalogue without a command builder — or a cod
 client the harness can run and the launcher cannot start — fails here instead of
 during a benchmark run.
 
+The model they are asked to start comes from `launcher_fixture`, so these run on a
+checkout with no install and no built server.
+
 Run from this directory, like the other benchmark tests:
 
     cd benchmark && python3 -m unittest test_coder_clients -v
@@ -14,46 +17,22 @@ Run from this directory, like the other benchmark tests:
 
 from __future__ import annotations
 
-import json
-import os
 import pathlib
 import subprocess
 import sys
 import unittest
 
 import coder_cli_benchmark as harness
+import launcher_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "tools/server_launcher.sh"
-SERVER = ROOT / ".build/release/TinyTitanServer"
-MODELS = ROOT / "models"
 
 
-def installed_model() -> str | None:
-    """The first served id under models/, or None when nothing is installed.
-
-    The launcher's dry run needs a model that is really there, and this test has
-    to be runnable on a checkout whose `models/` is empty (the release policy
-    keeps it smaller than the supported set on purpose).
-    """
-    if not SERVER.is_file():
-        return None
-    try:
-        listing = subprocess.run(
-            [str(SERVER), "--catalog", "--models-dir", str(MODELS)],
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=120,
-        ).stdout
-        models = json.loads(listing)["models"]
-    except Exception:
-        return None
-    return models[0]["id"] if models else None
-
-
-def run_launcher(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-    environment = dict(os.environ)
+def run_launcher(
+    installs: launcher_fixture.SyntheticInstalls, *args: str, stdin: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    environment = installs.env()
     if stdin is not None:
         environment["TINYTITAN_LAUNCHER_ASSUME_TTY"] = "1"
     return subprocess.run(
@@ -76,6 +55,10 @@ def run_harness(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 class ClientCatalogueTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
     def test_entries_are_well_formed(self) -> None:
         self.assertTrue(harness.CLIENTS)
         for client in harness.CLIENTS:
@@ -89,7 +72,7 @@ class ClientCatalogueTests(unittest.TestCase):
         self.assertEqual(set(harness.CODER_CLIENTS) | set(harness.EDITOR_CLIENTS), set(ids))
 
     def test_launcher_help_lists_exactly_the_catalogue(self) -> None:
-        run = run_launcher("--help")
+        run = run_launcher(self.installs, "--help")
         self.assertEqual(run.returncode, 0, run.stderr)
         line = next(line for line in run.stdout.splitlines() if "--client" in line)
         self.assertEqual(
@@ -98,26 +81,26 @@ class ClientCatalogueTests(unittest.TestCase):
         )
 
     def test_launcher_menu_numbers_every_client(self) -> None:
-        run = run_launcher("--dry-run", stdin="\n")
+        run = run_launcher(self.installs, "--dry-run", stdin="\n")
         self.assertIn("What do you want to launch?", run.stdout)
         for index, client in enumerate(harness.CLIENTS, start=2):
             with self.subTest(client=client["id"]):
                 self.assertIn(f"  {index}) {client['label']}", run.stdout)
 
     def test_unknown_client_is_refused_with_the_catalogue(self) -> None:
-        run = run_launcher("--client", "not-a-client", "--dry-run")
+        run = run_launcher(self.installs, "--client", "not-a-client", "--dry-run")
         self.assertEqual(run.returncode, 2)
         self.assertIn("unknown client: not-a-client", run.stderr)
         for client in harness.CLIENTS:
             self.assertIn(client["id"], run.stderr)
 
     def test_launcher_accepts_every_client(self) -> None:
-        model = installed_model()
-        if model is None:
-            self.skipTest("no install under models/ and no built server to list one")
+        model = self.installs.first_gpu()
         for client in harness.CLIENTS:
             with self.subTest(client=client["id"]):
-                run = run_launcher("--client", client["id"], "--model", model, "--dry-run")
+                run = run_launcher(
+                    self.installs, "--client", client["id"], "--model", model, "--dry-run"
+                )
                 self.assertEqual(run.returncode, 0, run.stderr)
                 self.assertIn(f"Client:     {client['label']}", run.stdout)
 
