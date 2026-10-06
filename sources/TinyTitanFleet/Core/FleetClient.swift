@@ -42,6 +42,7 @@ public enum FleetError: Error, Equatable, CustomStringConvertible {
     case http(target: String, status: Int, message: String)
     case decoding(target: String, reason: String)
     case notFound(String)
+    case responseTooLarge(target: String, bytes: Int)
 
     public var description: String {
         switch self {
@@ -55,6 +56,8 @@ public enum FleetError: Error, Equatable, CustomStringConvertible {
             return "\(target) answered something unreadable: \(reason)"
         case .notFound(let what):
             return "no member of the group holds \(what)"
+        case .responseTooLarge(let target, let bytes):
+            return "\(target) sent more than \(bytes) bytes; the answer was dropped"
         }
     }
 }
@@ -63,6 +66,15 @@ public enum FleetError: Error, Equatable, CustomStringConvertible {
 public struct URLSessionTransport: FleetTransport {
     public let timeout: TimeInterval
     private let session: URLSession
+
+    /// Bytes one answer may occupy, counted while it arrives.
+    ///
+    /// The response comes from any host the LAN fence admits, so its size is
+    /// external input. 4 MiB is the ceiling this project already uses for an
+    /// outside answer -- `maxBuffer` in the manager's `dns-sd` reader and
+    /// `MAX_PEER_RESPONSE_BYTES` in its peer probe -- so one number describes every
+    /// response read here instead of three that can drift apart.
+    static let maxResponseBytes = 4 * 1024 * 1024
 
     public init(timeout: TimeInterval = 10) {
         self.timeout = timeout
@@ -89,9 +101,25 @@ public struct URLSessionTransport: FleetTransport {
             urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
         }
         do {
-            let (data, response) = try await session.data(for: urlRequest)
+            // The answer is counted as it arrives, not after: `data(for:)` buffers
+            // the whole body first, which is a bound applied once the cost is paid.
+            // Byte-at-a-time is what `URLSession.AsyncBytes` offers on this SDK —
+            // `chunks(ofCount:)` measured absent at compile on Swift 6.4 — and a
+            // legitimate answer is a few kilobytes, so the loop only runs long when a
+            // host is streaming past the cap, where it stops at 4 MiB.
+            var data = Data()
+            let (stream, response) = try await session.bytes(for: urlRequest)
+            for try await byte in stream {
+                data.append(byte)
+                guard data.count <= Self.maxResponseBytes else {
+                    throw FleetError.responseTooLarge(
+                        target: "\(request.target)", bytes: Self.maxResponseBytes)
+                }
+            }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             return FleetResponse(status: status, body: data)
+        } catch let error as FleetError {
+            throw error
         } catch {
             throw FleetError.unreachable(
                 target: "\(request.target)", reason: error.localizedDescription)

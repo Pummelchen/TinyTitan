@@ -5,12 +5,15 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 
 import { groupDigest } from "../src/config.js";
 import {
   MAX_GOSSIP_ENTRIES,
+  MAX_PEER_RESPONSE_BYTES,
   PeerTable,
   discoveryDelayMs,
+  httpJson,
   mapLimit,
   peerKey,
   validateCandidate,
@@ -387,6 +390,78 @@ test("a discovery call that throws is recorded as the whole cycle failing", asyn
   assert.deepEqual(table.lastDiscoveryErrors, [
     { source: "discovery", message: "resolver wedged" },
   ]);
+});
+
+// AUD-168: `probe` dials every candidate the fence admits and buffered whatever
+// came back, so a host inside it -- and the default fence includes the
+// self-assigned range -- could size this process's memory by streaming at it.
+// `{ok: true}` is all it takes to be believed a member, because the group field is
+// how a peer says which fleet it is in, not a credential. A real loopback server is
+// required: the guard is inside the response reader, which a stubbed `fetch` cannot
+// reach.
+test("an answer over the cap is dropped, and one under it is parsed", async (t) => {
+  const server = createServer((req, res) => {
+    res.on("error", () => {});
+    req.socket.on("error", () => {});
+    if (req.url === "/under") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    // Never `end` the body: the point is that the reader stops it, and a peer that
+    // finished first would resolve through the parse path instead of the cap.
+    res.writeHead(200, { "content-type": "application/json" });
+    const chunk = Buffer.alloc(256 * 1024, 0x61);
+    const pump = () => {
+      if (res.destroyed || res.writableEnded) return;
+      res.write(chunk);
+      setTimeout(pump, 2);
+    };
+    pump();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  t.after(
+    () =>
+      new Promise((resolve) => {
+        server.closeAllConnections?.();
+        server.close(resolve);
+      }),
+  );
+
+  const under = await httpJson({ address: "127.0.0.1", port, path: "/under" });
+  assert.equal(under.status, 200);
+  assert.deepEqual(under.body, { ok: true }, "a normal inventory still parses");
+
+  // The deadline is part of the proof, not decoration. `httpJson`'s own `timeout`
+  // is a socket *inactivity* timeout, and a peer that writes every two
+  // milliseconds is never inactive, so with the byte bound removed nothing in the
+  // reader ends this request: measured on the unfixed code it simply hangs, which
+  // is the second half of the defect (a peer inside the fence can hold a probe open
+  // for as long as it likes). Racing it against a clock turns that into a failure.
+  let arm;
+  const deadline = new Promise((resolve) => {
+    arm = () =>
+      resolve({
+        status: -1,
+        error: "the reader never stopped an answer that does not end",
+      });
+  });
+  const clock = setTimeout(arm, 8000);
+  // `unref` so a passed test is not held open for the rest of the deadline, and
+  // cleared below so the timer cannot outlive the request it guards.
+  clock.unref();
+  const over = await Promise.race([
+    httpJson({ address: "127.0.0.1", port, path: "/over" }),
+    deadline,
+  ]);
+  clearTimeout(clock);
+  assert.equal(over.status, 0, "an over-cap answer is not a peer");
+  assert.match(
+    String(over.error),
+    new RegExp(`exceeds ${MAX_PEER_RESPONSE_BYTES} bytes`),
+    "and it says which rule cut it, naming the cap that is exported",
+  );
 });
 
 test("a clean cycle clears the previous cycle's failures", async () => {

@@ -39,6 +39,23 @@ export const DEFAULT_CONCURRENCY = 24;
 export const MAX_GOSSIP_ENTRIES = 512;
 
 /**
+ * Cap on one peer's answer, in bytes.
+ *
+ * The gossip cap and the 3 s probe timeout bound the *table*, and nothing bounded
+ * the *buffer*: `probe` dialled every candidate each cycle and appended whatever
+ * came back, so any host the fence accepts -- and the default fence accepts the
+ * self-assigned range, so a segment with no DHCP hands it to everyone -- could
+ * size this process's memory by streaming at it. `{ok: true}` is enough to be
+ * believed a member, because a peer's group field is how it says which fleet it is
+ * in, not a credential: an intruder simply leaves it out.
+ *
+ * Same 4 MiB the `dns-sd` reader passes as `maxBuffer`, and the same shape the
+ * loopback server applies to a request body: count while reading and drop the
+ * connection past the cap, rather than reading it all and checking after.
+ */
+export const MAX_PEER_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/**
  * Key one peer by where it answers.
  * @param address - host or IP.
  * @param port - port.
@@ -80,7 +97,18 @@ export function httpJson({ address, port, path, method = "GET", token, body, tim
       },
       (res) => {
         const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
+        let received = 0;
+        res.on("data", (chunk) => {
+          received += chunk.length;
+          if (received > MAX_PEER_RESPONSE_BYTES) {
+            // The answer is worthless past the cap, so it is dropped rather than
+            // kept: the destroy lands in the `error` handler below, which resolves
+            // with the reason instead of buffering what the peer chose to send.
+            req.destroy(new Error(`peer response exceeds ${MAX_PEER_RESPONSE_BYTES} bytes`));
+            return;
+          }
+          chunks.push(chunk);
+        });
         res.on("end", () => {
           const text = Buffer.concat(chunks).toString("utf8");
           let parsed;
