@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:18  Done:26  Blocked:1  Total:45**
+**Open:17  Done:28  Blocked:1  Total:46**
 
 ## Table
 
@@ -49,10 +49,11 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-145 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177` | The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times | defensive code for a case that cannot happen | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
+| AUD-145 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177` | The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times | defensive code for a case that cannot happen | DONE | Mac (primary) |
+| AUD-146 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:245 (pre-fix), :310 (pre-fix)` | Two expert-cache derivations read the rung list's literal order as a promise that it holds the largest value | implicit invariant on a public constant | DONE | Mac (primary) |
 
 ## Detail
 
@@ -732,18 +733,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
-### AUD-145 — The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times
-
-- **Severity / tier:** S3 / Tier B
-- **Project:** runtime
-- **Location:** `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177`
-- **Category:** defensive code for a case that cannot happen
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-137 sibling audit
-
-**Evidence before.** `allowedExpertCacheSlots` is a thirteen-element `public static let` constant ([8, 16, 24, 32, 40, 48, 64, 96, 112, 128, 160, 192, 256]), so `.first ?? 8` has no reachable nil branch at the five sites that use it, and the `allowedExpertCacheSlots.min { ... } ?? allowedExpertCacheSlots.first ?? 8` at :220 carries two. The 8 is a magic number standing in for a branch that cannot happen -- and it is the value that decides the expert-cache floor for a model whose manifest cannot be read (ServerModelSession+Loading.swift:177), so a future edit that reorders the array and forgets the literal would drift silently. Not the same class and not in scope: `fitting.last ??` at :310 is over a `filter` that really can be empty.
-
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
 - **Severity / tier:** S3 / Tier C
@@ -797,3 +786,39 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** `MemoryReadFailureTests.theHinterReportsAnUnreadableCoveragePool`: one `degraded during hint-coverage` line for the scope after a first search, and still one after a second question to the same broken store -- the once-per-scope rule, not a per-question line. Mutation check: silencing the report fails the test with 3 issues. The two protocol reads are covered by `tests/TinyTitanMemory/SessionJournalTests.swift` and the throwing-signature fallout across `ContinuityStoreTests`, `MemoryBackendTests` and `MemoryConsolidationTests`, all green in the full serial run (1612 tests, 7 targets, exit 0). The `applied(to:)` decision is recorded in the source comment at the site so the next sweep finds the reason rather than the omission.
 
 **Commit.** `a9ab3c5`
+
+### AUD-145 — The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** runtime
+- **Location:** `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177`
+- **Category:** defensive code for a case that cannot happen
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-137 sibling audit
+
+**Evidence before.** `allowedExpertCacheSlots` is a thirteen-element `public static let` constant ([8, 16, 24, 32, 40, 48, 64, 96, 112, 128, 160, 192, 256]), so `.first ?? 8` has no reachable nil branch at the five sites that use it, and the `allowedExpertCacheSlots.min { ... } ?? allowedExpertCacheSlots.first ?? 8` at :220 carries two. The 8 is a magic number standing in for a branch that cannot happen -- and it is the value that decides the expert-cache floor for a model whose manifest cannot be read (ServerModelSession+Loading.swift:177), so a future edit that reorders the array and forgets the literal would drift silently. Not the same class and not in scope: `fitting.last ??` at :310 is over a `filter` that really can be empty.
+
+**Fix.** `RuntimeConfiguration.minimumExpertCacheSlots = 8` is the floor, named once, at all seven sites: the two guard returns in `expertCacheSlots`, the two in `expertCacheSlotsFitting`, the `fitting` fallback, the `min(by:) ?? allowedExpertCacheSlots.first ?? 8` chain at :220 (now a walk over the list that starts at the floor, so there is no Optional to fall back from), and ServerModelSession+Loading.swift:177, the unreadable-manifest path that sizes a real cache. Value unchanged at every site -- 8 -- so nothing a model loads differently. The constant carries the reason it exists and the test that pins it. ServerModelSession+Loading.swift:177 and the AUD-137 note in RuntimeConfiguration.swift's own doc comment are the sibling sites the row named.
+
+**Evidence after.** Behaviour proved identical before committing: a temporary differential suite compared the old spelling (`min(by:)` + `last(where:)` + `.first ?? 8`) against the new over a grid of 12 expert strides (1-12 MiB) x 4 layer counts (1, 12, 48, 64) x 14 budgets (0-512 GiB) = 672 points, both functions at every point (1,344 comparisons), plus the three degenerate inputs -- `Test run with 1 test in 1 suite passed`, 0 mismatches; the file was deleted after the run since it guards a refactor, not a behaviour. Tie behaviour was measured separately rather than assumed: at wanted=12, 80 and 140 (exact midpoints of two rungs) `min(by:)` and the walk both return the earlier, smaller rung (8, 64, 128) -- 6 of 6 probe points the same. New permanent test `RuntimeConfigurationTests.expertCacheSlotFloorIsTheSmallestRung`. Mutation-checked against the constant: `minimumExpertCacheSlots = 16` made the pin test record `Expectation failed: RuntimeConfiguration.minimumExpertCacheSlots == 8`; restored from a copy (not a checkout, the file carried uncommitted work) and green again. RuntimeConfigurationTests+ExpertCacheBudgetTests+ServerArguments+CLIArgumentsTests 43 tests passed; all eleven gates rc 0; full serial suite 1,614 tests in 241 suites, exit 0.
+
+**Commit.** `08b43de`
+
+### AUD-146 — Two expert-cache derivations read the rung list's literal order as a promise that it holds the largest value
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** runtime
+- **Location:** `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:245 (pre-fix), :310 (pre-fix)`
+- **Category:** implicit invariant on a public constant
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-145 sibling audit
+
+**Evidence before.** `return fitting.last ?? allowedExpertCacheSlots.first ?? 8` in `expertCacheSlotsFitting` and `let smaller = allowedExpertCacheSlots.last(where: { $0 < choice })` in the step-down loop both take the *last element in list order*, and mean the *largest value*. They agree only while `allowedExpertCacheSlots` is written ascending -- nothing pinned that, and the list is `public`, with rungs added by hand over time (the comment records 112 added, then 160/192/256 on 2026-09-05). An insertion in the wrong place would silently hand the cache a smaller-but-not-largest fitting count, or step down to a rung that is not the nearest below: the same function whose own comment describes a 34%-overshoot paging cliff (0.42 against 2.01 tok/s) that the step-down exists to prevent.
+
+**Fix.** The two derivations state the value they mean: `fitting.max() ?? Self.minimumExpertCacheSlots`, and a `let rungs = allowedExpertCacheSlots.sorted()` taken before the step-down loop, so `last(where:)` reads a sorted list rather than a literal's spelling. One order assumption remains on purpose -- the nearest-rung walk settles a tie on the earlier element, which is the smaller rung only while the list climbs -- and the code says so and the new test pins it. Found while fixing AUD-145; committed with it rather than left as a note, because the audit step that found it is the same one that had the differential test in hand.
+
+**Evidence after.** The AUD-145 differential is also this row's: the sorted/`max()` forms matched the order-dependent forms at all 672 grid points x 2 functions, which is exactly the claim that the rewrite is value-preserving while the list climbs. The order itself is now enforced: swapping the literal's first two rungs (`16, 8, 24, ...`) made `expertCacheSlotFloorIsTheSmallestRung` record `Expectation failed: RuntimeConfiguration.allowedExpertCacheSlots == RuntimeConfiguration.allowedExpertCacheSlots.sorted()` -- 2 issues in that run (the floor and the order), suite failed, then restored and green. The behavioural suites stayed green under the reorder, which is the point of the fix: with `max()` and a sorted copy, a reordered literal cannot mis-size a cache. Full serial suite 1,614 tests in 241 suites, exit 0; all eleven gates rc 0.
+
+**Commit.** `08b43de`
