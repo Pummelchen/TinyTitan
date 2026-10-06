@@ -66,9 +66,11 @@ Three places, and only the first is a literal:
   `tinytitan-X.Y-macos-arm64.tar.gz` size: `ARCHIVE_BYTES_PENDING` bytes
   `tinytitan-lib-X.Y-macos-arm64.tar.gz` sha256: `LIBRARY_SHA256_PENDING`
   `tinytitan-lib-X.Y-macos-arm64.tar.gz` size: `LIBRARY_BYTES_PENDING` bytes
+  `tinytitan-X.Y-tools.tar.gz` sha256: `TOOLS_SHA256_PENDING`
+  `tinytitan-X.Y-tools.tar.gz` size: `TOOLS_BYTES_PENDING` bytes
   ```
 
-No placeholder is one to forget: `release.sh --publish` substitutes all four
+No placeholder is one to forget: `release.sh --publish` substitutes all six
 with the archives it just built, and **refuses to publish unless the notes carry
 the placeholder or quote the real value** for each. A release whose notes quote
 the wrong digest is worse than one quoting none — 3.7 shipped that way for a few
@@ -82,6 +84,15 @@ The library archive is the second one the release carries (`libTinyTitanLib.a`,
 `tools/build_library.sh`). It is published on **every** release, so its digest is
 enforced exactly like the engine archive's rather than left to the author to
 remember.
+
+The tools archive is the third: `git archive` of the tag, which is what
+`tools/install_tinytitan.sh` downloads into `~/.tinytitan/src` and then *runs* —
+the launcher, the model installer, the DeepSeek Harness setup. It therefore has to
+carry a published checksum for the installer to accept the release at all: the
+installer verifies both downloaded trees and stops if either cannot be verified, so
+**a release that skips this asset is a release nobody can install.** That is why
+`release.sh` stages it, asserts its members, publishes it with the Release, and
+enforces its digest in the notes here rather than leaving it to be remembered.
 
 The last two sections are a claim about what was verified. Do not write a gate
 result you have not seen; add it after the dry run if you want it in the notes.
@@ -156,6 +167,12 @@ What the dry run does, in order:
    Metal shader library — the runtime cannot load kernels without them), the
    licence and notices, `README-binaries.txt`, then the tarball and its
    `.sha256`.
+5. **The two accompanying archives** — the library (`tools/build_library.sh`,
+   asserted member by member) and the tools snapshot (`git archive` of the tag,
+   asserted for the scripts an installed copy runs). Each gets its own `.sha256`,
+   because the installer downloads and verifies all three: a release without the
+   tools archive cannot be installed at all, and a release whose notes do not
+   quote one of the digests is refused by `--publish`.
 
 `release.sh` requires HEAD to *be* the tag, so if a commit landed on `main`
 after tagging (a documentation fix is the usual reason), run the release from
@@ -372,12 +389,13 @@ gh release view vX.Y --repo Pummelchen/TinyTitan --json url,assets \
 ```
 
 Check: the notes on the Release quote the digest in the archive's `.sha256`
-next to it; the assets are **two** tarballs with their checksums — the engine
-archive and the library archive (`tinytitan-lib-X.Y-macos-arm64.tar.gz`) — and
-the wiki Changelog points at the same tag. The binaries are **not** signed or
-notarized, and the two `README` files in the archives say so and tell the user
-how to clear the quarantine attribute after verifying the checksum — keep that
-honest rather than implying a notarized build.
+next to it; the assets are **three** tarballs with their checksums — the engine
+archive, the library archive (`tinytitan-lib-X.Y-macos-arm64.tar.gz`) and the
+tools archive (`tinytitan-X.Y-tools.tar.gz`, what `install_tinytitan.sh` extracts
+and runs) — and the wiki Changelog points at the same tag. The binaries are
+**not** signed or notarized, and the two `README` files in the archives say so and
+tell the user how to clear the quarantine attribute after verifying the checksum —
+keep that honest rather than implying a notarized build.
 
 If you wrote a `### Performance` table, make sure it says which commit and
 machine it was measured on, and leave previous releases' tables alone.
@@ -388,9 +406,11 @@ machine it was measured on, and leave previous releases' tables alone.
 - [ ] Wiki `Changelog.md` has the new section, pushed
 - [ ] No release callout added to the README — the Changelog section **is** the
       announcement, and the README changed only if a fact in it changed
-- [ ] `docs/release-notes-vX.Y.md` ends with a checksum block carrying
-      `SHA256_PENDING` **and** `ARCHIVE_BYTES_PENDING` — never a size copied out
-      of a dry run
+- [ ] `docs/release-notes-vX.Y.md` ends with a checksum block carrying the
+      placeholders for **all three** archives — `SHA256_PENDING` and
+      `ARCHIVE_BYTES_PENDING`, `LIBRARY_SHA256_PENDING` and
+      `LIBRARY_BYTES_PENDING`, `TOOLS_SHA256_PENDING` and `TOOLS_BYTES_PENDING` —
+      never a size copied out of a dry run
 - [ ] Tree clean, `git tag -a vX.Y`, tag pushed, `release.sh` preconditions pass
 - [ ] A release build exists (`.build/release/TinyTitanCLI`) and
       `models/` holds exactly the installs you intend to verify

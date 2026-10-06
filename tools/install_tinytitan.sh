@@ -196,13 +196,49 @@ latest_tag() {
     | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
 }
 
+# Check one downloaded artifact against the digest the release publishes beside
+# it, and stop the install when it cannot be checked.
+#
+# There is deliberately no fall-through. This function guards files the install
+# then executes: the engine binaries are run by the launcher, and the tools
+# archive holds the very script that starts them. "We could not verify it" is a
+# reason to stop, not a line to scroll past, which is why every branch here that
+# cannot prove the bytes is a die. tools/release.sh publishes a .sha256 for both
+# archives, so a missing digest means the artifact is not the release it claims.
+verify_release_artifact() {
+  local dir="$1" name="$2" digest_url="$3" label="$4"
+  # `shasum` ships with macOS, so this is a guard rather than an expectation:
+  # without it a missing tool would land in the mismatch branch below and blame
+  # the download for a problem it does not have.
+  if ! command -v shasum >/dev/null 2>&1; then
+    rm -rf "$dir"
+    die "shasum is missing, so the $label download cannot be verified. It ships
+  with macOS; if it is genuinely unavailable, build from source with
+  --from-source instead of installing a release."
+  fi
+  if ! curl -fsSL -o "$dir/$name.sha256" "$digest_url"; then
+    rm -rf "$dir"
+    die "No checksum published for the $label download, so this install cannot be
+  verified. Check your connection, or name a release that carries one with
+  --version v5.19 or later."
+  fi
+  if ! ( cd "$dir" && shasum -a 256 -c "$name.sha256" >/dev/null 2>&1 ); then
+    rm -rf "$dir"
+    die "The $label download does not match its published checksum. Try again;
+  if it keeps failing the release itself is damaged, so report it rather than
+  installing it."
+  fi
+  ok "$label checksum verified"
+}
+
 # Download the published arm64 binaries and the matching source, and put them
 # under $INSTALL_ROOT. No git, no Xcode, no Swift, no brew, no Python: the engine
 # arrives built, and the tools that drive it arrive as text.
 install_from_release() {
-  local tag="$1" tmp asset src_url
+  local tag="$1" tmp asset tools_asset src_url
   [[ "$tag" == v* ]] || tag="v$tag"
   asset="tinytitan-${tag#v}-macos-arm64.tar.gz"
+  tools_asset="tinytitan-${tag#v}-tools.tar.gz"
   tmp="$(mktemp -d)"
 
   say "Downloading TinyTitan ${tag#v} (about 25 MB)"
@@ -211,22 +247,9 @@ install_from_release() {
     rm -rf "$tmp"
     die "Could not download $tag. Check your connection, or that the release exists."
   fi
-  if curl -fsSL -o "$tmp/$asset.sha256" \
-      "https://github.com/Pummelchen/TinyTitan/releases/download/$tag/$asset.sha256"; then
-    # `shasum` ships with macOS, so this is a guard rather than an expectation —
-    # without it a missing tool would fall through to the mismatch branch and
-    # blame the download for a problem it does not have.
-    if ! command -v shasum >/dev/null 2>&1; then
-      warn "shasum is missing, so the download could not be verified."
-    elif ( cd "$tmp" && shasum -a 256 -c "$asset.sha256" >/dev/null 2>&1 ); then
-      ok "Checksum verified"
-    else
-      rm -rf "$tmp"
-      die "The download does not match its published checksum. Try again."
-    fi
-  else
-    warn "No checksum published for $tag; continuing without verification."
-  fi
+  verify_release_artifact "$tmp" "$asset" \
+      "https://github.com/Pummelchen/TinyTitan/releases/download/$tag/$asset.sha256" \
+      "engine"
 
   rm -rf "$BIN_PATH"
   mkdir -p "$BIN_PATH"
@@ -243,13 +266,17 @@ install_from_release() {
   # The tools, the DSH plugin and the docs, from the same tag. Small, and it is
   # what makes the layout identical to a checkout apart from the build.
   say "Downloading the matching tools"
-  src_url="https://github.com/Pummelchen/TinyTitan/archive/refs/tags/$tag.tar.gz"
-  if ! curl -fL --progress-bar -o "$tmp/src.tar.gz" "$src_url"; then
-    rm -rf "$tmp"; die "Could not download the tools for $tag."
+  src_url="https://github.com/Pummelchen/TinyTitan/releases/download/$tag/$tools_asset"
+  if ! curl -fL --progress-bar -o "$tmp/$tools_asset" "$src_url"; then
+    rm -rf "$tmp"
+    die "Could not download the tools for $tag. A release without a published
+  $tools_asset is a release this installer will not run: $tag predates tool
+  checksums, so install a newer version, or build from a clone with --from-source."
   fi
+  verify_release_artifact "$tmp" "$tools_asset" "$src_url.sha256" "tools"
   rm -rf "$SRC_PATH"
   mkdir -p "$SRC_PATH"
-  tar -xzf "$tmp/src.tar.gz" -C "$SRC_PATH" --strip-components=1 || {
+  tar -xzf "$tmp/$tools_asset" -C "$SRC_PATH" --strip-components=1 || {
     rm -rf "$tmp"; die "Could not unpack the tools."; }
   rm -rf "$tmp"
   [[ -f "$SRC_PATH/tools/server_launcher.sh" ]] || die "The tools are incomplete."

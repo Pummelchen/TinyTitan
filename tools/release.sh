@@ -352,6 +352,33 @@ LIB_BYTES="$(wc -c < "$LIB_ARCHIVE" | tr -d ' ')"
 echo "  $(basename "$LIB_ARCHIVE")  $LIB_BYTES bytes"
 echo "  sha256 $LIB_SHA"
 
+# --- the tools ---------------------------------------------------------------
+# `tools/install_tinytitan.sh` downloads this, verifies it and then *runs* what
+# it extracted: the launcher, the model installer and the DSH setup. So it is a
+# released artifact with a released digest, exactly like the other two archives,
+# and the installer refuses a release that has no checksum for it.
+#
+# `git archive` of the tag rather than a hand-picked list of files, because the
+# installed layout is meant to look like a checkout apart from the build, and a
+# list of what the tools need would be a second place to remember that. The
+# members asserted below are the ones the installer itself names.
+step "tools"
+TOOLS_STAGE_PREFIX="tinytitan-$VERSION-tools"
+TOOLS_ARCHIVE="$STAGE_ROOT/$TOOLS_STAGE_PREFIX.tar.gz"
+git archive --format=tar --prefix="$TOOLS_STAGE_PREFIX/" "$TAG" | gzip > "$TOOLS_ARCHIVE" \
+  || die "git archive produced no tools snapshot for $TAG"
+for member in tools/install_tinytitan.sh tools/server_launcher.sh tools/install_models.sh \
+  tools/tinytitan_models.sh tools/dsh_local.sh plugins/dsh-tinytitan/ Package.swift \
+  sources/TinyTitanLib/; do
+  tar tzf "$TOOLS_ARCHIVE" | grep -q "^$TOOLS_STAGE_PREFIX/$member" \
+    || die "the tools archive carries no $member, which an installed copy needs"
+done
+shasum -a 256 "$TOOLS_ARCHIVE" | sed "s|$STAGE_ROOT/||" > "$TOOLS_ARCHIVE.sha256"
+TOOLS_SHA="$(awk '{print $1}' "$TOOLS_ARCHIVE.sha256")"
+TOOLS_BYTES="$(wc -c < "$TOOLS_ARCHIVE" | tr -d ' ')"
+echo "  $(basename "$TOOLS_ARCHIVE")  $TOOLS_BYTES bytes"
+echo "  sha256 $TOOLS_SHA"
+
 # --- notes ------------------------------------------------------------------
 # Checked whenever --notes is given, not only for --publish. Compaction and its
 # budget are cheap to check here and painful to discover after a full gate run.
@@ -378,20 +405,25 @@ if [ -n "$NOTES" ]; then
   # A wrong digest is worse than none: it tells a careful user their download is
   # corrupt, which is how 3.7 shipped for a few minutes. Both are enforced.
   RENDERED_NOTES="$STAGE_ROOT/notes-rendered.md"
-  # Order matters. `SHA256_PENDING` is a *substring* of `LIBRARY_SHA256_PENDING`,
-  # so substituting the engine's token first rewrites the library's name into
-  # `LIBRARY_<engine digest>` — the library's own rule then matches nothing and
-  # the notes publish a digest that belongs to the other archive. The guard below
-  # catches it (it did, on the first release that carried these placeholders),
-  # but the fix is not to write it that way: specific token first.
-  sed -e "s/LIBRARY_SHA256_PENDING/$LIB_SHA/g" -e "s/SHA256_PENDING/$SHA/g" \
-    -e "s/LIBRARY_BYTES_PENDING/$LIB_BYTES/g" -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" \
+  # Order matters. `SHA256_PENDING` is a *substring* of both
+  # `LIBRARY_SHA256_PENDING` and `TOOLS_SHA256_PENDING`, so substituting the
+  # engine's token first rewrites those names into `LIBRARY_<engine digest>` and
+  # `TOOLS_<engine digest>` — their own rules then match nothing and the notes
+  # publish a digest that belongs to the other archive. The guard below catches
+  # it (it did, on the first release that carried these placeholders), but the
+  # fix is not to write it that way: specific token first.
+  sed -e "s/LIBRARY_SHA256_PENDING/$LIB_SHA/g" -e "s/TOOLS_SHA256_PENDING/$TOOLS_SHA/g" \
+    -e "s/SHA256_PENDING/$SHA/g" \
+    -e "s/LIBRARY_BYTES_PENDING/$LIB_BYTES/g" -e "s/TOOLS_BYTES_PENDING/$TOOLS_BYTES/g" \
+    -e "s/ARCHIVE_BYTES_PENDING/$BYTES/g" \
     "$NOTES" > "$RENDERED_NOTES" \
     || die "failed to render notes"
   grep -q 'SHA256_PENDING' "$NOTES" && echo "  filled SHA256_PENDING with $SHA"
   grep -q 'ARCHIVE_BYTES_PENDING' "$NOTES" && echo "  filled ARCHIVE_BYTES_PENDING with $BYTES"
   grep -q 'LIBRARY_SHA256_PENDING' "$NOTES" && echo "  filled LIBRARY_SHA256_PENDING with $LIB_SHA"
   grep -q 'LIBRARY_BYTES_PENDING' "$NOTES" && echo "  filled LIBRARY_BYTES_PENDING with $LIB_BYTES"
+  grep -q 'TOOLS_SHA256_PENDING' "$NOTES" && echo "  filled TOOLS_SHA256_PENDING with $TOOLS_SHA"
+  grep -q 'TOOLS_BYTES_PENDING' "$NOTES" && echo "  filled TOOLS_BYTES_PENDING with $TOOLS_BYTES"
   grep -q "$SHA" "$RENDERED_NOTES" \
     || die "the notes neither contain SHA256_PENDING nor quote this archive's sha256 ($SHA)"
   grep -q "$BYTES" "$RENDERED_NOTES" \
@@ -403,6 +435,13 @@ if [ -n "$NOTES" ]; then
     || die "the notes neither contain LIBRARY_SHA256_PENDING nor quote the library archive's sha256 ($LIB_SHA)"
   grep -q "$LIB_BYTES" "$RENDERED_NOTES" \
     || die "the notes neither contain LIBRARY_BYTES_PENDING nor quote the library archive's size ($LIB_BYTES bytes)"
+  # Same argument for the tools archive, and one more: the installer dies without
+  # its published checksum, so notes that do not quote it describe a download
+  # nobody can verify or explain.
+  grep -q "$TOOLS_SHA" "$RENDERED_NOTES" \
+    || die "the notes neither contain TOOLS_SHA256_PENDING nor quote the tools archive's sha256 ($TOOLS_SHA)"
+  grep -q "$TOOLS_BYTES" "$RENDERED_NOTES" \
+    || die "the notes neither contain TOOLS_BYTES_PENDING nor quote the tools archive's size ($TOOLS_BYTES bytes)"
 
   # The Release page gets the COMPACT form: the same claims as bullets, one
   # sentence each, wrapped narrow. The full notes stay in the repo as the record
@@ -421,7 +460,8 @@ if [ -n "$NOTES" ]; then
   COMPACT_NOTES="$STAGE_ROOT/notes-compact.md"
   NOTES_MAX_CHARS="${TINYTITAN_RELEASE_NOTES_MAX_CHARS:-12000}"
   REQUIRE_ARGS=()
-  for required in $GOLDEN_SKIPPED $GOLDEN_ABSENT "$SHA" "$BYTES" "$LIB_SHA" "$LIB_BYTES"; do
+  for required in $GOLDEN_SKIPPED $GOLDEN_ABSENT "$SHA" "$BYTES" "$LIB_SHA" "$LIB_BYTES" \
+    "$TOOLS_SHA" "$TOOLS_BYTES"; do
     REQUIRE_ARGS+=(--require "$required")
   done
   python3 "$SCRIPT_DIR/compact-release-notes.py" "$RENDERED_NOTES" \
@@ -436,6 +476,8 @@ if [ "$PUBLISH" -ne 1 ]; then
   step "dry run complete"
   echo "  staged: $STAGE"
   echo "  library: $(basename "$LIB_ARCHIVE")"
+  echo "  tools: $(basename "$TOOLS_ARCHIVE")"
+  echo "  tools: $(basename "$TOOLS_ARCHIVE")"
   if [ -n "$NOTES" ]; then
     echo "  release page: the compact form checked above is what --publish would carry"
   else
@@ -449,6 +491,7 @@ fi
 
 step "publish"
 gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" "$LIB_ARCHIVE" "$LIB_ARCHIVE.sha256" \
+  "$TOOLS_ARCHIVE" "$TOOLS_ARCHIVE.sha256" \
   --repo "$REPO" \
   --title "TinyTitan $VERSION" \
   --notes-file "$COMPACT_NOTES" \
