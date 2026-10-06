@@ -630,6 +630,7 @@ class EndpointIntegrationTests(unittest.TestCase):
         self.assertEqual(got.read_bytes(), self.shard_bytes)
 
 
+@unittest.skipIf(prepare is None, f"prepare_qwen38 unavailable: {IMPORT_ERROR}")
 class FinishedOutputGuardTests(unittest.TestCase):
     """A finished snapshot is not a resume target: converting into it would lay a
     second generation of shards beside the first."""
