@@ -42,4 +42,12 @@ struct Expert: Decodable {
     let expert: Int?
     let offset: UInt64
     let size: UInt64
+    /// The slices that make up one expert's blob, in the format layer's own type.
+    ///
+    /// Required rather than optional: `SSDAIExpertV1` declares it non-optional and
+    /// the runtime decodes every `layout.json` through that type, so a layout
+    /// without it could not load. Certifying one here would be the exact thing
+    /// this tool exists to prevent -- and the per-tensor sizes are what make the
+    /// declared routed-expert width checkable at all.
+    let tensors: [String: SSDAISubTensorV1]
 }

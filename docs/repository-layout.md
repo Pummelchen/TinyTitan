@@ -552,6 +552,14 @@ and `PreadExpertStreamerTypes.swift` (52) holds `PrefetchDestinations` and
 touch, `fileprivate` included, and each new file needed the original's four
 imports.
 
+`VerifiedInstallTool.swift` (491 → 387) then gave its packed-expert half to
+`PackedExpertLayoutVerification.swift` (314) during AUD-124: `loadLayout` and
+`validatePackedExpertLayout` moved as pure code motion, and the routed-expert
+width arithmetic the audit asked for was written there rather than appended to
+the tool. One widening, `loadMetadataJSON` from `private` to internal, because
+the moved loader calls it; the new file needs `import TinyTitanFormat` for
+`SSDAISubTensorV1` and the alignment constant.
+
 ## Generated and local files
 
 `models/`, `.build/`, `.swiftpm/`, `benchmark/mock/`,

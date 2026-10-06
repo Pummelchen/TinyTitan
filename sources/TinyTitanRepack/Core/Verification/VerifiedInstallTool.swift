@@ -344,119 +344,13 @@ public enum VerifiedInstallTool {
         }
     }
 
-    private static func loadLayout(access: SSDAIDirectoryAccess) throws -> PackedExpertsLayout {
-        do {
-            let data = try loadMetadataJSON(
-                access: access,
-                relativePath: "packed_experts/layout.json")
-            return try JSONDecoder().decode(PackedExpertsLayout.self, from: data)
-        } catch {
-            throw RepackError.configurationInvalid(
-                detail: "packed_experts/layout.json invalid: \(error)")
-        }
-    }
-
-    private static func loadMetadataJSON(
+    static func loadMetadataJSON(
         access: SSDAIDirectoryAccess,
         relativePath: String
     ) throws -> Data {
         try SSDAIPathValidator.validateRelativePath(
             relativePath, field: "metadata.\(relativePath)")
         return try access.readMetadata(relativePath, maxBytes: metadataMaxBytes)
-    }
-
-    private static func validatePackedExpertLayout(
-        access: SSDAIDirectoryAccess,
-        manifest: Manifest
-    ) throws {
-        let layoutRelativePath = "packed_experts/layout.json"
-        guard manifest.files[layoutRelativePath] != nil else {
-            throw RepackError.configurationInvalid(detail: "manifest missing \(layoutRelativePath)")
-        }
-        let layout = try loadLayout(access: access)
-        let alignment = SSDAIFormatV1.alignmentBytes
-        guard layout.expertStride == manifest.expertStride,
-            layout.numLayers == manifest.numLayers,
-            layout.expertsPerLayer == manifest.expertsPerLayer
-        else {
-            throw RepackError.configurationInvalid(
-                detail: "packed expert layout dimensions mismatch manifest")
-        }
-        guard layout.expertStride % alignment == 0 else {
-            throw RepackError.configurationInvalid(
-                detail: "expertStride \(layout.expertStride) is not aligned to \(alignment) bytes")
-        }
-        guard layout.layers.count == layout.numLayers else {
-            throw RepackError.configurationInvalid(
-                detail: "packed expert layout layer count mismatch")
-        }
-        let expectedLayerSize = UInt64(layout.expertsPerLayer) * layout.expertStride
-        for layer in layout.layers {
-            guard layer.layer >= 0 && layer.layer < layout.numLayers else {
-                throw RepackError.configurationInvalid(
-                    detail: "packed expert layer index out of range")
-            }
-            guard layer.experts.count == layout.expertsPerLayer else {
-                throw RepackError.configurationInvalid(
-                    detail: "packed_experts/\(layer.file) expert count mismatch")
-            }
-            try SSDAIPathValidator.validateBasename(
-                layer.file, field: "packed_experts/layout.json layers[\(layer.layer)].file")
-            // A layer with no routed experts has no file, and writing one
-            // empty `layer_NN.bin` per layer to satisfy this loop would be
-            // worse than the check: the dense Qwen 3.5 installs are exactly
-            // this shape, 24 layouts and no packed experts at all. The
-            // expected size is what makes this safe rather than a hole --
-            // `expectedLayerSize` is 0 only when the layer is empty, so a
-            // layer that should carry bytes still fails on a missing file
-            // below, with a non-zero expected size to compare against.
-            if expectedLayerSize == 0 {
-                continue
-            }
-            let relativePath = "packed_experts/\(layer.file)"
-            guard let manifestEntry = manifest.files[relativePath] else {
-                throw RepackError.configurationInvalid(detail: "manifest missing \(relativePath)")
-            }
-            guard manifestEntry.size == expectedLayerSize else {
-                throw RepackError.configurationInvalid(
-                    detail:
-                        "\(relativePath) manifest size \(manifestEntry.size) != \(expectedLayerSize)"
-                )
-            }
-            let actualSize = try access.fileSize(relativePath)
-            guard actualSize == expectedLayerSize else {
-                throw RepackError.configurationInvalid(
-                    detail: "\(relativePath) size \(actualSize) != \(expectedLayerSize)")
-            }
-            var seenExperts = Set<Int>()
-            for (index, expert) in layer.experts.enumerated() {
-                let expertID = expert.expert ?? index
-                guard expertID >= 0 && expertID < layout.expertsPerLayer else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) expert id out of range")
-                }
-                guard seenExperts.insert(expertID).inserted else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) duplicate expert \(expertID)")
-                }
-                guard expert.size == layout.expertStride else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) expert \(expertID) size mismatch")
-                }
-                guard expert.offset % SSDAIFormatV1.alignmentBytes == 0 else {
-                    throw RepackError.configurationInvalid(
-                        detail:
-                            "\(relativePath) expert \(expertID) offset is not aligned to \(SSDAIFormatV1.alignmentBytes) bytes"
-                    )
-                }
-                guard expert.offset <= actualSize,
-                    expert.size <= actualSize - expert.offset
-                else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) expert \(expertID) range exceeds file size")
-                }
-            }
-        }
     }
 
     private static func findUnexpectedEntries(
