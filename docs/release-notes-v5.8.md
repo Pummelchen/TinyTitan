@@ -131,6 +131,13 @@ now runs both plugin suites, which nothing did before.
 - **The Qwen3.8 expert-cache budget stays at 96 slots** (TT-011), and
   `TINYTITAN_KEEP_WIRED` is a tri-state so `=0` pages the expert cache out
   (TT-008).
+
+  > **Superseded.** `TINYTITAN_KEEP_WIRED` is gone, along with the rest of the
+  > opt-in decode switches that tuning round measured: `3eb11cf` removed each
+  > one after it turned out a wash or a loss on the current build. Whether the
+  > expert cache stays wired is now the profile row's decision alone
+  > (`ModelProfile`), and `ModelProfileTests` records that the override is gone.
+  > The bullet stands as the record of what 5.8 shipped.
 - **The MTP verify pass is attributed on the installed pair** (TT-006), the ANE
   re-warm is separated from drift and the pin removes it (TT-005), the E5RT
   arenas are returned (TT-004), and the top-2 logits of both sampling paths are
