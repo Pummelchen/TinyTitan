@@ -552,7 +552,7 @@ and `PreadExpertStreamerTypes.swift` (52) holds `PrefetchDestinations` and
 touch, `fileprivate` included, and each new file needed the original's four
 imports.
 
-`VerifiedInstallTool.swift` (491 → 387) then gave its packed-expert half to
+`VerifiedInstallTool.swift` (491 → 385) then gave its packed-expert half to
 `PackedExpertLayoutVerification.swift` (314) during AUD-124: `loadLayout` and
 `validatePackedExpertLayout` moved as pure code motion, and the routed-expert
 width arithmetic the audit asked for was written there rather than appended to

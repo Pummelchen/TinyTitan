@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 40,
-    "done": 8,
+    "total": 41,
+    "done": 9,
     "open": 31,
     "blocked": 1
   },
@@ -406,16 +406,16 @@
       "severity": "S1",
       "tier": "A",
       "project": "repack",
-      "file_line": "sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390",
+      "file_line": "sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)",
       "title": "A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits",
       "category": "integrity verifier has no coverage on the shipped shapes",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L2 module pass + §5 facade sweep",
       "evidence-before": "Read at the cited lines and confirmed by the auditor. validateQuantAgainstResident `continue`s every u32 entry once expertsPerLayer != 0 (:221-224, with a comment saying the widths live in packed_experts/layout.json), and the dominant-width guard returns for the same condition (:256). validatePackedExpertLayout (:368-390) compares expertStride/numLayers/expertsPerLayer against the manifest and checks counts, offsets and alignment — but PackedExpertsLayout (VerifiedInstallManifest.swift:28-33) carries no width field, and grep for weightBits across the whole file finds only :197, :198, :211 and :258, all inside the resident path. So quant.routedExpert.weightBits is compared against nothing for exactly the MoE installs the product ships (35B-A3B, 125B-A6B), while the runtime dequantizes with it and ManifestIdentity turns it into the `_<bits>-Bit` id. The writer's own comment names the failure mode (SSDAIJSON.swift:140-144): 'the word count changes, the strides still divide evenly, every shape check passes, and the model answers fluently and wrongly'.",
-      "fix-summary": "",
-      "evidence-after": "Expected: a packed-expert install is verified by arithmetic — expertStride consistent with the declared bit width and the expert's element count — so a manifest that lies about the width of expert bytes fails --verify-install instead of passing it.",
-      "commit": "",
+      "fix-summary": "The packed layout is made to prove its own widths. `validatePackedExpertLayout` now reads the `quant` block it used to ignore and, for every expert of every layer, runs a new `PackedExpertBytes.validate`: a U32 slice's byte extent divided by its element count implies a width, that implied width must equal the slice's own `bits` annotation where it carries one, and it must equal the declared routed-expert slot for every slice; a BF16 slice must be exactly two bytes an element; and the slices must sum to the blob that rounds up to the declared `expertStride`. Every multiply and add is `addingReportingOverflow`/`multipliedReportingOverflow`, so a `UInt32.max` shape reports `too many bf16 values to count in bytes` instead of wrapping into a passing sum. The derived width is bounded by the format layer's own 1...32, not by the 4-or-8 the resident check insists on: an install whose bytes match its description is a truthful install even in a withdrawn width, and refusing it here would make the verifier stricter than the load path with a message telling the user to re-download weights that are fine. The check runs BEFORE the file-hash loop, and the layout file is now read once into a decoded value that both the check and the index-consistency pass use, so the attestation cannot report `all 104 files hash correctly` over bytes whose description already failed. Tensors are walked in key order so the first complaint is the same on two machines. The dense case is the sibling risk and is pinned: the verifier's `expectedLayerSize == 0` shortcut runs before the `quant` block is asked for (PackedExpertLayoutVerification.swift:101), and the load path's `config.numExperts > 0` guard runs before its routed cross-check, so a dense Qwen 3.5 install stays verifiable either way. The layout validator moved to `PackedExpertLayoutVerification.swift` (314 lines) as pure code motion for the 500-line rule, which is what the new arithmetic then went into.",
+      "evidence-after": "`tests/TinyTitanRepack/Core/Verification/PackedExpertWidthTests.swift`: 22 tests in 1 suite, all green, no model and no network. 16 go straight through `PackedExpertBytes.validate` on hand-built tables and pin the arithmetic: the real 125B-A6B expert record at its own width (2,764,800 bytes -> 2,768,896 stride at 4-bit) and at 8-bit; a declared width that disagrees with the bytes; an annotation that disagrees with its own slice; the truthful withdrawn 6-bit accepted while a mislabelled one is refused; a width derived with no annotation at all; a missing slice; a duplicated slice; an expert that fills its stride exactly; a byte extent that does not divide; a tensor with no elements; an implied width outside the format's 1...32; a scale slice the wrong size; an unknown dtype; overflow refused rather than wrapped (element count, byte sum, and expert-index multiply); and the same complaint printed from ten shuffled dictionaries. 6 go through the real `VerifiedInstallTool.validatePackedExpertLayout` on a temporary install, three of which repack the synthetic MoE snapshot: a fresh 8-bit install verifies, a manifest that misdeclares the routed width is refused, and a layout that misannotates an expert is refused before the hashes. The two dense-row cases are the sibling guards: `aDenseLayoutHasNoWidthToDeclare` pins that the empty-layer shortcut runs before the `quant` block is asked for, and `everyExpertInTheLayerIsCheckedNotOnlyTheFirst` pins that a lie in expert 1 is caught when the load path only ever looks at expert 0. Both controls re-measured at closure, not inherited from the fix run: commenting the `PackedExpertBytes.validate` call out makes three end-to-end tests fail, two of them with `expected a refusal, and the check passed`; moving the layout check to after the file-hash loop makes exactly one fail -- `aLayoutThatMisannotatesAnExpertIsRefusedBeforeTheHashes`, whose `annotated 8-bit` expectation goes false because the digest complaint now arrives first. Full suite `swift test --no-parallel` exit 0: 1518 tests in six bundles, 0 failures. `swift build -c release` clean. All eleven `tools/lint.sh` gates ok, the python one run with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH` -- see environment.md.",
+      "commit": "53b64d5",
       "blocked-reason": ""
     },
     {
@@ -688,6 +688,23 @@
       "evidence-before": "dsh_local.sh:264 `run \"download Node from nodejs.org\" curl -fsSL \"$url\" -o \"$tmp/$tarball\"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.",
       "fix-summary": "",
       "evidence-after": "Expected: the Node download is checked against nodejs.org's published SHASUMS256.txt for that exact version, and a missing or non-matching digest stops the setup -- the same fail-closed shape AUD-109 gave the engine and tools archives, with a harness that stubs curl and proves the refusal.",
+      "commit": "",
+      "blocked-reason": ""
+    },
+    {
+      "id": "AUD-141",
+      "severity": "S2",
+      "tier": "A",
+      "project": "runtime",
+      "file_line": "sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272",
+      "title": "The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly",
+      "category": "incomplete validation on the load path (found by the AUD-124 fix, not fixed by it)",
+      "status": "START",
+      "host": "Mac (primary)",
+      "discovered-by": "AUD-124 fix, sibling sweep",
+      "evidence-before": "`validateRoutedExpertLayout` takes `layer.experts.first` as the reference for the whole layer (Model+SchemaValidation.swift:271) and compares the nine expected role records (gate/up/down and their `_scales` and `_biases`) against that one expert only. A 125B-A6B layer carries 512 experts, so 511 of them are unchecked at load: a layout can shift an offset, change a shape or annotate a different width in expert 1 and the model still opens. The runtime then dequantizes those bytes with the word count taken from the declaration, which is exactly the failure the writer's own comment describes (sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:140-144). AUD-124 closed the same hole on the verifier side -- `PackedExpertBytes.validate` loops every expert, pinned by PackedExpertWidthTests.everyExpertInTheLayerIsCheckedNotOnlyTheFirst -- and this row records that the load path is still the one that runs when a receipt was already issued. Not fixed with AUD-124 because it is load-path work the user has not asked for, it needs a golden-baseline model run to close, and checking 512 experts x 9 records x every layer at load is a startup-cost change that needs a measurement and a decision, not an assertion dropped into a loop.",
+      "fix-summary": "",
+      "evidence-after": "Expected: opening a packed MoE install validates the role records of every expert in every layer, or the load path says in one line which experts it did not check and why. Either outcome needs the load cost measured before and after.",
       "commit": "",
       "blocked-reason": ""
     }

@@ -2,13 +2,12 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:31  Done:8  Blocked:1  Total:40**
+**Open:31  Done:9  Blocked:1  Total:41**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
 | AUD-139 | S1 | A | release | `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276` | v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled | release artifact gap created by a fix; needs an action on a published release | BLOCKED | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
@@ -16,9 +15,11 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385, sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift:97` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | DONE | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
+| AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
+| AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:29-35` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | OPEN | Mac (primary) |
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | OPEN | Mac (primary) |
@@ -50,20 +51,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 
 ## Detail
-
-### AUD-124 — A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** repack
-- **Location:** `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390`
-- **Category:** integrity verifier has no coverage on the shipped shapes
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** L2 module pass + §5 facade sweep
-
-**Evidence before.** Read at the cited lines and confirmed by the auditor. validateQuantAgainstResident `continue`s every u32 entry once expertsPerLayer != 0 (:221-224, with a comment saying the widths live in packed_experts/layout.json), and the dominant-width guard returns for the same condition (:256). validatePackedExpertLayout (:368-390) compares expertStride/numLayers/expertsPerLayer against the manifest and checks counts, offsets and alignment — but PackedExpertsLayout (VerifiedInstallManifest.swift:28-33) carries no width field, and grep for weightBits across the whole file finds only :197, :198, :211 and :258, all inside the resident path. So quant.routedExpert.weightBits is compared against nothing for exactly the MoE installs the product ships (35B-A3B, 125B-A6B), while the runtime dequantizes with it and ManifestIdentity turns it into the `_<bits>-Bit` id. The writer's own comment names the failure mode (SSDAIJSON.swift:140-144): 'the word count changes, the strides still divide evenly, every shape check passes, and the model answers fluently and wrongly'.
-
-**Evidence after.** Expected: a packed-expert install is verified by arithmetic — expertStride consistent with the declared bit width and the expert's element count — so a manifest that lies about the width of expert bytes fails --verify-install instead of passing it.
 
 ### AUD-139 — v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled
 
@@ -189,6 +176,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `fc68d72`
 
+### AUD-124 — A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** repack
+- **Location:** `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)`
+- **Category:** integrity verifier has no coverage on the shipped shapes
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L2 module pass + §5 facade sweep
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. validateQuantAgainstResident `continue`s every u32 entry once expertsPerLayer != 0 (:221-224, with a comment saying the widths live in packed_experts/layout.json), and the dominant-width guard returns for the same condition (:256). validatePackedExpertLayout (:368-390) compares expertStride/numLayers/expertsPerLayer against the manifest and checks counts, offsets and alignment — but PackedExpertsLayout (VerifiedInstallManifest.swift:28-33) carries no width field, and grep for weightBits across the whole file finds only :197, :198, :211 and :258, all inside the resident path. So quant.routedExpert.weightBits is compared against nothing for exactly the MoE installs the product ships (35B-A3B, 125B-A6B), while the runtime dequantizes with it and ManifestIdentity turns it into the `_<bits>-Bit` id. The writer's own comment names the failure mode (SSDAIJSON.swift:140-144): 'the word count changes, the strides still divide evenly, every shape check passes, and the model answers fluently and wrongly'.
+
+**Fix.** The packed layout is made to prove its own widths. `validatePackedExpertLayout` now reads the `quant` block it used to ignore and, for every expert of every layer, runs a new `PackedExpertBytes.validate`: a U32 slice's byte extent divided by its element count implies a width, that implied width must equal the slice's own `bits` annotation where it carries one, and it must equal the declared routed-expert slot for every slice; a BF16 slice must be exactly two bytes an element; and the slices must sum to the blob that rounds up to the declared `expertStride`. Every multiply and add is `addingReportingOverflow`/`multipliedReportingOverflow`, so a `UInt32.max` shape reports `too many bf16 values to count in bytes` instead of wrapping into a passing sum. The derived width is bounded by the format layer's own 1...32, not by the 4-or-8 the resident check insists on: an install whose bytes match its description is a truthful install even in a withdrawn width, and refusing it here would make the verifier stricter than the load path with a message telling the user to re-download weights that are fine. The check runs BEFORE the file-hash loop, and the layout file is now read once into a decoded value that both the check and the index-consistency pass use, so the attestation cannot report `all 104 files hash correctly` over bytes whose description already failed. Tensors are walked in key order so the first complaint is the same on two machines. The dense case is the sibling risk and is pinned: the verifier's `expectedLayerSize == 0` shortcut runs before the `quant` block is asked for (PackedExpertLayoutVerification.swift:101), and the load path's `config.numExperts > 0` guard runs before its routed cross-check, so a dense Qwen 3.5 install stays verifiable either way. The layout validator moved to `PackedExpertLayoutVerification.swift` (314 lines) as pure code motion for the 500-line rule, which is what the new arithmetic then went into.
+
+**Evidence after.** `tests/TinyTitanRepack/Core/Verification/PackedExpertWidthTests.swift`: 22 tests in 1 suite, all green, no model and no network. 16 go straight through `PackedExpertBytes.validate` on hand-built tables and pin the arithmetic: the real 125B-A6B expert record at its own width (2,764,800 bytes -> 2,768,896 stride at 4-bit) and at 8-bit; a declared width that disagrees with the bytes; an annotation that disagrees with its own slice; the truthful withdrawn 6-bit accepted while a mislabelled one is refused; a width derived with no annotation at all; a missing slice; a duplicated slice; an expert that fills its stride exactly; a byte extent that does not divide; a tensor with no elements; an implied width outside the format's 1...32; a scale slice the wrong size; an unknown dtype; overflow refused rather than wrapped (element count, byte sum, and expert-index multiply); and the same complaint printed from ten shuffled dictionaries. 6 go through the real `VerifiedInstallTool.validatePackedExpertLayout` on a temporary install, three of which repack the synthetic MoE snapshot: a fresh 8-bit install verifies, a manifest that misdeclares the routed width is refused, and a layout that misannotates an expert is refused before the hashes. The two dense-row cases are the sibling guards: `aDenseLayoutHasNoWidthToDeclare` pins that the empty-layer shortcut runs before the `quant` block is asked for, and `everyExpertInTheLayerIsCheckedNotOnlyTheFirst` pins that a lie in expert 1 is caught when the load path only ever looks at expert 0. Both controls re-measured at closure, not inherited from the fix run: commenting the `PackedExpertBytes.validate` call out makes three end-to-end tests fail, two of them with `expected a refusal, and the check passed`; moving the layout check to after the file-hash loop makes exactly one fail -- `aLayoutThatMisannotatesAnExpertIsRefusedBeforeTheHashes`, whose `annotated 8-bit` expectation goes false because the digest complaint now arrives first. Full suite `swift test --no-parallel` exit 0: 1518 tests in six bundles, 0 failures. `swift build -c release` clean. All eleven `tools/lint.sh` gates ok, the python one run with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH` -- see environment.md.
+
+**Commit.** `53b64d5`
+
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
 - **Severity / tier:** S2 / Tier B
@@ -224,6 +229,20 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** gh release v5.18 published 2026-10-05T06:17:34Z vs CI on ea5de8c (the tag) failing at 05:59:23Z
 
 **Evidence before.** docs/release-process.md opens 'This is the runbook for turning a green main into a tagged, published release', but the green-main precondition is a sentence, not a check: tools/release.sh gates the gates it runs locally and nothing queries the Actions run for HEAD. v5.18 is a live instance: published an hour after its own tag commit failed the Installer gates job.
+
+### AUD-141 — The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** runtime
+- **Location:** `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272`
+- **Category:** incomplete validation on the load path (found by the AUD-124 fix, not fixed by it)
+- **Status:** START
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-124 fix, sibling sweep
+
+**Evidence before.** `validateRoutedExpertLayout` takes `layer.experts.first` as the reference for the whole layer (Model+SchemaValidation.swift:271) and compares the nine expected role records (gate/up/down and their `_scales` and `_biases`) against that one expert only. A 125B-A6B layer carries 512 experts, so 511 of them are unchecked at load: a layout can shift an offset, change a shape or annotate a different width in expert 1 and the model still opens. The runtime then dequantizes those bytes with the word count taken from the declaration, which is exactly the failure the writer's own comment describes (sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:140-144). AUD-124 closed the same hole on the verifier side -- `PackedExpertBytes.validate` loops every expert, pinned by PackedExpertWidthTests.everyExpertInTheLayerIsCheckedNotOnlyTheFirst -- and this row records that the load path is still the one that runs when a receipt was already issued. Not fixed with AUD-124 because it is load-path work the user has not asked for, it needs a golden-baseline model run to close, and checking 512 experts x 9 records x every layer at load is a startup-cost change that needs a measurement and a decision, not an assertion dropped into a loop.
+
+**Evidence after.** Expected: opening a packed MoE install validates the role records of every expert in every layer, or the load path says in one line which experts it did not check and why. Either outcome needs the load cost measured before and after.
 
 ### AUD-106 — The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published
 

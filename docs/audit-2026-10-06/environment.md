@@ -35,14 +35,18 @@ independent-host requirement is recorded as a finding rather than worked around.
 | Python | python | 3.14.8 (Homebrew) | `/opt/homebrew/bin/python3` | above the `PYTHON_FLOOR="3.13"` the gate declares |
 | Python | ruff (global) | 0.16.10 | `/opt/homebrew/bin/ruff` | **does not match** `RUFF_PIN="0.16.7"` |
 | Python | ruff (audit venv) | 0.16.7 | `python3 -m venv /tmp/tt-audit/venv && pip install ruff==0.16.7` | matches; put on `PATH` ahead of Homebrew for every gate run |
+| Python | ruff (pipx) | 0.16.7 | `~/.local/bin/ruff` -> `~/.local/pipx/venvs/ruff/bin/ruff` | matches; survives `/tmp` being cleared, unlike the venv above |
 | Python | pip-audit | 2.10.1 | same venv | new tool, installed for the §3 CVE baseline |
 | JS/TS | node / npm | v26.10.0 / 11.19.1 | Homebrew | the plugin packages pin their own eslint (`ESLINT_PIN="10.11.0"`) via committed lockfiles |
 | Secrets | gitleaks | 8.30.1 | `/opt/homebrew/bin/gitleaks` | uses the committed `.gitleaks.toml` |
 
 Nothing was installed into the global toolchain. The two new tools (pinned ruff,
-pip-audit) live in `/tmp/tt-audit/venv`, the same way CI runs the converter suites in a
-venv, so this host's Homebrew ruff is untouched and the gate still sees the version it
-pins. Clean-up: `rm -rf /tmp/tt-audit` at the end of the run.
+pip-audit) first lived in `/tmp/tt-audit/venv`, the same way CI runs the converter suites
+in a venv, so this host's Homebrew ruff stayed untouched and the gate still saw the
+version it pins. The pinned ruff is now also a `pipx` install under `~/.local`, which is
+outside Homebrew but survives the venv being cleaned up, since `/tmp` does not survive a
+reboot. Either one works for a gate run; `PATH="$HOME/.local/bin:$PATH" tools/lint.sh
+python` is the shorter of the two. Clean-up: `rm -rf /tmp/tt-audit` at the end of the run.
 
 ## Deviations found while writing this file
 
