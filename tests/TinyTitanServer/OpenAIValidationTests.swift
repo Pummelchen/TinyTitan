@@ -349,6 +349,44 @@ struct OpenAIValidationTests {
             #expect(validated.tools.count == 1, "parallel_tool_calls=\(value) dropped the tools")
         }
     }
+
+    /// A tool schema of `schemas` chained object schemas, each reaching the next
+    /// through one property, plus the string leaf at the bottom -- so the walk
+    /// sees `schemas + 1` levels, the deepest at depth `schemas`.
+    private func toolRequest(schemas: Int) throws -> OpenAIChatRequest {
+        let parameters =
+            String(repeating: #"{"type":"object","properties":{"a":"#, count: schemas)
+            + #"{"type":"string"}"#
+            + String(repeating: "}}", count: schemas)
+        let body =
+            "{\"model\":\"m\",\"messages\":[{\"role\":\"user\",\"content\":\"lookup\"}],"
+            + "\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"lookup\","
+            + "\"parameters\":\(parameters)}}]}"
+        return try JSONDecoder().decode(OpenAIChatRequest.self, from: Data(body.utf8))
+    }
+
+    /// The wire's depth cap is this project's, not Foundation's: a schema that
+    /// parses is still refused by name, with the OpenAI error shape and the
+    /// param that identifies it, rather than walked until something gives.
+    @Test func aToolSchemaPastTheNestingCapIsRefusedAsBadRequest() throws {
+        let limit = JSONSchemaNode.maximumNestingDepth
+        #expect(
+            try OpenAIRequestValidator.validate(
+                toolRequest(schemas: limit), modelID: "m"
+            ).tools.count == 1)
+        var failure: ServerRequestError?
+        do {
+            _ = try OpenAIRequestValidator.validate(
+                toolRequest(schemas: limit + 1), modelID: "m")
+        } catch let error as ServerRequestError {
+            failure = error
+        }
+        let envelope = try #require(failure?.envelope).error
+        #expect(envelope.type == "invalid_request_error")
+        #expect(envelope.code == "invalid_tool_schema")
+        #expect(envelope.param == "tools")
+        #expect(envelope.message.contains("deeper than \(limit) levels"))
+    }
 }
 
 @Suite("Streaming stop matcher")

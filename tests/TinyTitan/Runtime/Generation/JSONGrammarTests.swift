@@ -258,4 +258,59 @@ import Testing
             _ = try self.compile(#"{"type":"array","properties":{"a":{"type":"string"}}}"#)
         }
     }
+
+    /// `schemas` chained object schemas, each reaching the next through one
+    /// property (or through `items` when `viaItems`), plus the string leaf at the
+    /// bottom: the compiler walks `schemas + 1` levels, the deepest at depth
+    /// `schemas`.
+    private func nestedSchemas(_ schemas: Int, viaItems: Bool = false) -> String {
+        let opener =
+            viaItems
+            ? #"{"type":"array","items":"#
+            : #"{"type":"object","properties":{"a":"#
+        let closer = viaItems ? "}" : "}}"
+        return String(repeating: opener, count: schemas)
+            + #"{"type":"string"}"#
+            + String(repeating: closer, count: schemas)
+    }
+
+    @Test func theNestingCapIsExactlyWhereItSaysItIs() throws {
+        // The deepest schema the cap still compiles, and one level past it -- so
+        // the guard is pinned, not merely "small". Both recursion edges count:
+        // `properties` reaches a child through a name, `items` reaches one.
+        let limit = JSONSchemaNode.maximumNestingDepth
+        for viaItems in [false, true] {
+            _ = try compile(nestedSchemas(limit, viaItems: viaItems))
+            #expect(throws: JSONSchemaCompileError.self) {
+                _ = try self.compile(nestedSchemas(limit + 1, viaItems: viaItems))
+            }
+        }
+    }
+
+    @Test func aRefusedDepthIsAMalformedSchemaErrorThatNamesTheCap() {
+        var message = ""
+        do {
+            _ = try compile(nestedSchemas(JSONSchemaNode.maximumNestingDepth + 1))
+        } catch let error as JSONSchemaCompileError {
+            message = error.description
+        } catch {
+            Issue.record("expected a schema error, got \(error)")
+        }
+        #expect(message.contains("deeper than \(JSONSchemaNode.maximumNestingDepth) levels"))
+    }
+
+    @Test func theDecoderBoundsWhatTheCompilerCanBeHanded() throws {
+        // Measured on this toolchain: 512 nesting levels decode, 513 throw. The
+        // cap above sits inside that bound, so a document too deep for either
+        // one is refused rather than walked -- and this expectation is the
+        // tripwire if a future Foundation ever lifts its own limit, which is the
+        // only thing that would make the recursion here unbounded again.
+        let depth = 513
+        let document =
+            String(repeating: "{\"a\":", count: depth)
+            + "null" + String(repeating: "}", count: depth)
+        #expect(throws: (any Error).self) {
+            _ = try JSONDecoder().decode(JSONValue.self, from: Data(document.utf8))
+        }
+    }
 }

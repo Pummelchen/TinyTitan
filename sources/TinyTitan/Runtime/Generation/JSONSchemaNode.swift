@@ -66,6 +66,17 @@ public enum JSONScalarKind: String, Sendable, Hashable, CaseIterable {
 
 /// A compiled schema position: what may appear where.
 public indirect enum JSONSchemaNode: Sendable, Hashable {
+    /// The deepest nesting any walk over a schema document may reach.
+    ///
+    /// `compile` walks the schema recursively, and until now the only bound on
+    /// what it could be handed was Foundation's own JSON parser, which was
+    /// measured on this toolchain (Swift 6.4) to accept 512 nesting levels and
+    /// throw at 513 -- an error this server reports as "malformed JSON request".
+    /// That bound is real but undocumented, so the depth guard here is the one
+    /// this project owns; sixty-four is well inside the parse limit and well
+    /// outside anything a client writes by hand.
+    public static let maximumNestingDepth = 64
+
     /// Any JSON value (no `type`, or `true` as a schema).
     case any
     case scalar(Set<JSONScalarKind>)
@@ -93,8 +104,18 @@ public indirect enum JSONSchemaNode: Sendable, Hashable {
         "prefixItems", "minProperties", "maxProperties",
     ]
 
-    /// Compile a schema document. `at` is the dotted path used in errors.
-    public static func compile(_ value: JSONValue, at path: String = "$") throws -> JSONSchemaNode {
+    /// Compile a schema document. `at` is the dotted path used in errors, and
+    /// `depth` is the nesting level this call sits at, so the walk carries its
+    /// own ceiling rather than inheriting one from the parser.
+    public static func compile(
+        _ value: JSONValue,
+        at path: String = "$",
+        depth: Int = 0
+    ) throws -> JSONSchemaNode {
+        guard depth <= maximumNestingDepth else {
+            throw JSONSchemaCompileError.malformed(
+                "a schema may not nest deeper than \(maximumNestingDepth) levels", at: path)
+        }
         // A boolean schema is the JSON Schema shorthand: `true` allows
         // anything, `false` allows nothing.
         if case .bool(let allowed) = value {
@@ -153,7 +174,8 @@ public indirect enum JSONSchemaNode: Sendable, Hashable {
                     throw JSONSchemaCompileError.unmatchableLiteral(
                         "property name '\(name)' at \(path) (it needs escaping)")
                 }
-                compiled[name] = try compile(schema, at: "\(path).properties.\(name)")
+                compiled[name] = try compile(
+                    schema, at: "\(path).properties.\(name)", depth: depth + 1)
             }
             let required = try requiredNames(keywords["required"], at: path)
             let additional = try additionalAllowed(keywords["additionalProperties"], at: path)
@@ -170,7 +192,7 @@ public indirect enum JSONSchemaNode: Sendable, Hashable {
         }
         if let items = keywords["items"] {
             try requireContainer(declared, .array, at: path)
-            return .array(items: try compile(items, at: "\(path).items"))
+            return .array(items: try compile(items, at: "\(path).items", depth: depth + 1))
         }
         // `required` and `additionalProperties` constrain an object even when
         // `properties` is absent, and neither can be honoured for a schema that

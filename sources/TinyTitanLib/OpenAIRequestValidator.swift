@@ -356,9 +356,15 @@ package enum OpenAIRequestValidator {
             parameters: parameters)
     }
 
-    private static func validateSchemaKeys(_ schema: JSONValue) throws {
+    /// Walk a tool's parameter schema. `depth` bounds the walk: the schema is
+    /// network input, and a recursive check with no ceiling of its own is a
+    /// check whose limit belongs to whatever parsed the document.
+    private static func validateSchemaKeys(
+        _ schema: JSONValue, depth: Int = 0
+    ) throws {
         switch schema {
         case .object(let object):
+            try requireSchemaDepth(depth)
             for (schemaKey, value) in object {
                 if schemaKey == "properties" {
                     guard case .object(let definitions) = value else {
@@ -369,18 +375,29 @@ package enum OpenAIRequestValidator {
                     for (_, definition) in definitions {
                         // ChatML tool-call parameter names are free-form;
                         // only the schema structure itself is validated.
-                        try validateSchemaKeys(definition)
+                        try validateSchemaKeys(definition, depth: depth + 1)
                     }
                 } else {
-                    try validateSchemaKeys(value)
+                    try validateSchemaKeys(value, depth: depth + 1)
                 }
             }
         case .array(let values):
+            try requireSchemaDepth(depth)
             for value in values {
-                try validateSchemaKeys(value)
+                try validateSchemaKeys(value, depth: depth + 1)
             }
         default:
+            // Only a container can deepen the walk. Counting a scalar would make
+            // this cap mean something other than the same document's schema cap.
             break
+        }
+    }
+
+    private static func requireSchemaDepth(_ depth: Int) throws {
+        guard depth <= JSONSchemaNode.maximumNestingDepth else {
+            throw invalid(
+                "tool schema nests deeper than \(JSONSchemaNode.maximumNestingDepth) levels",
+                "tools", "invalid_tool_schema")
         }
     }
 
