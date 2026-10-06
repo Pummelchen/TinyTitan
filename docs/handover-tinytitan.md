@@ -296,6 +296,37 @@ left as an upstream ask in `docs/dsh-upstream-asks.md`.
   queueing hop, which never runs the engine. The general form: when something is
   described as background, the seam that observes it must wait for the
   *hand-over*, not merely for already-started work.
+- **`swift build -c release --build-tests` cannot pass on this tree, and it is not
+  a manifest defect.** It fails `unable to resolve Swift module dependency to a
+  compatible module` for the libraries the tests `@testable import` — measured 2 of
+  2 on 2026-10-06, seven modules named once and one the next time, because the build
+  stops at the first module it cannot bind. `swift test -c release` on the same tree
+  builds and runs (`Build complete! (148.88 sec)`), and adding `-Xswiftc
+  -enable-testing` to the failing command makes it succeed too (`Build complete!
+  (147.46 sec)`), which is the mechanism: a release `--build-tests` compiles the
+  product libraries without `-enable-testing`, so a `@testable` import has no
+  compatible module to bind. Ledger AUD-152, filed first as an unreproduced flake.
+  So: run release-config tests with `swift test -c release`, and do not purge
+  `.build` or edit `Package.swift` when this error appears.
+- **A test that awaits a parked task cannot time out, so it hangs instead of
+  failing.** Two probe harnesses written to catch a lost wake produced no output at
+  all and had to be killed after 7 and 10 minutes: a task group joins *every* child,
+  so the child blocked on `await parkedTask.value` outlives the timeout child and
+  `group.cancelAll()`, and cancelling the waiter does not cancel the unstructured
+  task it is awaiting. The deadline has to be a polling loop over a counter the work
+  writes on its way out — which is how `concurrentSwitchesWakeEveryQueuedCaller` and
+  `RoutingGateTests` are written, and both then fail in 30.0 s and 10.1 s instead of
+  hanging. A second defect was hiding behind the first: the fixture gate stored one
+  continuation for any number of waiters, so the second concurrent waiter overwrote
+  the first.
+- **A pinned tool can be shadowed before the gate's remedy can reach it.** This host
+  has Homebrew `ruff` 0.16.10 in `/opt/homebrew/bin`, which precedes pipx's
+  `~/.local/bin` on `PATH`, so `pipx install --force ruff==0.16.7` — the remedy the
+  gate printed — installs the pin where nothing will use it. The gate now names the
+  binary it resolved. Until that PATH entry is removed the `python` gate is *not
+  checked* on this host; the check itself passes with the pinned ruff first on
+  `PATH` (`ok (ruff 0.16.7, check and format clean, parses under 3.13)`), so the
+  repository's python is clean and only the environment is not.
 - **The synthetic kernel metrics swing with the machine, not the code.** QKV GEMV
   and GDN in-projection have read 55.4–78.6 and 66.8–77.4 GB/s across the
   v5.5–v5.8 records on this machine, and 5.9 measured 63.5/67.9 while macOS's
