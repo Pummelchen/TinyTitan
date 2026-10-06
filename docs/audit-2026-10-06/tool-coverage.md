@@ -174,11 +174,12 @@ run directory with a naive local stamp, and no rule sees it.
 
 ## Repository gate proofs
 
-Each of the eleven checks in `tools/lint.sh` was given a deliberate violation and run as
+Each of the twelve checks in `tools/lint.sh` was given a deliberate violation and run as
 `tools/lint.sh <mode>`; the exit code is the gate's own, captured without a pipe so a
-`FAIL` line cannot be reported beside a zero status. The baseline run of all eleven on a
-clean tree is green (`/tmp/tt-audit/lint-baseline.log`: 2,091 functions scanned, 24
+`FAIL` line cannot be reported beside a zero status. The baseline run of the first eleven
+on a clean tree is green (`/tmp/tt-audit/lint-baseline.log`: 2,091 functions scanned, 24
 scripts, eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7 clean).
+`test-skip` is the twelfth, added when AUD-127 closed, and its own probe is the row below.
 
 | Gate | Violation introduced | Gate result |
 | --- | --- | --- |
@@ -187,6 +188,7 @@ scripts, eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7 clea
 | `unchecked-sendable` | `final class AuditProbeBox: @unchecked Sendable` with no `unchecked-invariant:` note | exit 1, `NEW: …AuditProbeBox` |
 | `converter` | `stack[expert] = piece` changed to `stack[len(target["experts"])] = piece`, i.e. file by arrival order | exit 1, `experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]` — the gate catches the real defect, not a proxy |
 | `arch-path` | `BIN=".build/arm64-apple-macosx26.0/release/TinyTitanCLI"` in a `tools/` script | exit 1, file and line named |
+| `test-skip` | (a) a temporary `tests/` suite whose `@Test` body opens `guard let path, FileManager…fileExists(atPath: path) else { return }` on an environment variable; (b) the tree as it stood with three sites already gated | (a) exit 1 naming `tests/TinyTitanServer/GateProbeTmp.swift:9`, and exit 0 once the probe file is deleted. (b) exit 1 naming one site the grep sweep had classed as a manual helper and not a defect — `ClientCLITests:170`, the stub server, which is the same early return and is now gated too. The gate was written after the three swept sites were fixed, so it is proved against the probe and that one live find, not re-run over the whole unfixed tree |
 | `shell` (portability) | `mapfile -t lines …` and a bare `"${args[@]}"` under `set -u` | exit 1, both classes named separately |
 | `shellcheck` | unquoted `cd $1` and an unquoted array expansion | exit 1, `SC2068` (error) and `SC2164` (warning) |
 | `swiftlint` | a force unwrap, then `as!`/`try!` | exit 1, `force_unwrapping`, `force_cast`, `force_try` all as errors under `--strict` |

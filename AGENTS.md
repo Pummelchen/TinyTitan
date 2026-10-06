@@ -247,8 +247,8 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the eleven checks CI enforces beyond the compiler — the
-first six are project-specific probes, the last five are pinned third-party
+`tools/lint.sh` runs the twelve checks CI enforces beyond the compiler — the
+first seven are project-specific probes, the last five are pinned third-party
 linters:
 
 - `force-cast` — no `as!` / `try!` under `sources/` without a
@@ -266,6 +266,14 @@ linters:
   opt-out, and it prints a skip line instead of silence.
 - `arch-path` — no hardcoded SwiftPM target triple in a build path, which points
   at nothing on a newer toolchain or at a stale binary on this one.
+- `silent-test-skip` (`tools/lint.sh test-skip`) — no test body in `tests/` may
+  `return` early on an environment variable, a file's presence, or a GPU family.
+  Such a test reports **passed** while having asserted nothing, which is worse
+  than a skip because a skip is honest: `.enabled(if:)` records the same
+  condition as one, and `LibraryContractTests` and the MPP kernel suite already
+  gate that way. A gate helper that returns `nil` is the sanctioned idiom and is
+  not flagged; an audited exemption is `lint:allow-silent-skip <reason>` above
+  the line, and there are none.
 - `shell-portability` — every shell script parses and runs under `/bin/bash`,
   which is 3.2.57 on a factory Mac, not the Homebrew 5.x a development machine
   puts first on `PATH`. That one is not academic: a single-quoted heredoc holding

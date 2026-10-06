@@ -132,15 +132,31 @@ struct Qwen4ExpArchInfoTests {
     }
 }
 
+/// The pinned checkpoint's own `config.json` on this host, or `nil` when no copy
+/// is present.
+///
+/// A gate, not a `guard ... else { return }` inside the test body: an early
+/// return there is reported as a *passed* test even though it asserted
+/// nothing, so the run would claim coverage it did not take. `.enabled(if:)`
+/// records the skip instead — the same shape `LibraryContractTests` and the
+/// MPP kernel suite use.
+private func pinnedQwen38Config() -> String? {
+    guard
+        let path = ProcessInfo.processInfo.environment["TINYTITAN_QWEN38_CONFIG"],
+        FileManager.default.fileExists(atPath: path)
+    else { return nil }
+    return path
+}
+
 /// Parses the real pinned checkpoint config, if a copy is present. Skipped
-/// when absent so the suite stays hermetic; run with the file to confirm the
-/// loader against the actual artifact rather than a reconstruction.
-@Suite("Qwen4Exp real config")
+/// (and *recorded* as skipped) when absent so the suite stays hermetic; run with
+/// the file to confirm the loader against the actual artifact rather than a
+/// reconstruction.
+@Suite("Qwen4Exp real config", .enabled(if: pinnedQwen38Config() != nil))
 struct Qwen4ExpRealConfigTests {
     @Test("The pinned checkpoint's own config.json parses and matches")
     func realConfig() throws {
-        let path = ProcessInfo.processInfo.environment["TINYTITAN_QWEN38_CONFIG"]
-        guard let path, FileManager.default.fileExists(atPath: path) else { return }
+        let path = try #require(pinnedQwen38Config())
         let a = try ArchInfo.load(configPath: path)
         #expect(a.family == .qwen38flash)
         #expect(a.numLayers == 48)

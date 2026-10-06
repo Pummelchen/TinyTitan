@@ -159,15 +159,23 @@ struct ClientCLITests {
     }
 }
 
-/// Not a test of anything: with TINYTITAN_STUB_SERVER_SECONDS set, keeps a
-/// scripted server up for that long and prints its port, so a CLI can be
-/// run against it by hand while debugging a client's request grammar.
+/// The requested lifetime of the manual stub server, or `nil` when the ordinary
+/// run should not start one.
+private func stubServerSeconds() -> Double? {
+    ProcessInfo.processInfo.environment["TINYTITAN_STUB_SERVER_SECONDS"]
+        .flatMap(Double.init)
+}
+
+/// Not a test of anything: with TINYTITAN_STUB_SERVER_SECONDS set to a number of
+/// seconds, keeps a scripted server up for that long and prints its port, so a
+/// CLI can be run against it by hand while debugging a client's request grammar.
+/// Gated rather than guarded in the body: the ordinary run has to *record* that
+/// this did not run, and an early return there reports a passed test that did
+/// nothing.
 @Suite struct StubServerForManualRuns {
-    @Test func stubServer() async throws {
-        guard
-            let seconds = ProcessInfo.processInfo.environment["TINYTITAN_STUB_SERVER_SECONDS"]
-                .flatMap(Double.init)
-        else { return }
+    @Test(.enabled(if: stubServerSeconds() != nil))
+    func stubServer() async throws {
+        let seconds = try #require(stubServerSeconds())
         let backend = GreetingBackend()
         let server = TinyTitanHTTPServer(modelID: "test-model", queueLimit: 2, backend: backend)
         let channel = try await server.start(port: 0)

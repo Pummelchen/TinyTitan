@@ -5,6 +5,16 @@ import TinyTitanValidationSupport
 
 @testable import TinyTitan
 
+/// Whether this host has an Apple10-family GPU, read once. The tile-boundary
+/// TensorOps test is gated on it so a hosted runner without that family
+/// *records a skip*: the kernel is never dispatched there, and a test that
+/// returned early instead would report a pass for a path it never ran. Run the
+/// suite on Apple10 hardware before changing the TensorOps path.
+private let apple10TensorOpsAvailable: Bool = {
+    guard let device = MTLCreateSystemDefaultDevice() else { return false }
+    return device.supportsFamily(.apple10)
+}()
+
 @Suite struct PrefillAttentionTests {
     private typealias Fixture = PrefillAttentionRef.Inputs
 
@@ -130,18 +140,16 @@ import TinyTitanValidationSupport
         }
     }
 
-    @Test(arguments: [
-        1,
-        63, 64, 65,
-        127, 128, 129,
-        255, 256, 257,
-        1_023, 1_024, 1_025,
-    ])
+    @Test(
+        .enabled(if: apple10TensorOpsAvailable),
+        arguments: [
+            1,
+            63, 64, 65,
+            127, 128, 129,
+            255, 256, 257,
+            1_023, 1_024, 1_025,
+        ])
     func tensorOps2DFullAttentionMatchesReferenceAtTileBoundaries(_ visibleKeys: Int) throws {
-        let context = try MetalContext()
-        // Hosted CI has no Apple10 GPU, so it returns without dispatching this
-        // kernel. Run this suite on Apple10 before changing the TensorOps path.
-        guard context.device.supportsFamily(.apple10) else { return }
         let fixture = Self.makeFixture(
             start: visibleKeys - 1,
             chunk: 1,

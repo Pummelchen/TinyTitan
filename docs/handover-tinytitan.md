@@ -15,7 +15,7 @@
 > **5.16** (`v5.16` → `0fd9df2`, 2026-10-03) made the engine a library —
 > `TinyTitanLib` is a shipped product, the CLI and the server both generate
 > through it, and the toolchain is pinned **exactly**: Xcode 27 / Swift 6.4,
-> nothing else. `tools/lint.sh` runs **eleven** pinned gates, and every one of
+> nothing else. `tools/lint.sh` runs **twelve** pinned gates, and every one of
 > them **fails** when its dependency is missing rather than reporting a skip —
 > a check that did not run is not a pass. Release notes in the tree keep
 > `SHA256_PENDING`; `tools/release.sh` fills them in the staged copy at publish
@@ -104,11 +104,11 @@ traps that one named still bite and are folded in below.
 | Release | **5.15 published** 2026-10-02 — `tinytitan-5.15-macos-arm64.tar.gz`, 15,412,309 bytes, sha256 `b0f2e136…` with its `.sha256` beside it (verified: the notes' digest matches the asset) |
 | Models | **8 installs, 244 GB**; every receipt bound to this path, so all load |
 | Goldens stored | 16; **7 checked** here (qwen38-125b-4bit, qwen36-{4,8}, qwen35-{4b,9b}-{4,8}); the nine with no install — `ornith-{4,8}`, `qwen38-8`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-2b-{4,8}` — are reported *not checked* and named in the notes |
-| Audit | **28 findings, all closed**; the eleven gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **28 findings, all closed**; the twelve gates in `tools/lint.sh` are what the audit left behind. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release rebuilt for 5.15 (at the tag); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, level with `origin/master` (Changelog carries the 5.15 section); user-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
-| CI | every `main` push runs CI (eleven gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the release commit's push is the run to watch (`gh run list`) |
+| CI | every `main` push runs CI (twelve gates, serial tests, thread-sanitizer, converter and installer gates, Markdown links) and CodeQL (Swift, 249 files); the release commit's push is the run to watch (`gh run list`) |
 
 ## What has landed
 

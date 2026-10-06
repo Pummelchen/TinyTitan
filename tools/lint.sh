@@ -11,6 +11,7 @@
 #   unchecked-sendable  new `@unchecked Sendable` must document its invariant
 #   converter           routed experts must land at their own index
 #   arch-path           no hardcoded SwiftPM triple in a build path (see below)
+#   silent-test-skip    no env/capability-shaped early return in tests/ (see below)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -533,6 +534,73 @@ check_shell_portability() {
   return $failed
 }
 
+# --- silent-test-skip --------------------------------------------------------
+# A test that returns early has run nothing, and reports as **passed**. The
+# audit found three (AUD-127 and the two siblings it swept): a checkpoint-config
+# test whose env var was unset, a TensorOps test whose GPU family was absent,
+# and a KV suite whose Metal device was missing. Each was green in the run log
+# while checking nothing, which is worse than a skip because a skip is honest —
+# `.enabled(if:)` records one, and `LibraryContractTests` and the MPP suite
+# already gate that way.
+#
+# The gate therefore flags a bare `else { return }` (block form too) in `tests/`
+# when the condition above it reads an environment variable, a file's existence,
+# or a device capability: those are the three ways a suite goes environment-shaped.
+# A gate helper that returns `nil` is the sanctioned idiom and is not flagged; only
+# the unreported early exit is. Opting out: `lint:allow-silent-skip <reason>` on
+# the line above, for a body that deliberately has nothing to assert on that path.
+check_silent_test_skip() {
+  echo "== silent-test-skip: no env/capability-shaped early return in tests =="
+  local out rc
+  out="$(cd "$ROOT" && python3 - <<'PY'
+import pathlib
+import re
+import sys
+
+TRIGGER = re.compile(
+    r"ProcessInfo\.processInfo\.environment|fileExists\(|supportsFamily\("
+    r"|MTLCreateSystemDefaultDevice")
+INLINE = re.compile(r"\belse\s*\{\s*return\s*\}")
+BLOCK_OPEN = re.compile(r"\belse\s*\{\s*$")
+BARE_RETURN = re.compile(r"^\s*return\s*$")
+ALLOW = re.compile(r"lint:allow-silent-skip\s+\S+")
+bad = []
+for path in sorted(pathlib.Path("tests").rglob("*.swift")):
+    lines = path.read_text(errors="replace").splitlines()
+    for index, line in enumerate(lines):
+        previous = lines[max(0, index - 3):index]
+        if INLINE.search(line):
+            exit_line, window = line, previous + [line]
+        elif BLOCK_OPEN.search(line) and any(
+            BARE_RETURN.match(n) for n in lines[index + 1:index + 3]
+        ):
+            exit_line, window = line, previous
+        else:
+            continue
+        if not any(TRIGGER.search(text) for text in window):
+            continue
+        if any(ALLOW.search(text) for text in previous + [exit_line]):
+            continue
+        bad.append(f"{path}:{index + 1}: {exit_line.strip()[:90]}")
+if bad:
+    print(
+        "FAIL: a test that returns early reports green while asserting nothing; "
+        "gate it with .enabled(if:) so the skip is recorded")
+    for entry in bad:
+        print("  " + entry)
+    sys.exit(1)
+print("ok (none)")
+PY
+)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$out" | sed 's/^/  /'
+    status=1
+  else
+    echo "  $(echo "$out" | tail -1)"
+  fi
+}
+
 # --- python -----------------------------------------------------------------
 # Ruff is the Python standard: the rules and the format are pinned in the
 # repository's pyproject.toml. A missing or different ruff FAILS rather than
@@ -794,12 +862,13 @@ check_javascript() {
 }
 
 case "$want" in
-  all)         check_force_cast; check_func_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_func_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   func-length) check_func_length ;;
   sendable)    check_unchecked_sendable ;;
   converter)   check_converter_expert_order ;;
   arch-path)   check_arch_path ;;
+  test-skip)   check_silent_test_skip ;;
   shell)       check_shell_portability ;;
   shellcheck)  check_shellcheck ;;
   swiftlint)   check_swiftlint ;;
@@ -808,7 +877,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|func-length|sendable|converter|arch-path|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|func-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
 esac
 
 exit $status

@@ -4,6 +4,11 @@ import Testing
 
 @testable import TinyTitan
 
+/// A Metal device on this host, or `nil` on a headless runner. Suite-level gate
+/// rather than an in-body early return: a `return` makes a test that ran nothing
+/// report as passed, and a green run would then cover a path it never took.
+private let hasMetalDeviceForGrowthTests: Bool = MTLCreateSystemDefaultDevice() != nil
+
 /// KV storage grows on demand instead of reserving `maxContext`.
 ///
 /// Reserving the maximum cost throughput even when unused: at 262144 tokens a
@@ -12,9 +17,10 @@ import Testing
 /// against 22.44 s at 262144. What these tests protect is the part that could go
 /// wrong silently -- growth must carry the existing KV forward, or a long
 /// conversation would keep generating from subtly corrupted history.
-@Suite struct KVCacheGrowthTests {
-    private static func make(maxContext: Int) throws -> KVCacheManager? {
-        guard let device = MTLCreateSystemDefaultDevice() else { return nil }
+@Suite(.enabled(if: hasMetalDeviceForGrowthTests))
+struct KVCacheGrowthTests {
+    private static func make(maxContext: Int) throws -> KVCacheManager {
+        let device = try #require(MTLCreateSystemDefaultDevice())
         return try KVCacheManager(
             device: device,
             config: .qwen36_35B_A3B,
@@ -31,21 +37,21 @@ import Testing
 
     /// The whole point: a large advertised limit must not be allocated up front.
     @Test func initialCapacityIgnoresALargeMaxContext() throws {
-        guard let kv = try Self.make(maxContext: 262_144) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 262_144)
+        let L = try #require(Self.fullLayer(kv))
         #expect(kv.capacity(layer: L) == KVCacheManager.initialCapacityTokens)
         #expect(kv.capacity(layer: L) < 262_144)
     }
 
     @Test func smallMaxContextIsNotRoundedUp() throws {
-        guard let kv = try Self.make(maxContext: 1_024) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 1_024)
+        let L = try #require(Self.fullLayer(kv))
         #expect(kv.capacity(layer: L) == 1_024)
     }
 
     @Test func reserveGrowsByDoublingAndStopsAtMaxContext() throws {
-        guard let kv = try Self.make(maxContext: 262_144) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 262_144)
+        let L = try #require(Self.fullLayer(kv))
         let start = kv.capacity(layer: L)
         try kv.reserve(tokens: start + 1)
         #expect(kv.capacity(layer: L) == start * 2)
@@ -57,8 +63,8 @@ import Testing
     }
 
     @Test func reserveBelowCurrentCapacityIsANoOp() throws {
-        guard let kv = try Self.make(maxContext: 262_144) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 262_144)
+        let L = try #require(Self.fullLayer(kv))
         let before = kv.capacity(layer: L)
         let buffer = kv.kSlot(layer: L, position: 0).buffer
         try kv.reserve(tokens: 8)
@@ -69,8 +75,8 @@ import Testing
 
     /// The failure this exists to catch: growth that loses history.
     @Test func growthPreservesWrittenTokens() throws {
-        guard let kv = try Self.make(maxContext: 262_144) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 262_144)
+        let L = try #require(Self.fullLayer(kv))
         let stride = kv.stride(layer: L)
         let start = kv.capacity(layer: L)
         // Write a recognisable byte per token across the first 64 positions.
@@ -95,8 +101,8 @@ import Testing
     }
 
     @Test func repeatedReserveIsIdempotent() throws {
-        guard let kv = try Self.make(maxContext: 262_144) else { return }
-        guard let L = Self.fullLayer(kv) else { return }
+        let kv = try Self.make(maxContext: 262_144)
+        let L = try #require(Self.fullLayer(kv))
         try kv.reserve(tokens: 20_000)
         let capacity = kv.capacity(layer: L)
         let buffer = kv.kSlot(layer: L, position: 0).buffer
