@@ -4,10 +4,10 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 38,
-    "done": 7,
+    "total": 40,
+    "done": 8,
     "open": 31,
-    "blocked": 0
+    "blocked": 1
   },
   "tasks": [
     {
@@ -151,16 +151,16 @@
       "severity": "S1",
       "tier": "A",
       "project": "installer",
-      "file_line": "tools/install_tinytitan.sh:214-229, :246-253",
+      "file_line": "tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385",
       "title": "The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes",
       "category": "integrity / download-and-execute, fail-open check",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L4 security pass",
       "evidence-before": "install_tinytitan.sh:214 fetches $asset.sha256 under `if curl -fsSL`; on failure the else branch at :227-229 only warns 'No checksum published for $tag; continuing without verification' and installs. tools/release.sh:320/349 always generate the .sha256 and :451 uploads it as a release asset, so the branch is a fail-open on a path that always has a checksum. The second artifact — src_url at :246, the tag archive holding tools/, extracted to $SRC_PATH and executed later by tools/server_launcher.sh — has no checksum code at all. Severity rationale, recorded so it is not later re-litigated: both downloads come over HTTPS from the same github.com origin as the digest itself, so the digest is corruption and rename detection, not publisher identity; that is S1, not a supply-chain S0.",
-      "fix-summary": "",
-      "evidence-after": "Expected: a missing or unverifiable checksum stops the install, and the tools archive is verified the same way the engine archive is. Both artifacts.",
-      "commit": "",
+      "fix-summary": "Both downloads now go through one helper with no fall-through: a missing `shasum`, an unfetchable `.sha256`, or a mismatch each removes the staging directory and dies BEFORE anything is unpacked, so the engine binaries and the tools tree are each installed only on proof. The warning branch is gone. The tools stopped being a source archive (`archive/refs/tags/$tag.tar.gz`) and became a release asset, `tinytitan-<version>-tools.tar.gz`, which `tools/release.sh` now stages with `git archive` of the tag, asserts member by member (install_tinytitan.sh, server_launcher.sh, install_models.sh, tinytitan_models.sh, dsh_local.sh, plugins/dsh-tinytitan/, Package.swift, sources/TinyTitanLib/), checksums, uploads beside the other two, and enforces in the release notes through TOOLS_SHA256_PENDING / TOOLS_BYTES_PENDING -- which is why the digest substitution order comment and docs/release-process.md changed shape as well. The installer's refusal messages name what to do (a newer --version, --from-source, retry, or report a damaged release) rather than only what failed.",
+      "evidence-after": "benchmark/test_release_installer_verification.py: 18 tests, OK in 1.4s. Five behavioural cases run the REAL installer (temp HOME, TINYTITAN_ROOT, a stub `curl` serving fixture archives, real SHA-256 digests, the real `shasum`) and assert both 'engine checksum verified' and 'tools checksum verified', the release-asset URL rather than archive/refs/tags, and that every digest was fetched. Four refusal cases -- engine digest missing, engine tampered, tools digest missing, tools tampered -- each assert a non-zero exit, the specific message, and that NOTHING landed in the install root afterwards. One case builds a PATH containing every system tool except the checksum tool and asserts the install refuses instead of installing unverified bytes. Negative control: the same harness pointed at HEAD~1's installer fails 12 of the 18, so they test the change and not their own fixtures. Gates: bash -n parses; tools/lint.sh shell ok (24 scripts, system bash 3.2.57); shellcheck 0.11.0 ok with no warnings; tools/lint.sh python ok (ruff 0.16.7, the pinned version installed with `pipx install --force ruff==0.16.7`; homebrew carries 0.16.10). Converter gate test_prepare_qwen38 + test_qwen38_resume_e2e: 75 tests OK. Sibling sweep: install_models.sh:620-623 checks content-length only, but the repacker hashes every payload against the manifest and the verified-install receipt is what the runtime demands, so the bytes are proven before use -- no row opened. tools/dsh_local.sh:264 downloads a Node tarball and executes what it extracts with no digest at all: same defect class, different surface, opened as AUD-140. Sequencing consequence, stated in the commit and in the runbook: the closed check requires an asset no published release carries, so this installer refuses v5.18 until it is backfilled or v5.19 is cut -- AUD-139.",
+      "commit": "8057a76",
       "blocked-reason": ""
     },
     {
@@ -653,6 +653,41 @@
       "evidence-before": "Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.",
       "fix-summary": "",
       "evidence-after": "None yet.",
+      "commit": "",
+      "blocked-reason": ""
+    },
+    {
+      "id": "AUD-139",
+      "severity": "S1",
+      "tier": "A",
+      "project": "release",
+      "file_line": "GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276",
+      "title": "v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled",
+      "category": "release artifact gap created by a fix; needs an action on a published release",
+      "status": "BLOCKED",
+      "host": "Mac (primary)",
+      "discovered-by": "AUD-109 fix, sibling consequence",
+      "owner": "repository owner (Pummelchen)",
+      "evidence-before": "AUD-109 made the tools tree a verified release asset. `gh release view v5.18 --repo Pummelchen/TinyTitan --json assets` lists the engine archive, its .sha256, the library archive and its .sha256 -- and no tools asset, because no release script before 8057a76 ever published one. The installer at :272 therefore dies on 'No checksum published for the tools download' for every tag up to and including v5.18, including the default newest-release path.",
+      "fix-summary": "",
+      "evidence-after": "Expected: `gh release upload v5.18 <tools archive> <tools archive>.sha256 --clobber` puts the asset and its digest on the existing Release, the archive is `git archive --prefix=tinytitan-5.18-tools/ v5.18`, and a `bash tools/install_tinytitan.sh --yes --no-model --version v5.18` in a clean VM then reports 'tools checksum verified'. Alternatively cut v5.19, which publishes it by construction, and merge AUD-109's installer after that release. Not taken by the auditor: uploading to, or otherwise mutating, a published release is an action on a shared surface, and the audit's own rule forbids it.",
+      "commit": "",
+      "blocked-reason": "Requires writing to the published v5.18 Release (or cutting v5.19), which is the repository owner's action, not an auditor's. The audit branch does not touch releases; the merge of AUD-109 should be sequenced after one of the two options above."
+    },
+    {
+      "id": "AUD-140",
+      "severity": "S2",
+      "tier": "A",
+      "project": "installer",
+      "file_line": "tools/dsh_local.sh:256-275",
+      "title": "The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest",
+      "category": "integrity / download-and-execute, fail-open check",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "discovered-by": "AUD-109 sibling sweep",
+      "evidence-before": "dsh_local.sh:264 `run \"download Node from nodejs.org\" curl -fsSL \"$url\" -o \"$tmp/$tarball\"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.",
+      "fix-summary": "",
+      "evidence-after": "Expected: the Node download is checked against nodejs.org's published SHASUMS256.txt for that exact version, and a missing or non-matching digest stops the setup -- the same fail-closed shape AUD-109 gave the engine and tools archives, with a harness that stubs curl and proves the refusal.",
       "commit": "",
       "blocked-reason": ""
     }

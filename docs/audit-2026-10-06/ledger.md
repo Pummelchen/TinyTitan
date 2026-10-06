@@ -2,18 +2,19 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:31  Done:7  Blocked:0  Total:38**
+**Open:31  Done:8  Blocked:1  Total:40**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
+| AUD-139 | S1 | A | release | `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276` | v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled | release artifact gap created by a fix; needs an action on a published release | BLOCKED | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | DONE | Mac (primary) |
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385, sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift:97` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | DONE | Mac (primary) |
+| AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
@@ -41,6 +42,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | OPEN | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | OPEN | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
+| AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
@@ -48,20 +50,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 
 ## Detail
-
-### AUD-109 — The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** installer
-- **Location:** `tools/install_tinytitan.sh:214-229, :246-253`
-- **Category:** integrity / download-and-execute, fail-open check
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** L4 security pass
-
-**Evidence before.** install_tinytitan.sh:214 fetches $asset.sha256 under `if curl -fsSL`; on failure the else branch at :227-229 only warns 'No checksum published for $tag; continuing without verification' and installs. tools/release.sh:320/349 always generate the .sha256 and :451 uploads it as a release asset, so the branch is a fail-open on a path that always has a checksum. The second artifact — src_url at :246, the tag archive holding tools/, extracted to $SRC_PATH and executed later by tools/server_launcher.sh — has no checksum code at all. Severity rationale, recorded so it is not later re-litigated: both downloads come over HTTPS from the same github.com origin as the digest itself, so the digest is corruption and rename detection, not publisher identity; that is S1, not a supply-chain S0.
-
-**Evidence after.** Expected: a missing or unverifiable checksum stops the install, and the tools archive is verified the same way the engine archive is. Both artifacts.
 
 ### AUD-124 — A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits
 
@@ -76,6 +64,22 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Read at the cited lines and confirmed by the auditor. validateQuantAgainstResident `continue`s every u32 entry once expertsPerLayer != 0 (:221-224, with a comment saying the widths live in packed_experts/layout.json), and the dominant-width guard returns for the same condition (:256). validatePackedExpertLayout (:368-390) compares expertStride/numLayers/expertsPerLayer against the manifest and checks counts, offsets and alignment — but PackedExpertsLayout (VerifiedInstallManifest.swift:28-33) carries no width field, and grep for weightBits across the whole file finds only :197, :198, :211 and :258, all inside the resident path. So quant.routedExpert.weightBits is compared against nothing for exactly the MoE installs the product ships (35B-A3B, 125B-A6B), while the runtime dequantizes with it and ManifestIdentity turns it into the `_<bits>-Bit` id. The writer's own comment names the failure mode (SSDAIJSON.swift:140-144): 'the word count changes, the strides still divide evenly, every shape check passes, and the model answers fluently and wrongly'.
 
 **Evidence after.** Expected: a packed-expert install is verified by arithmetic — expertStride consistent with the declared bit width and the expert's element count — so a manifest that lies about the width of expert bytes fails --verify-install instead of passing it.
+
+### AUD-139 — v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** release
+- **Location:** `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276`
+- **Category:** release artifact gap created by a fix; needs an action on a published release
+- **Status:** BLOCKED
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-109 fix, sibling consequence
+
+**Evidence before.** AUD-109 made the tools tree a verified release asset. `gh release view v5.18 --repo Pummelchen/TinyTitan --json assets` lists the engine archive, its .sha256, the library archive and its .sha256 -- and no tools asset, because no release script before 8057a76 ever published one. The installer at :272 therefore dies on 'No checksum published for the tools download' for every tag up to and including v5.18, including the default newest-release path.
+
+**Evidence after.** Expected: `gh release upload v5.18 <tools archive> <tools archive>.sha256 --clobber` puts the asset and its digest on the existing Release, the archive is `git archive --prefix=tinytitan-5.18-tools/ v5.18`, and a `bash tools/install_tinytitan.sh --yes --no-model --version v5.18` in a clean VM then reports 'tools checksum verified'. Alternatively cut v5.19, which publishes it by construction, and merge AUD-109's installer after that release. Not taken by the auditor: uploading to, or otherwise mutating, a published release is an action on a shared surface, and the audit's own rule forbids it.
+
+**Blocked.** owner `repository owner (Pummelchen)` — Requires writing to the published v5.18 Release (or cutting v5.19), which is the repository owner's action, not an auditor's. The audit branch does not touch releases; the merge of AUD-109 should be sequenced after one of the two options above.
 
 ### AUD-101 — A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path
 
@@ -148,6 +152,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** New tests, all green: JSONSchemaCompileTests.theNestingCapIsExactlyWhereItSaysItIs (64 accepted, 65 refused, via properties and via items), .aRefusedDepthIsAMalformedSchemaErrorThatNamesTheCap, .theDecoderBoundsWhatTheCompilerCanBeHanded (513 still throws -- the tripwire if the platform bound moves); OpenAIValidationTests.aToolSchemaPastTheNestingCapIsRefusedAsBadRequest asserts the 400 envelope shape through the real wire types. Affected suites: 111 tests in 6 suites passed. Full package suite `swift test --no-parallel`: exit 0, 1540 tests in 7 Swift Testing targets, 0 failures. swift-format, swiftlint and func-length clean. Regression surface measured before choosing 64: the deepest schema in any client config cached on this host nests 11 levels, and no JSON owned by this repository comes within 50 of the cap.
 
 **Commit.** `14710ba`
+
+### AUD-109 — The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** installer
+- **Location:** `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385`
+- **Category:** integrity / download-and-execute, fail-open check
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L4 security pass
+
+**Evidence before.** install_tinytitan.sh:214 fetches $asset.sha256 under `if curl -fsSL`; on failure the else branch at :227-229 only warns 'No checksum published for $tag; continuing without verification' and installs. tools/release.sh:320/349 always generate the .sha256 and :451 uploads it as a release asset, so the branch is a fail-open on a path that always has a checksum. The second artifact — src_url at :246, the tag archive holding tools/, extracted to $SRC_PATH and executed later by tools/server_launcher.sh — has no checksum code at all. Severity rationale, recorded so it is not later re-litigated: both downloads come over HTTPS from the same github.com origin as the digest itself, so the digest is corruption and rename detection, not publisher identity; that is S1, not a supply-chain S0.
+
+**Fix.** Both downloads now go through one helper with no fall-through: a missing `shasum`, an unfetchable `.sha256`, or a mismatch each removes the staging directory and dies BEFORE anything is unpacked, so the engine binaries and the tools tree are each installed only on proof. The warning branch is gone. The tools stopped being a source archive (`archive/refs/tags/$tag.tar.gz`) and became a release asset, `tinytitan-<version>-tools.tar.gz`, which `tools/release.sh` now stages with `git archive` of the tag, asserts member by member (install_tinytitan.sh, server_launcher.sh, install_models.sh, tinytitan_models.sh, dsh_local.sh, plugins/dsh-tinytitan/, Package.swift, sources/TinyTitanLib/), checksums, uploads beside the other two, and enforces in the release notes through TOOLS_SHA256_PENDING / TOOLS_BYTES_PENDING -- which is why the digest substitution order comment and docs/release-process.md changed shape as well. The installer's refusal messages name what to do (a newer --version, --from-source, retry, or report a damaged release) rather than only what failed.
+
+**Evidence after.** benchmark/test_release_installer_verification.py: 18 tests, OK in 1.4s. Five behavioural cases run the REAL installer (temp HOME, TINYTITAN_ROOT, a stub `curl` serving fixture archives, real SHA-256 digests, the real `shasum`) and assert both 'engine checksum verified' and 'tools checksum verified', the release-asset URL rather than archive/refs/tags, and that every digest was fetched. Four refusal cases -- engine digest missing, engine tampered, tools digest missing, tools tampered -- each assert a non-zero exit, the specific message, and that NOTHING landed in the install root afterwards. One case builds a PATH containing every system tool except the checksum tool and asserts the install refuses instead of installing unverified bytes. Negative control: the same harness pointed at HEAD~1's installer fails 12 of the 18, so they test the change and not their own fixtures. Gates: bash -n parses; tools/lint.sh shell ok (24 scripts, system bash 3.2.57); shellcheck 0.11.0 ok with no warnings; tools/lint.sh python ok (ruff 0.16.7, the pinned version installed with `pipx install --force ruff==0.16.7`; homebrew carries 0.16.10). Converter gate test_prepare_qwen38 + test_qwen38_resume_e2e: 75 tests OK. Sibling sweep: install_models.sh:620-623 checks content-length only, but the repacker hashes every payload against the manifest and the verified-install receipt is what the runtime demands, so the bytes are proven before use -- no row opened. tools/dsh_local.sh:264 downloads a Node tarball and executes what it extracts with no digest at all: same defect class, different surface, opened as AUD-140. Sequencing consequence, stated in the commit and in the runbook: the closed check requires an asset no published release carries, so this installer refuses v5.18 until it is backfilled or v5.19 is cut -- AUD-139.
+
+**Commit.** `8057a76`
 
 ### AUD-121 — A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure
 
@@ -522,6 +544,20 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as accepted-and-ignored with disclosure at plugins/dsh-tinytitan/README.md (~:227), so it is not a silent facade. Either enforce or reject with a clear error: a field that is silently ignored changes what the client believes it asked for.
 
 **Evidence after.** None yet.
+
+### AUD-140 — The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** installer
+- **Location:** `tools/dsh_local.sh:256-275`
+- **Category:** integrity / download-and-execute, fail-open check
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-109 sibling sweep
+
+**Evidence before.** dsh_local.sh:264 `run "download Node from nodejs.org" curl -fsSL "$url" -o "$tmp/$tarball"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.
+
+**Evidence after.** Expected: the Node download is checked against nodejs.org's published SHASUMS256.txt for that exact version, and a missing or non-matching digest stops the setup -- the same fail-closed shape AUD-109 gave the engine and tools archives, with a harness that stubs curl and proves the refusal.
 
 ### AUD-125 — memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing)
 
