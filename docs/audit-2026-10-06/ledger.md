@@ -2,19 +2,19 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:35  Done:3  Blocked:0  Total:38**
+**Open:33  Done:5  Blocked:0  Total:38**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:41-44` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | START | Mac (primary) |
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | START | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | START | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
+| AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
@@ -43,25 +43,11 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | OPEN | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | OPEN | Mac (primary) |
+| AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 
 ## Detail
-
-### AUD-107 — tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** engine
-- **Location:** `sources/TinyTitan/Runtime/Family/PLEConstants.swift:41-44`
-- **Category:** silent truncation/overflow, unchecked input
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** L3 line pass
-
-**Evidence before.** Read at the cited lines: ngramHeadsOffsets/ngramHeadsVocabSizes are [Int64] decoded straight from ple_constants.json (:11-12, JSONDecoder :34) and widened with UInt64(offset) + UInt64(vocab) (:43). UInt64() of a negative Int64 is a fatal trap, not a throw. validate() (:56-89) compares counts and the headCount*pleHeadDim product but never sign, and never checks that offsets ascend. The docstring at :48-55 says the check exists 'to turn a corrupt sidecar into a report rather than a trap' — it does not cover the trap this path can hit.
-
-**Evidence after.** Expected: validate() rejects a negative offset/vocab and a non-ascending offset table with ModelError.archMismatch, so a corrupt sidecar reports and never traps.
 
 ### AUD-108 — Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file
 
@@ -154,6 +140,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Pre-fix launcher: `Ran 16 tests … FAILED (failures=2)`. Fixed launcher: `Ran 16 tests in 1.357s OK`. Sibling suites still green on this host: test_launcher_ram, test_launcher_port, test_progress, test_coder_clients -> Ran 45 tests, OK.
 
 **Commit.** `see the audit(AUD-101) commit`
+
+### AUD-107 — tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)`
+- **Category:** silent truncation/overflow, unchecked input
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L3 line pass
+
+**Evidence before.** Read at the cited lines: ngramHeadsOffsets/ngramHeadsVocabSizes are [Int64] decoded straight from ple_constants.json (:11-12, JSONDecoder :34) and widened with UInt64(offset) + UInt64(vocab) (:43). UInt64() of a negative Int64 is a fatal trap, not a throw. validate() (:56-89) compares counts and the headCount*pleHeadDim product but never sign, and never checks that offsets ascend. The docstring at :48-55 says the check exists 'to turn a corrupt sidecar into a report rather than a trap' — it does not cover the trap this path can hit.
+
+**Fix.** `tableRowCount` is a throwing function and the only way to ask for the count, so no call order can reach the conversion unchecked: it walks the head tables the way the producer builds them, requiring offset[i] == sum(vocab[0..i]), vocab > 0 everywhere, paired arrays, a non-empty table, and `addingReportingOverflow` rather than `+=` for the running total. `validate()` calls it, so the load-time gate refuses the addressing as well as the width. RealForwardRunner+BuildCore.swift:333 passes `try constants.tableRowCount()`. Note for the record: the commit message says eleven tests; the suite is twelve with eight added -- the ledger number is the checked one.
+
+**Evidence after.** Before: a standalone `UInt64(negative Int64)` under this toolchain dies with `Fatal error: Negative value is not representable`, exit 133 -- the exact failure `ple_constants.json` could produce at RealForwardRunner+BuildCore.swift:333. After: `swift test --no-parallel --filter PLE` -> 26 tests in 4 suites passed, PLEConstantsGeometryTests 4 -> 12 tests, including `acceptsProductionConstants`, which feeds the checkpoint's own constants (the ple_golden fixture, whose offsets equal the installed model's ple_constants.json) through validate() and pins 320001446 rows, so the new invariants are the checkpoint's rules and not a refusal waiting for a working model. Full `swift test --no-parallel` exit 0; `swift build -c release` exit 0 (583 steps, 121.52 s); swift-format, swiftlint, force-cast, func-length all ok. Sibling audit: PLEConstants was the only model-supplied signed-to-unsigned conversion in sources/ (grep for `[Int64]` decodables finds only its three arrays; CPUEngine/SafeTensors.swift:119 already guards `offsets[0] >= 0`; ModelCatalog.sizeBytes is our own number, used only for display), and the guard against a repeat is that the count now cannot be obtained without the checks running.
+
+**Commit.** `fa1ca79`
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -543,22 +547,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
-### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
-
-- **Severity / tier:** S3 / Tier C
-- **Project:** docs
-- **Location:** `docs/release-notes-v5.8.md:132`
-- **Category:** stale documentation, documented switch with no consumer (L0/§6)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L0 repository pass + §6 unused-code sweep (row re-added: the first append script aborted before writing it)
-
-**Evidence before.** Re-derived on this branch rather than reconstructed from the aborted run, and the wider hypothesis was tested and rejected first: a scan of every TINYTITAN_* token in README.md and the non-historical docs, and in tools/ and plugins/, against actual readers (`${VAR}` in bash, a string literal in Swift, `os.environ`, `process.env`) found NO documented-but-unread switch -- TINYTITAN_ALL_MODELS (tools/tinytitan_models.sh:296 sets it, :440 reads it), TINYTITAN_STUB_SERVER_SECONDS (tests/TinyTitanServer/ClientCLITests.swift:168) and TINYTITAN_RELEASE_{NOTES_MAX_CHARS,SKIP_GOLDENS_REASON} (tools/release.sh:422, :71) are all live, so that whole class is clean and only the knob-deletion case survives. `git show --stat 3eb11cf` ('runtime: remove every decode knob that measured a wash or a loss') deletes 18 tokens; 13 of them have no reader anywhere in sources/, tools/ or plugins/. Of the docs that name a dead token, all carry a superseded note except three dated measurement records (docs/qwen38-prefetch-predictor-study.md, docs/v4.2-experiments.md, docs/v4.3-predictive-prefetch-plan.md -- accurate as records of what was measured then, not claims about the current engine) and docs/release-notes-v5.8.md:132, which says in the present tense that '`TINYTITAN_KEEP_WIRED` is a tri-state so `=0` pages the expert cache out'. docs/release-notes-v5.1.md:57 and docs/qwen38-decode-profile-2026-09-05.md:3-13 establish the house convention for exactly this: a `> **Superseded.**` block that names what was retired and keeps the text as the record of what that release shipped. The real model sidecar and the tests confirm the knob is gone: tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:119-122 asserts 'The tri-state `TINYTITAN_KEEP_WIRED` override is gone' and that the profile row decides.
-
-**Fix.** Add the Superseded banner to the 5.8 note's 'Also in this release' item, in the form release-notes-v5.1.md:57 already uses, naming the deletion commit and where the surviving decision lives (the profile row). Historical measurement records are left alone.
-
-**Evidence after.** None yet.
-
 ### AUD-137 — An unreachable ?? 262_144 fallback on a non-empty constant array
 
 - **Severity / tier:** S3 / Tier B
@@ -588,3 +576,21 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Fix.** Decide once: either give these reads the same report AUD-134 adds, or note in the protocol that a journal read cannot distinguish empty from failed and leave them.
 
 **Evidence after.** None yet.
+
+### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** `docs/release-notes-v5.8.md:132`
+- **Category:** stale documentation, documented switch with no consumer (L0/§6)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L0 repository pass + §6 unused-code sweep (row re-added: the first append script aborted before writing it)
+
+**Evidence before.** Re-derived on this branch rather than reconstructed from the aborted run, and the wider hypothesis was tested and rejected first: a scan of every TINYTITAN_* token in README.md and the non-historical docs, and in tools/ and plugins/, against actual readers (`${VAR}` in bash, a string literal in Swift, `os.environ`, `process.env`) found NO documented-but-unread switch -- TINYTITAN_ALL_MODELS (tools/tinytitan_models.sh:296 sets it, :440 reads it), TINYTITAN_STUB_SERVER_SECONDS (tests/TinyTitanServer/ClientCLITests.swift:168) and TINYTITAN_RELEASE_{NOTES_MAX_CHARS,SKIP_GOLDENS_REASON} (tools/release.sh:422, :71) are all live, so that whole class is clean and only the knob-deletion case survives. `git show --stat 3eb11cf` ('runtime: remove every decode knob that measured a wash or a loss') deletes 18 tokens; 13 of them have no reader anywhere in sources/, tools/ or plugins/. Of the docs that name a dead token, all carry a superseded note except three dated measurement records (docs/qwen38-prefetch-predictor-study.md, docs/v4.2-experiments.md, docs/v4.3-predictive-prefetch-plan.md -- accurate as records of what was measured then, not claims about the current engine) and docs/release-notes-v5.8.md:132, which says in the present tense that '`TINYTITAN_KEEP_WIRED` is a tri-state so `=0` pages the expert cache out'. docs/release-notes-v5.1.md:57 and docs/qwen38-decode-profile-2026-09-05.md:3-13 establish the house convention for exactly this: a `> **Superseded.**` block that names what was retired and keeps the text as the record of what that release shipped. The real model sidecar and the tests confirm the knob is gone: tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:119-122 asserts 'The tri-state `TINYTITAN_KEEP_WIRED` override is gone' and that the profile row decides.
+
+**Fix.** Add the Superseded banner to the 5.8 note's 'Also in this release' item, in the form release-notes-v5.1.md:57 already uses, naming the deletion commit and where the surviving decision lives (the profile row). Historical measurement records are left alone.
+
+**Evidence after.** docs/release-notes-v5.8.md carries the Superseded block in the form release-notes-v5.1.md:57 already uses: it names 3eb11cf, points at ModelProfile as the thing that decides now, cites ModelProfileTests:119-122 as the record that the override is gone, and keeps the bullet as what 5.8 shipped. Verified each claim against the code before writing it (`git show --stat 3eb11cf`, the test comment, and the absence of the token anywhere under sources/). Markdown has no lint gate here, so the check is factual rather than mechanical: no other doc claims a retired knob as current except three dated measurement records, which are left alone deliberately because they describe what was measured then, not what the engine does now.
+
+**Commit.** `dbb8bf6`

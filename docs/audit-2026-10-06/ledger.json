@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 38,
-    "done": 3,
-    "open": 35,
+    "done": 5,
+    "open": 33,
     "blocked": 0
   },
   "tasks": [
@@ -117,16 +117,16 @@
       "severity": "S1",
       "tier": "A",
       "project": "engine",
-      "file_line": "sources/TinyTitan/Runtime/Family/PLEConstants.swift:41-44",
+      "file_line": "sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)",
       "title": "tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose",
       "category": "silent truncation/overflow, unchecked input",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L3 line pass",
       "evidence-before": "Read at the cited lines: ngramHeadsOffsets/ngramHeadsVocabSizes are [Int64] decoded straight from ple_constants.json (:11-12, JSONDecoder :34) and widened with UInt64(offset) + UInt64(vocab) (:43). UInt64() of a negative Int64 is a fatal trap, not a throw. validate() (:56-89) compares counts and the headCount*pleHeadDim product but never sign, and never checks that offsets ascend. The docstring at :48-55 says the check exists 'to turn a corrupt sidecar into a report rather than a trap' — it does not cover the trap this path can hit.",
-      "fix-summary": "",
-      "evidence-after": "Expected: validate() rejects a negative offset/vocab and a non-ascending offset table with ModelError.archMismatch, so a corrupt sidecar reports and never traps.",
-      "commit": "",
+      "fix-summary": "`tableRowCount` is a throwing function and the only way to ask for the count, so no call order can reach the conversion unchecked: it walks the head tables the way the producer builds them, requiring offset[i] == sum(vocab[0..i]), vocab > 0 everywhere, paired arrays, a non-empty table, and `addingReportingOverflow` rather than `+=` for the running total. `validate()` calls it, so the load-time gate refuses the addressing as well as the width. RealForwardRunner+BuildCore.swift:333 passes `try constants.tableRowCount()`. Note for the record: the commit message says eleven tests; the suite is twelve with eight added -- the ledger number is the checked one.",
+      "evidence-after": "Before: a standalone `UInt64(negative Int64)` under this toolchain dies with `Fatal error: Negative value is not representable`, exit 133 -- the exact failure `ple_constants.json` could produce at RealForwardRunner+BuildCore.swift:333. After: `swift test --no-parallel --filter PLE` -> 26 tests in 4 suites passed, PLEConstantsGeometryTests 4 -> 12 tests, including `acceptsProductionConstants`, which feeds the checkpoint's own constants (the ple_golden fixture, whose offsets equal the installed model's ple_constants.json) through validate() and pins 320001446 rows, so the new invariants are the checkpoint's rules and not a refusal waiting for a working model. Full `swift test --no-parallel` exit 0; `swift build -c release` exit 0 (583 steps, 121.52 s); swift-format, swiftlint, force-cast, func-length all ok. Sibling audit: PLEConstants was the only model-supplied signed-to-unsigned conversion in sources/ (grep for `[Int64]` decodables finds only its three arrays; CPUEngine/SafeTensors.swift:119 already guards `offsets[0] >= 0`; ModelCatalog.sizeBytes is our own number, used only for display), and the guard against a repeat is that the count now cannot be obtained without the checks running.",
+      "commit": "fa1ca79",
       "blocked-reason": ""
     },
     {
@@ -460,13 +460,13 @@
       "file_line": "docs/release-notes-v5.8.md:132",
       "title": "release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this",
       "category": "stale documentation, documented switch with no consumer (L0/§6)",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L0 repository pass + §6 unused-code sweep (row re-added: the first append script aborted before writing it)",
       "evidence-before": "Re-derived on this branch rather than reconstructed from the aborted run, and the wider hypothesis was tested and rejected first: a scan of every TINYTITAN_* token in README.md and the non-historical docs, and in tools/ and plugins/, against actual readers (`${VAR}` in bash, a string literal in Swift, `os.environ`, `process.env`) found NO documented-but-unread switch -- TINYTITAN_ALL_MODELS (tools/tinytitan_models.sh:296 sets it, :440 reads it), TINYTITAN_STUB_SERVER_SECONDS (tests/TinyTitanServer/ClientCLITests.swift:168) and TINYTITAN_RELEASE_{NOTES_MAX_CHARS,SKIP_GOLDENS_REASON} (tools/release.sh:422, :71) are all live, so that whole class is clean and only the knob-deletion case survives. `git show --stat 3eb11cf` ('runtime: remove every decode knob that measured a wash or a loss') deletes 18 tokens; 13 of them have no reader anywhere in sources/, tools/ or plugins/. Of the docs that name a dead token, all carry a superseded note except three dated measurement records (docs/qwen38-prefetch-predictor-study.md, docs/v4.2-experiments.md, docs/v4.3-predictive-prefetch-plan.md -- accurate as records of what was measured then, not claims about the current engine) and docs/release-notes-v5.8.md:132, which says in the present tense that '`TINYTITAN_KEEP_WIRED` is a tri-state so `=0` pages the expert cache out'. docs/release-notes-v5.1.md:57 and docs/qwen38-decode-profile-2026-09-05.md:3-13 establish the house convention for exactly this: a `> **Superseded.**` block that names what was retired and keeps the text as the record of what that release shipped. The real model sidecar and the tests confirm the knob is gone: tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:119-122 asserts 'The tri-state `TINYTITAN_KEEP_WIRED` override is gone' and that the profile row decides.",
       "fix-summary": "Add the Superseded banner to the 5.8 note's 'Also in this release' item, in the form release-notes-v5.1.md:57 already uses, naming the deletion commit and where the surviving decision lives (the profile row). Historical measurement records are left alone.",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "evidence-after": "docs/release-notes-v5.8.md carries the Superseded block in the form release-notes-v5.1.md:57 already uses: it names 3eb11cf, points at ModelProfile as the thing that decides now, cites ModelProfileTests:119-122 as the record that the override is gone, and keeps the bullet as what 5.8 shipped. Verified each claim against the code before writing it (`git show --stat 3eb11cf`, the test comment, and the absence of the token anywhere under sources/). Markdown has no lint gate here, so the check is factual rather than mechanical: no other doc claims a retired knob as current except three dated measurement records, which are left alone deliberately because they describe what was measured then, not what the engine does now.",
+      "commit": "dbb8bf6",
       "blocked-reason": ""
     },
     {
