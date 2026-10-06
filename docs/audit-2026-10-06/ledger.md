@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:13  Done:39  Blocked:1  Total:53**
+**Open:11  Done:43  Blocked:1  Total:55**
 
 ## Table
 
@@ -20,10 +20,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
-| AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
-| AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
@@ -39,10 +37,12 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | DONE | Mac (primary) |
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | DONE | Mac (primary) |
+| AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | DONE | Mac (primary) |
+| AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
@@ -51,15 +51,17 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-150 | S2 | A | engine | `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)` | AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file | unbounded memory on an input file (found while converting AUD-142's sites) | DONE | Mac (primary) |
 | AUD-153 | S2 | C | tooling | `tests/TinyTitanServer/RoutingFixtures.swift RoutingGate (wait/open); tests/TinyTitanServer/RoutingGateTests.swift` | The router test fixture's gate held one continuation for any number of waiters, so a second concurrent waiter hung the run | test-infrastructure lost wake, found by AUD-143's own regression test | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-147 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:61-87` | readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist | single-layer CSRF defence recorded as two-layer | OPEN | Mac (primary) |
-| AUD-148 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:244` | isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape | trust boundary decided by an attacker-supplied header pair | OPEN | Mac (primary) |
 | AUD-149 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
 | AUD-151 | S3 | C | lint-gates | `docs/repository-layout.md:135-140 (the claim), sources/TinyTitanLib/Engine.swift:529, sources/TinyTitanServer/Core/OpenAIRequestValidator.swift:521, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:519 (the tree)` | The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do | missing gate, contract drift / stale documentation on a load-bearing rule | OPEN | Mac (primary) |
+| AUD-154 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js (/health, /peers, /inventory bodies) and src/peers.js:302-312` | Every group-facing response echoes the shared group key in cleartext, so the string that authorises the API lands in logs, dumps and screenshots | secret disclosure on an authenticated surface, found by the AUD-123/147/148 sibling audit | OPEN | Mac (primary) |
+| AUD-155 | S3 | A | fleet | `plugins/dsh-lan-manager/src/net.js:39 (DEFAULT_IPV4_NETWORKS)` | The default IPv4 allowlist still admits 169.254.0.0/16, so on a network with no DHCP every host on the segment is inside the fence | permissive default left open deliberately by AUD-123's fix | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
 | AUD-145 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:213, :220, :303, :305, :310 and sources/TinyTitanLib/ServerModelSession+Loading.swift:177` | The same unreachable ?? fallback AUD-137 removed sits on allowedExpertCacheSlots, five times | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-146 | S3 | B | runtime | `sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:245 (pre-fix), :310 (pre-fix)` | Two expert-cache derivations read the rung list's literal order as a promise that it holds the largest value | implicit invariant on a public constant | DONE | Mac (primary) |
+| AUD-147 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:61-87` | readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist | single-layer CSRF defence recorded as two-layer | DONE | Mac (primary) |
+| AUD-148 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:244` | isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape | trust boundary decided by an attacker-supplied header pair | DONE | Mac (primary) |
 | AUD-152 | S3 | C | tooling | `observed while running `swift build -c release --build-tests` on the tree at 65bf241; log /tmp/audit143-build.log (not committed — scratch), against Package.swift's test targets` | `swift build -c release --build-tests` failed to resolve every test module's dependency on a tree that builds clean, and did not re-produce | build invocation that cannot pass on this tree, mis-read as a flake: a release `--build-tests` compiles product libraries without -enable-testing, so a @testable import has nothing to bind | DONE | Mac (primary) |
 
 ## Detail
@@ -274,20 +276,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-123 — The LAN manager admits link-local peers by default and its default group key is a published literal
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** fleet
-- **Location:** `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38`
-- **Category:** permissive default on a network-facing surface
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L4 security pass
-
-**Evidence before.** DEFAULT_IPV4_NETWORKS (net.js:33-40) includes ['169.254.0.0', 16] beside loopback/RFC1918/CGNAT, and DEFAULT_GROUP_KEY is the string 'tinytitan-lan' (config.js:38), which config.js:132 always resolves to when nothing is configured — so the token guard is nominal against anyone reading the source. Two facts bound the severity: the harness webserver binds loopback only (index.js:232-240 documents and verifies it), and checkAddress compares the Origin hostname as a string against an IPv4 pattern (net.js:27) and never resolves DNS, so rebinding cannot smuggle a name through. S2 is the honest rating on those facts.
-
-**Evidence after.** None yet.
-
 ### AUD-126 — Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most
 
 - **Severity / tier:** S2 / Tier B
@@ -313,20 +301,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** §5 facade sweep
 
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported at route.js:45-46/:99-100 and generate.js:193-194, with the shell branch (route.js:66-72) said to forward neither --context nor --max-tokens.
-
-**Evidence after.** None yet.
-
-### AUD-133 — A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** fleet
-- **Location:** `plugins/dsh-lan-manager/src/discovery.js:238-248`
-- **Category:** silent failure on a network path
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `catch {}` around each discovery source.
 
 **Evidence after.** None yet.
 
@@ -597,6 +571,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `218a210`
 
+### AUD-123 — The LAN manager admits link-local peers by default and its default group key is a published literal
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38`
+- **Category:** permissive default on a network-facing surface
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L4 security pass
+
+**Evidence before.** DEFAULT_IPV4_NETWORKS (net.js:33-40) includes ['169.254.0.0', 16] beside loopback/RFC1918/CGNAT, and DEFAULT_GROUP_KEY is the string 'tinytitan-lan' (config.js:38), which config.js:132 always resolves to when nothing is configured — so the token guard is nominal against anyone reading the source. Two facts bound the severity: the harness webserver binds loopback only (index.js:232-240 documents and verifies it), and checkAddress compares the Origin hostname as a string against an IPv4 pattern (net.js:27) and never resolves DNS, so rebinding cannot smuggle a name through. S2 is the honest rating on those facts.
+
+**Fix.** Fixed the half this commit could bound: the shipped key can no longer buy a mutation off-machine. Guard 2b (router.js, after the token compare) answers 403 `default-group-key-outside-loopback` to any mutating request that presents the value equal to `DEFAULT_GROUP_KEY` from a source `isLoopback` refuses, with a hint naming `groupKey`/`DSH_LAN_KEY`. Read-only routes still answer with the shipped key, because `/peers` on an unconfigured desk is not a mutation and grouping is that key's actual job. `isLoopback` is new in net.js and is defined against `unwrapAddress`, so `::ffff:127.0.0.1` counts and `fe80::1%en0` does not. The link-local half is NOT fixed and is filed as AUD-155, including the reason it was not simply deleted here. Suite re-run on current main at ef30d5f: `node --test` in plugins/dsh-lan-manager prints `tests 122 / suites 0 / pass 122 / fail 0 / cancelled 0 / skipped 0` (260 ms), and `tools/lint.sh javascript` prints `ok: dsh-lan-manager` and `ok: dsh-tinytitan` (node v26.10.0, eslint 10.11.0, prettier 3.9.9). Nothing was pushed.
+
+**Evidence after.** Commit ef30d5f. `test/net.test.js` gains `isLoopback admits only the machine itself`, which asserts the cross-check rather than only the positive: 10.0.0.1, 169.254.9.9, 100.64.0.1 and fe80::1%en0 are each `checkAddress(...).allowed === true` *and* `isLoopback(...) === false`, so the new predicate cannot be a restatement of the fence. `test/router.test.js` gains `the shipped group key does not mutate beyond loopback`, which drives the real handler four ways: POST from 169.254.9.9 with the default key -> 403, GET /peers with the same key -> 200, POST with an operator key -> 200, POST from loopback with the default key -> 200. Mutation check M3 (Guard 2b deleted) fails 1 test; restored from /tmp/fleetfix/ before the suite ran.
+
+**Commit.** `ef30d5f`
+
 ### AUD-125 — memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing)
 
 - **Severity / tier:** S2 / Tier A
@@ -664,6 +656,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Fix.** True as reported, and not a defect. `router.js:187` is `if (origin && !isAllowedOrigin(origin, req.headers.host, config))`, so a mutating request with no Origin is not refused -- but a browser sends Origin on every POST (same-origin, cross-origin and plain <form> submissions all carry it), so no browser request reaches these routes without the header, and the callers that do arrive header-less are programs. The plugin's own client is one: `sources/TinyTitanFleet/Core/FleetClient.swift:198` posts through URLSession, which sets no Origin. Both of the row's assumed mitigations were then checked rather than trusted: the loopback claim is TRUE (index.js:231-233 records that the harness webserver accepts only 127.0.0.1 or 0.0.0.0 and refuses 0.0.0.0, so nothing listens on the LAN address the plugin advertises), and the content-type claim is FALSE -- readJsonBody (router.js:61) parses any body as JSON and never inspects content-type. So the fix is the reasoning plus the proof, not a new refusal: the Guard 3 comment now names the browser behaviour, the CLI that depends on it, and the guards that authorise a non-browser caller (source address, token); a new test pins three halves of that contract in one request shape -- bodyless POST /sessions/:id/archive with no Origin returns 200 ok, the same request from 203.0.113.9 is 403 source-not-allowed, and with a token configured it is 401 without the token and 200 with it. The content-type silence and the origin==host equality became their own rows, AUD-147 and AUD-148, because neither is what this row reported.
 
 **Evidence after.** Measured, and it is the measurement that decides. Mutating the guard to require the header (`!isAllowedOrigin(origin ?? "", ...)`) fails 19 of 108 tests in `npm test` -- every POST in the package, because every one of them legitimately sends no Origin -- so the fix the row implies would break the sanctioned client and close no browser path. Turning the guard into a wall (`true || ...`) fails 12 including the new test, so the new test is load-bearing rather than decorative. Both mutations restored, and `git diff` on router.js shows only the comment. `npm test` in plugins/dsh-lan-manager: 108 pass, 0 fail. router.test.js goes 41 -> 42 tests (the commit message says '105 before', which is wrong; the checked numbers are these: 108 after, 107 before, one test added). All twelve `tools/lint.sh` gates exit 0, including eslint 10.11.0 and prettier 3.9.9 over this package. No model run and nothing fetched. Commit 88472d2.
+
+### AUD-133 — A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/discovery.js:238-248`
+- **Category:** silent failure on a network path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `catch {}` around each discovery source.
+
+**Fix.** Per-source failures are now data, not silence. `discoverCandidates` takes `onSourceError` and both swallowed `catch {}` bodies report through it as `{source, message}`; `PeerTable#refresh` accumulates those into `lastDiscoveryErrors`, logs each one, also records a discovery function that throws wholesale as `{source: "discovery"}`, and clears the list on a clean cycle. `/peers` and `/health` carry the array as `discoveryErrors`, so a short peer list now says whether a probe source failed rather than leaving the reader to guess. Suite re-run on current main at ef30d5f: `node --test` in plugins/dsh-lan-manager prints `tests 122 / suites 0 / pass 122 / fail 0 / cancelled 0 / skipped 0` (260 ms), and `tools/lint.sh javascript` prints `ok: dsh-lan-manager` and `ok: dsh-tinytitan` (node v26.10.0, eslint 10.11.0, prettier 3.9.9). Nothing was pushed.
+
+**Evidence after.** Commit ef30d5f. `test/discovery.test.js`: `a failing source is reported and contributes nothing` (both sources fail -> failures `[{source: "bonjour"}, {source: "tailscale"}]` and an empty candidate list) and `a healthy run reports no source failures`. `test/peers.test.js`: a source failure is recorded on the table and logged; a discovery function that throws wholesale yields `[{source: "discovery", message: "resolver wedged"}]`; a clean cycle clears the array to `[]`. `/peers` and `/health` are pinned to carry `discoveryErrors` in `test/router.test.js`, including the empty-array case. Mutation check M4 (recording deleted) fails 3 tests.
+
+**Commit.** `ef30d5f`
 
 ### AUD-134 — Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing'
 
@@ -841,34 +851,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
-### AUD-147 — readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist
-
-- **Severity / tier:** S3 / Tier A
-- **Project:** fleet
-- **Location:** `plugins/dsh-lan-manager/src/router.js:61-87`
-- **Category:** single-layer CSRF defence recorded as two-layer
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-132 verification (the row's own 'mitigating facts', checked)
-
-**Evidence before.** AUD-132's note claimed the JSON routes require `content-type: application/json`, which a cross-origin simple form POST cannot set. Read the function: readJsonBody (router.js:61) collects bytes under the cap and calls JSON.parse on whatever arrives, with no header check on any path, so `enctype="text/plain"` -- one of the three content types a browser form may send without a preflight -- carries a valid JSON object straight through. No browser hole is open today, because such a POST always carries Origin and Guard 3 refuses a foreign one; the defect is that the defence is single-layer while the tree believes it is two, and any future change that loosens Guard 3 (`config.enforceOrigin !== false` is a documented off switch) silently removes the only check. Both real senders already set the header -- FleetClient.swift:89 sets `application/json` for every body it writes -- so requiring it costs no client. Decide, do not assume: whether to refuse a bodied request whose content-type is not JSON, and whether the plugin's own served UI posts through a path that sets it (plugins/dsh-lan-manager has no web/ assets; the page is served by the harness bundle, so the answer must be read there before the rule is written).
-
-**Evidence after.** None yet.
-
-### AUD-148 — isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape
-
-- **Severity / tier:** S3 / Tier A
-- **Project:** fleet
-- **Location:** `plugins/dsh-lan-manager/src/router.js:244`
-- **Category:** trust boundary decided by an attacker-supplied header pair
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-132 sibling audit
-
-**Evidence before.** `if (host && parsed.host === host) return true;` compares the Origin against the request's own Host header, so equality is granted by the attacker's naming, not by anything the server knows. A page served from an attacker domain that resolves to 127.0.0.1 (a TTL-0 record, the classic rebinding) and reaches the harness on its own port sends Origin: http://attacker.example:<port> with Host: attacker.example:<port> -- equal, so allowed, and the mutating routes are open to it. Two facts narrow it and belong in the row: it needs the attacker's page served on the *same port* the harness listens on, and a shared token (Guard 2) defeats it outright -- but the token is opt-in, `config.token` empty means Guard 2 is skipped entirely (router.js:172). The shape of the fix is a Host allowlist the server knows (127.0.0.1, localhost, ::1, and the host's own configured base path authority) instead of an origin-equals-host equality, and the decision belongs with AUD-147, since both change the same guard. Not verified live: no rebinding harness was run here; the claim is read from the code and is stated as such.
-
-**Evidence after.** None yet.
-
 ### AUD-149 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
 
 - **Severity / tier:** S3 / Tier C
@@ -898,6 +880,38 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Fix.** Only the false claim is corrected here, forward rather than silently: repository-layout.md now dates itself ('No file under `sources/` **was** above it as of 2026-09-28') and states the 2026-10-06 measurement with the three names, so the next reader is not told the tree is compliant when it is not. The splits themselves are not done — that is this row's remaining work, and it is deliberately not bundled into a read-bounds commit.
 
 **Evidence after.** Expected: a decision recorded in one place — split the three along a cohesive seam as pure code motion with the public API preserved (the doc's own precedent is `RealForwardRunner.swift` 1,449 -> 496), or amend the standard to say what the tree actually follows. Then the 14th gate, `file-length`, with a ratchet baseline exactly like `func-length`'s so a stale exemption row fails: the 2026-09-28 claim stayed true for a week and no longer, which is what an unenforced number costs. Note for whoever writes it — the gate must count *physical* lines, as the written rule does, or it will disagree with the doc it exists to protect.
+
+### AUD-154 — Every group-facing response echoes the shared group key in cleartext, so the string that authorises the API lands in logs, dumps and screenshots
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js (/health, /peers, /inventory bodies) and src/peers.js:302-312`
+- **Category:** secret disclosure on an authenticated surface, found by the AUD-123/147/148 sibling audit
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-147/AUD-148 sibling sweep, 2026-10-06
+
+**Evidence before.** Read from the code, not run: `/health` returns `group: config.groupKey ?? null`, `/peers` and `/inventory` return the same field, and `peers.js:302-312` compares a peer's `body.group` against `config.groupKey` as a *literal*. So the exact value that passes Guard 2 — the only thing distinguishing two machines inside Guard 1's ranges, per config.js's own doc comment — is emitted by the three endpoints an operator is most likely to `curl` and paste into an issue, and by every gossip round that reads a peer's list. Two facts bound it and belong in the row. (1) It is not an unauthenticated leak: all three routes sit behind Guard 2, so a caller who can read the key out of a body already has it. The exposure is the second-order one — the secret in log files, captured JSON, terminal scrollback and screenshots. (2) Any replacement has to keep a mixed-version fleet talking: `peers.js` compares the literal today, so a hash-only change makes every old peer look like it is in another group and silently empties the table. That is why the fix is a digest plus a temporary dual-accept rather than a swap, and why it was not folded into ef30d5f, which changed the guards, not the payloads.
+
+**Fix.** Not fixed yet. Planned: emit a digest (`groupDigest`, the first 8 hex of a SHA-256 over a domain-separated key) instead of the raw key in the three bodies, compare digests in `peers.js` with a dual-accept for a peer still sending the literal so a rollout cannot empty the table, and follow the field through the Swift client and its tests, which read `group` today.
+
+**Evidence after.** None yet.
+
+### AUD-155 — The default IPv4 allowlist still admits 169.254.0.0/16, so on a network with no DHCP every host on the segment is inside the fence
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/net.js:39 (DEFAULT_IPV4_NETWORKS)`
+- **Category:** permissive default left open deliberately by AUD-123's fix
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-123 fix, 2026-10-06 (the half that commit did not take)
+
+**Evidence before.** `DEFAULT_IPV4_NETWORKS` carries `["169.254.0.0", 16]` next to loopback, RFC 1918 and CGNAT. On an ad-hoc segment — no DHCP server, a direct Thunderbolt pair, a conference network — every host self-assigns out of that range, so membership in Guard 1's allowlist is granted by the medium rather than by the operator, which is the property the fence exists to decide. What bounds the severity today, read from the tree rather than assumed: the harness webserver binds loopback only (index.js:232-240, the same fact that caps AUD-123), so there is no working cross-machine path yet; and since ef30d5f a *mutating* request from such a host that presents the shipped key is refused, so on an unconfigured install the exposure is reads (`/workspaces`, `/sessions`, `/sessions/:id/messages` — session content) rather than writes. With an operator-chosen key the link-local host can mutate as soon as it is given the key, which is Guard 2 working as designed and not this row's defect. Why it was not simply deleted in ef30d5f: link-local is a legitimate peer address for a directly coupled pair of Macs, and discovery returns whatever addresses the interfaces hold, so removing it from the defaults is a behaviour change for a use case the plugin documents — it needs the same decide-and-record treatment AUD-148 got, not a one-line edit.
+
+**Fix.** Not fixed yet. Two candidate fixes, and the row records that a choice is owed: (a) drop `169.254.0.0/16` from the defaults and require `allowAddresses`/`ipv4Networks` for the ad-hoc-pair case, accepting that a freshly-coupled pair stops seeing each other until one line of config exists; (b) keep the range and gate reads the way Guard 2b gates mutations, so a link-local source with the shipped key gets nothing at all. (a) is the smaller surface and the honest default; (b) preserves the zero-setup case at the cost of another special case in the guard order.
+
+**Evidence after.** None yet.
 
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
@@ -988,6 +1002,42 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** The AUD-145 differential is also this row's: the sorted/`max()` forms matched the order-dependent forms at all 672 grid points x 2 functions, which is exactly the claim that the rewrite is value-preserving while the list climbs. The order itself is now enforced: swapping the literal's first two rungs (`16, 8, 24, ...`) made `expertCacheSlotFloorIsTheSmallestRung` record `Expectation failed: RuntimeConfiguration.allowedExpertCacheSlots == RuntimeConfiguration.allowedExpertCacheSlots.sorted()` -- 2 issues in that run (the floor and the order), suite failed, then restored and green. The behavioural suites stayed green under the reorder, which is the point of the fix: with `max()` and a sorted copy, a reordered literal cannot mis-size a cache. Full serial suite 1,614 tests in 241 suites, exit 0; all eleven gates rc 0.
 
 **Commit.** `08b43de`
+
+### AUD-147 — readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:61-87`
+- **Category:** single-layer CSRF defence recorded as two-layer
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-132 verification (the row's own 'mitigating facts', checked)
+
+**Evidence before.** AUD-132's note claimed the JSON routes require `content-type: application/json`, which a cross-origin simple form POST cannot set. Read the function: readJsonBody (router.js:61) collects bytes under the cap and calls JSON.parse on whatever arrives, with no header check on any path, so `enctype="text/plain"` -- one of the three content types a browser form may send without a preflight -- carries a valid JSON object straight through. No browser hole is open today, because such a POST always carries Origin and Guard 3 refuses a foreign one; the defect is that the defence is single-layer while the tree believes it is two, and any future change that loosens Guard 3 (`config.enforceOrigin !== false` is a documented off switch) silently removes the only check. Both real senders already set the header -- FleetClient.swift:89 sets `application/json` for every body it writes -- so requiring it costs no client. Decide, do not assume: whether to refuse a bodied request whose content-type is not JSON, and whether the plugin's own served UI posts through a path that sets it (plugins/dsh-lan-manager has no web/ assets; the page is served by the harness bundle, so the answer must be read there before the rule is written).
+
+**Fix.** `readJsonBody` refuses with 415 `unsupported-media-type` unless `content-type` starts with `application/json` (case-folded). The check sits after the empty-body early return, so a bodiless POST still passes — the shape `FleetClient.swift:89` writes, which sets the header for every body and none for an empty request — and the README's `curl` examples already set it, so no sender in the tree breaks. README layer 4 records the point of the layer: it does not depend on Guard 3, so `enforceOrigin: false` is no longer an off switch for the only body check. Suite re-run on current main at ef30d5f: `node --test` in plugins/dsh-lan-manager prints `tests 122 / suites 0 / pass 122 / fail 0 / cancelled 0 / skipped 0` (260 ms), and `tools/lint.sh javascript` prints `ok: dsh-lan-manager` and `ok: dsh-tinytitan` (node v26.10.0, eslint 10.11.0, prettier 3.9.9). Nothing was pushed.
+
+**Evidence after.** Commit ef30d5f. `test/router.test.js` pins three shapes: a `application/x-www-form-urlencoded` post -> 415, a `text/plain` body holding a valid JSON object -> 415 (the exact payload AUD-132 assumed was blocked), and `application/json; charset=utf-8` -> accepted, which is why the rule is a prefix test and not equality. The pre-existing `malformed JSON is a 400 with a stable code` returned 415 once the guard landed, because its raw iterator bypassed the header; it was rewritten to send `raw: "{not json"` through the helper so it still pins the parse path — that rewrite is the evidence the new guard did not silently absorb the old assertion. Mutation check M1 (guard deleted) fails 2 tests.
+
+**Commit.** `ef30d5f`
+
+### AUD-148 — isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:244`
+- **Category:** trust boundary decided by an attacker-supplied header pair
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-132 sibling audit
+
+**Evidence before.** `if (host && parsed.host === host) return true;` compares the Origin against the request's own Host header, so equality is granted by the attacker's naming, not by anything the server knows. A page served from an attacker domain that resolves to 127.0.0.1 (a TTL-0 record, the classic rebinding) and reaches the harness on its own port sends Origin: http://attacker.example:<port> with Host: attacker.example:<port> -- equal, so allowed, and the mutating routes are open to it. Two facts narrow it and belong in the row: it needs the attacker's page served on the *same port* the harness listens on, and a shared token (Guard 2) defeats it outright -- but the token is opt-in, `config.token` empty means Guard 2 is skipped entirely (router.js:172). The shape of the fix is a Host allowlist the server knows (127.0.0.1, localhost, ::1, and the host's own configured base path authority) instead of an origin-equals-host equality, and the decision belongs with AUD-147, since both change the same guard. Not verified live: no rebinding harness was run here; the claim is read from the code and is stated as such.
+
+**Fix.** Same-origin is now decided by something the server knows. `isKnownHost(authority, config)` accepts `localhost`, an address literal inside the configured networks (via `checkAddress`, which is why bracketed `[fe80::1%en0]:3080` and zone ids work), and a name in `trustedHosts` or `trustedOrigins`; `isAllowedOrigin`'s host branch requires `parsed.host === host && isKnownHost(host, config)` instead of the bare equality, so attacker-supplied naming no longer grants the pair. New config key `trustedHosts` with `DSH_LAN_TRUSTED_HOSTS` is the operator's escape hatch for a real hostname. Decision recorded: an explicit allowlist rather than deriving the host's own authorities from the socket, because the plugin is mounted in a server it does not own and cannot read its bind address. `HTTPServerHandler+Routes.swift:43-45` was read for the same shape; it sits behind the loopback-only bind and was left alone. Suite re-run on current main at ef30d5f: `node --test` in plugins/dsh-lan-manager prints `tests 122 / suites 0 / pass 122 / fail 0 / cancelled 0 / skipped 0` (260 ms), and `tools/lint.sh javascript` prints `ok: dsh-lan-manager` and `ok: dsh-tinytitan` (node v26.10.0, eslint 10.11.0, prettier 3.9.9). Nothing was pushed.
+
+**Evidence after.** Commit ef30d5f. `test/router.test.js` pins the rebinding shape end to end: Origin `http://attacker.invalid:3080` presented with the matching Host -> 403, where it was 200 before the fix; `trustedHosts: ["lan-desk.local"]` makes that pair 200 while `elsewhere.example` with its own matching Host stays 403, so the allowlist is an addition rather than a removal of the equality rule. `isKnownHost` has its own table test: `localhost`, `127.0.0.1:3080`, `::1`, `10.0.0.5:3080` and `[fe80::1%en0]:3080` trusted; `attacker.invalid:3080`, `8.8.8.8` and the empty string refused. Mutation check M2 (bare `parsed.host === host` restored) fails 3 tests.
+
+**Commit.** `ef30d5f`
 
 ### AUD-152 — `swift build -c release --build-tests` failed to resolve every test module's dependency on a tree that builds clean, and did not re-produce
 
