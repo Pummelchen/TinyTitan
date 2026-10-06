@@ -247,15 +247,15 @@ repository.
   the release build — §1.2.2, enforced rather than assumed since 2026-10-07. The
   tools archive is the one artifact with no binary in it, being `git archive` of
   the tag, and gets no arch check.
-- **Gates** `tools/lint.sh` (fifteen checks as of 2026-10-07: force-cast,
-  unbounded-read, func-length, file-length, unchecked-sendable, converter,
-  arch-path, silent-test-skip, test-hollow, shell-portability, shellcheck,
-  swiftlint, swift-format, javascript, python — the authoritative list is
-  `tools/lint.sh`'s own usage header, and adding a gate means editing this line
-  and `AGENTS.md` in the same commit. Of the four gates this audit added —
-  `unbounded-read`, `test-skip`, `file-length`, `test-hollow` — this line names
-  all four and `AGENTS.md` names two of them while still saying "thirteen
-  checks"; nothing compares a documented count to the script's, which is AUD-160) —
+- **Gates** `tools/lint.sh` — every check in its `all` chain, and the
+  authoritative list of those checks is the script's own usage header. This line
+  used to keep a second copy with a count ("fifteen checks as of 2026-10-07");
+  `library-facade` made that count stale the day it landed, which is the defect
+  AUD-160 records, so the copy is gone rather than renumbered. Five gates are
+  this audit's additions — `unbounded-read`, `test-skip`, `file-length`,
+  `test-hollow`, `library-facade`. `AGENTS.md` still enumerates the set with a
+  count of its own and is the maintainer's file, so correcting it is an owner
+  action, not an edit made from here. —
   `swift test --no-parallel`;
   **every installed model with
   a golden target**, through `tools/golden-baseline.sh --check`; then a clean

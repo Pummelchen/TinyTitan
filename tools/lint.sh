@@ -15,6 +15,8 @@
 #   arch-path           no hardcoded SwiftPM triple in a build path (see below)
 #   silent-test-skip    no env/capability-shaped early return in tests/ (see below)
 #   test-hollow         no @Test body that cannot fail (see below)
+#   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
+#                       no stdout write (AGENTS.md "Two products" rules 1 and 3)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -45,6 +47,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export ROOT
 BASELINE="$SCRIPT_DIR/func-length-baseline.txt"
+FACADE_BASELINE="$SCRIPT_DIR/library-facade-baseline.txt"
+FACADE_UPDATE="${FACADE_UPDATE:-}"
+export FACADE_BASELINE
 MAX_FUNC_LINES="${MAX_FUNC_LINES:-120}"
 export MAX_FILE_LINES="${MAX_FILE_LINES:-500}"
 
@@ -1196,8 +1201,179 @@ check_javascript() {
   return 0
 }
 
+# --- library facade ----------------------------------------------------------
+# `AGENTS.md`'s "Two products, one repository" makes three promises about
+# `sources/TinyTitanLib/`, the surface an embedder depends on: `public` there is
+# deliberate ("nothing becomes `public` by accident", rule 3), the library
+# "imports no NIO" and keeps stdout clean (rule 1). Measured 2026-10-06 all
+# three held and none of them was enforced anywhere: `tools/lint.sh` had
+# fifteen checks and not one of them looked at access level, imports or stdout
+# in that target, and swiftlint's committed config has no such rule either. An
+# unenforced promise is a reviewer's memory, and the day a fifth front end
+# needs one more `public` type nobody will notice the surface has stopped being
+# a surface.
+#
+# The public surface is a ratchet over a committed allowlist, compared as a
+# multiset rather than a set of keys: `Session.respond` has two overloads, and
+# `sort -u` would let one of them vanish while its row stayed "earned". `open`
+# counts as surface too -- it promises more than `public`, because it also
+# allows overriding outside the module -- and leading attributes are stripped
+# before the modifier is tested, so `@discardableResult public func` cannot hide
+# from a scanner that only looks at what a line starts with. The two absolute
+# rules have no baseline and no opt-out, because there is nothing to ratchet --
+# the correct count is zero.
+#
+# A missing allowlist is a failure, not a fresh baseline. func-length may write
+# its own because an over-long function is already known and counted; here an
+# absent file means the audited list is gone, and blessing whatever is in the
+# tree is the exact accident the check exists to catch. Regenerate deliberately
+# with `FACADE_UPDATE=1 tools/lint.sh library-facade`.
+measure_library_facade() {
+  python3 - <<'PY'
+import os, re, sys
+
+root = os.environ["ROOT"]
+lib = os.path.join(root, "sources", "TinyTitanLib")
+DECL = re.compile(
+    r"\b(func|let|var|init|struct|class|enum|actor|protocol|typealias|"
+    r"extension|subscript)\b[ \t]*([A-Za-z_][A-Za-z0-9_]*)?")
+# `public` is the surface, and `open` is a wider one than public -- it also
+# promises overridability outside the module -- so both are counted. Attributes
+# precede the access modifier, so `@_spi`-style prefixes are stripped before the
+# modifier is tested; otherwise `@discardableResult public func` would be
+# invisible to the very check that is supposed to catch it.
+ACCESS = re.compile(r"^(public|open)\b[ \t]*(.*)$", re.S)
+ATTR = re.compile(r"^@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?[ \t]*")
+COMMENT = ("//", "/*", "*", "*/")
+
+if not os.path.isdir(lib):
+    print("SCANNED:0")
+    print("UNRESOLVED:%s is not a directory" % lib)
+    sys.exit(0)
+
+rows, unresolved, scanned = [], [], 0
+for dirpath, _dirs, names in os.walk(lib):
+    for name in sorted(names):
+        if not name.endswith(".swift"):
+            continue
+        path = os.path.join(dirpath, name)
+        scanned += 1
+        rel = os.path.relpath(path, root)
+        with open(path, encoding="utf-8") as handle:
+            for number, line in enumerate(handle, 1):
+                text = line.strip()
+                if text.startswith(COMMENT):
+                    continue
+                while True:
+                    prefix = ATTR.match(text)
+                    if not prefix:
+                        break
+                    text = text[prefix.end():]
+                access = ACCESS.match(text)
+                if not access:
+                    continue
+                match = DECL.search(access.group(2))
+                if not match:
+                    unresolved.append("%s:%d:%s" % (rel, number, line.strip()[:70]))
+                    continue
+                kind = match.group(1)
+                rows.append("%s:%s:%s" % (rel, kind, match.group(2) or kind))
+
+print("SCANNED:%d" % scanned)
+for item in unresolved:
+    print("UNRESOLVED:%s" % item)
+for row in sorted(rows):
+    print(row)
+PY
+}
+
+check_library_facade() {
+  echo "== library-facade: the TinyTitanLib surface must be chosen, not inherited =="
+  local raw rc scanned current unresolved
+  raw="$(measure_library_facade)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  FAIL: the facade scanner exited $rc; it measured nothing."
+    status=1
+    return
+  fi
+  scanned="$(echo "$raw" | sed -n 's/^SCANNED://p' | tail -1)"
+  if [ -z "$scanned" ] || [ "$scanned" -eq 0 ] 2>/dev/null; then
+    echo "  FAIL: no Swift files were scanned under sources/TinyTitanLib."
+    echo "        Expected ~30; check ROOT and the target's location."
+    status=1
+    return
+  fi
+  unresolved="$(echo "$raw" | grep '^UNRESOLVED:' || true)"
+  if [ -n "$unresolved" ]; then
+    echo "$unresolved" | sed 's/^UNRESOLVED:/  UNRESOLVED: /'
+    echo "  FAIL: the scanner could not name these public declarations."
+    echo "        Fix tools/lint.sh — do not silence this by ignoring them."
+    status=1
+    return
+  fi
+  current="$(echo "$raw" | grep -v '^SCANNED:' | grep -v '^$')"
+
+  local baseline new stale
+  if [ -n "$FACADE_UPDATE" ]; then
+    # The deliberate way the allowlist changes: the surface is measured here and
+    # now, written out, and the diff of that file is what a reviewer reads.
+    echo "$current" > "$FACADE_BASELINE"
+    echo "  allowlist rewritten: $(echo "$current" | grep -c .) public declarations"
+  else
+    if [ ! -f "$FACADE_BASELINE" ]; then
+      echo "  FAIL: no allowlist at ${FACADE_BASELINE#$ROOT/}."
+      echo "        The audited public surface is missing, so nothing here is"
+      echo "        checked. Restore it, or regenerate it deliberately with"
+      echo "        FACADE_UPDATE=1 tools/lint.sh library-facade."
+      status=1
+      return
+    fi
+    baseline="$(sort "$FACADE_BASELINE" | grep -v '^$')"
+    new="$(comm -13 <(echo "$baseline") <(echo "$current"))"
+    if [ -n "$new" ]; then
+      echo "$new" | sed 's/^/  NEW: /'
+      echo "  FAIL: these are public in TinyTitanLib and not in the allowlist."
+      echo "        Make them package, or add them to ${FACADE_BASELINE#$ROOT/}"
+      echo "        in the same PR that argues for them."
+      status=1
+    fi
+    stale="$(comm -23 <(echo "$baseline") <(echo "$current"))"
+    if [ -n "$stale" ]; then
+      echo "$stale" | sed 's/^/  STALE: /'
+      echo "  FAIL: these are no longer in the surface — drop them from"
+      echo "        ${FACADE_BASELINE#$ROOT/} so the exemption cannot be reused."
+      status=1
+    fi
+    [ -n "$new" ] || [ -n "$stale" ] || \
+      echo "  ok ($(echo "$current" | grep -c .) public declarations, all allowlisted)"
+  fi
+
+  # Rule 1, twice over: no server concept may enter the library, and stdout
+  # belongs to the program that embedded it. The scanner skips comments,
+  # because `ServerLog.swift`'s own doc comment states this rule back at
+  # itself -- a gate that fails on prose is a gate people learn to distrust.
+  local violations rc
+  violations="$(python3 "$SCRIPT_DIR/library-facade-rules.py")"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  FAIL: the rule-1 scanner exited $rc; it measured nothing."
+    status=1
+    return
+  fi
+  if [ -n "$violations" ]; then
+    echo "$violations" | sed 's/^/  /'
+    echo "  FAIL: rule 1 -- TinyTitanLib may import no NIO and write nothing to"
+    echo "        stdout, because stdout belongs to the embedding program."
+    echo "        Diagnostics go through ServerLog.diagnostic(), on stderr."
+    status=1
+  else
+    echo "  ok (no NIO import, no stdout write, in $scanned files)"
+  fi
+}
+
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_library_facade; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
@@ -1207,6 +1383,7 @@ case "$want" in
   arch-path)   check_arch_path ;;
   test-skip)   check_silent_test_skip ;;
   test-hollow) check_test_hollow ;;
+  library-facade) check_library_facade ;;
   shell)       check_shell_portability ;;
   shellcheck)  check_shellcheck ;;
   swiftlint)   check_swiftlint ;;
@@ -1215,7 +1392,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|test-hollow|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|test-hollow|library-facade|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
 esac
 
 exit $status

@@ -119,9 +119,12 @@ jobs:
             .build/release/TinyTitanCLI \
             .build/release/TinyTitanRepack \
             .build/release/TinyTitanBench
-      - name: Production gates (all fifteen)
+      - name: Production gates (every check in tools/lint.sh's all chain)
         # Checks the compiler cannot express. Runs before the suite so a style
-        # regression fails in seconds rather than after a full test run.
+        # regression fails in seconds rather than after a full test run. The
+        # step names no count on purpose: a number here is a second list of the
+        # gates, and the last time one was added both it and `tools/lint.sh`'s
+        # own header drifted out of date.
         run: tools/lint.sh
       - name: The package is consumable as a dependency
         # `examples/embedded` is a package that is not this repository: it depends
