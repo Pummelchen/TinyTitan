@@ -72,15 +72,19 @@ Written by `SSDAIJSON.encodeManifest`. The fields that matter:
 
 | Field | Meaning |
 | --- | --- |
-| `magic`, `versionMajor`, `versionMinor` | `"SSDAI"`, 1, 0 |
+| `magic`, `versionMajor`, `versionMinor` | `"SSDAI"`, 1, 1. Reads accept 1.0 — an installed manifest is never rewritten, because the receipt binds its digest — and 1.1 is where the extension block below became mandatory (`SSDAIFormatV1.extensionGeometryMandatoryFromMinor`) |
 | `modelID` | the model's id, e.g. `"qwen3.5-2b"`. **Not** the API id: the catalog appends the width, giving `qwen3.5-2b_4-Bit` |
 | `sourceSnapshotHash` | the source checkpoint's index hash; how an install is traced to what it was built from |
 | `arch` | the architecture the planner read. `arch.family` mirrors `ModelFamily` and is what loaders dispatch on |
 | `quant` | the five width *slots*, plus one entry per quantified resident tensor (below) |
 | `files` | every payload file with its size and sha256 |
 | `expertsPerLayer`, `numLayers`, `expertStride` | cross-checked against `packed_experts/layout.json` |
-| `bitWidthOverridesHonored` | how many per-tensor overrides the source checkpoint declared; an audit number, not an input |
 | `flags` | `streamingPresent`, `turboQuantKV`, `aneSharedExpert` |
+
+Conversion-time statistics are not manifest fields. How many per-tensor widths the source checkpoint
+declared, for instance, is recorded in the repack audit as `bit_width_overrides_honored`; it never
+described these bytes (a MoE install declares dozens of overrides and carries none of them among its
+resident tensors), and the manifest is what a reader needs in order to load the payload.
 
 ### `quant`: slots **and** per-tensor widths
 
@@ -114,9 +118,11 @@ the strides still divide evenly, every shape check passes, and the model answers
 fluently and wrongly.
 
 Unquantized tensors (norms, scalars) have no entry: they carry no scales, they
-are read as BF16 by `dtype`, and they are never dequantized. A stem that
-collides with one of the five slot names would overwrite a slot, so the writer
-skips it.
+are read as BF16 by `dtype`, and they are never dequantized. A stem that lands
+on one of the five slot names, or on another tensor's stem at a **different**
+width, is refused at install time rather than skipped: one of the two facts
+would have to be dropped, and a dropped width is exactly the silent
+misread described above.
 
 `routedExpert` is the slot the rest of the system treats as "the model's width":
 `ManifestIdentity.weightBits` reads it, and `apiModelID` appends it as
@@ -131,7 +137,27 @@ would drop the open set of per-tensor keys, because the fixed slots are a
 `CodingKeys` enum and the overrides are not — which is exactly the bug that was
 shipped and then found by comparing `.ssdai` logits against the snapshot's.
 
-## `model_weights.bin`
+### `arch` extension geometry
+
+Sixteen keys describe the parts of these families that are not in the core
+shape: the hyper-connection streams (`hcCount`, `hcLowRank`), the QSA indexer
+(`indexerNumHeads`, `indexerNumKVHeads`, `indexerHeadDim`, `indexerBudget`,
+`indexerCompressRatio`), the n-gram block (`pleLayerIndices` and its six
+scalars), plus `routerNormTopK` and `quantGroupSize`.
+
+They are written **when the architecture has the geometry**, not for one family
+name — the writer's old gate was `family == "qwen38flash"`, and the
+Qwen3.8-Flash-Next *draft* runs on the target's hyper-connections and indexer,
+so it was written with none of them and cross-checked against nothing. The gate
+is `hcCount > 0 || indexerBudget > 0 || !pleLayerIndices.isEmpty`, which is how
+the runtime defines the same three (`enabled` on each config struct), so writer
+and reader agree by construction.
+
+The reader compares every key it is given, and from version 1.1 **requires** the
+block for an architecture whose contract has the geometry. A 1.0 manifest may
+still omit it, because the installs already on disk were written before the
+block was mandatory and no manifest is rewritten in place.
+
 
 One file, two regions. `indexSize` bytes of index, then `residentSize` bytes of
 tensor payload. Both are page-aligned to 16 KB, which is the format's

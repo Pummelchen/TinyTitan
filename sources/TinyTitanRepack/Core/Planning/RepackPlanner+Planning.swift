@@ -44,10 +44,6 @@ extension RepackPlanner {
             for t in h.tensors { registry[t.name] = t }
         }
 
-        // Source allowlisting owns exact fingerprint validation. Preserve the
-        // declared override count for the output manifest audit.
-        let bitsOverrideCount = meta.bitsOverrides.count
-
         var lmResidentBases: [String] = []
         var excludedMultimodalNames: [String] = []
         var routedByLayerAndRole: [Int: [String: String]] = [:]
@@ -127,7 +123,6 @@ extension RepackPlanner {
             arch: arch,
             baseMode: meta.baseMode,
             baseGroupSize: meta.baseGroupSize,
-            bitsOverrideCount: bitsOverrideCount,
             resident: resident,
             layers: layerPlans,
             matchedModelID: matched,

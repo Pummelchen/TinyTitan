@@ -19,7 +19,21 @@ package enum SSDAIFormatV1 {
     }
 
     package static let versionMajor = 1
-    package static let versionMinor = 0
+    package static let versionMinor = 1
+
+    /// The manifest `versionMinor` from which an architecture that has
+    /// extension geometry (hyper-connections, the QSA indexer, the n-gram
+    /// block) must *declare* it, rather than merely be checked when it does.
+    ///
+    /// 1.0 made every one of those fields optional so installs written before
+    /// the families existed stayed loadable, and a reader that treats an absent
+    /// field as agreement validates nothing: the guard only bites on a manifest
+    /// that happens to carry the keys. 1.1 closes that by making the block
+    /// mandatory for a family whose runtime contract has the geometry, while
+    /// still reading 1.0 manifests — including the ones already installed, no
+    /// receipt of which may be rewritten in place.
+    package static let extensionGeometryMandatoryFromMinor = 1
+
     package static let alignmentBytes: UInt64 = 16_384
     package static let residentHeaderBytes = 24
     package static let residentEntryBytes = 72

@@ -220,7 +220,9 @@ import Testing
         return try JSONDecoder().decode(ManifestQuant.self, from: data)
     }
 
-    @Test func peekFamilyKeepsFullQwenWhenBitWidthOverridesPresent() throws {
+    /// No `arch.family` is declared here, so this pins the shape-inference fallback: a
+    /// Qwen 3.6 toy manifest must read back as `.qwen36`.
+    @Test func peekFamilyInfersFullQwenWhenNoFamilyIsDeclared() throws {
         let arch = ArchConfig.qwen36_35B_A3B
         var files: [String: [String: Any]] = [
             "model_weights.bin": ["size": 1, "sha256": String(repeating: "0", count: 64)],
@@ -233,7 +235,7 @@ import Testing
             ]
         }
         let (dir, _) = try Self.writeToyManifest(
-            ["bitWidthOverridesHonored": 80],
+            [:],
             archOverrides: [
                 "hiddenSize": arch.hiddenSize,
                 "ffnIntermediate": arch.intermediateSize,
@@ -288,7 +290,7 @@ import Testing
     @Test func peekFamilyDetectsMTPByArchitectureShape() throws {
         let arch = ArchConfig.qwen36MTP
         let (dir, _) = try Self.writeToyManifest(
-            ["bitWidthOverridesHonored": 12],
+            [:],
             archOverrides: [
                 "hiddenSize": arch.hiddenSize,
                 "ffnIntermediate": arch.intermediateSize,
@@ -677,5 +679,64 @@ struct ManifestExtensionGeometryTests {
         #expect(throws: (any Error).self) {
             _ = try ManifestReader.load(directoryURL: dir, expecting: cfg)
         }
+    }
+
+    /// The 1.0 rule was "validate what is declared", which left the guard
+    /// biting only on a manifest that happened to carry the keys: a writer that
+    /// emitted no block was validating nothing at all, and a family sharing the
+    /// target's hyper-connections was exactly that case. From 1.1, an
+    /// architecture that has the geometry refuses a manifest without it.
+    @Test("A 1.1 manifest for a family with the geometry must declare it")
+    func extensionGeometryIsMandatoryFromVersion11() throws {
+        let cfg = Self.toyWithExtensions()
+        let (dir, _) = try ManifestReaderTests.writeToyManifest(
+            ["versionMinor": 1], config: cfg)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var field = ""
+        var actual = ""
+        do {
+            _ = try ManifestReader.load(directoryURL: dir, expecting: cfg)
+            Issue.record("a 1.1 manifest with no extension block loaded")
+        } catch let error as ModelError {
+            // Naming the field, not merely failing: an operator whose install is
+            // refused has to be able to tell a stale manifest from a wrong one.
+            if case ModelError.archMismatch(let f, _, let a) = error {
+                field = f
+                actual = a
+            }
+        }
+        #expect(field == "hcCount")
+        #expect(actual == "not declared")
+    }
+
+    /// The other half of the rule: 1.0 installs are still read, because the
+    /// manifest is hash-bound into `verified-install.json` and is never
+    /// rewritten in place. `absentFieldsAreAccepted` is this case at minor 0.
+    @Test("A complete 1.1 block validates")
+    func completeBlockAcceptedAtVersion11() throws {
+        let cfg = Self.toyWithExtensions()
+        let (dir, _) = try ManifestReaderTests.writeToyManifest(
+            ["versionMinor": 1],
+            archOverrides: [
+                "hcCount": 4, "hcLowRank": 320,
+                "indexerNumHeads": 4, "indexerNumKVHeads": 1,
+                "indexerHeadDim": 128, "indexerBudget": 2048,
+                "indexerCompressRatio": 4,
+                "pleLayerIndices": [1], "pleEmbedDim": 2560,
+                "pleConvKernelSize": 4, "pleNgramSize": 3,
+                "pleVocabSizeBase": 20_000_000, "pleHeadsPerNgram": 8,
+                "pleVocabDivisor": 128,
+                "routerNormTopK": true, "quantGroupSize": 64,
+            ],
+            config: cfg)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try ManifestReader.load(directoryURL: dir, expecting: cfg)
+    }
+
+    @Test("A 1.1 manifest for a family without the geometry needs no block")
+    func plainFamilyNeedsNoBlockAtVersion11() throws {
+        let (dir, _) = try ManifestReaderTests.writeToyManifest(["versionMinor": 1])
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = try ManifestReader.load(directoryURL: dir, expecting: .qwenToy())
     }
 }

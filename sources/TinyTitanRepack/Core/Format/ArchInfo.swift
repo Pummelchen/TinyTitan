@@ -164,6 +164,18 @@ struct ArchInfo: Sendable, Equatable {
         self.quantGroupSize = quantGroupSize
     }
 
+    /// Whether this architecture has the extension geometry the manifest's
+    /// extension block carries, so the block is written and then required.
+    ///
+    /// A property of the *values*, not of the family name, and defined the same
+    /// way the runtime defines its half of the comparison
+    /// (`HyperConnectionConfig.enabled`, `SparseIndexerConfig.enabled`,
+    /// `PLEConfig.enabled`): writer and reader then agree by construction
+    /// instead of by two lists kept in step.
+    var declaresExtensionGeometry: Bool {
+        hcCount > 0 || indexerBudget > 0 || !pleLayerIndices.isEmpty
+    }
+
     static func load(configPath: String) throws -> ArchInfo {
         let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

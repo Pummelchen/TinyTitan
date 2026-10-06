@@ -190,7 +190,7 @@ public enum ManifestReader {
             throw ModelError.indexCorrupt(
                 detail: "manifest requests removed TurboQuant KV runtime support")
         }
-        try validateArch(m.arch, expected: expected)
+        try validateArch(m.arch, minor: m.versionMinor, expected: expected)
         if let quant = m.quant {
             try validateQuant(quant, family: expected.family)
         } else if expected.numLayers == ArchConfig.qwen36_35B_A3B.numLayers,
@@ -277,6 +277,7 @@ public enum ManifestReader {
 
     private static func validateArch(
         _ a: ManifestArch,
+        minor: Int,
         expected e: ArchConfig
     ) throws {
         func check<T: Equatable & CustomStringConvertible>(
@@ -315,14 +316,29 @@ public enum ManifestReader {
             actualMask.description,
             e.fullAttentionLayerMask.description)
 
-        // Extension geometry is checked only when the manifest declares it.
-        // Absent means an older manifest, which the core fields above already
-        // pin; present and disagreeing means the payload is not the
-        // architecture this runtime would execute, which must not be silent.
+        // Extension geometry. A 1.0 manifest may legitimately omit it, because
+        // installs written before these families existed carry no such keys and
+        // no receipt may be rewritten in place; from
+        // `extensionGeometryMandatoryFromMinor` a manifest for an architecture
+        // that *has* the geometry has to declare it. Either way, what is
+        // declared is compared: a checkpoint whose hyper-connection, indexer or
+        // n-gram geometry differs from this runtime's is not the architecture
+        // being executed, and silence here is a wrong answer rather than a
+        // refusal.
+        let declares = e.hyperConnections.enabled || e.sparseIndexer.enabled || e.ple.enabled
+        let require = declares && minor >= SSDAIFormatV1.extensionGeometryMandatoryFromMinor
         func checkOptional<T: Equatable & CustomStringConvertible>(
             _ field: String, _ actual: T?, _ expected: T
         ) throws {
-            guard let actual else { return }
+            guard let actual else {
+                if require {
+                    throw ModelError.archMismatch(
+                        field: field,
+                        expected: "\(expected)",
+                        actual: "not declared")
+                }
+                return
+            }
             try check(field, actual, expected)
         }
         try checkOptional("hcCount", a.hcCount, e.hyperConnections.count)

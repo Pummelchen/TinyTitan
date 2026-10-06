@@ -439,13 +439,15 @@ extension ArchInfo {
             indexerHeadDim: base.indexerHeadDim,
             indexerBudget: base.indexerBudget,
             indexerCompressRatio: base.indexerCompressRatio,
-            pleLayerIndices: [],
-            pleEmbedDim: base.pleEmbedDim,
-            pleConvKernelSize: base.pleConvKernelSize,
-            pleNgramSize: base.pleNgramSize,
-            pleVocabSizeBase: base.pleVocabSizeBase,
-            pleHeadsPerNgram: base.pleHeadsPerNgram,
-            pleVocabDivisor: base.pleVocabDivisor,
+            // No n-gram block, so no n-gram geometry: the draft carries the
+            // target's hyper-connections and indexer, and nothing that would
+            // size a gather. Inheriting the target's PLE scalars while emptying
+            // its layer indices described a block that is not there, and the
+            // runtime's own draft contract says `ple: .none`.
+            pleLayerIndices: [], pleEmbedDim: 0,
+            pleConvKernelSize: 0, pleNgramSize: 0,
+            pleVocabSizeBase: 0, pleHeadsPerNgram: 0,
+            pleVocabDivisor: 0,
             routerNormTopK: base.routerNormTopK,
             quantGroupSize: base.quantGroupSize)
         return arch

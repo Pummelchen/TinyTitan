@@ -104,7 +104,6 @@ struct RepackPlan: Sendable {
     let arch: ArchInfo
     let baseMode: String  // "affine"
     let baseGroupSize: Int  // 64
-    let bitsOverrideCount: Int
     let resident: ResidentFilePlan
     let layers: [LayerFilePlan]
     let matchedModelID: String?

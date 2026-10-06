@@ -1,4 +1,5 @@
 import Foundation
+import TinyTitanFormat
 
 /// JSON encoders for `manifest.json` and `packed_experts/layout.json`. The
 /// files are small (kilobytes), so we use Foundation's `JSONSerialization`
@@ -7,8 +8,11 @@ enum SSDAIJSON {
 
     /// The magic written into every manifest this repacker produces.
     static let magic = "SSDAI"
-    static let versionMajor = 1
-    static let versionMinor = 0
+    /// The version, single-sourced from the format module: a bump has to move
+    /// the writer, the wire struct's defaults and the reader's expectations
+    /// together, and two literals can drift apart.
+    static let versionMajor = SSDAIFormatV1.versionMajor
+    static let versionMinor = SSDAIFormatV1.versionMinor
 
     struct FileEntry {
         let size: UInt64
@@ -71,12 +75,20 @@ enum SSDAIJSON {
         archDict["linearKeyHeadDim"] = arch.linearKeyHeadDim
         archDict["linearValueHeadDim"] = arch.linearValueHeadDim
         archDict["linearConvKernelSize"] = arch.linearConvKernelSize
-        // Extension geometry is written only for the families that have it, so
-        // manifests for the existing families stay byte-identical. The reader
-        // validates these whenever present, which is what stops a checkpoint
-        // with different hyper-connection / indexer / PLE geometry from being
-        // run silently against the runtime's hardcoded constants.
-        if arch.family == .qwen38flash {
+        // Extension geometry is written for every architecture that has it, so
+        // manifests for the families that do not stay byte-identical. The
+        // reader validates these whenever present and, from
+        // `SSDAIFormatV1.extensionGeometryMandatoryFromMinor`, requires them
+        // whenever the runtime contract has them -- which is what stops a
+        // checkpoint with different hyper-connection / indexer / PLE geometry
+        // from being run silently against the runtime's hardcoded constants.
+        //
+        // The gate is the geometry, not a family name. It used to read
+        // `arch.family == .qwen38flash`, and the Qwen3.8-Flash-Next *draft*
+        // carries the target's hyper-connections and indexer, so the one
+        // installed family beyond the name check got no block at all: 16 keys
+        // missing, and a reader that validates only what it is given.
+        if arch.declaresExtensionGeometry {
             archDict["hcCount"] = arch.hcCount
             archDict["hcLowRank"] = arch.hcLowRank
             archDict["indexerNumHeads"] = arch.indexerNumHeads
@@ -94,7 +106,7 @@ enum SSDAIJSON {
             archDict["routerNormTopK"] = arch.routerNormTopK
             archDict["quantGroupSize"] = arch.quantGroupSize
         }
-        let quantDict = quantObject(plan: plan, bitWidths: bitWidths)
+        let quantDict = try quantObject(plan: plan, bitWidths: bitWidths)
 
         var filesDict: [String: Any] = [:]
         for (path, info) in files {
@@ -118,7 +130,6 @@ enum SSDAIJSON {
             "expertsPerLayer": expertsPerLayer,
             "numLayers": numLayers,
             "expertStride": expertStride,
-            "bitWidthOverridesHonored": plan.bitsOverrideCount,
         ]
         return try JSONSerialization.data(
             withJSONObject: manifest,
@@ -145,12 +156,14 @@ enum SSDAIJSON {
     ///
     /// Unquantized tensors (norms, scalars) carry no `quantSpec` and are
     /// deliberately absent: they are read as BF16 by `dtype` and never
-    /// dequantized. A stem that collides with a slot name would overwrite a
-    /// slot, so it is skipped.
+    /// dequantized. A stem that lands on a slot name, or on another tensor's
+    /// stem with a different width, is refused rather than skipped: the key can
+    /// carry one of the two facts, and the one this object exists to protect is
+    /// the tensor's real width.
     private static func quantObject(
         plan: RepackPlan,
         bitWidths: QuantBitWidths
-    ) -> [String: Any] {
+    ) throws -> [String: Any] {
         let slots = [
             "embedding": bitWidths.embedding,
             "attention": bitWidths.attention,
@@ -167,16 +180,69 @@ enum SSDAIJSON {
         }
         var dict: [String: Any] = [:]
         for (slot, bits) in slots { dict[slot] = entry(bits) }
-        for resident in plan.resident.entries {
-            guard let spec = resident.quantSpec else { continue }
-            let stem =
-                resident.name.hasSuffix(".weight")
-                ? String(resident.name.dropLast(".weight".count)) : resident.name
-            guard dict[stem] == nil else { continue }
-            dict[stem] = entry(spec.bits)
+        for override in try perTensorWidths(
+            quantized: plan.resident.entries.compactMap { resident in
+                guard let spec = resident.quantSpec else { return nil }
+                return (name: resident.name, bits: spec.bits)
+            },
+            slotNames: Set(slots.keys))
+        {
+            dict[override.stem] = entry(override.bits)
         }
         return dict
     }
+
+    /// Each quantized resident tensor's manifest key and real width.
+    ///
+    /// The key is the tensor stem, so `…k_proj.weight` becomes `…k_proj`, which
+    /// is what `ManifestQuant.slot(_:overrides:fallback:)` looks a tensor up by.
+    /// Two collisions are refused here instead of resolved by whichever entry
+    /// was written last:
+    ///
+    /// - a stem equal to a slot name, which would silently demote a whole slot
+    ///   or lose this tensor's width; and
+    /// - the same stem from two tensors at different widths, which the manifest
+    ///   cannot represent.
+    ///
+    /// Both are the failure class the per-tensor entries exist to fix: a lost
+    /// width is read back as the slot's, the strides still divide evenly, every
+    /// shape check passes, and the model answers fluently and wrongly.
+    static func perTensorWidths(
+        quantized: [(name: String, bits: Int)],
+        slotNames: Set<String>
+    ) throws -> [(stem: String, bits: Int)] {
+        var result: [(stem: String, bits: Int)] = []
+        result.reserveCapacity(quantized.count)
+        var widths: [String: Int] = [:]
+        for tensor in quantized {
+            let stem =
+                tensor.name.hasSuffix(weightSuffix)
+                ? String(tensor.name.dropLast(weightSuffix.count)) : tensor.name
+            guard !slotNames.contains(stem) else {
+                throw RepackError.configurationInvalid(
+                    detail: "resident tensor '\(tensor.name)' packs to '\(stem)', "
+                        + "which is a quant slot name; the manifest cannot carry "
+                        + "both the slot and this tensor's width, so writing it "
+                        + "would drop one of them")
+            }
+            if let previous = widths[stem] {
+                guard previous == tensor.bits else {
+                    throw RepackError.configurationInvalid(
+                        detail: "two resident tensors pack to '\(stem)' at "
+                            + "different widths (\(previous) and \(tensor.bits)); "
+                            + "the manifest keys widths by stem, so one would be "
+                            + "written and the other read")
+                }
+                continue
+            }
+            widths[stem] = tensor.bits
+            result.append((stem: stem, bits: tensor.bits))
+        }
+        return result
+    }
+
+    /// The suffix a resident tensor's name carries and its manifest key drops.
+    private static let weightSuffix = ".weight"
 
     static func encodeLayout(
         plan: RepackPlan,

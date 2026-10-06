@@ -318,7 +318,6 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
     package let expertsPerLayer: Int
     package let numLayers: Int
     package let expertStride: UInt64
-    package let bitWidthOverridesHonored: Int?
 
     package init(
         magic: String = SSDAIFormatV1.magic,
@@ -328,8 +327,7 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
         sourceSnapshotHash: String?, arch: SSDAIManifestArchV1,
         quant: SSDAIManifestQuantV1?,
         files: [String: SSDAIManifestFileV1],
-        expertsPerLayer: Int, numLayers: Int, expertStride: UInt64,
-        bitWidthOverridesHonored: Int?
+        expertsPerLayer: Int, numLayers: Int, expertStride: UInt64
     ) {
         self.magic = magic
         self.versionMajor = versionMajor
@@ -343,7 +341,6 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
         self.expertsPerLayer = expertsPerLayer
         self.numLayers = numLayers
         self.expertStride = expertStride
-        self.bitWidthOverridesHonored = bitWidthOverridesHonored
     }
 }
 
