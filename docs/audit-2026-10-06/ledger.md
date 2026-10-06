@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:21  Done:2  Blocked:0  Total:23**
+**Open:33  Done:3  Blocked:0  Total:36**
 
 ## Table
 
@@ -12,6 +12,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | START | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | START | Mac (primary) |
+| AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
@@ -31,6 +32,18 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
+| AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
+| AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | OPEN | Mac (primary) |
+| AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | OPEN | Mac (primary) |
+| AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
+| AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
+| AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
+| AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :78, :203 and 7 more` | A cluster of try?-to-empty fallbacks turns a thrown journal error into 'no memories found' on the retrieval and consolidation paths | silent failure, error swallowed into an empty answer | OPEN | Mac (primary) |
+| AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | OPEN | Mac (primary) |
+| AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
+| AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
+| AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
+| AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
 
 ## Detail
 
@@ -89,6 +102,20 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in "missing dependency: No module named 'ml_dtypes' …"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. With the pins installed the same three suites run `Ran 87 tests … OK`, exit 0.
 
 **Evidence after.** Expected: with a dependency absent the suite reports skip (or error before the run) and exit 0 for the skip reason, never a failure that reads like a code defect.
+
+### AUD-124 — A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** repack
+- **Location:** `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390`
+- **Category:** integrity verifier has no coverage on the shipped shapes
+- **Status:** START
+- **Host:** Mac (primary)
+- **Discovered by:** L2 module pass + §5 facade sweep
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. validateQuantAgainstResident `continue`s every u32 entry once expertsPerLayer != 0 (:221-224, with a comment saying the widths live in packed_experts/layout.json), and the dominant-width guard returns for the same condition (:256). validatePackedExpertLayout (:368-390) compares expertStride/numLayers/expertsPerLayer against the manifest and checks counts, offsets and alignment — but PackedExpertsLayout (VerifiedInstallManifest.swift:28-33) carries no width field, and grep for weightBits across the whole file finds only :197, :198, :211 and :258, all inside the resident path. So quant.routedExpert.weightBits is compared against nothing for exactly the MoE installs the product ships (35B-A3B, 125B-A6B), while the runtime dequantizes with it and ManifestIdentity turns it into the `_<bits>-Bit` id. The writer's own comment names the failure mode (SSDAIJSON.swift:140-144): 'the word count changes, the strides still divide evenly, every shape check passes, and the model answers fluently and wrongly'.
+
+**Evidence after.** Expected: a packed-expert install is verified by arithmetic — expertStride consistent with the declared bit width and the expert's element count — so a manifest that lies about the width of expert bytes fails --verify-install instead of passing it.
 
 ### AUD-101 — A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path
 
@@ -353,5 +380,177 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** L4 security pass
 
 **Evidence before.** DEFAULT_IPV4_NETWORKS (net.js:33-40) includes ['169.254.0.0', 16] beside loopback/RFC1918/CGNAT, and DEFAULT_GROUP_KEY is the string 'tinytitan-lan' (config.js:38), which config.js:132 always resolves to when nothing is configured — so the token guard is nominal against anyone reading the source. Two facts bound the severity: the harness webserver binds loopback only (index.js:232-240 documents and verifies it), and checkAddress compares the Origin hostname as a string against an IPv4 pattern (net.js:27) and never resolves DNS, so rebinding cannot smuggle a name through. S2 is the honest rating on those facts.
+
+**Evidence after.** None yet.
+
+### AUD-126 — Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** tests
+- **Location:** `benchmark/test_launcher_ram.py:135, :194 and 5 more`
+- **Category:** coverage gap on a CI gate
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** sibling scan while closing AUD-102
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. test_launcher_ram.py:135 and :194, test_launcher_port.py:108 and :155, test_coder_clients.py:117, test_tinytitan_profile.py:37 each skipTest on 'no install under models/ and no built server to list one' (or a local variant). CI has no models/ by policy and none may be fetched to satisfy a gate, so these never run there — the same shape AUD-102 was, found by looking at the siblings rather than assuming they were clean. EmptyModelsDirTests demonstrates the fix: a synthetic directory plus TINYTITAN_MODELS_DIR exercises the launcher's choices with no model.
+
+**Evidence after.** None yet.
+
+### AUD-127 — A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip
+
+- **Severity / tier:** S2 / Tier C
+- **Project:** tests
+- **Location:** `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143`
+- **Category:** test that asserts nothing on the path it did not take
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `guard let path, fileExists(...) else { return }` in the test body. Swift Testing's `try #require` or `.enabled(if:)` would record the skip instead of hiding it.
+
+**Evidence after.** None yet.
+
+### AUD-129 — Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** docs
+- **Location:** `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328`
+- **Category:** surface wired to nothing (§5)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported against ServerArguments.swift:305 (the real flag) and :421 (unknown flags throw), so the failure is loud rather than silent — but the documented spelling can never work, and a reader following the doc gets an error.
+
+**Evidence after.** None yet.
+
+### AUD-130 — context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351`
+- **Category:** surface wired to nothing (§5)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported at route.js:45-46/:99-100 and generate.js:193-194, with the shell branch (route.js:66-72) said to forward neither --context nor --max-tokens.
+
+**Evidence after.** None yet.
+
+### AUD-132 — The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:186-192`
+- **Category:** CSRF guard with an absent-header hole
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `if (origin && !isAllowedOrigin(...))`. Two mitigating facts to confirm before scoping the fix: the harness binds loopback only, and the JSON routes require content-type: application/json, which a cross-origin simple form POST cannot set.
+
+**Evidence after.** None yet.
+
+### AUD-133 — A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/discovery.js:238-248`
+- **Category:** silent failure on a network path
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `catch {}` around each discovery source.
+
+**Evidence after.** None yet.
+
+### AUD-134 — A cluster of try?-to-empty fallbacks turns a thrown journal error into 'no memories found' on the retrieval and consolidation paths
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :78, :203 and 7 more`
+- **Category:** silent failure, error swallowed into an empty answer
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. MemoryService+Sessions.swift:39/:42 (`(try? await localStore.sessionInit(...)) ?? .empty`), :78, :203 (`?? []`); MemoryService+Consolidation.swift:31/:73/:75; MemoryRetrieval.swift:52/:233/:289; ContinuityJournalStore.swift:71/:92. MemoryRetrieval.swift:256 is `try? await Task.sleep`, a poll and not a swallow, so it is excluded. The fix's scope depends on a determination the sweep did not make: whether each site is already surfaced through journalFailed(in:)/reportedJournalFailures — a documented degradation — or swallowed outright.
+
+**Evidence after.** None yet — first: verify each site and split reported from swallowed.
+
+### AUD-135 — expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79`
+- **Category:** silent failure
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. `try? await engine.compactJournal()` then `await engine.shutDown()` then `return true` (:77-79). The open-failure path is handled honestly (`guard let journal = try? FileJournal(url: url) else { return false }` at :70), so the asymmetry is only the compaction. journalFailed(in:) (:128) and reportedJournalFailures (MemoryService.swift:63) report open failures once per scope; nothing reports this one. Consequence is disk growth, not lost data, hence S2.
+
+**Evidence after.** None yet.
+
+### AUD-136 — reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146`
+- **Category:** surface wired to nothing, publicly disclosed (§5)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as accepted-and-ignored with disclosure at plugins/dsh-tinytitan/README.md (~:227), so it is not a silent facade. Either enforce or reject with a clear error: a field that is silently ignored changes what the client believes it asked for.
+
+**Evidence after.** None yet.
+
+### AUD-125 — memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing)
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/ContinuityStore.swift:110`
+- **Category:** silent failure, wrong result reported to the model
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L2 module pass + §5 facade sweep
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. The function recalls the fact, then `do { try await engine.archive(...) } catch ContinuityError.notPersisted(let detail) { throw MemoryError.notPersisted(detail) } catch {}` and `return true` (:106-111). The notPersisted branch carries the right reasoning — 'Answering "deleted" would bring the fact back after a restart with the model believing it gone' — and the very next catch discards that reasoning for every other failure (journal write error, lock loss, decode error). So the tool reports success on the same condition the code says must not be reported as success.
+
+**Fix.** ContinuityStore.delete now uses the same `catch let error as ContinuityError { throw Self.translate(error) }` the store path already uses, so no archive failure can be swallowed and answer true. translate(.notPersisted) returns .notPersisted (ContinuityStore+KeyMapping.swift:132-133), so the message the RAM-only case earns is byte-identical to before. The empty catch is gone, which §0 names as an anti-pattern regardless of reachability.
+
+**Evidence after.** RECLASSIFICATION, recorded rather than quietly narrowed: the sweep's claim that memory_delete 'answers deleted when nothing was archived' is not reachable by the main failure path. ContinuityEngine+Internals.swift:42-47 wraps EVERY journal append failure as ContinuityError.notPersisted, which is the branch the old code already rethrew. The only errors that could reach the empty catch were non-notPersisted ContinuityError cases, and archive has no reachable throw of those (the key is validated before the call). So this is hardening, not a live wrong answer: S1 -> S2, and no failing-before test exists because no observable behaviour changed. The behaviour IS already pinned by MemoryJournalFailureTests.aDeleteTheJournalRefusesIsAFailure and by ContinuityCore's failedWritesAreReportedNotSwallowed. Evidence run: swift build clean, those suites 57 + 4 tests green.
+
+**Commit.** `see the audit(AUD-125) commit`
+
+### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** tests
+- **Location:** `tests/ (18 sites, see evidence)`
+- **Category:** tests that assert nothing
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. RMSNormReferenceTests.swift:55 (`_ = (RmsNormRef.apply, "precondition…")`, comment says documentation-only); Sha256VerifierTests.swift:32 (asserts against a hex produced by the function under test, so it passes by construction); ManifestReaderTests.swift:625/:633; RouterTopKTests.swift:220/:228 (comment concedes the precondition traps); non-throw-only bodies at HyperConnectionTests:31, SampleTopK64Tests:16, PLEHashTests:167, Qwen38FlashSchemaTests:191/:210, ReasoningControlTests:20/:118, RoleUniformityTests:21/:94/:100, PrefillGroupedRoutedMoETests+Binding:144, HTTPServerTests:607, QuantManifestPayloadAgreementTests:269/:324; ClientCLITests.swift:162-168 whose own comment reads 'Not a test of anything'. The framework is Swift Testing throughout (209 files import Testing, no XCTest).
+
+**Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
+
+### AUD-137 — An unreachable ?? 262_144 fallback on a non-empty constant array
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33`
+- **Category:** defensive code for a case that cannot happen
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.
 
 **Evidence after.** None yet.

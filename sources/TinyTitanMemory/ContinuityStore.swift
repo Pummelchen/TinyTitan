@@ -103,11 +103,14 @@ public actor ContinuityStore: MemoryStore {
                 taskID: taskID,
                 namespace: address.namespace,
                 key: address.key)
-        } catch ContinuityError.notPersisted(let detail) {
-            // Retired in RAM only. Answering "deleted" would bring the fact
-            // back after a restart with the model believing it gone.
-            throw MemoryError.notPersisted(detail)
-        } catch {}
+        } catch let error as ContinuityError {
+            // Every failure, not only `notPersisted`: answering "deleted" after
+            // an archive that threw leaves the fact on disk with the model
+            // believing it gone, and a journal write error is that same lie with
+            // a different cause. `translate` maps `notPersisted` through
+            // unchanged, so the message the RAM-only case earns is unchanged.
+            throw Self.translate(error)
+        }
         return true
     }
 
