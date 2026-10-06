@@ -277,6 +277,29 @@ struct TokenizerTests {
         }
     }
 
+    /// AUD-142, on the largest document the load path reads: the installed 125B
+    /// `tokenizer.json` measures 12,809,320 bytes. One byte under the file's own
+    /// size the decoder still loads it; one byte over, the bound refuses it before
+    /// `JSONDecoder` sees a byte — which is the difference between a cap that
+    /// bounds the allocation and one that only reports afterwards.
+    @Test("tokenizer.json is refused by the size bound, not by the decoder")
+    func oversizedTokenizerJSONIsRefusedByTheBound() throws {
+        let url = try ChatMLTemplateTests.fixtureFolder()
+            .appendingPathComponent("tokenizer.json")
+        let size = try Data(contentsOf: url).count
+        _ = try GFByteLevelDecoderConfiguration.load(
+            from: url, tokenizer: tok.tokenizer, maxBytes: UInt64(size))
+        #expect {
+            _ = try GFByteLevelDecoderConfiguration.load(
+                from: url, tokenizer: tok.tokenizer, maxBytes: UInt64(size - 1))
+        } throws: { error in
+            guard case ModelError.metadataOverBound(let name, let bytes, let cap) = error else {
+                return false
+            }
+            return name == "tokenizer.json" && bytes == size && cap == UInt64(size - 1)
+        }
+    }
+
     // MARK: - Helpers
 
     private func assertStreams(_ target: String) throws {

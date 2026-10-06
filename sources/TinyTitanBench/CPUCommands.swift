@@ -226,7 +226,14 @@ extension TinyTitanBench {
     ) {
         let vocabularyURL = directory.appendingPathComponent("vocab.json")
         if FileManager.default.fileExists(atPath: vocabularyURL.path) {
-            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: vocabularyURL))
+            // Bounded with the engine's metadata ceiling even though this is a
+            // bench surface over the operator's own snapshot: the alternative is
+            // a read in the tree that looks like an unfixed hole the next sweep
+            // has to re-litigate.
+            let object = try JSONSerialization.jsonObject(
+                with: BoundedMetadataRead.read(
+                    fileAt: vocabularyURL,
+                    maxBytes: ManifestReader.defaultMaxBytes))
             guard let mapping = object as? [String: Int] else {
                 throw DenseModelError.unreadableVocabulary(vocabularyURL.path)
             }

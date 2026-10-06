@@ -1,8 +1,27 @@
 import Foundation
+import TinyTitanFormat
 
 enum SSDAILayoutValidator {
+    /// Round-trip check on a `layout.json` this converter wrote seconds ago, into
+    /// its own partial directory — so there is no adversary on this path, and the
+    /// uncapped read the sweep flagged was never an AUD-113-shaped hole.
+    ///
+    /// It is bounded anyway, and with the runtime's own ceiling on this document
+    /// (`SSDAIFormatV1.packedExpertsLayoutMaxBytes`, which is what
+    /// `PackedExpertsLayoutReader.defaultMaxBytes` applies when loading it). That
+    /// makes the check worth more than it was: a layout the engine would refuse to
+    /// open now fails the conversion at the point it is written, instead of
+    /// producing an install that dies at load time on another machine.
     static func validate(path: String, plan: RepackPlan) throws {
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        let data: Data
+        do {
+            data = try Posix.readBoundedData(
+                path, maximumBytes: SSDAIFormatV1.packedExpertsLayoutMaxBytes)
+        } catch RepackError.installStateCorrupt(_, let detail) {
+            throw RepackError.configurationInvalid(
+                detail: "layout.json validation failed: \(detail), and over the bound "
+                    + "the runtime applies when it loads this document")
+        }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
             let layers = root["layers"] as? [[String: Any]]
         else {

@@ -85,6 +85,7 @@ enum RemoteSnapshotLoader {
                 length: 8,
                 audit: audit)
             defer { try? FileManager.default.removeItem(atPath: prefix.path) }
+            // lint:allow-unbounded-read a temp file this process wrote from the `length: 8` range above
             let prefixData = try Data(contentsOf: URL(fileURLWithPath: prefix.path))
             guard prefixData.count == 8 else {
                 throw RepackError.safetensorsHeaderInvalid(
@@ -110,6 +111,8 @@ enum RemoteSnapshotLoader {
                 length: Int(headerSize),
                 audit: audit)
             defer { try? FileManager.default.removeItem(atPath: headerFile.path) }
+            // lint:allow-unbounded-read exactly the `headerSize` range requested above, which was
+            // refused there unless it fits `Safetensors.maxHeaderBytes` and the shard's own size.
             let headerData = try Data(contentsOf: URL(fileURLWithPath: headerFile.path))
             headers.append(
                 try Safetensors.parseHeaderBytes(

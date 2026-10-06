@@ -171,19 +171,26 @@ final class ANEPrefillAttention: @unchecked Sendable {
 
     /// The sidecar's own reader, bounded like every other metadata reader here
     /// (`ManifestReader.load`, `VerifiedInstallReceiptReader.load`,
-    /// `PackedExpertsLayoutReader.load`). K17: the size is checked against the
-    /// bytes actually read, since stat-then-re-read is a TOCTOU window;
-    /// `Data(contentsOf:)` grows as it reads, so an uncapped read is an
-    /// unbounded allocation over a directory copied off another machine.
+    /// `PackedExpertsLayoutReader.load`). A sidecar directory is copied off
+    /// another machine, so its `ane_prefill.json` may be arbitrarily large
+    /// before anyone looks: the cap is applied to the descriptor's size before
+    /// the buffer is allocated, never to the bytes after they have been read
+    /// (K17), and a link in place of the document is refused rather than
+    /// followed.
     static func loadSidecarMetadata(
         at url: URL,
         maxBytes: UInt64 = ManifestReader.defaultMaxBytes
     ) throws -> SidecarMetadata {
-        let metaData = try Data(contentsOf: url)
-        guard UInt64(metaData.count) <= maxBytes else {
+        let metaData: Data
+        do {
+            metaData = try BoundedMetadataRead.read(fileAt: url, maxBytes: maxBytes)
+        } catch ModelError.metadataOverBound(let document, let bytes, let cap) {
+            // `PrefillError.chunkedUnsupported`, because a sidecar over bound is
+            // a re-export question and every caller of this already handles that
+            // case as one.
             throw PrefillError.chunkedUnsupported(
-                "ANE prefill sidecar metadata \(url.path) is \(metaData.count) bytes, over the "
-                    + "\(maxBytes)-byte metadata bound; re-export it")
+                "ANE prefill sidecar metadata \(url.deletingLastPathComponent().path)/\(document) "
+                    + "is \(bytes) bytes, over the \(cap)-byte metadata bound; re-export it")
         }
         return try JSONDecoder().decode(SidecarMetadata.self, from: metaData)
     }

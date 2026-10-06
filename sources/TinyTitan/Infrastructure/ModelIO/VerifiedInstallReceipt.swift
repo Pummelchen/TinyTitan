@@ -90,15 +90,18 @@ public enum VerifiedInstallReceiptReader {
             throw ModelError.trustedReceiptInvalid(detail: "\(fileName) is missing")
         }
         do {
-            // K17: read first, then verify the size against the same data —
-            // checking attributesOfItem and then re-reading the file was a
-            // TOCTOU window (the file could grow between the two).
-            let data = try Data(contentsOf: url)
-            guard UInt64(data.count) <= maxBytes else {
-                throw ModelError.trustedReceiptInvalid(
-                    detail: "\(fileName) size \(data.count) exceeds metadata cap \(maxBytes)")
-            }
+            // K17, with the bound applied where it can still prevent the cost.
+            // Reading first and checking the count afterwards verified the bytes
+            // that were used, but `Data(contentsOf:)` had already materialized
+            // the whole document — measured at +2,049 MB of process footprint for
+            // a 2 GiB sparse file. One fd is held from open through fstat through
+            // the read, so the size checked is the size read *and* an over-bound
+            // document is refused before anything is allocated.
+            let data = try BoundedMetadataRead.read(fileAt: url, maxBytes: maxBytes)
             return try JSONDecoder().decode(VerifiedInstallReceipt.self, from: data)
+        } catch ModelError.metadataOverBound(let document, let bytes, let cap) {
+            throw ModelError.trustedReceiptInvalid(
+                detail: "\(document) size \(bytes) exceeds metadata cap \(cap)")
         } catch let error as ModelError {
             throw error
         } catch {

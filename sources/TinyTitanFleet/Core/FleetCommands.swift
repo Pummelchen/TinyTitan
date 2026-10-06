@@ -14,6 +14,75 @@ public struct FleetRead: Sendable {
     }
 }
 
+/// An inventory snapshot the operator handed the tool, read from a file or a pipe.
+public enum FleetInventoryError: Error, Equatable, CustomStringConvertible {
+    case unreadable(path: String)
+    case oversized(path: String, bytes: Int, cap: Int)
+
+    public var description: String {
+        switch self {
+        case .unreadable(let path):
+            return "cannot read \(path)"
+        case .oversized(let path, let bytes, let cap):
+            return "\(path) is over the \(cap)-byte inventory bound (\(bytes) bytes read)"
+        }
+    }
+}
+
+/// Where `--from` reads its inventory from.
+///
+/// Both branches are capped, which is the point: `--from -` reads stdin to
+/// end-of-file, so bounding the file and not the pipe would protect neither —
+/// the pipe is the same allocation under a different name.
+///
+/// The bound is checked as the bytes accumulate rather than from an `fstat` size
+/// before the read, because a pipe has no size to consult. That still bounds the
+/// allocation — an over-bound input costs at most one chunk more than the ceiling
+/// instead of its full size — but it is a weaker shape than the engine's
+/// `BoundedMetadataRead`, and it is on a weaker boundary: the operator named this
+/// file or this pipe themselves, so a link at that path is their choice, not an
+/// attacker's, which is why the read follows links that the model-directory reads
+/// refuse.
+public enum FleetInventorySource {
+    /// A rendered fleet is one entry per workspace, session and peer, so a real
+    /// snapshot is hundreds of kilobytes; 32 MiB is three orders of magnitude of
+    /// headroom, and exists to bound the allocation, not to police the format.
+    public static let maxBytes = 32 * 1024 * 1024
+
+    public static func read(fileAt url: URL) throws -> Data {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            throw FleetInventoryError.unreadable(path: url.path)
+        }
+        defer { try? handle.close() }
+        return try readLimited(handle, path: url.path)
+    }
+
+    public static func readStandardInput() throws -> Data {
+        try readLimited(.standardInput, path: "<stdin>")
+    }
+
+    /// Read to end-of-file, refusing as soon as `maxBytes` is crossed.
+    public static func readLimited(
+        _ handle: FileHandle,
+        path: String = "<stream>",
+        maxBytes: Int = maxBytes
+    ) throws -> Data {
+        var data = Data()
+        while true {
+            let chunk = handle.availableData
+            if chunk.isEmpty { break }
+            data.append(chunk)
+            guard data.count <= maxBytes else {
+                throw FleetInventoryError.oversized(path: path, bytes: data.count, cap: maxBytes)
+            }
+        }
+        return data
+    }
+}
+
 /// What happened to one prompt addressed to one session.
 public struct FleetOutcome: Sendable, Equatable {
     public let node: String

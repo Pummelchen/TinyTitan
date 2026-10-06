@@ -70,7 +70,7 @@ enum IndexLoader {
         var overrides: [String: QuantSpec] = [:]
         do {
             let data = try Posix.readBoundedData(
-                configPath, maximumBytes: 1024 * 1024)
+                configPath, maximumBytes: ArchInfo.maxConfigBytes)
             guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw RepackError.configJsonInvalid(path: configPath, detail: "not a JSON object")
             }

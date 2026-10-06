@@ -176,8 +176,30 @@ struct ArchInfo: Sendable, Equatable {
         hcCount > 0 || indexerBudget > 0 || !pleLayerIndices.isEmpty
     }
 
-    static func load(configPath: String) throws -> ArchInfo {
-        let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+    /// Ceiling for the checkpoint's `config.json`, stated here because two
+    /// readers take that same file — this one and `IndexLoader` — and a document
+    /// should have one bound, not two that can drift apart.
+    ///
+    /// 8 MiB is not borrowed from the manifest's 64 MiB: this is the converter's
+    /// own trust boundary, where the operator chose the directory, so a cap here
+    /// risks refusing a *legitimate* checkpoint rather than an attacker's. The
+    /// installed tokenizer copy of the file measures 12,935 bytes, so the ceiling
+    /// is ~650x the real document and the history in
+    /// `IndexLoader.maximumIndexBytes` — a 4 MiB bound that turned out to be below
+    /// a legitimate file — is the reason for the margin rather than for a tighter
+    /// number. It is still a bound: `Posix.readBoundedData` checks it before
+    /// allocating, so a corrupt or planted file cannot make the converter
+    /// allocate without limit. To convert a checkpoint whose config really does
+    /// exceed it, raise this one constant; the refusal names the size and the cap.
+    static let maxConfigBytes: UInt64 = 8 * 1024 * 1024
+
+    static func load(configPath: String, maxBytes: UInt64 = maxConfigBytes) throws -> ArchInfo {
+        let data: Data
+        do {
+            data = try Posix.readBoundedData(configPath, maximumBytes: maxBytes)
+        } catch RepackError.installStateCorrupt(let path, let detail) {
+            throw RepackError.configJsonInvalid(path: path, detail: detail)
+        }
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw RepackError.configJsonInvalid(path: configPath, detail: "not a JSON object")
         }

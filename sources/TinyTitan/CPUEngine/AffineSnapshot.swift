@@ -125,10 +125,20 @@ public struct AffineSnapshot: Sendable {
         return [:]
     }
 
-    public init(directory: URL) throws {
+    public init(
+        directory: URL,
+        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
+    ) throws {
         self.directory = directory
-        let config = try JSONSerialization.jsonObject(
-            with: Data(contentsOf: directory.appendingPathComponent("config.json")))
+        // A snapshot directory may have been copied off another machine, which is
+        // the same attacker model the `.ssdai` loader fences with
+        // `ManifestReader.defaultMaxBytes`, so this document shares that ceiling
+        // instead of carrying a second one that can drift below it. The real
+        // `config.json` measures 12,935 bytes installed, about 5,000x under it.
+        let configData = try BoundedMetadataRead.read(
+            fileAt: directory.appendingPathComponent("config.json"),
+            maxBytes: maxBytes)
+        let config = try JSONSerialization.jsonObject(with: configData)
         guard let config = config as? [String: Any] else {
             throw SafeTensorsFile.Failure.malformed("config.json is not an object")
         }
@@ -260,6 +270,12 @@ public struct AffineSnapshot: Sendable {
         let index = try ResidentIndexReader.load(fileURL: weightsURL)
         // Mapped once, held for the snapshot's life; see `ResidentWeights`.
         let weights = ResidentWeights(
+            // lint:allow-unbounded-read `.alwaysMapped` is a mapping, not a copy:
+            // the pages fault in as the kernels touch them, so this is the one
+            // whole-file read here that does not allocate the file's size up front
+            // — which is the defect the gate hunts. It is also the design: a blob
+            // read this way is what lets an 8-bit install run, and its shape comes
+            // from the verified index loaded above, not from this read.
             data: try Data(contentsOf: weightsURL, options: .alwaysMapped))
 
         // Per-tensor width overrides, keyed by stem, exactly as the snapshot

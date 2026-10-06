@@ -137,6 +137,9 @@ extension TinyTitanBench {
             FileHandle.standardError.write(Data("no tokenizer in \(path)\n".utf8))
             exit(2)
         }
+        // lint:allow-unbounded-read the corpus is the operator's own `--text` file,
+        // named on the command line of the run they started; nothing loads it on
+        // their behalf, and scoring it is the benchmark's whole point.
         let body = try String(contentsOf: text, encoding: .utf8)
         var ids = tokenizer.encode(body, addBOS: false).map(Int.init)
         if ids.count > maximumTokens { ids = Array(ids.prefix(maximumTokens)) }
@@ -257,6 +260,8 @@ extension TinyTitanBench {
             exit(2)
         }
 
+        // lint:allow-unbounded-read as in `runCPUQwen35Perplexity`: one line per
+        // prompt in the operator's own `--input` file, read to be scored.
         let lines = try String(contentsOf: input, encoding: .utf8)
             .split(separator: "\n", omittingEmptySubsequences: true)
         var results: [String] = []

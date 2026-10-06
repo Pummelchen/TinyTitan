@@ -476,6 +476,10 @@ public actor Engine {
             return .integrityFailure(path: file, detail: error.description)
         case .trustedReceiptInvalid(let detail), .indexCorrupt(let detail):
             return .integrityFailure(path: directory.path, detail: detail)
+        case .metadataOverBound:
+            // A document over its bound is a corrupt or planted file, not a
+            // support question: the install is the caller's to replace.
+            return .integrityFailure(path: directory.path, detail: error.description)
         case .archMismatch, .unsupportedArchitecture:
             return .unsupportedFamily(family: family.rawValue)
         case .partialInstall, .missingFile, .tensorNotFound, .tensorSizeMismatch,

@@ -135,9 +135,15 @@ readability question, and the convention that came out of this pass is:
 The file-size rule is 500 physical lines per **production** source file (under
 `sources/`), comments and blanks included; `tests/` is exempt and is split for
 readability, not to satisfy the number (see `AGENTS.md`). **No file under
-`sources/` is above it as of 2026-09-28** — `git ls-files 'sources/**/*.swift' |
-xargs wc -l` lists 353 files and the largest is under the limit. The last two
-came down that day:
+`sources/` was above it as of 2026-09-28** — `git ls-files 'sources/**/*.swift' |
+xargs wc -l` listed 353 files and the largest was under the limit. That claim is
+now stale and says so: measured 2026-10-06, three production files are over it —
+`TinyTitanLib/Engine.swift` (529), `TinyTitanServer/Core/OpenAIRequestValidator.swift`
+(521) and `TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift` (519). Nothing
+enforces the number, which is how a written standard drifts: the last gate to touch
+these paths checks function length, not file length. The rule itself still holds —
+the three are to be split along a cohesive seam, not exempted — and the split is
+filed as a ledger row, not quietly waived here. The last two came down that day:
 
 - `RealForwardRunner.swift` (1,449 → 496): the 603-line initializer became a
   convenience initializer that fills a staging `Builder` in two phases

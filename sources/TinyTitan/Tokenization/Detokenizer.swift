@@ -46,9 +46,15 @@ struct GFByteLevelDecoderConfiguration: Sendable {
 
     static func load(
         from tokenizerJSON: URL,
-        tokenizer: any Tokenizer
+        tokenizer: any Tokenizer,
+        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
     ) throws -> Self {
-        let data = try Data(contentsOf: tokenizerJSON)
+        // `tokenizer.json` is the largest document the load path reads: 12,809,320
+        // bytes for the installed 125B tokenizer measured on this host. It is
+        // copied into the install like any other part of the model directory, so
+        // it takes the manifest's ceiling rather than a number tuned to today's
+        // vocab, which would refuse a legitimate tokenizer the day the vocab grows.
+        let data = try BoundedMetadataRead.read(fileAt: tokenizerJSON, maxBytes: maxBytes)
         let metadata = try JSONDecoder().decode(FileMetadata.self, from: data)
         guard metadata.decoder.type == "ByteLevel" else {
             throw GFTokenizerError.unsupportedForDialect(

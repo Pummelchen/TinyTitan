@@ -23,6 +23,10 @@ package enum ModelError: Error, CustomStringConvertible, Equatable {
     case tensorSizeMismatch(name: String, expected: UInt64, actual: UInt64)
     case residentBufferWrapFailed
     case indexCorrupt(detail: String)
+    /// A metadata document is larger than the bound its reader states, so it was
+    /// refused **before** its bytes were allocated. The wording is the one
+    /// `ModelCatalog` and `ANEPrefillAttention` already use for the same refusal.
+    case metadataOverBound(document: String, bytes: Int, cap: UInt64)
     case posixFailed(call: String, errno: Int32)
     case trustedReceiptInvalid(detail: String)
     case expertCacheUnplaceable(detail: String)
@@ -62,6 +66,8 @@ package enum ModelError: Error, CustomStringConvertible, Equatable {
             return "MTLDevice.makeBuffer(bytesNoCopy:...) returned nil"
         case .indexCorrupt(let d):
             return "resident index is corrupt: \(d)"
+        case .metadataOverBound(let document, let bytes, let cap):
+            return "\(document) is \(bytes) bytes, over the \(cap)-byte metadata bound"
         case .posixFailed(let c, let e):
             return "\(c) failed with errno \(e)"
         case .trustedReceiptInvalid(let detail):

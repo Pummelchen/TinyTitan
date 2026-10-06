@@ -243,12 +243,10 @@ func loadGroup(runner: FleetRunner, seed: FleetTarget, from path: String?) async
 /// The same JSON a member answers `/inventory` with, so a snapshot can be
 /// rendered, reviewed or diffed with no fleet running.
 func localRead(path: String, seed: FleetTarget) throws -> FleetRead {
-    let data: Data
-    if path == "-" {
-        data = FileHandle.standardInput.readDataToEndOfFile()
-    } else {
-        data = try Data(contentsOf: URL(fileURLWithPath: path))
-    }
+    let data =
+        path == "-"
+        ? try FleetInventorySource.readStandardInput()
+        : try FleetInventorySource.read(fileAt: URL(fileURLWithPath: path))
     let inventory = try JSONDecoder().decode(FleetInventory.self, from: data)
     return FleetRead(group: FleetRunner.assemble(inventory: inventory, seed: seed), raw: data)
 }

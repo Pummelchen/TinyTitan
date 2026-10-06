@@ -7,6 +7,7 @@
 #
 # Checks:
 #   force-cast          no `as!` / `try!` in sources/ without an audited opt-out
+#   unbounded-read      no whole-file read in sources/ without an audited bound
 #   func-length         no NEW function longer than MAX_FUNC_LINES (ratcheted)
 #   unchecked-sendable  new `@unchecked Sendable` must document its invariant
 #   converter           routed experts must land at their own index
@@ -26,6 +27,10 @@
 #
 # Opting out of arch-path: `lint:allow-arch-path <reason>` on the line above,
 # for a deliberate compatibility fallback rather than a build path.
+#
+# Opting out of unbounded-read: `lint:allow-unbounded-read <reason>` in the comment
+# block above, for a read whose input is already bounded by something other than a
+# size cap. See the check for what counts as a reason.
 #
 # Opting out of the converter check: `ALLOW_MISSING_CONVERTER_DEPS=1`. The gate
 # fails when python3 or the converter's three pinned dependencies are absent,
@@ -71,6 +76,59 @@ check_force_cast() {
 
   if [ "$found" -ne 0 ]; then
     echo "  FAIL: force cast/try without an audited 'lint:allow-force <reason>' comment above it"
+    status=1
+  else
+    echo "  ok"
+  fi
+}
+
+# --- unbounded whole-file reads ---------------------------------------------
+# A metadata document read by `Data(contentsOf:)` or `String(contentsOf:)`
+# materializes the whole file before anything looks at it, so a bound applied to
+# the bytes afterwards is a bound applied after the cost. Measured here: a 2 GiB
+# sparse file (0 B allocated on disk, so the read is pure allocation) took 0.350 s
+# and raised the process footprint by 2,049 MB on a 24 GB Mac — enough to page a
+# resident model out mid-generation. The nine load-path sites that had that shape
+# now read through `BoundedMetadataRead` (engine) or `Posix.readBoundedData`
+# (converter), which `fstat` the descriptor being read and refuse before
+# allocating.
+#
+# This gate keeps that from regressing: every whole-file read under `sources/`
+# needs an audited reason. Opting out: `lint:allow-unbounded-read <reason>` in the
+# comment block directly above, where the reason names the bound the input already
+# carries — a range this process itself requested, a resource the package ships, an
+# operator-named file outside every trust boundary, or an mmap that is the point of
+# the read.
+check_unbounded_metadata_read() {
+  echo "== unbounded-read: whole-file reads under sources/ must state their bound =="
+  local found=0
+  while IFS= read -r hit; do
+    local file line text n ok=0
+    file="${hit%%:*}"
+    line="$(echo "$hit" | cut -d: -f2)"
+    text="$(sed -n "${line}p" "$file")"
+    # A doc comment that only names the shape is not a read.
+    case "$(echo "$text" | sed 's/^[[:space:]]*//')" in
+      //*|'/*'*) continue ;;
+    esac
+    n=$((line - 1))
+    while [ "$n" -ge 1 ]; do
+      text="$(sed -n "${n}p" "$file")"
+      echo "$text" | grep -qE '^[[:space:]]*//' || break
+      if echo "$text" | grep -qE 'lint:allow-unbounded-read[[:space:]]+[^[:space:]]'; then
+        ok=1
+        break
+      fi
+      n=$((n - 1))
+    done
+    [ "$ok" -eq 1 ] && continue
+    echo "  ${file#$ROOT/}:$line: $(echo "$hit" | cut -d: -f3- | sed 's/^[[:space:]]*//')"
+    found=1
+  done < <(grep -rnE '(Data|String)\(contentsOf:' --include='*.swift' "$ROOT/sources" 2>/dev/null)
+
+  if [ "$found" -ne 0 ]; then
+    echo "  FAIL: unbounded whole-file read without a 'lint:allow-unbounded-read <reason>' comment above it"
+    echo "        bound the read instead (BoundedMetadataRead / Posix.readBoundedData), or say why it needs no bound"
     status=1
   else
     echo "  ok"
@@ -862,8 +920,9 @@ check_javascript() {
 }
 
 case "$want" in
-  all)         check_force_cast; check_func_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
+  unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
   sendable)    check_unchecked_sendable ;;
   converter)   check_converter_expert_order ;;
@@ -877,7 +936,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|func-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
 esac
 
 exit $status

@@ -277,19 +277,25 @@ public struct ModelCatalog: Sendable {
 
     /// A scanned directory's `config.json`, read under the manifest's bound.
     /// A probe walks every directory the scan finds, so the file in front of it
-    /// is not a document this server was told to load, and `Data(contentsOf:)`
-    /// grows as it reads. K17: the size is checked against the bytes actually
-    /// read, since stat-then-re-read is a TOCTOU window.
+    /// is not a document this server was told to load, and it can be far larger
+    /// than the bound before the bound is applied: a bound that checks the bytes
+    /// *after* the read has already paid for them. K17: the size is `fstat`'d on
+    /// the descriptor being read, so the cap fires before the allocation and
+    /// still belongs to the file actually read.
     static func readSnapshotConfig(
         _ directory: URL,
         maxBytes: UInt64 = ManifestReader.defaultMaxBytes
     ) throws -> Data {
-        let data = try Data(contentsOf: directory.appendingPathComponent("config.json"))
-        guard UInt64(data.count) <= maxBytes else {
+        do {
+            return try BoundedMetadataRead.read(
+                fileAt: directory.appendingPathComponent("config.json"),
+                maxBytes: maxBytes)
+        } catch ModelError.metadataOverBound(let document, let bytes, let cap) {
+            // The catalog's own error type, because the probe below catches it
+            // and turns it into the skip reason a scan reports.
             throw CPUModelBackend.CPUBackendError.unsupported(
-                "config.json is \(data.count) bytes, over the \(maxBytes)-byte metadata bound")
+                "\(document) is \(bytes) bytes, over the \(cap)-byte metadata bound")
         }
-        return data
     }
 
     private static func probeSnapshot(_ directory: URL) -> Result<Entry, ProbeFailure> {

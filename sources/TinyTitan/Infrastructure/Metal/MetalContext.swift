@@ -146,6 +146,9 @@ public final class MetalContext: @unchecked Sendable {
             guard let url = shaderURL(module: name) else {
                 throw MetalError.missingShaderResource(name)
             }
+            // lint:allow-unbounded-read Bundle.module resolves this to a .metal
+            // source this package itself ships and compiles in full; no path a
+            // caller can hand the engine reaches this read.
             let src = try String(contentsOf: url, encoding: .utf8)
             combined += "\n// ==== \(name).metal ====\n" + src + "\n"
         }
@@ -164,6 +167,8 @@ public final class MetalContext: @unchecked Sendable {
         guard let url = shaderURL(module: module) else {
             throw MetalError.missingShaderResource(module)
         }
+        // lint:allow-unbounded-read Same resource as `compileShaderLibrary`: a
+        // .metal file this package ships, named by `module`, not by a caller.
         let src = try String(contentsOf: url, encoding: .utf8)
         let opts = MTLCompileOptions()
         opts.languageVersion = .version4_0

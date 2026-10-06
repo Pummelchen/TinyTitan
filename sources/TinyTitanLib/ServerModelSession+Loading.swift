@@ -290,9 +290,16 @@ extension ServerModelSession {
                 context: context, vocab: model.config.vocabSize,
                 logitSoftcap: Float(model.config.finalLogitSoftcap))
         }
-        let templateDigest = SHA256.hash(data: try Data(contentsOf: templateURL))
-            .map { String(format: "%02x", $0) }
-            .joined()
+        // Bounded like every other document copied into a model directory: the
+        // installed template measures 8,952 bytes, and the digest below is taken
+        // over whatever bytes come back, so the read is capped before it allocates.
+        let templateDigest = SHA256.hash(
+            data: try BoundedMetadataRead.read(
+                fileAt: templateURL,
+                maxBytes: ManifestReader.defaultMaxBytes)
+        )
+        .map { String(format: "%02x", $0) }
+        .joined()
         let runtimeIdentity = [
             String(runtime.expertCacheSlots),
             runtime.expertCachePolicy.rawValue,

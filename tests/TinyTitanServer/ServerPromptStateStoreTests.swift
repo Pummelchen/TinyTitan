@@ -124,6 +124,64 @@ struct ServerPromptStateStoreTests {
                 atPath: payload.deletingLastPathComponent().path))
     }
 
+    /// AUD-142: a record whose `metadata.json` crosses the store's bound is
+    /// skipped, and skipped *without being read*. The shape this replaced stat'd
+    /// the path, checked the size, then re-read the path — so the bytes checked
+    /// were not the bytes used (K17), and the whole document was allocated before
+    /// the refusal. The fixture is a sparse tail for that reason: it is 16 MiB and
+    /// one byte of *size* with almost nothing behind it, which is exactly what a
+    /// planted cache entry looks like and what an unbounded read would put in
+    /// memory.
+    @Test func oversizedDiskMetadataIsSkippedWithoutBeingRead() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1, 2])
+        let snapshot = makeSnapshot(position: 2, payload: Data([1, 2, 3, 4, 5, 6, 7]))
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0,
+            diskDirectory: root,
+            diskLimitBytes: 1_024)
+        let writer = try ServerPromptStateStore(configuration: configuration)
+        _ = await writer.save(entry: entry, snapshot: snapshot)
+
+        let metadata =
+            root
+            .appendingPathComponent(entry.id.uuidString.lowercased())
+            .appendingPathComponent("metadata.json")
+        let handle = try FileHandle(forWritingTo: metadata)
+        try handle.truncate(atOffset: 16 * 1_024 * 1_024 + 1)
+        try handle.close()
+
+        let reader = try ServerPromptStateStore(configuration: configuration)
+        #expect(reader.loadEntries(domain: domain).isEmpty)
+    }
+
+    /// A link standing in for a record's metadata is not a record. The check that
+    /// covers this used to be a `resourceValues` look at the path before the read;
+    /// it now lives in the read, on the descriptor that is actually used.
+    @Test func symlinkedDiskMetadataIsSkipped() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1, 2])
+        let snapshot = makeSnapshot(position: 2, payload: Data([1, 2, 3, 4, 5, 6, 7]))
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0,
+            diskDirectory: root,
+            diskLimitBytes: 1_024)
+        let writer = try ServerPromptStateStore(configuration: configuration)
+        _ = await writer.save(entry: entry, snapshot: snapshot)
+
+        let record = root.appendingPathComponent(entry.id.uuidString.lowercased())
+        let metadata = record.appendingPathComponent("metadata.json")
+        let real = root.appendingPathComponent("elsewhere.json")
+        try FileManager.default.moveItem(at: metadata, to: real)
+        try FileManager.default.createSymbolicLink(
+            atPath: metadata.path, withDestinationPath: real.path)
+
+        let reader = try ServerPromptStateStore(configuration: configuration)
+        #expect(reader.loadEntries(domain: domain).isEmpty)
+    }
+
     private func makeEntry(tokens: [Int32]) -> ServerPromptCacheEntry {
         ServerPromptCacheEntry(
             id: UUID(),

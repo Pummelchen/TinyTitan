@@ -200,6 +200,30 @@ import Testing
     /// dequantize read fewer groups per row than the weights hold and returned
     /// plausible nonsense. It is refused now, before the division's result is
     /// trusted.
+    /// AUD-142: the `config.json` read is bounded, and it is the *bound* that
+    /// fires. The same directory loads under the default ceiling and is refused
+    /// under a smaller one, so the refusal cannot be the architecture block
+    /// complaining, and the message carries the size and the cap because "the
+    /// config is invalid" would send the operator to the wrong file.
+    @Test func anOversizedConfigIsRefusedByTheBoundNotByTheArchitectureParse() throws {
+        let directory = try writeSnapshot(
+            rows: 8, columns: 64, bits: 4,
+            level: { _, _ in 1 }, scale: 1, bias: 0)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try AffineSnapshot(directory: directory)
+
+        let configURL = directory.appendingPathComponent("config.json")
+        let size = try Data(contentsOf: configURL).count
+        #expect {
+            _ = try AffineSnapshot(directory: directory, maxBytes: UInt64(size - 1))
+        } throws: { error in
+            guard case ModelError.metadataOverBound(let name, let bytes, let cap) = error else {
+                return false
+            }
+            return name == "config.json" && bytes == size && cap == UInt64(size - 1)
+        }
+    }
+
     @Test func aWidthOutsideWholeGroupsIsRefused() throws {
         let directory = try writeSnapshot(
             rows: 8, columns: 32, bits: 4,

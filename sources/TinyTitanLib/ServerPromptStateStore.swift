@@ -32,6 +32,9 @@ final class ServerPromptStateStore: @unchecked Sendable {
 
     private static let metadataName = "metadata.json"
     private static let payloadName = "state.bin"
+    /// Applied by `BoundedMetadataRead` before the buffer is allocated, not to
+    /// the bytes after they have been read — a stat-then-re-read check bounded
+    /// the decision but not the memory (K17).
     private static let maximumMetadataBytes = 16 * 1_048_576
 
     /// Hard ceiling for one snapshot capture (S2). A snapshot above this is
@@ -112,13 +115,9 @@ final class ServerPromptStateStore: @unchecked Sendable {
             let metadataURL = directory.appendingPathComponent(Self.metadataName)
             let payloadURL = directory.appendingPathComponent(Self.payloadName)
             guard
-                let metadataValues = try? metadataURL.resourceValues(
-                    forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
-                metadataValues.isRegularFile == true,
-                metadataValues.isSymbolicLink != true,
-                let metadataSize = metadataValues.fileSize,
-                metadataSize <= Self.maximumMetadataBytes,
-                let metadataData = try? Data(contentsOf: metadataURL),
+                let metadataData = try? BoundedMetadataRead.read(
+                    fileAt: metadataURL,
+                    maxBytes: UInt64(Self.maximumMetadataBytes)),
                 let metadata = try? JSONDecoder().decode(
                     DiskMetadata.self,
                     from: metadataData),

@@ -247,12 +247,22 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the twelve checks CI enforces beyond the compiler — the
-first seven are project-specific probes, the last five are pinned third-party
+`tools/lint.sh` runs the thirteen checks CI enforces beyond the compiler — the
+first eight are project-specific probes, the last five are pinned third-party
 linters:
 
 - `force-cast` — no `as!` / `try!` under `sources/` without a
   `lint:allow-force <reason>` comment above it.
+- `unbounded-read` — no whole-file `Data(contentsOf:)` / `String(contentsOf:)`
+  under `sources/` without a `lint:allow-unbounded-read <reason>` comment above
+  it. A bound applied to the bytes *after* such a read is a bound applied after
+  the allocation: measured on a 2 GiB sparse file, 0.350 s and +2,049 MB of
+  `phys_footprint` on a 24 GB Mac. Metadata documents therefore go through
+  `BoundedMetadataRead` (engine) or `Posix.readBoundedData` (converter), which
+  `fstat` the descriptor being read and refuse before allocating. The 7
+  exemptions are reads whose input is bounded some other way — a range this
+  process itself requested, a resource the package ships, an mmap that is the
+  point of the read, or an operator-named benchmark input.
 - `func-length` — no function over 120 lines without an inline `lint:allow-long
   <reason>`. The ratchet file `tools/func-length-baseline.txt` carries the
   audited exemptions (14 rows: the formatter sweep's expansions), and the gate
@@ -290,9 +300,10 @@ linters:
   declared 3.13 floor). Each pins its tool version and fails when another is on
   `PATH`.
 
-`tools/lint.sh <mode>` runs a single check (`force-cast`, `func-length`,
-`sendable`, `converter`, `arch-path`, `shell`, `shellcheck`, `swiftlint`,
-`swift-format`, `javascript`, `python`; `format` and `js` are aliases).
+`tools/lint.sh <mode>` runs a single check (`force-cast`, `unbounded-read`,
+`func-length`, `sendable`, `converter`, `arch-path`, `test-skip`, `shell`,
+`shellcheck`, `swiftlint`, `swift-format`, `javascript`, `python`; `format` and
+`js` are aliases).
 
 In a fresh checkout the `javascript` check needs the plugin packages'
 dependencies first — `npm ci` in `plugins/dsh-lan-manager/` and
