@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:9  Done:45  Blocked:1  Total:55**
+**Open:9  Done:46  Blocked:1  Total:56**
 
 ## Table
 
@@ -22,7 +22,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
-| AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
+| AUD-156 | S2 | A | installer | `tools/dsh_local.sh:819-836 (ensure_smoke_deps)` | The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked | unpinned dependency downloaded and executed, against the script's own pinning rule | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
@@ -46,6 +46,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
+| AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanLib/ServerPromptStateStore.swift:121, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/IndexLoader.swift:72, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250 (before); sources/TinyTitan/Infrastructure/ModelIO/BoundedMetadataRead.swift (after)` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-150 | S2 | A | engine | `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)` | AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file | unbounded memory on an input file (found while converting AUD-142's sites) | DONE | Mac (primary) |
@@ -304,19 +305,19 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-140 — The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest
+### AUD-156 — The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked
 
 - **Severity / tier:** S2 / Tier A
 - **Project:** installer
-- **Location:** `tools/dsh_local.sh:256-275`
-- **Category:** integrity / download-and-execute, fail-open check
+- **Location:** `tools/dsh_local.sh:819-836 (ensure_smoke_deps)`
+- **Category:** unpinned dependency downloaded and executed, against the script's own pinning rule
 - **Status:** OPEN
 - **Host:** Mac (primary)
-- **Discovered by:** AUD-109 sibling sweep
+- **Discovered by:** AUD-140 sibling sweep
 
-**Evidence before.** dsh_local.sh:264 `run "download Node from nodejs.org" curl -fsSL "$url" -o "$tmp/$tarball"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.
+**Evidence before.** `"$(npm_bin)" install --prefix "$SMOKE_DIR" --no-fund --no-audit playwright` (:826) names no version, while the two other installs in the same file are pinned from constants at the top (`@deepseek-ai/dsh@$DSH_VERSION` :353, `pnpm@$PNPM_VERSION` :394). The file's own header argues the case -- 'a floating version here would turn a working install into a broken one overnight' -- and this is the one place it does not hold. Measured on this host 2026-10-06: `~/.tinytitan/dsh/smoke/node_modules/playwright` is 1.63.0 and `npm view playwright version` is 1.63.0, so what installs is whatever the registry calls latest at the moment someone runs `smoke`, not a version this repository chose. The next line (:833) runs the freshly installed CLI's `install chromium --only-shell`, which pulls a ~150 MB browser bundle from Playwright's CDN into $DSH_ROOT/browsers and launches it: npm's integrity check covers the package against the registry's own metadata, and nothing here covers the browser bundle, so the bytes that get executed on the floating path are decided upstream twice over. Not fixed in AUD-140's commit on purpose: the pin is a choice about which Playwright this project supports, and the only way to learn whether that version still drives the page is a real smoke run, which needs a running server and so falls under the model-run preconditions.
 
-**Evidence after.** Expected: the Node download is checked against nodejs.org's published SHASUMS256.txt for that exact version, and a missing or non-matching digest stops the setup -- the same fail-closed shape AUD-109 gave the engine and tools archives, with a harness that stubs curl and proves the refusal.
+**Evidence after.** Expected: `playwright` is pinned from a constant beside PNPM_VERSION, the smoke install and the browser download both report the version they took, and `benchmark/test_dsh_isolation.py` gains the static rule that no npm install in tools/dsh_local.sh is unpinned -- so the next surface added here fails a gate instead of repeating this one. Closing needs one real `tools/dsh_local.sh smoke` run against a started server (model preconditions apply), recorded with its exit code, because a pin nobody drove the page with is a claim, not a fix.
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -728,6 +729,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** OpenAIValidationTests 36 tests pass. Mutation: deleting the new note fails parallelToolCallsIsAcceptedAndReported with 1 issue, restoring it is green again, so the test pins the disclosure rather than the decode. Three-way bound check in that test: true -> note, false -> none, field absent -> none. 98 tests across the request-path suites pass, full serial suite exit 0 (1615 tests, 7 runs, 0 failures), all eleven gates exit 0 (swiftlint --strict, swift-format --strict, shellcheck 0.11.0 over 24 scripts, ruff 0.16.7, eslint+prettier over both plugin packages, converter suites ok).
 
 **Commit.** `6b742ec`
+
+### AUD-140 — The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** installer
+- **Location:** `tools/dsh_local.sh:256-275`
+- **Category:** integrity / download-and-execute, fail-open check
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-109 sibling sweep
+
+**Evidence before.** dsh_local.sh:264 `run "download Node from nodejs.org" curl -fsSL "$url" -o "$tmp/$tarball"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.
+
+**Fix.** verify_node_tarball (tools/dsh_local.sh:252) runs between the two fetches and `tar -xzf` (:325): it requires `shasum`, requires the fetched SHASUMS256.txt to be non-empty, selects the one line whose second field is exactly this tarball's name, writes that line alone as `$tarball.sha256`, and runs `shasum -a 256 -c` on it. Each of those four failures is a die that removes the scratch directory before it exits, so the private root is left empty -- no fall-through, the shape AUD-109 gave verify_release_artifact. The checksum file is fetched with `|| true` deliberately: under `set -e` a 404 would abort on curl's exit code and blame a transfer for what is actually 'nothing published to check these bytes against'; the verifier is the only place that decides whether to continue, and its four messages name four different causes because the fix the reader reaches for depends on which one it was. The dry run prints both fetches and returns before the verifier, so --dry-run still writes nothing.
+
+**Evidence after.** Commit e786499. benchmark/test_dsh_node_digest.py: 12 tests OK in 0.955s. The accept case asserts the digest was fetched for the pinned version AND that the run continued into the harness install -- the synthetic tarball ships a `bin/npm` stub that prints and exits 1, so 'reached npm' is the evidence the check passed; a green exit would prove nothing and a guard that died early never gets there. Four refusal cases each assert a non-zero exit, the specific message, and that $DSH_ROOT/node does not exist afterwards: tampered bytes, absent SHASUMS256.txt, a checksum file that lists other artifacts but not this tarball, and a farm PATH holding every system tool except the checksum tool (which also asserts the refusal offers 'install Node yourself' rather than a flag that skips the check). The fixture lists two impossible digests BEFORE ours, so a check that took the first line, or handed the whole file to `shasum -c`, cannot pass by luck. Every run uses a farm of symlinks to /usr/bin, /bin and /usr/sbin with no node and no npm, so which branch executes does not depend on what the testing machine has installed. Mutation checks, each restored after: verifier call removed -> 7 fail; missing-shasum guard removed -> 2 (the shasum class only); any-line-instead-of-the-named-one -> 4; whole file handed to `shasum -c` -> 2; mismatch branch unreachable -> 2 (the tamper class); absent-checksum-file guard removed -> 1. Negative control: the same harness against HEAD~1's script -> 9 of 12 fail. Gates: tools/lint.sh shell ok (25 scripts, system bash 3.2.57), shellcheck 0.11.0 ok with no warnings, python gate ok (ruff 0.16.7, check and format clean) -- but only when run as `PATH=$HOME/.local/bin:$PATH tools/lint.sh python`, because Homebrew's 0.16.10 still shadows the pin on the default PATH on this host; that is still the user's call to `brew uninstall ruff`, and without the reordering the gate reports FAIL rather than passing silently. CI: this suite and test_release_installer_verification were both added to the Installer gates step -- the AUD-109 harness existed and no gate ran it, which is how this class of defect could sit here; the whole step is 93 tests OK in 7.6s locally. Sibling sweep of the same pattern (download, then execute): tools/ now has two download surfaces, install_tinytitan.sh (verified since AUD-109) and this one; the model downloads in install_models.sh are hashed by the repacker against the manifest. One true and unfixed finding left in the same script: dsh_local.sh:826 installs `playwright` with no version while every other npm install names a pin (:353 dsh, :394 pnpm), and :833 then downloads a ~150 MB chromium bundle from Playwright's CDN and executes it. Measured here, the floating install resolves to 1.63.0 -- today's registry latest, i.e. whatever is newest when someone happens to run `smoke`. Filed as AUD-156 rather than pinned blind, because choosing a pin needs a real smoke run and that is a model run under the preconditions.
+
+**Commit.** `e786499`
 
 ### AUD-142 — Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap
 
