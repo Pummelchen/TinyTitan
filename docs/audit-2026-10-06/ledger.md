@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:68  Blocked:1  Total:69**
+**Open:0  Done:70  Blocked:1  Total:71**
 
 ## Table
 
@@ -77,6 +77,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-158 | S3 | C | lint-gates | `AGENTS.md 'Two products, one repository' rules 1 and 3, sources/TinyTitanLib/*.swift (22 public types, 88 public declarations, 291 package), tools/lint.sh (no facade check)` | Nothing enforces the library facade: `public` in `TinyTitanLib` is a promise carried only by the reviewer's memory, and so are 'imports no NIO' and 'keeps stdout clean' | unenforced documented standard (missing gate) | DONE | Mac (primary) |
 | AUD-160 | S3 | C | docs-gates | `AGENTS.md ('runs the thirteen checks'), RELEASE.md:240, .github/workflows/ci.yml:109, docs/handover-tinytitan.md:23 (all enumerate the gate set); docs/handover-tinytitan.md:8-22 and this ledger's AUD-106 fix-summary (release shas)` | Nothing compares a documented count or citation to the thing it documents: four files enumerate the gate set, three were wrong, and three release shas cited tag objects as commits | missing gate / derived facts restated as prose | DONE | Mac (primary) |
 | AUD-162 | S3 | C | docs-gates | `AGENTS.md:268 and CONTRIBUTING.md:37 (`14 rows`), docs/handover-tinytitan.md:127 (`16 files under benchmark/golden/, 16 targets in tools/golden-baseline.sh`), tools/func-length-baseline.txt, tools/library-facade-baseline.txt` | The docs gate enforces the gate count, mode names, ledger counts and tag shas, but three other documented counts of repository-computable things are still prose | guard not reachable (same class as AUD-160, not yet fixed) | DONE | Mac (primary) |
+| AUD-170 | S3 | A | fleet | `sources/TinyTitanFleet/Command/main.swift:115 (was the inline `??` chain), sources/TinyTitanFleet/Core/FleetGroupKey.swift` | `ttlanmanager --key` puts the group key in argv, where every other local account reads it with ps, and nothing said so | secret through a world-visible channel, on the one path where the secret is the operator's own | DONE | Mac (primary) |
+| AUD-171 | S3 | B | plugins | `plugins/dsh-lan-manager/src/router.js:326 (the catch-all), plugins/dsh-lan-manager/src/api.js:800 (the session-controller wrapper)` | An unexpected throw answers with its own message, so a filesystem failure names this Mac's paths to any peer that can reach the port | internal detail in an error answer, plus a mislabelled status on the sibling site | DONE | Mac (primary) |
 
 ## Detail
 
@@ -1416,3 +1418,39 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** All four claims re-measured on this tree and true, so the gate is green without any document being edited to satisfy it: `wc -l tools/func-length-baseline.txt` = 14 (matching `AGENTS.md:268` and `CONTRIBUTING.md:37`), `git ls-files benchmark/golden | wc -l` = 16, and `tools/golden-baseline.sh:280` names 16 targets. `python3 tools/docs-facts.py` exits 0: `ok (82 documents against 17 gates derived from tools/lint.sh, table shape in all 108; 1 owner-file note(s) reported and not enforced)` -- the one note being `AGENTS.md:250`'s count, which is the maintainer's file and is reported, not enforced. Mutation proof: the probe now reads 24/24 arms ok, six of them new -- (18) `(14 rows` written as 15 fails naming `tools/func-length-baseline.txt holds 14 rows`; (19) the same claim pointed at `tools/no-such-baseline.txt` fails with `cannot count the rows a claim of “14 rows” rests on (tools/no-such-baseline.txt)` rather than passing vacuously; (20) `17 files under `benchmark/golden/`` fails against `git ls-files benchmark/golden/ lists 16`; (21) `17 targets in `tools/golden-baseline.sh`` fails against the derived 16; (22) `48 rows per token`, with no ratchet file within the window, exits 0; (24) a fourth cell added to a row of `tool-coverage.md` -- a document `check_counts` never reads -- exits 1 naming the line and both column counts. Arm M3 was tightened with an `absent` needle so the ledger-count phrase provably does not also fire the new `N rows` pattern. Full suite: `tools/lint.sh` exits 0 across all 17 gates (ruff 0.16.7 check and format clean, shellcheck 0.11.0 over 27 scripts on bash 3.2.57, swiftlint 0.65.1 --strict, swift-format --strict, eslint 10.11.0 + prettier 3.9.9 on both plugins, 1,658 test bodies scanned, 88 public declarations allowlisted, largest source 496 lines). Scope of verification: tooling and documents only -- no Swift or C changed, so the test suite and the golden baseline were not re-run, and no model was fetched. The three remaining non-DONE rows after this close are AUD-120 (needs an owner decision), AUD-139 (blocked on the owner) and AUD-156 (needs one real `tools/dsh_local.sh smoke` run).
 
 **Commit.** `28fd719`
+
+### AUD-170 — `ttlanmanager --key` puts the group key in argv, where every other local account reads it with ps, and nothing said so
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `sources/TinyTitanFleet/Command/main.swift:115 (was the inline `??` chain), sources/TinyTitanFleet/Core/FleetGroupKey.swift`
+- **Category:** secret through a world-visible channel, on the one path where the secret is the operator's own
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the L4 sweep's leftover question about how the fleet key is carried
+
+**Evidence before.** The shipped default `tinytitan-lan` is public by design -- `router.js:101` tells a peer that presents it that the key `groups rather than protects`, and that is the right reading of a default. So the key that matters is the one an operator chose *because* they want other people out, and the documented way to pass it to the CLI is `--key`, which is also the first name in the resolution order the help text prints. macOS shows every account's argv to every other account through `ps`; a process's environment belongs to its own user. The help line named the order and never named the difference, and the README's own habit of writing the token into a `curl -H` argument goes out the same door. Nothing in the tree said which spelling to prefer.
+
+**Fix.** The resolution moves out of the executable's top-level code into `FleetGroupKey` -- `FleetKey` was already taken by the keyboard enum in `FleetDashboard.swift` -- with the order untouched, and returns the warning alongside the key. `--key` now puts one line on stderr naming the channel and pointing at `DSH_LAN_KEY`, and the usage text says the same before anyone types it. Errors and warnings go to stderr, so `--json` output stays parseable.
+
+**Evidence after.** Measured 2026-10-06. 2 tests in `tests/TinyTitanFleet/KeySourceTests.swift` pin both the warning and the order (a reorder would change which key a machine presents without touching any other assertion). Fleet suite 51 tests in 13 suites passed. Mutation probe: with the warning replaced by `nil` the test fails with two named issues, so the probe is not a compile check. Live: `swift run ttlanmanager --key probe-key --peer 127.0.0.1:59999 --timeout 1 inventory` prints the line on stderr before dialling anything, and the executable builds under `-warnings-as-errors`. NOT covered: the same literal lives in `plugins/dsh-lan-manager/src/config.js:51` as `DEFAULT_GROUP_KEY` and nothing pins the two together -- a Swift test reaching into `plugins/` has no precedent here, and inventing one was not this row's call.
+
+**Commit.** `a9bd232`
+
+### AUD-171 — An unexpected throw answers with its own message, so a filesystem failure names this Mac's paths to any peer that can reach the port
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-lan-manager/src/router.js:326 (the catch-all), plugins/dsh-lan-manager/src/api.js:800 (the session-controller wrapper)`
+- **Category:** internal detail in an error answer, plus a mislabelled status on the sibling site
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the L4 pass over what the manager says when it fails
+
+**Evidence before.** The router's catch-all answered 500 with `error.message` verbatim. The throws that reach it are the unexpected ones -- `node:fs` and child-process failures -- and Node puts the absolute path in their messages, so the answer told any caller where this Mac keeps its profiles. The manager listens on the LAN by design, so "any caller" is not only this user. One layer down sat the same defect with a second problem: the session-controller wrapper wrapped *any* throw into an `ApiError` carrying its message, so that route never passed through the router fence at all, and its fallback gave an uncoded controller failure status 400 -- telling the caller to fix a request that was fine.
+
+**Fix.** The catch-all keeps the log line that already recorded the stack and answers with a fixed message that says where the detail is. `ApiError` messages still go out unchanged, because those are authored here and are the documented answer for a known failure. The wrapper now keeps the code and message only of an error the controller *authored* -- one carrying its own code -- and rethrows anything else to the catch-all, which both logs it and calls it a 500.
+
+**Evidence after.** Measured 2026-10-06. `an unexpected throw answers a fixed 500 and keeps its detail in the log` asserts the absence of the path and the presence of the log line, so the fix cannot become a silent failure. On the unfixed sources it fails with `expected: 500` and an actual of 400 -- the path was in the body at that point. Suite 130 pass / 0 fail; the 501 case and the `workspace/not-found` case still assert their authored messages, which is the half that had to survive. NOT covered: the fan-out receipts in `prompt-all` and the archive path echo per-session failure messages, and api.js has no logger in scope to put the detail anywhere else -- fixing that needs a log channel threaded through, not a message swapped.
+
+**Commit.** `fe467d9`

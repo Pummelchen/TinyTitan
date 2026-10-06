@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 69,
-    "done": 68,
+    "total": 71,
+    "done": 70,
     "open": 0,
     "blocked": 1
   },
@@ -1182,6 +1182,40 @@
       "fix-summary": "Every served id must match `[A-Za-z0-9._-]+` before anything is printed, the refusal captures the validator's stderr and passes it to `die`, and nothing is emitted unless the whole listing passes -- so a refusal leaves the array empty and the existing empty-listing error still fires.",
       "evidence-after": "Measured 2026-10-06. 4 tests in `benchmark/test_dsh_route.py` (`ServedIdTests`) drive a real `ThreadingHTTPServer` on 127.0.0.1 port 0 rather than a stub, because the claim is what the shell does with a live answer: plain ids reach the block, an id with a newline is refused, an id with YAML punctuation is refused, and one bad id refuses the whole listing. Suite: 17 passed including the 4 new. `tools/lint.sh shell` and `shellcheck` clean, and the loop is a `while read` rather than `mapfile` because /bin/bash on a factory Mac is 3.2.",
       "commit": "a5ee765",
+      "blocked-reason": ""
+    },
+    {
+      "id": "AUD-170",
+      "severity": "S3",
+      "tier": "A",
+      "project": "fleet",
+      "file_line": "sources/TinyTitanFleet/Command/main.swift:115 (was the inline `??` chain), sources/TinyTitanFleet/Core/FleetGroupKey.swift",
+      "title": "`ttlanmanager --key` puts the group key in argv, where every other local account reads it with ps, and nothing said so",
+      "category": "secret through a world-visible channel, on the one path where the secret is the operator's own",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "the L4 sweep's leftover question about how the fleet key is carried",
+      "evidence-before": "The shipped default `tinytitan-lan` is public by design -- `router.js:101` tells a peer that presents it that the key `groups rather than protects`, and that is the right reading of a default. So the key that matters is the one an operator chose *because* they want other people out, and the documented way to pass it to the CLI is `--key`, which is also the first name in the resolution order the help text prints. macOS shows every account's argv to every other account through `ps`; a process's environment belongs to its own user. The help line named the order and never named the difference, and the README's own habit of writing the token into a `curl -H` argument goes out the same door. Nothing in the tree said which spelling to prefer.",
+      "fix-summary": "The resolution moves out of the executable's top-level code into `FleetGroupKey` -- `FleetKey` was already taken by the keyboard enum in `FleetDashboard.swift` -- with the order untouched, and returns the warning alongside the key. `--key` now puts one line on stderr naming the channel and pointing at `DSH_LAN_KEY`, and the usage text says the same before anyone types it. Errors and warnings go to stderr, so `--json` output stays parseable.",
+      "evidence-after": "Measured 2026-10-06. 2 tests in `tests/TinyTitanFleet/KeySourceTests.swift` pin both the warning and the order (a reorder would change which key a machine presents without touching any other assertion). Fleet suite 51 tests in 13 suites passed. Mutation probe: with the warning replaced by `nil` the test fails with two named issues, so the probe is not a compile check. Live: `swift run ttlanmanager --key probe-key --peer 127.0.0.1:59999 --timeout 1 inventory` prints the line on stderr before dialling anything, and the executable builds under `-warnings-as-errors`. NOT covered: the same literal lives in `plugins/dsh-lan-manager/src/config.js:51` as `DEFAULT_GROUP_KEY` and nothing pins the two together -- a Swift test reaching into `plugins/` has no precedent here, and inventing one was not this row's call.",
+      "commit": "a9bd232",
+      "blocked-reason": ""
+    },
+    {
+      "id": "AUD-171",
+      "severity": "S3",
+      "tier": "B",
+      "project": "plugins",
+      "file_line": "plugins/dsh-lan-manager/src/router.js:326 (the catch-all), plugins/dsh-lan-manager/src/api.js:800 (the session-controller wrapper)",
+      "title": "An unexpected throw answers with its own message, so a filesystem failure names this Mac's paths to any peer that can reach the port",
+      "category": "internal detail in an error answer, plus a mislabelled status on the sibling site",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "the L4 pass over what the manager says when it fails",
+      "evidence-before": "The router's catch-all answered 500 with `error.message` verbatim. The throws that reach it are the unexpected ones -- `node:fs` and child-process failures -- and Node puts the absolute path in their messages, so the answer told any caller where this Mac keeps its profiles. The manager listens on the LAN by design, so \"any caller\" is not only this user. One layer down sat the same defect with a second problem: the session-controller wrapper wrapped *any* throw into an `ApiError` carrying its message, so that route never passed through the router fence at all, and its fallback gave an uncoded controller failure status 400 -- telling the caller to fix a request that was fine.",
+      "fix-summary": "The catch-all keeps the log line that already recorded the stack and answers with a fixed message that says where the detail is. `ApiError` messages still go out unchanged, because those are authored here and are the documented answer for a known failure. The wrapper now keeps the code and message only of an error the controller *authored* -- one carrying its own code -- and rethrows anything else to the catch-all, which both logs it and calls it a 500.",
+      "evidence-after": "Measured 2026-10-06. `an unexpected throw answers a fixed 500 and keeps its detail in the log` asserts the absence of the path and the presence of the log line, so the fix cannot become a silent failure. On the unfixed sources it fails with `expected: 500` and an actual of 400 -- the path was in the body at that point. Suite 130 pass / 0 fail; the 501 case and the `workspace/not-found` case still assert their authored messages, which is the half that had to survive. NOT covered: the fan-out receipts in `prompt-all` and the archive path echo per-session failure messages, and api.js has no logger in scope to put the detail anywhere else -- fixing that needs a log channel threaded through, not a message swapped.",
+      "commit": "fe467d9",
       "blocked-reason": ""
     }
   ]
