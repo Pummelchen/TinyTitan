@@ -92,9 +92,14 @@ final class PLEBlock {
     let gateBuf: MTLBuffer  // [streams]
     let gatedBuf: MTLBuffer  // [hcDim]
     let convOut: MTLBuffer  // [hcDim]
-    /// `[history + 1, hcDim]`, ping-ponged so the row shift is a
+    /// `[history + maxRows, hcDim]`, ping-ponged so the row shift is a
     /// non-overlapping blit.
-    private var xpad: [MTLBuffer]
+    ///
+    /// Not private: `rewindWindow`'s contract -- which of the pair it reads,
+    /// and from which row -- is only observable on these buffers, and it is the
+    /// one piece of state a speculative pass can leave desynchronized in
+    /// silence. The parity dump reads the others for the same reason.
+    var xpad: [MTLBuffer]
     private var xpadIndex = 0
 
     /// Rows the scratch is sized for: one for decode, a whole chunk for

@@ -6,6 +6,19 @@ import Metal
 /// Split from RealForwardRunner.swift in the modularity refactor
 /// (docs/modularity-refactor.md) as pure code motion: one concern
 /// per file, no signature or behavior changes.
+///
+/// Coverage note, stated because the unit run reports this file at 0 covered
+/// lines and that number has no meaning without its reason: this is the only
+/// body in the runtime whose 0% is not a choice. It runs during a real prefill
+/// of a full-attention layer the sidecar covers, so reaching it needs a
+/// Qwen3.8-Flash-Next install *and* the exported ANE bundle -- and the
+/// installed `.ssdai` here carries none (`manifest.json`, `model_weights.bin`,
+/// `ngram_table.bin`, `packed_experts/`, `ple_constants.json`, `tokenizer/`,
+/// `verified-install.json`). Producing that bundle is `tools/export_ane_prefill.py`,
+/// an operator job, so the right answer is not a test that fetches it.
+/// `ANEPrefillAttentionTests` covers the bridge it calls; this method's own
+/// staging, rebinding and shadow-append is only observable inside a live
+/// prefill, and is reported as not checked rather than as covered.
 extension RealForwardRunner {
     /// One full-attention layer's prefill attention on the Neural Engine
     /// (Track A). The layer's input norm is already encoded on `cb`; this
