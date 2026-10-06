@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:13  Done:32  Blocked:1  Total:46**
+**Open:13  Done:33  Blocked:1  Total:47**
 
 ## Table
 
@@ -22,7 +22,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
-| AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | OPEN | Mac (primary) |
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
@@ -43,12 +42,14 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
+| AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
+| AUD-146 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
@@ -285,20 +286,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** sibling scan while closing AUD-102
 
 **Evidence before.** Read at the cited lines and confirmed by the auditor. test_launcher_ram.py:135 and :194, test_launcher_port.py:108 and :155, test_coder_clients.py:117, test_tinytitan_profile.py:37 each skipTest on 'no install under models/ and no built server to list one' (or a local variant). CI has no models/ by policy and none may be fetched to satisfy a gate, so these never run there — the same shape AUD-102 was, found by looking at the siblings rather than assuming they were clean. EmptyModelsDirTests demonstrates the fix: a synthetic directory plus TINYTITAN_MODELS_DIR exercises the launcher's choices with no model.
-
-**Evidence after.** None yet.
-
-### AUD-127 — A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip
-
-- **Severity / tier:** S2 / Tier C
-- **Project:** tests
-- **Location:** `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143`
-- **Category:** test that asserts nothing on the path it did not take
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `guard let path, fileExists(...) else { return }` in the test body. Swift Testing's `try #require` or `.enabled(if:)` would record the skip instead of hiding it.
 
 **Evidence after.** None yet.
 
@@ -650,6 +637,22 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `see the audit(AUD-125) commit`
 
+### AUD-127 — A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip
+
+- **Severity / tier:** S2 / Tier C
+- **Project:** tests
+- **Location:** `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)`
+- **Category:** test that asserts nothing on the path it did not take
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `guard let path, fileExists(...) else { return }` in the test body. Swift Testing's `try #require` or `.enabled(if:)` would record the skip instead of hiding it.
+
+**Fix.** Verified verbatim before fixing: the body began `guard let path, FileManager.default .fileExists(atPath: path) else { return }` on TINYTITAN_QWEN38_CONFIG, so the ordinary run reported the test as passed having parsed nothing. Replaced with a suite-level `.enabled(if: pinnedQwen38Config() != nil)` plus a `try #require` on the path in the body, which is the shape `LibraryContractTests` (`.enabled(if: contractModel() != nil)`) and the MPP kernel suite already use, and which the MPP file's own comment states as the rule: "gated with .enabled(if:) so the skip is *recorded* in the test output instead of silently passing or being dropped — an unavailable MPP path is an expected skip, never a green result." Sibling sweep over tests/ (every `else { return }`, every `ProcessInfo…environment`, every fileExists/supportsFamily/device guard) found three more sites of the same shape and they are fixed in the same commit: `PrefillAttentionTests.swift:144` (Apple10 family gate in a parameterized test), `KVCacheGrowthTests.swift:34,41,47,60,72,98` (six tests whose `make` returned nil without a Metal device, now a suite gate plus a non-optional `make`, and whose `fullLayer` guard now `#require`s — a config with no full-attention layer must fail, not pass), and `ClientCLITests.swift:170` (the stub-server helper, which the sweep had classed as "not a test of anything" and the new gate classed as the same defect). Not siblings, with the reason: the Remote* progress closures and the buffer-pointer guards in Int8AffineGEMV/CPUEngine/Continuity/MemoryStore are callback and helper bodies, not test bodies; `ModelCatalogTests:77` is a fixture builder deliberately writing an incomplete snapshot; `PrefillAttentionTests:205` is a conditional *extra* assertion after two that always run. The guard against recurrence is a twelfth `tools/lint.sh` check, `test-skip`, that fails on a bare `else { return }` in tests/ whose condition reads an environment variable, a file's existence, or a device capability; a gate helper returning nil is the sanctioned idiom and is not flagged, so the tree needs no exemptions.
+
+**Evidence after.** Measured on Mac15,3 / M3 / 24 GB / macOS 27.0.1 / Swift 6.4. Default run, `swift test --no-parallel --filter 'Qwen4Exp|KVCacheGrowth|PrefillAttention|StubServerForManualRuns'` exit 0: 27 tests in 3 suites and 20 tests in 4 suites, and the gated ones now print as skips — `Test "The pinned checkpoint's own config.json parses and matches" skipped.`, `Suite "Qwen4Exp real config" skipped.`, `Test tensorOps2DFullAttentionMatchesReferenceAtTileBoundaries(_:) skipped.` (this M3 is not Apple10), `Test stubServer() skipped.` — where before the same command reported them as passed. Gate flipped both ways: with TINYTITAN_QWEN38_CONFIG pointed at a config carrying the production shape the test *runs and passes* (1 test in 1 suite, 0.001 s), and with `num_experts_per_tok: 8` in that file it *runs and fails with 1 issue* (exit 1), so the gate enables a real check rather than decorating a skip. The probe config was a reconstruction written to /tmp, not a fetched artifact, and both files were deleted after; the real pinned checkpoint's config.json is not on this host and nothing was downloaded for it — so the row's own purpose (a run against the actual artifact) stays unexercised here and belongs to the model-gated milestone. `TINYTITAN_STUB_SERVER_SECONDS=1` runs the stub server and passes in 1.006 s. KVCacheGrowthTests' six tests run and assert on this host's GPU (suite passed after 0.002 s). New gate proven: a temporary `tests/` file reproducing the reported shape makes `tools/lint.sh test-skip` exit 1 naming `tests/TinyTitanServer/GateProbeTmp.swift:9`, and deleting it returns exit 0. Full serial suite exit 0: 1,615 tests in seven bundles (748+387+141+173+28+44+94), 0 failures, 14 recorded skips. All twelve gates exit 0, after the pinned `xcrun swift-format` reflowed the four touched test files — the first full gate run failed on that drift and is corrected here rather than claimed early. Not run: the golden baseline, because no production source changed. Apple10 hardware not available, so the TensorOps test's enabled path is reported *not checked* on this host. Commit b036b5a.
+
 ### AUD-129 — Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work
 
 - **Severity / tier:** S2 / Tier B
@@ -754,6 +757,20 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. RMSNormReferenceTests.swift:55 (`_ = (RmsNormRef.apply, "precondition…")`, comment says documentation-only); Sha256VerifierTests.swift:32 (asserts against a hex produced by the function under test, so it passes by construction); ManifestReaderTests.swift:625/:633; RouterTopKTests.swift:220/:228 (comment concedes the precondition traps); non-throw-only bodies at HyperConnectionTests:31, SampleTopK64Tests:16, PLEHashTests:167, Qwen38FlashSchemaTests:191/:210, ReasoningControlTests:20/:118, RoleUniformityTests:21/:94/:100, PrefillGroupedRoutedMoETests+Binding:144, HTTPServerTests:607, QuantManifestPayloadAgreementTests:269/:324; ClientCLITests.swift:162-168 whose own comment reads 'Not a test of anything'. The framework is Swift Testing throughout (209 files import Testing, no XCTest).
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
+
+### AUD-146 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** `docs/handover-tinytitan.md:103-106`
+- **Category:** stated state that the tree disproves
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-127 sibling audit
+
+**Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
+
+**Evidence after.** None yet.
 
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 

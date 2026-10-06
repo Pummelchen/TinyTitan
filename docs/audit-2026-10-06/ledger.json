@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 46,
-    "done": 32,
+    "total": 47,
+    "done": 33,
     "open": 13,
     "blocked": 1
   },
@@ -525,15 +525,15 @@
       "severity": "S2",
       "tier": "C",
       "project": "tests",
-      "file_line": "tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143",
+      "file_line": "tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)",
       "title": "A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip",
       "category": "test that asserts nothing on the path it did not take",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "§5 facade sweep",
       "evidence-before": "Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `guard let path, fileExists(...) else { return }` in the test body. Swift Testing's `try #require` or `.enabled(if:)` would record the skip instead of hiding it.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
+      "fix-summary": "Verified verbatim before fixing: the body began `guard let path, FileManager.default .fileExists(atPath: path) else { return }` on TINYTITAN_QWEN38_CONFIG, so the ordinary run reported the test as passed having parsed nothing. Replaced with a suite-level `.enabled(if: pinnedQwen38Config() != nil)` plus a `try #require` on the path in the body, which is the shape `LibraryContractTests` (`.enabled(if: contractModel() != nil)`) and the MPP kernel suite already use, and which the MPP file's own comment states as the rule: \"gated with .enabled(if:) so the skip is *recorded* in the test output instead of silently passing or being dropped — an unavailable MPP path is an expected skip, never a green result.\" Sibling sweep over tests/ (every `else { return }`, every `ProcessInfo…environment`, every fileExists/supportsFamily/device guard) found three more sites of the same shape and they are fixed in the same commit: `PrefillAttentionTests.swift:144` (Apple10 family gate in a parameterized test), `KVCacheGrowthTests.swift:34,41,47,60,72,98` (six tests whose `make` returned nil without a Metal device, now a suite gate plus a non-optional `make`, and whose `fullLayer` guard now `#require`s — a config with no full-attention layer must fail, not pass), and `ClientCLITests.swift:170` (the stub-server helper, which the sweep had classed as \"not a test of anything\" and the new gate classed as the same defect). Not siblings, with the reason: the Remote* progress closures and the buffer-pointer guards in Int8AffineGEMV/CPUEngine/Continuity/MemoryStore are callback and helper bodies, not test bodies; `ModelCatalogTests:77` is a fixture builder deliberately writing an incomplete snapshot; `PrefillAttentionTests:205` is a conditional *extra* assertion after two that always run. The guard against recurrence is a twelfth `tools/lint.sh` check, `test-skip`, that fails on a bare `else { return }` in tests/ whose condition reads an environment variable, a file's existence, or a device capability; a gate helper returning nil is the sanctioned idiom and is not flagged, so the tree needs no exemptions.",
+      "evidence-after": "Measured on Mac15,3 / M3 / 24 GB / macOS 27.0.1 / Swift 6.4. Default run, `swift test --no-parallel --filter 'Qwen4Exp|KVCacheGrowth|PrefillAttention|StubServerForManualRuns'` exit 0: 27 tests in 3 suites and 20 tests in 4 suites, and the gated ones now print as skips — `Test \"The pinned checkpoint's own config.json parses and matches\" skipped.`, `Suite \"Qwen4Exp real config\" skipped.`, `Test tensorOps2DFullAttentionMatchesReferenceAtTileBoundaries(_:) skipped.` (this M3 is not Apple10), `Test stubServer() skipped.` — where before the same command reported them as passed. Gate flipped both ways: with TINYTITAN_QWEN38_CONFIG pointed at a config carrying the production shape the test *runs and passes* (1 test in 1 suite, 0.001 s), and with `num_experts_per_tok: 8` in that file it *runs and fails with 1 issue* (exit 1), so the gate enables a real check rather than decorating a skip. The probe config was a reconstruction written to /tmp, not a fetched artifact, and both files were deleted after; the real pinned checkpoint's config.json is not on this host and nothing was downloaded for it — so the row's own purpose (a run against the actual artifact) stays unexercised here and belongs to the model-gated milestone. `TINYTITAN_STUB_SERVER_SECONDS=1` runs the stub server and passes in 1.006 s. KVCacheGrowthTests' six tests run and assert on this host's GPU (suite passed after 0.002 s). New gate proven: a temporary `tests/` file reproducing the reported shape makes `tools/lint.sh test-skip` exit 1 naming `tests/TinyTitanServer/GateProbeTmp.swift:9`, and deleting it returns exit 0. Full serial suite exit 0: 1,615 tests in seven bundles (748+387+141+173+28+44+94), 0 failures, 14 recorded skips. All twelve gates exit 0, after the pinned `xcrun swift-format` reflowed the four touched test files — the first full gate run failed on that drift and is corrected here rather than claimed early. Not run: the golden baseline, because no production source changed. Apple10 hardware not available, so the TensorOps test's enabled path is reported *not checked* on this host. Commit b036b5a.",
       "commit": "",
       "blocked-reason": ""
     },
@@ -792,6 +792,23 @@
       "evidence-after": "The AUD-145 differential is also this row's: the sorted/`max()` forms matched the order-dependent forms at all 672 grid points x 2 functions, which is exactly the claim that the rewrite is value-preserving while the list climbs. The order itself is now enforced: swapping the literal's first two rungs (`16, 8, 24, ...`) made `expertCacheSlotFloorIsTheSmallestRung` record `Expectation failed: RuntimeConfiguration.allowedExpertCacheSlots == RuntimeConfiguration.allowedExpertCacheSlots.sorted()` -- 2 issues in that run (the floor and the order), suite failed, then restored and green. The behavioural suites stayed green under the reorder, which is the point of the fix: with `max()` and a sorted copy, a reordered literal cannot mis-size a cache. Full serial suite 1,614 tests in 241 suites, exit 0; all eleven gates rc 0.",
       "commit": "08b43de",
       "blocked-reason": null
+    },
+    {
+      "id": "AUD-146",
+      "severity": "S3",
+      "tier": "C",
+      "project": "docs",
+      "file_line": "docs/handover-tinytitan.md:103-106",
+      "title": "The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin",
+      "category": "stated state that the tree disproves",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "discovered-by": "AUD-127 sibling audit",
+      "evidence-before": "Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not \"**8 installs, 244 GB**\"; the row also claims \"**7 checked**\" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.",
+      "fix-summary": "",
+      "evidence-after": "None yet.",
+      "commit": "",
+      "blocked-reason": ""
     }
   ]
 }
