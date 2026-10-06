@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:27  Done:16  Blocked:1  Total:44**
+**Open:24  Done:19  Blocked:1  Total:44**
 
 ## Table
 
@@ -22,9 +22,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
-| AUD-115 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321` | bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read | dead contract field | OPEN | Mac (primary) |
-| AUD-116 | S2 | A | repack | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149` | A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix | silent drop on a numerics-affecting field | OPEN | Mac (primary) |
-| AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | OPEN | Mac (primary) |
 | AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | OPEN | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
@@ -45,6 +42,9 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
 | AUD-113 | S2 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:33 (before); PLEConstants.swift:35-46, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:172-189, sources/TinyTitanServer/Core/ModelCatalog.swift:278-293 (after)` | ple_constants.json is read with an uncapped Data(contentsOf:) although its sibling receipts cap the same file class | unbounded memory on a model-supplied file | DONE | Mac (primary) |
 | AUD-114 | S2 | B | build-config | `Package.swift:81-83` | A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02 | contract drift / stale documentation on a load-bearing rule | DONE | Mac (primary) |
+| AUD-115 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321 (both now deleted)` | bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read | dead contract field | DONE | Mac (primary) |
+| AUD-116 | S2 | A | repack | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149` | A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix | silent drop on a numerics-affecting field | DONE | Mac (primary) |
+| AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | DONE | Mac (primary) |
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
@@ -277,48 +277,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** recon of main vs tags/releases
 
 **Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
-
-### AUD-115 — bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** contract
-- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321`
-- **Category:** dead contract field
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L1 architecture pass
-
-**Evidence before.** Written at SSDAIJSON.swift:121 from plan.bitsOverrideCount; decoded into the wire struct at SSDAIManifestV1.swift:321/:332/:346; asserted in tests/TinyTitan/Infrastructure/ModelIO/ManifestReaderTests.swift:236 and :291. ManifestReader.swift:448-465 maps wire→Manifest (including quant.overrides→quantOverrides at :459) and does not carry it; grep over sources/ finds no runtime reader. The repack side keeps its own copy in RepackAudit.swift:12/:86, so the value exists twice and is consumed zero times.
-
-**Evidence after.** None yet.
-
-### AUD-116 — A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** repack
-- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149`
-- **Category:** silent drop on a numerics-affecting field
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L1 architecture pass
-
-**Evidence before.** `guard dict[stem] == nil else { continue }` at :149 inside quantObject; the doc comment at :147-148 states the intent ('a stem that collides with a slot name would overwrite a slot, so it is skipped'). Skipping protects the slot but drops the override, and the reader's decoder comment (SSDAIManifestV1.swift:222-226) records what a dropped override did historically: a 4-bit install's 8-bit K/V read back as 4-bit — 'the model answers fluently and wrongly' (SSDAIJSON.swift:140-144). Rated S2 not S1 because the five slot keys are camelCase while tensor stems are dotted Hugging Face names, so a real collision is implausible; the guard should refuse rather than drop.
-
-**Evidence after.** None yet.
-
-### AUD-117 — hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** contract
-- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327`
-- **Category:** unvalidated external input / contract drift
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L1 architecture pass
-
-**Evidence before.** SSDAIJSON.swift:79 gates the extension fields on `.qwen38flash`. ManifestReader.swift:322-327 `checkOptional` skips whatever is absent, so a second family that requires the same geometry would produce no manifest fields and no error. PLEConstants.validate() (:56-89) is what catches the ple half at load — but only if something calls it, and nothing in the manifest layer requires it.
-
-**Evidence after.** None yet.
 
 ### AUD-119 — Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce
 
@@ -628,6 +586,60 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** No behaviour to test -- the manifest, the build and the dependency edge are unchanged, and `swift build -c debug` is clean after the edit. The property the comment asserts is checked by tools/embedded-dependency-check.sh (task #23), which resolves the released tag from another package and builds examples/embedded against it; the defect here was two authoritative files disagreeing, and they now agree.
 
 **Commit.** `this commit`
+
+### AUD-115 — bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** contract
+- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321 (both now deleted)`
+- **Category:** dead contract field
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L1 architecture pass
+
+**Evidence before.** Written at SSDAIJSON.swift:121 from plan.bitsOverrideCount; decoded into the wire struct at SSDAIManifestV1.swift:321/:332/:346; asserted in tests/TinyTitan/Infrastructure/ModelIO/ManifestReaderTests.swift:236 and :291. ManifestReader.swift:448-465 maps wire→Manifest (including quant.overrides→quantOverrides at :459) and does not carry it; grep over sources/ finds no runtime reader. The repack side keeps its own copy in RepackAudit.swift:12/:86, so the value exists twice and is consumed zero times.
+
+**Fix.** Deleted, not wired up. The field is gone from the writer, from the wire struct (:321/:332/:346), from RepackPlan and from the planner that computed it. Two directions were possible: carry the count into the runtime Manifest so a reader could consume it, or remove it. Removal is the right one because the number describes the source checkpoint, not these bytes -- measured on this host, the installed MoE manifest's audit records bit_width_overrides_honored = 100 while its quant object carries no per-tensor override entries at all (the routed experts they describe are streamed, not resident) -- so a reader could do nothing with it, and a validator rule asserting the two agree would refuse a correct install. The conversion-time statistic stays where it is already consumed: RepackAudit.swift:12/:86, the audit record. The two tests that asserted the field were retargeted to the behaviour they were really pinning (peekFamilyInfersFullQwenWhenNoFamilyIsDeclared), and docs/ssdai-format.md lost its row and gained the rule: conversion-time statistics are not manifest fields.
+
+**Evidence after.** grep -rn 'bitWidthOverridesHonored|bitsOverrideCount' sources/ returns only the four RepackAudit / RemoteStreamingRepacker lines, i.e. the audit record that consumes it. Sibling sweep of the same seam, scripted: the writer's archDict key set, SSDAIManifestArchV1's field set and ManifestArch's field set now diff as writer==wire with runtime-wire empty (the only wire-only name is `family`, which ManifestReader routes to ManifestIdentity rather than ManifestArch by design), so there is no second written-but-unconsumable field. Reads of installed 1.0 manifests are unaffected: JSONDecoder ignores the key it no longer has, and the full suite passes with the installs on this disk unmodified. swift build -c debug clean; the manifest/repack/quant suites pass 219 tests in 33 suites; full `swift test --no-parallel` 747+384+162+141+89+44+28 all passing; `tools/lint.sh` exit 0 on eleven gates.
+
+**Commit.** `3bd9337`
+
+### AUD-116 — A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** repack
+- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149`
+- **Category:** silent drop on a numerics-affecting field
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L1 architecture pass
+
+**Evidence before.** `guard dict[stem] == nil else { continue }` at :149 inside quantObject; the doc comment at :147-148 states the intent ('a stem that collides with a slot name would overwrite a slot, so it is skipped'). Skipping protects the slot but drops the override, and the reader's decoder comment (SSDAIManifestV1.swift:222-226) records what a dropped override did historically: a 4-bit install's 8-bit K/V read back as 4-bit — 'the model answers fluently and wrongly' (SSDAIJSON.swift:140-144). Rated S2 not S1 because the five slot keys are camelCase while tensor stems are dotted Hugging Face names, so a real collision is implausible; the guard should refuse rather than drop.
+
+**Fix.** quantObject now throws instead of skipping. The rule moved into a named helper, SSDAIJSON.perTensorWidths(quantized:slotNames:), which returns each quantized resident tensor's stem and width and refuses two collisions it used to resolve by whichever entry came second: a stem equal to one of the five slot names, and the same stem reached from two tensors at different widths. An agreeing duplicate is still written once (x.weight and x are one tensor), so nothing about a normal install's output changes. The doc comment above it states why skipping was the wrong half of the choice: one of the two facts has to survive, and the one the per-tensor entries exist to protect is the tensor's real width -- a lost width is read back as the slot's, the strides still divide evenly, and the model answers fluently and wrongly. The guard is reached through encodeManifest, not only from the helper, which is what the last test in the new suite checks.
+
+**Evidence after.** Four new tests in tests/TinyTitanRepack/Core/Format/SSDAIJSONTests.swift: the slot collision throws, the differing-width duplicate throws, the agreeing duplicate yields one entry, an ordinary name stems to its key, and encodeManifest on a plan carrying `attention.weight` fails the install with RepackError.configurationInvalid. Written before fixing: two of the five failed, and both failed because the guard was silent -- `Expectation failed: an error was expected but none was thrown` -- which is the drop this row is about, observed rather than asserted. After: suite passes 9 in 1. No real install has a resident tensor named after a slot (the five keys are camelCase; stems are dotted checkpoint names), and every synthetic and installed manifest in the suites still encodes and loads. Full suite and eleven gates green.
+
+**Commit.** `3bd9337`
+
+### AUD-117 — hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** contract
+- **Location:** `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327`
+- **Category:** unvalidated external input / contract drift
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L1 architecture pass
+
+**Evidence before.** SSDAIJSON.swift:79 gates the extension fields on `.qwen38flash`. ManifestReader.swift:322-327 `checkOptional` skips whatever is absent, so a second family that requires the same geometry would produce no manifest fields and no error. PLEConstants.validate() (:56-89) is what catches the ple half at load — but only if something calls it, and nothing in the manifest layer requires it.
+
+**Fix.** The gate is the geometry now, not a name. ArchInfo.declaresExtensionGeometry is `hcCount > 0 || indexerBudget > 0 || !pleLayerIndices.isEmpty` -- the same three tests the runtime uses for HyperConnectionConfig.enabled, SparseIndexerConfig.enabled and PLEConfig.enabled -- so a family added later is covered without editing the writer, and writer and reader agree by construction instead of by two lists kept in step. The reader's `checkOptional` keeps its tolerance and gains a requirement: when the architecture it is loading has the geometry and the manifest is at `SSDAIFormatV1.extensionGeometryMandatoryFromMinor` (1) or above, an absent field is `ModelError.archMismatch(field:, actual: "not declared")` rather than silence. New manifests are version 1.1; the writer's own literals are deleted and it reads SSDAIFormatV1, which is the declaration the wire struct defaults from, so a bump cannot land on one side. 1.0 manifests -- all eight installs on this disk -- are still read, because a manifest is hash-bound into its receipt and is never rewritten in place; that is the only reason the requirement needed a version to hang on rather than being unconditional. The MTP derivation also stopped inheriting the target's PLE scalars while emptying its layer indices: the draft's own runtime contract is `ple: .none`, and declaring 2560-wide n-gram dimensions for a block that does not exist would have made the new requirement refuse a correct install.
+
+**Evidence after.** Measured before fixing, on the installs under models/: qwen3.8-flash-next_125B_A6B_4Bit/manifest.json carries all 16 extension keys (hcCount 4, indexerNumHeads 4, pleLayerIndices [1]); qwen3.8-flash-next_125B_A6B_MTP_4Bit/manifest.json carries none (`keys with ext: []`) while its runtime contract has hyper-connections 4x320 and an indexer budget of 2048 -- so the row's defect was live on this host, not hypothetical, and both were version 1.0. New tests: the draft's derived ArchInfo declares the geometry and its manifest carries hcCount/hcLowRank/indexerBudget with the ple fields at zero; the target's manifest still carries them; a qwen36 arch writes no block at all, so its bytes do not move; a written manifest is 1.1; and on the reader side a 1.1 manifest with no block for a declaring family is refused naming `hcCount` / `not declared`, a complete 1.1 block validates, and a 1.1 manifest for a family without the geometry needs no block. Suite: 17 tests in 3 suites pass, and the pre-existing `absentFieldsAreAccepted` is the 1.0 tolerance staying green. Not exercised: a live load of a freshly written 1.1 MTP manifest, which needs an install and no gate may fetch one -- reported here as not checked, and belonging to the golden-baseline milestone. Full suite and eleven gates green.
+
+**Commit.** `3bd9337`
 
 ### AUD-118 — The receipt file name is declared twice, once per side of the contract
 
