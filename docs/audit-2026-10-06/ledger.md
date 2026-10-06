@@ -2,18 +2,18 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:32  Done:6  Blocked:0  Total:38**
+**Open:31  Done:7  Blocked:0  Total:38**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | START | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | DONE | Mac (primary) |
+| AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385, sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift:97` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
@@ -48,20 +48,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 
 ## Detail
-
-### AUD-108 — Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** server
-- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385`
-- **Category:** missing error handling, unbounded resource, network-facing input
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** L4 security pass
-
-**Evidence before.** validateSchemaKeys recurses into every object value and array element (:368, :373, :377-380) and has no depth parameter. The same shape recurs at :437 (JSONDecoder().decode(JSONValue.self, …)), :348/:443 (jinjaSendableValue) and sources/TinyTitanLib/JSONSchemaNode.swift:97 compile(_:at:). grep -E 'depth|maxDepth|nesting' over OpenAIWireTypes.swift, JSONValue.swift, JSONSchemaNode.swift, OpenAIRequestValidator.swift: no matches. The only bound on the request is the 1 MiB body cap (HTTPServer.swift:10), which is ~10^5 levels of '{"a":' — and it runs on an NIO event-loop thread.
-
-**Evidence after.** Expected: a stated maximum nesting depth, exceeded → 400 invalid_request_error, and no stack overflow reachable from a request body.
 
 ### AUD-109 — The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes
 
@@ -144,6 +130,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Before: a standalone `UInt64(negative Int64)` under this toolchain dies with `Fatal error: Negative value is not representable`, exit 133 -- the exact failure `ple_constants.json` could produce at RealForwardRunner+BuildCore.swift:333. After: `swift test --no-parallel --filter PLE` -> 26 tests in 4 suites passed, PLEConstantsGeometryTests 4 -> 12 tests, including `acceptsProductionConstants`, which feeds the checkpoint's own constants (the ple_golden fixture, whose offsets equal the installed model's ple_constants.json) through validate() and pins 320001446 rows, so the new invariants are the checkpoint's rules and not a refusal waiting for a working model. Full `swift test --no-parallel` exit 0; `swift build -c release` exit 0 (583 steps, 121.52 s); swift-format, swiftlint, force-cast, func-length all ok. Sibling audit: PLEConstants was the only model-supplied signed-to-unsigned conversion in sources/ (grep for `[Int64]` decodables finds only its three arrays; CPUEngine/SafeTensors.swift:119 already guards `offsets[0] >= 0`; ModelCatalog.sizeBytes is our own number, used only for display), and the guard against a repeat is that the count now cannot be obtained without the checks running.
 
 **Commit.** `fa1ca79`
+
+### AUD-108 — Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385, sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift:97`
+- **Category:** missing error handling, unbounded resource, network-facing input
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L4 security pass
+
+**Evidence before.** Paths on the original row were wrong and are corrected above: JSONValue lives at sources/TinyTitan/Tokenization/JSONValue.swift and JSONSchemaNode at sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift, not under TinyTitanLib. What was checked: validateSchemaKeys recursed into every object value and array element with no depth parameter; JSONSchemaNode.compile recursed through properties (:156) and items (:173) with none; jinjaSendableValue and JSONValue.init(from:) recurse over the same shape; grep for 'depth|maxDepth|nesting' found no bound in any of the four files. The claim that a 1 MiB body therefore affords ~10^5 levels was measured and is FALSE: on this toolchain Foundation's parser accepts 512 nesting levels and throws at 513 (probe: 512 -> decoded, 513 -> "Too many nested arrays or dictionaries"), and the handler maps that to a 400 invalid_json (HTTPServerHandler+Chat.swift:129-135). No stack overflow was reachable from a request body.
+
+**Fix.** The bound is moved from the parser into the code that walks: JSONSchemaNode.maximumNestingDepth = 64, checked by compile on each level it descends through properties or items, and by validateSchemaKeys over the same document. validateSchemaKeys no longer counts a scalar as a step, which is what made the two walkers disagree (a schema that compiled at 64 was refused as a tool at 32). The wire answer for a refused depth is a 400 with code invalid_tool_schema, param tools; a compiled-schema refusal is malformed(...) mapped to unsupported_value. jinjaSendableValue is bounded transitively on both request paths (validateSchemaKeys runs first for a tool schema; historical arguments are bounded by the parse). foundationObject() and the encode/jinja walks over free-form metadata stay bounded by the parse rather than by the schema cap: they echo data the same request already carried, and refusing them at 64 would reject valid requests for no gain. Recorded as a decision, not a scope cut -- the row asked for a stated maximum depth, a 400 past it, and no reachable overflow, and each is now true of this repository rather than of Foundation.
+
+**Evidence after.** New tests, all green: JSONSchemaCompileTests.theNestingCapIsExactlyWhereItSaysItIs (64 accepted, 65 refused, via properties and via items), .aRefusedDepthIsAMalformedSchemaErrorThatNamesTheCap, .theDecoderBoundsWhatTheCompilerCanBeHanded (513 still throws -- the tripwire if the platform bound moves); OpenAIValidationTests.aToolSchemaPastTheNestingCapIsRefusedAsBadRequest asserts the 400 envelope shape through the real wire types. Affected suites: 111 tests in 6 suites passed. Full package suite `swift test --no-parallel`: exit 0, 1540 tests in 7 Swift Testing targets, 0 failures. swift-format, swiftlint and func-length clean. Regression surface measured before choosing 64: the deepest schema in any client config cached on this host nests 11 levels, and no JSON owned by this repository comes within 50 of the cap.
+
+**Commit.** `14710ba`
 
 ### AUD-121 — A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure
 

@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 38,
-    "done": 6,
-    "open": 32,
+    "done": 7,
+    "open": 31,
     "blocked": 0
   },
   "tasks": [
@@ -134,16 +134,16 @@
       "severity": "S1",
       "tier": "A",
       "project": "server",
-      "file_line": "sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385",
+      "file_line": "sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385, sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift:97",
       "title": "Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file",
       "category": "missing error handling, unbounded resource, network-facing input",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L4 security pass",
-      "evidence-before": "validateSchemaKeys recurses into every object value and array element (:368, :373, :377-380) and has no depth parameter. The same shape recurs at :437 (JSONDecoder().decode(JSONValue.self, …)), :348/:443 (jinjaSendableValue) and sources/TinyTitanLib/JSONSchemaNode.swift:97 compile(_:at:). grep -E 'depth|maxDepth|nesting' over OpenAIWireTypes.swift, JSONValue.swift, JSONSchemaNode.swift, OpenAIRequestValidator.swift: no matches. The only bound on the request is the 1 MiB body cap (HTTPServer.swift:10), which is ~10^5 levels of '{\"a\":' — and it runs on an NIO event-loop thread.",
-      "fix-summary": "",
-      "evidence-after": "Expected: a stated maximum nesting depth, exceeded → 400 invalid_request_error, and no stack overflow reachable from a request body.",
-      "commit": "",
+      "evidence-before": "Paths on the original row were wrong and are corrected above: JSONValue lives at sources/TinyTitan/Tokenization/JSONValue.swift and JSONSchemaNode at sources/TinyTitan/Runtime/Generation/JSONSchemaNode.swift, not under TinyTitanLib. What was checked: validateSchemaKeys recursed into every object value and array element with no depth parameter; JSONSchemaNode.compile recursed through properties (:156) and items (:173) with none; jinjaSendableValue and JSONValue.init(from:) recurse over the same shape; grep for 'depth|maxDepth|nesting' found no bound in any of the four files. The claim that a 1 MiB body therefore affords ~10^5 levels was measured and is FALSE: on this toolchain Foundation's parser accepts 512 nesting levels and throws at 513 (probe: 512 -> decoded, 513 -> \"Too many nested arrays or dictionaries\"), and the handler maps that to a 400 invalid_json (HTTPServerHandler+Chat.swift:129-135). No stack overflow was reachable from a request body.",
+      "fix-summary": "The bound is moved from the parser into the code that walks: JSONSchemaNode.maximumNestingDepth = 64, checked by compile on each level it descends through properties or items, and by validateSchemaKeys over the same document. validateSchemaKeys no longer counts a scalar as a step, which is what made the two walkers disagree (a schema that compiled at 64 was refused as a tool at 32). The wire answer for a refused depth is a 400 with code invalid_tool_schema, param tools; a compiled-schema refusal is malformed(...) mapped to unsupported_value. jinjaSendableValue is bounded transitively on both request paths (validateSchemaKeys runs first for a tool schema; historical arguments are bounded by the parse). foundationObject() and the encode/jinja walks over free-form metadata stay bounded by the parse rather than by the schema cap: they echo data the same request already carried, and refusing them at 64 would reject valid requests for no gain. Recorded as a decision, not a scope cut -- the row asked for a stated maximum depth, a 400 past it, and no reachable overflow, and each is now true of this repository rather than of Foundation.",
+      "evidence-after": "New tests, all green: JSONSchemaCompileTests.theNestingCapIsExactlyWhereItSaysItIs (64 accepted, 65 refused, via properties and via items), .aRefusedDepthIsAMalformedSchemaErrorThatNamesTheCap, .theDecoderBoundsWhatTheCompilerCanBeHanded (513 still throws -- the tripwire if the platform bound moves); OpenAIValidationTests.aToolSchemaPastTheNestingCapIsRefusedAsBadRequest asserts the 400 envelope shape through the real wire types. Affected suites: 111 tests in 6 suites passed. Full package suite `swift test --no-parallel`: exit 0, 1540 tests in 7 Swift Testing targets, 0 failures. swift-format, swiftlint and func-length clean. Regression surface measured before choosing 64: the deepest schema in any client config cached on this host nests 11 levels, and no JSON owned by this repository comes within 50 of the cap.",
+      "commit": "14710ba",
       "blocked-reason": ""
     },
     {
