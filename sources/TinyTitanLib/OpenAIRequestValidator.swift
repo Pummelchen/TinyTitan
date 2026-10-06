@@ -142,7 +142,14 @@ package enum OpenAIRequestValidator {
         // that sends it defensively (the OpenAI SDKs default it, Codex sends
         // `false` on every turn) for a preference it cannot verify anyway. The
         // Responses object echoes what it was given; Chat Completions has no
-        // field to echo into, which is why this is documented instead.
+        // field to echo into, which is why the note below is the disclosure for
+        // that path, and the wiki's OpenAI-Compatible-Server page is the one for
+        // people reading the API rather than a log.
+        if request.parallelToolCalls == true {
+            reasoningNotes.append(
+                "parallel_tool_calls is accepted but not enforced; the model's tool "
+                    + "calls are emitted as it produces them, one at a time or several")
+        }
         // S17: include_usage is a streaming option; silently ignoring it on a
         // non-stream request hides a client bug.
         if request.streamOptions?.includeUsage == true, request.stream != true {

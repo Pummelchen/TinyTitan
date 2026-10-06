@@ -801,6 +801,35 @@ struct ServerArgumentTests {
             "an accepted-but-unenforced field must say so")
     }
 
+    /// The same rule for the other accepted-but-unenforced field, and its
+    /// bound: the disclosure is for a request that asks for something the
+    /// decoder cannot promise, not for the defensive `false` a coding agent
+    /// sends on every turn (Codex does), which would put a line in the log for
+    /// every request and bury the ones that mean something.
+    @Test func parallelToolCallsIsAcceptedAndReported() throws {
+        let on = try OpenAIRequestValidator.validate(
+            try Self.request(withExtra: #""parallel_tool_calls":true"#), modelID: "m")
+        #expect(
+            on.reasoningNotes.contains { $0.contains("parallel_tool_calls") },
+            "Chat Completions has no response field to echo it into, so the note is the disclosure")
+
+        let off = try OpenAIRequestValidator.validate(
+            try Self.request(withExtra: #""parallel_tool_calls":false"#), modelID: "m")
+        #expect(
+            !off.reasoningNotes.contains { $0.contains("parallel_tool_calls") },
+            "the every-turn default must not fill the log")
+
+        let absent = try OpenAIRequestValidator.validate(
+            try JSONDecoder().decode(
+                OpenAIChatRequest.self,
+                from: Data(
+                    #"{"model":"m","messages":[{"role":"user","content":"x"}]}"#.utf8)),
+            modelID: "m")
+        #expect(
+            !absent.reasoningNotes.contains { $0.contains("parallel_tool_calls") },
+            "a field the client never sent says nothing")
+    }
+
     /// Every spelling a coding agent might send means something on the
     /// ladder, so none of them is a failure.
     @Test func unfamiliarReasoningVocabularyIsAccepted() throws {
