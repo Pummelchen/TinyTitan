@@ -330,7 +330,7 @@ extension RealForwardRunner {
                     Qwen38FlashTensors.ngramTableFile
                 ).path,
                 rowDim: constants.pleHeadDim,
-                rowCount: constants.tableRowCount)
+                rowCount: try constants.tableRowCount())
             bp.pleBlock = try PLEBlock(
                 context: context,
                 dim: cfg.hiddenSize,

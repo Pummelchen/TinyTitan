@@ -143,20 +143,36 @@ struct PLEHashTests {
 /// buffer (host heap corruption) or feed the block wrong-width rows, silently.
 /// `PLEHash`'s own consistency checks are preconditions, so this validation has
 /// to run before `makeHash()` for a corrupt sidecar to be a report rather than a
-/// trap.
+/// trap. The row addressing is checked on the same terms: the offsets and
+/// vocabularies are `Int64` from JSON, and the count that comes out of them is
+/// what sizes the table read.
 @Suite("PLE sidecar geometry")
 struct PLEConstantsGeometryTests {
     private func constants(
         ngramSize: Int = 3,
         headsPerNgram: Int = 8,
         pleHeadDim: Int = 160,
-        headEntries: Int? = nil
+        headEntries: Int? = nil,
+        vocabSizes: [Int64]? = nil,
+        offsets: [Int64]? = nil
     ) -> PLEConstants {
         let headCount = headEntries ?? (headsPerNgram * (ngramSize - 1))
+        // The producer builds the offsets by accumulating each head's size from
+        // zero (`tools/prepare_qwen38.py:148-152`), so a well-formed fixture has
+        // to look the same way or every test below trips the layout check.
+        let vocab = vocabSizes ?? Array(repeating: 1, count: headCount)
+        var running: [Int64] = []
+        if offsets == nil {
+            var total: Int64 = 0
+            for size in vocab {
+                running.append(total)
+                total += size
+            }
+        }
         return PLEConstants(
             layerMultipliers: Array(repeating: 1, count: ngramSize),
-            ngramHeadsOffsets: Array(repeating: 0, count: headCount),
-            ngramHeadsVocabSizes: Array(repeating: 1, count: headCount),
+            ngramHeadsOffsets: offsets ?? running,
+            ngramHeadsVocabSizes: vocab,
             eosTokenID: 0,
             ngramSize: ngramSize,
             headsPerNgram: headsPerNgram,
@@ -201,5 +217,114 @@ struct PLEConstantsGeometryTests {
                 embedDim: 2560, ngramSize: 3,
                 headsPerNgram: 8)
         }
+    }
+
+    @Test("The row count is every head's vocabulary summed")
+    func countsTheTable() throws {
+        // 3 + 5 + 7 = 15 rows, which is also last offset (8) + last vocab (7).
+        let sidecar = constants(
+            headEntries: 3, vocabSizes: [3, 5, 7], offsets: [0, 3, 8])
+        #expect(try sidecar.tableRowCount() == 15)
+        // 16 heads of the shipped width, so a legal sidecar addresses a table
+        // of exactly headCount * vocab rows.
+        #expect(try constants().tableRowCount() == 16)
+    }
+
+    @Test("A negative addressing value is a report, and never a trap")
+    func refusesNegativeAddressing() {
+        // `UInt64(offset)` for offset < 0 is a fatal error. This is the case the
+        // guard exists for, so it is asserted through `tableRowCount()` directly:
+        // the trap must not be reachable on a path that did not run `validate()`.
+        #expect(throws: ModelError.self) {
+            try constants(headEntries: 3, offsets: [0, -1, 2]).tableRowCount()
+        }
+        #expect(throws: ModelError.self) {
+            try constants(headEntries: 3, vocabSizes: [1, -2, 1]).tableRowCount()
+        }
+        // And through the load-time gate, which is how the model path reaches it.
+        #expect(throws: ModelError.self) {
+            try constants(
+                offsets: Array(repeating: -1, count: 16)
+            ).validate(embedDim: 2560, ngramSize: 3, headsPerNgram: 8)
+        }
+    }
+
+    @Test("A zero vocabulary is refused before it reaches the hash")
+    func refusesZeroVocabulary() {
+        // A zero trips `PLEHash`'s `vocabSizes > 0` precondition, which is a
+        // trap in a load path; refusing it here is what keeps the corrupt sidecar
+        // a report. The negative case below is the quieter one: it survives that
+        // precondition as a bit-pattern giant and misaddresses every row.
+        #expect(throws: ModelError.self) {
+            try constants(headEntries: 3, vocabSizes: [1, 0, 1]).tableRowCount()
+        }
+    }
+
+    @Test("Offsets that do not follow the preceding head are refused")
+    func refusesNonContiguousOffsets() {
+        // Any of these describes a table whose heads overlap or leave a hole,
+        // so a gathered row would be read from another head's range.
+        for offsets in [[0, 2, 4], [0, 1, 1], [0, 1, 0], [1, 2, 3]] as [[Int64]] {
+            #expect(throws: ModelError.self) {
+                try constants(headEntries: 3, offsets: offsets).tableRowCount()
+            }
+        }
+    }
+
+    @Test("Head tables that do not pair up are refused")
+    func refusesUnpairedHeadTables() {
+        #expect(throws: ModelError.self) {
+            try constants(
+                headEntries: 3, vocabSizes: [1, 1], offsets: [0, 1, 2]
+            ).tableRowCount()
+        }
+        #expect(throws: ModelError.self) {
+            try constants(headEntries: 0).tableRowCount()
+        }
+    }
+
+    @Test("Sizes that overflow the row count are refused, not wrapped")
+    func refusesOverflowingTableSize() {
+        // Two values that are each legal, summing past Int64.max: a wrapped
+        // count would address a table that does not exist.
+        let sidecar = constants(
+            headEntries: 2,
+            vocabSizes: [Int64.max, 1],
+            offsets: [0, Int64.max])
+        #expect(throws: ModelError.self) {
+            try sidecar.tableRowCount()
+        }
+    }
+
+    @Test("Validating checks the addressing as well as the width")
+    func validateCoversAddressing() {
+        // The gate and the count are one contract: passing validate() must mean
+        // the row count is obtainable, or a load could pass the gate and then
+        // trap on the very next line.
+        #expect(throws: ModelError.self) {
+            try constants(offsets: [0, 5] + Array(repeating: 2, count: 14))
+                .validate(embedDim: 2560, ngramSize: 3, headsPerNgram: 8)
+        }
+    }
+
+    @Test("The checkpoint's own constants address the shipped table")
+    func acceptsProductionConstants() throws {
+        // The fixture is the pinned checkpoint's real `ple_constants.json`, so
+        // this is the test that the checks above are the checkpoint's rules and
+        // not an invention that would refuse a working model. 320001446 is the
+        // row count of the n-gram table in the install, which is what the
+        // loader sizes the table read from.
+        let production = PLEHashTests.golden.constants
+        let sidecar = PLEConstants(
+            layerMultipliers: production.multipliers.map { Int64(bitPattern: $0) },
+            ngramHeadsOffsets: production.offsets.map { Int64($0) },
+            ngramHeadsVocabSizes: production.vocab.map { Int64($0) },
+            eosTokenID: production.eos,
+            ngramSize: production.ngramSize,
+            headsPerNgram: production.headsPerNgram,
+            pleNumHeads: 16,
+            pleHeadDim: 160)
+        try sidecar.validate(embedDim: 2560, ngramSize: 3, headsPerNgram: 8)
+        #expect(try sidecar.tableRowCount() == 320_001_446)
     }
 }

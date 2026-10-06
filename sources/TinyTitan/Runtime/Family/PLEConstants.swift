@@ -35,12 +35,69 @@ public struct PLEConstants: Decodable, Sendable {
     }
 
     /// Row count of the table these constants address: the last head's offset
-    /// plus its own vocabulary.
-    public var tableRowCount: UInt64 {
-        guard let offset = ngramHeadsOffsets.last,
-            let vocab = ngramHeadsVocabSizes.last
-        else { return 0 }
-        return UInt64(offset) + UInt64(vocab)
+    /// plus its own vocabulary, which is every head's vocabulary summed.
+    ///
+    /// Throws rather than traps, and is the only way to ask. Both halves of the
+    /// sum are `Int64`s read out of `ple_constants.json`, and `UInt64(-1)` is a
+    /// fatal error, so a corrupt sidecar has to be a report on this path too --
+    /// `validate()` cannot be the only guard, because a `public` property cannot
+    /// insist that some other method ran before it.
+    ///
+    /// The layout is what the producer states, not an invention:
+    /// `tools/prepare_qwen38.py:148-152` appends the running total before adding
+    /// each head's size, so the offsets ascend by exactly the preceding
+    /// vocabulary from a zero base. A negative value, a zero vocabulary or a gap
+    /// therefore means the file does not describe the table it claims to, and
+    /// each reaches `PLEHash` differently: a zero trips its `vocabSizes > 0`
+    /// precondition, and a negative survives that check as the bit-pattern giant
+    /// `UInt64(bitPattern:)` makes of it, so every row of every head hashes into
+    /// the wrong place with no error anywhere.
+    ///
+    /// - Throws: `ModelError.archMismatch` naming the head whose addressing is
+    ///     wrong, or a head table that does not pair up or has no entries.
+    public func tableRowCount() throws -> UInt64 {
+        guard ngramHeadsOffsets.count == ngramHeadsVocabSizes.count else {
+            throw ModelError.archMismatch(
+                field: "ple_constants.json head tables",
+                expected: "one vocab size per offset",
+                actual: "\(ngramHeadsOffsets.count) offsets, "
+                    + "\(ngramHeadsVocabSizes.count) vocab sizes")
+        }
+        guard !ngramHeadsVocabSizes.isEmpty else {
+            throw ModelError.archMismatch(
+                field: "ple_constants.json head tables",
+                expected: "at least one head set",
+                actual: "no entries")
+        }
+        var rows: Int64 = 0
+        for index in ngramHeadsOffsets.indices {
+            let offset = ngramHeadsOffsets[index]
+            let vocab = ngramHeadsVocabSizes[index]
+            guard offset == rows else {
+                throw ModelError.archMismatch(
+                    field: "ple_constants.json offset[\(index)]",
+                    expected: "\(rows)",
+                    actual: "\(offset)")
+            }
+            guard vocab > 0 else {
+                throw ModelError.archMismatch(
+                    field: "ple_constants.json vocab_size[\(index)]",
+                    expected: "> 0",
+                    actual: "\(vocab)")
+            }
+            // Checked rather than `+=`: two legal-looking Int64 sizes can pass a
+            // sign test and still overflow, and the wrapped value would address
+            // a table that does not exist.
+            let (next, overflow) = rows.addingReportingOverflow(vocab)
+            guard !overflow else {
+                throw ModelError.archMismatch(
+                    field: "ple_constants.json table size",
+                    expected: "<= Int64.max rows",
+                    actual: "overflow at head[\(index)]")
+            }
+            rows = next
+        }
+        return UInt64(rows)
     }
 
     /// Check the sidecar's geometry against the architecture that will use it.
@@ -53,6 +110,10 @@ public struct PLEConstants: Decodable, Sendable {
     /// rows of the wrong width, silently. `PLEHash`'s own consistency checks are
     /// preconditions, so this must run *before* `makeHash()` to turn a corrupt
     /// sidecar into a report rather than a trap.
+    ///
+    /// It also runs `tableRowCount()`, because the row addressing is part of the
+    /// same geometry: a negative offset or a zero vocabulary passes every count
+    /// and product check above, and reaches either a trap or a wrong table.
     public func validate(
         embedDim: Int,
         ngramSize: Int,
@@ -86,6 +147,7 @@ public struct PLEConstants: Decodable, Sendable {
                 expected: "\(embedDim) values per token",
                 actual: "\(headCount) * \(pleHeadDim) = \(headCount * pleHeadDim)")
         }
+        _ = try tableRowCount()
     }
 
     public func makeHash() -> PLEHash {
