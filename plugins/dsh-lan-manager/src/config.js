@@ -13,14 +13,18 @@
  * | `discoveryIntervalSeconds` | `DSH_LAN_DISCOVERY_SECONDS` | `60` |
  * | `resolveConcurrency` | `DSH_LAN_RESOLVE_CONCURRENCY` | `4` |
  * | `allowAddresses` | `DSH_LAN_ALLOW` (comma separated) | `[]` |
+ * | `trustedHosts` | `DSH_LAN_TRUSTED_HOSTS` (comma separated) | `[]` |
  * | `includeEmptyWorkspaces` | — | `false` |
  * | `enforceOrigin` | — | `true` |
  *
  * **One key, two jobs.** The same string is the group tag (instances carrying it
  * are one fleet) and the door key every request presents in `x-dsh-token`. The
  * default is public — it ships in this file — so it *groups* rather than
- * *protects*, which is the intended single-user-LAN trade: change it on every
- * Mac when the network is not entirely yours.
+ * *protects*, which is the intended single-user-LAN trade. Because it protects
+ * nothing until it is changed, the router refuses a **mutating** request that
+ * arrives from outside loopback while the key is still the shipped default
+ * (AUD-123): the trade is only ever meant to be made with yourself, and a peer
+ * address the fence also admits — link-local and CGNAT included — is not you.
  *
  * @module dsh-lan-manager/config
  */
@@ -149,6 +153,12 @@ export function resolveConfig(raw = {}, env = process.env) {
     ipv6Networks: Array.isArray(raw.ipv6Networks) ? raw.ipv6Networks : undefined,
     originNetworks: Array.isArray(raw.originNetworks) ? raw.originNetworks : undefined,
     trustedOrigins: parseList(raw.trustedOrigins ?? ""),
+    // Hostnames the operator declares this server is reached by. A same-origin
+    // claim in an Origin header is only equal to the request's own Host, and
+    // equality the attacker's DNS chose is the rebinding shape (AUD-148), so the
+    // router grants same-origin only for a host named here or already inside the
+    // address fence.
+    trustedHosts: parseList(raw.trustedHosts ?? env.DSH_LAN_TRUSTED_HOSTS ?? ""),
     allowPrivateOrigins: raw.allowPrivateOrigins !== false,
     enforceOrigin: raw.enforceOrigin !== false,
     includeEmptyWorkspaces: raw.includeEmptyWorkspaces === true,

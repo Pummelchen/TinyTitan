@@ -227,6 +227,27 @@ export function unwrapAddress(address) {
 }
 
 /**
+ * Is an address loopback — the machine talking to itself?
+ *
+ * This is deliberately **not** a narrower `checkAddress`. The fence answers
+ * "may this source reach the API at all", and it is widened on purpose to a LAN,
+ * a tailnet and link-local so a fleet works with no setup. Loopback answers a
+ * different question — "is there anyone else on this network who could have sent
+ * it" — and only that one can support a rule that rests on the caller being this
+ * machine (AUD-123: the shipped default group key is public, so beyond loopback
+ * it proves nothing).
+ * @param address - dotted quad, IPv6 literal, or a socket address.
+ * @returns true for `127.0.0.0/8` and `::1`.
+ */
+export function isLoopback(address) {
+  const { family, address: normalized } = unwrapAddress(address);
+  if (family === "ipv4") return ipv4InNetwork(normalized, "127.0.0.0", 8);
+  // `normalizeIpv6` expands, so `::1` arrives as its full group form.
+  if (family === "ipv6") return normalized === "0:0:0:0:0:0:0:1";
+  return false;
+}
+
+/**
  * Is one source address permitted?
  * @param address - the socket's `remoteAddress`.
  * @param options - optional `ipv4Networks` / `ipv6Networks` / `allow` overrides.

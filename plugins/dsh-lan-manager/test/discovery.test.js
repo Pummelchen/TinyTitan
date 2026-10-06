@@ -191,3 +191,30 @@ test("discoverCandidates survives a source that blows up", async () => {
     ["10.0.0.5"],
   );
 });
+
+// AUD-133: a source that dies must say so. The union is still allowed to come up
+// without Tailscale installed — that is the whole reason the catch exists — but a
+// caller holding the list has to be able to tell a small fleet from a dead probe.
+test("a failing source is reported and contributes nothing", async () => {
+  const failures = [];
+  const candidates = await discoverCandidates({
+    config: { peers: [], peerPort: 3080, discoverSubnet: false },
+    exec: async () => {
+      throw new Error("spawn Tailscale ENOENT");
+    },
+    onSourceError: (failure) => failures.push(failure),
+  });
+  assert.deepEqual(candidates, []);
+  assert.deepEqual(failures.map((failure) => failure.source).sort(), ["bonjour", "tailscale"]);
+  assert.ok(failures.every((failure) => failure.message.includes("ENOENT")));
+});
+
+test("a healthy run reports no source failures", async () => {
+  const failures = [];
+  await discoverCandidates({
+    config: { peers: ["10.0.0.5"], peerPort: 3080, discoverBonjour: false, discoverSubnet: false },
+    exec: async () => ({ stdout: JSON.stringify({ peers: [] }), code: 0 }),
+    onSourceError: (failure) => failures.push(failure),
+  });
+  assert.deepEqual(failures, []);
+});

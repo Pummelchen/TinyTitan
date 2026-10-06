@@ -214,6 +214,10 @@ export class PeerTable {
     this.timer = undefined;
     this.refreshing = undefined;
     this.lastRefresh = undefined;
+    // The last cycle's failed discovery sources, `[{source, message}]`. Kept on
+    // the table rather than only in the log so `/peers` can say *why* it is short,
+    // instead of a dead Tailscale probe reading as a small fleet.
+    this.lastDiscoveryErrors = [];
   }
 
   /**
@@ -345,11 +349,21 @@ export class PeerTable {
 
   async #refresh() {
     const candidates = [];
+    const sourceErrors = [];
+    const noteSourceError = (failure) => {
+      sourceErrors.push(failure);
+      this.log(`discovery source ${failure.source} failed: ${failure.message}`);
+    };
     try {
-      candidates.push(...(await this.discovery({ config: this.config })));
+      candidates.push(
+        ...(await this.discovery({ config: this.config, onSourceError: noteSourceError })),
+      );
     } catch (error) {
-      this.log(`discovery failed: ${error?.message ?? error}`);
+      const message = String(error?.message ?? error);
+      this.log(`discovery failed: ${message}`);
+      sourceErrors.push({ source: "discovery", message });
     }
+    this.lastDiscoveryErrors = sourceErrors;
     candidates.push(...this.gossip.values());
 
     const mine = this.selfAddresses();

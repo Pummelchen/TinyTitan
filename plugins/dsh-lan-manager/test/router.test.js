@@ -19,7 +19,13 @@ import { join } from "node:path";
 
 import { DEFAULT_GROUP_KEY, resolveConfig } from "../src/config.js";
 import { resolveMessageFactory, setContextOverrides } from "../src/api.js";
-import { createHandler, isAllowedOrigin, readJsonBody, subPath } from "../src/router.js";
+import {
+  createHandler,
+  isAllowedOrigin,
+  isKnownHost,
+  readJsonBody,
+  subPath,
+} from "../src/router.js";
 
 /**
  * Write a session projection the way the harness does: one JSON per session with
@@ -166,16 +172,30 @@ function makeReq({
   method = "GET",
   url = "/dsh-lan/health",
   body,
+  raw,
+  contentType,
   headers = {},
   remote = "127.0.0.1",
 }) {
-  const payload = body === undefined ? [] : [Buffer.from(JSON.stringify(body))];
+  const payload =
+    raw !== undefined
+      ? [Buffer.from(raw)]
+      : body === undefined
+        ? []
+        : [Buffer.from(JSON.stringify(body))];
+  // Every real caller presents the group key, so tests do too — except the
+  // ones testing the door itself, which pass their own header and win here.
+  // A body is presented as JSON for the same reason: `FleetClient.swift:89`
+  // sets the header for every body it writes, and a bodiless POST sends none.
+  const typed = contentType ?? (payload.length > 0 ? "application/json" : undefined);
   return {
     method,
     url,
-    // Every real caller presents the group key, so tests do too — except the
-    // ones testing the door itself, which pass their own header and win here.
-    headers: { "x-dsh-token": DEFAULT_GROUP_KEY, ...headers },
+    headers: {
+      ...(typed ? { "content-type": typed } : {}),
+      "x-dsh-token": DEFAULT_GROUP_KEY,
+      ...headers,
+    },
     socket: { remoteAddress: remote },
     async *[Symbol.asyncIterator]() {
       for (const chunk of payload) yield chunk;
@@ -740,12 +760,15 @@ test("an oversized body is refused rather than buffered", async () => {
 test("malformed JSON is a 400 with a stable code", async () => {
   const { handler, store } = await setup();
   try {
-    const req = makeReq({ method: "POST", url: "/dsh-lan/prompt" });
-    req[Symbol.asyncIterator] = async function* iterate() {
-      yield Buffer.from("{not json");
-    };
-    const res = makeRes();
-    await handler(req, res);
+    // Announced as JSON and not parseable: that is the 400 half. Announcing some
+    // other media type is the 415 half, and it is refused before the bytes are
+    // parsed, so a body that is not offered as JSON never reaches `JSON.parse`.
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      raw: "{not json",
+      headers: { origin: "http://127.0.0.1:3080", host: "127.0.0.1:3080" },
+    });
     assert.equal(res.status, 400);
     assert.equal(res.body.error, "bad-json");
   } finally {
@@ -1240,5 +1263,215 @@ test("POST /workspaces with startSession returns the workspace and its session",
     );
   } finally {
     store.cleanup();
+  }
+});
+
+// --- AUD-147: the content-type layer is real ----------------------------------
+//
+// AUD-132's note recorded two mitigations for cross-origin writes: the Origin
+// guard and `content-type: application/json`, which a simple form post cannot
+// set. Only the first existed. These pin the second, and they set a *passing*
+// Origin so the refusal cannot be credited to Guard 3 — the point of the layer is
+// that it holds when the Origin guard is switched off.
+
+test("a form post with JSON in it is refused before anything is parsed", async () => {
+  const { handler, store } = await setup();
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      // Exactly what `<form enctype="text/plain">` sends: the body verbatim, and
+      // a content type a cross-origin page may set without a preflight.
+      raw: '{"sessionId":"s-a1","prompt":"x"}',
+      contentType: "text/plain;charset=UTF-8",
+      headers: { origin: "http://127.0.0.1:3080", host: "127.0.0.1:3080" },
+    });
+    assert.equal(res.status, 415);
+    assert.equal(res.body.error, "unsupported-media-type");
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a urlencoded post is refused the same way", async () => {
+  const { handler, store } = await setup();
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      raw: "sessionId=s-a1&prompt=x",
+      contentType: "application/x-www-form-urlencoded",
+      headers: { origin: "http://127.0.0.1:3080", host: "127.0.0.1:3080" },
+    });
+    assert.equal(res.status, 415);
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("json with parameters on the media type is accepted", async () => {
+  const { handler, store } = await setup();
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      raw: '{"sessionId":"s-a1","prompt":"x"}',
+      contentType: "application/json; charset=utf-8",
+      headers: { origin: "http://127.0.0.1:3080", host: "127.0.0.1:3080" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+  } finally {
+    store.cleanup();
+  }
+});
+
+// --- AUD-148: same-origin is a host the server knows, not an equality ----------
+
+test("a rebinding same-host Origin is refused", async () => {
+  const { handler, store } = await setup();
+  try {
+    // The classic shape: `attacker.example` resolves to this machine, so the
+    // browser sends an Origin that equals the Host it was told to use. Equality
+    // alone called that same-origin and opened every mutating route.
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      body: { sessionId: "s-a1", prompt: "x" },
+      headers: {
+        origin: "http://attacker.example:3080",
+        host: "attacker.example:3080",
+      },
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "origin-not-allowed");
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a host the operator names is trusted, and only that name", async () => {
+  const { handler, store } = await setup({ config: { trustedHosts: ["mordor.local"] } });
+  try {
+    const allowed = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      body: { sessionId: "s-a1", prompt: "x" },
+      headers: { origin: "http://mordor.local:3080", host: "mordor.local:3080" },
+    });
+    assert.equal(allowed.status, 200);
+    const other = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt",
+      body: { sessionId: "s-a1", prompt: "x" },
+      headers: { origin: "http://elsewhere.example:3080", host: "elsewhere.example:3080" },
+    });
+    assert.equal(other.status, 403);
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("isKnownHost names loopback and the fence, and nothing that merely repeats itself", () => {
+  assert.equal(isKnownHost("127.0.0.1:3080", {}), true);
+  assert.equal(isKnownHost("localhost:3080", {}), true);
+  assert.equal(isKnownHost("[::1]:3080", {}), true);
+  assert.equal(isKnownHost("192.168.1.5:3080", {}), true);
+  assert.equal(isKnownHost("169.254.9.9", {}), true);
+  assert.equal(isKnownHost("attacker.example:3080", {}), false);
+  assert.equal(isKnownHost("", {}), false);
+  assert.equal(isKnownHost(":3080", {}), false);
+  assert.equal(isKnownHost("attacker.example:3080", { trustedHosts: ["attacker.example"] }), true);
+  // The flag that narrows origins narrows the host set with it, or the two
+  // predicates would disagree about what "my own host" means.
+  assert.equal(isKnownHost("192.168.1.5:3080", { allowPrivateOrigins: false }), false);
+  assert.equal(isAllowedOrigin("http://attacker.example:3080", "attacker.example:3080", {}), false);
+  assert.equal(
+    isAllowedOrigin("http://mordor.local:3080", "mordor.local:3080", {
+      trustedHosts: ["mordor.local"],
+    }),
+    true,
+  );
+});
+
+// --- AUD-123: the shipped default key is a tag, not a door ---------------------
+
+test("the published default group key does not open a mutating route beyond loopback", async () => {
+  const { handler, store } = await setup();
+  try {
+    // Inside the fence (link-local is in the defaults) and carrying the shipped
+    // key, so Guard 1 and Guard 2 both pass — and both are nominal here: the
+    // address range is one the caller may share, and the key is in the source.
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions/s-a1/archive",
+      headers: { host: "169.254.9.9:3080" },
+      remote: "169.254.9.9",
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "default-group-key-outside-loopback");
+
+    // A read from the same caller is unaffected: an unconfigured fleet still has
+    // to be listed before it can be driven.
+    const listed = await call(handler, {
+      url: "/dsh-lan/peers",
+      headers: { host: "169.254.9.9:3080" },
+      remote: "169.254.9.9",
+    });
+    assert.equal(listed.status, 200);
+  } finally {
+    store.cleanup();
+  }
+
+  // The same request succeeds once the key is one an operator chose.
+  const keyed = await setup({ config: { token: "s3cret" } });
+  try {
+    const res = await call(keyed.handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions/s-a1/archive",
+      headers: { host: "169.254.9.9:3080", "x-dsh-token": "s3cret" },
+      remote: "169.254.9.9",
+    });
+    assert.equal(res.status, 200);
+  } finally {
+    keyed.store.cleanup();
+  }
+
+  // And on loopback the documented single-user trade still holds.
+  const local = await setup();
+  try {
+    const res = await call(local.handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions/s-a1/archive",
+      headers: { host: "127.0.0.1:3080" },
+    });
+    assert.equal(res.status, 200);
+  } finally {
+    local.store.cleanup();
+  }
+});
+
+// AUD-133, the reader's half: the reason has to reach whoever lists the fleet.
+test("a degraded discovery shows up on the peer list and on health", async () => {
+  const errors = [{ source: "tailscale", message: "spawn Tailscale ENOENT" }];
+  const peers = { list: () => [], lastRefresh: 1234, lastDiscoveryErrors: errors };
+  const { handler, store } = await setup({ peers });
+  try {
+    const listed = await call(handler, { url: "/dsh-lan/peers" });
+    assert.deepEqual(listed.body.discoveryErrors, errors);
+    const health = await call(handler, { url: "/dsh-lan/health" });
+    assert.deepEqual(health.body.discoveryErrors, errors);
+  } finally {
+    store.cleanup();
+  }
+
+  // With no table at all the field is an empty list, not a missing key: "no
+  // failures" and "I did not look" read differently to a manager.
+  const bare = await setup();
+  try {
+    const listed = await call(bare.handler, { url: "/dsh-lan/peers" });
+    assert.deepEqual(listed.body.discoveryErrors, []);
+  } finally {
+    bare.store.cleanup();
   }
 });

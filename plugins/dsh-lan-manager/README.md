@@ -71,7 +71,7 @@ logs; pass `{"archiveSessions": false}` to delete a workspace without archiving.
 
 ## Security
 
-The API mutates workspaces and enqueues model prompts, so access is fenced in three
+The API mutates workspaces and enqueues model prompts, so access is fenced in four
 layers, checked in this order:
 
 1. **Source address**, before the body is read and before any handler runs. Allowed:
@@ -85,10 +85,28 @@ layers, checked in this order:
    request presents, and the tag that decides which instances are one fleet.
    **It ships with a default (`tinytitan-lan`), so by default it groups rather
    than protects** — every Mac that installs this plugin joins the same group
-   with no setup, and any host on the allowlist that knows the default can call
-   it. Change it on every Mac when the network is not entirely yours.
+   with no setup. Because a published string protects nothing, a **mutating**
+   request that carries the shipped default and arrives from outside loopback is
+   refused (`403 default-group-key-outside-loopback`): the zero-setup trade is
+   one you make with your own machine, and the address fence is wider than your
+   machine on purpose. Reads are unaffected, so an unconfigured fleet is still
+   listed and inventoried before anything is driven. Change the key on every Mac
+   when the network is not entirely yours.
 3. **Origin**, on mutating verbs only: a foreign site in an allowlisted browser must
-   not be usable as a confused deputy.
+   not be usable as a confused deputy. _Same-origin_ is decided against hosts this
+   server can name — loopback, a host inside the address fence, or one listed in
+   `trustedHosts` / `trustedOrigins` — and **not** against the request's own `Host`
+   header. An Origin that merely equals the Host is the DNS-rebinding shape: a page
+   on `attacker.example`, which resolves to this machine, sends both headers as
+   `attacker.example:3080`, and equality would call that same-origin.
+4. **`content-type` on a body**: a request that sends bytes must offer them as
+   `application/json`, or it is refused `415` before anything is parsed. A browser
+   may post `text/plain`, `application/x-www-form-urlencoded` or `multipart/form-data`
+   without a preflight, and `JSON.parse` does not care which — so without this rule
+   the Origin guard would be the _only_ layer, and `enforceOrigin: false` is a
+   documented way to switch it off. A request with **no** body sends no content-type
+   and still passes; `ttlanmanager` sets the header for every body it writes
+   (`FleetClient.swift:89`), as do the `curl` examples above.
 
 ### Reaching it from another machine
 
@@ -325,7 +343,7 @@ done
 | Key                        | Env                            | Default                              | Meaning                                                                                                                                            |
 | -------------------------- | ------------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `basePath`                 | `DSH_LAN_BASE_PATH`            | `/dsh-lan`                           | Route prefix                                                                                                                                       |
-| `groupKey` / `token`       | `DSH_LAN_KEY`, `DSH_LAN_TOKEN` | `tinytitan-lan`                      | Group tag **and** the secret every request presents                                                                                                |
+| `groupKey` / `token`       | `DSH_LAN_KEY`, `DSH_LAN_TOKEN` | `tinytitan-lan`                      | Group tag **and** the secret every request presents; while it is the default, a mutation from outside loopback is refused                          |
 | `peers`                    | `DSH_LAN_PEERS`                | `[]`                                 | Seed addresses (`host` or `host:port`) to try even when discovery finds nothing                                                                    |
 | `discoveryIntervalSeconds` | `DSH_LAN_DISCOVERY_SECONDS`    | `60`                                 | How often the group is refreshed (minimum 5)                                                                                                       |
 | `discoverTailscale`        | —                              | `true`                               | Enumerate online tailnet peers that have an IPv4 address — macOS, Linux, Windows — from the Tailscale CLI                                          |
@@ -340,6 +358,7 @@ done
 | `ipv4Networks`             | —                              | loopback, RFC1918, link-local, CGNAT | Replace the IPv4 allowlist                                                                                                                         |
 | `ipv6Networks`             | —                              | `::1/128`, `fc00::/7`, `fe80::/10`   | Replace the IPv6 allowlist                                                                                                                         |
 | `trustedOrigins`           | —                              | `[]`                                 | Extra Origins accepted                                                                                                                             |
+| `trustedHosts`             | `DSH_LAN_TRUSTED_HOSTS`        | `[]`                                 | Extra hostnames this server treats as its own, so a page served from one of them is same-origin                                                    |
 | `allowPrivateOrigins`      | —                              | `true`                               | Accept LAN Origins on mutations                                                                                                                    |
 | `enforceOrigin`            | —                              | `true`                               | Check Origin on mutations at all                                                                                                                   |
 | `includeEmptyWorkspaces`   | —                              | `false`                              | Show workspaces with no visible session                                                                                                            |

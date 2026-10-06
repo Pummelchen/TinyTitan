@@ -8,19 +8,31 @@
  *    runs. A caller outside the allowlist gets `403` and the plugin does no work.
  * 2. **Shared token** — when configured, compared in constant time. Optional so a
  *    single-user LAN needs no secret, but it is the only thing that distinguishes
- *    two machines on the same private range.
+ *    two machines on the same private range. Because the shipped default is a
+ *    published literal, it distinguishes nothing until an operator changes it, so
+ *    a **mutating** request from outside loopback while the key is still the
+ *    default is refused: the default is a group tag, and the trade it represents
+ *    is one a user makes with their own machine and no one else's.
  * 3. **Origin, on mutating verbs only** — a browser on an allowed host must not be
  *    usable as a confused deputy by a page from elsewhere. Absent Origin (curl,
- *    another dsh instance) is fine; a foreign Origin is refused.
+ *    another dsh instance) is fine; a foreign Origin is refused. Same-origin is
+ *    judged against hosts this server can name, not against the request's own
+ *    `Host` header, because an equality the caller's DNS chose is the rebinding
+ *    shape.
  *
  * Responses are JSON. Bodies are capped so a stray client cannot stream the host
- * out of memory.
+ * out of memory, and a body is only read as JSON when its `content-type` says so:
+ * the three media types a browser form may post without a preflight are not JSON,
+ * and refusing them is what keeps Guard 3 the *second* layer rather than the only
+ * one — `enforceOrigin: false` is a documented off switch, and the layer under it
+ * must not depend on it.
  *
  * @module dsh-lan-manager/router
  */
 
 import { timingSafeEqual } from "node:crypto";
 
+import { DEFAULT_GROUP_KEY } from "./config.js";
 import {
   ApiError,
   archiveSession,
@@ -34,7 +46,7 @@ import {
   readSessionMessages,
   startSession,
 } from "./api.js";
-import { checkAddress, peerAddress } from "./net.js";
+import { checkAddress, isLoopback, peerAddress } from "./net.js";
 
 /** Default request body cap: prompts are text, not uploads. */
 export const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
@@ -54,6 +66,17 @@ function safeEqual(a, b) {
 
 /**
  * Read and parse a JSON body under a byte cap.
+ *
+ * A body that does not announce itself as JSON is refused with `415` before it is
+ * parsed. `JSON.parse` on whatever arrives would accept a `<form>` submission —
+ * `text/plain` is one of the three media types a browser may post without a
+ * preflight, and it carries a JSON object through unchanged — which would leave
+ * Guard 3 as the only thing between that form and a mutating route, and
+ * `enforceOrigin: false` is a documented way to remove it. Requiring the header
+ * costs no caller: `FleetClient.swift:89` sets `application/json` for every body
+ * it writes, and a request with *no* body — the archive and delete posts — sends
+ * no content-type at all and still passes, because there is nothing to misrepresent.
+ *
  * @param req - the request.
  * @param maxBytes - cap.
  * @returns the parsed body, or `{}` when empty.
@@ -74,6 +97,10 @@ export async function readJsonBody(req, maxBytes = DEFAULT_MAX_BODY_BYTES) {
   if (size === 0) return {};
   const text = Buffer.concat(chunks).toString("utf8").trim();
   if (!text) return {};
+  const contentType = String(req.headers?.["content-type"] ?? "").toLowerCase();
+  if (!contentType.startsWith("application/json")) {
+    throw new ApiError("unsupported-media-type", "content-type must be application/json", 415);
+  }
   try {
     const parsed = JSON.parse(text);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -181,6 +208,25 @@ export function createHandler(options) {
     const method = String(req.method ?? "GET").toUpperCase();
     const mutating = method !== "GET" && method !== "HEAD";
 
+    // Guard 2b: the shipped default group key only counts inside loopback.
+    //
+    // `tinytitan-lan` is in this repository's source, so as a door key it admits
+    // anyone who has read it — which is the documented trade for a single user on
+    // a network of their own, and the reason the harness binds loopback only. The
+    // fence above widens past that on purpose (LAN, tailnet, and link-local and
+    // CGNAT included, so a fleet needs no setup), and a caller from one of those
+    // ranges is not the user. So past loopback the key has to be one an operator
+    // chose. Reads stay allowed: an unconfigured peer still has to be listed and
+    // inventoried before it can be driven.
+    if (mutating && config.token === DEFAULT_GROUP_KEY && !isLoopback(verdict.address)) {
+      log(`default group key from ${verdict.address} on ${method} ${req.url}`);
+      sendJson(res, 403, {
+        error: "default-group-key-outside-loopback",
+        hint: "the shipped group key is public, so it groups rather than protects: set groupKey (or DSH_LAN_KEY) to a value you chose",
+      });
+      return;
+    }
+
     // Guard 3: Origin on mutating verbs only, and only when one is present.
     //
     // An absent Origin is accepted on purpose. A browser sends Origin on **every**
@@ -231,11 +277,53 @@ export function createHandler(options) {
 }
 
 /**
+ * Is an authority one this server can name as its own?
+ *
+ * The question exists because a same-origin claim is only as good as the host it
+ * is compared against, and the `Host` header is chosen by the caller's DNS: an
+ * attacker whose domain resolves to this machine sends `Origin:` and `Host:` both
+ * as `attacker.example:P`, and a bare equality calls that same-origin. That is
+ * DNS rebinding, and the answer to it is a set the server knows — loopback, a
+ * host inside its own address fence, or a name the operator listed in
+ * `trustedHosts` / `trustedOrigins`.
+ *
+ * Deliberately **not** applied to every request: the sanctioned manager reads
+ * peers by hostname (`ttlanmanager` connects to `mordor.local:3080`, no Origin),
+ * so a blanket Host rule would break the client that is supposed to reach the
+ * fleet. It gates the same-origin *inference* only.
+ *
+ * @param authority - a `Host` or `Origin` host, port included, brackets allowed.
+ * @param config - resolved config.
+ * @returns true when this server can recognise the name.
+ */
+export function isKnownHost(authority, config) {
+  const text = String(authority ?? "").trim();
+  if (!text) return false;
+  const bracketed = /^\[(.+?)](?::\d+)?$/.exec(text);
+  const hostname = (bracketed ? bracketed[1] : text.replace(/:\d+$/, "")).toLowerCase();
+  if (!hostname) return false;
+  if (hostname === "localhost") return true;
+  for (const extra of config.trustedHosts ?? []) {
+    const wanted = String(extra).toLowerCase();
+    if (hostname === wanted || hostname === wanted.replace(/:\d+$/, "")) return true;
+  }
+  for (const extra of config.trustedOrigins ?? []) {
+    if (hostname === String(extra).toLowerCase().replace(/:\d+$/, "")) return true;
+  }
+  if (config.allowPrivateOrigins === false) return false;
+  return checkAddress(hostname, {
+    ipv4Networks: config.originNetworks ?? config.ipv4Networks,
+    ipv6Networks: config.ipv6Networks,
+  }).allowed;
+}
+
+/**
  * Is an Origin header acceptable for a mutating request?
  *
- * Accepts: an Origin whose authority equals the request Host, `localhost`, or any
- * host inside the allowlist (when `allowPrivateOrigins` is not disabled — the
- * normal single-fleet case, where the page is served from the same LAN). Rejects
+ * Accepts: an Origin whose authority equals the request Host **and** names a host
+ * this server recognises (see {@link isKnownHost}), a host inside the allowlist
+ * (when `allowPrivateOrigins` is not disabled — the normal single-fleet case,
+ * where the page is served from the same LAN), or one explicitly trusted. Rejects
  * everything else, which is what stops an unrelated site in an allowed browser
  * from driving the API.
  *
@@ -251,7 +339,7 @@ export function isAllowedOrigin(origin, host, config) {
   } catch {
     return false;
   }
-  if (host && parsed.host === host) return true;
+  if (host && parsed.host === host && isKnownHost(host, config)) return true;
   for (const extra of config.trustedOrigins ?? []) {
     if (parsed.host === extra || parsed.hostname === extra) return true;
   }
@@ -295,6 +383,7 @@ async function dispatch({
         peerCount: peers?.list().length ?? 0,
         discoveryIntervalSeconds: config.discoveryIntervalSeconds ?? null,
         lastDiscovery: peers?.lastRefresh ?? null,
+        discoveryErrors: peers?.lastDiscoveryErrors ?? [],
         messageStrategy: messageFactory?.strategy ?? "unavailable",
         source: { address: source.address, family: source.family, reason: source.reason },
         endpoints: [
@@ -342,6 +431,9 @@ async function dispatch({
         self: self ?? null,
         lastDiscovery: peers?.lastRefresh ?? null,
         discoveryIntervalSeconds: config.discoveryIntervalSeconds ?? null,
+        // A short list with a dead probe must not read as a small fleet: the
+        // reason rides with the peers it failed to find (AUD-133).
+        discoveryErrors: peers?.lastDiscoveryErrors ?? [],
         peers: light,
       },
     };

@@ -12,10 +12,34 @@ import {
   ipv4InNetwork,
   ipv4ToInt,
   ipv6InNetwork,
+  isLoopback,
   normalizeIpv6,
   peerAddress,
   unwrapAddress,
 } from "../src/net.js";
+
+// AUD-123: loopback is a different question from "inside the fence", and the
+// fence is deliberately wider. These pin the narrow one, because a rule that
+// rests on "this is the machine talking to itself" is only as good as this test.
+test("isLoopback admits only the machine itself", () => {
+  assert.equal(isLoopback("127.0.0.1"), true);
+  assert.equal(isLoopback("127.5.6.7"), true);
+  assert.equal(isLoopback("::1"), true);
+  assert.equal(isLoopback("[::1]"), true);
+  assert.equal(isLoopback("::ffff:127.0.0.1"), true);
+  assert.equal(isLoopback("10.0.0.1"), false);
+  assert.equal(isLoopback("169.254.9.9"), false);
+  assert.equal(isLoopback("100.64.0.1"), false);
+  assert.equal(isLoopback("fe80::1%en0"), false);
+  assert.equal(isLoopback("mordor.local"), false);
+  assert.equal(isLoopback(""), false);
+  // Every one of the false cases above is *inside* the default fence: the two
+  // predicates must disagree, or the rule they both feed is not the one claimed.
+  for (const address of ["10.0.0.1", "169.254.9.9", "100.64.0.1", "fe80::1%en0"]) {
+    assert.equal(checkAddress(address).allowed, true);
+    assert.equal(isLoopback(address), false);
+  }
+});
 
 test("ipv4ToInt parses and rejects", () => {
   assert.equal(ipv4ToInt("0.0.0.0"), 0);

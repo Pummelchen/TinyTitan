@@ -309,3 +309,56 @@ test("a name that does not resolve is cached too, so it is not retried every cyc
   await table.refresh();
   assert.equal(calls, 2, "and tries again once the TTL has passed");
 });
+
+test("a failed discovery source is kept on the table, not only in the log", async () => {
+  const lines = [];
+  const table = new PeerTable({
+    config: CONFIG,
+    log: (line) => lines.push(line),
+    discovery: async ({ onSourceError }) => {
+      onSourceError({ source: "tailscale", message: "spawn Tailscale ENOENT" });
+      return [];
+    },
+  });
+  await table.refresh();
+  assert.deepEqual(table.lastDiscoveryErrors, [
+    { source: "tailscale", message: "spawn Tailscale ENOENT" },
+  ]);
+  assert.ok(
+    lines.some((line) => line.includes("discovery source tailscale failed")),
+    `the failure was not logged: ${lines.join(" | ")}`,
+  );
+});
+
+test("a discovery call that throws is recorded as the whole cycle failing", async () => {
+  const table = new PeerTable({
+    config: CONFIG,
+    log: () => {},
+    discovery: async () => {
+      throw new Error("resolver wedged");
+    },
+  });
+  await table.refresh();
+  assert.deepEqual(table.lastDiscoveryErrors, [
+    { source: "discovery", message: "resolver wedged" },
+  ]);
+});
+
+test("a clean cycle clears the previous cycle's failures", async () => {
+  let broken = true;
+  const table = new PeerTable({
+    config: CONFIG,
+    log: () => {},
+    discovery: async ({ onSourceError }) => {
+      if (broken) {
+        onSourceError({ source: "bonjour", message: "dns-sd exited 1" });
+      }
+      broken = false;
+      return [];
+    },
+  });
+  await table.refresh();
+  assert.equal(table.lastDiscoveryErrors.length, 1);
+  await table.refresh();
+  assert.deepEqual(table.lastDiscoveryErrors, []);
+});

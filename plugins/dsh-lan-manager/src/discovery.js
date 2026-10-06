@@ -227,24 +227,38 @@ export function seedPeers(seeds = [], defaultPort) {
 
 /**
  * Run every enabled source and union the results.
- * @param options - `{ config, exec, interfaces }`.
+ *
+ * A source that throws contributes nothing to the list — and says so, through
+ * `onSourceError`, to whoever is holding the list. Both halves matter: the fleet
+ * must still come up when the Tailscale binary is absent, and a manager reading
+ * `/peers` has to be able to tell ten members from three members plus a probe
+ * that died (AUD-133).
+ *
+ * @param options - `{ config, exec, interfaces, onSourceError }`.
  * @returns `[{address, port, name, source}]`, de-duplicated by address+port.
  */
-export async function discoverCandidates({ config = {}, exec: run = exec, interfaces } = {}) {
+export async function discoverCandidates({
+  config = {},
+  exec: run = exec,
+  interfaces,
+  onSourceError = () => {},
+} = {}) {
   const port = config.peerPort;
   const found = [...seedPeers(config.peers ?? [], port)];
+  const report = (source, error) =>
+    onSourceError({ source, message: String(error?.message ?? error) });
   if (config.discoverTailscale !== false) {
     try {
       found.push(...(await tailscalePeers({ exec: run })).map((p) => ({ ...p, port })));
-    } catch {
-      /* a source that fails contributes nothing */
+    } catch (error) {
+      report("tailscale", error);
     }
   }
   if (config.discoverBonjour !== false) {
     try {
       found.push(...(await bonjourPeers({ exec: run })));
-    } catch {
-      /* as above */
+    } catch (error) {
+      report("bonjour", error);
     }
   }
   if (config.discoverSubnet === true) {
