@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:2  Done:59  Blocked:1  Total:62**
+**Open:1  Done:61  Blocked:1  Total:63**
 
 ## Table
 
@@ -17,8 +17,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
 | AUD-143 | S1 | A | server | `sources/TinyTitan/Infrastructure/Concurrency/SuspensionSlot.swift (new); sources/TinyTitanServer/Core/ModelRouterError.swift acquire/turn/beginSwitch/releaseSwitchClaim/wait/drop/wakeWaiters; sources/TinyTitanServer/Core/ServerCoordinator.swift; sources/TinyTitanServer/Core/ManagedModelBackend.swift; sources/TinyTitanServer/Core/MemoryBackend.swift; sources/TinyTitan/Runtime/Inference/ForwardStepGate.swift; sources/TinyTitanLib/ServerModelSession.swift +PromptCache.swift; tests/TinyTitan/Infrastructure/Concurrency/SuspensionSlotTests.swift; tests/TinyTitanServer/ModelRouterTests.swift` | A pending model switch can be overtaken by new work for the resident model, and in a release build the same test aborts the server bundle with signal 6 on this host | residency fairness bug plus a release-only abort of the server bundle — one defect, two symptoms: the actor's waiter array was mutated from a non-isolated continuation closure | DONE | Mac (primary) |
+| AUD-163 | S1 | A | plugin | `plugins/dsh-tinytitan/src/generate.js:620 (applyRouteThroughSettings), tools/dsh_local.sh:586 (write_default_model)` | The boot-time route refresh keeps the picker current but leaves `agent-default-model` naming a model the server no longer serves, so every turn fails with UNKNOWN_MODEL | half-covered refresh: two namespaces written by one install, only one of them revisited | DONE | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
-| AUD-156 | S2 | A | installer | `tools/dsh_local.sh:819-836 (ensure_smoke_deps)` | The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked | unpinned dependency downloaded and executed, against the script's own pinning rule | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
@@ -51,6 +51,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-150 | S2 | A | engine | `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)` | AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file | unbounded memory on an input file (found while converting AUD-142's sites) | DONE | Mac (primary) |
 | AUD-153 | S2 | C | tooling | `tests/TinyTitanServer/RoutingFixtures.swift RoutingGate (wait/open); tests/TinyTitanServer/RoutingGateTests.swift` | The router test fixture's gate held one continuation for any number of waiters, so a second concurrent waiter hung the run | test-infrastructure lost wake, found by AUD-143's own regression test | DONE | Mac (primary) |
+| AUD-156 | S2 | A | installer | `tools/dsh_local.sh:819-836 (ensure_smoke_deps)` | The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked | unpinned dependency downloaded and executed, against the script's own pinning rule | DONE | Mac (primary) |
 | AUD-157 | S2 | B | plugins | `plugins/dsh-tinytitan/test/generate.test.js:30-35, :93-107` | The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads | a check that does not run (test harness path vs tool path) | DONE | Mac (primary) |
 | AUD-159 | S2 | B | release | `RELEASE.md:26-31 (rule 2), tools/release.sh:47-48,310,369-377, tools/build_library.sh:97` | RELEASE.md requires `lipo -archs <binary>` to report exactly `arm64` and nothing in the release path ever runs lipo; the only arm64 claim in a shipped artifact is its filename | unenforced documented standard (missing gate) | DONE | Mac (primary) |
 | AUD-161 | S2 | B | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:176-192, sources/TinyTitan/Kernels/MoE/SharedExpertInt4.swift:110-140, sources/TinyTitan/Kernels/MoE/SharedExpertAffineQuant.swift (deleted), sources/TinyTitanFormat/SSDAIManifestV1.swift:248-258 (guard, previously untested)` | A quantized weight width outside [4, 8] is accepted by the CPU snapshot reader, and the one place that did route a 6-bit width could only abort the process | input validation at a trust boundary (width reaches kernel arithmetic) | DONE | Mac (primary) |
@@ -241,6 +242,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `07e867b`
 
+### AUD-163 — The boot-time route refresh keeps the picker current but leaves `agent-default-model` naming a model the server no longer serves, so every turn fails with UNKNOWN_MODEL
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** plugin
+- **Location:** `plugins/dsh-tinytitan/src/generate.js:620 (applyRouteThroughSettings), tools/dsh_local.sh:586 (write_default_model)`
+- **Category:** half-covered refresh: two namespaces written by one install, only one of them revisited
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the real `smoke` run AUD-156 demanded
+
+**Evidence before.** Found by running, not reading. `tools/dsh_local.sh smoke` against a server whose only model is `qwen3.8-flash-next_4-Bit` spent 300s on the page and got no answer; the page tail said `pi-ai provider "tinytitan" has no configured model "qwen3.5-4b_4-Bit"` / `UNKNOWN_MODEL`, and the composer read `tinytitan/qwen3.5-4b_4-Bit`. `~/.tinytitan/dsh/home/profiles/web/cordis.patch.yml` carried both halves of the contradiction at once: `models: [qwen3.8-flash-next_4-Bit]` under `llm-pi-ai` (refreshed) and `agent-default-model: {provider: tinytitan, model: qwen3.5-4b_4-Bit}` (never revisited). `write_default_model` runs at install time only, and `applyRouteThroughSettings` -- which the plugin runs at every harness boot -- updates the `llm-pi-ai` namespace alone. So the first machine that changed which model it served broke the sanctioned client completely while the sidebar still listed the live model and `status` reported the route as present. Not reachable from a clean install on this host's current model: it needed the move from a 4B dense install to the 125B that this Mac made in September, which is why static review of the refresh found nothing.
+
+**Fix.** `ensureDefaultModel` runs inside the same refresh pass, reading the user layer through `settings.describe()` the way `ensureDefaultPreset` already does. It is deliberately narrower than `set the default to the first served model`: a default naming a served model is kept even when it is not first, a default belonging to another provider is kept, a default never set is left to the installer, and a read that throws skips the repair -- this runs inside somebody else's profile, and taking back a choice is worse than leaving a stale value alone. Only a reference this repository wrote and can prove dead is rewritten, and a failed rewrite is logged on its own rather than failing a refresh that already wrote the route.
+
+**Evidence after.** Measured 2026-10-06. 7 new tests in `test/generate.test.js`; against the pre-fix `generate.js` the suite fails outright on the missing export, so the probes bind to the fix. Plugin suite 144/144 with 0 skipped (js-yaml resolved here, so the integration case ran rather than reporting a pass it never asserted); `tools/lint.sh javascript` clean after prettier. Live: `ensure` then `smoke` exits 0 with `answer matching /\b42\b/ appeared` on the 125B, and the patch's default now reads `qwen3.8-flash-next_4-Bit` -- the repair is confirmed by mechanism, not only by the page answering. NOT covered: the pre-0.2.0 file path (`generateRoute`/`writeRouteSettings`, reached when a harness has no settings service) still writes only `llm-pi-ai` and inherits the same stale-default defect. It is not the pinned harness, so the fix is on the live path and this sentence is the record of the gap.
+
+**Commit.** `a0fae6d`
+
 ### AUD-120 — No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source
 
 - **Severity / tier:** S2 / Tier B
@@ -254,20 +273,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** pip-audit 2.10.1 covers benchmark/requirements.txt and `npm audit` covers both plugin packages, both clean at baseline (see baseline.md). For Swift there is no scanner in the toolchain, no .github/dependabot.yml in the repo, and ci.yml installs nothing that would consult an advisory feed. Package.resolved carries exact pins, which is reproducibility, not vulnerability coverage.
 
 **Evidence after.** None yet.
-
-### AUD-156 — The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** installer
-- **Location:** `tools/dsh_local.sh:819-836 (ensure_smoke_deps)`
-- **Category:** unpinned dependency downloaded and executed, against the script's own pinning rule
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-140 sibling sweep
-
-**Evidence before.** `"$(npm_bin)" install --prefix "$SMOKE_DIR" --no-fund --no-audit playwright` (:826) names no version, while the two other installs in the same file are pinned from constants at the top (`@deepseek-ai/dsh@$DSH_VERSION` :353, `pnpm@$PNPM_VERSION` :394). The file's own header argues the case -- 'a floating version here would turn a working install into a broken one overnight' -- and this is the one place it does not hold. Measured on this host 2026-10-06: `~/.tinytitan/dsh/smoke/node_modules/playwright` is 1.63.0 and `npm view playwright version` is 1.63.0, so what installs is whatever the registry calls latest at the moment someone runs `smoke`, not a version this repository chose. The next line (:833) runs the freshly installed CLI's `install chromium --only-shell`, which pulls a ~150 MB browser bundle from Playwright's CDN into $DSH_ROOT/browsers and launches it: npm's integrity check covers the package against the registry's own metadata, and nothing here covers the browser bundle, so the bytes that get executed on the floating path are decided upstream twice over. Not fixed in AUD-140's commit on purpose: the pin is a choice about which Playwright this project supports, and the only way to learn whether that version still drives the page is a real smoke run, which needs a running server and so falls under the model-run preconditions.
-
-**Evidence after.** Expected: `playwright` is pinned from a constant beside PNPM_VERSION, the smoke install and the browser download both report the version they took, and `benchmark/test_dsh_isolation.py` gains the static rule that no npm install in tools/dsh_local.sh is unpinned -- so the next surface added here fails a gate instead of repeating this one. Closing needs one real `tools/dsh_local.sh smoke` run against a started server (model preconditions apply), recorded with its exit code, because a pin nobody drove the page with is a claim, not a fix.
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -877,6 +882,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Commit 07e867b. `RoutingGateTests.everyWaiterOnOneGateIsReleased` passes in 0.068 s with the fixed gate, and fails in 10.066 s with 4 issues against the pre-fix fixture (`releases` reads 1 of 4, then 4 of 5) — the mutation check, run by restoring the old body, measuring, and putting the fix back. `ModelRouterTests` 21 tests green in debug and in release; the stress test's `maxConcurrentGenerations` expectation was removed as this row's own error and the property that actually holds is stated in its place. Full serial debug suite green (1,637 tests across the seven modules, exit 0).
 
 **Commit.** `07e867b`
+
+### AUD-156 — The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** installer
+- **Location:** `tools/dsh_local.sh:819-836 (ensure_smoke_deps)`
+- **Category:** unpinned dependency downloaded and executed, against the script's own pinning rule
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-140 sibling sweep
+
+**Evidence before.** `"$(npm_bin)" install --prefix "$SMOKE_DIR" --no-fund --no-audit playwright` (:826) names no version, while the two other installs in the same file are pinned from constants at the top (`@deepseek-ai/dsh@$DSH_VERSION` :353, `pnpm@$PNPM_VERSION` :394). The file's own header argues the case -- 'a floating version here would turn a working install into a broken one overnight' -- and this is the one place it does not hold. Measured on this host 2026-10-06: `~/.tinytitan/dsh/smoke/node_modules/playwright` is 1.63.0 and `npm view playwright version` is 1.63.0, so what installs is whatever the registry calls latest at the moment someone runs `smoke`, not a version this repository chose. The next line (:833) runs the freshly installed CLI's `install chromium --only-shell`, which pulls a ~150 MB browser bundle from Playwright's CDN into $DSH_ROOT/browsers and launches it: npm's integrity check covers the package against the registry's own metadata, and nothing here covers the browser bundle, so the bytes that get executed on the floating path are decided upstream twice over. Not fixed in AUD-140's commit on purpose: the pin is a choice about which Playwright this project supports, and the only way to learn whether that version still drives the page is a real smoke run, which needs a running server and so falls under the model-run preconditions.
+
+**Fix.** `PLAYWRIGHT_VERSION` is a constant beside `PNPM_VERSION` (`${TINYTITAN_DSH_PLAYWRIGHT_VERSION:-1.63.0}`), the install names it, and the bare `-x .bin/playwright` existence check is replaced by `playwright_installed`, which reads the version out of the package's own manifest and compares it to the pin -- otherwise a leftover from before the pin satisfies the check forever, which is exactly how the floating install stayed working here. Both paths report what they took. The gate is the static rule: `test_the_smoke_playwright_is_pinned_and_checked_against_what_it_got` asserts every npm install in the script carries a version (3, each subtested) and that the pin comparison exists, so a fourth install surface added here fails a gate instead of repeating this one.
+
+**Evidence after.** Measured 2026-10-06. The probe fails on the pre-fix script before it passes: 2 assertions (the unpinned spec, the missing overridable constant). `tools/lint.sh shell` (bash 3.2.57, 27 scripts), `shellcheck` (0.11.0) and `python` (ruff 0.16.7, reached by putting the pipx copy ahead of Homebrew's shadowing 0.16.10 on PATH) pass, and `test_dsh_isolation` is 19/19. The required real run: `tools/dsh_local.sh smoke` against the server on 8080 exits 0 -- `Headless browser already at chromium_headless_shell-1243, which Playwright 1.63.0 chose`, `answer matching /\b42\b/ appeared`, `PASSED`. The first attempt at that run did NOT pass, and the reason is AUD-163: the pin was sound, the page was broken for a different reason -- which is the argument for demanding a real run rather than accepting a static check.
+
+**Commit.** `28a0e7e (fix + gate), closed by the smoke run on a0fae6d`
 
 ### AUD-157 — The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads
 
