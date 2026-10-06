@@ -72,9 +72,22 @@ public struct SafeTensorsFile: Sendable {
     }
 
     public init(url: URL) throws {
-        self.url = url
-        let descriptor = open(url.path, O_RDONLY)
+        // O_NOFOLLOW because a model install is copied in from another machine,
+        // which is the attacker model `SSDAIModelDirectory` exists for. AUD-110
+        // and AUD-144 closed this same opener in the installer and the journals;
+        // this is the sibling those fixes did not reach, where a link planted at
+        // `model.safetensors` mapped a file outside the install as its weights.
+        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw Failure.unreadable(url.path) }
+        try self.init(url: url, descriptor: descriptor)
+    }
+
+    /// Map a shard the caller has already opened through a validated directory
+    /// descriptor, so the bytes mapped are the bytes that were checked -- an
+    /// open-by-path after the check would leave the window open again.
+    /// Takes ownership of `descriptor` and closes it, including on failure.
+    init(url: URL, descriptor: Int32) throws {
+        self.url = url
         defer { close(descriptor) }
         var status = stat()
         guard fstat(descriptor, &status) == 0, status.st_size > 8 else {

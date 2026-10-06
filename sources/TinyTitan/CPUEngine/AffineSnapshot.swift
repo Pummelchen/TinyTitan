@@ -189,17 +189,25 @@ public struct AffineSnapshot: Sendable {
         try Self.validateWidths(baseBits: bits, widths: overrides)
 
         let index = try JSONSerialization.jsonObject(
-            with: Data(
-                contentsOf: directory.appendingPathComponent(
-                    "model.safetensors.index.json")))
+            with: try BoundedMetadataRead.read(
+                fileAt: directory.appendingPathComponent("model.safetensors.index.json"),
+                maxBytes: maxBytes))
         guard let index = index as? [String: Any],
             let map = index["weight_map"] as? [String: String]
         else {
             throw SafeTensorsFile.Failure.malformed("index has no weight_map")
         }
+        // The shard names are index content from a directory that can arrive copied
+        // off another machine, so they open through `SSDAIModelDirectory`: a
+        // non-canonical name is refused and every component is opened `O_NOFOLLOW`
+        // relative to the directory's own descriptor, so no name reaches a file
+        // outside the snapshot. `LocalSnapshotLoader` fences the same contract here.
+        let root = try SSDAIModelDirectory(rootURL: directory)
         var opened: [String: SafeTensorsFile] = [:]
         for file in Set(map.values) {
-            opened[file] = try SafeTensorsFile(url: directory.appendingPathComponent(file))
+            opened[file] = try SafeTensorsFile(
+                url: directory.appendingPathComponent(file),
+                descriptor: try root.openFile(file))
         }
         storage = .safetensors(shards: opened, placement: map)
     }

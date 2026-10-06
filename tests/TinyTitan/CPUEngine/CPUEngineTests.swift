@@ -224,6 +224,117 @@ import Testing
         }
     }
 
+    /// AUD-164: the shard names come from the index document, and an install
+    /// arrives copied off another machine, so a name that walks outside the
+    /// snapshot directory is refused. The same fence `LocalSnapshotLoader`
+    /// applies to this format on the converter's side.
+    @Test func aShardNameThatEscapesTheSnapshotIsRefused() throws {
+        let directory = try writeSnapshot(
+            rows: 8, columns: 64, bits: 4,
+            level: { _, _ in 1 }, scale: 1, bias: 0)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // The valid case first: without it a refusal from anywhere else in the
+        // loader would read as this one.
+        _ = try AffineSnapshot(directory: directory)
+
+        let outside = directory.deletingLastPathComponent()
+            .appendingPathComponent("escaped-\(UUID().uuidString).safetensors")
+        try FileManager.default.copyItem(
+            at: directory.appendingPathComponent("model.safetensors"), to: outside)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try JSONSerialization.data(withJSONObject: [
+            "weight_map": [
+                "w.weight": "../" + outside.lastPathComponent,
+                "w.scales": "model.safetensors",
+                "w.biases": "model.safetensors",
+            ]
+        ])
+        .write(to: directory.appendingPathComponent("model.safetensors.index.json"))
+
+        #expect {
+            _ = try AffineSnapshot(directory: directory)
+        } throws: { error in
+            guard case ModelError.indexCorrupt(let detail) = error else { return false }
+            return detail.contains("unsafe path")
+        }
+    }
+
+    /// The other half of the same boundary: a legitimate name that is a link.
+    /// Opened through `SSDAIModelDirectory`, the shard must be a regular file and
+    /// no component may be followed, so this is a refusal rather than a mapping
+    /// of whatever the install's author pointed at.
+    @Test func aSymlinkedShardIsRefusedRatherThanMapped() throws {
+        let directory = try writeSnapshot(
+            rows: 8, columns: 64, bits: 4,
+            level: { _, _ in 1 }, scale: 1, bias: 0)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try AffineSnapshot(directory: directory)
+
+        let shard = directory.appendingPathComponent("model.safetensors")
+        let target = directory.deletingLastPathComponent()
+            .appendingPathComponent("linked-\(UUID().uuidString).safetensors")
+        try FileManager.default.moveItem(at: shard, to: target)
+        defer { try? FileManager.default.removeItem(at: target) }
+        try FileManager.default.createSymbolicLink(at: shard, withDestinationURL: target)
+
+        #expect(throws: ModelError.self) {
+            _ = try AffineSnapshot(directory: directory)
+        }
+    }
+
+    /// AUD-164 also closes the by-path opener, so the same rule holds for a
+    /// caller that names the file itself: `init(url:)` will not follow a link.
+    @Test func aSymlinkedURLIsRefusedByTheOpener() throws {
+        let url = try writeShard([("a", "F32", [1], [0, 0, 0, 0])])
+        defer { try? FileManager.default.removeItem(at: url) }
+        let link = url.deletingLastPathComponent()
+            .appendingPathComponent("link-\(UUID().uuidString).safetensors")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+        defer { try? FileManager.default.removeItem(at: link) }
+
+        #expect(throws: SafeTensorsFile.Failure.self) {
+            _ = try SafeTensorsFile(url: link)
+        }
+        _ = try SafeTensorsFile(url: url)
+    }
+
+    /// AUD-165: the index document is the second metadata read in this
+    /// initializer, and it was still a whole-file `Data(contentsOf:)` while the
+    /// `config.json` above it went through `BoundedMetadataRead` -- the sibling
+    /// AUD-142 fixed one of and left the other. The cap fires before the
+    /// allocation, so the refusal names the document and both sizes.
+    @Test func anOversizedIndexIsRefusedByTheBoundNotByTheParse() throws {
+        let directory = try writeSnapshot(
+            rows: 8, columns: 64, bits: 4,
+            level: { _, _ in 1 }, scale: 1, bias: 0)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let indexURL = directory.appendingPathComponent("model.safetensors.index.json")
+        // Padding rather than a bigger weight_map: the reader ignores this key, so
+        // the only thing that changes is the document's size, and it is the size
+        // the bound is about.
+        try JSONSerialization.data(withJSONObject: [
+            "weight_map": [
+                "w.weight": "model.safetensors",
+                "w.scales": "model.safetensors",
+                "w.biases": "model.safetensors",
+            ],
+            "padding": String(repeating: "x", count: 4096),
+        ])
+        .write(to: indexURL)
+        let indexSize = try Data(contentsOf: indexURL).count
+        _ = try AffineSnapshot(directory: directory, maxBytes: UInt64(indexSize))
+
+        #expect {
+            _ = try AffineSnapshot(directory: directory, maxBytes: UInt64(indexSize - 1))
+        } throws: { error in
+            guard case ModelError.metadataOverBound(let name, let bytes, let cap) = error else {
+                return false
+            }
+            return name == "model.safetensors.index.json"
+                && bytes == indexSize && cap == UInt64(indexSize - 1)
+        }
+    }
+
     @Test func aWidthOutsideWholeGroupsIsRefused() throws {
         let directory = try writeSnapshot(
             rows: 8, columns: 32, bits: 4,
