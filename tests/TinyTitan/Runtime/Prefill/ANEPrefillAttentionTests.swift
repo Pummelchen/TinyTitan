@@ -175,6 +175,38 @@ private func makeSelection(
         }
     }
 
+    /// The sidecar read was an uncapped `Data(contentsOf:)`. Bounded like every
+    /// other metadata reader here, and refused by name so an oversized export
+    /// is not mistaken for a corrupt one.
+    @Test func anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ane-bound-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let metaURL = dir.appendingPathComponent("ane_prefill.json")
+        var meta: [String: Any] = [
+            "version": 1, "family": "qwen38flash", "chunkTokens": 4096,
+            "histories": [0, 4096], "layers": [3, 7],
+            "aneCompileVerified": true, "selectionFolded": true,
+        ]
+        // Padding the reader ignores and the bound does not.
+        meta["pad"] = String(repeating: "x", count: 512)
+        try JSONSerialization.data(withJSONObject: meta).write(to: metaURL)
+        let size = try Data(contentsOf: metaURL).count
+        #expect(size > 64, "the fixture is too small to cross a 64-byte bound")
+
+        var described = ""
+        do {
+            _ = try ANEPrefillAttention.loadSidecarMetadata(at: metaURL, maxBytes: 64)
+        } catch {
+            described = String(describing: error)
+        }
+        #expect(
+            described.contains("\(size)") && described.contains("over the 64-byte metadata bound"),
+            "the refusal named neither the size nor the cap: \(described)")
+        #expect(try ANEPrefillAttention.loadSidecarMetadata(at: metaURL).version == 1)
+    }
+
     @Test func sidecarExportedFromDifferentWeightsIsRejected() throws {
         let ctx = try MetalContext()
         let dir = FileManager.default.temporaryDirectory

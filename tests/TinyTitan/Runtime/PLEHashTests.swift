@@ -327,4 +327,93 @@ struct PLEConstantsGeometryTests {
         try sidecar.validate(embedDim: 2560, ngramSize: 3, headsPerNgram: 8)
         #expect(try sidecar.tableRowCount() == 320_001_446)
     }
+
+    // MARK: - Reading the sidecar off disk
+
+    /// The wire form, with the keys `CodingKeys` maps to. Written by hand
+    /// rather than produced from the struct, because `PLEConstants` decodes --
+    /// an encoder built from the same type would agree with itself whatever the
+    /// file names were, which is the thing this test has to pin.
+    private let sidecarJSON = """
+        {
+          "layer_multipliers": [1, 2],
+          "ngram_heads_offsets": [0, 1],
+          "ngram_heads_vocab_sizes": [1, 1],
+          "eos_token_id": 151645,
+          "ngram_size": 3,
+          "heads_per_ngram": 1,
+          "ple_n_heads": 16,
+          "ple_head_dim": 160
+        }
+        """
+
+    private func writeSidecar(_ json: String) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ple-sidecar-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: root.appendingPathComponent("ple_constants.json"))
+        return root
+    }
+
+    /// The error's own text, or nil when the call succeeded. A bound has to
+    /// refuse by naming the file and the cap, so the tests below read the
+    /// message rather than only the type.
+    private func refusal(_ body: () throws -> Void) -> String? {
+        do {
+            try body()
+            return nil
+        } catch {
+            return String(describing: error)
+        }
+    }
+
+    @Test("The sidecar loads from the directory it ships in")
+    func loadsFromDirectory() throws {
+        let root = try writeSidecar(sidecarJSON)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let loaded = try PLEConstants.load(directoryURL: root)
+        #expect(loaded.ngramSize == 3)
+        #expect(loaded.headsPerNgram == 1)
+        #expect(loaded.eosTokenID == 151_645)
+        #expect(loaded.ngramHeadsOffsets == [0, 1])
+        #expect(loaded.layerMultipliers == [1, 2])
+    }
+
+    /// The read used to be an uncapped `Data(contentsOf:)`, which grows as it
+    /// reads: a `ple_constants.json` of any size became an allocation of that
+    /// size before anything looked at it. The bound has to refuse with the file
+    /// named, not fail as a truncated JSON document, or the operator cannot tell
+    /// a huge sidecar from a corrupt one.
+    @Test("A sidecar over the metadata bound is refused, and says so")
+    func refusesOverBoundSidecar() throws {
+        let root = try writeSidecar(sidecarJSON)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let size = try Data(
+            contentsOf: root.appendingPathComponent("ple_constants.json")).count
+        #expect(size > 64, "the fixture is too small to cross a 64-byte bound")
+        let described = try #require(
+            refusal { _ = try PLEConstants.load(directoryURL: root, maxBytes: 64) },
+            Comment(rawValue: "a 64-byte bound accepted a \(size)-byte sidecar")
+        )
+        #expect(
+            described.contains("\(size)") && described.contains("64"),
+            Comment(rawValue: "the refusal named neither the size nor the cap: \(described)")
+        )
+        // The same file inside the bound still loads, so the refusal above is
+        // the bound and not the path, the open, or the decoder.
+        #expect(try PLEConstants.load(directoryURL: root, maxBytes: 1 << 20).ngramSize == 3)
+    }
+
+    /// A directory with no sidecar is a named missing file, not an
+    /// `NSCocoaErrorDomain` leak from the filesystem.
+    @Test("A missing sidecar is reported as missing")
+    func refusesMissingSidecar() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ple-sidecar-absent-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(throws: ModelError.self) {
+            try PLEConstants.load(directoryURL: root)
+        }
+    }
 }

@@ -326,4 +326,47 @@ struct ModelCatalogTests {
             ModelCatalog.displayNames.count == shipped.count,
             "a display name was added or removed without updating the shipped list")
     }
+
+    // MARK: - The size bound on a scanned config
+
+    /// The probe reads `config.json` from every directory the scan finds, and
+    /// `Data(contentsOf:)` grows as it reads, so an unbounded read is an
+    /// unbounded allocation over a directory nobody asked the server to load.
+    /// The bound is the manifest's, shared rather than invented.
+    @Test func aScannedConfigOverTheBoundIsRefusedAndSaysSo() throws {
+        let root = try CatalogFixture.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try CatalogFixture.write(
+            CatalogFixture.cpuConfig(),
+            to: root.appendingPathComponent("config.json"))
+        let size = try Data(
+            contentsOf: root.appendingPathComponent("config.json")).count
+        #expect(size > 8, "the fixture is too small to cross an 8-byte bound")
+
+        var described = ""
+        do {
+            _ = try ModelCatalog.readSnapshotConfig(root, maxBytes: 8)
+        } catch {
+            described = String(describing: error)
+        }
+        #expect(
+            described.contains("\(size)") && described.contains("over the 8-byte metadata bound"),
+            "the refusal named neither the size nor the cap: \(described)")
+
+        // The same file inside the bound reads, so the refusal above is the
+        // bound and not the path or the decoder.
+        #expect(try ModelCatalog.readSnapshotConfig(root).count == size)
+    }
+
+    /// The family probe goes through the same helper, so it must still resolve a
+    /// normal snapshot -- otherwise the bound above would have quietly turned
+    /// `--cpu` into a refusal for every real model.
+    @Test func theFamilyProbeStillReadsAnOrdinaryConfig() throws {
+        let root = try CatalogFixture.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try CatalogFixture.write(
+            CatalogFixture.cpuConfig(),
+            to: root.appendingPathComponent("config.json"))
+        #expect(try ModelCatalog.snapshotFamily(root) == .qwen35Dense)
+    }
 }

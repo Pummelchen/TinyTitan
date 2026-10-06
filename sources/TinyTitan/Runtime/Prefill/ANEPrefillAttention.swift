@@ -169,6 +169,25 @@ final class ANEPrefillAttention: @unchecked Sendable {
             isDirectory: true)
     }
 
+    /// The sidecar's own reader, bounded like every other metadata reader here
+    /// (`ManifestReader.load`, `VerifiedInstallReceiptReader.load`,
+    /// `PackedExpertsLayoutReader.load`). K17: the size is checked against the
+    /// bytes actually read, since stat-then-re-read is a TOCTOU window;
+    /// `Data(contentsOf:)` grows as it reads, so an uncapped read is an
+    /// unbounded allocation over a directory copied off another machine.
+    static func loadSidecarMetadata(
+        at url: URL,
+        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
+    ) throws -> SidecarMetadata {
+        let metaData = try Data(contentsOf: url)
+        guard UInt64(metaData.count) <= maxBytes else {
+            throw PrefillError.chunkedUnsupported(
+                "ANE prefill sidecar metadata \(url.path) is \(metaData.count) bytes, over the "
+                    + "\(maxBytes)-byte metadata bound; re-export it")
+        }
+        return try JSONDecoder().decode(SidecarMetadata.self, from: metaData)
+    }
+
     let chunkTokens: Int
     let histories: Set<Int>
     let coveredLayers: Set<Int>
@@ -266,8 +285,7 @@ final class ANEPrefillAttention: @unchecked Sendable {
                     + "tools/export_ane_prefill.py --model \(modelDirectory.path) "
                     + "--chunk \(configChunkTokens) for this model first")
         }
-        let meta = try JSONDecoder().decode(
-            SidecarMetadata.self, from: Data(contentsOf: metaURL))
+        let meta = try Self.loadSidecarMetadata(at: metaURL)
         guard meta.version == Self.expectedVersion else {
             throw PrefillError.chunkedUnsupported(
                 "ANE prefill sidecar version \(meta.version) != supported \(Self.expectedVersion); re-export"

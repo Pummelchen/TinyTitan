@@ -27,10 +27,22 @@ public struct PLEConstants: Decodable, Sendable {
         case pleHeadDim = "ple_head_dim"
     }
 
-    public static func load(directoryURL: URL) throws -> PLEConstants {
-        let url = directoryURL.appendingPathComponent(
-            Qwen38FlashTensors.pleConstantsFile)
-        let data = try Data(contentsOf: url)
+    /// The sidecar shares the manifest's bound rather than carrying a second,
+    /// unrelated one that can drift below it, as `VerifiedInstallReceiptReader`
+    /// does for the same reason. See `ManifestReader.defaultMaxBytes`.
+    public static let defaultMaxBytes: UInt64 = ManifestReader.defaultMaxBytes
+
+    public static func load(
+        directoryURL: URL,
+        maxBytes: UInt64 = defaultMaxBytes
+    ) throws -> PLEConstants {
+        let name = Qwen38FlashTensors.pleConstantsFile
+        // Root-anchored and bounded before the allocation. `Data(contentsOf:)`
+        // grows a buffer as it reads, so an uncapped read of a directory that
+        // may have been copied off another machine is an unbounded allocation,
+        // and this file is a few hundred KB in a real install.
+        let data = try SSDAIModelDirectory(rootURL: directoryURL)
+            .readMetadata(name, maxBytes: maxBytes)
         return try JSONDecoder().decode(PLEConstants.self, from: data)
     }
 

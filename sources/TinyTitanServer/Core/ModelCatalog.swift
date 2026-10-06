@@ -275,14 +275,33 @@ public struct ModelCatalog: Sendable {
                 engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : nil))
     }
 
+    /// A scanned directory's `config.json`, read under the manifest's bound.
+    /// A probe walks every directory the scan finds, so the file in front of it
+    /// is not a document this server was told to load, and `Data(contentsOf:)`
+    /// grows as it reads. K17: the size is checked against the bytes actually
+    /// read, since stat-then-re-read is a TOCTOU window.
+    static func readSnapshotConfig(
+        _ directory: URL,
+        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
+    ) throws -> Data {
+        let data = try Data(contentsOf: directory.appendingPathComponent("config.json"))
+        guard UInt64(data.count) <= maxBytes else {
+            throw CPUModelBackend.CPUBackendError.unsupported(
+                "config.json is \(data.count) bytes, over the \(maxBytes)-byte metadata bound")
+        }
+        return data
+    }
+
     private static func probeSnapshot(_ directory: URL) -> Result<Entry, ProbeFailure> {
         let config: [String: Any]
         do {
-            let data = try Data(contentsOf: directory.appendingPathComponent("config.json"))
+            let data = try readSnapshotConfig(directory)
             guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return .failure(ProbeFailure(reason: "config.json is not a JSON object"))
             }
             config = object
+        } catch let error as CPUModelBackend.CPUBackendError {
+            return .failure(ProbeFailure(reason: "\(error)"))
         } catch {
             return .failure(ProbeFailure(reason: "unreadable config.json: \(error)"))
         }
@@ -342,7 +361,7 @@ public struct ModelCatalog: Sendable {
             }
             return .qwen35Dense
         }
-        let data = try Data(contentsOf: directory.appendingPathComponent("config.json"))
+        let data = try readSnapshotConfig(directory)
         let config = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         let modelType = config?["model_type"] as? String
         guard let family = CPUModelFamily.resolve(modelType: modelType) else {
