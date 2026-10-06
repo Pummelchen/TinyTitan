@@ -29,6 +29,16 @@ PRODUCTS=(TinyTitanServer TinyTitanCLI TinyTitanRepack TinyTitanBench)
 die() { echo "error: $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }
 
+# RELEASE.md rule 2 is a promise about bytes — `lipo -archs <binary>` must report
+# exactly `arm64` — and until now nothing in the release path ran lipo, so the only
+# arm64 claim in a shipped artifact was its filename. Every name-based assertion
+# below (`tar tzf | grep -q libTinyTitanLib.dylib`) passes on the wrong
+# architecture, Rosetta hides an x86_64 slice on this host, and the sha256 in the
+# release notes would certify those bytes as the Apple Silicon build. The scan is
+# `tools/assert-arch.sh`, which `tools/build_library.sh` also uses.
+# shellcheck source=assert-arch.sh
+. "$SCRIPT_DIR/assert-arch.sh"
+
 TAG="${1:-}"
 [ -n "$TAG" ] || die "usage: tools/release.sh <tag> [--publish] [--notes <file>]"
 shift
@@ -348,6 +358,9 @@ step "package"
 # 5.6's first upload shipped without the Metal shader library.
 tar tzf "$ARCHIVE" | grep -q '^[^/]*/TinyTitan_TinyTitan\.bundle/' \
   || die "the archive carries no TinyTitan_TinyTitan.bundle: the runtime could not load its kernels"
+# The checksum is the release notes' promise about these bytes, so the arch of
+# what the archive actually holds is asserted before it is taken, not after.
+assert_arm64_archive "$ARCHIVE" "engine"
 shasum -a 256 "$ARCHIVE" | sed "s|$STAGE_ROOT/||" > "$ARCHIVE.sha256"
 SHA="$(awk '{print $1}' "$ARCHIVE.sha256")"
 BYTES="$(wc -c < "$ARCHIVE" | tr -d ' ')"
@@ -377,6 +390,13 @@ for member in libTinyTitanLib.a libTinyTitanLib.dylib TinyTitanLib.swiftmodule/ 
   tar tzf "$LIB_ARCHIVE" | grep -q "$member" \
     || die "the library archive carries no $member"
 done
+# The member loop above proves the names shipped; this proves the bytes under
+# those names are the Apple Silicon ones. `libTinyTitanLib.a` is an `!<arch>`
+# container and `lipo -archs` reads it (measured: `arm64`), so the static form
+# an embedder links is covered alongside the dylib. There is no demo *binary* in
+# this archive — `demo/` ships main.swift and the two build scripts — so if a
+# compiled demo is ever added here, the magic scan checks it without being told.
+assert_arm64_archive "$LIB_ARCHIVE" "library"
 shasum -a 256 "$LIB_ARCHIVE" | sed "s|$STAGE_ROOT/||" > "$LIB_ARCHIVE.sha256"
 LIB_SHA="$(awk '{print $1}' "$LIB_ARCHIVE.sha256")"
 LIB_BYTES="$(wc -c < "$LIB_ARCHIVE" | tr -d ' ')"
@@ -393,6 +413,10 @@ echo "  sha256 $LIB_SHA"
 # installed layout is meant to look like a checkout apart from the build, and a
 # list of what the tools need would be a second place to remember that. The
 # members asserted below are the ones the installer itself names.
+#
+# This archive gets no `assert_arm64_archive`: `git archive` of a tag is source
+# and scripts, so the scan would find no Mach-O and the gate would die on a
+# correctly built tools archive. It is the one artifact here with no binary in it.
 step "tools"
 TOOLS_STAGE_PREFIX="tinytitan-$VERSION-tools"
 TOOLS_ARCHIVE="$STAGE_ROOT/$TOOLS_STAGE_PREFIX.tar.gz"

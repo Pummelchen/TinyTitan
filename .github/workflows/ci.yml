@@ -106,6 +106,19 @@ jobs:
             grep -E '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' /tmp/build.log
             exit 1
           fi
+      - name: The arm64 promise (RELEASE.md rule 2)
+        # `tools/release.sh` asserts this over the archives it publishes, but a
+        # release is cut from one machine while CI is the only place that builds a
+        # clean clone on the pinned toolchain. The four products a release would
+        # stage are checked here, immediately after the build and before the gates
+        # that cost minutes: an arch that is not `arm64` stops the run, not the
+        # release.
+        run: |
+          tools/assert-arch.sh \
+            .build/release/TinyTitanServer \
+            .build/release/TinyTitanCLI \
+            .build/release/TinyTitanRepack \
+            .build/release/TinyTitanBench
       - name: Production gates (all fifteen)
         # Checks the compiler cannot express. Runs before the suite so a style
         # regression fails in seconds rather than after a full test run.

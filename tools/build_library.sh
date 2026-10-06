@@ -25,6 +25,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# The arm64 assertion RELEASE.md rule 2 promises. `tools/release.sh` re-checks
+# the archive it builds from this directory, but this script also runs standalone
+# from a terminal, and a hand-packaged library is still a library we handed out.
+# shellcheck source=assert-arch.sh
+. "$(dirname "$0")/assert-arch.sh"
 PRODUCT="TinyTitanLib"
 DYNAMIC_PRODUCT="TinyTitanLibDynamic"
 INSTALL_NAME="@rpath/lib$PRODUCT.dylib"
@@ -228,6 +233,13 @@ after verifying the checksum published with this archive:
 
   xattr -dr com.apple.quarantine /path/to/this/directory
 TXT
+
+# Both shipping forms are checked before the directory is declared staged: the
+# static archive and the dynamic library are the files a consumer links, and
+# `lipo -archs` reads an `!<arch>` container (measured: `arm64`), so the `.a` is
+# not a hole in the assertion. The 29 `.swiftmodule` files beside them are Swift
+# bitcode and are excluded by magic rather than by name.
+assert_arm64_dir "$OUT" "library dist"
 
 step "staged"
 ls -1 "$OUT"

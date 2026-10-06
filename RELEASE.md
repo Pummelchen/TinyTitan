@@ -28,7 +28,10 @@ than adopting a release process they cannot use.
    is how a universal binary gets made, and there is no x86_64 build.
 2. **Assert it, do not assume it.** After building, check the artifact:
    `lipo -archs <binary>` must be exactly `arm64`. A build that silently produced
-   a fat binary is a release defect, not a build option.
+   a fat binary is a release defect, not a build option. The check has to run
+   inside the release path rather than in someone's hands: an assertion nobody
+   executes is a habit, and a habit does not notice the day the toolchain starts
+   emitting something else.
 3. **Every release carries the artifacts.** A tag alone is not a release. If the
    Release page has no binaries attached, the release did not happen.
 4. **No hardcoded build-toolchain triple in a path.** `.build/release` is the
@@ -236,7 +239,14 @@ repository.
 - **Artifacts** `tinytitan-X.Y-macos-arm64.tar.gz` + `.sha256`, containing **four
   executables** — `TinyTitanServer`, `TinyTitanCLI`,
   `TinyTitanRepack`, `TinyTitanBench` — plus the
-  `.bundle` resources, licence and notices.
+  `.bundle` resources, licence and notices. Every Mach-O in what ships is
+  asserted exactly `arm64` by `tools/assert-arch.sh`: `tools/release.sh` runs it
+  over the unpacked engine and library archives before either checksum is taken,
+  `tools/build_library.sh` runs it over the directory it stages (which is also the
+  standalone path an operator uses), and CI runs it over the four products after
+  the release build — §1.2.2, enforced rather than assumed since 2026-10-07. The
+  tools archive is the one artifact with no binary in it, being `git archive` of
+  the tag, and gets no arch check.
 - **Gates** `tools/lint.sh` (fifteen checks as of 2026-10-07: force-cast,
   unbounded-read, func-length, file-length, unchecked-sendable, converter,
   arch-path, silent-test-skip, test-hollow, shell-portability, shellcheck,

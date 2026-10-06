@@ -207,11 +207,15 @@ What the dry run does, in order:
    and the warning gate passes vacuously.
 4. **Stage and package** — the four executables, the `.bundle` resources (the
    Metal shader library — the runtime cannot load kernels without them), the
-   licence and notices, `README-binaries.txt`, then the tarball and its
-   `.sha256`.
+   licence and notices, `README-binaries.txt`, then the tarball — which is
+   unpacked and run through `tools/assert-arch.sh`, every Mach-O required to be
+   exactly `arm64` (RELEASE.md §1.2.2), **before** its `.sha256` is taken, so a
+   digest is never published over bytes of the wrong platform.
 5. **The two accompanying archives** — the library (`tools/build_library.sh`,
-   asserted member by member) and the tools snapshot (`git archive` of the tag,
-   asserted for the scripts an installed copy runs). Each gets its own `.sha256`,
+   asserted member by member, and its staging directory asserted by arch) and the
+   tools snapshot (`git archive` of the tag, asserted for the scripts an installed
+   copy runs; it is the one archive with no binary in it, so no arch check). Each
+   gets its own `.sha256`,
    because the installer downloads and verifies all three: a release without the
    tools archive cannot be installed at all, and a release whose notes do not
    quote one of the digests is refused by `--publish`.
