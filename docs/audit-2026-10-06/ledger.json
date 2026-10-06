@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 46,
-    "done": 30,
-    "open": 15,
+    "done": 31,
+    "open": 14,
     "blocked": 1
   },
   "tasks": [
@@ -52,13 +52,13 @@
       "file_line": "pyproject.toml:20-24",
       "title": "Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do",
       "category": "check coverage gap",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "tool-coverage proof (docs/audit-2026-10-06/tool-coverage.md)",
       "evidence-before": "Proven: E722, B006, S101, F632 each fire on a probe. Silent on the same probe: subprocess.run(check=False), time.sleep() used to synchronise, open() without encoding=, datetime.datetime.now() without a timezone, and a test body that asserts nothing. pyproject.toml says 'the rest are the families the audit standard names', which is a claim broader than select = [E4,E7,E9,F,W,B,E722,S101,PT].",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "Verified by re-running the probe against the committed config, then fixed the coverage rather than the claim. Measured first: PLW1510, DTZ005 and ASYNC110/ASYNC116 are stable in the pinned ruff 0.16.7 and PLW1514 needs preview; enabling preview on this tree adds no violation besides PLW1514 itself (141 = 91 + 42 + 8, no other code), and the pin plus the gate's version check is what makes that safe. Selected DTZ, ASYNC, PLW1510, PLW1514 and made the tree clean under them: 42 subprocess.run calls now state check=False (each was read first -- every one inspects the exit status on purpose, and pgrep/sysctl/curl would raise under check=True, so the honest enforcement is that the choice is explicit, which is what the rule's own description says), 91 text-mode open/read_text/write_text gained encoding=\"utf-8\", eight datetime.now() stamps became UTC -- the convention the same files already use for recorded_at -- and the comment now names the two pitfalls with no rule anywhere (a test body that asserts nothing; time.sleep() in synchronous code) instead of implying they are covered. Sibling check: .swiftlint.yml and the plugin eslint configs were read for the same over-claim shape and carry none; time.strftime()/time.localtime() sit outside DTZ, so benchmark/tinytitan_benchmark.py:506 still stamps a run directory naively and that is recorded in tool-coverage.md rather than silently changed.",
+      "evidence-after": "Probe with all nine pitfalls, run with the committed config: eight rules fire (E722, B006, S101, F632, PLW1510, DTZ005, PLW1514, ASYNC110) and the three rows the file names as human checks stay silent, so the claim and the coverage now match. Mutation through the gate: deleting one check=False fails tools/lint.sh python with exit 1 naming subprocess-run-without-check and the file; deleting one encoding= fails it again naming unspecified-encoding; both restored clean. Behaviour: converter suites 87 tests OK in 35.544s (identical to the pre-change measurement), test_install_models_menu + test_dsh_isolation + test_launcher_ram 48 tests OK in 3.310s, compileall over benchmark, tools and examples exit 0, --help on six of the touched scripts ok. All eleven gates exit 0 (ruff 0.16.7 check and format clean, parses under 3.13).",
+      "commit": "350e92b",
       "blocked-reason": null
     },
     {

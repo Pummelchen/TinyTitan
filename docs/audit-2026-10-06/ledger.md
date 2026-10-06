@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:15  Done:30  Blocked:1  Total:46**
+**Open:14  Done:31  Blocked:1  Total:46**
 
 ## Table
 
@@ -17,7 +17,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
-| AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
@@ -30,6 +29,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
+| AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | DONE | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
@@ -218,18 +218,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `53b64d5`
 
-### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** python-tooling
-- **Location:** `pyproject.toml:20-24`
-- **Category:** check coverage gap
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** tool-coverage proof (docs/audit-2026-10-06/tool-coverage.md)
-
-**Evidence before.** Proven: E722, B006, S101, F632 each fire on a probe. Silent on the same probe: subprocess.run(check=False), time.sleep() used to synchronise, open() without encoding=, datetime.datetime.now() without a timezone, and a test body that asserts nothing. pyproject.toml says 'the rest are the families the audit standard names', which is a claim broader than select = [E4,E7,E9,F,W,B,E722,S101,PT].
-
 ### AUD-105 — Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing
 
 - **Severity / tier:** S2 / Tier B
@@ -402,6 +390,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
     Not fixed with AUD-113 because none of these seven is the file that row named, three of the four groups need a cap chosen for their boundary rather than the manifest's, and the three engine-side sites are load-path changes that each need a golden-baseline run to close.
 
 **Evidence after.** Expected: group (1) reads under a stated bound and says so on refusal, with a test per site in the shape AUD-113's `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` uses (the bound fires, not the decoder); `ServerPromptStateStore.swift:121` moves to read-then-check so its bound stops being a TOCTOU; groups (2) and (3) get a limit written down where the operator can see it, or an explicit note that the operator's own checkpoint is out of scope; group (4) classified as a self-check rather than left to look like an unfixed hole. Load-path sites need `tools/golden-baseline.sh --check qwen38-4` before and after.
+
+### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** python-tooling
+- **Location:** `pyproject.toml:20-24`
+- **Category:** check coverage gap
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** tool-coverage proof (docs/audit-2026-10-06/tool-coverage.md)
+
+**Evidence before.** Proven: E722, B006, S101, F632 each fire on a probe. Silent on the same probe: subprocess.run(check=False), time.sleep() used to synchronise, open() without encoding=, datetime.datetime.now() without a timezone, and a test body that asserts nothing. pyproject.toml says 'the rest are the families the audit standard names', which is a claim broader than select = [E4,E7,E9,F,W,B,E722,S101,PT].
+
+**Fix.** Verified by re-running the probe against the committed config, then fixed the coverage rather than the claim. Measured first: PLW1510, DTZ005 and ASYNC110/ASYNC116 are stable in the pinned ruff 0.16.7 and PLW1514 needs preview; enabling preview on this tree adds no violation besides PLW1514 itself (141 = 91 + 42 + 8, no other code), and the pin plus the gate's version check is what makes that safe. Selected DTZ, ASYNC, PLW1510, PLW1514 and made the tree clean under them: 42 subprocess.run calls now state check=False (each was read first -- every one inspects the exit status on purpose, and pgrep/sysctl/curl would raise under check=True, so the honest enforcement is that the choice is explicit, which is what the rule's own description says), 91 text-mode open/read_text/write_text gained encoding="utf-8", eight datetime.now() stamps became UTC -- the convention the same files already use for recorded_at -- and the comment now names the two pitfalls with no rule anywhere (a test body that asserts nothing; time.sleep() in synchronous code) instead of implying they are covered. Sibling check: .swiftlint.yml and the plugin eslint configs were read for the same over-claim shape and carry none; time.strftime()/time.localtime() sit outside DTZ, so benchmark/tinytitan_benchmark.py:506 still stamps a run directory naively and that is recorded in tool-coverage.md rather than silently changed.
+
+**Evidence after.** Probe with all nine pitfalls, run with the committed config: eight rules fire (E722, B006, S101, F632, PLW1510, DTZ005, PLW1514, ASYNC110) and the three rows the file names as human checks stay silent, so the claim and the coverage now match. Mutation through the gate: deleting one check=False fails tools/lint.sh python with exit 1 naming subprocess-run-without-check and the file; deleting one encoding= fails it again naming unspecified-encoding; both restored clean. Behaviour: converter suites 87 tests OK in 35.544s (identical to the pre-change measurement), test_install_models_menu + test_dsh_isolation + test_launcher_ram 48 tests OK in 3.310s, compileall over benchmark, tools and examples exit 0, --help on six of the touched scripts ok. All eleven gates exit 0 (ruff 0.16.7 check and format clean, parses under 3.13).
+
+**Commit.** `350e92b`
 
 ### AUD-104 — The converter expert-order gate reports nothing when the converter dependencies are missing
 
