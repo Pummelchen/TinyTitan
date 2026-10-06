@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:8  Done:47  Blocked:1  Total:56**
+**Open:7  Done:49  Blocked:1  Total:57**
 
 ## Table
 
@@ -20,7 +20,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
-| AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-156 | S2 | A | installer | `tools/dsh_local.sh:819-836 (ensure_smoke_deps)` | The smoke path installs Playwright unpinned and then executes a CDN browser bundle it never checked | unpinned dependency downloaded and executed, against the script's own pinning rule | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
@@ -40,6 +39,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
+| AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :66-76, :104-110 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | DONE | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
@@ -51,6 +51,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-150 | S2 | A | engine | `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)` | AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file | unbounded memory on an input file (found while converting AUD-142's sites) | DONE | Mac (primary) |
 | AUD-153 | S2 | C | tooling | `tests/TinyTitanServer/RoutingFixtures.swift RoutingGate (wait/open); tests/TinyTitanServer/RoutingGateTests.swift` | The router test fixture's gate held one continuation for any number of waiters, so a second concurrent waiter hung the run | test-infrastructure lost wake, found by AUD-143's own regression test | DONE | Mac (primary) |
+| AUD-157 | S2 | B | plugins | `plugins/dsh-tinytitan/test/generate.test.js:30-35, :93-107` | The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads | a check that does not run (test harness path vs tool path) | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-149 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
 | AUD-151 | S3 | C | lint-gates | `docs/repository-layout.md:135-140 (the claim), sources/TinyTitanLib/Engine.swift:529, sources/TinyTitanServer/Core/OpenAIRequestValidator.swift:521, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:519 (the tree)` | The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do | missing gate, contract drift / stale documentation on a load-bearing rule | OPEN | Mac (primary) |
@@ -274,20 +275,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** sibling scan while closing AUD-102
 
 **Evidence before.** Read at the cited lines and confirmed by the auditor. test_launcher_ram.py:135 and :194, test_launcher_port.py:108 and :155, test_coder_clients.py:117, test_tinytitan_profile.py:37 each skipTest on 'no install under models/ and no built server to list one' (or a local variant). CI has no models/ by policy and none may be fetched to satisfy a gate, so these never run there — the same shape AUD-102 was, found by looking at the siblings rather than assuming they were clean. EmptyModelsDirTests demonstrates the fix: a synthetic directory plus TINYTITAN_MODELS_DIR exercises the launcher's choices with no model.
-
-**Evidence after.** None yet.
-
-### AUD-130 — context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** plugins
-- **Location:** `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351`
-- **Category:** surface wired to nothing (§5)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported at route.js:45-46/:99-100 and generate.js:193-194, with the shell branch (route.js:66-72) said to forward neither --context nor --max-tokens.
 
 **Evidence after.** None yet.
 
@@ -628,6 +615,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `this commit`
 
+### AUD-130 — context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-tinytitan/src/route.js:45-46, :66-76, :104-110 and src/config.js:294-351`
+- **Category:** surface wired to nothing (§5)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported at route.js:45-46/:99-100 and generate.js:193-194, with the shell branch (route.js:66-72) said to forward neither --context nor --max-tokens.
+
+**Fix.** True on both halves, and worse than filed on the second. `resolveConfig` emitted neither key (config.js:296-351 listed 34 fields, not these two), so `buildBlock` fell to `ROUTE_DEFAULTS` on every write -- boot, the `models/` watcher, and the preset path alike -- and a route an operator narrowed was silently widened back at the next refresh, with no way to keep it narrow except never letting the plugin run again. The second half is the shell branch: `registerRoute` forwarded `--reasoning` but neither `--context` nor `--max-tokens`, even though `tools/dsh_route.sh` parses (:103-104), validates (:119-120) and documents (:36-37) both, so on a checkout the plugin could not express a narrow route through its own tool either. Fixed by making the pair declarable rather than by deleting the dead parameters: the README (previously :171-175) tells an operator to narrow a route and names the compaction arithmetic that only holds on a narrow window, so the values are a supported choice, not an unused option. Resolved in the same order the neighbouring `reasoning` uses -- config, then TINYTITAN_CONTEXT / TINYTITAN_MAX_TOKENS, then nothing -- for the reason already recorded above that field: a refresh that is told neither writes its own default over a level the caller chose. `null` means unsaid and keeps the writers' pin (262144/32768), so an untouched install still gets the historical block byte-for-byte; a value that is not a positive safe integer is refused at boot by `resolveRouteTokenCount`, as every other field here is. Forwarded on all three paths that write the block: the script's argv, `generateRoute`'s options, and `applyRouteThroughSettings` through the spread `routeRefresher` already does. Docs updated in the same commit: two table rows, the env-fallback list, the compaction paragraph (it now says to narrow the route *in the row*, since hand-editing was the advice the refresh silently undid), and a comment in `cordis.patch.yml` where an operator would look. Sibling sweep: every other operator-facing option the two writers destructure (port, provider, reasoning, presetId, repoRoot, serverBinary, modelsDir, selfContained, dshHome) is emitted by `resolveConfig`; `settingsPath` is the one accepted-but-not-emitted parameter on the path, and it is derived from `dshHome` inside `generateRoute` (:569) rather than dead. `TINYTITAN_CONTEXT` had no other consumer in the tree before this change, so no spelling collision. Sibling sweep, second half: fixing the forwarding made the checkout-tool comparison runnable for the first time on this host, and it is the pin that proves the two writers agree on the new flags; that is AUD-157.
+
+**Evidence after.** `npm test` in plugins/dsh-tinytitan: 137 tests, 136 passed, 1 skipped — the skip being `the generated block is byte-identical to tools/dsh_route.sh --print`. The skip that batch exposed is itself a finding and is filed as AUD-157: the byte-equality pin probed `.build/arm64-apple-macosx/release/TinyTitanServer`, which is not the path the checkout tool resolves, so it could not run on a host that builds to `.build/release`. With that probe fixed (ee72cbb) the pin runs here and passes, which is the stronger evidence: the same catalog and the same flags compared in-suite rather than by hand. The comparison it would have made was run by hand instead, both sides reaching the same `.build/release` binary (TINYTITAN_SERVER is a JS-side name the tool does not read), so the export in that shell had no effect on it: `bash tools/dsh_route.sh --print --context 131072 --max-tokens 8192` and `generateBlock(catalog, {context: 131072, maxTokens: 8192})` over the real 125B-A6B catalog (`TinyTitanServer --catalog --models-dir models`, 2 installs) both produced 41-line blocks and `cmp` exit 0; `--print` with neither flag printed `defaultContextWindow: 262144` / `defaultMaxTokens: 32768`, which is the unsaid case the `null` design promises. Six new or extended tests, each mutation-checked with the mutation reverted afterwards: dropping the script forwarding fails exactly `the route refresh carries the window and cap it was given` and `what resolveConfig emits is what the tool is handed` (2 fail / 12 pass); dropping the env fallback fails exactly `the declared window and cap come from the config, then the environment` (1/13); omitting the two keys from `resolveConfig` fails three named tests (3/11); `tokens <= 0` -> `tokens < 0` fails exactly `config refuses what it cannot use` (1/13); and dropping the options from the generator call fails `the built-in writer declares the window and cap it was given` while its control, `the built-in writer keeps the launcher's pin when nothing is declared`, stays green -- that last pair is what the first sweep missed, since no test pinned the generator path's forwarding at all before this row. Unmutated control: 14/14 in route.test.js. `tools/lint.sh javascript` reports ok for both plugin packages (node v26.10.0, eslint 10.11.0, prettier 3.9.9); the suite and the gate were both re-run after `npm run format`.
+
+**Commit.** `a7de79f`
+
 ### AUD-132 — The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright
 
 - **Severity / tier:** S2 / Tier A
@@ -859,6 +864,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Commit 07e867b. `RoutingGateTests.everyWaiterOnOneGateIsReleased` passes in 0.068 s with the fixed gate, and fails in 10.066 s with 4 issues against the pre-fix fixture (`releases` reads 1 of 4, then 4 of 5) — the mutation check, run by restoring the old body, measuring, and putting the fix back. `ModelRouterTests` 21 tests green in debug and in release; the stress test's `maxConcurrentGenerations` expectation was removed as this row's own error and the property that actually holds is stated in its place. Full serial debug suite green (1,637 tests across the seven modules, exit 0).
 
 **Commit.** `07e867b`
+
+### AUD-157 — The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-tinytitan/test/generate.test.js:30-35, :93-107`
+- **Category:** a check that does not run (test harness path vs tool path)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-130 fix, sibling sweep
+
+**Evidence before.** Found while closing AUD-130, from the suite's own skip line: `the generated block is byte-identical to tools/dsh_route.sh --print` reported `no built TinyTitanServer or tools/dsh_route.sh here` on a host where both exist. `shellComparable` required `existsSync(SHELL_BINARY)` with `SHELL_BINARY = .build/arm64-apple-macosx/release/TinyTitanServer`, while `tools/dsh_route.sh:66-73` resolves `$TINYTITAN_BIN_DIR`, then `$BASE_DIR/.build/release/TinyTitanServer`, then `../bin/` -- never the triple-named directory. The file's own comment (:30-31) claimed 'the test binary may also be the `.build/release` symlink, so both are probed', but the probe was an AND of both paths, so the fallback `TEST_BINARY` could never rescue it. Consequence: on any checkout whose release build is not at the triple path -- which includes a host built through Xcode's `out/Products/Release`, this audit's own machine among them -- the single assertion that the shell writer and the built-in generator produce the same bytes does not run, and nothing else reports that. The audit's plugin suites had therefore been green for weeks on a comparison that had never executed here, including for the `--context`/`--max-tokens` forwarding AUD-130 added in the same batch.
+
+**Fix.** Named the binary the way the tool names it: one `SHELL_BINARY` at `.build/release/TinyTitanServer`, used both by `readCatalog` and by the probe, so the two sides of the comparison read the same file and the assertion is about the writers rather than about discovery; the triple path and the `TEST_BINARY` alias are gone. Scrubbed `TINYTITAN_BIN_DIR` from the environment `shellBlock` passes to the tool, next to the `TINYTITAN_CATALOG_JSON`/`_MODELS_DIR`/`_PORT`/`_SERVER` names already removed: it outranks the checkout path in the tool's own order (:66-67), so an ambient one -- which is exactly what the installer's launcher sets -- would make the test compare two different builds and call the difference a writer bug. The skip line now prints the path it looked for, so a genuine skip says what is missing instead of guessing. Not fixed by creating the triple directory: that would manufacture the condition the test asks about rather than ask the right question, and `tools/lint.sh arch-path` exists to keep hardcoded triples out of build paths. Scope note found on the way, and left alone deliberately: the two sides read different environment names for the same job. The shell tool honours `TINYTITAN_BIN_DIR` and `TINYTITAN_DEFAULT_PORT`, the JS side honours `TINYTITAN_SERVER`, `TINYTITAN_REASONING` and now `TINYTITAN_CONTEXT`/`TINYTITAN_MAX_TOKENS`, and none of the six names is read by both except `TINYTITAN_PORT` and `TINYTITAN_MODELS_DIR`. That is a documentation shape rather than a defect -- the plugin always forwards what it resolved as explicit flags, so the effective route is the same whichever side runs -- and unifying the names would change what an existing installation means, which is the user's call, not a sweep's. Recorded here so the next reader does not rediscover it as a bug.
+
+**Evidence after.** Before, on this host: `npm test` -> 137 tests / 136 pass / 1 skipped, the skip being the byte-equality pin, with `.build/release -> out/Products/Release` and a real `TinyTitanServer` behind it. After ee72cbb: 137 / 137 pass / **0 skipped**, the pin taking 177.6 ms against the installed catalog (2 x qwen3.8-flash-next 125B-A6B 4-bit), so the two writers were compared for real -- including the narrowed case, which the test already covered (`--context 131072 --max-tokens 8192` versus `generateBlock(...)`). Independent hand check before the fix, same numbers: the tool's `--print` and the generator's block were 41 lines each and `cmp` exit 0, and `--print` with neither flag printed `defaultContextWindow: 262144` / `defaultMaxTokens: 32768`. Mutation check that the pin bites: `defaultContextWindow: ${context}` -> `${context + 1}` in src/generate.js:218 fails `the generated block is byte-identical to tools/dsh_route.sh --print` plus four siblings (14 pass / 5 fail); reverting returns 19/19. A first attempt at that mutation was vacuous -- the pattern omitted the six spaces inside the template literal, matched nothing, and reported 19/19 as if it were evidence -- which is why the check is reported with the grep line that proves the file changed. `tools/lint.sh javascript` ok for both packages (node v26.10.0, eslint 10.11.0, prettier 3.9.9) after `npm run format`.
+
+**Commit.** `ee72cbb`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
