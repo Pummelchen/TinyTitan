@@ -146,11 +146,18 @@ jobs:
         # download). `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
-        # draw. None needs dependencies beyond the runner's python3.
+        # draw. The two verification suites are the fail-closed half of the same
+        # promise: every artifact this repository downloads and then executes —
+        # the engine archive, the tools archive, the private Node — is checked
+        # against a published digest first, and each branch that cannot prove the
+        # bytes must stop the install. They drive the real scripts against a stub
+        # `curl`, so they fetch nothing and need no token. None needs dependencies
+        # beyond the runner's python3.
         run: |
           cd benchmark
           python3 -m unittest test_dsh_isolation test_install_models_menu \
-            test_launcher_install test_progress
+            test_launcher_install test_progress \
+            test_release_installer_verification test_dsh_node_digest
       - name: Release gates (the CI-green precondition)
         # `tools/ci-green.sh` is what stops a tag going out over a commit whose CI
         # has not passed — the gap that let v5.18 publish an hour after its own

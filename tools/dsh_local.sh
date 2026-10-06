@@ -31,7 +31,9 @@
 #
 # Node is reused when the machine already has one, and only fetched into
 # ~/.tinytitan/dsh/node when it does not, so this never runs `brew install` and
-# never writes a global npm prefix.
+# never writes a global npm prefix. The fetch is checked against the digest
+# nodejs.org publishes for that exact version before anything is unpacked: what
+# lands in the private root is executed by the harness seconds later.
 #
 # The DeepSeek Harness version is **pinned**. It is the version this project
 # supports and has tested the plugin against; DSH is in developer preview and
@@ -238,6 +240,55 @@ private_env() {
 
 # --- node -------------------------------------------------------------------
 
+# Check the fetched Node tarball against the digest nodejs.org publishes for this
+# exact version, and stop before anything is unpacked when the bytes cannot be
+# proven. There is deliberately no fall-through, and the shape is the one
+# `verify_release_artifact` in tools/install_tinytitan.sh gives the engine and
+# tools archives (AUD-109): the file verified here is the runtime the harness
+# then executes, so "could not verify" is a reason to stop, not a line to scroll
+# past. Each branch names a different cause on purpose — a missing `shasum` is
+# this machine, a missing or unmatched digest is the download — because the fix
+# the user reaches for depends on which one it was.
+verify_node_tarball() {
+  local dir="$1" tarball="$2" shasums="$3"
+  # `shasum` ships with macOS, so this is a guard rather than an expectation:
+  # without it a missing tool would land in the mismatch branch and blame the
+  # download for a problem it does not have.
+  if ! command -v shasum >/dev/null 2>&1; then
+    rm -rf "$dir"
+    die "shasum is missing, so the Node download cannot be verified. It ships with
+  macOS. If it is genuinely unavailable, install Node yourself and re-run: an
+  existing node+npm is used in preference to fetching one."
+  fi
+  if [[ ! -s "$dir/$shasums" ]]; then
+    rm -rf "$dir"
+    die "nodejs.org published no checksums for Node $NODE_VERSION, so these bytes
+  cannot be verified and nothing was installed. Check the connection, or name a
+  version that carries them with TINYTITAN_DSH_NODE_VERSION."
+  fi
+  # Pin the check to the one line that names the file we are about to run.
+  # SHASUMS256.txt lists every artifact of the release — headers, the source
+  # tarball, the other platforms — and handing the whole file to `shasum -c`
+  # would verify all of them and pass on whichever matched.
+  local line
+  line="$(awk -v want="$tarball" '$2 == want { print $1 "  " $2; exit }' "$dir/$shasums")"
+  if [[ -z "$line" ]]; then
+    rm -rf "$dir"
+    die "The published checksums for Node $NODE_VERSION do not name $tarball, so
+  nothing was installed. This Mac wants an arm64 darwin build of that version;
+  nodejs.org did not publish one under that name."
+  fi
+  printf '%s\n' "$line" > "$dir/$tarball.sha256"
+  if ! ( cd "$dir" && shasum -a 256 -c "$tarball.sha256" >/dev/null 2>&1 ); then
+    rm -rf "$dir"
+    die "The Node download does not match the checksum nodejs.org publishes for
+  v${NODE_VERSION}, so nothing was installed. Try again; if it keeps failing the
+  mirror is serving damaged bytes, and installing Node by another route is
+  better than unpacking these."
+  fi
+  ok "Node $NODE_VERSION verified against nodejs.org's published digest"
+}
+
 # Fetch Node into our own root. Only reached when the Mac has no node at all,
 # because the alternative — `brew install node` — writes a system-wide package
 # for a feature the user may never turn on.
@@ -257,12 +308,21 @@ install_node() {
 
   local tarball="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
   local url="https://nodejs.org/dist/v${NODE_VERSION}/${tarball}"
+  local shasums="SHASUMS256.txt"
   say "Installing a private Node $NODE_VERSION (no Homebrew, nothing system-wide)"
   echo "  This is about 50 MB and lands only in $DSH_NODE_DIR."
   local tmp; tmp="$(mktemp -d)"
 
   run "download Node from nodejs.org" curl -fsSL "$url" -o "$tmp/$tarball"
+  # `|| true` is deliberate: `set -e` would otherwise end the run on a 404 with
+  # curl's own exit code, and the reason this install stopped is not a failed
+  # transfer — it is that there are no published bytes to check against.
+  # verify_node_tarball is the only place that decides whether to continue, and
+  # it says so in those terms.
+  run "fetch nodejs.org's published checksums for v${NODE_VERSION}" \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${shasums}" -o "$tmp/$shasums" || true
   if (( DRY_RUN )); then rm -rf "$tmp"; return 0; fi
+  verify_node_tarball "$tmp" "$tarball" "$shasums"
   mkdir -p "$DSH_NODE_DIR"
   tar -xzf "$tmp/$tarball" -C "$DSH_NODE_DIR" --strip-components=1
   rm -rf "$tmp"
