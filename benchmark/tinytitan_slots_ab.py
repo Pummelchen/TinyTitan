@@ -40,7 +40,7 @@ def run(slots, pin=None):
         else:
             env["TINYTITAN_NO_PIN"] = "1"
     log_path = benchmark_log_path(f"tinytitan_slots_{slots}{'_pin' if pin else ''}.log")
-    log = open(log_path, "w")
+    log = open(log_path, "w", encoding="utf-8")
     boot = time.time()
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL), env=env, stdout=log, stderr=subprocess.STDOUT
@@ -93,7 +93,7 @@ def run(slots, pin=None):
         proc.kill()
     time.sleep(0.3)
     gen, runner, gpu = [], [], []
-    with open(log_path) as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             if "TinyTitan generation" in line and "decode_tok_s=" in line:
                 gen.append(line.strip())

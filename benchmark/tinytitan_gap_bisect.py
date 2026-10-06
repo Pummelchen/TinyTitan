@@ -32,7 +32,7 @@ def run(max_tokens, tag, extra_env=None):
     if extra_env:
         env.update(extra_env)
     log_path = benchmark_log_path(f"tinytitan_gap_{tag}.log")
-    log = open(log_path, "w")
+    log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL), env=env, stdout=log, stderr=subprocess.STDOUT
     )
@@ -83,7 +83,7 @@ def run(max_tokens, tag, extra_env=None):
         proc.kill()
     time.sleep(0.3)
     out = {"gen": [], "runner": [], "gpu": []}
-    with open(log_path) as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             if "TinyTitan generation" in line and "decode_tok_s=" in line:
                 out["gen"].append(line.strip())

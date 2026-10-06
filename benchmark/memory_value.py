@@ -77,7 +77,7 @@ def consolidation_outcomes() -> tuple[int, int]:
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return (-1, -1)
     distilled = skipped = 0
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if "memory consolidated session=" in line:
                 distilled += 1
@@ -278,21 +278,27 @@ def compiles(stage: str, code: str) -> bool | None:
             path = work / "pong.swift"
             path.write_text(code)
             done = subprocess.run(
-                ["swiftc", "-typecheck", str(path)], capture_output=True, timeout=180
+                ["swiftc", "-typecheck", str(path)], capture_output=True, timeout=180, check=False
             )
             return done.returncode == 0
         if stage == "python":
             path = work / "pong.py"
             path.write_text(code)
             done = subprocess.run(
-                [sys.executable, "-m", "py_compile", str(path)], capture_output=True, timeout=120
+                [sys.executable, "-m", "py_compile", str(path)],
+                capture_output=True,
+                timeout=120,
+                check=False,
             )
             return done.returncode == 0
         if stage == "c99":
             path = work / "pong.c"
             path.write_text(code)
             done = subprocess.run(
-                ["cc", "-std=c99", "-fsyntax-only", str(path)], capture_output=True, timeout=180
+                ["cc", "-std=c99", "-fsyntax-only", str(path)],
+                capture_output=True,
+                timeout=180,
+                check=False,
             )
             return done.returncode == 0
     except Exception:

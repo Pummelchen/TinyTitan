@@ -90,6 +90,7 @@ def fetch_slice(name: str, index: dict, lo: int, count: int) -> np.ndarray:
                 f"{patcher.BASE}/{shard}",
             ],
             capture_output=True,
+            check=False,
         )
         if result.returncode == 0 and len(result.stdout) == want:
             return (

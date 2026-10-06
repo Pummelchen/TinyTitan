@@ -349,7 +349,7 @@ def main() -> int:
         "block = 4,215 ms per layer-chunk averaged over a 6,103-token "
         "prefill (84.3 s / 20 layer-chunks)."
     )
-    with open(".build/benchmark-results/ane-attention-probe.json", "w") as fh:
+    with open(".build/benchmark-results/ane-attention-probe.json", "w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
     print("wrote .build/benchmark-results/ane-attention-probe.json")
     return 0

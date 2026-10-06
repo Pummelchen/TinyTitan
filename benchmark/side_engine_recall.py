@@ -147,7 +147,7 @@ def cases() -> list[dict]:
 
 def prepare(path: Path) -> int:
     jobs = cases()
-    path.write_text("\n".join(json.dumps(j) for j in jobs) + "\n")
+    path.write_text("\n".join(json.dumps(j) for j in jobs) + "\n", encoding="utf-8")
     print(f"{len(jobs)} cases -> {path}")
     print(f"  {len(QUESTIONS)} questions x {len(BIBLE)} facts")
     return 0
@@ -158,7 +158,9 @@ def recall(rank: list[str], target: str, k: int) -> bool:
 
 
 def score(path: Path) -> int:
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     by_question: dict[str, list[dict]] = {}
     for row in rows:
         by_question.setdefault(row["question"], []).append(row)

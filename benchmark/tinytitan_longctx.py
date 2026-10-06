@@ -46,7 +46,7 @@ SHORT = "Write a detailed essay about the history of computing."
 
 
 def launch_server():
-    log = open(benchmark_log_path("longctx_server.log"), "w")
+    log = open(benchmark_log_path("longctx_server.log"), "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL),
         env=server_environment(),
@@ -203,7 +203,7 @@ def main():
         proc.kill()
 
     print("\n--- server footers ---", flush=True)
-    for line in open(benchmark_log_path("longctx_server.log")):
+    for line in open(benchmark_log_path("longctx_server.log"), encoding="utf-8"):
         if "TinyTitan generation" in line or "completed in" in line:
             print(line.strip(), flush=True)
 

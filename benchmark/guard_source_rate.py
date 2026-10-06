@@ -192,7 +192,7 @@ def facts(journal: Path) -> list[dict]:
     said by that point and not against the whole book.
     """
     written = []
-    for line in journal.read_text().splitlines():
+    for line in journal.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         record = json.loads(line)

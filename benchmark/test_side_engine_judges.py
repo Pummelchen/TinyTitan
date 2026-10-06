@@ -57,7 +57,7 @@ class SummarizeTests(unittest.TestCase):
             {"task": "T5", "truth": "YES", "prompt": "s", "completion": "YES"},
             {"task": "T5", "truth": "NO", "prompt": "t", "completion": "NO"},
         ]
-        handle = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".jsonl", delete=False)
         handle.write("\n".join(json.dumps(row) for row in payload))
         handle.close()
         return pathlib.Path(handle.name)

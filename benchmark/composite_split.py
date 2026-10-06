@@ -126,13 +126,15 @@ def prepare(labels: list[str], path: Path) -> int:
                 "value": fact["value"],
             }
         )
-    path.write_text("\n".join(json.dumps(job) for job in jobs) + "\n")
+    path.write_text("\n".join(json.dumps(job) for job in jobs) + "\n", encoding="utf-8")
     print(f"{len(jobs)} facts -> {path}")
     return 0
 
 
 def score(path: Path, threshold: float) -> int:
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     kept, repaired, damaged, unchanged, refused = [], [], [], [], []
     for row in rows:
         before = grounding(row["value"], row["session"])

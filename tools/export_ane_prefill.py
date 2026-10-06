@@ -729,7 +729,7 @@ def main() -> int:
         raise SystemExit(f"--max-history must be a multiple of --chunk ({args.chunk})")
     histories = list(range(0, args.max_history + 1, args.chunk))
 
-    manifest = json.load(open(model_dir / "manifest.json"))
+    manifest = json.load(open(model_dir / "manifest.json", encoding="utf-8"))
     entries = read_index(weights_bin)
     # The chunk is the operator's choice here and the runtime's gate later:
     # `eligibleChunk` only routes a chunk to the sidecar when the configured
@@ -855,7 +855,7 @@ def main() -> int:
             # a causal-only mask.
             "selectionFolded": selection_folded,
         }
-        with open(staging / "ane_prefill.json", "w") as fh:
+        with open(staging / "ane_prefill.json", "w", encoding="utf-8") as fh:
             json.dump(meta, fh, indent=2)
 
         previous = model_dir / f".ane_prefill.previous-{os.getpid()}"

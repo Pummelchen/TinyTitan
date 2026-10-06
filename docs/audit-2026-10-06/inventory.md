@@ -144,7 +144,9 @@ Already enforced in build config, and *proved* in
   `.swift-format`. Toolchain Xcode 27 / Swift 6.4 — the only supported one.
 - C: `.c99` (`:321`) plus `-pedantic-errors` and the full hardening set
   (`:95-108`), `-Werror`.
-- Python: ruff pinned 0.16.7 with `B`, `E722`, `S101`, `PT` selected
-  (`pyproject.toml:1-35`) — the two standards §1 names that the config *claims* and
-  does not deliver are recorded as AUD-103 rather than assumed covered.
+- Python: ruff pinned 0.16.7 with `B`, `E722`, `S101`, `PT`, `DTZ`, `ASYNC`,
+  `PLW1510` and `PLW1514` selected (`pyproject.toml:16-51`, the `[tool.ruff.lint]` block). At discovery the set was
+  `B`, `E722`, `S101`, `PT` and the config *claimed* more than it delivered; AUD-103 added
+  the families that cover three of the five silent pitfalls and the comment now names the
+  two that stay a human check, so what is enforced here is what the file says.
 - Bash: system bash 3.2.57 parse-and-run gate plus shellcheck 0.11.0.

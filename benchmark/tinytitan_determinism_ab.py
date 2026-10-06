@@ -72,7 +72,7 @@ def first_diff_index(a, b):
 
 
 def run_server():
-    log = open(benchmark_log_path("tinytitan_determinism_server.log"), "w")
+    log = open(benchmark_log_path("tinytitan_determinism_server.log"), "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL),
         env=server_environment(),

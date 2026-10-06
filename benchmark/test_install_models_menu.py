@@ -46,7 +46,12 @@ echo "rc=$?"
 
 def run_menu(stdin: str | None) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", "-c", HARNESS], input=stdin, capture_output=True, text=True, timeout=60
+        ["bash", "-c", HARNESS],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
 
 
@@ -160,7 +165,12 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
             self.stub_df(available_gb)
             env["PATH"] = f"{self.df_dir}:{env['PATH']}"
         return subprocess.run(
-            ["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True, timeout=120
+            ["bash", str(SCRIPT), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
         )
 
     def install(self, name: str) -> None:
@@ -201,7 +211,12 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.stub_df(3)
         env["PATH"] = f"{self.df_dir}:{env['PATH']}"
         result = subprocess.run(
-            ["bash", str(SCRIPT), "ornith15"], env=env, capture_output=True, text=True, timeout=120
+            ["bash", str(SCRIPT), "ornith15"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
         )
         self.assertIn("FAKE-REPACK", result.stdout + result.stderr)
 

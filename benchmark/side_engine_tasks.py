@@ -492,7 +492,9 @@ def confidence_cases() -> list[dict]:
 
 
 def score_variants(path: Path) -> int:
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     groups: dict[str, list] = {}
     for row in rows:
         groups.setdefault(row.get("variant", "plain"), []).append(row)
@@ -557,7 +559,7 @@ def score_variants(path: Path) -> int:
 
 def prepare(path: Path) -> int:
     jobs = cases()
-    path.write_text("\n".join(json.dumps(j) for j in jobs) + "\n")
+    path.write_text("\n".join(json.dumps(j) for j in jobs) + "\n", encoding="utf-8")
     counts: dict[str, int] = {}
     for j in jobs:
         counts[j["task"]] = counts.get(j["task"], 0) + 1
@@ -567,7 +569,9 @@ def prepare(path: Path) -> int:
 
 
 def score(path: Path) -> int:
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     tasks: dict[str, list] = {}
     for row in rows:
         tasks.setdefault(row["task"], []).append(row)

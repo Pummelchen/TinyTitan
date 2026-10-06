@@ -30,7 +30,7 @@ def answer_of(completion: str) -> str:
 
 def load_labels(review: Path) -> dict[str, dict]:
     labels = {}
-    with review.open() as handle:
+    with review.open(encoding="utf-8") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             if row["kind"] == "excluded":
                 continue
@@ -39,7 +39,9 @@ def load_labels(review: Path) -> dict[str, dict]:
 
 
 def report(name: str, done: Path, labels: dict[str, dict]) -> dict:
-    rows = [json.loads(line) for line in done.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in done.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     scored = []
     for row in rows:
         label = labels.get(row.get("note", ""))

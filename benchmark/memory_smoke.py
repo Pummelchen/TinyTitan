@@ -26,7 +26,7 @@ SERVER_LOG = os.environ.get("TINYTITAN_MEMVAL_SERVER_LOG")
 def consolidation_lines():
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return []
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         return [line.strip() for line in handle if "consolidated session=" in line]
 
 

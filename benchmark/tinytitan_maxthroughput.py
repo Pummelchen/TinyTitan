@@ -87,7 +87,7 @@ def main():
 
 def run_quant(model, label, mtp_model=None, engine="gpu"):
     log_path = benchmark_log_path(f"maxtput_{label}.log")
-    log = open(log_path, "w")
+    log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=model, mtp_model=mtp_model, engine=engine),
         env=server_environment(),
@@ -153,7 +153,7 @@ def run_quant(model, label, mtp_model=None, engine="gpu"):
     time.sleep(0.5)
 
     rates, cts = [], []
-    with open(log_path) as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             if (
                 "TinyTitan generation" in line or "TinyTitan mtp " in line

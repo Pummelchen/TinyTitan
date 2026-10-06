@@ -71,6 +71,7 @@ def score(install: str, text: Path, tokens: int, nll_out: Path) -> dict:
         capture_output=True,
         text=True,
         timeout=7200,
+        check=False,
     )
     if result.returncode != 0:
         raise SystemExit(

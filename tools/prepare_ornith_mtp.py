@@ -83,7 +83,7 @@ def sha256(path: Path) -> str:
 
 
 def validate_config(path: Path) -> dict:
-    config = json.loads(path.read_text())
+    config = json.loads(path.read_text(encoding="utf-8"))
     text = config.get("text_config", config)
     expected = {
         "hidden_size": 2048,
@@ -120,7 +120,7 @@ def validate_index(path: Path, shard_name: str) -> set[str]:
             f"source index SHA-256 {actual_digest} does not match pinned "
             f"revision {SOURCE_REVISION} ({SOURCE_INDEX_SHA256})"
         )
-    index = json.loads(path.read_text())
+    index = json.loads(path.read_text(encoding="utf-8"))
     mapped = {name: shard for name, shard in index["weight_map"].items() if name.startswith("mtp.")}
     expected = set(source_shapes())
     if set(mapped) != expected:

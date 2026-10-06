@@ -139,7 +139,7 @@ def request(prompt: str) -> dict[str, object]:
 def parse_footers(log_path: pathlib.Path) -> tuple[list[str], list[str]]:
     generation: list[str] = []
     runner: list[str] = []
-    for line in log_path.read_text().splitlines():
+    for line in log_path.read_text(encoding="utf-8").splitlines():
         if "TinyTitan generation" in line and "decode_tok_s=" in line:
             generation.append(line.strip())
         if "TinyTitan runner" in line and "expert_hit_rate=" in line:
@@ -167,7 +167,7 @@ def run_case(
             f"expert-ab-{mode}-{io_backend}-{io_sync}-{io_submission}-{prompt_name}.log"
         )
     )
-    with log_path.open("w") as log:
+    with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
             server_command(SERVER, PORT),
             env=environment,

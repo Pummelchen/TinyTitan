@@ -37,7 +37,7 @@ def run_quant(model_path, label):
     env = server_environment()
     env["TINYTITAN_RUNNER_STATS"] = "1"
     log_path = benchmark_log_path(f"longgen_{label}.log")
-    log = open(log_path, "w")
+    log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=model_path), env=env, stdout=log, stderr=subprocess.STDOUT
     )
@@ -99,7 +99,7 @@ def run_quant(model_path, label):
     time.sleep(0.5)
 
     rates, cts = [], []
-    with open(log_path) as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             if "TinyTitan generation" in line and "decode_tok_s=" in line:
                 rates.append(float(line.split("decode_tok_s=")[1].split()[0]))

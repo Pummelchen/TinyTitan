@@ -202,14 +202,14 @@ def run_arm(name: str, env_delta: dict[str, str]) -> dict:
     # faster or slower.
     env["TINYTITAN_RUNNER_STATS"] = "1"
     env.update(env_delta)
-    with open(log_path, "w") as fh:
+    with open(log_path, "w", encoding="utf-8") as fh:
         proc = subprocess.Popen(
             server_command(BIN, PORT, model=MODEL), env=env, stdout=fh, stderr=subprocess.STDOUT
         )
     try:
         model_id = wait_ready(proc)
         if model_id is None:
-            tail = Path(log_path).read_text().strip().splitlines()[-3:]
+            tail = Path(log_path).read_text(encoding="utf-8").strip().splitlines()[-3:]
             return {"arm": name, "ok": False, "note": "; ".join(tail)[:160]}
         # An arm that crashes the server drops the stream mid-read. Record it
         # and continue: losing the rest of a multi-hour sweep to one bad
@@ -232,7 +232,7 @@ def run_arm(name: str, env_delta: dict[str, str]) -> dict:
             proc.kill()
         time.sleep(3)
 
-    text = Path(log_path).read_text()
+    text = Path(log_path).read_text(encoding="utf-8")
     rates = [float(m) for m in re.findall(r"TinyTitan generation .*?decode_tok_s=([\d.]+)", text)]
     if not rates:
         return {"arm": name, "ok": False, "note": "no decode footer"}
@@ -276,7 +276,7 @@ def main() -> int:
     arms = [a for a in ARMS if not wanted or a[0] in wanted]
 
     busy = subprocess.run(
-        ["pgrep", "-f", "TinyTitanServer|TinyTitanCLI"], capture_output=True, text=True
+        ["pgrep", "-f", "TinyTitanServer|TinyTitanCLI"], capture_output=True, text=True, check=False
     ).stdout.strip()
     if busy:
         print("another model process is running; stop it first", file=sys.stderr)

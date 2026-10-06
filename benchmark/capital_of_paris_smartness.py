@@ -159,7 +159,7 @@ def main():
                 for k in ("ttft_s", "total_s", "decode_tok_s", "e2e_tok_s"):
                     if isinstance(row.get(k), float):
                         row[k] = round(row[k], 3)
-                with open(RESULTS, "a") as fh:
+                with open(RESULTS, "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(row) + "\n")
                 print(
                     f"{row['status']:10s} {label:26s} {quant}-bit {engine:3s} "

@@ -136,7 +136,7 @@ class Engine:
 def run_timed(cmd: list[str], timeout: int = 3600) -> tuple[str, float | None, int]:
     """Run cmd, returning (combined output, peak RSS MB, returncode)."""
     proc = subprocess.run(
-        ["/usr/bin/time", "-l"] + cmd, capture_output=True, text=True, timeout=timeout
+        ["/usr/bin/time", "-l"] + cmd, capture_output=True, text=True, timeout=timeout, check=False
     )
     out = (proc.stdout or "") + (proc.stderr or "")
     rss = None
@@ -149,7 +149,7 @@ def run_timed(cmd: list[str], timeout: int = 3600) -> tuple[str, float | None, i
 def sample_rss(pid: int) -> float | None:
     try:
         out = subprocess.run(
-            ["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True
+            ["ps", "-o", "rss=", "-p", str(pid)], capture_output=True, text=True, check=False
         ).stdout.strip()
         return int(out) / 1024 if out else None
     except Exception:
@@ -165,7 +165,10 @@ def perf_cores() -> int:
     try:
         return int(
             subprocess.run(
-                ["sysctl", "-n", "hw.perflevel0.logicalcpu"], capture_output=True, text=True
+                ["sysctl", "-n", "hw.perflevel0.logicalcpu"],
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.strip()
         )
     except Exception:
@@ -251,7 +254,9 @@ def run_ollama(prompt: str) -> tuple[float | None, float | None, str]:
     if "eval_count" not in data:
         return None, None, f"no eval stats: {str(data)[:120]}"
     rate = data["eval_count"] / (data["eval_duration"] / 1e9)
-    pid = subprocess.run(["pgrep", "-n", "ollama"], capture_output=True, text=True).stdout.strip()
+    pid = subprocess.run(
+        ["pgrep", "-n", "ollama"], capture_output=True, text=True, check=False
+    ).stdout.strip()
     return rate, sample_rss(int(pid)) if pid else None, ""
 
 
@@ -310,7 +315,7 @@ def run_lmstudio(prompt: str) -> tuple[float | None, float | None, str]:
     if rate is None:
         return None, None, "no stats.tokens_per_second (start with `lms server start`)"
     pid = subprocess.run(
-        ["pgrep", "-n", "LM Studio"], capture_output=True, text=True
+        ["pgrep", "-n", "LM Studio"], capture_output=True, text=True, check=False
     ).stdout.strip()
     return float(rate), sample_rss(int(pid)) if pid else None, ""
 
@@ -348,7 +353,7 @@ def run_tinytitan(prompt: str) -> tuple[float | None, float | None, str]:
     port = 8123
     binary = ROOT / ".build/release/TinyTitanServer"
     log = ROOT / ".build/vs-competitors-tinytitan.log"
-    with open(log, "w") as fh:
+    with open(log, "w", encoding="utf-8") as fh:
         proc = subprocess.Popen(
             [
                 str(binary),
@@ -549,6 +554,7 @@ def main() -> int:
         ["pgrep", "-f", "TinyTitanServer|TinyTitanCLI|ollama|LM Studio|mlx_lm|llama-cli"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     if busy:
         print("another inference process is running; stop it first", file=sys.stderr)

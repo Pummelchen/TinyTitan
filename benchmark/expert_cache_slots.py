@@ -62,7 +62,9 @@ def build_prompt(source: pathlib.Path, characters: int) -> tuple[str, str]:
 
 
 def swap_used_gib() -> float:
-    out = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True).stdout
+    out = subprocess.run(
+        ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, check=False
+    ).stdout
     match = re.search(r"used = ([\d.]+)M", out)
     return float(match.group(1)) / 1024.0 if match else float("nan")
 
@@ -95,6 +97,7 @@ def run_once(model: pathlib.Path, messages: pathlib.Path, slots: int, max_new: i
         capture_output=True,
         text=True,
         timeout=3600,
+        check=False,
     )
     after = swap_used_gib()
     err = proc.stderr
@@ -156,7 +159,10 @@ def main() -> int:
     if not (model / "verified-install.json").exists():
         raise SystemExit(f"not an installed model: {model}")
     busy = subprocess.run(
-        ["pgrep", "-fl", "TinyTitanCLI|TinyTitanServer"], capture_output=True, text=True
+        ["pgrep", "-fl", "TinyTitanCLI|TinyTitanServer"],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     if busy:
         raise SystemExit(f"a model process is already running:\n{busy}")
@@ -232,7 +238,7 @@ def main() -> int:
 
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M")
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M")
         out = RESULTS / f"slots-{args.label}-{stamp}.json"
         out.write_text(
             json.dumps(

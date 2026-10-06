@@ -306,11 +306,11 @@ class ServerProcess:
 
 def write_json(path: pathlib.Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def append_jsonl(path: pathlib.Path, value: Any) -> None:
-    with path.open("a") as handle:
+    with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(value, sort_keys=True) + "\n")
 
 
@@ -823,7 +823,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     output = (args.output or DEFAULT_OUTPUT / stamp).resolve()
     output.mkdir(parents=True, exist_ok=False)
     environment = preflight(MODEL_PATHS.values())

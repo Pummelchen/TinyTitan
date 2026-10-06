@@ -134,6 +134,7 @@ class PrivateHarnessIsolationTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 timeout=120,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr[-400:])
             self.assertIn("would", result.stdout)
@@ -186,6 +187,7 @@ class PrivateHarnessStatusTests(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr[-400:])
         # `warn` deliberately writes to stderr (it is the unmissable sink), so a
@@ -249,7 +251,12 @@ class ModelsDirectoryTests(unittest.TestCase):
         if environment:
             env.update(environment)
         result = subprocess.run(
-            ["bash", str(script), "paths"], env=env, capture_output=True, text=True, timeout=60
+            ["bash", str(script), "paths"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr[-400:])
         return dict(line.split(None, 1) for line in result.stdout.splitlines() if line.strip())

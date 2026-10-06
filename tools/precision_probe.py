@@ -23,7 +23,7 @@ spec.loader.exec_module(pq)
 
 SP = "/private/tmp/claude-501/-Users-andreborchert-Downloads-TinyTitan/d4ac9bc1-da72-4471-8662-cfbcc02dd766/scratchpad"
 BASE = "https://huggingface.co/Qwen/Qwen3.8-Flash-Next/resolve/main"
-wm = json.load(open(f"{SP}/q38_index.json"))["weight_map"]
+wm = json.load(open(f"{SP}/q38_index.json", encoding="utf-8"))["weight_map"]
 _headers = {}
 
 

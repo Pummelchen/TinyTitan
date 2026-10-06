@@ -92,7 +92,7 @@ def passed(reply: str, expected: str, kind: str) -> bool:
 
 
 def run_case(model: str, prompt: str) -> str:
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as handle:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
         json.dump(
             [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}], handle
         )
@@ -113,6 +113,7 @@ def run_case(model: str, prompt: str) -> str:
             capture_output=True,
             text=True,
             timeout=1800,
+            check=False,
         )
     finally:
         Path(path).unlink(missing_ok=True)

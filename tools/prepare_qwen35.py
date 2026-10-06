@@ -704,7 +704,8 @@ def stop_download() -> None:
 def fetch_tokenizer(out: Path) -> None:
     for name, required in TOKENIZER_FILES:
         done = subprocess.run(
-            ["curl", "-sfL", "--max-time", "300", *RETRY, "-o", str(out / name), f"{BASE}/{name}"]
+            ["curl", "-sfL", "--max-time", "300", *RETRY, "-o", str(out / name), f"{BASE}/{name}"],
+            check=False,
         )
         if done.returncode != 0:
             (out / name).unlink(missing_ok=True)

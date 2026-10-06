@@ -55,6 +55,7 @@ def run_cpu(install: str, jobs: list[dict], out: Path) -> float:
             capture_output=True,
             text=True,
             timeout=14_400,
+            check=False,
         )
         elapsed = time.time() - started
     if result.returncode != 0:
@@ -97,7 +98,9 @@ def run_server(url: str, model: str, jobs: list[dict], out: Path) -> float:
 
 
 def summarize(path: Path) -> dict:
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     per_task: dict[str, dict] = {}
     for row in rows:
         expected = tasks.truth_of(row)

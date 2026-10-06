@@ -116,7 +116,9 @@ PERF_METRICS = {
 
 
 def run(cmd: list[str], env: dict | None = None, timeout: int = 3600) -> tuple[int, str, str]:
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout, cwd=ROOT)
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, env=env, timeout=timeout, cwd=ROOT, check=False
+    )
     return proc.returncode, proc.stdout, proc.stderr
 
 
@@ -423,7 +425,11 @@ def measure(model: str, prompt: str, max_new: int, iterations: int) -> dict:
     try:
         env["physical_memory_bytes"] = int(
             subprocess.run(
-                ["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=30
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
             ).stdout.strip()
         )
     except Exception:
@@ -537,8 +543,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.compare:
-        baseline = json.load(open(args.compare[0]))
-        candidate = json.load(open(args.compare[1]))
+        baseline = json.load(open(args.compare[0], encoding="utf-8"))
+        candidate = json.load(open(args.compare[1], encoding="utf-8"))
         print(f"baseline {args.compare[0]} -> candidate {args.compare[1]}")
         return 0 if compare(baseline, candidate, args.threshold) else 1
 
@@ -595,7 +601,7 @@ def main() -> int:
                 file=sys.stderr,
             )
     if baseline_path:
-        baseline = json.load(open(baseline_path))
+        baseline = json.load(open(baseline_path, encoding="utf-8"))
         print()
         return 0 if compare(baseline, record, args.threshold) else 1
     return 0

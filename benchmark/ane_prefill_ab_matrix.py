@@ -107,7 +107,7 @@ def run_arm(model: str, ane: bool, characters: int, chunk: int, timeout: int = 3
         str(chunk),
     ]
     proc = subprocess.run(
-        command, capture_output=True, text=True, env=env, cwd=ROOT, timeout=timeout
+        command, capture_output=True, text=True, env=env, cwd=ROOT, timeout=timeout, check=False
     )
     arm: dict = {"ane": ane, "exit": proc.returncode}
     if proc.returncode != 0:
@@ -319,7 +319,7 @@ def main() -> int:
     record = new_record(args.repeats, args.prompt_characters, MAX_NEW, args.prefill_chunk)
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
-        label = args.label or datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+        label = args.label or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
         path = RESULTS / f"{label}.json"
         if path.exists() and args.skip_done:
             try:

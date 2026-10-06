@@ -607,6 +607,7 @@ class EndpointIntegrationTests(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("plan validates against the checkpoint's own headers", result.stdout)
@@ -652,6 +653,7 @@ class FinishedOutputGuardTests(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("already holds a finished snapshot", result.stderr + result.stdout)

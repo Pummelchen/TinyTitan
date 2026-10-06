@@ -32,7 +32,7 @@ def run(mode):
     if mode == "off":
         env["TINYTITAN_RDADVISE_POLICY"] = "off"
     log_path = benchmark_log_path(f"tinytitan_rd_{mode}.log")
-    log = open(log_path, "w")
+    log = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL), env=env, stdout=log, stderr=subprocess.STDOUT
     )
@@ -82,7 +82,7 @@ def run(mode):
         proc.kill()
     time.sleep(0.3)
     gen, runner, gpu = [], [], []
-    with open(log_path) as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             if "TinyTitan generation" in line and "decode_tok_s=" in line:
                 gen.append(line.strip())

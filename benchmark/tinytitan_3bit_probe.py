@@ -185,7 +185,7 @@ def main() -> int:
 
     out = ROOT / ".build/benchmark-results/3bit-probe.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as fh:
+    with open(out, "w", encoding="utf-8") as fh:
         json.dump({"error_ratios": ratios, "packing": rows}, fh, indent=2)
     print(f"\nwrote {out}")
     return 0

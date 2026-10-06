@@ -84,7 +84,7 @@ def run_arm(
         str(chunk),
     ]
     proc = subprocess.run(
-        command, capture_output=True, text=True, env=env, cwd=ROOT, timeout=timeout
+        command, capture_output=True, text=True, env=env, cwd=ROOT, timeout=timeout, check=False
     )
     result: dict = {"arm": arm, "exit": proc.returncode}
     if proc.returncode != 0:
@@ -206,7 +206,9 @@ def main() -> int:
             print(f"  dumps kept at {root}", flush=True)
         if args.record:
             RESULTS.mkdir(parents=True, exist_ok=True)
-            label = args.label or datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+            label = args.label or datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y%m%dT%H%M%S"
+            )
             path = RESULTS / f"ane-layer-diff-{label}.json"
             record = {
                 "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(

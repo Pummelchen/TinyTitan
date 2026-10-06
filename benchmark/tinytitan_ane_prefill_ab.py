@@ -81,7 +81,7 @@ def launch(quant: str, ane: bool, log_name: str) -> None:
     cmd = server_command(binary, PORT, model=MODELS[quant], cache_mode="off")
     env = server_environment()
     env["TINYTITAN_PREFILL_ANE"] = "on" if ane else "off"
-    log = open(benchmark_log_path(log_name), "w")
+    log = open(benchmark_log_path(log_name), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
     g0._servers.append(proc)
 
@@ -135,7 +135,7 @@ def one_run(quant: str, ane: bool, prompt: str, tag: str) -> dict:
     if result is None:
         raise SystemExit(f"[{quant}/{arm}] request failed")
     row: dict = {"arm": arm, **result}
-    with open(benchmark_log_path(log_name)) as handle:
+    with open(benchmark_log_path(log_name), encoding="utf-8") as handle:
         text = handle.read()
     gen = g0.GENERATION_RE.search(text)
     if gen:
@@ -238,7 +238,7 @@ def main() -> int:
 
     out = ROOT / f".build/benchmark-results/ane-prefill-ab-{args.quant}.json"
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as fh:
+    with open(out, "w", encoding="utf-8") as fh:
         json.dump({"rows": rows}, fh, indent=2)
     print(f"\nwrote {out}")
     return 0

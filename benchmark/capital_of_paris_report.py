@@ -40,7 +40,7 @@ COMMIT = os.environ.get("COMMIT", "the commit this report is committed with")
 def load(paths):
     rows = []
     for path in paths:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:

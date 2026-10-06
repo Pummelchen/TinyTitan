@@ -15,10 +15,40 @@ extend-exclude = [".build", "models"]
 
 [tool.ruff.lint]
 # E4/E7/E9 and F are the correctness core (imports, statements, undefined
-# names); W is whitespace-level syntax; the rest are the families the audit
-# standard names: B flake8-bugbear (loop-variable capture, mutable defaults,
-# zip without strict), E722 bare except, S101 assert, PT flake8-pytest-style.
-select = ["E4", "E7", "E9", "F", "W", "B", "E722", "S101", "PT"]
+# names); W is whitespace-level syntax. The rest cover the pitfalls the audit
+# standard names, one family each, as measured by the probe in
+# docs/audit-2026-10-06/tool-coverage.md:
+#   B      flake8-bugbear — loop-variable capture (B023), mutable defaults (B006),
+#          zip without strict (B905), useless expressions (B018)
+#   E722   bare `except:`
+#   S101   `assert` used for validation
+#   F632   `is` compared against a literal
+#   PT     flake8-pytest-style (see the two exclusions below)
+#   DTZ    flake8-datetimez — `datetime.now()` without a timezone (DTZ005)
+#   ASYNC  flake8-async — `time.sleep()` used to wait inside an async function
+#          (ASYNC110) and a non-constant sleep argument (ASYNC116)
+#   PLW1510 flake8-pylint — `subprocess.run` with no `check` argument at all. It
+#          enforces that the choice is *stated*, not that it is True: the probes
+#          here read the exit status on purpose (`pgrep` exits 1 for "no match"),
+#          so they say `check=False` and the omission is what the rule catches.
+#   PLW1514 pylint — text-mode `open`/`read_text`/`write_text` with no `encoding`,
+#          whose fix is `encoding="utf-8"`.
+#
+# Two of the nine named pitfalls are still a human check, and this is the place
+# that says so rather than a comment that implies otherwise: a test body that
+# asserts nothing has no rule in any ruff family, and `time.sleep()` in
+# synchronous code is not what ASYNC110 sees (it is an async-function rule, and
+# this tree has no async functions — so the family is enabled for the day it
+# gains one). `time.strftime()` and `time.localtime()` are also outside DTZ,
+# which reads `datetime`; a naive local stamp through those is not caught.
+#
+# `preview` is required for PLW1514 and nothing else here. It is safe because
+# ruff is pinned: the gate names the version and fails when another is on PATH,
+# so the preview rule set cannot drift under this file. Measured on the pinned
+# 0.16.7, enabling preview adds no violation beyond PLW1514 itself, so every
+# rule family listed above is exactly as strict as it was.
+select = ["E4", "E7", "E9", "F", "W", "B", "E722", "S101", "PT", "DTZ", "ASYNC", "PLW1510", "PLW1514"]
+preview = true
 
 ignore = [
     # PT009 wants every unittest assertion rewritten as a bare `assert`. This

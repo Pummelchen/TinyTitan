@@ -86,9 +86,9 @@ def dequant(q, scales, biases, bits, group):
     return (vals * s[:, :, None] + b[:, :, None]).reshape(out_rows, -1)
 
 
-off_idx = json.load(open("off_index.json"))["weight_map"]
-mlx_idx = json.load(open("rt_index.json"))["weight_map"]
-qcfg = json.load(open("rt_config.json"))["quantization_config"]
+off_idx = json.load(open("off_index.json", encoding="utf-8"))["weight_map"]
+mlx_idx = json.load(open("rt_index.json", encoding="utf-8"))["weight_map"]
+qcfg = json.load(open("rt_config.json", encoding="utf-8"))["quantization_config"]
 
 TARGETS = [
     "model.language_model.layers.3.self_attn.q_proj.weight",

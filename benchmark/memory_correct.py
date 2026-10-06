@@ -83,7 +83,7 @@ def consolidation_outcomes() -> tuple[int, int]:
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return (-1, -1)
     distilled = skipped = 0
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if "memory consolidated session=" in line:
                 distilled += 1
@@ -303,7 +303,7 @@ def assert_arm_is_real(arm: str, prompt_tokens: int):
     """
     log = os.environ.get("TINYTITAN_MEMVAL_SERVER_LOG")
     if log and Path(log).exists():
-        enabled = "memory enabled=true" in Path(log).read_text(errors="replace")
+        enabled = "memory enabled=true" in Path(log).read_text(encoding="utf-8", errors="replace")
         wants = arm != "control"
         if enabled != wants:
             raise SystemExit(

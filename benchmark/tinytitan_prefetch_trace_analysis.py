@@ -53,7 +53,7 @@ class Counters:
 
 def load_trace(path: pathlib.Path) -> list[Observation]:
     observations: list[Observation] = []
-    for number, line in enumerate(path.read_text().splitlines(), start=1):
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:

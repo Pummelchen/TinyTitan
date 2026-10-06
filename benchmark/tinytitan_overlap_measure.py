@@ -30,7 +30,7 @@ env = server_environment()
 env["TINYTITAN_RUNNER_STATS"] = "1"
 env["TINYTITAN_KERNEL_STATS"] = "1"
 log_path = benchmark_log_path("tinytitan_overlap.log")
-log = open(log_path, "w")
+log = open(log_path, "w", encoding="utf-8")
 proc = subprocess.Popen(
     server_command(BIN, PORT, model=MODEL), env=env, stdout=log, stderr=subprocess.STDOUT
 )
@@ -78,7 +78,7 @@ try:
 except subprocess.TimeoutExpired:
     proc.kill()
 
-with open(log_path) as f:
+with open(log_path, encoding="utf-8") as f:
     lines = f.readlines()
 gen, runner, kernels = [], [], []
 for line in lines:

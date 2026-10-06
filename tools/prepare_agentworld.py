@@ -818,7 +818,9 @@ def prefetch_shards(
 def fetch_tokenizer(out: Path) -> None:
     for name, required in TOKENIZER_FILES:
         result = subprocess.run(
-            ["curl", "-sfL", "--max-time", "300", *RETRY, f"{BASE}/{name}"], capture_output=True
+            ["curl", "-sfL", "--max-time", "300", *RETRY, f"{BASE}/{name}"],
+            capture_output=True,
+            check=False,
         )
         if result.returncode != 0 or not result.stdout:
             if required:

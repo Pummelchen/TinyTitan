@@ -122,6 +122,7 @@ def idle_gpu_utilization() -> int | None:
             capture_output=True,
             text=True,
             timeout=15,
+            check=False,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
@@ -134,7 +135,11 @@ def machine_load() -> dict:
     out: dict = {}
     try:
         ps = subprocess.run(
-            ["ps", "-Ao", "%cpu,comm", "-r"], capture_output=True, text=True, timeout=15
+            ["ps", "-Ao", "%cpu,comm", "-r"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         ).stdout
         rows = []
         for line in ps.splitlines()[1:]:
@@ -152,7 +157,7 @@ def machine_load() -> dict:
         out["busy_processes"] = []
     try:
         mp = subprocess.run(
-            ["memory_pressure", "-Q"], capture_output=True, text=True, timeout=15
+            ["memory_pressure", "-Q"], capture_output=True, text=True, timeout=15, check=False
         ).stdout
         m = re.search(r"free percentage:\s*(\d+)", mp)
         out["free_percent"] = int(m.group(1)) if m else None
@@ -160,7 +165,11 @@ def machine_load() -> dict:
         out["free_percent"] = None
     try:
         sw = subprocess.run(
-            ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, timeout=15
+            ["sysctl", "-n", "vm.swapusage"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
         ).stdout
         m = re.search(r"used\s*=\s*([0-9.]+)M", sw)
         out["swap_used_mb"] = float(m.group(1)) if m else None
@@ -182,7 +191,7 @@ def preflight(max_gpu_percent: int) -> None:
     pattern = (
         "TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm"
     )
-    found = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True)
+    found = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True, check=False)
     mine = str(pathlib.Path(__file__).name)
     lines = [ln for ln in found.stdout.splitlines() if mine not in ln]
     if lines:
@@ -255,7 +264,7 @@ def launch(
     env["TINYTITAN_KERNEL_STATS"] = "1"
     if sampler_path:
         env["TINYTITAN_SAMPLER_PATH"] = sampler_path
-    log = open(benchmark_log_path(log_name), "w")
+    log = open(benchmark_log_path(log_name), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
     _servers.append(proc)
     return proc
@@ -321,7 +330,7 @@ def parse_log(path: str) -> list[dict]:
     """Group footer lines into one record per completed request."""
     records: list[dict] = []
     current: dict | None = None
-    with open(path) as handle:
+    with open(path, encoding="utf-8") as handle:
         for line in handle:
             gen = GENERATION_RE.search(line)
             if gen:
@@ -576,7 +585,7 @@ def main() -> int:
     report(summaries)
     out = args.out or str(ROOT / ".build/benchmark-results/gate0-profile.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as handle:
+    with open(out, "w", encoding="utf-8") as handle:
         json.dump({"summaries": summaries}, handle, indent=2)
     print(f"\nwrote {out}")
     return 0

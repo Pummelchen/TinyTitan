@@ -131,12 +131,46 @@ Probe file in `benchmark/`, run with the pinned ruff (0.16.7) and the committed
 | `datetime.now()` without a timezone | `datetime.datetime.now()` | **silent** |
 | a test that asserts nothing | empty test body | **silent** (no rule; `PT009`/`PT027` are excluded in `pyproject.toml`) |
 
-Four of the nine named pitfalls are enforced by the tool; five are not. `pyproject.toml`
-states that "the rest are the families the audit standard names", which is a claim
-broader than the configuration — the same defect class this repository's own lessons
-list (`Say what a guard actually reads, not what it intends`). Filed as ledger tasks
-rather than fixed by moving the goalposts: the fix is to add the rule families that do
-cover them, or to keep the human check and say so.
+Four of the nine enforced by the tool; five silent. `pyproject.toml` stated that "the rest
+are the families the audit standard names", which is a claim broader than the
+configuration — the same defect class this repository's own lessons list (`Say what a guard
+actually reads, not what it intends`). Filed as AUD-103 rather than fixed by moving the
+goalposts: the fix is to add the rule families that do cover them, or to keep the human
+check and say so.
+
+### Python — the same probe after AUD-103
+
+`select` gained `DTZ`, `ASYNC`, `PLW1510` and `PLW1514` (with `preview = true`, which
+`PLW1514` needs and which adds no other violation on the pinned ruff), and the tree was
+made clean under it: 42 `subprocess.run` calls now state `check=False` where they read the
+exit status on purpose, 91 text-mode `open`/`read_text`/`write_text` gained
+`encoding="utf-8"`, and eight `datetime.now()` stamps became UTC — the convention the same
+files already used for their `recorded_at` fields. Re-measured with the committed config
+against a probe holding all nine:
+
+| Pitfall §1 names | Now | Rule |
+| --- | --- | --- |
+| bare `except:` | caught | `E722` |
+| mutable default argument | caught | `B006` |
+| `assert` used for validation | caught | `S101` |
+| `is` compared against a literal | caught | `F632` |
+| `subprocess` with no `check` at all | caught | `PLW1510` |
+| `datetime.now()` without a timezone | caught | `DTZ005` |
+| `open()` without `encoding=` | caught | `PLW1514` |
+| `time.sleep()` used to synchronize in an `async def` | caught | `ASYNC110` |
+| `time.sleep()` used to synchronize in synchronous code | **silent** | no rule exists |
+| a test that asserts nothing | **silent** | no rule exists |
+| `subprocess.run(..., check=False)` with the status never read | **silent** | `PLW1510` reads the omission, not the value |
+
+Seven of the nine named pitfalls are now enforced by the tool, and the three that are not
+are named in `pyproject.toml` itself. The `subprocess` row moved from *without
+`check=True`* to *without an explicit `check`*: `PLW1510` allows `check=False` by design,
+because these scripts call `pgrep` (exit 1 means "no match"), `sysctl` and `curl` whose
+failure each one handles with its own message. What the rule buys is that the choice can no
+longer be an accident of the default. `time.strftime()` and `time.localtime()` sit outside
+`DTZ`, which reads only `datetime` — `benchmark/tinytitan_benchmark.py:506` still labels a
+run directory with a naive local stamp, and no rule sees it.
+
 
 ## Repository gate proofs
 
@@ -158,7 +192,7 @@ scripts, eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7 clea
 | `swiftlint` | a force unwrap, then `as!`/`try!` | exit 1, `force_unwrapping`, `force_cast`, `force_try` all as errors under `--strict` |
 | `swift-format` | `func auditProbeBadlyFormatted( ){` / `let   a=1` | exit 1, five `Spacing`/`TrailingWhitespace` errors |
 | `javascript` | `let unused = 1` in a plugin `src/` file | exit 1, `no-unused-vars` + `prefer-const` |
-| `python` | see the Python table above | exit 1 for four of the nine named pitfalls; five are silent |
+| `python` | see the Python tables above | exit 1 for four of the nine at discovery; after AUD-103 the probe in the second table is caught by eight rules, and deleting a `check=False` or an `encoding="utf-8"` from a real file fails `tools/lint.sh python` with exit 1 |
 
 Two observations from the proofs themselves, filed as ledger tasks:
 

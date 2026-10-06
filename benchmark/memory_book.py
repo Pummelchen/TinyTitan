@@ -67,7 +67,7 @@ def consolidation_outcomes() -> tuple[int, int]:
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return (-1, -1)
     distilled = skipped = 0
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if "memory consolidated session=" in line:
                 distilled += 1

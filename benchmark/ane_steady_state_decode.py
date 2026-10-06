@@ -112,6 +112,7 @@ def run_cli(
         capture_output=True,
         text=True,
         timeout=3600,
+        check=False,
     )
     match = FOOTER.search(proc.stderr)
     if match is None:
@@ -208,6 +209,7 @@ def main() -> int:
         ["pgrep", "-fl", "TinyTitanCLI|TinyTitanServer|mlx_lm|mlx-lm"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     if busy:
         raise SystemExit(f"a model process is already running:\n{busy}")
@@ -217,7 +219,7 @@ def main() -> int:
     # this into "keep writing" for an instruct model, and it is the path the
     # qualification harness uses. Written once and reused by every run.
     messages = tempfile.NamedTemporaryFile(
-        "w", prefix="tt007-messages-", suffix=".json", delete=False
+        "w", encoding="utf-8", prefix="tt007-messages-", suffix=".json", delete=False
     )
     json.dump([{"role": "user", "content": prompt}], messages)
     messages.close()
@@ -300,7 +302,7 @@ def main() -> int:
 
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M")
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M")
         out = RESULTS / f"steady-state-{args.label}-{stamp}.json"
         out.write_text(
             json.dumps(

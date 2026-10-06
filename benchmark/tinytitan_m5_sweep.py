@@ -105,7 +105,9 @@ def run_once(
     tags = {"slots": slots, "chunk": chunk}
     t0 = time.time()
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=RUN_TIMEOUT_S)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=RUN_TIMEOUT_S, check=False
+        )
     except subprocess.TimeoutExpired:
         return {**tags, "error": "timed out after %ds" % RUN_TIMEOUT_S}
     elapsed = time.time() - t0
@@ -159,9 +161,9 @@ def main():
     prompt_directory = os.path.join(base, ".build", "benchmark-prompts")
     os.makedirs(prompt_directory, exist_ok=True)
     prompt_file = tempfile.NamedTemporaryFile(
-        "w", suffix=".json", delete=False, dir=prompt_directory
+        "w", encoding="utf-8", suffix=".json", delete=False, dir=prompt_directory
     ).name
-    with open(prompt_file, "w") as f:
+    with open(prompt_file, "w", encoding="utf-8") as f:
         f.write(json.dumps([{"role": "user", "content": make_prompt(args.prompt_tokens)}]))
 
     print("TinyTitan M5 sweep")
@@ -269,7 +271,7 @@ def main():
     out_dir = os.path.join(base, "benchmark", "benchmark-results")
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "m5_sweep_results.csv")
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         f.write(csv)
     print("results written to %s" % out)
 

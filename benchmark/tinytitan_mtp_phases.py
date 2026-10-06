@@ -115,7 +115,7 @@ def launch(
     env["TINYTITAN_KERNEL_STATS"] = "1"
     if mtp:
         env["TINYTITAN_MTP_VERIFY"] = VERIFY_ARM
-    log = open(benchmark_log_path(log_name), "w")
+    log = open(benchmark_log_path(log_name), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT)
     g0._servers.append(proc)
     return proc
@@ -168,7 +168,7 @@ def one_run(
     if result is None:
         raise SystemExit(f"[{target.name}/{arm}] request failed")
     row: dict = {"arm": arm, **result}
-    with open(benchmark_log_path(log_name)) as handle:
+    with open(benchmark_log_path(log_name), encoding="utf-8") as handle:
         text = handle.read()
     m = MTP_RE.search(text)
     if m:
@@ -366,7 +366,7 @@ def main() -> int:
 
     out = ROOT / (f".build/benchmark-results/mtp-phases-{label}-{args.verify_arm}.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as handle:
+    with open(out, "w", encoding="utf-8") as handle:
         json.dump({"rows": rows}, handle, indent=2)
     print(f"\nwrote {out}")
     return 0

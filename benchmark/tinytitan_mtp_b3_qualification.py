@@ -145,7 +145,7 @@ def main() -> int:
 
     out = ROOT / (f".build/benchmark-results/mtp-b3-{args.quant}-{args.scenario}.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as handle:
+    with open(out, "w", encoding="utf-8") as handle:
         json.dump(
             {
                 "rows": rows,

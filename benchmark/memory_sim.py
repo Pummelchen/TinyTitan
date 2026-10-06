@@ -63,7 +63,7 @@ def load_writes(journal: Path) -> list[dict]:
     distilled, so a session's writes carry that session's id.
     """
     writes = []
-    for line in journal.read_text().splitlines():
+    for line in journal.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         record = json.loads(line)

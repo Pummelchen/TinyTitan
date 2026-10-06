@@ -181,7 +181,9 @@ def main() -> int:
     worst = max(c["rel_err"] for r in results for c in r["chunks"])
     bad = sum(c["nan_inf"] for r in results for c in r["chunks"])
     print(f"  worst per-layer rel err vs fp32 reference: {worst:.4f}   total nan/inf: {bad}")
-    with open(ROOT / ".build/benchmark-results/ane-realweight-rehearsal.json", "w") as fh:
+    with open(
+        ROOT / ".build/benchmark-results/ane-realweight-rehearsal.json", "w", encoding="utf-8"
+    ) as fh:
         json.dump(
             {
                 "results": results,

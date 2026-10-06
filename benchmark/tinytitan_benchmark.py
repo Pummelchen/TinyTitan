@@ -405,7 +405,7 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
     footer_rates = []
     mtp_stats = []
     try:
-        with open(log_path) as f:
+        with open(log_path, encoding="utf-8") as f:
             for line in f:
                 match = DECODE_FOOTER_RE.search(line)
                 if match:
@@ -510,7 +510,7 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
         f"bench-{config_label}-{ts}",
     )
     os.makedirs(outdir, exist_ok=True)
-    with open(os.path.join(outdir, "aggregate.json"), "w") as f:
+    with open(os.path.join(outdir, "aggregate.json"), "w", encoding="utf-8") as f:
         json.dump(
             {
                 "config": config_label,
@@ -555,7 +555,7 @@ def launch_server(base_dir, port, main_model, mtp_model, cache_mode, mtp_config)
     cmd = server_command(binary, port, model=main_model, cache_mode=cache_mode)
     if mtp_config == "on":
         cmd += ["--mtp-model", mtp_model, "--mtp-memory-mib", "384"]
-    log = open(benchmark_log_path(f"tinytitanserver_{port}.log"), "w")
+    log = open(benchmark_log_path(f"tinytitanserver_{port}.log"), "w", encoding="utf-8")
     proc = subprocess.Popen(cmd, env=server_environment(), stdout=log, stderr=subprocess.STDOUT)
     _spawned_servers.append(proc)
     return proc

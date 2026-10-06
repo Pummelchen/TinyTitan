@@ -82,7 +82,7 @@ def consolidation_outcomes() -> tuple[int, int]:
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return (-1, -1)
     distilled = skipped = 0
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if "memory consolidated session=" in line:
                 distilled += 1
@@ -121,7 +121,7 @@ def placements_logged() -> list[tuple[str, str]]:
     if not SERVER_LOG or not os.path.exists(SERVER_LOG):
         return []
     pattern = re.compile(r"session=\S+ scope=(\S+) tag=\S* via=(\S+)")
-    with open(SERVER_LOG, errors="replace") as handle:
+    with open(SERVER_LOG, encoding="utf-8", errors="replace") as handle:
         return [
             (match.group(1), match.group(2))
             for match in (pattern.search(line) for line in handle)

@@ -654,7 +654,8 @@ def download(shard: str, work: Path, progress: Progress | None = None, base: flo
                     "-o",
                     str(dest),
                     url,
-                ]
+                ],
+                check=False,
             )
         finally:
             stop_watch.set()
@@ -1015,7 +1016,9 @@ def fetch_tokenizer(out: Path) -> None:
     """Copy the tokenizer beside the weights, so the snapshot stands alone."""
     for name, required in TOKENIZER_FILES:
         url = f"{BASE}/{name}"
-        result = subprocess.run(["curl", "-sfL", "--max-time", "300", url], capture_output=True)
+        result = subprocess.run(
+            ["curl", "-sfL", "--max-time", "300", url], capture_output=True, check=False
+        )
         if result.returncode != 0 or not result.stdout:
             if required:
                 raise SystemExit(
@@ -1077,7 +1080,7 @@ REUSE_CONSTANT_KEYS = (
 def read_json_file(path: Path) -> dict | None:
     """The JSON object in `path`, or None when it is absent or unreadable."""
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
