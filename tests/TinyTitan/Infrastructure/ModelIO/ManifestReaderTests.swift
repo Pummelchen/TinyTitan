@@ -156,6 +156,39 @@ import Testing
         #expect(m.quant?.attention.weightBits == 4)
     }
 
+    /// The guard between an override's width and a kernel's arithmetic.
+    ///
+    /// Every reader that takes a width as arithmetic -- `32 / bits` lanes, the
+    /// packed-row extents `requireAffine` cross-checks -- would otherwise unpack
+    /// the same bytes *wrongly* rather than fail: a 6-bit tensor gets five lanes
+    /// per word and answers fluently and wrongly, and the GPU GEMVs assert
+    /// `[4, 8]` and abort the process instead. `SSDAIManifestQuantV1.init(from:)`
+    /// refuses such a width while decoding, which is the difference between a
+    /// load error and either of those. The message has to name the tensor: the
+    /// overrides are keyed by stem, so "the quant block is wrong" sends nobody
+    /// anywhere.
+    @Test func anOverrideAtAWidthNoKernelImplementsIsRefusedAtDecode() throws {
+        let stem = "language_model.model.layers.0.mlp.gate_proj"
+        for bits in [6, 3, 16, 2] {
+            var quant = Self.quant()
+            quant[stem] = Self.quantSlot(bits)
+            let (dir, toy) = try Self.writeToyManifest(["quant": quant])
+            defer { try? FileManager.default.removeItem(at: dir) }
+            do {
+                _ = try ManifestReader.load(directoryURL: dir, expecting: toy)
+                Issue.record("a \(bits)-bit override must not decode")
+            } catch let error as ModelError {
+                let text = "\(error)"
+                #expect(text.contains(stem), "the refusal must name \(stem), got \(text)")
+                #expect(
+                    text.contains("\(bits) bits"),
+                    "the refusal must name \(bits) bits, got \(text)")
+            } catch {
+                Issue.record("unexpected error \(error)")
+            }
+        }
+    }
+
     @Test func aTensorResolvesThroughItsOverrideThenItsSlot() throws {
         let quant = try Self.decodedQuant()
         let stem = "language_model.model.layers.0.self_attn.indexer.index_q_proj"

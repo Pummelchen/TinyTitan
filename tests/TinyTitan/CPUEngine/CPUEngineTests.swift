@@ -266,6 +266,53 @@ import Testing
         #expect(snapshot.bits(forStem: "elsewhere") == 8)
     }
 
+    /// A width the CPU kernels do not implement is refused at load.
+    ///
+    /// On this route the width comes from `config.json` through a plain JSON
+    /// cast, so unlike the `.ssdai` reader -- where
+    /// `SSDAIManifestQuantV1.init(from:)` refuses it while decoding -- nothing
+    /// gated it. Nothing downstream looks at it either: `dequantize` derives
+    /// `lanes = 32 / bits`, so a 6-bit matrix does not fail, it unpacks five
+    /// lanes per word and returns plausible nonsense. For an engine whose whole
+    /// purpose is to be an independent reference for the GPU path, a wrong
+    /// agreement number is worse than a refused load, and the GEMV's own
+    /// `switch` ends in `preconditionFailure` -- an abort on model data.
+    @Test func aSnapshotWidthNoCPUKernelImplementsIsRefusedAtLoad() throws {
+        for bits in [6, 3, 16] {
+            let directory = try writeSnapshot(
+                rows: 64, columns: 128, bits: bits,
+                level: { _, _ in 1 }, scale: 1, bias: 0)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            do {
+                _ = try AffineSnapshot(directory: directory)
+                Issue.record("a \(bits)-bit snapshot must not load")
+            } catch {
+                let text = "\(error)"
+                #expect(
+                    text.contains("\(bits)-bit"),
+                    "the refusal must name the width, got \(text)")
+            }
+        }
+    }
+
+    /// The same rule for the per-tensor block, which is where a snapshot says
+    /// one tensor differs from the build's base width.
+    @Test func aSnapshotOverrideAtAWidthNoKernelImplementsIsRefused() throws {
+        let directory = try writeSnapshot(
+            rows: 64, columns: 128, bits: 4,
+            level: { _, _ in 1 }, scale: 1, bias: 0,
+            overrides: ["w": 6])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            _ = try AffineSnapshot(directory: directory)
+            Issue.record("a 6-bit override must not load")
+        } catch {
+            let text = "\(error)"
+            #expect(text.contains("w"), "the refusal must name the stem, got \(text)")
+            #expect(text.contains("6-bit"), "the refusal must name the width, got \(text)")
+        }
+    }
+
     /// `y = W · x` where every level is 1 and the scale is 1: each row sums
     /// x. A wrong lane order or group stride shows up immediately.
     @Test func gemvComputesTheProduct() throws {

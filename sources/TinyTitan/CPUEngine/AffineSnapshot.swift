@@ -186,6 +186,7 @@ public struct AffineSnapshot: Sendable {
             }
         }
         widths = overrides
+        try Self.validateWidths(baseBits: bits, widths: overrides)
 
         let index = try JSONSerialization.jsonObject(
             with: Data(
@@ -301,6 +302,9 @@ public struct AffineSnapshot: Sendable {
             }
         }
         self.widths = widths
+        // Not checked here: on this route the widths are the manifest's slots and
+        // overrides, and `SSDAIManifestQuantV1.init(from:)` already refused
+        // anything outside `supportedWeightBits` while decoding.
         storage = .ssdai(index: index, weights: weights)
     }
 
@@ -333,6 +337,35 @@ public struct AffineSnapshot: Sendable {
     }
 
     public func bits(forStem stem: String) -> Int { widths[stem] ?? baseBits }
+
+    /// Refuse a quantized width the CPU kernels do not implement.
+    ///
+    /// The `.ssdai` reader gets this for free -- `SSDAIManifestQuantV1.init(from:)`
+    /// refuses an override outside `supportedWeightBits` while decoding -- but the
+    /// snapshot reader reads `config.json`'s `quantization` block with plain JSON
+    /// casts, so nothing on that route looked at the number at all.
+    ///
+    /// Nothing downstream does either. `dequantize` derives its lane count as
+    /// `32 / bits`, so a 6-bit tensor does not fail: it unpacks five lanes per
+    /// word, shifts past the mask, and returns plausible nonsense. The GEMV at
+    /// least ends in `preconditionFailure`, but that is an abort on model data.
+    /// Either way the engine stops being what it exists to be -- an independent
+    /// reference for the GPU path -- so the width is checked where it is read.
+    /// 4 and 8 are what `tinytitan_int4_affine_gemv` and
+    /// `tinytitan_int8_affine_gemv` implement.
+    static func validateWidths(baseBits: Int, widths: [String: Int]) throws {
+        let declared: [(String, Int)] =
+            [("<quantization>.bits", baseBits)]
+            + widths.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        for (source, bits) in declared {
+            guard [4, 8].contains(bits) else {
+                throw SafeTensorsFile.Failure.malformed(
+                    "\(source) declares \(bits)-bit weights. The CPU kernels "
+                        + "implement 4 and 8 only, so this snapshot cannot be "
+                        + "read correctly -- not as a reference and not as output.")
+            }
+        }
+    }
 
     /// The stem of a `.weight` name, which is how widths and the index are
     /// keyed.

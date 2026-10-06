@@ -110,7 +110,6 @@ public final class SharedExpertInt4 {
 public final class SharedExpertRuntime {
     private enum Implementation {
         case int4(SharedExpertInt4)
-        case affine(SharedExpertAffineQuant)
         case int8(SharedExpertInt8)
     }
 
@@ -122,16 +121,17 @@ public final class SharedExpertRuntime {
         siluActivation: Bool = false
     ) throws {
         self.weightBits = weightBits
+        // Only 4 and 8. A 6-bit arm used to route here and compose affine GEMVs,
+        // but `AffineQuantGEMV` asserts `[4, 8]`, so it aborted the process
+        // instead of failing the load. 6-bit is a withdrawn format and no width
+        // outside `[4, 8]` can reach this constructor: a slot is refused at
+        // manifest read (`ManifestReader.validateQuant`) and a per-tensor
+        // override is refused while decoding (`SSDAIManifestQuantV1.init(from:)`).
         switch weightBits {
         case 4:
             self.implementation = .int4(
                 try SharedExpertInt4(
                     context: context, siluActivation: siluActivation))
-        case 6:
-            self.implementation = .affine(
-                try SharedExpertAffineQuant(
-                    context: context, weightBits: weightBits,
-                    siluActivation: siluActivation))
         case 8:
             self.implementation = .int8(
                 try SharedExpertInt8(
@@ -163,13 +163,6 @@ public final class SharedExpertRuntime {
             try runtime.encode(
                 commandBuffer: commandBuffer, x: x, xOffset: xOffset,
                 gate: gate, up: up, down: down, y: y, yOffset: yOffset,
-                scratchAct: scratchAct, scratchActOffset: scratchActOffset)
-        case .affine(let runtime):
-            try runtime.encode(
-                commandBuffer: commandBuffer, x: x, xOffset: xOffset,
-                gate: gate, up: up, down: down, y: y, yOffset: yOffset,
-                scratchGate: scratchGate, scratchGateOffset: scratchGateOffset,
-                scratchUp: scratchUp, scratchUpOffset: scratchUpOffset,
                 scratchAct: scratchAct, scratchActOffset: scratchActOffset)
         }
     }
