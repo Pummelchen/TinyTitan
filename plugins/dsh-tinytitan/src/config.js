@@ -158,6 +158,28 @@ function resolveCompactionHeadroom(value) {
 }
 
 /**
+ * A route token count the operator has declared, or `null` for "say nothing".
+ *
+ * `null` is load-bearing: both route writers fall back to the launcher's pin
+ * (262144 window, 32768 cap — `ROUTE_DEFAULTS` in generate.js, and
+ * `dsh_route.sh`'s own defaults), so naming nothing keeps the historical block
+ * byte-for-byte. The value exists because a route narrowed by hand is not: the
+ * next refresh — boot, or the `models/` watcher — rewrites the whole section, so
+ * without this knob the only way to keep a smaller window is to never let the
+ * plugin refresh again. `compactionHeadroomTokens` is the other half of that
+ * choice, and `README.md` carries the arithmetic that makes a narrow window
+ * dangerous.
+ */
+function resolveRouteTokenCount(field, value) {
+  if (value === undefined || value === null || value === "") return null;
+  const tokens = Number(value);
+  if (!Number.isSafeInteger(tokens) || tokens <= 0) {
+    throw new Error(`dsh-tinytitan: ${field} must be a positive token count, got ${value}`);
+  }
+  return tokens;
+}
+
+/**
  * Rounds an auto-created goal may run before the harness blocks it.
  *
  * Only read when `autoGoal` is on. The cap is deliberately much smaller than the
@@ -285,6 +307,17 @@ export function resolveConfig(config = {}) {
   if (reasoning.length === 0) throw new Error("dsh-tinytitan: reasoning must not be empty");
   const presetId = String(config.presetId ?? DEFAULT_PRESET_ID).trim();
   if (presetId.length === 0) throw new Error("dsh-tinytitan: presetId must not be empty");
+  // Config, then environment, then nothing — the same order as `reasoning` and
+  // for the same reason recorded above it: a refresh that is told neither writes
+  // the writer's default over a window and cap the operator narrowed.
+  const context = resolveRouteTokenCount(
+    "context",
+    config.context ?? process.env.TINYTITAN_CONTEXT,
+  );
+  const maxTokens = resolveRouteTokenCount(
+    "maxTokens",
+    config.maxTokens ?? process.env.TINYTITAN_MAX_TOKENS,
+  );
   const repoRoot = findRepoRoot({ explicit: config.repoRoot, env: process.env });
   // The self-contained generator's discovery order starts at explicit config and
   // then the environment; resolving both here keeps route.js free of the
@@ -296,6 +329,8 @@ export function resolveConfig(config = {}) {
     provider,
     reasoning,
     presetId,
+    context,
+    maxTokens,
     repoRoot: repoRoot.root,
     repoFound: repoRoot.found,
     dshHome: String(config.dshHome ?? defaultDshHome()),

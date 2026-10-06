@@ -108,9 +108,9 @@ from a generated file to a registry entry. Three things are worth knowing:
 ## Configure
 
 Every field is optional; these are the defaults the `cordis.patch.yml` row writes
-out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_REPO` /
-`TINYTITAN_SERVER` / `TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment
-fallbacks.
+out, and `TINYTITAN_PORT` / `TINYTITAN_REASONING` / `TINYTITAN_CONTEXT` /
+`TINYTITAN_MAX_TOKENS` / `TINYTITAN_REPO` / `TINYTITAN_SERVER` /
+`TINYTITAN_MODELS_DIR` / `DSH_HOME` are the environment fallbacks.
 
 The three switches that start work nobody asked for — `autoGoal` (a goal from
 every prompt), `autonomy` (the fresh-agent `ralph` loop) and `handoff` (a child
@@ -124,6 +124,8 @@ by naming the field with `true`; installing the bundle never does it for you.
 | `provider`                  | `tinytitan`                                                                                                                                     | the `llm-pi-ai` provider route name                                                                                                                                                                                                                                                                                     |
 | `reasoning`                 | resolved: `config.reasoning`, else `TINYTITAN_REASONING`, else `medium`                                                                         | the route's declared default reasoning level. It must match how the server was started: a route that says "think" against a server running `--reasoning off` makes a dense Qwen spend its whole output budget inside the reasoning block and never answer                                                               |
 | `presetId`                  | `tinytitan`                                                                                                                                     | the agent preset this plugin registers                                                                                                                                                                                                                                                                                  |
+| `context`                   | unset (the writer's `262144`)                                                                                                                   | the `contextWindow` the route declares, for the provider and every model row (`$TINYTITAN_CONTEXT`). Unset keeps the block byte-for-byte what the launcher's pin writes; naming one is how a narrowed route survives the next refresh. A positive whole number of tokens, or the row is refused at boot                 |
+| `maxTokens`                 | unset (the writer's `32768`)                                                                                                                    | the output cap the same route declares (`$TINYTITAN_MAX_TOKENS`), with the same unset-means-pin and validation rules as `context` above                                                                                                                                                                                 |
 | `registerRoute`             | `true`                                                                                                                                          | refresh the route block from `tools/dsh_route.sh`                                                                                                                                                                                                                                                                       |
 | `watchModels`               | `true`                                                                                                                                          | keep watching `models/` and refresh when an install appears or disappears                                                                                                                                                                                                                                               |
 | `watchDebounceMs`           | `2000`                                                                                                                                          | how long the folder has to be quiet before the refresh runs                                                                                                                                                                                                                                                             |
@@ -168,11 +170,13 @@ that default alone, so on the route this project declares (262,144 window,
 80%. That is a safe direction — less context, less KV on a local server — but on
 a _narrow_ declared window the arithmetic flips: below roughly `cap + 65,536`
 the pressure budget goes negative, the engine logs one warning and then **never
-compacts**, and the session eventually fails on the context wall. If you generate
-a route with `tools/dsh_route.sh --context <smaller>`, set the plugin's
-`compactionHeadroomTokens`, e.g. `0` to let the ratio govern again or the cap's
-quarter (`8192`) to keep a guard: both leave a positive budget at every window
-where `window > maxTokens`.
+compacts**, and the session eventually fails on the context wall. So narrow the
+window in the row, not by hand: `tools/dsh_route.sh --context <smaller>` writes a
+route the plugin's next refresh — boot, or a change under `models/` — puts
+straight back, unless the same numbers are in the row as `context` and
+`maxTokens`. Then set `compactionHeadroomTokens` too, e.g. `0` to let the ratio
+govern again or the cap's quarter (`8192`) to keep a guard: both leave a positive
+budget at every window where `window > maxTokens`.
 
 **With no server built, the folder is read directly.** The catalog normally comes
 from `TinyTitanServer --catalog`, which is the authority on what an install is.

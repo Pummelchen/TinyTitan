@@ -66,6 +66,14 @@ export function registerRoute({
     // was started with it off — after which the model reasons until its output
     // budget is gone and the page never shows an answer.
     if (reasoning) args.push("--reasoning", String(reasoning));
+    // The same forwarding, and the same reason: `dsh_route.sh` falls back to the
+    // launcher's pin, so a refresh that names neither writes 262144/32768 back
+    // over a route narrowed with `--context`. `null` means unsaid, and the
+    // script's default then stands, exactly as with `--reasoning` above.
+    if (context !== null && context !== undefined) args.push("--context", String(context));
+    if (maxTokens !== null && maxTokens !== undefined) {
+      args.push("--max-tokens", String(maxTokens));
+    }
     try {
       const stdout = run("bash", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
       const first = String(stdout).trim().split("\n")[0] || "written";

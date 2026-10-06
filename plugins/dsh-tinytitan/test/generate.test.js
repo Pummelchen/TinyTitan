@@ -577,6 +577,52 @@ test("registerRoute falls back to the generator when the checkout tool is absent
   assert.ok(readFileSync(join(dshHome, "settings.yaml"), "utf8").includes("llm-pi-ai:"));
 });
 
+/** `registerRoute` on a checkout with no `tools/dsh_route.sh`, i.e. the built-in writer. */
+function throughGenerator(options) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "dsh-tinytitan-repo-"));
+  const dshHome = mkdtempSync(join(tmpdir(), "dsh-tinytitan-home-"));
+  const modelsDir = mkdtempSync(join(tmpdir(), "dsh-tinytitan-models-"));
+  writeFileSync(join(dshHome, "settings.yaml"), "ui-theme:\n  preference: dark\n");
+  const binary = join(repoRoot, "TinyTitanServer");
+  writeFileSync(binary, "#!/bin/sh\nexit 0\n");
+  chmodSync(binary, 0o755);
+  const result = registerRoute({
+    repoRoot,
+    dshHome,
+    port: 8080,
+    provider: "tinytitan",
+    serverBinary: binary,
+    modelsDir,
+    env: { PATH: "" },
+    run: () => JSON.stringify({ models: FAKE }),
+    log: () => {},
+    ...options,
+  });
+  assert.equal(result.status, "written-self-contained");
+  return { settings: readFileSync(join(dshHome, "settings.yaml"), "utf8"), result };
+}
+
+test("the built-in writer declares the window and cap it was given", () => {
+  // The generator is the writer DSH 0.2.0 machines reach when the checkout has
+  // no tool, so it needs the same pin as the script branch: dropping the two
+  // forwarded options here left every existing test green.
+  const { settings } = throughGenerator({ context: 131072, maxTokens: 8192 });
+  assert.ok(settings.includes("defaultContextWindow: 131072"), settings);
+  assert.ok(settings.includes("defaultMaxTokens: 8192"), settings);
+  // One row per served model; the lowercase spelling excludes the provider's
+  // own `defaultContextWindow` / `defaultMaxTokens` lines.
+  assert.equal(count(settings, "contextWindow: 131072"), 2, settings);
+  assert.equal(count(settings, "maxTokens: 8192"), 2, settings);
+});
+
+test("the built-in writer keeps the launcher's pin when nothing is declared", () => {
+  const { settings } = throughGenerator({});
+  assert.ok(settings.includes("defaultContextWindow: 262144"), settings);
+  assert.ok(settings.includes("defaultMaxTokens: 32768"), settings);
+  assert.equal(count(settings, "contextWindow: 262144"), 2);
+  assert.equal(count(settings, "maxTokens: 32768"), 2);
+});
+
 test("applyRouteThroughSettings merges the route into the llm-pi-ai entry", async (t) => {
   // The writer parses the generated block with the harness's own `js-yaml`,
   // which resolves inside a harness (and after `npm ci`) but not in the CI step
@@ -612,6 +658,48 @@ test("applyRouteThroughSettings merges the route into the llm-pi-ai entry", asyn
   assert.equal(updates.length, 1);
   assert.equal(updates[0].ns, "llm-pi-ai");
   assert.equal(updates[0].patch.providers.tinytitan.models.length, 2);
+  // Nothing declared, so the launcher's pin stands. This is the branch a
+  // caller reaches through `routeRefresher`, which spreads the whole resolved
+  // config, so a key `resolveConfig` never emits would land here as `undefined`
+  // and silently become 262144/32768 whatever the operator had narrowed to.
+  assert.equal(updates[0].patch.providers.tinytitan.defaultContextWindow, 262144);
+  assert.equal(updates[0].patch.providers.tinytitan.defaultMaxTokens, 32768);
+  assert.equal(updates[0].patch.providers.tinytitan.models[0].contextWindow, 262144);
+  assert.equal(updates[0].patch.providers.tinytitan.models[1].maxTokens, 32768);
+});
+
+test("a declared window and cap reach the settings patch at both levels", async (t) => {
+  try {
+    await import("js-yaml");
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      t.skip("js-yaml is not installed here; the harness's own copy resolves it");
+      return;
+    }
+    throw error;
+  }
+  const updates = [];
+  const result = await applyRouteThroughSettings({
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: "/models",
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    run: () => JSON.stringify({ models: FAKE }),
+    context: 131072,
+    maxTokens: 8192,
+    settings: { update: async (ns, patch) => updates.push({ ns, patch }) },
+    log: () => {},
+  });
+  assert.equal(result.status, "applied");
+  const provider = updates[0].patch.providers.tinytitan;
+  assert.equal(provider.defaultContextWindow, 131072);
+  assert.equal(provider.defaultMaxTokens, 8192);
+  // Every model row carries the same pair, as the shell tool's does.
+  for (const model of provider.models) {
+    assert.equal(model.contextWindow, 131072);
+    assert.equal(model.maxTokens, 8192);
+  }
 });
 
 test("applyRouteThroughSettings reports a missing settings service", async () => {

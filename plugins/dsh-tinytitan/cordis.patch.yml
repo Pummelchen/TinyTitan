@@ -19,6 +19,11 @@
         # override both.
         provider: tinytitan
         registerRoute: true
+        # `context` and `maxTokens` (or TINYTITAN_CONTEXT / TINYTITAN_MAX_TOKENS)
+        # declare the window and cap the route writes. Left unset, the writers keep
+        # their own pin (262144 / 32768); set them when you narrowed a route by
+        # hand, or the next refresh writes the pin back over it. Read the README's
+        # compaction note before narrowing one.
         # Keep the route in step with models/ after boot, so an install or a
         # deletion reaches the picker without restarting the harness. The watcher
         # refreshes through the same path boot used.

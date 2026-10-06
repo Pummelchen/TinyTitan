@@ -93,6 +93,82 @@ test("no reasoning level is passed when the caller names none", () => {
   assert.equal(calls[0].includes("--reasoning"), false);
 });
 
+test("the route refresh carries the window and cap it was given", () => {
+  // Same forwarding as the reasoning level above: `dsh_route.sh` has its own
+  // defaults, so a refresh that names neither puts the launcher's 262144/32768
+  // back over a route narrowed to fit the compaction arithmetic.
+  const calls = [];
+  registerRoute({
+    repoRoot: repo(true),
+    port: 8096,
+    provider: "tinytitan",
+    context: 131072,
+    maxTokens: 8192,
+    dshHome: "/tmp/dsh-home",
+    run: (command, args) => {
+      calls.push(args);
+      return "replaced\n";
+    },
+    log: () => {},
+  });
+  assert.deepEqual(calls[0].slice(1), [
+    "--write",
+    "--port",
+    "8096",
+    "--provider",
+    "tinytitan",
+    "--settings",
+    "/tmp/dsh-home/settings.yaml",
+    "--context",
+    "131072",
+    "--max-tokens",
+    "8192",
+  ]);
+});
+
+test("no window or cap is passed when the caller names neither", () => {
+  // The script keeps its own pin then, which is the historical block byte-for-byte.
+  const calls = [];
+  registerRoute({
+    repoRoot: repo(true),
+    port: 8080,
+    provider: "tinytitan",
+    dshHome: "/tmp/dsh-home",
+    run: (command, args) => {
+      calls.push(args);
+      return "written\n";
+    },
+    log: () => {},
+  });
+  assert.equal(calls[0].includes("--context"), false);
+  assert.equal(calls[0].includes("--max-tokens"), false);
+});
+
+test("what resolveConfig emits is what the tool is handed", () => {
+  // The reported defect was exactly this seam: `context` and `maxTokens` were
+  // read by both writers, but `resolveConfig` emitted neither, so the boot-time
+  // and watcher refreshes — which spread the resolved config — always wrote the
+  // launcher's pin. Asserting each side separately would not have caught it.
+  const calls = [];
+  const root = repo(true);
+  registerRoute({
+    ...resolveConfig({
+      repoRoot: root,
+      dshHome: "/tmp/dsh-home",
+      context: 131072,
+      maxTokens: 8192,
+    }),
+    run: (command, args) => {
+      calls.push(args);
+      return "replaced\n";
+    },
+    log: () => {},
+  });
+  const args = calls[0];
+  assert.equal(args[args.indexOf("--context") + 1], "131072");
+  assert.equal(args[args.indexOf("--max-tokens") + 1], "8192");
+});
+
 test("a checkout without the tool is reported, not fatal", () => {
   const messages = [];
   const result = registerRoute({
@@ -133,6 +209,8 @@ test("config defaults suit a local server and can be overridden", () => {
   assert.equal(defaults.registerRoute, true);
   assert.equal(defaults.writeCompactionPreset, true);
   assert.equal(defaults.compactionHeadroomTokens, null, "the harness's headroom stands by default");
+  assert.equal(defaults.context, null, "the route writer's own window pin stands by default");
+  assert.equal(defaults.maxTokens, null, "the route writer's own cap pin stands by default");
   assert.ok(defaults.dshHome.endsWith(".dsh"));
 
   const configured = resolveConfig({
@@ -143,6 +221,8 @@ test("config defaults suit a local server and can be overridden", () => {
     writeCompactionPreset: false,
     setDefaultWhenUnset: false,
     compactionHeadroomTokens: 0,
+    context: 131072,
+    maxTokens: 8192,
     repoRoot: "/repo",
     dshHome: "/home",
   });
@@ -153,6 +233,8 @@ test("config defaults suit a local server and can be overridden", () => {
   assert.equal(configured.writeCompactionPreset, false);
   assert.equal(configured.setDefaultWhenUnset, false);
   assert.equal(configured.compactionHeadroomTokens, 0);
+  assert.equal(configured.context, 131072);
+  assert.equal(configured.maxTokens, 8192);
   // An explicit root is a hint: it is used when it holds the tool, and a stale
   // one falls through to the checkout this test suite lives in.
   assert.equal(configured.repoRoot, REPO_ROOT);
@@ -173,6 +255,32 @@ test("the environment picks the port when the config does not", () => {
   }
 });
 
+test("the declared window and cap come from the config, then the environment", () => {
+  // A route is rewritten on every refresh, so a window narrowed once has to be
+  // something the plugin can be told from outside the profile — otherwise the
+  // next boot writes the launcher's 262144 back over it.
+  const savedContext = process.env.TINYTITAN_CONTEXT;
+  const savedMax = process.env.TINYTITAN_MAX_TOKENS;
+  delete process.env.TINYTITAN_CONTEXT;
+  delete process.env.TINYTITAN_MAX_TOKENS;
+  try {
+    assert.equal(resolveConfig().context, null);
+    assert.equal(resolveConfig().maxTokens, null);
+    process.env.TINYTITAN_CONTEXT = "65536";
+    process.env.TINYTITAN_MAX_TOKENS = "16384";
+    assert.equal(resolveConfig().context, 65536);
+    assert.equal(resolveConfig().maxTokens, 16384);
+    // Configured values are explicit choices and still win.
+    assert.equal(resolveConfig({ context: 32768, maxTokens: 4096 }).context, 32768);
+    assert.equal(resolveConfig({ context: 32768, maxTokens: 4096 }).maxTokens, 4096);
+  } finally {
+    if (savedContext === undefined) delete process.env.TINYTITAN_CONTEXT;
+    else process.env.TINYTITAN_CONTEXT = savedContext;
+    if (savedMax === undefined) delete process.env.TINYTITAN_MAX_TOKENS;
+    else process.env.TINYTITAN_MAX_TOKENS = savedMax;
+  }
+});
+
 test("config refuses what it cannot use", () => {
   assert.throws(() => resolveConfig({ port: 0 }), /port must be a port number/);
   assert.throws(() => resolveConfig({ port: "http" }), /port must be a port number/);
@@ -181,6 +289,13 @@ test("config refuses what it cannot use", () => {
   assert.throws(() => resolveConfig({ compactionHeadroomTokens: 1.5 }), /whole number of tokens/);
   assert.throws(() => resolveConfig({ presetId: "" }), /presetId must not be empty/);
   assert.throws(() => resolveConfig({ reasoning: "" }), /reasoning must not be empty/);
+  assert.throws(() => resolveConfig({ context: 0 }), /context must be a positive token count/);
+  assert.throws(() => resolveConfig({ context: "wide" }), /context must be a positive token count/);
+  assert.throws(() => resolveConfig({ maxTokens: -1 }), /maxTokens must be a positive token count/);
+  assert.throws(
+    () => resolveConfig({ maxTokens: 1.5 }),
+    /maxTokens must be a positive token count/,
+  );
 });
 
 test("the reasoning level comes from the config, then the environment, then the default", () => {
