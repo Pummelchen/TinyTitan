@@ -358,6 +358,16 @@ step "package"
 # 5.6's first upload shipped without the Metal shader library.
 tar tzf "$ARCHIVE" | grep -q '^[^/]*/TinyTitan_TinyTitan\.bundle/' \
   || die "the archive carries no TinyTitan_TinyTitan.bundle: the runtime could not load its kernels"
+# Every product the build produced, by name, in the archive. The stage loop above
+# proves each one was executable *before* the copy, and `set -e` is off here, so a
+# `cp` that fails partway -- out of disk is the realistic one -- would otherwise
+# leave an archive with three of four binaries and a release that never mentions
+# the missing one. The arch assertion below counts Mach-O artifacts and reports
+# that count; this is what makes the count mean four rather than "whatever arrived".
+for p in "${PRODUCTS[@]+"${PRODUCTS[@]}"}"; do
+  tar tzf "$ARCHIVE" | grep -q "^[^/]*/$p$" \
+    || die "the archive carries no $p, which the build produced and the stage copied"
+done
 # The checksum is the release notes' promise about these bytes, so the arch of
 # what the archive actually holds is asserted before it is taken, not after.
 assert_arm64_archive "$ARCHIVE" "engine"
