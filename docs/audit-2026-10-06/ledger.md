@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:24  Done:19  Blocked:1  Total:44**
+**Open:20  Done:23  Blocked:1  Total:44**
 
 ## Table
 
@@ -31,12 +31,9 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
-| AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | OPEN | Mac (primary) |
-| AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | OPEN | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
-| AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | OPEN | Mac (primary) |
 | AUD-110 | S2 | A | repack | `sources/TinyTitanRepack/Core/System/Posix.swift:32 (before); :29-44 (after)` | openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs | symlink following / TOCTOU on a predicted path | DONE | Mac (primary) |
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
@@ -48,10 +45,13 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
+| AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
+| AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
+| AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
-| AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
+| AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
 
 ## Detail
 
@@ -404,34 +404,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-134 — Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing'
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** memory
-- **Location:** `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52`
-- **Category:** silent failure, error swallowed into an empty answer
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep, verified and narrowed by the auditor on this branch
-
-**Evidence before.** Every site re-read on this branch; the sweep's list was wrong in both directions. `journalFailed(in:)` (MemoryService+Maintenance.swift:128-136) reports a *write* refusal once per scope through `log(.degraded(operation: "journal"))`, and MemoryService+Sessions.swift:108 reads it -- so open and write failures ARE surfaced. None of these *reads* set that flag, and each returns a value indistinguishable from an empty workspace: (1) :39/:42 `(try? await localStore.sessionInit(...)) ?? .empty` -- on the :42 branch (no workspace at all) `isDegraded` stays false, so a throwing local store yields an empty bootstrap and a prompt that says the model has no memories; (2) :202 recordedFacts `(try? await store.search(...)) ?? []` -- the tool-facing fact list and, at MemoryBackend+Consolidation.swift:111, the consolidation prompt's `existing:` facts, so consolidation is told there is nothing on file and re-adds what is already there; (3) Consolidation.swift:29-31 and :72-73 `(try? await store.search(limit: 400)) ?? []` -- the duplicate/conflict candidate pool, so a failed read silently disables the dedup that T2/T4/T5 exist to do; (4) ContinuityJournalStore.turns():52 `guard let taskID = try? await store.taskID(...)` else `[]` -> MemoryBackend+Consolidation.swift:97 logs 'consolidation skipped ... no new turns' when the truth is 'the journal could not be read'. The last is the actively misleading one: the log names the wrong cause.
-
-**Evidence after.** None yet -- first: a test that makes the read throw and asserts the caller says 'unavailable' rather than 'empty'. Scope corrections, recorded here per §0 rather than by editing the finding away: MemoryService+Sessions.swift:78 and MemoryService+Consolidation.swift:75 are not `try?` sites at all (sweep false positives, :78 is `guard configuration.isEnabled else { return [] }`, :75 a plain `pool = sharedCandidates ?? []` over an already-read value); MemoryRetrieval.swift:256 is `try? await Task.sleep`; MemoryRetrieval.swift:52/:233 and ContinuityJournalStore.sessions():71/search():92 are real `try?`-to-empty but benign -- the first two cost recall on a background path, the last two have no production caller (the only consumer of journalStore(for:) is consolidation, which calls turns()), and MemoryRetrieval.swift:289 is documented intent ('a failure is never a hint', :285-287). Those four moved to AUD-138 so this row can be closed on what is actually model-visible.
-
-### AUD-135 — expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** memory
-- **Location:** `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79`
-- **Category:** silent failure
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Read at the cited lines and confirmed by the auditor. `try? await engine.compactJournal()` then `await engine.shutDown()` then `return true` (:77-79). The open-failure path is handled honestly (`guard let journal = try? FileJournal(url: url) else { return false }` at :70), so the asymmetry is only the compaction. journalFailed(in:) (:128) and reportedJournalFailures (MemoryService.swift:63) report open failures once per scope; nothing reports this one. Consequence is disk growth, not lost data, hence S2.
-
-**Evidence after.** None yet.
-
 ### AUD-136 — reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced
 
 - **Severity / tier:** S2 / Tier B
@@ -480,21 +452,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
     Not fixed with AUD-113 because none of these seven is the file that row named, three of the four groups need a cap chosen for their boundary rather than the manifest's, and the three engine-side sites are load-path changes that each need a golden-baseline run to close.
 
 **Evidence after.** Expected: group (1) reads under a stated bound and says so on refusal, with a test per site in the shape AUD-113's `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` uses (the bound fires, not the decoder); `ServerPromptStateStore.swift:121` moves to read-then-check so its bound stops being a TOCTOU; groups (2) and (3) get a limit written down where the operator can see it, or an explicit note that the operator's own checkpoint is out of scope; group (4) classified as a self-check rather than left to look like an unfixed hole. Load-path sites need `tools/golden-baseline.sh --check qwen38-4` before and after.
-
-### AUD-144 — Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** memory
-- **Location:** `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416`
-- **Category:** symlink following on a predicted path
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-110/AUD-111 fix, sibling sweep
-
-**Evidence before.** `grep -rn O_CREAT sources/` after AUD-110: every creating opener in `TinyTitan` and `TinyTitanRepack` now refuses links, and the four left are here -- :116 `open(lockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)` (the `flock` anchor), :137 the append handle, and :382 and :416 both `O_WRONLY | O_CREAT | O_TRUNC`, the compaction temp and `truncate()`. The mode and O_CLOEXEC are already right; only the link guard is missing, and `grep -rn 'isSymbolicLink|symlink' sources/ContinuityCore/` returns nothing, so there is no equivalent of the repack's `InstallLockTests.symlinkedLockIsRejectedWithoutFollowingIt` anywhere in this target either. The two O_TRUNC sites are the sharp pair: a link planted at a predicted journal or checkpoint name turns a memory-store write into a destructive write elsewhere, reachable by anything that can create a file in the store directory. Weaker boundary than AUD-110 -- the store lives under the operator's own `~/.tinytitan`, so it needs local write access to that directory, which is why this is a sibling row and not the same severity -- but the same primitive, and the installer's precedent says the fix costs nothing at the open.
-    Not fixed with AUD-110 because it is a different target (Tier A per `docs/audit-2026-10-06/inventory.md:120`, `TinyTitanMemory` + `ContinuityCore`), it needs the memory suite (`tests/ContinuityCore/JournalTests.swift`, `JournalFailureTests.swift`) rather than the repack's, and `:116` deserves thought the sweep did not have time for: refusing a link at the lock path changes who can contend for the lock, which is the one behaviour here that is load-bearing.
-
-**Evidence after.** Expected: the four opens carry O_NOFOLLOW, or `:116` is argued out with the reason recorded; a test per site in the shape `PosixOpenTests.aSymlinkAtTheOutputPathIsRefusedAndItsTargetSurvives` asserting the victim's bytes survive, not merely that an error was thrown; and the memory suites green in the full serial run.
 
 ### AUD-110 — openCreateRW is the only opener without O_NOFOLLOW, and it is used for weight outputs
 
@@ -695,6 +652,61 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `this commit`
 
+### AUD-134 — Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing'
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52`
+- **Category:** silent failure, error swallowed into an empty answer
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep, verified and narrowed by the auditor on this branch
+
+**Evidence before.** Every site re-read on this branch; the sweep's list was wrong in both directions. `journalFailed(in:)` (MemoryService+Maintenance.swift:128-136) reports a *write* refusal once per scope through `log(.degraded(operation: "journal"))`, and MemoryService+Sessions.swift:108 reads it -- so open and write failures ARE surfaced. None of these *reads* set that flag, and each returns a value indistinguishable from an empty workspace: (1) :39/:42 `(try? await localStore.sessionInit(...)) ?? .empty` -- on the :42 branch (no workspace at all) `isDegraded` stays false, so a throwing local store yields an empty bootstrap and a prompt that says the model has no memories; (2) :202 recordedFacts `(try? await store.search(...)) ?? []` -- the tool-facing fact list and, at MemoryBackend+Consolidation.swift:111, the consolidation prompt's `existing:` facts, so consolidation is told there is nothing on file and re-adds what is already there; (3) Consolidation.swift:29-31 and :72-73 `(try? await store.search(limit: 400)) ?? []` -- the duplicate/conflict candidate pool, so a failed read silently disables the dedup that T2/T4/T5 exist to do; (4) ContinuityJournalStore.turns():52 `guard let taskID = try? await store.taskID(...)` else `[]` -> MemoryBackend+Consolidation.swift:97 logs 'consolidation skipped ... no new turns' when the truth is 'the journal could not be read'. The last is the actively misleading one: the log names the wrong cause.
+
+**Fix.** Split by what the caller can do, which is the two directions the finding left open. Propagation, where a caller can act: `recordedFacts` is now `async throws`; the three `SessionJournal` reads (`turns`, `sessions`, `search`) are `async throws`, with the protocol documenting why -- an empty array then means only "that session has no turns" -- and `ContinuityJournalStore` reads `taskID` with `try await` instead of `try?`, which is the site that logged "no new turns" for a journal it never fetched; `InMemoryJournal` implements the same three without throwing, commented as never actually throwing so the in-memory path keeps the honest `[]`. `MemoryBackend.runConsolidation` catches both reads (the transcript and the existing facts) and returns *before* advancing `consolidatedThrough`, so nothing is lost: the next session end reads the journal again. For the existing-facts read the choice is to skip rather than to distil against an empty list, because `existing:` is what the extraction is shown as already-on-file, and answering it with nothing is how the same facts come back under new keys. Reporting, where a value still has to be produced: `reportReadFailure(operation:error:in:)`, once per operation and workspace through `reportedReadFailures`, wired at the two local-store bootstrap fallbacks, the shared-facts bootstrap read, the project dedup pool, the shared dedup pool and the current-value read. It deliberately does not set `isDegraded`: that flag means writes are not reaching storage and the prompt says so, and a failed read would tell the model its memory is not being saved when it is. The shared pool is now a three-state `enum SharedPool { unread, unknown, known }` so an unreadable shared workspace yields an empty pool and can never borrow the project's `candidates` as its own. The write still lands on an unknown pool -- refusing there would drop a distilled fact for good, the caller having already spent its session on the extraction. Scope corrections recorded in the finding stand: the two sweep false positives were not `try?` sites and are unchanged.
+
+**Evidence after.** New `tests/TinyTitanMemory/MemoryReadFailureTests.swift`, 5 tests, on a store double that throws only on reads (a failing *write* would set `isDegraded`, and `activeStore(for:)` would then swap in the local store, so the test would measure the fallback rather than the read): `recordedFacts` throws rather than answering empty; an unreadable dedup pool is reported once, worded as "answering as unknown" beside the workspace name, and the fact still lands; an unreadable current value produces one line for two facts; an unreadable *shared* pool does not borrow the project's candidates -- asserted by the side-engine's recorded pairs being empty while the project store holds a same-category fact -- and the global fact still reaches `_global`; plus the hinter's coverage read (AUD-138). One server test in `tests/TinyTitanServer/MemoryConsolidationTests.swift` wires a journal whose `turns` throws and asserts, through a `ServerLog` sink, that the line says "the journal could not be read", that "no new turns" does not appear, and that no generation was spent on a transcript never read. Mutation check: with the reports silenced, the pool switched back to `candidates` and the server catch replaced by the old "no new turns" skip, 14 issues across 6 tests -- and the two tests that do not depend on the mutation (the clean expiry and `recordedFacts`' throwing signature) stay green, which is the honest limit of that check: the pre-fix signature could not compile the propagation test at all. Full serial run green, 1612 tests in 7 targets, exit 0.
+
+**Commit.** `a9ab3c5`
+
+### AUD-135 — expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79`
+- **Category:** silent failure
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Read at the cited lines and confirmed by the auditor. `try? await engine.compactJournal()` then `await engine.shutDown()` then `return true` (:77-79). The open-failure path is handled honestly (`guard let journal = try? FileJournal(url: url) else { return false }` at :70), so the asymmetry is only the compaction. journalFailed(in:) (:128) and reportedJournalFailures (MemoryService.swift:63) report open failures once per scope; nothing reports this one. Consequence is disk growth, not lost data, hence S2.
+
+**Fix.** `expireSessionLog` returns `String?` instead of `Bool`: nil means the file was rewritten, any string is the reason it was not, and every step's failure is a return -- open ("could not be opened"), replay ("could not be replayed") and the one that was swallowed, compaction ("compaction failed"). The engine is shut down on both failure paths so the workspace lock is not left held by a half-finished expiry. The retention loop in `MemoryService.sweepStaleWorkspaces` keeps refused files out of the `.expired` event and collects them into `[(path, file, reason)]`, logging `.degraded(operation: "expire")` once per path through the new `reportedExpiries` set -- keyed by path because project names are only unique inside their directory -- on the precedent of `reportedJournalFailures`. `shutDown()` clears it, as it does the other two report sets.
+
+**Evidence after.** New `tests/TinyTitanMemory/ExpireSessionLogTests.swift`, 4 tests, against a real `FileJournal` written through the engine: a clean expiry drops the transcript and keeps the fact (asserted by replaying the file and reading the store back, not by counting bytes); a compaction that cannot write -- a non-empty, unwritable directory planted at the predicted `<journal>.compacting` name, so `writeCheckpoint`'s `removeItem` fails and the create cannot proceed -- returns the reason and leaves the transcript on disk; a directory in place of the journal reports "could not be opened"; and the sweep, run twice over the same stuck file, produces exactly one `degraded during expire` line naming the file and the step, and no "expired the session log" event. Mutation check: restoring `try? await engine.compactJournal()` + `return nil` fails the two refusal tests with 4 issues, including the false `.expired` claim, and the success-path tests stay green.
+
+**Commit.** `a9ab3c5`
+
+### AUD-144 — Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416`
+- **Category:** symlink following on a predicted path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-110/AUD-111 fix, sibling sweep
+
+**Evidence before.** `grep -rn O_CREAT sources/` after AUD-110: every creating opener in `TinyTitan` and `TinyTitanRepack` now refuses links, and the four left are here -- :116 `open(lockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)` (the `flock` anchor), :137 the append handle, and :382 and :416 both `O_WRONLY | O_CREAT | O_TRUNC`, the compaction temp and `truncate()`. The mode and O_CLOEXEC are already right; only the link guard is missing, and `grep -rn 'isSymbolicLink|symlink' sources/ContinuityCore/` returns nothing, so there is no equivalent of the repack's `InstallLockTests.symlinkedLockIsRejectedWithoutFollowingIt` anywhere in this target either. The two O_TRUNC sites are the sharp pair: a link planted at a predicted journal or checkpoint name turns a memory-store write into a destructive write elsewhere, reachable by anything that can create a file in the store directory. Weaker boundary than AUD-110 -- the store lives under the operator's own `~/.tinytitan`, so it needs local write access to that directory, which is why this is a sibling row and not the same severity -- but the same primitive, and the installer's precedent says the fix costs nothing at the open.
+    Not fixed with AUD-110 because it is a different target (Tier A per `docs/audit-2026-10-06/inventory.md:120`, `TinyTitanMemory` + `ContinuityCore`), it needs the memory suite (`tests/ContinuityCore/JournalTests.swift`, `JournalFailureTests.swift`) rather than the repack's, and `:116` deserves thought the sweep did not have time for: refusing a link at the lock path changes who can contend for the lock, which is the one behaviour here that is load-bearing.
+
+**Fix.** All four creating opens carry O_NOFOLLOW: the `flock` anchor (:116 -> now the lock open), the append handle, the compaction temp and `truncate()`, each `O_RDWR/O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC` at 0o600. `:116` was argued rather than exempted, and the argument is that refusing is the *safer* side: following a link at `<journal>.lock` takes flock on the planted link's target, not on the anchor the other holder opened, so both processes believe they own the workspace and the mutual exclusion every other guarantee here leans on disappears silently. Refusing turns that into one open that fails, which is the deliberate `absent vs unreadable` contract the type already documents. The mode and O_CLOEXEC were already right, so the change costs nothing at the open -- the installer's `Posix.openCreateRW` is the precedent. Sibling sweep found the same missing guard outside the file: `MemoryService.isLockHeld`, the retention probe that protects deletion, opened the `.lock` path without it. There the consequence was not link following but data loss -- a link at the predicted name is locked instead of the real anchor, the probe answers "not held", and the sweep deletes a journal another process is appending to, whose next compaction then rewrites the workspace from its own stale memory. ELOOP now counts as held, on that probe's existing "anything unreadable is held" rule. Directory symlinks still resolve, because O_NOFOLLOW covers only the last component, and the operator's `~/.tinytitan` layout keeps working.
+
+**Evidence after.** `grep -rn O_CREAT sources/ | grep -vc O_NOFOLLOW` -> 0. New `tests/ContinuityCore/JournalSymlinkTests.swift` (5 tests) asserts the damage property, not the throw: journal path refused, lock path refused *and* no journal file created behind it, `truncate()` refused, the compaction temp refused, plus the directory-symlink regression guard that an operator's link still works. Two more in `tests/TinyTitanMemory/SweepStaleWorkspacesTests.swift`: a regular unheld lock still reads as free (the guard must not switch the cap off), and a symlinked lock reads as held with its target's bytes intact. Pre-fix behaviour was measured by restoring the code, not asserted: without the flags the truncate test's victim file is destroyed, and without the probe guard `isLockHeld` answered false and the sweep deleted the live journal. Eleven gates clean (`tools/lint.sh`, pinned toolchain on PATH); full serial run green at 1612 tests in 7 targets, exit 0, +17 over the recorded 1595 baseline, which is exactly the 17 tests this batch adds.
+
+**Commit.** `a9ab3c5`
+
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
 - **Severity / tier:** S3 / Tier C
@@ -723,22 +735,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-138 — Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller
-
-- **Severity / tier:** S3 / Tier C
-- **Project:** memory
-- **Location:** `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92`
-- **Category:** error swallowed into an empty answer (low reach)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** split from AUD-134 during its verification
-
-**Evidence before.** Read and confirmed while narrowing AUD-134. MemoryRetrieval.swift:52 skips one promoted fact and :233 caches a question with an empty candidate set when the store read throws -- the cost is recall on the background retrieval path, never a wrong answer shown as right. ContinuityJournalStore.sessions():71 and search():92 both `guard let taskID = try? await store.taskID(...) else { return [] }`; they satisfy the SessionJournal protocol (SessionJournal.swift:25-28) and the only production consumer of `journalStore(for:)` is consolidation, which calls `turns()` (MemoryBackend+Consolidation.swift:88-91). Benign only while that stays true, which is why this is a row and not a dismissal.
-
-**Fix.** Decide once: either give these reads the same report AUD-134 adds, or note in the protocol that a journal read cannot distinguish empty from failed and leave them.
-
-**Evidence after.** None yet.
-
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
 - **Severity / tier:** S3 / Tier C
@@ -756,3 +752,21 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** docs/release-notes-v5.8.md carries the Superseded block in the form release-notes-v5.1.md:57 already uses: it names 3eb11cf, points at ModelProfile as the thing that decides now, cites ModelProfileTests:119-122 as the record that the override is gone, and keeps the bullet as what 5.8 shipped. Verified each claim against the code before writing it (`git show --stat 3eb11cf`, the test comment, and the absence of the token anywhere under sources/). Markdown has no lint gate here, so the check is factual rather than mechanical: no other doc claims a retired knob as current except three dated measurement records, which are left alone deliberately because they describe what was measured then, not what the engine does now.
 
 **Commit.** `dbb8bf6`
+
+### AUD-138 — Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92`
+- **Category:** error swallowed into an empty answer (low reach)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** split from AUD-134 during its verification
+
+**Evidence before.** Read and confirmed while narrowing AUD-134. MemoryRetrieval.swift:52 skips one promoted fact and :233 caches a question with an empty candidate set when the store read throws -- the cost is recall on the background retrieval path, never a wrong answer shown as right. ContinuityJournalStore.sessions():71 and search():92 both `guard let taskID = try? await store.taskID(...) else { return [] }`; they satisfy the SessionJournal protocol (SessionJournal.swift:25-28) and the only production consumer of `journalStore(for:)` is consolidation, which calls `turns()` (MemoryBackend+Consolidation.swift:88-91). Benign only while that stays true, which is why this is a row and not a dismissal.
+
+**Fix.** Decided, per the row's own instruction, and the decision is different at each of the four sites because their consequences differ. `ContinuityJournalStore.sessions()` and `search()` propagate now (the protocol's reads are throwing, so `[]` means empty and nothing else); they still have no production caller, and that is precisely why making them honest costs nothing and leaving them swallowing would have been the row's own "benign only while that stays true" trap. `MemoryRetrieval.runQueue`'s coverage read -- the one that decides whether a question has any facts to judge -- reports once per scope through a new `reportedSweepFailures` set and drops the question, worded so the log distinguishes "nothing worth judging" from "nothing was judged": `no facts were judged for this question`. `MemoryRetrieval.applied(to:)`'s per-key `try? await store.get` is deliberately left swallowing, with the reason in the code above it: one failed fetch costs one promotion and the list that comes back is the token ranking's own, which is what the caller had before any hint existed, so the degraded answer is already honest and there is nothing to misreport.
+
+**Evidence after.** `MemoryReadFailureTests.theHinterReportsAnUnreadableCoveragePool`: one `degraded during hint-coverage` line for the scope after a first search, and still one after a second question to the same broken store -- the once-per-scope rule, not a per-question line. Mutation check: silencing the report fails the test with 3 issues. The two protocol reads are covered by `tests/TinyTitanMemory/SessionJournalTests.swift` and the throwing-signature fallout across `ContinuityStoreTests`, `MemoryBackendTests` and `MemoryConsolidationTests`, all green in the full serial run (1612 tests, 7 targets, exit 0). The `applied(to:)` decision is recorded in the source comment at the site so the next sweep finds the reason rather than the omission.
+
+**Commit.** `a9ab3c5`
