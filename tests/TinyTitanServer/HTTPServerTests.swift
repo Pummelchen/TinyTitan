@@ -765,6 +765,85 @@ struct HTTPServerTests {
         try await server.shutdown()
     }
 
+    /// AUD-147's content-type gate is what stands between a page the operator
+    /// visits and a mutating route on this loopback port, and `/v1/models/unload`
+    /// was the one POST route in the table that did not carry it. A form POST
+    /// cannot name `application/json`, so it is refused here; the request that
+    /// the CLI and the tests above make -- `curl -X POST`, no content-type --
+    /// still works, because the absent header is that route's contract.
+    @Test func unloadRefusesABrowserFormPost() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        for encoding in ["application/x-www-form-urlencoded", "text/plain", "multipart/form-data"] {
+            var request = URLRequest(
+                url: try localURL(port: port, "/v1/models/unload"))
+            request.httpMethod = "POST"
+            request.setValue(encoding, forHTTPHeaderField: "content-type")
+            request.httpBody = Data("x=1".utf8)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            #expect(
+                (response as? HTTPURLResponse)?.statusCode == 415,
+                "\(encoding) is a form, not a client")
+            #expect(data.lossyUTF8String.contains("unsupported_media_type"))
+            #expect(!data.lossyUTF8String.contains("\"unloaded\""))
+        }
+
+        try await server.shutdown()
+    }
+
+    /// The five routes that *do* carry the gate had no test for it: nothing in the
+    /// suite ever sent a non-JSON content type, so the guard AUD-147 added was
+    /// pinned only by the reviewer's memory. Half a fix in this repository's terms,
+    /// and the LAN sibling has three such tests.
+    ///
+    /// The two surfaces are checked apart, because they answer apart: the OpenAI
+    /// envelope carries the `unsupported_media_type` code, and the Anthropic one is
+    /// `{"type":"error","error":{"type":"invalid_request_error","message":...}}`
+    /// with no code field at all — which the first draft of this test mistook for a
+    /// missing gate until it printed the body. The message is matched up to its
+    /// slash, because the encoder escapes `/` as `\/` and the full sentence does not
+    /// appear in either body as written.
+    @Test func everyJsonRouteRefusesANonJsonContentType() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let openAIRoutes = ["/v1/chat/completions", "/v1/responses", "/v1/responses/compact"]
+        let anthropicRoutes = ["/v1/messages", "/v1/messages/count_tokens"]
+        for route in openAIRoutes + anthropicRoutes {
+            var request = URLRequest(url: try localURL(port: port, route))
+            request.httpMethod = "POST"
+            request.setValue("text/plain", forHTTPHeaderField: "content-type")
+            request.httpBody = Data(
+                #"""
+                {"model":"test-model","messages":[{"role":"user","content":"hi"}]}
+                """#.utf8)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let text = data.lossyUTF8String
+            #expect(
+                (response as? HTTPURLResponse)?.statusCode == 415,
+                "\(route) accepts a form POST")
+            #expect(
+                text.contains("content-type must be application"),
+                "\(route) answered 415 without naming the rule")
+            if openAIRoutes.contains(route) {
+                #expect(text.contains("unsupported_media_type"), "\(route) lost its code")
+            } else {
+                #expect(text.contains("invalid_request_error"), "\(route) lost its type")
+            }
+        }
+
+        try await server.shutdown()
+    }
+
     // MARK: - SSE edge cases (T30)
 
     /// A backend failure mid-stream must emit the error frame and still

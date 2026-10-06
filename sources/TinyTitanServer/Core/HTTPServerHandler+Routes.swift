@@ -42,6 +42,16 @@ extension ServerHTTPHandler {
         let jsonBody =
             head.headers.first(name: "content-type")?
             .lowercased().hasPrefix("application/json") == true
+        // AUD-147's gate for a route that reads *no* body. `jsonBody` cannot be
+        // copied here: `curl -X POST` sends no content-type, and that is how this
+        // route is documented and tested -- the absent-header path is the CLI's
+        // contract, which is the AUD-132 lesson. What still has to be refused is a
+        // browser form POST, and a form always *does* name a content-type, so
+        // "absent" is the CLI and "present but not JSON" is the form.
+        let notAForm =
+            head.headers.first(name: "content-type").map {
+                $0.lowercased().hasPrefix("application/json")
+            } ?? true
         // S28: only the two read routes answer HEAD; see `refuseUnsupportedHEAD`.
         if refuseUnsupportedHEAD(head, path: path, context: context) { return }
         switch (head.method, path) {
@@ -126,6 +136,10 @@ extension ServerHTTPHandler {
             }
             handleCountTokens(body: body, context: context)
         case (.POST, "/v1/models/unload"):
+            guard notAForm else {
+                writeUnsupportedMediaType(context, surface: .chat)
+                return
+            }
             handleUnload(context: context)
         case (_, "/health"), (_, "/v1/models"), (_, "/v1/chat/completions"), (_, "/v1/responses"),
             (_, "/v1/responses/compact"),
