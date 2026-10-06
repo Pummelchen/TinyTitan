@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 62,
-    "done": 58,
-    "open": 3,
+    "done": 59,
+    "open": 2,
     "blocked": 1
   },
   "tasks": [
@@ -1057,13 +1057,13 @@
       "file_line": "AGENTS.md:268 and CONTRIBUTING.md:37 (`14 rows`), docs/handover-tinytitan.md:127 (`16 files under benchmark/golden/, 16 targets in tools/golden-baseline.sh`), tools/func-length-baseline.txt, tools/library-facade-baseline.txt",
       "title": "The docs gate enforces the gate count, mode names, ledger counts and tag shas, but three other documented counts of repository-computable things are still prose",
       "category": "guard not reachable (same class as AUD-160, not yet fixed)",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "AUD-160 sibling sweep",
       "evidence-before": "The same mistake, elsewhere, measured 2026-10-06: `AGENTS.md:268` and `CONTRIBUTING.md:37` each state `14 rows` for `tools/func-length-baseline.txt`, and the handover's Goldens row states `16 files under benchmark/golden/` and `16 targets in `tools/golden-baseline.sh`. All four are true right now -- `wc -l` says 14, `git ls-files benchmark/golden | wc -l` says 16 -- so this is not a live wrong number, it is the class AUD-160 exists to end left half-covered: a gate that added its own row to `tools/func-length-baseline.txt` or a golden target would silently stale these sentences exactly the way `library-facade` staled the gate counts on 2026-10-07. `tools/docs-facts.py` compares only the counts it can derive without a second parser today.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": ""
+      "fix-summary": "`tools/docs-facts.py` gained `check_derived_counts`, which judges three more restated counts against the tree: `N rows` attributed to the nearest `tools/*.txt` within 300 characters (compared with that file's non-blank line count), `N files under `dir`` (compared with `git ls-files dir`), and `N targets in `tools/golden-baseline.sh`` (compared with the target list that script's own `unknown target:` message prints). Each is matched by phrase and must name the file or directory it is a claim about, because the bare pattern `N rows|files|targets` also matches an n-gram table (48 rows per token), a git diff (353 files, 10 files changed) and a locale catalogue (3,633 rows x 2 locales): 23 hits in the corpus, four of them claims about this tree. `N rows / N closed` is left to `check_ledger_counts`, which is the check that owns it. The window is 300 characters rather than the whole paragraph because CONTRIBUTING.md's gate list is one paragraph, and a claim in its last bullet would otherwise inherit the first bullet's file. Quoted numbers stay mentions and history headings stay dated, on the same rules AUD-160 set. While proving the arm for a count whose file does not exist, the table check was widened to every tracked document rather than the 82 the number checks may read -- a mis-shaped row is a rendering defect, not a quotation of history -- and it immediately found one in the file that documents the gates: `tool-coverage.md:205`, the `library-facade` row, carried a fourth column in a three-column table. Fixed in the same commit (`28fd719`); no row is filed for it because nothing is open after it.",
+      "evidence-after": "All four claims re-measured on this tree and true, so the gate is green without any document being edited to satisfy it: `wc -l tools/func-length-baseline.txt` = 14 (matching `AGENTS.md:268` and `CONTRIBUTING.md:37`), `git ls-files benchmark/golden | wc -l` = 16, and `tools/golden-baseline.sh:280` names 16 targets. `python3 tools/docs-facts.py` exits 0: `ok (82 documents against 17 gates derived from tools/lint.sh, table shape in all 108; 1 owner-file note(s) reported and not enforced)` -- the one note being `AGENTS.md:250`'s count, which is the maintainer's file and is reported, not enforced. Mutation proof: the probe now reads 24/24 arms ok, six of them new -- (18) `(14 rows` written as 15 fails naming `tools/func-length-baseline.txt holds 14 rows`; (19) the same claim pointed at `tools/no-such-baseline.txt` fails with `cannot count the rows a claim of \u201c14 rows\u201d rests on (tools/no-such-baseline.txt)` rather than passing vacuously; (20) `17 files under `benchmark/golden/`` fails against `git ls-files benchmark/golden/ lists 16`; (21) `17 targets in `tools/golden-baseline.sh`` fails against the derived 16; (22) `48 rows per token`, with no ratchet file within the window, exits 0; (24) a fourth cell added to a row of `tool-coverage.md` -- a document `check_counts` never reads -- exits 1 naming the line and both column counts. Arm M3 was tightened with an `absent` needle so the ledger-count phrase provably does not also fire the new `N rows` pattern. Full suite: `tools/lint.sh` exits 0 across all 17 gates (ruff 0.16.7 check and format clean, shellcheck 0.11.0 over 27 scripts on bash 3.2.57, swiftlint 0.65.1 --strict, swift-format --strict, eslint 10.11.0 + prettier 3.9.9 on both plugins, 1,658 test bodies scanned, 88 public declarations allowlisted, largest source 496 lines). Scope of verification: tooling and documents only -- no Swift or C changed, so the test suite and the golden baseline were not re-run, and no model was fetched. The three remaining non-DONE rows after this close are AUD-120 (needs an owner decision), AUD-139 (blocked on the owner) and AUD-156 (needs one real `tools/dsh_local.sh smoke` run).",
+      "commit": "28fd719"
     }
   ]
 }
