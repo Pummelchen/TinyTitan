@@ -407,6 +407,4 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
 
     var inFlightCount: Int { inFlight }
     var waiterCount: Int { waiters.count }
-    var pendingSwitchCount: Int { pendingSwitches }
-    var isSwitchingForTesting: Bool { switching }
 }
