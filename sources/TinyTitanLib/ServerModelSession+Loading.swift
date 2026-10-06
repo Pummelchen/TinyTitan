@@ -174,7 +174,7 @@ extension ServerModelSession {
         } else {
             // Unreadable manifest means the load below will fail with a better
             // message than anything this could throw, so pick the safe small end.
-            derivedSlots = RuntimeConfiguration.allowedExpertCacheSlots.first ?? 8
+            derivedSlots = RuntimeConfiguration.minimumExpertCacheSlots
         }
         let loadSlots = requestedExpertCacheSlots ?? slotOverride ?? derivedSlots
         // `nil` keeps the long-standing rule: an installer receipt means the

@@ -29,6 +29,15 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         8, 16, 24, 32, 40, 48, 64, 96, 112, 128, 160, 192, 256,
     ]
 
+    /// The smallest rung `allowedExpertCacheSlots` offers.
+    ///
+    /// The list is a constant, so "no rungs at all" is not a case a caller has
+    /// to answer: the sites that need the floor name this instead of writing
+    /// `.first ?? 8` and putting the 8 in seven places. Pinned by
+    /// `RuntimeConfigurationTests.expertCacheSlotFloorIsTheSmallestRung`, which
+    /// is what catches the two drifting apart.
+    public static let minimumExpertCacheSlots = 8
+
     /// Target bytes for the routed-expert slot cache when no count is given.
     ///
     /// 8 GiB, which is a third of a 24 GB machine and deliberate. The slot cache
@@ -210,14 +219,18 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         budgetBytes: Int = defaultExpertCacheBudgetBytes
     ) -> Int {
         guard expertStrideBytes > 0, layers > 0 else {
-            return allowedExpertCacheSlots.first ?? 8
+            return Self.minimumExpertCacheSlots
         }
         let perSlot = Double(expertStrideBytes) * Double(layers)
         let wanted = Double(budgetBytes) / perSlot
-        var choice =
-            allowedExpertCacheSlots.min {
-                abs(Double($0) - wanted) < abs(Double($1) - wanted)
-            } ?? allowedExpertCacheSlots.first ?? 8
+        // The nearest rung, and the earliest one wins a tie -- the rule
+        // `min(by:)` applies, walked over the list so no branch has to pretend
+        // it can be empty.
+        var choice = Self.minimumExpertCacheSlots
+        for candidate in allowedExpertCacheSlots
+        where abs(Double(candidate) - wanted) < abs(Double(choice) - wanted) {
+            choice = candidate
+        }
         // Nearest, then step down until the footprint honours the budget.
         //
         // Rounding to nearest alone can overshoot, and the overshoot grows with
@@ -241,8 +254,15 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         // throughput at all -- and a cliff above it. Too few slots costs a
         // little; too many costs everything.
         let ceiling = Double(budgetBytes) * 1.15
+        // `last(where:)` reads the list's order as a promise -- the largest rung
+        // below the current one -- so it takes a sorted copy rather than the
+        // literal's spelling. The literal is written ascending and
+        // `expertCacheSlotFloorIsTheSmallestRung` pins that, because the
+        // nearest-rung walk above settles a tie on the earlier element, which is
+        // the smaller rung only while the list climbs.
+        let rungs = allowedExpertCacheSlots.sorted()
         while Double(choice) * perSlot > ceiling,
-            let smaller = allowedExpertCacheSlots.last(where: { $0 < choice })
+            let smaller = rungs.last(where: { $0 < choice })
         {
             choice = smaller
         }
@@ -300,14 +320,19 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         cacheBytes: Int
     ) -> Int {
         guard expertStrideBytes > 0, layers > 0 else {
-            return allowedExpertCacheSlots.first ?? 8
+            return Self.minimumExpertCacheSlots
         }
-        guard cacheBytes > 0 else { return allowedExpertCacheSlots.first ?? 8 }
+        guard cacheBytes > 0 else { return Self.minimumExpertCacheSlots }
         let perSlot = Double(expertStrideBytes) * Double(layers)
         let fitting = allowedExpertCacheSlots.filter {
             Double($0) * perSlot <= Double(cacheBytes)
         }
-        return fitting.last ?? allowedExpertCacheSlots.first ?? 8
+        // `fitting` really can be empty -- a budget below the smallest rung
+        // leaves nothing that fits -- so this fallback is not defensive code for
+        // an impossible branch; only the rung it names is. `max()` rather than
+        // `last` because the largest rung that fits is the answer, whatever
+        // order the list is written in.
+        return fitting.max() ?? Self.minimumExpertCacheSlots
     }
 
     public static let allowedPrefillChunkTokens = [

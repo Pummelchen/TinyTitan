@@ -13,6 +13,32 @@ import Testing
         #expect(RuntimeConfiguration.supportedYaRNContextTokens == [524_288, 1_048_576])
     }
 
+    /// The expert-cache floor is the list's own smallest rung, and the list is
+    /// ascending.
+    ///
+    /// The first half is what stops the named constant and the literal drifting
+    /// apart -- the floor decides the cache for a model whose manifest cannot be
+    /// read, so a silent 8 that is no longer the smallest rung is a wrong cache
+    /// size with nothing to say so. The second half is what the derivations
+    /// assume: the nearest-rung walk takes the earliest element on a tie, which
+    /// is the *smaller* rung only while the list climbs.
+    @Test func expertCacheSlotFloorIsTheSmallestRung() {
+        #expect(
+            RuntimeConfiguration.allowedExpertCacheSlots.first
+                == RuntimeConfiguration.minimumExpertCacheSlots)
+        #expect(RuntimeConfiguration.minimumExpertCacheSlots == 8)
+        #expect(
+            RuntimeConfiguration.allowedExpertCacheSlots
+                == RuntimeConfiguration.allowedExpertCacheSlots.sorted())
+        #expect(
+            Set(RuntimeConfiguration.allowedExpertCacheSlots).count
+                == RuntimeConfiguration.allowedExpertCacheSlots.count)
+        // Every rung is a legal `expertCacheSlots:` value, so the floor is not a
+        // number the validator would refuse.
+        let runtime = try? RuntimeConfiguration(expertCacheSlots: 8)
+        #expect(runtime?.expertCacheSlots == 8)
+    }
+
     @Test func productionDefaultsAreStable() throws {
         let runtime = try RuntimeConfiguration(
             expertCacheSlots: 16,
