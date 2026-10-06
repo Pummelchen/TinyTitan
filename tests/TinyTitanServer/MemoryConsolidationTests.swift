@@ -242,6 +242,68 @@ import TinyTitanMemory
         #expect(inner.requests.count == 1)
     }
 
+    /// AUD-134, server side. The journal read used to answer `[]` when the
+    /// file would not open, and the head of a session whose transcript was
+    /// never fetched moved anyway: the turns were consolidated into nothing,
+    /// once, forever. A failed read now stops the run before the generation
+    /// and says which of the two it was.
+    @Test func anUnreadableJournalStopsTheRunAndSaysSo() async throws {
+        let inner = ScriptedBackend([completion("Chapter 34: the inn burned.")])
+        let configuration = configuration(tools: .off, consolidation: true)
+        let lines = LogBox()
+        ServerLog.useSink { lines.append($0) }
+        defer { ServerLog.useSink(nil) }
+        let service = MemoryService(
+            configuration: configuration, durableStore: InMemoryStore(),
+            journal: UnreadableJournal())
+        let backend = MemoryBackend(
+            wrapping: inner, service: service,
+            configuration: configuration)
+        _ = try await backend.generate(request("write chapter 34"), onEvent: { _ in })
+        try await Task.sleep(for: .milliseconds(250))
+
+        let messages = lines.messages()
+        #expect(
+            messages.contains { $0.contains("the journal could not be read") },
+            "the log should name the failed read: \(messages)")
+        #expect(
+            !messages.contains { $0.contains("no new turns") },
+            "an unreadable journal is not an empty session")
+        #expect(
+            inner.requests.count == 1,
+            "a transcript that was never read got distilled anyway")
+        await backend.shutDown()
+    }
+
+    /// unchecked-invariant: `lines` is only ever touched under `lock`.
+    private final class LogBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lines: [String] = []
+        func append(_ line: String) { lock.withLock { lines.append(line) } }
+        func messages() -> [String] { lock.withLock { lines } }
+    }
+
+    /// A journal whose transcript read fails, standing in for a file the
+    /// engine could not replay.
+    private struct UnreadableJournal: SessionJournal {
+        func record(_: JournalTurn, in _: MemoryScope) async {}
+        func turns(session _: String, limit _: Int, in _: MemoryScope) async throws
+            -> [JournalTurn]
+        {
+            throw MemoryError.backendUnavailable("journal file unreadable")
+        }
+
+        func sessions(limit _: Int, in _: MemoryScope) async throws
+            -> [JournalSessionSummary]
+        {
+            []
+        }
+
+        func search(_: String, limit _: Int, in _: MemoryScope) async throws -> [JournalTurn] {
+            []
+        }
+    }
+
     // MARK: - The parser
 
     @Test func extractionOutputIsParsedLeniently() {
@@ -887,7 +949,7 @@ import TinyTitanMemory
         try await waitForConsolidations(inner, atLeast: 2)
 
         let scope = try #require(configuration.scope())
-        let facts = await service.recordedFacts(in: scope, limit: 50)
+        let facts = try await service.recordedFacts(in: scope, limit: 50)
         let keys = facts.map(\.key.rawValue)
         #expect(keys.contains("msa/governing_law"))
         #expect(keys.contains("agreement/governing_law") == false)
@@ -943,7 +1005,7 @@ import TinyTitanMemory
         #expect(extractions[1].messages.last?.content?.contains("msa/governing_law") == true)
 
         let scope = try #require(configuration.scope())
-        let facts = await service.recordedFacts(in: scope, limit: 50)
+        let facts = try await service.recordedFacts(in: scope, limit: 50)
         let keys = facts.map(\.key.rawValue)
         #expect(keys.contains("msa/governing_law"))
         #expect(keys.contains("agreement/governing_law") == false)

@@ -96,6 +96,18 @@ public actor FileJournal: ContinuityJournal {
 
     // MARK: - Opening
 
+    /// Every opener below passes `O_NOFOLLOW`.
+    ///
+    /// The journal, its lock and the compaction temp all live at paths this
+    /// type derives from the store directory rather than paths it was handed,
+    /// so anything that can create a file there can plant a link at one of
+    /// them. Without the flag that turns a memory-store write into a write
+    /// somewhere else entirely -- and at the two `O_TRUNC` sites, into a
+    /// destructive one. `O_NOFOLLOW` applies to the final component only, so
+    /// the operator symlinking the store *directory* onto another disk still
+    /// works; only a link standing where a journal file is expected is
+    /// refused, and it is refused rather than followed. Same rule the
+    /// installer's `Posix.openCreateRW` enforces.
     private static func prepareDirectory(for url: URL) throws {
         let manager = FileManager.default
         let directory = url.deletingLastPathComponent()
@@ -113,7 +125,13 @@ public actor FileJournal: ContinuityJournal {
     }
 
     private static func acquireLock(at lockURL: URL, journal: URL) throws -> Int32 {
-        let descriptor = open(lockURL.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        // Refusing a link here is what makes the lock guard the *path* the
+        // journal is written under. Following one would put the flock on an
+        // arbitrary inode, so two journals at two paths could both believe
+        // they owned the same one -- which is the exact failure the lock
+        // exists to prevent, and it would be silent.
+        let descriptor = open(
+            lockURL.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             throw JournalError.cannotOpen(
                 lockURL,
@@ -134,7 +152,8 @@ public actor FileJournal: ContinuityJournal {
     /// `O_APPEND` so every write lands at the end without a seek, which is
     /// what keeps a record from being written into the middle of another.
     private static func openForAppend(_ url: URL) throws -> Int32 {
-        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0o600)
+        let descriptor = open(
+            url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else {
             throw JournalError.cannotOpen(url, underlying: String(cString: strerror(errno)))
         }
@@ -379,7 +398,11 @@ public actor FileJournal: ContinuityJournal {
         replacing target: URL
     ) -> Result<Void, JournalError> {
         try? FileManager.default.removeItem(at: temporary)
-        let handle = open(temporary.path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0o600)
+        // The temp name is predicted rather than unique, so the removeItem
+        // above is not a guard: it unlinks a planted link along with its
+        // anchor. O_NOFOLLOW is what stops the create writing through one.
+        let handle = open(
+            temporary.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard handle >= 0 else {
             return .failure(.cannotOpen(temporary, underlying: String(cString: strerror(errno))))
         }
@@ -413,7 +436,8 @@ public actor FileJournal: ContinuityJournal {
         try await settleBarrier()
         if descriptor >= 0 { close(descriptor) }
         descriptor = -1
-        let emptied = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0o600)
+        let emptied = open(
+            url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard emptied >= 0 else {
             throw JournalError.cannotOpen(url, underlying: String(cString: strerror(errno)))
         }

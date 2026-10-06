@@ -25,15 +25,34 @@ extension MemoryService {
         // pays nothing for the check it cannot make.
         let candidates: [MemoryRecord]
         if sideEngine != nil {
-            candidates =
-                (try? await store.search(
+            do {
+                candidates = try await store.search(
                     MemoryQuery(limit: 400),
-                    in: context.scope)) ?? []
+                    in: context.scope)
+            } catch {
+                // The write still happens: a fact the model distilled is worth
+                // more than the duplicate the missing pool cannot rule out, and
+                // refusing here would drop the fact for good, because the
+                // caller has already spent its session on the extraction. What
+                // must not happen is the pool-based dedup going quiet — hence
+                // the report, which is what makes this an unknown pool rather
+                // than an empty one.
+                reportReadFailure("dedup-pool", error, in: context.scope)
+                candidates = []
+            }
         } else {
             candidates = []
         }
-        // The shared workspace's facts, read the first time one is needed.
-        var sharedCandidates: [MemoryRecord]?
+        /// The shared workspace's pool, read the first time one is needed.
+        /// Three states, because "this workspace has no facts" and "the
+        /// workspace would not answer" are different answers, and `nil` for
+        /// both would let a failed read look like the second.
+        enum SharedPool {
+            case unread
+            case unknown
+            case known([MemoryRecord])
+        }
+        var sharedPool = SharedPool.unread
         var questionsLeft = Self.maximumSideEngineQuestions
         for record in records {
             // A fact about the person rather than the project goes to the
@@ -58,7 +77,15 @@ extension MemoryService {
             // restates unchanged facts: every eye colour in a novel got a v2
             // and a v3 with the identical value. A write that changes nothing
             // is version churn and completion tokens for no fact.
-            let current = try? await destination.get(record.key, in: scope)
+            let current: MemoryRecord?
+            do {
+                current = try await destination.get(record.key, in: scope)
+            } catch {
+                // Unknown, not absent: the unchanged-fold below cannot run, so
+                // this may cost a version rather than skip one.
+                reportReadFailure("current-value", error, in: scope)
+                current = nil
+            }
             if let current, Self.fold(current.value) == Self.fold(record.value) {
                 unchanged += 1
                 continue
@@ -67,12 +94,29 @@ extension MemoryService {
             // deterministic path pays nothing for a check it cannot make.
             var pool = candidates
             if isShared, sideEngine != nil {
-                if sharedCandidates == nil {
-                    sharedCandidates =
-                        (try? await destination.search(
-                            MemoryQuery(limit: 400), in: scope)) ?? []
+                if case .unread = sharedPool {
+                    do {
+                        sharedPool = .known(
+                            try await destination.search(
+                                MemoryQuery(limit: 400), in: scope))
+                    } catch {
+                        // Remembered as unknown, and not retried per record: a
+                        // store that threw once on this scope throws again, and
+                        // the price of the failure is the dedup it stops doing,
+                        // which is exactly what the report is for.
+                        reportReadFailure("dedup-pool", error, in: scope)
+                        sharedPool = .unknown
+                    }
                 }
-                pool = sharedCandidates ?? []
+                switch sharedPool {
+                case .known(let records): pool = records
+                // Not `candidates`: that pool is the project's, and a shared
+                // fact deduped against another workspace's records would be
+                // judged against the wrong store. An empty pool here is the
+                // honest reading of "unknown" — the rules that need it are
+                // reported, not silently passed.
+                case .unknown, .unread: pool = []
+                }
             }
             // T2, T4, T5 and T3 over one budget for the whole consolidation.
             // Durability comes first, then the rule that fixes a value the

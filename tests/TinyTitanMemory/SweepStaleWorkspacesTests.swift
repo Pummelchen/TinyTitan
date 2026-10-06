@@ -112,4 +112,37 @@ import Testing
         try write(journal, modified: Date())
         #expect(!MemoryService.isLockHeld(at: journal))
     }
+
+    /// A real, regular, unheld lock must still read as free: the `O_NOFOLLOW`
+    /// probe below is only allowed to reject links, not to turn every idle
+    /// workspace into a held one and switch the cap off.
+    @Test func aRegularUnheldLockIsNotHeld() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("tinytitan/local/idle.ndjson")
+        try write(journal, modified: Date())
+        try Data().write(to: journal.appendingPathExtension("lock"))
+        #expect(!MemoryService.isLockHeld(at: journal))
+    }
+
+    /// The sibling of AUD-110's symlink guard, at the probe that protects
+    /// deletion. A link planted at the predicted `<journal>.lock` name would
+    /// otherwise be locked *instead of* the real anchor: the probe answers
+    /// "not held", the sweep deletes a journal another process is appending
+    /// to, and that process's next compaction rewrites the workspace from its
+    /// own stale memory. An unreadable probe is a held probe.
+    @Test func aSymlinkedLockCountsAsHeldAndItsTargetSurvives() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = directory.appendingPathComponent("tinytitan/local/linked.ndjson")
+        try write(journal, modified: Date())
+        let victim = directory.appendingPathComponent("someone-elses-file")
+        let canary = Data("do not lock me".utf8)
+        try canary.write(to: victim)
+        try FileManager.default.createSymbolicLink(
+            at: journal.appendingPathExtension("lock"), withDestinationURL: victim)
+
+        #expect(MemoryService.isLockHeld(at: journal))
+        #expect(try Data(contentsOf: victim) == canary)
+    }
 }

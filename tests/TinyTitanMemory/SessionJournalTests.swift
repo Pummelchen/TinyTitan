@@ -134,7 +134,7 @@ import Testing
                 in: scope)
         }
 
-        let turns = await journal.turns(session: "s1", limit: 10, in: scope)
+        let turns = try await journal.turns(session: "s1", limit: 10, in: scope)
         #expect(turns.map(\.prompt) == ["q2", "q1", "q0"])
         #expect(turns.first?.promptTokens == 120)
         #expect(turns.first?.stopReason == "stop")
@@ -143,8 +143,9 @@ import Testing
     @Test func workspacesAreIsolated() async throws {
         let journal = InMemoryJournal()
         await journal.record(turn("s1", 0), in: try scope("repo-a"))
-        #expect(await journal.turns(session: "s1", limit: 10, in: try scope("repo-b")).isEmpty)
-        #expect(await journal.sessions(limit: 10, in: try scope("repo-b")).isEmpty)
+        let other = try scope("repo-b")
+        #expect(try await journal.turns(session: "s1", limit: 10, in: other).isEmpty)
+        #expect(try await journal.sessions(limit: 10, in: other).isEmpty)
     }
 
     @Test func trimsTurnsPerSession() async throws {
@@ -156,7 +157,7 @@ import Testing
                 in: scope)
         }
 
-        let turns = await journal.turns(session: "s1", limit: 50, in: scope)
+        let turns = try await journal.turns(session: "s1", limit: 50, in: scope)
         #expect(turns.count == 5)
         // The newest five survive; an old turn of a long session is the least
         // useful thing the journal holds.
@@ -171,12 +172,12 @@ import Testing
             await journal.record(turn("s\(index)", 0, at: TimeInterval(index)), in: scope)
         }
 
-        let sessions = await journal.sessions(limit: 50, in: scope)
+        let sessions = try await journal.sessions(limit: 50, in: scope)
         #expect(sessions.count == 3)
         #expect(sessions.map(\.session) == ["s5", "s4", "s3"])
         // The dropped sessions take their turns with them, so the footprint
         // really does have a ceiling.
-        #expect(await journal.turns(session: "s0", limit: 10, in: scope).isEmpty)
+        #expect(try await journal.turns(session: "s0", limit: 10, in: scope).isEmpty)
         #expect(await journal.allTurns(in: scope).count == 3)
     }
 
@@ -186,7 +187,8 @@ import Testing
         await journal.record(turn("s1", 0, at: 0), in: scope)
         await journal.record(turn("s1", 1, at: 60), in: scope)
 
-        let summary = try #require(await journal.sessions(limit: 5, in: scope).first)
+        let summaries = try await journal.sessions(limit: 5, in: scope)
+        let summary = try #require(summaries.first)
         #expect(summary.turnCount == 2)
         #expect(summary.firstSeen == Date(timeIntervalSince1970: 1_000))
         #expect(summary.lastSeen == Date(timeIntervalSince1970: 1_060))
@@ -202,13 +204,13 @@ import Testing
                 "s2", 0, prompt: "unrelated question",
                 reply: "unrelated answer", at: 60), in: scope)
 
-        let hits = await journal.search("foomanager", limit: 10, in: scope)
+        let hits = try await journal.search("foomanager", limit: 10, in: scope)
         #expect(hits.count == 1)
         #expect(hits.first?.session == "s1")
         // Matching the reply counts too: the answer is often where the useful
         // sentence lives.
-        #expect(await journal.search("background sync", limit: 10, in: scope).count == 1)
-        #expect(await journal.search("", limit: 10, in: scope).isEmpty)
+        #expect(try await journal.search("background sync", limit: 10, in: scope).count == 1)
+        #expect(try await journal.search("", limit: 10, in: scope).isEmpty)
     }
 
     @Test func journalLimitsDoNotShareCuratedMemoryBudget() {

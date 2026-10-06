@@ -39,12 +39,18 @@ public actor InMemoryJournal: SessionJournal {
         order[scope] = sessions
     }
 
-    public func turns(session: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn] {
+    /// Never actually throws; the protocol's reads are throwing so that an
+    /// empty array can only mean empty.
+    public func turns(
+        session: String, limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalTurn] {
         let stored = turns[Key(scope: scope, session: session)] ?? []
         return Array(stored.reversed().prefix(max(0, limit)))
     }
 
-    public func sessions(limit: Int, in scope: MemoryScope) async -> [JournalSessionSummary] {
+    public func sessions(
+        limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalSessionSummary] {
         let sessions = order[scope] ?? []
         return sessions.prefix(max(0, limit)).compactMap { session in
             let stored = turns[Key(scope: scope, session: session)] ?? []
@@ -59,7 +65,9 @@ public actor InMemoryJournal: SessionJournal {
         }
     }
 
-    public func search(_ text: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn] {
+    public func search(
+        _ text: String, limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalTurn] {
         let needle = text.lowercased()
         guard !needle.isEmpty else { return [] }
         let sessions = order[scope] ?? []

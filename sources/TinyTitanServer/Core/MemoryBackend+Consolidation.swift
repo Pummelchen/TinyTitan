@@ -86,10 +86,22 @@ extension MemoryBackend {
             unconsolidated[scope] = nil
         }
         guard let journal = await service.journalStore(for: scope) else { return }
-        let newestFirst = await journal.turns(
-            session: context.session.id,
-            limit: configuration.consolidationMaximumTurns,
-            in: scope)
+        let newestFirst: [JournalTurn]
+        do {
+            newestFirst = try await journal.turns(
+                session: context.session.id,
+                limit: configuration.consolidationMaximumTurns,
+                in: scope)
+        } catch {
+            // "No new turns" and "the journal would not answer" are different
+            // facts, and only the first is a reason to skip. Nothing is lost by
+            // returning here: the consolidated head is not advanced on this
+            // path, so the next session end reads the journal again.
+            ServerLog.memory(
+                "consolidation skipped session=\(context.session.id): "
+                    + "the journal could not be read (\(error))")
+            return
+        }
         let chronological = Array(newestFirst.reversed())
         let through = consolidatedThrough[context.session.id] ?? -1
         let fresh = chronological.filter { $0.index > through }
@@ -108,7 +120,19 @@ extension MemoryBackend {
         // answers the previous prompt is read with that prompt.
         let overlap = chronological.last { $0.index <= through }.map { [$0] } ?? []
         let turns = overlap + fresh
-        let existing = await service.recordedFacts(in: scope, limit: 400)
+        let existing: [MemoryRecord]
+        do {
+            existing = try await service.recordedFacts(in: scope, limit: 400)
+        } catch {
+            // Skipping, not consolidating against an empty list. `existing:` is
+            // what the extraction is shown as "already on file"; answering it
+            // with nothing for a store that would not read is how the same
+            // facts come back written again under new keys.
+            ServerLog.memory(
+                "consolidation skipped session=\(context.session.id): "
+                    + "the facts on file could not be read (\(error))")
+            return
+        }
         let request = ServerMemory.consolidationRequest(
             turns: turns, existing: existing, workspace: scope.workspace)
         let started = Date()

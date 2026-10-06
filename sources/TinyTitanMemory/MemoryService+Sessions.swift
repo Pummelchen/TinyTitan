@@ -36,10 +36,21 @@ extension MemoryService {
                 isDegraded = true
                 log(.degraded(operation: "sessionInit", detail: "\(error)"))
                 guard configuration.degradesToLocalStore else { return nil }
-                bootstrap = (try? await localStore.sessionInit(session, in: scope)) ?? .empty
+                do {
+                    bootstrap = try await localStore.sessionInit(session, in: scope)
+                } catch {
+                    // The fallback failed too. `.empty` here is a decision, not
+                    // an answer from a store: this prompt would otherwise say "no
+                    // memories" on a session whose memory was never read.
+                    reportReadFailure("sessionInit-local", error, in: scope)
+                }
             }
         } else {
-            bootstrap = (try? await localStore.sessionInit(session, in: scope)) ?? .empty
+            do {
+                bootstrap = try await localStore.sessionInit(session, in: scope)
+            } catch {
+                reportReadFailure("sessionInit-local", error, in: scope)
+            }
         }
         // The person's own facts, from the shared workspace, ride along on
         // every project's bootstrap. Bounded small: they are preferences,
@@ -47,8 +58,12 @@ extension MemoryService {
         if let sharedScope = configuration.sharedScope, scope != sharedScope,
             await workspace(for: sharedScope) != nil
         {
-            let shared = await recordedFacts(in: sharedScope, limit: 12)
-            if !shared.isEmpty { bootstrap = bootstrap.withShared(shared) }
+            do {
+                let shared = try await recordedFacts(in: sharedScope, limit: 12)
+                if !shared.isEmpty { bootstrap = bootstrap.withShared(shared) }
+            } catch {
+                reportReadFailure("shared-facts", error, in: sharedScope)
+            }
         }
         let durable = await isDurable(in: scope)
         log(
@@ -198,9 +213,17 @@ extension MemoryService {
     /// Values, not only keys. Shown keys alone, a model re-derived every one
     /// of them from a session that said nothing about them, and wrote "not
     /// specified" over a character's eye colour.
-    public func recordedFacts(in scope: MemoryScope, limit: Int = 60) async -> [MemoryRecord] {
+    ///
+    /// - Throws: whatever the store's read threw. Answering `[]` for that is
+    ///   how a consolidation is told there is nothing on file when the file
+    ///   was simply unreadable, and then re-adds what is already there under
+    ///   new keys. A caller that cannot act on the difference has to say which
+    ///   of the two it got; `reportReadFailure` is for those.
+    public func recordedFacts(in scope: MemoryScope, limit: Int = 60) async throws
+        -> [MemoryRecord]
+    {
         let store = await activeStore(for: scope)
-        return (try? await store.search(MemoryQuery(limit: limit), in: scope)) ?? []
+        return try await store.search(MemoryQuery(limit: limit), in: scope)
     }
 
 }

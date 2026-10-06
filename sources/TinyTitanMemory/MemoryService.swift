@@ -61,6 +61,13 @@ public actor MemoryService {
     /// Workspaces whose journal failure has been logged, so a disk that stays
     /// full produces one line rather than one per tool call.
     var reportedJournalFailures: Set<MemoryScope> = []
+    /// Project files whose failed expiry has been logged, for the same reason:
+    /// retention offers an unexpirable file again on every sweep.
+    var reportedExpiries: Set<String> = []
+    /// Reads whose failure has been reported, keyed by operation and
+    /// workspace, so a store that stays broken produces one line per
+    /// operation rather than one per call.
+    var reportedReadFailures: Set<String> = []
     var log: @Sendable (MemoryLogEvent) -> Void
 
     /// Everything one scope needs, created on first use.
@@ -196,13 +203,23 @@ public actor MemoryService {
         let cutoff = now.addingTimeInterval(-Double(storage.retentionDays) * 86_400)
         let deleted = Set(doomed.map(\.path))
         var expired: [String] = []
+        var refused: [(path: String, file: String, reason: String)] = []
         for candidate in candidates
         where candidate.modified < cutoff && !deleted.contains(candidate.url.path) {
-            if await Self.expireSessionLog(at: candidate.url) {
+            if let reason = await Self.expireSessionLog(at: candidate.url) {
+                refused.append((candidate.url.path, candidate.url.lastPathComponent, reason))
+            } else {
                 expired.append(candidate.url.lastPathComponent)
             }
         }
         if !expired.isEmpty { log(.expired(files: expired)) }
+        // Once per file, on the precedent of `reportedJournalFailures`: a file
+        // that cannot be expired is offered to every later sweep, and one stuck
+        // workspace should not produce a line per sweep. Keyed by path because
+        // project names are only unique inside their directory.
+        for refusal in refused where reportedExpiries.insert(refusal.path).inserted {
+            log(.degraded(operation: "expire", detail: "\(refusal.file): \(refusal.reason)"))
+        }
     }
 
 }

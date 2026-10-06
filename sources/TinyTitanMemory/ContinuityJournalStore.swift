@@ -48,9 +48,16 @@ public actor ContinuityJournalStore: SessionJournal {
         await engine.pruneSessions(taskID: taskID, keeping: limits.sessionsPerWorkspace)
     }
 
-    public func turns(session: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn] {
-        guard let taskID = try? await store.taskID(for: scope),
-            let resolved = await engine.session(externalID: session, taskID: taskID)
+    public func turns(
+        session: String, limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalTurn] {
+        // `taskID` is the one read here that can fail, and it is the whole of
+        // the workspace's identity: without it there is no session to look up
+        // and no turns to return. Swallowed, it answered `[]`, and the
+        // consolidation log said "no new turns" for a journal it could not
+        // read at all.
+        let taskID = try await store.taskID(for: scope)
+        guard let resolved = await engine.session(externalID: session, taskID: taskID)
         else { return [] }
         let all = await engine.turns(taskID: taskID)
         return
@@ -67,8 +74,10 @@ public actor ContinuityJournalStore: SessionJournal {
             .map { $0 }
     }
 
-    public func sessions(limit: Int, in scope: MemoryScope) async -> [JournalSessionSummary] {
-        guard let taskID = try? await store.taskID(for: scope) else { return [] }
+    public func sessions(
+        limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalSessionSummary] {
+        let taskID = try await store.taskID(for: scope)
         let all = await engine.turns(taskID: taskID)
         var bySession: [UUID: [SessionTurn]] = [:]
         for turn in all { bySession[turn.sessionID, default: []].append(turn) }
@@ -88,8 +97,11 @@ public actor ContinuityJournalStore: SessionJournal {
         return summaries.sorted { $0.lastSeen > $1.lastSeen }.prefix(limit).map { $0 }
     }
 
-    public func search(_ text: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn] {
-        guard !text.isEmpty, let taskID = try? await store.taskID(for: scope) else { return [] }
+    public func search(
+        _ text: String, limit: Int, in scope: MemoryScope
+    ) async throws -> [JournalTurn] {
+        guard !text.isEmpty else { return [] }
+        let taskID = try await store.taskID(for: scope)
         let labels = await sessionLabels(taskID: taskID)
         let all = await engine.turns(taskID: taskID)
         var counters: [UUID: Int] = [:]

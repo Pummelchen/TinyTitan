@@ -545,7 +545,7 @@ import TinyTitanMemory
         _ = try await backend.generate(request(prompt), onEvent: { _ in })
 
         let scope = try MemoryScope(namespace: "tinytitan", user: "local", workspace: "repo-a")
-        let turns = await journal.turns(session: "", limit: 10, in: scope)
+        let turns = try await journal.turns(session: "", limit: 10, in: scope)
         let recorded =
             turns.isEmpty
             ? await journal.allTurns(in: scope)

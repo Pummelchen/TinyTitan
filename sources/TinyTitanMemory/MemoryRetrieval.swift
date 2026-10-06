@@ -46,6 +46,14 @@ public struct MemoryRetrievalHint: Sendable, Equatable {
         let recalledKeys = Set(recalled.map(\.key))
         let rest = records.filter { !recalledKeys.contains($0.key) }
         var promoted: [MemoryRecord] = []
+        // One failed fetch here costs one promotion and cannot misinform: the
+        // list that comes back is the token ranking's own, which is exactly what
+        // the caller had before any hint existed, and nothing about the store's
+        // contents is claimed by it. This is the deliberate other half of the
+        // decide-once in AUD-138 — every other swallowed read on this path now
+        // says it could not read, and this one is left silent because the answer
+        // it degrades to is already honest and there is no log at this site to
+        // say it through.
         for key in answered.keys.sorted(by: { $0.rawValue < $1.rawValue })
         where !present.contains(key) {
             guard recalled.count + promoted.count < limit else { break }
@@ -147,6 +155,9 @@ public actor MemoryRetrievalHinter {
     private var queue: [String] = []
     private var background: Task<Void, Never>?
     private var stopped = false
+    /// Scopes whose candidate-pool read has already been reported, so a store
+    /// that stays broken says it once rather than once per question.
+    private var reportedSweepFailures: Set<String> = []
 
     init(
         engine: any MemorySideEngine,
@@ -229,11 +240,28 @@ public actor MemoryRetrievalHinter {
                 continue
             }
             if entry.candidateKeys.isEmpty {
-                let records =
-                    (try? await entry.store.search(
-                        MemoryQuery(limit: Self.coverageLimit), in: entry.scope)) ?? []
-                entry.candidateKeys = records.map(\.key)
-                questions[key] = entry
+                do {
+                    let records = try await entry.store.search(
+                        MemoryQuery(limit: Self.coverageLimit), in: entry.scope)
+                    entry.candidateKeys = records.map(\.key)
+                    questions[key] = entry
+                } catch {
+                    // Said once per scope, and the question is dropped rather
+                    // than left to look like a workspace with nothing in it: a
+                    // silent zero-hint run and an unreadable store produce the
+                    // same queue, and only one of them is fine.
+                    if reportedSweepFailures.insert(entry.scope.workspace).inserted {
+                        log(
+                            .degraded(
+                                operation: "hint-coverage",
+                                detail: "candidate read failed in workspace "
+                                    + "'\(entry.scope.workspace)', no facts were "
+                                    + "judged for this question: \(error)"))
+                    }
+                    queue.removeFirst()
+                    idleWaited = 0
+                    continue
+                }
             }
             while entry.cursor < entry.candidateKeys.count,
                 entry.judged.contains(entry.candidateKeys[entry.cursor])

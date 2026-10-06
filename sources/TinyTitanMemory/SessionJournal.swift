@@ -20,12 +20,17 @@ public protocol SessionJournal: Sendable {
     /// can fail a completion is worse than no journal.
     func record(_ turn: JournalTurn, in scope: MemoryScope) async
     /// Turns for a session, newest first.
-    func turns(session: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn]
+    ///
+    /// Throws, and an empty array therefore means only one thing: that
+    /// session has no turns. A read that could not answer with `[]` is how a
+    /// log line ends up saying "no new turns" about a session whose turns were
+    /// never fetched, which is a different fact and needs a different action.
+    func turns(session: String, limit: Int, in scope: MemoryScope) async throws -> [JournalTurn]
     /// Sessions seen in a workspace, newest first.
-    func sessions(limit: Int, in scope: MemoryScope) async -> [JournalSessionSummary]
+    func sessions(limit: Int, in scope: MemoryScope) async throws -> [JournalSessionSummary]
     /// Turns across sessions whose text matches, newest first. For a person
     /// or a tool asking "when did we last touch this", not for the prompt.
-    func search(_ text: String, limit: Int, in scope: MemoryScope) async -> [JournalTurn]
+    func search(_ text: String, limit: Int, in scope: MemoryScope) async throws -> [JournalTurn]
 }
 
 /// One exchange, as the journal keeps it.

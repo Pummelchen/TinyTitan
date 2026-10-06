@@ -316,7 +316,7 @@ import Testing
         await journal.record(turn(0, prompt: "first", reply: "one"), in: scope)
         await journal.record(turn(1, prompt: "second", reply: "two"), in: scope)
 
-        let stored = await journal.turns(session: "s1", limit: 10, in: scope)
+        let stored = try await journal.turns(session: "s1", limit: 10, in: scope)
         #expect(stored.map(\.prompt) == ["second", "first"])
         #expect(stored.first?.reply == "two")
         #expect(stored.first?.model == "qwen35b")
@@ -332,7 +332,7 @@ import Testing
         await journal.record(turn(0, session: "s2", prompt: "b", reply: "2"), in: scope)
         await journal.record(turn(1, session: "s2", prompt: "c", reply: "3"), in: scope)
 
-        let summaries = await journal.sessions(limit: 10, in: scope)
+        let summaries = try await journal.sessions(limit: 10, in: scope)
         #expect(Set(summaries.map(\.session)) == ["s1", "s2"])
         let second = try #require(summaries.first { $0.session == "s2" })
         #expect(second.turnCount == 2)
@@ -351,10 +351,10 @@ import Testing
                 0, session: "s2", prompt: "about colour",
                 reply: "warm palette"), in: scope)
 
-        let hits = await journal.search("SYNC", limit: 10, in: scope)
+        let hits = try await journal.search("SYNC", limit: 10, in: scope)
         #expect(hits.count == 1)
         #expect(hits.first?.session == "s1")
-        #expect(await journal.search("kubernetes", limit: 10, in: scope).isEmpty)
+        #expect(try await journal.search("kubernetes", limit: 10, in: scope).isEmpty)
     }
 
     /// The two stores describe one session, not two that share a name. A
@@ -370,7 +370,7 @@ import Testing
             turn(0, session: "shared", prompt: "hello", reply: "hi"),
             in: scope)
 
-        let summaries = await journal.sessions(limit: 10, in: scope)
+        let summaries = try await journal.sessions(limit: 10, in: scope)
         #expect(summaries.count == 1)
         #expect(summaries.first?.session == "shared")
         #expect(summaries.first?.turnCount == 1)
@@ -388,7 +388,7 @@ import Testing
                 turn(index, prompt: "ask \(index)", reply: "reply \(index)"),
                 in: scope)
         }
-        let stored = await journal.turns(session: "s1", limit: 50, in: scope)
+        let stored = try await journal.turns(session: "s1", limit: 50, in: scope)
         #expect(stored.count == 3)
         // The newest survive, which is the only useful direction to trim.
         #expect(stored.first?.prompt == "ask 9")
@@ -487,9 +487,9 @@ import Testing
         #expect(await service.isDurable)
         let journal = try #require(await service.journalStore())
         let scope = try #require(configuration.scope())
-        let sessions = await journal.sessions(limit: 10, in: scope)
+        let sessions = try await journal.sessions(limit: 10, in: scope)
         #expect(sessions.contains { $0.session == "s1" })
-        let turns = await journal.turns(session: "s1", limit: 10, in: scope)
+        let turns = try await journal.turns(session: "s1", limit: 10, in: scope)
         #expect(turns.first?.prompt == "write pong in swift")
         #expect(turns.first?.completionTokens == 40)
     }

@@ -24,11 +24,18 @@ extension MemoryService {
     static func isLockHeld(at journalURL: URL) -> Bool {
         let descriptor = open(
             journalURL.appendingPathExtension("lock").path,
-            O_RDWR | O_CLOEXEC)
+            O_RDWR | O_NOFOLLOW | O_CLOEXEC)
         if descriptor < 0 {
             // No lock file at all means no journal has opened this workspace, so
             // there is nothing that could be holding it. Any other errno is not
             // ours to read in favour of deleting.
+            //
+            // O_NOFOLLOW is part of that "any other errno", not an extra: a link
+            // planted at the lock path would otherwise be locked *instead of* the
+            // real anchor, this would answer "not held", and the retention pass
+            // would delete a journal another process is appending to -- exactly
+            // the data loss the comment above exists to prevent. ELOOP is a
+            // failure to probe, so it counts as held.
             return errno != ENOENT
         }
         defer { close(descriptor) }
@@ -63,20 +70,40 @@ extension MemoryService {
     /// Opens it with the ordinary engine, which takes the workspace lock, so
     /// a file another server holds is left alone. Every session is pruned
     /// and the journal compacted; the facts, their history and the task
-    /// survive. Returns false when the file could not be opened.
-    static func expireSessionLog(at url: URL) async -> Bool {
-        guard let journal = try? FileJournal(url: url) else { return false }
+    /// survive.
+    ///
+    /// - Returns: `nil` when the file was rewritten, otherwise the reason it
+    ///   was not, for the caller to log. Every step's failure is a return,
+    ///   including the compaction: wrapping it in `try?` and answering `true`
+    ///   anyway reported a file whose session log was still on disk in full as
+    ///   expired, which is the one outcome the retention pass must not claim —
+    ///   the disk it exists to reclaim keeps growing and the log says nothing
+    ///   about why.
+    static func expireSessionLog(at url: URL) async -> String? {
+        let journal: FileJournal
+        do {
+            journal = try FileJournal(url: url)
+        } catch {
+            return "could not be opened (\(error))"
+        }
         let engine = ContinuityEngine(journal: journal)
-        do { try await engine.start() } catch {
+        do {
+            try await engine.start()
+        } catch {
             await engine.shutDown()
-            return false
+            return "could not be replayed (\(error))"
         }
         for task in await engine.tasks() {
             await engine.pruneSessions(taskID: task.id, keeping: 0)
         }
-        try? await engine.compactJournal()
+        do {
+            try await engine.compactJournal()
+        } catch {
+            await engine.shutDown()
+            return "compaction failed (\(error))"
+        }
         await engine.shutDown()
-        return true
+        return nil
     }
 
     /// Close every workspace, flushing and releasing the workspace locks.
@@ -95,6 +122,8 @@ extension MemoryService {
         workspaces.removeAll()
         lastUsed.removeAll()
         reportedJournalFailures.removeAll()
+        reportedExpiries.removeAll()
+        reportedReadFailures.removeAll()
         // The side-engine is a second resident model, so it is released on the
         // same shutdown that releases the stores rather than at process exit.
         await sideEngine?.shutdown()
@@ -133,6 +162,32 @@ extension MemoryService {
             log(.degraded(operation: "journal", detail: failure))
         }
         return true
+    }
+
+    /// A memory *read* that threw, said once per operation and workspace.
+    ///
+    /// This is `journalFailed(in:)` for the read side, and it exists because
+    /// an empty answer and a failed read are not the same answer. A caller
+    /// that swallows the throw into `[]` or `.empty` reports "this session has
+    /// no memories", "this workspace has no facts on file", "there were no new
+    /// turns" — each of which sends someone off to act on evidence that was
+    /// never gathered. Sites that still have to produce a value call this with
+    /// what they are about to return, so the log says which of the two it was;
+    /// sites that can propagate instead do, and this is for the rest.
+    ///
+    /// Deliberately does not set `isDegraded`: that flag means *writes are not
+    /// reaching storage* and makes the prompt say so. A read that failed says
+    /// nothing about a write, and claiming it did would tell the model its
+    /// memory is not being saved when it is.
+    func reportReadFailure(_ operation: String, _ error: Error, in scope: MemoryScope) {
+        guard reportedReadFailures.insert("\(operation)@\(scope.workspace)").inserted else {
+            return
+        }
+        log(
+            .degraded(
+                operation: operation,
+                detail: "read failed in workspace '\(scope.workspace)', "
+                    + "answering as unknown: \(error)"))
     }
 
     /// Whether the configuration's own scope is persisting.
