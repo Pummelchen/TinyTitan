@@ -1,0 +1,44 @@
+# Advisory coverage for every dependency this repository builds against.
+#
+# Until now the two script languages had a scanner (pip-audit and `npm audit` run
+# in the lint job) and Swift had none: `Package.resolved` carries exact pins,
+# which is reproducibility, not a check that a pinned version has a published CVE.
+# The GitHub Advisory Database does cover SwiftPM — the dependency graph reads
+# `Package.resolved` — so the missing piece was this file, not a feed. Enabling it
+# needs nothing further here: the repository is public and Dependabot security
+# updates are already switched on in its settings.
+#
+# `version-updates` are deliberately off (an unreviewed bump is a numerics change
+# waiting to happen, and every gate here is measured on the pin it names) except
+# for GitHub Actions, where the pins are SHA-pinned and a bump is a supply-chain
+# event that *should* arrive as a PR rather than as a silent drift.
+version: 2
+updates:
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: npm
+    directory: /plugins/dsh-tinytitan
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: npm
+    directory: /plugins/dsh-lan-manager
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: pip
+    directory: /benchmark
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
