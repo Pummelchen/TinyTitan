@@ -25,6 +25,12 @@
 #
 # Opting out of arch-path: `lint:allow-arch-path <reason>` on the line above,
 # for a deliberate compatibility fallback rather than a build path.
+#
+# Opting out of the converter check: `ALLOW_MISSING_CONVERTER_DEPS=1`. The gate
+# fails when python3 or the converter's three pinned dependencies are absent,
+# because a check that does not run must not read as a pass; the variable is the
+# documented way to say "this machine cannot install them", and it prints the
+# skip instead of quieting it.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -301,23 +307,47 @@ check_unchecked_sendable() {
 # match the checkpoint, the shapes are right, `validateRoleUniformity` passes,
 # the receipt verifies, and the model answers fluently from the wrong experts.
 # It has to be caught here, because no Swift test can see a converter bug.
+#
+# Fails closed. The probe imports `numpy` and the converter module, so a machine
+# without them used to print "SKIP: ... (converter deps unavailable)" and exit 0
+# — which is the exact shape of the defect this gate hunts: everything reads
+# green while nothing was checked. Missing dependencies now name the install
+# command, the way the javascript gate names `npm ci`.
+#
+# Opting out: `ALLOW_MISSING_CONVERTER_DEPS=1 tools/lint.sh` for a run that
+# cannot install them (a machine with no numpy for the width this check needs).
+# The skip is then printed as a skip, loudly, and is the only case in which this
+# gate goes quiet without running the probe.
 check_converter_expert_order() {
   echo "== converter-expert-order: experts file at their own index =="
-  if ! command -v python3 >/dev/null 2>&1 && ! command -v python3.13 >/dev/null 2>&1; then
-    echo "  SKIP: no python3 available to run the converter check"
+  local py
+  py="$(command -v python3.13 || command -v python3)"
+  if [ -z "$py" ]; then
+    if [ "${ALLOW_MISSING_CONVERTER_DEPS:-0}" = "1" ]; then
+      echo "  SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: no python3, the probe did not run"
+      return
+    fi
+    echo "  FAIL: no python3 on PATH; the converter check cannot run"
+    status=1
     return
   fi
-  local py out rc
-  py="$(command -v python3.13 || command -v python3)"
+  local out rc
   out="$("$py" - <<'PY' 2>&1
+import os
 import sys
 sys.path.insert(0, "tools")
 try:
     import numpy as np
     import prepare_agentworld as P
 except ImportError as exc:
-    print("SKIP: {} (converter deps unavailable)".format(exc))
-    sys.exit(0)
+    # 3 is the documented "missing dependency" exit; any other non-zero code is
+    # a genuine failure of the probe.
+    if os.environ.get("ALLOW_MISSING_CONVERTER_DEPS") == "1":
+        print("SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1: {} — the probe did not run".format(exc))
+        sys.exit(0)
+    print("FAIL: converter deps unavailable ({}); run: python3 -m pip install -r "
+          "benchmark/requirements.txt".format(exc))
+    sys.exit(3)
 
 class W:
     def __init__(self): self.added = {}

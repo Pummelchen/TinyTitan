@@ -158,7 +158,13 @@ What the dry run does, in order:
 2. **Gates** — `tools/lint.sh`; `swift test --no-parallel`, which must print
    `Test run with N tests in M suites passed`; then **every installed model that
    has a golden target** (`benchmark/golden/`), each through
-   `tools/golden-baseline.sh --check <target>`.
+   `tools/golden-baseline.sh --check <target>`. The gates need their pinned
+   toolchains on the machine (the plugin packages' `npm ci`, and
+   `python3 -m pip install -r benchmark/requirements.txt` for the converter
+   probe): a gate whose dependency is absent **fails**, because a check that
+   could not run is not a pass. Install it, do not opt out of it —
+   `ALLOW_MISSING_CONVERTER_DEPS=1` exists for a machine that genuinely cannot,
+   and the release notes must then say the converter gate was skipped.
 3. **A clean scratch build** — `swift build -c release --scratch-path
    .build/releases/.../build`, with the log scanned for compiler warnings. It is
    deliberately not an incremental build: an incremental one compiles nothing

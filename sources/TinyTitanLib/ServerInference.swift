@@ -174,7 +174,7 @@ package protocol ServerInferenceBackend: Sendable {
 
 extension ServerInferenceBackend {
     package var maximumContext: Int {
-        RuntimeConfiguration.supportedContextTokens.max() ?? 262_144
+        RuntimeConfiguration.nativeMaximumContextTokens
     }
     package var samplingDefaults: GenerationDefaults.Sampling { GenerationDefaults.house }
 }

@@ -20,6 +20,55 @@ struct OpenAIValidationTests {
         #expect(validated.generationConfig.presencePenalty == 0)
     }
 
+    /// A caller that names no context window gets the native maximum, not the
+    /// YaRN one and not a number typed in beside it.
+    ///
+    /// Both defaults are here because a request is capped by the validator's
+    /// parameter while the window a backend reports comes from the protocol
+    /// extension, and the two have to agree: they are the same ceiling for the
+    /// same reason -- a backend with no model card to ask, and a caller that
+    /// has not asked one.
+    @Test func theDefaultCeilingIsTheNativeMaximum() throws {
+        struct BackendWithoutACard: ServerInferenceBackend {
+            func generate(
+                _ request: ValidatedChatRequest,
+                onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
+            ) async throws -> ServerCompletion {
+                throw ServerRequestError.unsupportedOperation("stub")
+            }
+        }
+
+        #expect(
+            BackendWithoutACard().maximumContext
+                == RuntimeConfiguration.nativeMaximumContextTokens)
+        // The ceiling itself, and that it is not the wider YaRN one.
+        #expect(RuntimeConfiguration.nativeMaximumContextTokens == 262_144)
+        #expect(
+            RuntimeConfiguration.nativeMaximumContextTokens
+                < RuntimeConfiguration.maximumContextTokens)
+
+        func chat(maxTokens: Int) throws -> OpenAIChatRequest {
+            try JSONDecoder().decode(
+                OpenAIChatRequest.self,
+                from: Data(
+                    #"{"model":"m","messages":[{"role":"user","content":"x"}],"max_tokens":\#(maxTokens)}"#
+                        .utf8))
+        }
+
+        let atTheCeiling = try chat(
+            maxTokens: RuntimeConfiguration.nativeMaximumContextTokens)
+        let validated = try OpenAIRequestValidator.validate(atTheCeiling, modelID: "m")
+        #expect(
+            validated.maximumCompletionTokens
+                == RuntimeConfiguration.nativeMaximumContextTokens)
+
+        let pastIt = try chat(
+            maxTokens: RuntimeConfiguration.nativeMaximumContextTokens + 1)
+        #expect(throws: ServerRequestError.self) {
+            try OpenAIRequestValidator.validate(pastIt, modelID: "m")
+        }
+    }
+
     @Test func qwen38SelectsItsSamplingRowFromTheThinkingMode() throws {
         let data = Data(#"{"model":"m","messages":[{"role":"user","content":"x"}]}"#.utf8)
         let request = try JSONDecoder().decode(OpenAIChatRequest.self, from: data)

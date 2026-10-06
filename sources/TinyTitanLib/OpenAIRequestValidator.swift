@@ -29,8 +29,7 @@ package enum OpenAIRequestValidator {
     package static func validate(
         _ request: OpenAIChatRequest,
         modelID: String,
-        maxContext: Int = RuntimeConfiguration
-            .supportedContextTokens.max() ?? 262_144,
+        maxContext: Int = RuntimeConfiguration.nativeMaximumContextTokens,
         reasoningProfile: ServerReasoningProfile = .default,
         // Filled in for a request that omits the value.
         // Defaults to the house settings so callers that

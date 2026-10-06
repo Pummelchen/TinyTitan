@@ -260,7 +260,10 @@ linters:
 - `unchecked-sendable` — every `@unchecked Sendable` carries an
   `unchecked-invariant:` note.
 - `converter` — a probe that files routed experts by index rather than arrival
-  order.
+  order. It needs `numpy` and the converter module, and **fails** when either is
+  missing rather than reporting a skip: a gate that did not run reading as a pass
+  is the exact defect it hunts. `ALLOW_MISSING_CONVERTER_DEPS=1` is the documented
+  opt-out, and it prints a skip line instead of silence.
 - `arch-path` — no hardcoded SwiftPM target triple in a build path, which points
   at nothing on a newer toolchain or at a stale binary on this one.
 - `shell-portability` — every shell script parses and runs under `/bin/bash`,
@@ -286,7 +289,11 @@ linters:
 In a fresh checkout the `javascript` check needs the plugin packages'
 dependencies first — `npm ci` in `plugins/dsh-lan-manager/` and
 `plugins/dsh-tinytitan/` (all CI installs before the gate); without it the check
-fails with that command in its message and the other ten still run.
+fails with that command in its message and the other ten still run. The
+`converter` check is the same kind of dependency: it needs `numpy` and the
+converter module, so `python3 -m pip install -r benchmark/requirements.txt`
+first (CI installs those pins in the lint job too), and it fails with that
+command in its message rather than skipping.
 
 `tools/golden-baseline.sh --check <target>` compares greedy, fixed-seed generation
 against `benchmark/golden/`. It is the only check that exercises real inference, so
@@ -296,9 +303,11 @@ Ornith 1.5 4-bit. It counts as a model run: apply the preconditions above first.
 baseline is valid for one (machine, build, model) triple; re-capture only for a
 deliberate numerics change, never to make a mismatch go away.
 
-The converter's gate is two python suites, run together:
+The converter's gate is three python suites, run together — the same three CI
+runs:
 
-    cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e
+    cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
+      test_prepare_agentworld
 
 `test_prepare_qwen38` pins the pieces (shard validation, the constants gate, the
 retry loop) in a second. `test_qwen38_resume_e2e` runs `main()` end to end against a
@@ -306,10 +315,13 @@ synthetic checkpoint served from 127.0.0.1 — real `curl` downloads into a scra
 directory with transfers dropped, truncated, stalled, 404'd and range-refused, a real
 `SIGKILL` mid-conversion, a truncated adopted shard, a table reused in place or
 copied across a mounted disk image — and asserts that every recovery ends with the
-same snapshot a clean run produces. It never fetches a real shard, so it is safe in
-CI and takes about half a minute. Run both after any change to the converter, the
-resume path, the n-gram table or the download loop; CI runs them too, in a venv
-because the runner does not carry `numpy`, `safetensors` or `ml_dtypes`.
+same snapshot a clean run produces. `test_prepare_agentworld` covers the
+Qwen3.5-MoE per-expert fusion at both widths from a synthetic in-memory shard
+(issue #19). None fetches a real shard, so they are safe in CI and take about half a
+minute. Run all three after any change to the converter, the resume path, the n-gram
+table or the download loop; they need `numpy`, `safetensors` and `ml_dtypes`, which
+`benchmark/requirements.txt` pins and the runner does not carry — CI installs them
+into a venv first.
 
 **Verification uses only the models already installed under `models/`.** `models/`
 is deliberately kept smaller than the full supported set to save disk, so a golden

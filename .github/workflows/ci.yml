@@ -41,6 +41,15 @@ jobs:
         run: |
           python3 -m pip install --user --disable-pip-version-check --quiet ruff==0.16.7
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+      - name: Install the converter's pinned dependencies
+        # `tools/lint.sh`'s converter gate probes the expert-fusion path in
+        # `tools/prepare_agentworld.py`, and FAILS rather than skipping when
+        # `numpy` or the module is missing: a check that did not run must not
+        # read as a pass. The same pins the converter suites use, from the same
+        # file, so the probe and the gates below run the same code paths.
+        run: |
+          python3 -m pip install --user --disable-pip-version-check --quiet \
+            -r benchmark/requirements.txt
       - name: Install the pinned shell linter
         # `tools/lint.sh`'s shellcheck gate pins 0.11.0 and fails when another
         # version is present; Homebrew cannot pin, so the release binary is

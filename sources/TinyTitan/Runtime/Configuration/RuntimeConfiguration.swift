@@ -4,6 +4,13 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     public static let supportedContextTokens = [
         4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144,
     ]
+    /// The ceiling for a backend that has no model card to ask, so it is what
+    /// a request's `max_context` defaults to. Equal to
+    /// `supportedContextTokens.last` by declaration, pinned by
+    /// `RuntimeConfigurationTests.publicContextChoicesReachQwenMaximum` --
+    /// which is why the sites that want it name this rather than taking
+    /// `.max()` of the list and inventing a fallback for a branch that cannot
+    /// happen.
     public static let nativeMaximumContextTokens = 262_144
     public static let supportedYaRNContextTokens = [524_288, 1_048_576]
     public static let defaultYaRNContextTokens = 1_048_576
