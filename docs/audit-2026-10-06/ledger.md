@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:13  Done:33  Blocked:1  Total:47**
+**Open:14  Done:34  Blocked:1  Total:49**
 
 ## Table
 
@@ -23,7 +23,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
-| AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
 | AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
@@ -44,12 +43,15 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143 (+3 siblings)` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | DONE | Mac (primary) |
 | AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
+| AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | DONE | Mac (primary) |
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-146 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
+| AUD-147 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:61-87` | readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist | single-layer CSRF defence recorded as two-layer | OPEN | Mac (primary) |
+| AUD-148 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:244` | isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape | trust boundary decided by an attacker-supplied header pair | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
@@ -300,20 +302,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** §5 facade sweep
 
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported at route.js:45-46/:99-100 and generate.js:193-194, with the shell branch (route.js:66-72) said to forward neither --context nor --max-tokens.
-
-**Evidence after.** None yet.
-
-### AUD-132 — The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** fleet
-- **Location:** `plugins/dsh-lan-manager/src/router.js:186-192`
-- **Category:** CSRF guard with an absent-header hole
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `if (origin && !isAllowedOrigin(...))`. Two mitigating facts to confirm before scoping the fix: the harness binds loopback only, and the JSON routes require content-type: application/json, which a cross-origin simple form POST cannot set.
 
 **Evidence after.** None yet.
 
@@ -671,6 +659,22 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `this commit`
 
+### AUD-132 — The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:186-192`
+- **Category:** CSRF guard with an absent-header hole
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `if (origin && !isAllowedOrigin(...))`. Two mitigating facts to confirm before scoping the fix: the harness binds loopback only, and the JSON routes require content-type: application/json, which a cross-origin simple form POST cannot set.
+
+**Fix.** True as reported, and not a defect. `router.js:187` is `if (origin && !isAllowedOrigin(origin, req.headers.host, config))`, so a mutating request with no Origin is not refused -- but a browser sends Origin on every POST (same-origin, cross-origin and plain <form> submissions all carry it), so no browser request reaches these routes without the header, and the callers that do arrive header-less are programs. The plugin's own client is one: `sources/TinyTitanFleet/Core/FleetClient.swift:198` posts through URLSession, which sets no Origin. Both of the row's assumed mitigations were then checked rather than trusted: the loopback claim is TRUE (index.js:231-233 records that the harness webserver accepts only 127.0.0.1 or 0.0.0.0 and refuses 0.0.0.0, so nothing listens on the LAN address the plugin advertises), and the content-type claim is FALSE -- readJsonBody (router.js:61) parses any body as JSON and never inspects content-type. So the fix is the reasoning plus the proof, not a new refusal: the Guard 3 comment now names the browser behaviour, the CLI that depends on it, and the guards that authorise a non-browser caller (source address, token); a new test pins three halves of that contract in one request shape -- bodyless POST /sessions/:id/archive with no Origin returns 200 ok, the same request from 203.0.113.9 is 403 source-not-allowed, and with a token configured it is 401 without the token and 200 with it. The content-type silence and the origin==host equality became their own rows, AUD-147 and AUD-148, because neither is what this row reported.
+
+**Evidence after.** Measured, and it is the measurement that decides. Mutating the guard to require the header (`!isAllowedOrigin(origin ?? "", ...)`) fails 19 of 108 tests in `npm test` -- every POST in the package, because every one of them legitimately sends no Origin -- so the fix the row implies would break the sanctioned client and close no browser path. Turning the guard into a wall (`true || ...`) fails 12 including the new test, so the new test is load-bearing rather than decorative. Both mutations restored, and `git diff` on router.js shows only the comment. `npm test` in plugins/dsh-lan-manager: 108 pass, 0 fail. router.test.js goes 41 -> 42 tests (the commit message says '105 before', which is wrong; the checked numbers are these: 108 after, 107 before, one test added). All twelve `tools/lint.sh` gates exit 0, including eslint 10.11.0 and prettier 3.9.9 over this package. No model run and nothing fetched. Commit 88472d2.
+
 ### AUD-134 — Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing'
 
 - **Severity / tier:** S2 / Tier A
@@ -769,6 +773,34 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** AUD-127 sibling audit
 
 **Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
+
+**Evidence after.** None yet.
+
+### AUD-147 — readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:61-87`
+- **Category:** single-layer CSRF defence recorded as two-layer
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-132 verification (the row's own 'mitigating facts', checked)
+
+**Evidence before.** AUD-132's note claimed the JSON routes require `content-type: application/json`, which a cross-origin simple form POST cannot set. Read the function: readJsonBody (router.js:61) collects bytes under the cap and calls JSON.parse on whatever arrives, with no header check on any path, so `enctype="text/plain"` -- one of the three content types a browser form may send without a preflight -- carries a valid JSON object straight through. No browser hole is open today, because such a POST always carries Origin and Guard 3 refuses a foreign one; the defect is that the defence is single-layer while the tree believes it is two, and any future change that loosens Guard 3 (`config.enforceOrigin !== false` is a documented off switch) silently removes the only check. Both real senders already set the header -- FleetClient.swift:89 sets `application/json` for every body it writes -- so requiring it costs no client. Decide, do not assume: whether to refuse a bodied request whose content-type is not JSON, and whether the plugin's own served UI posts through a path that sets it (plugins/dsh-lan-manager has no web/ assets; the page is served by the harness bundle, so the answer must be read there before the rule is written).
+
+**Evidence after.** None yet.
+
+### AUD-148 — isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/router.js:244`
+- **Category:** trust boundary decided by an attacker-supplied header pair
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-132 sibling audit
+
+**Evidence before.** `if (host && parsed.host === host) return true;` compares the Origin against the request's own Host header, so equality is granted by the attacker's naming, not by anything the server knows. A page served from an attacker domain that resolves to 127.0.0.1 (a TTL-0 record, the classic rebinding) and reaches the harness on its own port sends Origin: http://attacker.example:<port> with Host: attacker.example:<port> -- equal, so allowed, and the mutating routes are open to it. Two facts narrow it and belong in the row: it needs the attacker's page served on the *same port* the harness listens on, and a shared token (Guard 2) defeats it outright -- but the token is opt-in, `config.token` empty means Guard 2 is skipped entirely (router.js:172). The shape of the fix is a Host allowlist the server knows (127.0.0.1, localhost, ::1, and the host's own configured base path authority) instead of an origin-equals-host equality, and the decision belongs with AUD-147, since both change the same guard. Not verified live: no rebinding harness was run here; the claim is read from the code and is stated as such.
 
 **Evidence after.** None yet.
 
