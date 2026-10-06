@@ -106,7 +106,7 @@ jobs:
             grep -E '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' /tmp/build.log
             exit 1
           fi
-      - name: Production gates (all fourteen)
+      - name: Production gates (all fifteen)
         # Checks the compiler cannot express. Runs before the suite so a style
         # regression fails in seconds rather than after a full test run.
         run: tools/lint.sh

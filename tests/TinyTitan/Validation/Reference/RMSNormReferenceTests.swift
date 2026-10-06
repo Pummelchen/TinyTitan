@@ -9,11 +9,20 @@ import TinyTitanValidationSupport
 ///
 /// The scalar formulation shares no code path with Accelerate. Both must
 /// agree to `Tolerance.identity`.
+///
+/// Mismatched `x`/`weight` lengths are a caller bug and both formulations
+/// trap on them. A trap cannot be observed from a test body — it ends the
+/// process, and Swift Testing has no way to catch it — so the contract is
+/// written down here rather than asserted by a test that cannot fail.
 @Suite struct RMSNormReferenceTests {
 
     /// Independent scalar reference. Different summation order than both
     /// the kernel and the Accelerate reference.
     private static func scalarRef(x: [Float], weight: [Float], eps: Float) -> [Float] {
+        // `zip` would silently truncate to the shorter input, so the
+        // comparator used to disagree with the function it validates about
+        // what a mismatch means. Same contract, same trap.
+        precondition(x.count == weight.count, "x and weight must match length")
         let d = x.count
         var sumSq: Float = 0
         for v in x { sumSq += v * v }
@@ -52,10 +61,10 @@ import TinyTitanValidationSupport
         for v in y { #expect(v.isFinite) }
     }
 
-    @Test("Reference rejects mismatched lengths")
-    func mismatchedLengthsTrap() async {
-        // Documentation-only: this would precondition-fail. We can't catch
-        // preconditions in Swift Testing, but we record the contract here.
-        _ = (RmsNormRef.apply, "precondition on x.count == weight.count")
+    @Test("The empty input returns no output, not a crash")
+    func emptyInput() {
+        // `apply` has an explicit guard here: it used to reach a force-unwrap
+        // on a zero-count buffer's base address.
+        #expect(RmsNormRef.apply(x: [], weight: [], eps: 1e-6).isEmpty)
     }
 }

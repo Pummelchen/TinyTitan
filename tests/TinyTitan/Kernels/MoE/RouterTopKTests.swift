@@ -222,7 +222,10 @@ import TinyTitanValidationSupport
         // kMaxStreamedExperts is 16 in moe.metal; 10 must fit, and the
         // constructor must accept it now that the k8 gate is lifted.
         let context = try MetalContext()
-        _ = try MoE(context: context, topKExperts: 10)
+        let moe = try MoE(context: context, topKExperts: 10)
+        // Discarding the runner asserted only that construction did not throw.
+        // The claim is that the runner carries the k that was asked for.
+        #expect(moe.maxStreamedExperts == 10)
     }
 
     @Test("The argument buffer's slot bound covers both shipping top-k values")
@@ -231,7 +234,9 @@ import TinyTitanValidationSupport
         // anything larger is refused by a precondition, which traps rather
         // than throwing and so cannot be exercised from here.
         let context = try MetalContext()
-        _ = try MoE(context: context, topKExperts: 8)  // Qwen 3.6, Ornith
-        _ = try MoE(context: context, topKExperts: 16)  // the bound itself
+        let eight = try MoE(context: context, topKExperts: 8)  // Qwen 3.6, Ornith
+        let sixteen = try MoE(context: context, topKExperts: 16)  // the bound itself
+        #expect(eight.maxStreamedExperts == 8)
+        #expect(sixteen.maxStreamedExperts == 16)
     }
 }

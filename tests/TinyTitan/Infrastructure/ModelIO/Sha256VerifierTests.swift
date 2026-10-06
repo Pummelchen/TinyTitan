@@ -29,14 +29,19 @@ import Testing
         #expect(small == big, "chunk size must not affect digest")
     }
 
+    /// The expected digest is pinned from outside the implementation: feeding
+    /// `verifyFile` whatever `hashFile` just returned would pass for any
+    /// deterministic wrong digest, because both sides would agree with each
+    /// other and with nothing else.
     @Test func verifyMatches() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ssdai-sha-match-\(UUID().uuidString).bin")
         let payload = Data("hello world".utf8)
         try payload.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
-        let hex = try Sha256Verifier.hashFile(at: url)
-        try Sha256Verifier.verifyFile(at: url, named: "hello", expectedHex: hex)
+        let published = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        #expect(try Sha256Verifier.hashFile(at: url) == published)
+        try Sha256Verifier.verifyFile(at: url, named: "hello", expectedHex: published)
     }
 
     @Test func verifyMismatchThrowsChecksumMismatch() throws {

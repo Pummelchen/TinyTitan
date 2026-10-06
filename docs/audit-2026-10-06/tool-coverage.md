@@ -174,15 +174,16 @@ run directory with a naive local stamp, and no rule sees it.
 
 ## Repository gate proofs
 
-Each of the fourteen checks in `tools/lint.sh` was given a deliberate violation and run as
+Each of the fifteen checks in `tools/lint.sh` was given a deliberate violation and run as
 `tools/lint.sh <mode>`; the exit code is the gate's own, captured without a pipe so a
 `FAIL` line cannot be reported beside a zero status. The baseline run of the first eleven
 on a clean tree is green (`/tmp/tt-audit/lint-baseline.log`: 2,091 functions scanned, 24
 scripts, eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7 clean).
 `test-skip` is the twelfth, added when AUD-127 closed, and `unbounded-read` the thirteenth,
 added when AUD-142 closed; `file-length` is the fourteenth, added when AUD-151 closed, and
-it is the only one of the fourteen whose probe must run in a copied tree — see the note
-under the table. Each has its own probe row below.
+`test-hollow` the fifteenth, added when AUD-128 closed. Those last two are the only ones
+whose probe must run in a copied tree — see the note under the table. Each has its own row
+below.
 
 | Gate | Violation introduced | Gate result |
 | --- | --- | --- |
@@ -193,6 +194,7 @@ under the table. Each has its own probe row below.
 | `converter` | `stack[expert] = piece` changed to `stack[len(target["experts"])] = piece`, i.e. file by arrival order | exit 1, `experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]` — the gate catches the real defect, not a proxy |
 | `arch-path` | `BIN=".build/arm64-apple-macosx26.0/release/TinyTitanCLI"` in a `tools/` script | exit 1, file and line named |
 | `test-skip` | (a) a temporary `tests/` suite whose `@Test` body opens `guard let path, FileManager…fileExists(atPath: path) else { return }` on an environment variable; (b) the tree as it stood with three sites already gated | (a) exit 1 naming `tests/TinyTitanServer/GateProbeTmp.swift:9`, and exit 0 once the probe file is deleted. (b) exit 1 naming one site the grep sweep had classed as a manual helper and not a defect — `ClientCLITests:170`, the stub server, which is the same early return and is now gated too. The gate was written after the three swept sites were fixed, so it is proved against the probe and that one live find, not re-run over the whole unfixed tree |
+| `test-hollow` | seven arms in a copied tree (`/tmp/th-gate`, `tools/lint.sh` + `tests/` only), all in one probe file: (1) a body whose only statement is `_ = (SomeFunction, "a string")`; (2) a body whose only `#expect` is inside a `//` comment; (3) a body holding `{`/`}` and the words `@Test func`/`#expect` inside a `"…"` and a `#"{…}"#` raw string; (4) a body that asserts only through a same-file helper; (5) a body whose only assertion is `try`; (6) arm 1 with `lint:allow-hollow-test <reason>` above the `@Test`; (7) a normal asserting test placed *after* arm 3 | (1)(2)(3) exit 1, each named with file, line and test name — so the comment and the strings are not read as assertions; (4)(5)(6) are not flagged, which is the rule as written (a throwing body fails when it throws, and a helper's `#expect` is a real assertion reached by the call); (7) still scanned and passing proves arm 3's braces did not derail the match. Then the tree as it stood *before* the fix: with `HEAD`'s `RMSNormReferenceTests.swift` copied in, exit 1 naming `mismatchedLengthsTrap` at line 55 — the gate bites on the audited defect itself, not a proxy. Guards: with `tests/` moved away, exit 1 `found no @Test bodies`; with a `python3` that exits 3 first on `PATH`, exit 1 `the hollow-body counter exited 3; it measured nothing`. Clean run prints `ok (1630 test bodies scanned, none hollow)` in 2.4 s |
 | `unbounded-read` | a temporary `sources/` file holding `try Data(contentsOf: url)` (a) with no comment above it and (b) with `// lint:allow-unbounded-read` and no reason | (a) exit 1, `sources/TinyTitan/Infrastructure/ModelIO/UnboundedProbe.swift:2` named; (b) exit 1 again — the marker without a reason fails like no marker at all; (c) the same probe with `lint:allow-unbounded-read <reason>` on the line directly above → exit 0, and exit 0 once the probe file is deleted. On the tree as it stands the gate is clean with 7 exemptions, and it found those 7 the first time it ran: the two `RemoteSnapshotLoader` temp reads (a range this process requested), the two `MetalContext` shader reads (a resource the package ships), the one `AffineSnapshot` `.alwaysMapped` weights map, and the two `CPUQwenCommands` benchmark inputs. Doc comments that merely *name* `Data(contentsOf:)` are not flagged — 3 of the 10 matches on the current tree are prose, and before the row was fixed the ratio was worse, because every reader this audit converted left its explanation behind. |
 | `shell` (portability) | `mapfile -t lines …` and a bare `"${args[@]}"` under `set -u` | exit 1, both classes named separately |
 | `shellcheck` | unquoted `cd $1` and an unquoted array expansion | exit 1, `SC2068` (error) and `SC2164` (warning) |
@@ -231,3 +233,21 @@ are traps for whoever probes a gate here next:
   that passes without asserting`) were filed for. The counter now
   always exits 0 when it completed and the shell decides the verdict from an `OVER` line,
   so a non-zero status can only mean "this did not run"; arm (e) above pins it.
+
+One more, from the `test-hollow` proof added on 2026-10-07, and it is the rule rather
+than a trap:
+
+- **The sweep's count and the gate's count are different measurements, and the difference
+  is the design.** A first pass over `tests/` flagged 83 of 1,630 `@Test` bodies for holding
+  no assertion token. Read one by one, 51 of them assert through a helper in the same file
+  (`check("fresh")`, `verify(...)`) whose own body carries the `#expect`, and 30 assert only
+  that a call does not throw — which in Swift Testing *is* an assertion, because a body that
+  throws fails the test. Both classes are named for what they check ("a uniform role
+  override is accepted", "the fused read kernel builds"), so the gate accepts them, and the
+  rule had to be written helper-aware or it would have failed the tree over fifty bodies that
+  work. That leaves 2, and only after the arithmetic was done did the audit find a third
+  pattern the token scan cannot see: a body that calls a function and **discards** the result
+  (`_ = try MoE(context: context, topKExperts: 10)`), which throws-nothing passes even though
+  the test's name claims the runner carries `k`. Two of those were in `RouterTopKTests`, and
+  they are what the `#expect(moe.maxStreamedExperts == 10)` replacements are for. A rule
+  cannot catch a discarded value; that one needs a reader.

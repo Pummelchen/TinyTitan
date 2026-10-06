@@ -237,14 +237,15 @@ repository.
   executables** — `TinyTitanServer`, `TinyTitanCLI`,
   `TinyTitanRepack`, `TinyTitanBench` — plus the
   `.bundle` resources, licence and notices.
-- **Gates** `tools/lint.sh` (fourteen checks as of 2026-10-06: force-cast,
+- **Gates** `tools/lint.sh` (fifteen checks as of 2026-10-07: force-cast,
   unbounded-read, func-length, file-length, unchecked-sendable, converter,
-  arch-path, silent-test-skip, shell-portability, shellcheck,
+  arch-path, silent-test-skip, test-hollow, shell-portability, shellcheck,
   swiftlint, swift-format, javascript, python — the authoritative list is
   `tools/lint.sh`'s own usage header, and adding a gate means editing this line
-  and `AGENTS.md` in the same commit: of the two gates that landed on
-  2026-10-06, this line names neither and `AGENTS.md` names one, and no check
-  compares a documented count to the script's) —
+  and `AGENTS.md` in the same commit. Of the four gates this audit added —
+  `unbounded-read`, `test-skip`, `file-length`, `test-hollow` — this line names
+  all four and `AGENTS.md` names two of them while still saying "thirteen
+  checks"; nothing compares a documented count to the script's, which is AUD-160) —
   `swift test --no-parallel`;
   **every installed model with
   a golden target**, through `tools/golden-baseline.sh --check`; then a clean

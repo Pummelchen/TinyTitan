@@ -14,6 +14,7 @@
 #   converter           routed experts must land at their own index
 #   arch-path           no hardcoded SwiftPM triple in a build path (see below)
 #   silent-test-skip    no env/capability-shaped early return in tests/ (see below)
+#   test-hollow         no @Test body that cannot fail (see below)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -746,6 +747,191 @@ PY
   fi
 }
 
+# --- test-hollow -------------------------------------------------------------
+# A @Test body with no assertion, no `try` and no call into an asserting helper
+# cannot fail, whatever the code under test does. The audit found three of these
+# (AUD-128): a body whose only statement was `_ = (aFunction, "a string")`, a
+# comment that conceded "Documentation-only", and two runners built and then
+# discarded so the test asserted only that construction did not throw. Each
+# recorded coverage that did not exist, which is the same injury as a silent
+# skip with a harder edge: it is invisible even in a green run's line-by-line log.
+#
+# `try` counts as an assertion because Swift Testing fails the test when the body
+# throws, so the "this accepted" bodies the repo already has pass the gate on
+# purpose. The rule is:
+#   assertion token -> fine
+#   `try`           -> fine (a throw fails the test)
+#   calls a helper whose body asserts, directly or through another helper -> fine
+#   none of those   -> hollow
+# Comments and string literals are blanked before the scan, so a `#expect` inside
+# a doc comment is not an assertion, and brace matching cannot be thrown off by a
+# brace in a string.
+#
+# Opting out: `lint:allow-hollow-test <reason>` on a line above the `@Test`, for
+# a body that deliberately asserts nothing. There are none in the tree.
+measure_hollow_tests() {
+  python3 - <<'PY'
+import os
+import pathlib
+import re
+
+ASSERT = ("#expect", "#require", "Issue.record", "withKnownIssue",
+          "confirmation(", "XCTAssert")
+ALLOW = re.compile(r"lint:allow-hollow-test\s+\S+")
+CALLS = re.compile(r"(?<![\w.])([A-Za-z_]\w*)\s*\(")
+
+
+def blank_noise(src):
+    """Blank comments and string contents; keep every newline in place."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "/" and src[i + 1:i + 2] == "/":
+            j = src.find("\n", i)
+            j = n if j < 0 else j
+            out.append(" " * (j - i))
+            i = j
+            continue
+        if c == "/" and src[i + 1:i + 2] == "*":
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif src.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    out.append("\n" if src[j] == "\n" else " ")
+                    j += 1
+            i = j
+            continue
+        hashes = len(src[i:]) - len(src[i:].lstrip("#"))
+        k = i + hashes
+        if hashes <= 2 and src[k:k + 1] == '"':
+            triple = src[k:k + 3] == '"""'
+            delim = '"""' if triple else '"'
+            end, closed = k + len(delim), False
+            while end < n:
+                if not triple and src[end] == "\\":
+                    end += 2
+                    continue
+                if src.startswith(delim, end):
+                    closed = True
+                    break
+                end += 1
+            tail = end + len(delim) if closed else n
+            out.append("".join(ch if ch == "\n" else " " for ch in src[i:tail]))
+            i = tail
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def span(text, brace_at):
+    depth = 0
+    for j in range(brace_at, len(text)):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return brace_at, j
+    return None
+
+
+def body_after(text, at):
+    found = re.search(r"\{", text[at:])
+    if not found:
+        return None
+    return span(text, at + found.start())
+
+
+def declared(text):
+    """(name, body) for every func in the file."""
+    rows = []
+    for match in re.finditer(r"\bfunc\s+([A-Za-z_]\w*)", text):
+        got = body_after(text, match.end())
+        if got:
+            rows.append((match.group(1), text[got[0] + 1:got[1]]))
+    return rows
+
+
+scanned = 0
+hollow = []
+root = pathlib.Path(os.environ["ROOT"])
+for path in sorted((root / "tests").rglob("*.swift")):
+    raw = path.read_text(errors="replace")
+    text = blank_noise(raw)
+    rows = declared(text)
+    asserting = {name for name, body in rows if any(t in body for t in ASSERT)}
+    grew = True
+    while grew:                 # a helper that asserts only through another helper
+        grew = False
+        for name, body in rows:
+            if name in asserting:
+                continue
+            if asserting & set(CALLS.findall(body)):
+                asserting.add(name)
+                grew = True
+    lines = raw.splitlines()
+    for match in re.finditer(r"@Test\b", text):
+        found = re.search(r"\bfunc\s+([A-Za-z_]\w*)", text[match.end():])
+        if not found:
+            continue
+        got = body_after(text, match.end() + found.end())
+        if not got:
+            continue
+        body = text[got[0] + 1:got[1]]
+        scanned += 1
+        if any(t in body for t in ASSERT) or re.search(r"\btry\b", body):
+            continue
+        if asserting & set(CALLS.findall(body)):
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        window = lines[max(0, line - 4):line]
+        if any(ALLOW.search(entry) for entry in window):
+            continue
+        hollow.append("HOLLOW %s:%d %s" % (
+            path.relative_to(root).as_posix(), line, found.group(1)))
+print("SCANNED:%d" % scanned)
+for row in hollow:
+    print(row)
+PY
+}
+
+check_test_hollow() {
+  echo "== test-hollow: no @Test body that cannot fail =="
+  local raw rc scanned hollow
+  raw="$(measure_hollow_tests)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  FAIL: the hollow-body counter exited $rc; it measured nothing."
+    echo "        Expected python3 on PATH; do not read this as a pass."
+    status=1
+    return
+  fi
+  scanned="$(echo "$raw" | sed -n 's/^SCANNED://p' | tail -1)"
+  if [ -z "$scanned" ] || [ "$scanned" -eq 0 ] 2>/dev/null; then
+    echo "  FAIL: the hollow-body counter found no @Test bodies under tests/."
+    echo "        Expected ~1600; check ROOT and the glob."
+    status=1
+    return
+  fi
+  hollow="$(echo "$raw" | grep '^HOLLOW ' || true)"
+  if [ -n "$hollow" ]; then
+    echo "$hollow" | while IFS= read -r row; do
+      echo "  $row"
+    done
+    echo "  FAIL: $(( $(echo "$hollow" | grep -c .) )) test body(ies) cannot fail."
+    echo "        Assert what the name promises, gate it with .enabled(if:),"
+    echo "        or delete it -- an unassertive body records coverage that does"
+    echo "        not exist."
+    status=1
+    return
+  fi
+  echo "  ok ($scanned test bodies scanned, none hollow)"
+}
+
 # --- python -----------------------------------------------------------------
 # Ruff is the Python standard: the rules and the format are pinned in the
 # repository's pyproject.toml. A missing or different ruff FAILS rather than
@@ -1011,7 +1197,7 @@ check_javascript() {
 }
 
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
@@ -1020,6 +1206,7 @@ case "$want" in
   converter)   check_converter_expert_order ;;
   arch-path)   check_arch_path ;;
   test-skip)   check_silent_test_skip ;;
+  test-hollow) check_test_hollow ;;
   shell)       check_shell_portability ;;
   shellcheck)  check_shellcheck ;;
   swiftlint)   check_swiftlint ;;
@@ -1028,7 +1215,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|test-hollow|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
 esac
 
 exit $status
