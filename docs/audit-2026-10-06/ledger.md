@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:62  Blocked:1  Total:63**
+**Open:0  Done:68  Blocked:1  Total:69**
 
 ## Table
 
@@ -18,6 +18,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
 | AUD-143 | S1 | A | server | `sources/TinyTitan/Infrastructure/Concurrency/SuspensionSlot.swift (new); sources/TinyTitanServer/Core/ModelRouterError.swift acquire/turn/beginSwitch/releaseSwitchClaim/wait/drop/wakeWaiters; sources/TinyTitanServer/Core/ServerCoordinator.swift; sources/TinyTitanServer/Core/ManagedModelBackend.swift; sources/TinyTitanServer/Core/MemoryBackend.swift; sources/TinyTitan/Runtime/Inference/ForwardStepGate.swift; sources/TinyTitanLib/ServerModelSession.swift +PromptCache.swift; tests/TinyTitan/Infrastructure/Concurrency/SuspensionSlotTests.swift; tests/TinyTitanServer/ModelRouterTests.swift` | A pending model switch can be overtaken by new work for the resident model, and in a release build the same test aborts the server bundle with signal 6 on this host | residency fairness bug plus a release-only abort of the server bundle — one defect, two symptoms: the actor's waiter array was mutated from a non-isolated continuation closure | DONE | Mac (primary) |
 | AUD-163 | S1 | A | plugin | `plugins/dsh-tinytitan/src/generate.js:620 (applyRouteThroughSettings), tools/dsh_local.sh:586 (write_default_model)` | The boot-time route refresh keeps the picker current but leaves `agent-default-model` naming a model the server no longer serves, so every turn fails with UNKNOWN_MODEL | half-covered refresh: two namespaces written by one install, only one of them revisited | DONE | Mac (primary) |
+| AUD-168 | S1 | A | fleet | `plugins/dsh-lan-manager/src/peers.js:103 (the counted reader), sources/TinyTitanFleet/Core/FleetClient.swift:113 (the counted byte loop)` | Both peer readers buffer whatever a host sends them, so the LAN prober can be sized by any host inside its own fence and held open indefinitely | unbounded receive on a discovery path, in two languages | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
@@ -55,6 +56,11 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-157 | S2 | B | plugins | `plugins/dsh-tinytitan/test/generate.test.js:30-35, :93-107` | The route writers' byte-equality pin cannot run on a checkout that builds to .build/release, because it probes the arch-triple path the tool never reads | a check that does not run (test harness path vs tool path) | DONE | Mac (primary) |
 | AUD-159 | S2 | B | release | `RELEASE.md:26-31 (rule 2), tools/release.sh:47-48,310,369-377, tools/build_library.sh:97` | RELEASE.md requires `lipo -archs <binary>` to report exactly `arm64` and nothing in the release path ever runs lipo; the only arm64 claim in a shipped artifact is its filename | unenforced documented standard (missing gate) | DONE | Mac (primary) |
 | AUD-161 | S2 | B | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:176-192, sources/TinyTitan/Kernels/MoE/SharedExpertInt4.swift:110-140, sources/TinyTitan/Kernels/MoE/SharedExpertAffineQuant.swift (deleted), sources/TinyTitanFormat/SSDAIManifestV1.swift:248-258 (guard, previously untested)` | A quantized weight width outside [4, 8] is accepted by the CPU snapshot reader, and the one place that did route a 6-bit width could only abort the process | input validation at a trust boundary (width reaches kernel arithmetic) | DONE | Mac (primary) |
+| AUD-164 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:205 (the fenced open loop, formerly an unguarded appendPathComponent), sources/TinyTitan/CPUEngine/SafeTensors.swift:80 (the O_NOFOLLOW opener)` | The CPU snapshot opens every shard name it reads out of the model index with no containment and no O_NOFOLLOW, while three sibling loaders fence the same contract | trusting manifest content: the boundary fenced everywhere else is unfenced on one path | DONE | Mac (primary) |
+| AUD-165 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:191 (the index read, now through BoundedMetadataRead)` | The second metadata read in the same initializer is still an uncapped whole-file Data(contentsOf:), the shape AUD-150 closed for the other seven | read-then-check: a bound applied after the allocation bounds the decision, not the memory | DONE | Mac (primary) |
+| AUD-166 | S2 | A | lint-gates | `tools/lint.sh:119 (unbounded_read_hits), tools/lint.sh:155 (check_unbounded_metadata_read)` | The gate that hunts unbounded reads matches one physical line, so it printed ok over the wrapped call AUD-165 is -- and it prints ok when its own walk found no files | a gate that cannot see the defect it exists to catch, and cannot see whether it ran | DONE | Mac (primary) |
+| AUD-167 | S2 | A | server | `sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:139 (the guard), :51 (notAForm)` | POST /v1/models/unload has no browser-form gate, so a form POST from any LAN page can reach the route that unloads the resident model | half-covered guard: five mutating routes check the content type and the sixth does not | DONE | Mac (primary) |
+| AUD-169 | S2 | A | python-tooling | `tools/dsh_route.sh (the --from-server served-id block)` | The route validator prints model ids it reads off a running server straight into the settings block, where both sibling writers validate the same field | trusting an id read from the network on one writer and validating it on two | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -259,6 +265,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Measured 2026-10-06. 7 new tests in `test/generate.test.js`; against the pre-fix `generate.js` the suite fails outright on the missing export, so the probes bind to the fix. Plugin suite 144/144 with 0 skipped (js-yaml resolved here, so the integration case ran rather than reporting a pass it never asserted); `tools/lint.sh javascript` clean after prettier. Live: `ensure` then `smoke` exits 0 with `answer matching /\b42\b/ appeared` on the 125B, and the patch's default now reads `qwen3.8-flash-next_4-Bit` -- the repair is confirmed by mechanism, not only by the page answering. NOT covered: the pre-0.2.0 file path (`generateRoute`/`writeRouteSettings`, reached when a harness has no settings service) still writes only `llm-pi-ai` and inherits the same stale-default defect. It is not the pinned harness, so the fix is on the live path and this sentence is the record of the gap.
 
 **Commit.** `a0fae6d`
+
+### AUD-168 — Both peer readers buffer whatever a host sends them, so the LAN prober can be sized by any host inside its own fence and held open indefinitely
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** fleet
+- **Location:** `plugins/dsh-lan-manager/src/peers.js:103 (the counted reader), sources/TinyTitanFleet/Core/FleetClient.swift:113 (the counted byte loop)`
+- **Category:** unbounded receive on a discovery path, in two languages
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the L4 pass over every place this tree reads a socket it did not choose
+
+**Evidence before.** `probe()` dials every candidate the fence admits and buffered the whole response before parsing. The default fence includes the self-assigned range, so any host on the local link without a DHCP address is a candidate, and it only has to answer `{ok: true}` to be believed a member -- the group field is how a peer says which fleet it is in, not a credential. Two costs, both paid by the resident manager: memory grows with whatever the peer chooses to send, and the JS socket `timeout` is an inactivity timer, so a peer that keeps writing is never cut off. `URLSessionTransport` on the Swift side had the same shape through `data(for:)`, which buffers the whole body before the caller sees a byte count.
+
+**Fix.** Both readers count as bytes arrive and stop at a declared cap: `MAX_PEER_RESPONSE_BYTES` is exported from `peers.js` so a test can name the rule it enforces, and an over-cap answer destroys the request with the cap in the message. `FleetClient` carries the same 4 MiB as `static let maxResponseBytes` and a new `FleetError.responseTooLarge(target:bytes:)` that says who was too large. The Swift loop stays byte-at-a-time: `chunks(ofCount:)` measured absent on `URLSession.AsyncBytes` at this SDK, so the comment records the measurement instead of an assumed optimisation.
+
+**Evidence after.** Measured 2026-10-06. Both tests run against a real loopback server, because the guard is inside the response reader and a stubbed `fetch` cannot reach it. JS (`test/peers.test.js`): the under-cap inventory still parses and the never-ending over-cap answer is refused; the first version hung rather than failing on the unfixed code, which was itself the second half of this defect, so the test carries an 8 s unref'd deadline that turns the regression into an observable failure. Swift (`tests/TinyTitanFleet/ResponseBoundTests.swift`): the first socket test in that target, over a raw POSIX loopback server -- `sin_len` and the `in_addr` byte order were both wrong in the first draft, and the failure now carries `errno` so the next one is diagnosable. Full suites after the fix: fleet 49 tests in 13 suites passed, plugin `npm test` 129 passed / 0 failed. NOT covered: the cap bounds one answer, not the number of concurrent probes.
+
+**Commit.** `5250aa6`
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -968,6 +992,96 @@ Gates on the committed tree: `tools/lint.sh` swift-format, swiftlint, force-cast
 Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the repack/verification route (`PackedExpertWidthTests`) and the server/lib width reporting (`identity.weightBits`, and `routedExpertWeightBits` which comes from a slot) are all behind one of the two gates. Two honest observations: `validateRoleUniformity`'s `bits == 16` allowance for the GDN a/b pair is **unreachable from a manifest**, because the decoder refuses 16 -- harmless, but it is a branch no input can take; and `CPUTensorOps.swift:154`'s `preconditionFailure` is deliberately kept as the last-resort guard now that the width is refused at load, since converting it to a throw would move the check to every call site. Not checked, stated: no golden-baseline or model run, because no supported install is 6-bit (it is a withdrawn format) and `models/` holds only the two Qwen3.8 4-bit installs -- this route is reachable only from a hand-supplied snapshot directory, which the new tests build synthetically.
 
 **Commit.** `be2df04`
+
+### AUD-164 — The CPU snapshot opens every shard name it reads out of the model index with no containment and no O_NOFOLLOW, while three sibling loaders fence the same contract
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:205 (the fenced open loop, formerly an unguarded appendPathComponent), sources/TinyTitan/CPUEngine/SafeTensors.swift:80 (the O_NOFOLLOW opener)`
+- **Category:** trusting manifest content: the boundary fenced everywhere else is unfenced on one path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the L4 security sweep over names and bytes that come from outside this process
+
+**Evidence before.** An installed model directory can arrive copied off another machine, so an index's `weight_map` values are external input, not a list this process wrote. The CPU loader turned each one straight into `directory.appendingPathComponent(file)` and handed the URL to `SafeTensorsFile(url:)`, whose opener was a plain `open(O_RDONLY)`: no canonicalisation, so `../../...` resolved out of the snapshot, and no `O_NOFOLLOW`, so a symlink at a plausible shard name mapped a file outside the directory into the engine's address space. `SSDAIModelDirectory` already fences both halves (a non-canonical name is refused, every component opens `O_NOFOLLOW` relative to the directory's own descriptor), `LocalSnapshotLoader` fences the same contract for the other engine, and the `.ssdai` path fences it again -- three siblings and one hole. The hole is on the CPU path, which is the one a user reaches for when the GPU path will not fit.
+
+**Fix.** The shard loop opens through `SSDAIModelDirectory(rootURL:)` the way its siblings do, so containment is checked per name and every component opens relative to the snapshot's own descriptor. `SafeTensorsFile` gains an init that adopts an already-open descriptor, because opening by name and then re-opening by URL is a TOCTOU: the bytes mapped must be the bytes that were checked. The URL init now sets `O_NOFOLLOW` itself, so the fence lives in the opener and a caller cannot forget it.
+
+**Evidence after.** Measured 2026-10-06 during the L4 pass. 4 tests in `tests/TinyTitan/CPUEngine/CPUEngineTests.swift`: `aShardNameThatEscapesTheSnapshotIsRefused`, `aSymlinkedShardIsRefusedRatherThanMapped`, `aSymlinkedURLIsRefusedByTheOpener`, and AUD-165's bound test. Against the pre-fix sources all four fail with `an error was expected but none was thrown`, so each binds to the fence rather than to the fixture. The full CPU suite is 38 tests in 2 suites, passed, re-run after the fix commits. NOT covered: `AffineSnapshot.swift` is now at exactly 500 physical lines, the `file-length` ceiling with no headroom, so the next change to this file must split it along a seam first.
+
+**Commit.** `1745078`
+
+### AUD-165 — The second metadata read in the same initializer is still an uncapped whole-file Data(contentsOf:), the shape AUD-150 closed for the other seven
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:191 (the index read, now through BoundedMetadataRead)`
+- **Category:** read-then-check: a bound applied after the allocation bounds the decision, not the memory
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** following AUD-150's rule to every metadata read rather than only the seven it named
+
+**Evidence before.** AUD-150 moved seven metadata reads onto `BoundedMetadataRead`, which `fstat`s the descriptor and refuses before allocating. This one survived in the same initializer that reads the manifest sitting beside it: `JSONSerialization.jsonObject(with: Data(contentsOf: indexURL))`. The file's name comes from the directory being loaded, so a sparse index allocates the whole thing first and only then fails to parse. AUD-150 measured the identical shape on a 2 GiB sparse file: 0.350 s and +2,049 MB of `phys_footprint` on a 24 GB Mac.
+
+**Fix.** The index read goes through `BoundedMetadataRead.read(fileAt:maxBytes:)` with the same `maxBytes` the sibling manifest read in this initializer already carries, so the bound is the one the loader already declares rather than a number invented here.
+
+**Evidence after.** Measured 2026-10-06. `anOversizedIndexIsRefusedByTheBoundNotByTheParse` asserts both halves: that it is refused, and that the refusal names the bound rather than a JSON error -- a parse failure would satisfy a test that only checked for an error, and would mean the bound was never what stopped it. Runs green in the same 38-test CPU suite.
+
+**Commit.** `1745078`
+
+### AUD-166 — The gate that hunts unbounded reads matches one physical line, so it printed ok over the wrapped call AUD-165 is -- and it prints ok when its own walk found no files
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** lint-gates
+- **Location:** `tools/lint.sh:119 (unbounded_read_hits), tools/lint.sh:155 (check_unbounded_metadata_read)`
+- **Category:** a gate that cannot see the defect it exists to catch, and cannot see whether it ran
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** running the gate over AUD-165's site instead of trusting its ok
+
+**Evidence before.** `unbounded-read` tested `/(Data|String)\(contentsOf:/` against each line as it came from `readlines()`. `swift-format` wraps a call whose arguments do not fit, which is exactly what AUD-165's read looked like -- `Data(` on one line, `contentsOf: url)` on the next -- so the gate reported ok over the one site it had been asked to find. Second hole in the same function: `Dir.glob` returning nothing raised nothing, so an empty scan printed ok over the whole tree. That is the AUD-104 defect -- a gate that did not run reading as a pass -- inside the gate that hunts unbounded reads.
+
+**Fix.** The matcher joins a continuation-line window before testing, so a wrapped call is one match. The walker raises `no Swift files under <root>` on an empty root, and the shell side turns a failed walk into a FAIL with the reason printed instead of falling through to ok.
+
+**Evidence after.** Measured 2026-10-06 on current code, both halves: the same synthetic wrapped read was placed under `sources/`, the pre-fix gate restored from 766cb27^ exited 0 printing `ok`, and the fixed gate exited 1 with `FAIL: unbounded whole-file read without a 'lint:allow-unbounded-read <reason>' comment above it` naming file and line; the probe file was removed and the clean tree is ok again, exit 0. Joining the lines surfaced one real site the old grep never saw: `sources/TinyTitanCLI/Run.swift:203`, the `--messages-file` read mapped `.mappedIfSafe`, which carries the audited exemption because the bytes are a file the operator named and the mapping is the point of the read.
+
+**Commit.** `766cb27`
+
+### AUD-167 — POST /v1/models/unload has no browser-form gate, so a form POST from any LAN page can reach the route that unloads the resident model
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** server
+- **Location:** `sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:139 (the guard), :51 (notAForm)`
+- **Category:** half-covered guard: five mutating routes check the content type and the sixth does not
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** enumerating which routes the AUD-147 Origin/content-type guards actually reach
+
+**Evidence before.** `/v1/models/unload` read its body through the absent-content-type-tolerant helper rather than the gated path, so an `application/x-www-form-urlencoded` or `multipart/form-data` POST -- what a browser sends from a plain `<form>` with no preflight to answer for it -- reached the route whose only effect is to drop the loaded model. The other five mutating JSON routes all carry the gate. The helper could not simply be swapped: its absent-header permissiveness is the CLI's contract, which is the AUD-132 lesson, so the route needed the guard rather than a stricter body reader. Nothing in the suite had ever sent a non-JSON content type to any of the five that do carry the gate, so the missing sixth had no test to fail and the guard was pinned only by memory.
+
+**Fix.** `notAForm` is computed once at the top of the route table and the unload case guards on it, answering 415 through the same `writeUnsupportedMediaType` the other five use, so the envelope stays per-surface instead of inventing a new error shape.
+
+**Evidence after.** Measured 2026-10-06. `unloadRefusesABrowserFormPost` drives three form encodings at the live route and asserts 415 and that the body does not say `unloaded`. `everyJsonRouteRefusesANonJsonContentType` pins the gate on all five gated routes at once and checks the two surfaces apart because they answer apart: the OpenAI envelope carries `unsupported_media_type` and the Anthropic one is `invalid_request_error` with no code field at all -- the first draft read that as a missing gate until it printed the body. The encoder escapes the slash in `application/json`, so the message assertion stops before it. `HTTPServerTests` is 22/22 passed.
+
+**Commit.** `a087c90`
+
+### AUD-169 — The route validator prints model ids it reads off a running server straight into the settings block, where both sibling writers validate the same field
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** python-tooling
+- **Location:** `tools/dsh_route.sh (the --from-server served-id block)`
+- **Category:** trusting an id read from the network on one writer and validating it on two
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** comparing the three writers of the same settings block against each other
+
+**Evidence before.** `--from-server` asks a live server for `/v1/models` and writes each id verbatim into the YAML block it emits. The catalogue parser refuses an empty or multi-line field and the plugin writer runs the same validator over its own input; this path asked neither question, on the theory that a running server only names real models. An id carrying a newline became two rows in the block, and one carrying YAML punctuation changed what the block declares rather than what it names. The failure was also invisible: the python check raised into a command substitution whose stderr was not the launcher's, so the operator saw `listed no models` instead of the reason.
+
+**Fix.** Every served id must match `[A-Za-z0-9._-]+` before anything is printed, the refusal captures the validator's stderr and passes it to `die`, and nothing is emitted unless the whole listing passes -- so a refusal leaves the array empty and the existing empty-listing error still fires.
+
+**Evidence after.** Measured 2026-10-06. 4 tests in `benchmark/test_dsh_route.py` (`ServedIdTests`) drive a real `ThreadingHTTPServer` on 127.0.0.1 port 0 rather than a stub, because the claim is what the shell does with a live answer: plain ids reach the block, an id with a newline is refused, an id with YAML punctuation is refused, and one bad id refuses the whole listing. Suite: 17 passed including the 4 new. `tools/lint.sh shell` and `shellcheck` clean, and the loop is a `while read` rather than `mapfile` because /bin/bash on a factory Mac is 3.2.
+
+**Commit.** `a5ee765`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 

@@ -247,8 +247,8 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the thirteen checks CI enforces beyond the compiler — the
-first eight are project-specific probes, the last five are pinned third-party
+`tools/lint.sh` runs the seventeen checks CI enforces beyond the compiler — the
+first twelve are project-specific probes, the last five are pinned third-party
 linters:
 
 - `force-cast` — no `as!` / `try!` under `sources/` without a
@@ -259,14 +259,22 @@ linters:
   the allocation: measured on a 2 GiB sparse file, 0.350 s and +2,049 MB of
   `phys_footprint` on a 24 GB Mac. Metadata documents therefore go through
   `BoundedMetadataRead` (engine) or `Posix.readBoundedData` (converter), which
-  `fstat` the descriptor being read and refuse before allocating. The 7
-  exemptions are reads whose input is bounded some other way — a range this
-  process itself requested, a resource the package ships, an mmap that is the
-  point of the read, or an operator-named benchmark input.
+  `fstat` the descriptor being read and refuse before allocating. The gate joins
+  a continuation-line window before matching, because `swift-format` wraps a call
+  whose arguments do not fit and the wrapped shape is exactly what it hunts; it
+  also fails when its own walk finds no Swift files, so a scan that read nothing
+  cannot report a pass. The 8 exemptions are reads whose input is bounded some
+  other way — a range this process itself requested, a resource the package
+  ships, an mmap that is the point of the read, or an operator-named benchmark
+  input.
 - `func-length` — no function over 120 lines without an inline `lint:allow-long
   <reason>`. The ratchet file `tools/func-length-baseline.txt` carries the
   audited exemptions (14 rows: the formatter sweep's expansions), and the gate
   fails on a stale exemption row as well as on a new offender.
+- `file-length` — no production source under `sources/` over 500 physical lines,
+  comments and blanks included; `tests/` is organised by the suite it covers and
+  is not held to it. An oversized file splits along a cohesive seam as pure code
+  motion, and `docs/repository-layout.md` records the splits.
 - `unchecked-sendable` — every `@unchecked Sendable` carries an
   `unchecked-invariant:` note.
 - `converter` — a probe that files routed experts by index rather than arrival
@@ -284,6 +292,20 @@ linters:
   gate that way. A gate helper that returns `nil` is the sanctioned idiom and is
   not flagged; an audited exemption is `lint:allow-silent-skip <reason>` above
   the line, and there are none.
+- `test-hollow` — no `@Test` body that cannot fail. A body with no assertion
+  reports green while having checked nothing, so the gate names it and says to
+  assert what the name promises, gate it with `.enabled(if:)`, or delete it. Like
+  `test-skip` it fails when its own counter measured no bodies rather than
+  reporting ok over a scan that ran on nothing.
+- `library-facade` — every `public` declaration in `TinyTitanLib` is on the
+  measured allowlist (`tools/library-facade-baseline.txt`). `public` there is a
+  promise to an embedder, so a new one is a deliberate act: `FACADE_UPDATE=1`
+  re-measures the list, and a decision belongs in `docs/plan-embedded-library.md`
+  before it is used to silence the gate.
+- `docs` — a documented count, name, sha or table must match the repository, via
+  `tools/docs-facts.py`. This is what catches the class the audit kept finding:
+  a gate name in `AGENTS.md` that `tools/lint.sh` does not accept, and a restated
+  audit count in `docs/handover-tinytitan.md` that `ledger.json` contradicts.
 - `shell-portability` — every shell script parses and runs under `/bin/bash`,
   which is 3.2.57 on a factory Mac, not the Homebrew 5.x a development machine
   puts first on `PATH`. That one is not academic: a single-quoted heredoc holding
