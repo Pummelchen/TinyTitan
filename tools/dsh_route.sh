@@ -137,10 +137,25 @@ if (( FROM_SERVER )); then
   # /bin/bash is 3.2 on a factory Mac. This is the `--from-server` path, which is
   # exactly what a launcher without a checkout uses.
   served=()
+  # A served id is printed verbatim into the settings block, so it has to be one
+  # plain token. The catalogue parser refuses an empty or multi-line field, and the
+  # plugin writer does the same through its own validator; this path asked neither
+  # question, so an id carrying a newline became two rows here and one carrying
+  # YAML punctuation changed what the block declares. The validator prints nothing
+  # unless every id passes, and its reason becomes this script's reason, so an
+  # operator is not told "listed no models" when a model was listed and refused.
+  if ! validated="$(printf '%s' "$listing" | python3 -c 'import json,re,sys
+ids = [str(m["id"]) for m in json.load(sys.stdin)["data"]]
+bad = sorted(i for i in ids if not re.fullmatch(r"[A-Za-z0-9._-]+", i))
+if bad:
+    raise SystemExit("ids that are not plain tokens: " + repr(bad))
+for i in ids:
+    print(i)' 2>&1)"; then
+    die "the server on port $PORT answered with ${validated}"
+  fi
   while IFS= read -r served_id; do
     [[ -n "$served_id" ]] && served+=("$served_id")
-  done < <(printf '%s' "$listing" \
-    | python3 -c 'import json,sys; [print(m["id"]) for m in json.load(sys.stdin)["data"]]')
+  done <<< "${validated}"
   (( ${#served[@]} > 0 )) || die "the server on port $PORT listed no models"
   for id in "${served[@]+"${served[@]}"}"; do
     # A served id carries the width and nothing else human-readable is known

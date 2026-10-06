@@ -4,8 +4,8 @@
 route the harness reads, so its model picker follows the catalog instead of a
 list someone typed. These tests pin what matters: the ids and effort ladders it
 derives, the three switches that are easy to get wrong by hand, the settings-file
-surgery (replace the section, keep everything else, back it up), and its refusal
-to describe nothing.
+surgery (replace the section, keep everything else, back it up), its refusal to
+describe nothing, and the fence on an id it reads off a running server.
 
 They run against `tools/testdata/catalog-example.json` through
 `TINYTITAN_CATALOG_JSON`, so they need no model, no built server and no network.
@@ -24,7 +24,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools/dsh_route.sh"
@@ -207,6 +209,66 @@ class RefusalTests(unittest.TestCase):
         missing = pathlib.Path(tempfile.mkdtemp()) / "absent.yaml"
         run = run_route("--models", "qwen38", "--write", "--settings", str(missing), expect=2)
         self.assertIn("no DSH settings file", run.stderr)
+
+
+class ServedIdTests(unittest.TestCase):
+    """``--from-server`` takes its ids from a running server, and validates them.
+
+    The listing is printed straight into the harness's settings block, so one id
+    carrying a newline writes two rows and one carrying YAML punctuation changes what
+    the block declares. The catalogue path refuses both shapes in its parser and the
+    plugin writer has its own validator; this third source asked neither question.
+    A real loopback server is required because the fence sits after ``curl``, in the
+    pipeline that turns the answer into rows - stubbing it would test the stub.
+    """
+
+    def serve(self, ids: list[str]) -> int:
+        body = json.dumps({"object": "list", "data": [{"id": one} for one in ids]}).encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_: object) -> None:
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return int(server.server_address[1])
+
+    def test_plain_served_ids_reach_the_block(self) -> None:
+        port = self.serve(["qwen3.5_4B_4Bit", "ornith-1.5_35B_A3B_8Bit"])
+        run = run_route("--from-server", "--port", str(port), catalog=None)
+        self.assertEqual(declared_ids(run.stdout), ["qwen3.5_4B_4Bit", "ornith-1.5_35B_A3B_8Bit"])
+
+    def test_an_id_with_a_newline_is_refused(self) -> None:
+        port = self.serve(["qwen3.5_4B_4Bit\n        - id: injected"])
+        run = run_route("--from-server", "--port", str(port), catalog=None, expect=2)
+        self.assertIn("not plain tokens", run.stderr)
+        self.assertNotIn("- id: injected", run.stdout)
+
+    def test_an_id_with_yaml_punctuation_is_refused(self) -> None:
+        port = self.serve(["a: http://evil.example/v1"])
+        run = run_route("--from-server", "--port", str(port), catalog=None, expect=2)
+        self.assertIn("not plain tokens", run.stderr)
+
+    def test_one_bad_id_refuses_the_whole_listing(self) -> None:
+        # Partial acceptance would be the worse outcome: the picker would show the
+        # models that passed and silently drop the one the operator launched.
+        port = self.serve(["qwen3.5_4B_4Bit", "two\nrows"])
+        run = run_route("--from-server", "--port", str(port), catalog=None, expect=2)
+        self.assertIn("not plain tokens", run.stderr)
+        self.assertEqual(declared_ids(run.stdout), [])
 
 
 class InstalledLayoutTests(unittest.TestCase):
