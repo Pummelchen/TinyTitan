@@ -110,6 +110,119 @@ extension ModelLoaderTests {
         #expect(memcmp(fullExpertBytes, trustedExpertBytes, Int(fullExpert.length)) == 0)
     }
 
+    /// Rewrite one expert's record inside the toy install's `layout.json` and
+    /// re-pin the manifest entry for that file, so the loader's size and SHA
+    /// checks pass and the schema cross-check is what refuses the install.
+    ///
+    /// The caller edits a single expert, always one *after* the layer's first:
+    /// the reference record stays exactly as the writer produced it, so these
+    /// cases only fail if the load path compares every expert rather than
+    /// trusting the one it validates against the architecture.
+    static func repinToyLayoutExpert(
+        directoryURL dir: URL,
+        layer: Int,
+        expert index: Int,
+        mutate: (inout [String: Any]) throws -> Void
+    ) throws {
+        let layoutURL = dir.appendingPathComponent("packed_experts/layout.json")
+        var root = try #require(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: layoutURL)) as? [String: Any])
+        var layers = try #require(root["layers"] as? [[String: Any]])
+        var experts = try #require(layers[layer]["experts"] as? [[String: Any]])
+        try mutate(&experts[index])
+        layers[layer]["experts"] = experts
+        root["layers"] = layers
+        let layoutData = try JSONSerialization.data(
+            withJSONObject: root, options: [.sortedKeys])
+        try layoutData.write(to: layoutURL)
+
+        let manifestURL = dir.appendingPathComponent("manifest.json")
+        var manifest = try #require(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: manifestURL)) as? [String: Any])
+        var files = try #require(manifest["files"] as? [String: [String: Any]])
+        var entry = try #require(files["packed_experts/layout.json"])
+        entry["size"] = layoutData.count
+        entry["sha256"] = Sha256Verifier.hashData(layoutData)
+        files["packed_experts/layout.json"] = entry
+        manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+            .write(to: manifestURL)
+    }
+
+    /// Read one expert's `tensors` map out of its record.
+    static func expertTensors(_ expert: inout [String: Any]) throws -> [String: [String: Any]] {
+        try #require(expert["tensors"] as? [String: [String: Any]])
+    }
+
+    private static func rejectsLaterExpert(
+        _ dir: URL, _ phrase: String
+    ) throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        #expect {
+            _ = try Model.load(
+                directoryURL: dir, device: device,
+                expecting: .qwenToy())
+        } throws: { error in
+            if case ModelError.indexCorrupt(let detail) = error {
+                return detail.contains(phrase)
+            }
+            return false
+        }
+    }
+
+    @Test func laterExpertWidthLieFailsAtLoad() throws {
+        let dir = try Self.writeToySynthetic()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Self.repinToyLayoutExpert(directoryURL: dir, layer: 0, expert: 7) { expert in
+            var tensors = try Self.expertTensors(&expert)
+            tensors["gate"]?["bits"] = 8
+            expert["tensors"] = tensors
+        }
+        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+    }
+
+    @Test func laterExpertShapeLieFailsAtLoad() throws {
+        let dir = try Self.writeToySynthetic()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // gate is [moeIntermediate, hidden] = [128, 64]; transposed it is the
+        // same byte count, so only the role records distinguish it.
+        try Self.repinToyLayoutExpert(directoryURL: dir, layer: 2, expert: 3) { expert in
+            var tensors = try Self.expertTensors(&expert)
+            tensors["up"]?["shape"] = [64, 128]
+            expert["tensors"] = tensors
+        }
+        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+    }
+
+    @Test func laterExpertMissingRoleFailsAtLoad() throws {
+        let dir = try Self.writeToySynthetic()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Self.repinToyLayoutExpert(directoryURL: dir, layer: 1, expert: 5) { expert in
+            var tensors = try Self.expertTensors(&expert)
+            tensors.removeValue(forKey: "down_biases")
+            expert["tensors"] = tensors
+        }
+        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+    }
+
+    @Test func validToyInstallStillLoadsAfterTheExpertMutationHelper() throws {
+        // The helper must not break a correct install on its own: re-hashing
+        // and re-pinning alone leave the load path green, so a refusal in the
+        // tests above is the schema cross-check and not a size or checksum
+        // failure the helper introduced.
+        let dir = try Self.writeToySynthetic()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Self.repinToyLayoutExpert(directoryURL: dir, layer: 0, expert: 1) { _ in }
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let model = try Model.load(
+            directoryURL: dir, device: device,
+            expecting: .qwenToy())
+        let expert = try model.routedExpert(layer: 0, expert: 1)
+        #expect(expert.length > 0)
+    }
+
     @Test func nonPageAlignedExpertStrideFailsAtManifest() throws {
         let dir = try Self.writeToySynthetic()
         defer { try? FileManager.default.removeItem(at: dir) }

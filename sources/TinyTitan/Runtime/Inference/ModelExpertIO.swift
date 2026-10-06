@@ -66,6 +66,10 @@ extension Model {
         return streamers.reduce(.zero) { $0.adding($1.statistics()) }
     }
 
+    /// One expert's role offsets stand in for the whole layer's, because
+    /// `validateRoutedExpertLayout` has already refused an install where any
+    /// other expert's record differs from this one's — the assumption is
+    /// pinned by `ModelLoaderTests+Loading`'s later-expert tests.
     public func routedExpertOffsets(layer: Int) throws -> MoEExpertOffsets {
         let expert = try packedExpertsLayout.expert(layer: layer, expert: 0)
         func offset(_ role: String) -> UInt32 {

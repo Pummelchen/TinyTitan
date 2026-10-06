@@ -107,6 +107,92 @@ import Testing
         }
     }
 
+    /// Rewrite the toy `layout.json` with one field of one expert's record
+    /// changed, leaving every other expert exactly as `writeToyLayout()` wrote
+    /// it. The point is that the defect lives only in a *later* expert: the
+    /// reference expert at index 0 stays valid, so a validator that checked
+    /// only the first record of each layer would accept these.
+    private static func mutateExpertField(
+        _ dir: URL, layer: Int, expert: Int, field: String, to value: Any
+    ) throws {
+        let url = dir.appendingPathComponent("packed_experts/layout.json")
+        var root = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+                as? [String: Any])
+        var layers = try #require(root["layers"] as? [[String: Any]])
+        var experts = try #require(layers[layer]["experts"] as? [[String: Any]])
+        experts[expert][field] = value
+        layers[layer]["experts"] = experts
+        root["layers"] = layers
+        try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+            .write(to: url)
+    }
+
+    /// The same, for one field of one sub-tensor inside an expert's blob.
+    private static func mutateSubTensorField(
+        _ dir: URL, layer: Int, expert: Int, tensor: String, field: String, to value: Any
+    ) throws {
+        let url = dir.appendingPathComponent("packed_experts/layout.json")
+        var root = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+                as? [String: Any])
+        var layers = try #require(root["layers"] as? [[String: Any]])
+        var experts = try #require(layers[layer]["experts"] as? [[String: Any]])
+        var tensors = try #require(experts[expert]["tensors"] as? [String: [String: Any]])
+        tensors[tensor]?[field] = value
+        experts[expert]["tensors"] = tensors
+        layers[layer]["experts"] = experts
+        root["layers"] = layers
+        try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+            .write(to: url)
+    }
+
+    private static func rejects(_ dir: URL, _ phrase: String) throws {
+        #expect {
+            _ = try PackedExpertsLayoutReader.load(directoryURL: dir)
+        } throws: { error in
+            if case ModelError.indexCorrupt(let detail) = error {
+                return detail.contains(phrase)
+            }
+            return false
+        }
+    }
+
+    @Test func laterExpertBlobOffsetRejectsEvenWithValidFirstExpert() throws {
+        let dir = try Self.writeToyLayout()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Expert 1 is physically at rank 1, so its blob must start at
+        // 1 * 16384; a page inside that is a different expert's bytes.
+        try Self.mutateExpertField(dir, layer: 0, expert: 1, field: "offset", to: 20_480)
+        try Self.rejects(dir, "offset or size does not match physical rank")
+    }
+
+    @Test func laterExpertBlobSizeRejectsEvenWithValidFirstExpert() throws {
+        let dir = try Self.writeToyLayout()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Self.mutateExpertField(dir, layer: 0, expert: 1, field: "size", to: 8192)
+        try Self.rejects(dir, "offset or size does not match physical rank")
+    }
+
+    @Test func laterExpertTensorRangePastBlobRejects() throws {
+        let dir = try Self.writeToyLayout()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // 4096 + 20000 runs past the 16384-byte expert blob. The streamer would
+        // read the next expert's payload as this one's gate weights.
+        try Self.mutateSubTensorField(
+            dir, layer: 0, expert: 1, tensor: "gate", field: "size", to: 20_000)
+        try Self.rejects(dir, "range exceeds expert blob")
+    }
+
+    @Test func laterExpertOverlappingTensorRangesRejects() throws {
+        let dir = try Self.writeToyLayout()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // gate_scales declared at offset 0 aliases gate's packed weights.
+        try Self.mutateSubTensorField(
+            dir, layer: 0, expert: 1, tensor: "gate_scales", field: "offset", to: 0)
+        try Self.rejects(dir, "overlapping ranges")
+    }
+
     @Test func oversizedLayoutRejectsBeforeDecode() throws {
         let dir = try Self.writeToyLayout()
         defer { try? FileManager.default.removeItem(at: dir) }
