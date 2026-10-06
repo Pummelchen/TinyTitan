@@ -20,6 +20,8 @@ final class RoutingEventLog: @unchecked Sendable {
     func append(_ event: String) { lock.withLock { _events.append(event) } }
     var events: [String] { lock.withLock { _events } }
     var loads: [String] { events.filter { $0.hasPrefix("load ") } }
+    var departures: Int { events.filter { $0.hasPrefix("departed ") }.count }
+    var releases: Int { events.filter { $0.hasPrefix("released") }.count }
     func index(of event: String) -> Int? { events.firstIndex(of: event) }
 
     func record(_ request: ValidatedChatRequest) { lock.withLock { _requests.append(request) } }
@@ -39,21 +41,39 @@ final class RoutingEventLog: @unchecked Sendable {
 }
 
 /// Holds a generation open until the test opens it.
+///
+/// One slot per waiter, for the same reason the engine keeps one per queued
+/// caller (ledger AUD-143): the continuation is handed to the slot, never stored
+/// in the actor's own memory from inside the suspension closure. A single stored
+/// continuation also lost every waiter but the last — two generations on the same
+/// model overlapped, and only one of them was ever released.
 actor RoutingGate {
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var slots: [SuspensionSlot] = []
     private var opened = false
 
-    var isWaiting: Bool { continuation != nil }
+    var isWaiting: Bool { !slots.isEmpty }
 
     func wait() async {
         guard !opened else { return }
-        await withCheckedContinuation { continuation = $0 }
+        let slot = SuspensionSlot()
+        slots.append(slot)
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { slot.handOver($0) }
+        } onCancel: {
+            Task { await self.drop(slot) }
+        }
+    }
+
+    private func drop(_ slot: SuspensionSlot) {
+        slots.removeAll { $0 === slot }
+        slot.signal(.cancel)
     }
 
     func open() {
         opened = true
-        continuation?.resume()
-        continuation = nil
+        let woken = slots
+        slots.removeAll()
+        for slot in woken { slot.signal(.wake) }
     }
 }
 

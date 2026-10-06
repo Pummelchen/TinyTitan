@@ -55,14 +55,9 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
     private var lastActivity = ContinuousClock.now
     private var reaper: Task<Void, Never>?
     /// Manual unloads waiting for in-flight requests to drain.
-    private var unloadWaiters: [UnloadWaiter] = []
+    private var unloadWaiters: [SuspensionSlot] = []
     /// Built on the first load, then reused for the process lifetime.
     private var metalContext: MetalContext?
-
-    private struct UnloadWaiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Never>
-    }
 
     package init(
         plan: ModelSessionPlan,
@@ -136,21 +131,22 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
                 ServerLog.residency("unloaded")
                 return true
             }
-            let id = UUID()
+            let slot = SuspensionSlot()
+            unloadWaiters.append(slot)
             await withTaskCancellationHandler {
-                await withCheckedContinuation { continuation in
-                    unloadWaiters.append(UnloadWaiter(id: id, continuation: continuation))
-                }
+                await withCheckedContinuation { slot.handOver($0) }
             } onCancel: {
-                Task { await self.cancelUnloadWaiter(id) }
+                Task { await self.cancelUnload(slot) }
             }
         }
         return false
     }
 
-    private func cancelUnloadWaiter(_ id: UUID) {
-        guard let index = unloadWaiters.firstIndex(where: { $0.id == id }) else { return }
-        unloadWaiters.remove(at: index).continuation.resume()
+    private func cancelUnload(_ slot: SuspensionSlot) {
+        if let index = unloadWaiters.firstIndex(where: { $0 === slot }) {
+            unloadWaiters.remove(at: index)
+        }
+        slot.signal(.cancel)
     }
 
     // MARK: - Residency
@@ -183,7 +179,7 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
         let waiters = unloadWaiters
         unloadWaiters.removeAll()
         for waiter in waiters {
-            waiter.continuation.resume()
+            waiter.signal(.wake)
         }
     }
 

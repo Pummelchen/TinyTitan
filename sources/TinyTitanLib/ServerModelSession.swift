@@ -77,7 +77,7 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
     /// Slots not currently held by a generation. Bounded by the coordinator's
     /// width; the waiter queue is a safety net if width ever exceeds slots.
     var freeSlots: [Int]
-    var slotWaiters: [SlotWaiter] = []
+    var slotWaiters: [SuspensionSlot] = []
     let prefillConfig: PrefillRuntimeConfig
     // Long prompts are prefilled chunk by chunk — small enough to keep expert
     // reads tight.
@@ -96,11 +96,6 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
     /// Concise-mode system prompt injected into every completion, or nil when
     /// concise mode is off. Selected per quantization (see ConcisePrompt).
     nonisolated let concisePrompt: String?
-
-    struct SlotWaiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Error>
-    }
 
     /// A pure function of its arguments, so a caller can reproduce the
     /// effective cache mode for the startup banner without loading a model.

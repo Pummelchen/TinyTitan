@@ -10,10 +10,6 @@ import TinyTitan
 import TinyTitanLib
 
 public actor ServerCoordinator {
-    struct Waiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Error>
-    }
 
     let queueLimit: Int
     /// How many generations may run at once. One is the historical
@@ -23,7 +19,7 @@ public actor ServerCoordinator {
     let width: Int
     var admittedCount = 0
     var activeCount = 0
-    var waiters: [Waiter] = []
+    var waiters: [SuspensionSlot] = []
     var shuttingDown = false
     /// Raised for the duration of every client generation. The side-engine
     /// reads it to choose its width: one thread while a person is waiting,
@@ -74,37 +70,49 @@ public actor ServerCoordinator {
     func acquire(onQueued: @escaping @Sendable () -> Void) async throws {
         try Task.checkCancellation()
         guard !shuttingDown else { throw CancellationError() }
-        if activeCount < width {
-            activeCount += 1
-            return
-        }
-        guard waiters.count < queueLimit else { throw ServerRequestError.queueFull }
-        onQueued()
-        let id = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                waiters.append(Waiter(id: id, continuation: continuation))
-            }
+        guard let slot = try queueOrAdmit(onQueued: onQueued) else { return }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { slot.handOver($0) }
         } onCancel: {
-            Task { await self.cancelWaiter(id) }
+            Task { await self.cancel(slot) }
         }
+        if slot.received == .cancel { throw CancellationError() }
         if Task.isCancelled {
+            // Admitted and cancelled in the same breath: the width is held now, so
+            // hand it back before throwing rather than leaking a slot.
             release()
             throw CancellationError()
         }
     }
 
-    func cancelWaiter(_ id: UUID) {
-        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
-        let waiter = waiters.remove(at: index)
-        waiter.continuation.resume(throwing: CancellationError())
+    /// Admit the caller, or queue it on a fresh slot, in one step with no
+    /// suspension. Nil means admitted. Registering in the same step as the check is
+    /// what keeps a `release` from landing between them, and the slot is the only
+    /// thing the continuation closure may touch: see `SuspensionSlot`.
+    private func queueOrAdmit(onQueued: @Sendable () -> Void) throws -> SuspensionSlot? {
+        if activeCount < width {
+            activeCount += 1
+            return nil
+        }
+        guard waiters.count < queueLimit else { throw ServerRequestError.queueFull }
+        onQueued()
+        let slot = SuspensionSlot()
+        waiters.append(slot)
+        return slot
+    }
+
+    func cancel(_ slot: SuspensionSlot) {
+        if let index = waiters.firstIndex(where: { $0 === slot }) {
+            waiters.remove(at: index)
+        }
+        slot.signal(.cancel)
     }
 
     func release() {
         if waiters.isEmpty {
             activeCount = max(0, activeCount - 1)
         } else {
-            waiters.removeFirst().continuation.resume()
+            waiters.removeFirst().signal(.wake)
         }
     }
 
@@ -113,7 +121,7 @@ public actor ServerCoordinator {
         let queued = waiters
         waiters.removeAll()
         for waiter in queued {
-            waiter.continuation.resume(throwing: CancellationError())
+            waiter.signal(.cancel)
         }
     }
 

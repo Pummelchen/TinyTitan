@@ -60,9 +60,17 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         let backend: any ServerInferenceBackend
     }
 
-    private struct Waiter {
-        let id: UUID
-        let continuation: CheckedContinuation<Void, Never>
+    /// One queued caller. The slot is what it suspends on; the kind says whether
+    /// the caller is counted in `pendingSwitches`, which is the barrier that keeps
+    /// new work for the resident model behind a pending switch.
+    private struct QueuedTurn {
+        enum Kind {
+            case residentWork
+            case switcher
+        }
+
+        let slot: SuspensionSlot
+        let kind: Kind
     }
 
     private var resident: Resident?
@@ -74,7 +82,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
     /// new work for the resident model queues behind them rather than keeping
     /// the in-flight count above zero forever.
     private var pendingSwitches = 0
-    private var waiters: [Waiter] = []
+    private var waiters: [QueuedTurn] = []
 
     package init(
         catalog: ModelCatalog,
@@ -219,7 +227,9 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
                 return true
             }
             if Task.isCancelled { return false }
-            await waitForTurn()
+            let slot = SuspensionSlot()
+            waiters.append(QueuedTurn(slot: slot, kind: .residentWork))
+            await wait(on: slot)
         }
         return false
     }
@@ -240,36 +250,95 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         guard let entry = entries[target], let choice = choices[target] else {
             throw ServerRequestError.unknownModel
         }
+        // Set when this caller is counted in `pendingSwitches` and not yet holding
+        // the switch; whoever still holds the count on the way out gives it back.
+        var countedSwitcher = false
         while true {
-            try Task.checkCancellation()
-            if let resident, resident.id == target, !switching, pendingSwitches == 0 {
-                inFlight += 1
-                return resident.backend
-            }
-            if resident?.id != target, !switching, inFlight == 0 {
-                return try await switchTo(entry, choice: choice)
-            }
-            if resident?.id == target {
-                await waitForTurn()
-                continue
-            }
-            pendingSwitches += 1
-            await waitForTurn()
-            pendingSwitches -= 1
             if Task.isCancelled {
-                // Work for the resident model may be queued behind this
-                // switch; with it abandoned they must re-check, not sleep on.
-                wakeWaiters()
+                if countedSwitcher { releaseSwitchClaim() }
                 throw CancellationError()
             }
+            let step = turn(
+                for: target, entry: entry, choice: choice, countedSwitcher: countedSwitcher)
+            switch step {
+            case .proceed(let backend):
+                // Served by the resident model: whatever switch claim this caller
+                // held is spent, and leaving it up would block every later caller
+                // behind a switch that is no longer coming.
+                if countedSwitcher { releaseSwitchClaim() }
+                countedSwitcher = false
+                return backend
+            case .switchNow:
+                countedSwitcher = false
+                return try await switchTo(entry, choice: choice)
+            case .wait(let turn):
+                if countedSwitcher, turn.kind != .switcher {
+                    releaseSwitchClaim()
+                    countedSwitcher = false
+                }
+                if turn.kind == .switcher { countedSwitcher = true }
+                await wait(on: turn.slot)
+                if turn.slot.received == .cancel || Task.isCancelled {
+                    if countedSwitcher { releaseSwitchClaim() }
+                    throw CancellationError()
+                }
+            }
         }
+    }
+
+    /// Decide what this caller may do and, if it must wait, register it — in one
+    /// step containing no suspension. That atomicity is the guarantee: a wake
+    /// cannot land between reading `switching`/`pendingSwitches` and joining the
+    /// queue, which is how a switcher used to be overtaken by fresh work for the
+    /// resident model. The claim for a switch is taken here too, because returning
+    /// from this method and reaching `switchTo` is itself a suspension point.
+    private func turn(
+        for target: String,
+        entry: ModelCatalog.Entry,
+        choice: ReasoningChoice,
+        countedSwitcher: Bool
+    ) -> Turn {
+        if let resident, resident.id == target, !switching, pendingSwitches == 0 {
+            inFlight += 1
+            return .proceed(resident.backend)
+        }
+        if resident?.id != target, !switching, inFlight == 0 {
+            beginSwitch(counted: countedSwitcher)
+            return .switchNow
+        }
+        let slot = SuspensionSlot()
+        let kind: QueuedTurn.Kind = resident?.id != target ? .switcher : .residentWork
+        if kind == .switcher && !countedSwitcher { pendingSwitches += 1 }
+        let turn = QueuedTurn(slot: slot, kind: kind)
+        waiters.append(turn)
+        return .wait(turn)
+    }
+
+    private enum Turn {
+        case proceed(any ServerInferenceBackend)
+        case switchNow
+        case wait(QueuedTurn)
+    }
+
+    /// Raise the barrier for the duration of the switch. The count this caller held
+    /// is spent here, so from this step until `switchTo`'s exit nothing can let
+    /// resident work past a queued switcher.
+    private func beginSwitch(counted: Bool) {
+        if counted, pendingSwitches > 0 { pendingSwitches -= 1 }
+        switching = true
+    }
+
+    /// A queued switcher that is giving up: without this the barrier stays raised
+    /// and the resident model starves new work forever.
+    private func releaseSwitchClaim() {
+        if pendingSwitches > 0 { pendingSwitches -= 1 }
+        wakeWaiters()
     }
 
     private func switchTo(
         _ entry: ModelCatalog.Entry,
         choice: ReasoningChoice
     ) async throws -> any ServerInferenceBackend {
-        switching = true
         defer {
             switching = false
             wakeWaiters()
@@ -296,31 +365,32 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         return loaded
     }
 
+    /// Marks the caller's wait over and the in-flight count released.
     private func release() {
         inFlight -= 1
         if inFlight == 0 { wakeWaiters() }
     }
 
-    private func waitForTurn() async {
-        let id = UUID()
+    /// Suspend on a slot the actor already holds. Only the slot is reachable from
+    /// the continuation closure, and `handOver` is built for a foreign executor:
+    /// appending the continuation to `waiters` from here mutated actor state off
+    /// the actor, which is ledger AUD-143.
+    private func wait(on slot: SuspensionSlot) async {
         await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                // Checked here, on the actor, so a cancellation that landed
-                // before this waiter was queued cannot leave it asleep.
-                if Task.isCancelled {
-                    continuation.resume()
-                } else {
-                    waiters.append(Waiter(id: id, continuation: continuation))
-                }
-            }
+            await withCheckedContinuation { slot.handOver($0) }
         } onCancel: {
-            Task { await self.cancelWaiter(id) }
+            Task { await self.drop(slot) }
         }
     }
 
-    private func cancelWaiter(_ id: UUID) {
-        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
-        waiters.remove(at: index).continuation.resume()
+    /// Remove a cancelled caller and wake it. The switch count it may have held is
+    /// given back by the caller that owns it, in `acquire`, so this does not touch
+    /// `pendingSwitches` and cannot double-count the same departure.
+    private func drop(_ slot: SuspensionSlot) {
+        if let index = waiters.firstIndex(where: { $0.slot === slot }) {
+            waiters.remove(at: index)
+        }
+        slot.signal(.cancel)
     }
 
     /// Every waiter re-checks its own condition, so waking all of them is
@@ -329,7 +399,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         let woken = waiters
         waiters.removeAll()
         for waiter in woken {
-            waiter.continuation.resume()
+            waiter.slot.signal(.wake)
         }
     }
 
@@ -337,4 +407,6 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
 
     var inFlightCount: Int { inFlight }
     var waiterCount: Int { waiters.count }
+    var pendingSwitchCount: Int { pendingSwitches }
+    var isSwitchingForTesting: Bool { switching }
 }

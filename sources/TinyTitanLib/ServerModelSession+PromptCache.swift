@@ -14,31 +14,47 @@ extension ServerModelSession {
     /// free, and the wait exists only so a wider coordinator degrades to
     /// queueing instead of failing.
     func acquireSlot() async throws -> Int {
-        if let slot = freeSlots.popLast() { return slot }
-        let id = UUID()
-        try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                slotWaiters.append(SlotWaiter(id: id, continuation: continuation))
+        while true {
+            switch claimSlotOrQueue() {
+            case .taken(let slot): return slot
+            case .queued(let slot):
+                await withTaskCancellationHandler {
+                    await withCheckedContinuation { slot.handOver($0) }
+                } onCancel: {
+                    Task { await self.cancelSlot(slot) }
+                }
+                if slot.received == .cancel || Task.isCancelled { throw CancellationError() }
             }
-        } onCancel: {
-            Task { await self.cancelSlotWaiter(id) }
         }
-        if Task.isCancelled { throw CancellationError() }
-        guard let slot = freeSlots.popLast() else {
-            throw ServerRequestError.queueFull
-        }
-        return slot
     }
 
-    func cancelSlotWaiter(_ id: UUID) {
-        guard let index = slotWaiters.firstIndex(where: { $0.id == id }) else { return }
-        slotWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    /// Pop a free slot or register the caller on a fresh one, in one step with no
+    /// suspension: `releaseSlot` cannot hand a slot over between the check and the
+    /// registration. See `SuspensionSlot` for why the continuation itself is not
+    /// what gets registered.
+    private func claimSlotOrQueue() -> SlotGate {
+        if let slot = freeSlots.popLast() { return .taken(slot) }
+        let waiter = SuspensionSlot()
+        slotWaiters.append(waiter)
+        return .queued(waiter)
+    }
+
+    private enum SlotGate {
+        case taken(Int)
+        case queued(SuspensionSlot)
+    }
+
+    func cancelSlot(_ slot: SuspensionSlot) {
+        if let index = slotWaiters.firstIndex(where: { $0 === slot }) {
+            slotWaiters.remove(at: index)
+        }
+        slot.signal(.cancel)
     }
 
     func releaseSlot(_ slot: Int) {
         freeSlots.append(slot)
         if !slotWaiters.isEmpty {
-            slotWaiters.removeFirst().continuation.resume()
+            slotWaiters.removeFirst().signal(.wake)
         }
     }
 

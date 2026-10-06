@@ -226,6 +226,64 @@ struct ModelRouterTests {
             _ = try await router.generate(Fixture.request("\(Fixture.alpha.id)@cpu")) { _ in }
         }
     }
+    /// Every queued caller has to be released by the wake that took the gate from
+    /// it, and every abandoned one by its cancellation. This is the AUD-143
+    /// regression: the waiter array was appended to from the continuation closure,
+    /// off the actor's executor, so a wake could land before the append and the
+    /// caller slept on a waiter nobody held.
+    ///
+    /// Progress is counted, not awaited. A job that lost its wake never returns,
+    /// so awaiting the jobs would hang the test instead of failing it, and a task
+    /// group does not time out either — it joins every child, including the one
+    /// blocked on a parked job. The deadline is therefore a polling loop over the
+    /// departures the jobs each write on their way out.
+    @Test func concurrentSwitchesWakeEveryQueuedCaller() async throws {
+        let log = RoutingEventLog()
+        let alphaGate = RoutingGate()
+        let smallGate = RoutingGate()
+        let router = try Fixture.router(
+            log: log,
+            gates: [Fixture.alpha.id: alphaGate, Fixture.small.id: smallGate])
+        try await router.preload()
+
+        var jobs: [Task<Void, Never>] = []
+        for index in 0..<12 {
+            let id = index.isMultiple(of: 2) ? Fixture.alpha.id : Fixture.small.id
+            jobs.append(
+                Task {
+                    // try?, not try: this job's outcome is the count, and a caller
+                    // that left by cancellation has still left.
+                    _ = try? await router.generate(Fixture.request(id)) { _ in }
+                    log.append("departed \(id)")
+                })
+        }
+        await Fixture.eventually("callers to queue") { await router.waiterCount >= 1 }
+        let total = jobs.count
+        for job in jobs.suffix(3) { job.cancel() }
+        await alphaGate.open()
+        await smallGate.open()
+
+        await Fixture.eventually("every caller to be released", timeout: .seconds(20)) {
+            let released = log.departures
+            let active = await router.inFlightCount
+            return released == total && active == 0
+        }
+        let departed = log.departures
+        let waiters = await router.waiterCount
+        let inFlight = await router.inFlightCount
+        let loads = log.loads.count
+        #expect(departed == jobs.count, "\(departed)/\(jobs.count) callers returned")
+        #expect(waiters == 0, "\(waiters) queued callers were never dropped")
+        #expect(inFlight == 0, "\(inFlight) departed callers kept the count")
+        // The stress has to actually switch, or it tests nothing.
+        #expect(loads > 1, "\(loads) loads: the callers never forced a switch")
+        // Not asserted: one generation at a time. The router allows several callers
+        // on the resident model (`inFlight` counts them, and a switch waits for all
+        // of them); it is the HTTP coordinator that serialises requests. Measured on
+        // the release build, one run in seven overlapped two generations — which is
+        // also what made the gate's single stored continuation a hang rather than a
+        // curiosity.
+    }
 }
 
 @Suite("Reasoning fallback")
@@ -298,4 +356,5 @@ struct ReasoningFallbackTests {
         #expect(settings.effort == .low)
         #expect(arguments.requestedReasoningLevel == .low)
     }
+
 }

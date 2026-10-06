@@ -80,7 +80,7 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// own, takes this gate first. A person never waits behind more than one
     /// consolidation, and a consolidation only starts in a pause.
     var innerBusy = false
-    var innerWaiters: [CheckedContinuation<Void, Never>] = []
+    var innerWaiters: [SuspensionSlot] = []
 
     package init(
         wrapping inner: any ServerInferenceBackend,
@@ -300,17 +300,28 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     // MARK: - The generation gate
 
     func acquireInner() async {
-        while innerBusy {
-            await withCheckedContinuation { innerWaiters.append($0) }
+        while let slot = queueInner() {
+            await withCheckedContinuation { slot.handOver($0) }
+        }
+    }
+
+    /// Take the gate or queue on a fresh slot, in one step with no suspension, so a
+    /// release cannot land between the check and the registration. Nil means taken.
+    private func queueInner() -> SuspensionSlot? {
+        if innerBusy {
+            let slot = SuspensionSlot()
+            innerWaiters.append(slot)
+            return slot
         }
         innerBusy = true
+        return nil
     }
 
     func releaseInner() {
         innerBusy = false
         let waiting = innerWaiters
         innerWaiters.removeAll()
-        for waiter in waiting { waiter.resume() }
+        for waiter in waiting { waiter.signal(.wake) }
     }
 
     /// Runs one inner generation under the gate.

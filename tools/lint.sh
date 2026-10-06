@@ -681,7 +681,10 @@ check_python() {
   version="$(ruff --version | awk '{print $2}')"
   if [ "$version" != "$RUFF_PIN" ]; then
     echo "  FAIL: ruff $version is installed, this gate pins $RUFF_PIN"
+    echo "        the binary in use is $(command -v ruff)"
     echo "        pipx install --force ruff==$RUFF_PIN"
+    echo "        if that path is not pipx's, an earlier PATH entry shadows it"
+    echo "        (brew install ruff puts one in /opt/homebrew/bin)"
     status=1
     return 1
   fi
@@ -794,6 +797,7 @@ check_swiftlint() {
   version="$(swiftlint version)"
   if [ "$version" != "$SWIFTLINT_PIN" ]; then
     echo "  FAIL: swiftlint $version is installed, this gate pins $SWIFTLINT_PIN"
+    echo "        the binary in use is $(command -v swiftlint)"
     status=1
     return 1
   fi
