@@ -181,7 +181,17 @@ export function createHandler(options) {
     const method = String(req.method ?? "GET").toUpperCase();
     const mutating = method !== "GET" && method !== "HEAD";
 
-    // Guard 3: Origin on mutating verbs only.
+    // Guard 3: Origin on mutating verbs only, and only when one is present.
+    //
+    // An absent Origin is accepted on purpose. A browser sends Origin on **every**
+    // POST — same-origin, cross-origin, and a plain `<form>` submission included —
+    // so there is no browser request that reaches a mutating route without it, and
+    // the requests that do arrive header-less are programs: `ttlanmanager` posts
+    // through URLSession, which sends no Origin (FleetClient.swift:198). Demanding
+    // the header would break the sanctioned client and close no browser path.
+    // What authorises a non-browser caller instead is Guard 1's source address and
+    // Guard 2's token, and `test/router.test.js` pins that both still bite when
+    // there is no Origin to check.
     if (mutating && config.enforceOrigin !== false) {
       const origin = req.headers.origin;
       if (origin && !isAllowedOrigin(origin, req.headers.host, config)) {

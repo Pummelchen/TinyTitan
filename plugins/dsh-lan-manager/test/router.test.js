@@ -633,6 +633,72 @@ test("a foreign Origin cannot drive a mutating request", async () => {
   }
 });
 
+test("a mutating request with no Origin is the CLI's contract, and the other guards still bite", async () => {
+  // Guard 3 checks an Origin only when one is present, because a browser never
+  // omits it on POST (same-origin, cross-origin and `<form>` posts all carry it)
+  // while `ttlanmanager` posts through URLSession, which sends no Origin at all
+  // (FleetClient.swift:198). So the header-less caller is a program, and what
+  // authorises it is Guard 1 and Guard 2 — which is what the two halves below
+  // pin, rather than trusting the missing header to be harmless.
+  const { handler, store } = await setup();
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions/s-a1/archive",
+      headers: { host: "127.0.0.1:3080" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.notEqual(res.body.error, "origin-not-allowed");
+  } finally {
+    store.cleanup();
+  }
+
+  // The same request, from a source the address fence rejects, is still refused
+  // with no Origin in play.
+  const fenced = await setup();
+  try {
+    const res = await call(fenced.handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions/s-a1/archive",
+      headers: { host: "127.0.0.1:3080" },
+      remote: "203.0.113.9",
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, "source-not-allowed");
+  } finally {
+    fenced.store.cleanup();
+  }
+
+  // And the same request with a token configured is refused until the token
+  // arrives, so an absent Origin never doubles as an authentication bypass.
+  const tokened = await setup({ config: { token: "s3cret" } });
+  try {
+    assert.equal(
+      (
+        await call(tokened.handler, {
+          method: "POST",
+          url: "/dsh-lan/sessions/s-a1/archive",
+          headers: { host: "127.0.0.1:3080", "x-dsh-token": "" },
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (
+        await call(tokened.handler, {
+          method: "POST",
+          url: "/dsh-lan/sessions/s-a1/archive",
+          headers: { host: "127.0.0.1:3080", "x-dsh-token": "s3cret" },
+        })
+      ).status,
+      200,
+    );
+  } finally {
+    tokened.store.cleanup();
+  }
+});
+
 test("a same-host Origin is accepted", async () => {
   const { handler, store } = await setup();
   try {
