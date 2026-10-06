@@ -109,10 +109,57 @@ check_force_cast() {
 # carries — a range this process itself requested, a resource the package ships, an
 # operator-named file outside every trust boundary, or an mmap that is the point of
 # the read.
+#
+# The call is found by joining each line with its continuations, not by matching
+# one line: `swift-format` wraps a long argument list, and a line-oriented grep
+# reported `ok` over `Data(\n    contentsOf: …)` -- which is exactly how one of the
+# nine reads AUD-142 bounded survived it. A gate that cannot see its own input
+# reads as a pass over code it never looked at, the failure this file already
+# refuses for `func-length` by printing UNRESOLVED instead of shrugging.
+unbounded_read_hits() {
+  ruby -e '
+    Encoding.default_external = Encoding::UTF_8
+    Encoding.default_internal = Encoding::UTF_8
+    root = File.join(ENV.fetch("ROOT"), "sources")
+    paths = Dir.glob(File.join(root, "**", "*.swift")).sort
+    # A search that found no files has read no code, and silence here would print
+    # `ok` over the whole tree. `ROOT` is exported above; this is the guard for the
+    # day it is not, or the day the directory moves.
+    raise "no Swift files under #{root}" if paths.empty?
+    paths.each do |path|
+      lines = File.readlines(path, chomp: true)
+      lines.each_with_index do |line, i|
+        # The walk starts at the call, not at the statement around it: an outer
+        # line would otherwise report the same read a second time, at a line no
+        # exemption can be attached to.
+        next unless line =~ /(Data|String)\(/
+        depth = line.count("(") - line.count(")")
+        joined = line
+        j = i
+        while depth > 0 && j + 1 < lines.length
+          j += 1
+          joined += " " + lines[j]
+          depth += lines[j].count("(") - lines[j].count(")")
+        end
+        next unless joined =~ /(Data|String)\(\s*contentsOf:/
+        puts "#{path}:#{i + 1}:#{line}"
+      end
+    end
+  '
+}
+
 check_unbounded_metadata_read() {
   echo "== unbounded-read: whole-file reads under sources/ must state their bound =="
   local found=0
+  local hits
+  if ! hits="$(unbounded_read_hits)"; then
+    echo "  FAIL: the walk over sources/ did not run"
+    echo "        a gate that searched nothing would report a pass over code it never read"
+    status=1
+    return
+  fi
   while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
     local file line text n ok=0
     file="${hit%%:*}"
     line="$(echo "$hit" | cut -d: -f2)"
@@ -134,7 +181,7 @@ check_unbounded_metadata_read() {
     [ "$ok" -eq 1 ] && continue
     echo "  ${file#$ROOT/}:$line: $(echo "$hit" | cut -d: -f3- | sed 's/^[[:space:]]*//')"
     found=1
-  done < <(grep -rnE '(Data|String)\(contentsOf:' --include='*.swift' "$ROOT/sources" 2>/dev/null)
+  done <<< "${hits}"
 
   if [ "$found" -ne 0 ]; then
     echo "  FAIL: unbounded whole-file read without a 'lint:allow-unbounded-read <reason>' comment above it"

@@ -200,6 +200,11 @@ private func buildPrompt(args: Args) throws -> Prompt {
     guard let messagesFile = args.messagesFile else {
         throw MessageFileError(description: "one of --prompt or --messages-file is required")
     }
+    // lint:allow-unbounded-read --messages-file names this path, so its size is
+    // whatever the operator pointed at: a file outside every trust boundary, read
+    // `.mappedIfSafe` so a large transcript is mapped rather than copied -- the
+    // same two reasons the resident-payload read carries, on an input this process
+    // was told to open.
     let data = try Data(
         contentsOf: URL(fileURLWithPath: messagesFile),
         options: [.mappedIfSafe])
