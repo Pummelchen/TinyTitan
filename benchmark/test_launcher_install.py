@@ -86,10 +86,15 @@ def shell_model_function(function: str, *args: str) -> subprocess.CompletedProce
     )
 
 
-def run_launcher(*args: str) -> subprocess.CompletedProcess[str]:
+def run_launcher(
+    *args: str, models_dir: pathlib.Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the launcher in a dry run, optionally against another `models/`."""
     environment = dict(os.environ)
     environment["TINYTITAN_LAUNCHER_DRY_RUN"] = "1"
     environment.pop("TINYTITAN_LAUNCHER_ASSUME_TTY", None)
+    if models_dir is not None:
+        environment["TINYTITAN_MODELS_DIR"] = str(models_dir)
     return subprocess.run(
         ["bash", str(LAUNCHER), "--dry-run", *args],
         input="",
@@ -118,6 +123,22 @@ def first_missing() -> tuple[str, str, str] | None:
             if not (MODELS / directory).is_dir():
                 return name, bits, catalogue_key
     return None
+
+
+def first_catalogue_model() -> tuple[str, str, str]:
+    """A (launcher name, bits, install key) both lists agree on, disk ignored.
+
+    `first_missing` depends on what this machine happens to have installed, so a
+    test built on it runs or skips by accident. This one is the same lookup with
+    the filesystem taken out of it, for a case that must always run.
+    """
+    known = catalogue()
+    for name, key in LAUNCHER_NAMES.items():
+        for bits in ("4", "8"):
+            catalogue_key = key if bits == "4" else f"{key}-8bit"
+            if catalogue_key in known:
+                return name, bits, catalogue_key
+    raise AssertionError("no launcher name maps to an installer catalogue key")
 
 
 class InstallKeyTests(unittest.TestCase):
@@ -361,6 +382,40 @@ class MenuSelectionTests(unittest.TestCase):
         run = self.menu("\n")
         self.assertRegex(run.stdout, r"Choice \[1-\d+\] \(default \d+\)")
         self.assertNotIn("ERROR", run.stdout)
+
+
+class EmptyModelsDirTests(unittest.TestCase):
+    """A checkout with nothing installed reaches the fetch instead of stopping.
+
+    `models/` is gitignored, so this is the state a fresh clone and every CI run
+    are in. The launcher's empty-catalog guard used to answer it with `exit 2`
+    before the offer and fetch code, which made the feature these other tests pin
+    unreachable on exactly the machines that need it. The directory is created
+    here rather than inherited, so the case runs identically on a checkout with
+    eight installs and one with none.
+    """
+
+    def test_a_named_model_is_offered_not_refused(self) -> None:
+        name, bits, key = first_catalogue_model()
+        with tempfile.TemporaryDirectory() as empty:
+            models = pathlib.Path(empty)
+            run = run_launcher(
+                "--client", "server", "--model", name, "--bits", bits, models_dir=models
+            )
+            self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+            combined = run.stdout + run.stderr
+            self.assertIn(f"tools/install_models.sh {key}", combined)
+            # The old refusal must not be what produced that line.
+            self.assertNotIn("no install under", combined)
+            self.assertNotIn("Starting TinyTitanServer", run.stdout)
+            self.assertEqual(sorted(p.name for p in models.iterdir()), [])
+
+    def test_the_menu_draws_the_fetch_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as empty:
+            run = run_launcher("--client", "server", models_dir=pathlib.Path(empty))
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("are not installed yet", run.stdout)
+        self.assertIn("fetches it first", run.stdout)
 
 
 if __name__ == "__main__":

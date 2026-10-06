@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 23,
-    "done": 0,
-    "open": 23,
+    "done": 2,
+    "open": 21,
     "blocked": 0
   },
   "tasks": [
@@ -18,13 +18,13 @@
       "file_line": "tools/server_launcher.sh:517-522",
       "title": "A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path",
       "category": "unreachable-fix / broken first-run path",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "CI run 37329361684 + local reproduction",
       "evidence-before": "5.18's headline is 'a model that is not on disk can be fetched from the launcher'. Reproduced on this host: `TINYTITAN_MODELS_DIR=<empty> TINYTITAN_LAUNCHER_DRY_RUN=1 bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` prints 'ERROR: no install under <dir> matches the built-in list' and exits 2. tinytitan_static_catalog (tools/tinytitan_models.sh:458-462) returns 1 when models/ holds none of the built-in models, and server_launcher.sh exits 2 at :521, i.e. before the fetch/offer code at :569-616 and before --model handling at :620. The offer helper itself is fine — tinytitan_missing_offers on an empty directory is tested and passes (benchmark/test_launcher_install.py:MissingOffersTests) — so the defect is the composed path, not the helper. Expected-correct: a --model/--bits request for a width that is not on disk reaches install_model_key and, piped or --dry-run, prints the tools/install_models.sh command and downloads nothing.",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "server_launcher.sh: the empty-static-catalog branch stops only when there is also nothing to fetch (TINYTITAN_CATALOG_MISSING empty). With offers available it says so in one line and falls through to the menu and the --model path, which already re-read the catalog after an install. The block comment above it is corrected too: it asserted the menu never offers what is not on disk, which stopped being true when the fetch rows were added.",
+      "evidence-after": "Before: `TINYTITAN_MODELS_DIR=<empty> bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` -> exit 2, 'ERROR: no install under … matches the built-in list'. After: exit 1 and 'Install it with:  tools/install_models.sh katcoder'. Menu with an empty dir: rows 1-16 drawn, 'Rows 1-16 are not installed yet', choice 9 -> exit 1 + 'Install it with: tools/install_models.sh qwen38flash'; EOF at the menu -> exit 1, nothing downloaded. The empty dir stayed empty in all four cases. New EmptyModelsDirTests fail (2 failures) against HEAD's launcher and pass against the fixed one; test_launcher_install 16/16 OK.",
+      "commit": "see the audit(AUD-101) commit",
       "blocked-reason": null
     },
     {
@@ -35,13 +35,13 @@
       "file_line": "benchmark/test_launcher_install.py:104-120,162-197",
       "title": "The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes",
       "category": "test correctness / CI gate",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary) + GitHub Actions",
       "discovered-by": "gh run list + gh run view --log-failed",
       "evidence-before": "CI on main: ea5de8c FAIL, 2d510fc FAIL, 9bb9051 FAIL (last green f5f1204). The failing step is 'Installer gates', `FAILED (failures=6)` in test_launcher_install. first_missing() returns a candidate when a catalogue model is NOT installed, so on a CI runner with an empty models/ nothing skips, the six menu/missing-model tests run against the launcher's exit-2 path, and assertEqual(returncode, 1) fails with '2 != 1'. Locally the same 14 tests pass (`python3 -m unittest benchmark.test_launcher_install` -> OK) because this checkout has two installs. Its sibling suites do guard this case — test_launcher_ram.py:135 and test_launcher_port.py:108 skipTest('no install under models/ and no built server to list one'). AGENTS.md states tests never load a model and no gate may fetch one, so the suite must be correct against an empty models/.",
-      "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "fix-summary": "The suite's expectation was right and is kept: returncode 1 plus the exact install_models.sh command. What was missing was coverage of the state CI is actually in, so the same assertion only ran against whatever this machine happens to have. EmptyModelsDirTests creates an empty models dir and points TINYTITAN_MODELS_DIR at it, and first_catalogue_model() picks a launcher name without consulting the disk. No assertion was loosened and no test was skipped: 14 tests before, 16 after.",
+      "evidence-after": "Pre-fix launcher: `Ran 16 tests … FAILED (failures=2)`. Fixed launcher: `Ran 16 tests in 1.357s OK`. Sibling suites still green on this host: test_launcher_ram, test_launcher_port, test_progress, test_coder_clients -> Ran 45 tests, OK.",
+      "commit": "see the audit(AUD-101) commit",
       "blocked-reason": null
     },
     {

@@ -496,9 +496,10 @@ install_missing_model() {
   install_model_key "$key" "$3" "$2"
 }
 
-# The installed models: the server's own catalog, or the built-in list. Both
-# are held to installs that are really on disk, so the menu never offers a model
-# or a width that cannot be loaded.
+# The installed models: the server's own catalog, or the built-in list. Nothing
+# here loads a model that is not on disk — a choice that is not installed is
+# fetched first, which is what the rows past the installed ones exist for. So an
+# empty models/ is not a dead end: it is the case that has to reach the fetch.
 dynamic=0
 if tinytitan_load_catalog "$BINARY" "$MODELS_DIR"; then
   if tinytitan_catalog_keep_installed; then
@@ -515,10 +516,17 @@ if (( ! dynamic )); then
   echo "      Offering the installs this checkout has instead; the server will" >&2
   echo "      serve only the model chosen here, and switching needs a restart." >&2
   if ! tinytitan_static_catalog "$MODELS_DIR"; then
-    echo "" >&2
-    echo "ERROR: $TINYTITAN_CATALOG_ERROR." >&2
-    echo "       Add one first: docs/adding-a-model.md, or tools/install_models.sh." >&2
-    exit 2
+    # models/ holds none of the built-in installs. That is exactly the case the
+    # fetch exists for, so the built-in list still drives the menu and --model:
+    # stopping here would make a fresh checkout unable to reach the code that
+    # installs its first model. Stop only when there is nothing to fetch either.
+    if (( ${#TINYTITAN_CATALOG_MISSING[@]} == 0 )); then
+      echo "" >&2
+      echo "ERROR: $TINYTITAN_CATALOG_ERROR." >&2
+      echo "       Add one first: docs/adding-a-model.md, or tools/install_models.sh." >&2
+      exit 2
+    fi
+    echo "      Nothing is installed under $MODELS_DIR, so every row below fetches it first." >&2
   fi
   if (( ${#TINYTITAN_CATALOG_MISSING[@]} > 0 )); then
     echo "      Supported but not installed here: ${TINYTITAN_CATALOG_MISSING[*]+"${TINYTITAN_CATALOG_MISSING[*]}"}" >&2

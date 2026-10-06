@@ -2,18 +2,18 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:23  Done:0  Blocked:0  Total:23**
+**Open:21  Done:2  Blocked:0  Total:23**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | START | Mac (primary) |
-| AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | START | Mac (primary) + GitHub Actions |
 | AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:41-44` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | START | Mac (primary) |
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | START | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | START | Mac (primary) |
+| AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
+| AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
@@ -33,30 +33,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
 
 ## Detail
-
-### AUD-101 — A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** launcher
-- **Location:** `tools/server_launcher.sh:517-522`
-- **Category:** unreachable-fix / broken first-run path
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** CI run 37329361684 + local reproduction
-
-**Evidence before.** 5.18's headline is 'a model that is not on disk can be fetched from the launcher'. Reproduced on this host: `TINYTITAN_MODELS_DIR=<empty> TINYTITAN_LAUNCHER_DRY_RUN=1 bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` prints 'ERROR: no install under <dir> matches the built-in list' and exits 2. tinytitan_static_catalog (tools/tinytitan_models.sh:458-462) returns 1 when models/ holds none of the built-in models, and server_launcher.sh exits 2 at :521, i.e. before the fetch/offer code at :569-616 and before --model handling at :620. The offer helper itself is fine — tinytitan_missing_offers on an empty directory is tested and passes (benchmark/test_launcher_install.py:MissingOffersTests) — so the defect is the composed path, not the helper. Expected-correct: a --model/--bits request for a width that is not on disk reaches install_model_key and, piped or --dry-run, prints the tools/install_models.sh command and downloads nothing.
-
-### AUD-102 — The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes
-
-- **Severity / tier:** S1 / Tier B
-- **Project:** tests
-- **Location:** `benchmark/test_launcher_install.py:104-120,162-197`
-- **Category:** test correctness / CI gate
-- **Status:** START
-- **Host:** Mac (primary) + GitHub Actions
-- **Discovered by:** gh run list + gh run view --log-failed
-
-**Evidence before.** CI on main: ea5de8c FAIL, 2d510fc FAIL, 9bb9051 FAIL (last green f5f1204). The failing step is 'Installer gates', `FAILED (failures=6)` in test_launcher_install. first_missing() returns a candidate when a catalogue model is NOT installed, so on a CI runner with an empty models/ nothing skips, the six menu/missing-model tests run against the launcher's exit-2 path, and assertEqual(returncode, 1) fails with '2 != 1'. Locally the same 14 tests pass (`python3 -m unittest benchmark.test_launcher_install` -> OK) because this checkout has two installs. Its sibling suites do guard this case — test_launcher_ram.py:135 and test_launcher_port.py:108 skipTest('no install under models/ and no built server to list one'). AGENTS.md states tests never load a model and no gate may fetch one, so the suite must be correct against an empty models/.
 
 ### AUD-107 — tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose
 
@@ -113,6 +89,42 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in "missing dependency: No module named 'ml_dtypes' …"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. With the pins installed the same three suites run `Ran 87 tests … OK`, exit 0.
 
 **Evidence after.** Expected: with a dependency absent the suite reports skip (or error before the run) and exit 0 for the skip reason, never a failure that reads like a code defect.
+
+### AUD-101 — A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** launcher
+- **Location:** `tools/server_launcher.sh:517-522`
+- **Category:** unreachable-fix / broken first-run path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** CI run 37329361684 + local reproduction
+
+**Evidence before.** 5.18's headline is 'a model that is not on disk can be fetched from the launcher'. Reproduced on this host: `TINYTITAN_MODELS_DIR=<empty> TINYTITAN_LAUNCHER_DRY_RUN=1 bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` prints 'ERROR: no install under <dir> matches the built-in list' and exits 2. tinytitan_static_catalog (tools/tinytitan_models.sh:458-462) returns 1 when models/ holds none of the built-in models, and server_launcher.sh exits 2 at :521, i.e. before the fetch/offer code at :569-616 and before --model handling at :620. The offer helper itself is fine — tinytitan_missing_offers on an empty directory is tested and passes (benchmark/test_launcher_install.py:MissingOffersTests) — so the defect is the composed path, not the helper. Expected-correct: a --model/--bits request for a width that is not on disk reaches install_model_key and, piped or --dry-run, prints the tools/install_models.sh command and downloads nothing.
+
+**Fix.** server_launcher.sh: the empty-static-catalog branch stops only when there is also nothing to fetch (TINYTITAN_CATALOG_MISSING empty). With offers available it says so in one line and falls through to the menu and the --model path, which already re-read the catalog after an install. The block comment above it is corrected too: it asserted the menu never offers what is not on disk, which stopped being true when the fetch rows were added.
+
+**Evidence after.** Before: `TINYTITAN_MODELS_DIR=<empty> bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` -> exit 2, 'ERROR: no install under … matches the built-in list'. After: exit 1 and 'Install it with:  tools/install_models.sh katcoder'. Menu with an empty dir: rows 1-16 drawn, 'Rows 1-16 are not installed yet', choice 9 -> exit 1 + 'Install it with: tools/install_models.sh qwen38flash'; EOF at the menu -> exit 1, nothing downloaded. The empty dir stayed empty in all four cases. New EmptyModelsDirTests fail (2 failures) against HEAD's launcher and pass against the fixed one; test_launcher_install 16/16 OK.
+
+**Commit.** `see the audit(AUD-101) commit`
+
+### AUD-102 — The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes
+
+- **Severity / tier:** S1 / Tier B
+- **Project:** tests
+- **Location:** `benchmark/test_launcher_install.py:104-120,162-197`
+- **Category:** test correctness / CI gate
+- **Status:** DONE
+- **Host:** Mac (primary) + GitHub Actions
+- **Discovered by:** gh run list + gh run view --log-failed
+
+**Evidence before.** CI on main: ea5de8c FAIL, 2d510fc FAIL, 9bb9051 FAIL (last green f5f1204). The failing step is 'Installer gates', `FAILED (failures=6)` in test_launcher_install. first_missing() returns a candidate when a catalogue model is NOT installed, so on a CI runner with an empty models/ nothing skips, the six menu/missing-model tests run against the launcher's exit-2 path, and assertEqual(returncode, 1) fails with '2 != 1'. Locally the same 14 tests pass (`python3 -m unittest benchmark.test_launcher_install` -> OK) because this checkout has two installs. Its sibling suites do guard this case — test_launcher_ram.py:135 and test_launcher_port.py:108 skipTest('no install under models/ and no built server to list one'). AGENTS.md states tests never load a model and no gate may fetch one, so the suite must be correct against an empty models/.
+
+**Fix.** The suite's expectation was right and is kept: returncode 1 plus the exact install_models.sh command. What was missing was coverage of the state CI is actually in, so the same assertion only ran against whatever this machine happens to have. EmptyModelsDirTests creates an empty models dir and points TINYTITAN_MODELS_DIR at it, and first_catalogue_model() picks a launcher name without consulting the disk. No assertion was loosened and no test was skipped: 14 tests before, 16 after.
+
+**Evidence after.** Pre-fix launcher: `Ran 16 tests … FAILED (failures=2)`. Fixed launcher: `Ran 16 tests in 1.357s OK`. Sibling suites still green on this host: test_launcher_ram, test_launcher_port, test_progress, test_coder_clients -> Ran 45 tests, OK.
+
+**Commit.** `see the audit(AUD-101) commit`
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
