@@ -174,18 +174,21 @@ run directory with a naive local stamp, and no rule sees it.
 
 ## Repository gate proofs
 
-Each of the thirteen checks in `tools/lint.sh` was given a deliberate violation and run as
+Each of the fourteen checks in `tools/lint.sh` was given a deliberate violation and run as
 `tools/lint.sh <mode>`; the exit code is the gate's own, captured without a pipe so a
 `FAIL` line cannot be reported beside a zero status. The baseline run of the first eleven
 on a clean tree is green (`/tmp/tt-audit/lint-baseline.log`: 2,091 functions scanned, 24
 scripts, eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7 clean).
 `test-skip` is the twelfth, added when AUD-127 closed, and `unbounded-read` the thirteenth,
-added when AUD-142 closed; each has its own probe row below.
+added when AUD-142 closed; `file-length` is the fourteenth, added when AUD-151 closed, and
+it is the only one of the fourteen whose probe must run in a copied tree — see the note
+under the table. Each has its own probe row below.
 
 | Gate | Violation introduced | Gate result |
 | --- | --- | --- |
 | `force-cast` | `value as! String` and `try! JSONSerialization…` with no opt-out | exit 1, both lines named |
 | `func-length` | a 125-line function | exit 1, `NEW: …auditProbeLongFunction` |
+| `file-length` | five arms, all in a copied tree: (a) `HEAD`'s pre-split `Engine.swift` (529 physical lines) as the only source; (b) the same file after the split (286); (c) a fabricated file at exactly 500, then at 501; (d) a tree whose `sources/` holds no Swift at all; (e) the same tree with `PATH=/nonexistent`, so the counter cannot start | (a) exit 1, `OVER 529 sources/Engine.swift` — the gate bites on the real defect it was written for, not a proxy; (b) exit 0; (c) exit 0 at 500 and exit 1 at 501, naming `OVER 501 sources/Exact.swift`, so the boundary is `> limit` as the rule is written; (d) exit 1, `the length counter found no Swift sources under sources/`; (e) exit 1, `the length counter exited 127; it measured nothing`. On the tree as it stands the gate is clean and prints its receipt: `ok (largest: 496 sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift, 370 files scanned)` |
 | `unchecked-sendable` | `final class AuditProbeBox: @unchecked Sendable` with no `unchecked-invariant:` note | exit 1, `NEW: …AuditProbeBox` |
 | `converter` | `stack[expert] = piece` changed to `stack[len(target["experts"])] = piece`, i.e. file by arrival order | exit 1, `experts landed by arrival order: [3, 0, 7, 1, 5, 2, 6, 4]` — the gate catches the real defect, not a proxy |
 | `arch-path` | `BIN=".build/arm64-apple-macosx26.0/release/TinyTitanCLI"` in a `tools/` script | exit 1, file and line named |
@@ -208,3 +211,23 @@ Two observations from the proofs themselves, filed as ledger tasks:
   the converter dependencies the most dangerous defect in this repository — experts filed
   by arrival order, which no downstream check can see — goes unexamined while the gate
   reports nothing failing. This host has `numpy`, so the proof above ran for real.
+
+Two more, from the `file-length` proof added on 2026-10-06. Neither is a ledger task; both
+are traps for whoever probes a gate here next:
+
+- **The first four arms were vacuous.** They set `ROOT=/tmp/fabricated` in the environment
+  and each reported exactly what the *real* tree reports — `ok (largest: 496 …, 370 files)`
+  — while claiming to measure a 501-line file. `tools/lint.sh` recomputes and re-exports
+  `ROOT` from its own path near the top of the file, so no caller-supplied `ROOT` reaches a
+  check. A gate whose input root is derived internally can only be probed by running that
+  same script from a copied tree, which is how the five arms above were taken. It is worth
+  checking the *message* names the probe file, not only the exit code: an `ok` line that
+  reports the real tree's largest file is the tell.
+- **A gate's exit status must mean one thing.** The first draft had python `sys.exit(1)` on
+  finding offenders, and the shell treated any non-zero as a verdict; when `MAX_FILE_LINES`
+  turned out not to be exported, the `KeyError` traceback also exited 1, and the failure
+  printed `found no Swift sources under sources/` — a wrong diagnosis of a gate that had
+  not run, which is the shape AUD-104 (`a gate that reports nothing`) and AUD-127 (`a gate
+  that passes without asserting`) were filed for. The counter now
+  always exits 0 when it completed and the shell decides the verdict from an `OVER` line,
+  so a non-zero status can only mean "this did not run"; arm (e) above pins it.

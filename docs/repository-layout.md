@@ -109,10 +109,23 @@ Removing one means one suite silently loses its fixture, so leave them.
 
 ## File size
 
-There is no line-count ceiling on a *file*; the gate is on functions
-(`tools/lint.sh`, 120 lines, with an inline `lint:allow-long <reason>`
-exemption for orchestrators that are genuinely one sequence). File size is a
-readability question, and the convention that came out of this pass is:
+Two gates, one per shape: `tools/lint.sh func-length` caps a *function* at 120
+lines (ratcheted, with an inline `lint:allow-long <reason>` exemption for
+orchestrators that are genuinely one sequence), and `tools/lint.sh file-length`
+caps a *production source file* at 500 physical lines with no exemption at all.
+The file gate was added on 2026-10-06, and its own history is the argument for
+it: the standard below was written down, the layout doc restated it as fact, and
+three files drifted over it while nothing objected — including by this sweep's
+hand, when AUD-142 added 4 lines to a 525-line file and 7 to a 512-line one.
+The gate counts what the rule counts (physical lines, comments and blanks
+included), reports the largest file it scanned as a receipt, and fails when it
+scans nothing or when its counter cannot run. Its scope is `sources/**/*.swift`:
+`.metal` shader sources are not held to it (one kernel file is one compiled
+artifact per pass family, so cutting it moves a kernel without making either
+half easier to read), and `tests/` is not either — see the rule below.
+
+File size is otherwise a readability question, and the convention that came out
+of this pass is:
 
 - **A file should hold one type, or one type plus the value types it speaks
   in.** When a file held a type and its supporting value types, those moved
@@ -130,20 +143,22 @@ readability question, and the convention that came out of this pass is:
   file-scoped in Swift, so a member reached from a new file of the same module
   becomes `internal`. That is the price of the split and the reason it is done
   only where the read improves; 95 members of `ServerHTTPHandler` and 4 members
-  around `Model` were widened this pass, and nothing else changed.
+  around `Model` were widened this pass, and 5 more on 2026-10-06 when
+  `OpenAIRequestValidator`'s nested-input helpers moved out. Nothing else changed.
 
 The file-size rule is 500 physical lines per **production** source file (under
 `sources/`), comments and blanks included; `tests/` is exempt and is split for
 readability, not to satisfy the number (see `AGENTS.md`). **No file under
 `sources/` was above it as of 2026-09-28** — `git ls-files 'sources/**/*.swift' |
 xargs wc -l` listed 353 files and the largest was under the limit. That claim is
-now stale and says so: measured 2026-10-06, three production files are over it —
-`TinyTitanLib/Engine.swift` (529), `TinyTitanServer/Core/OpenAIRequestValidator.swift`
-(521) and `TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift` (519). Nothing
-enforces the number, which is how a written standard drifts: the last gate to touch
-these paths checks function length, not file length. The rule itself still holds —
-the three are to be split along a cohesive seam, not exempted — and the split is
-filed as a ledger row, not quietly waived here. The last two came down that day:
+now stale and says so: measured 2026-10-06, three production files were over it —
+`TinyTitanLib/Engine.swift` (529), `TinyTitanLib/OpenAIRequestValidator.swift`
+(521, listed in the first version of this note under its pre-rename path
+`TinyTitanServer/Core/…`) and `TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift`
+(519). Nothing enforced the number, which is how a written standard drifts: the
+last gate to touch these paths checks function length, not file length. All three
+are now split, and `file-length` is the 14th gate, so the drift cannot repeat
+unnoticed. The last two came down on 2026-09-28:
 
 - `RealForwardRunner.swift` (1,449 → 496): the 603-line initializer became a
   convenience initializer that fills a staging `Builder` in two phases
@@ -162,6 +177,16 @@ value types or accessors, the cluster moved out on its own
 (`+DecodeAttention.swift`, `+DecodeMoE.swift`, `+PrefillLayer.swift`,
 `+PrefillMoE.swift`, `OpenAIWireTypes.swift`, `ResponsesAPIMapper.swift`,
 `Model+Validation.swift`, `Model+Accessors.swift`).
+
+The three that had drifted over it came down on 2026-10-06, each along a seam
+that was already visible in the file, and each checked as a line-multiset
+comparison against `HEAD` so the move could not carry an edit by accident:
+
+| New file | Lines | Out of | Seam |
+| --- | ---: | --- | --- |
+| `TinyTitanLib/EngineConfiguration.swift` | 257 | `Engine.swift` (529 → 286) | The values an embedder passes in — `EngineConfiguration`, the six kit-vocabulary enums and `SamplingDefaults` — left the actor that consumes them. Nothing widened: every moved declaration was already `public` or module-internal. |
+| `TinyTitanLib/OpenAIRequestValidator+Structure.swift` | 234 | `OpenAIRequestValidator.swift` (521 → 302) | The nested-input walks (`response_format`, a tool's schema and its depth cap, the message history) left the scalar field cascade. Five members widened `private` → `internal`, named above. |
+| `Runtime/Prefill/ANEPrefillAttention+Sidecar.swift` | 99 | `ANEPrefillAttention.swift` (519 → 431) | The sidecar's on-disk contract: its directory rule, its `ane_prefill.json` shape and the bounded read of it. Beside the existing `+Models.swift`, and nothing widened. |
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached

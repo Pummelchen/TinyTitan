@@ -9,6 +9,7 @@
 #   force-cast          no `as!` / `try!` in sources/ without an audited opt-out
 #   unbounded-read      no whole-file read in sources/ without an audited bound
 #   func-length         no NEW function longer than MAX_FUNC_LINES (ratcheted)
+#   file-length         no production source under sources/ over MAX_FILE_LINES
 #   unchecked-sendable  new `@unchecked Sendable` must document its invariant
 #   converter           routed experts must land at their own index
 #   arch-path           no hardcoded SwiftPM triple in a build path (see below)
@@ -44,6 +45,7 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export ROOT
 BASELINE="$SCRIPT_DIR/func-length-baseline.txt"
 MAX_FUNC_LINES="${MAX_FUNC_LINES:-120}"
+export MAX_FILE_LINES="${MAX_FILE_LINES:-500}"
 
 status=0
 want="${1:-all}"
@@ -290,6 +292,91 @@ check_func_length() {
   fi
 
   echo "  ok ($(echo "$current" | grep -c .) baselined, 0 new, $scanned scanned)"
+}
+
+# --- production file length -------------------------------------------------
+# `AGENTS.md` states the standard: a file under `sources/` stays at 500 physical
+# lines or fewer, comments and blanks included, and an oversized file is split
+# along a cohesive seam as pure code motion with the public API preserved.
+# `tests/` is deliberately not covered — it is organised by the suite each file
+# covers, so a test file over the number is a readability question rather than a
+# gate finding. `.metal` shader sources are not covered either: one kernel file
+# is one compiled artifact per pass family, so cutting `prefill.metal` (1,377
+# lines) at 500 would move a kernel between files without making either easier
+# to read. The rule as written says "a file under `sources/`", which is wider
+# than that; where the scope is narrower than the prose, the prose is the thing
+# to amend, and this comment is where the difference is stated rather than
+# hidden.
+#
+# What the gate is for: the standard was carried by habit alone, and habit lost.
+# Measured 2026-10-06, three files were over it (529, 521 and 519) and had been
+# for a week after the layout doc last claimed none were; this sweep's own
+# AUD-142 commit added 4 lines to one of them and 7 to another, and neither the
+# compiler nor any of the other twelve gates objected. A number nobody checks is
+# a suggestion.
+#
+# There is no opt-out and no baseline file on purpose. func-length ratchets
+# because 1,449-line functions cannot all be decomposed in one pass; a 501-line
+# file can be split in one, so an exemption row would only be a way to leave one
+# behind. `MAX_FILE_LINES` exists so the number is stated in one place.
+measure_file_lengths() {
+  python3 - <<'PY'
+import os
+import pathlib
+
+root = pathlib.Path(os.environ["ROOT"])
+limit = int(os.environ.get("MAX_FILE_LINES", "500"))
+counted = []
+for path in sorted((root / "sources").rglob("*.swift")):
+    # Physical lines, as the written rule counts them: every newline, plus an
+    # unterminated final line. A trailing newline alone is not a line.
+    lines = len(path.read_bytes().splitlines())
+    counted.append((lines, path.relative_to(root).as_posix()))
+print("SCANNED:%d" % len(counted))
+if counted:
+    largest = max(counted)
+    print("LARGEST:%d %s" % largest)
+# Exit status is reserved for "this did not run". Finding offenders is a
+# successful measurement, so the caller never has to tell a crash apart from a
+# verdict -- which is exactly the mistake this gate's first draft made, when a
+# missing environment variable surfaced as "found no Swift sources".
+for lines, path in sorted(counted, reverse=True):
+    if lines > limit:
+        print("OVER %d %s" % (lines, path))
+PY
+}
+
+check_file_length() {
+  echo "== file-length: no production source over $MAX_FILE_LINES physical lines =="
+  local raw rc over scanned largest
+  raw="$(measure_file_lengths)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  FAIL: the length counter exited $rc; it measured nothing."
+    echo "        Expected python3 on PATH; do not read this as a pass."
+    status=1
+    return
+  fi
+  scanned="$(echo "$raw" | sed -n 's/^SCANNED://p' | tail -1)"
+  if [ -z "$scanned" ] || [ "$scanned" -eq 0 ] 2>/dev/null; then
+    echo "  FAIL: the length counter found no Swift sources under sources/."
+    echo "        Expected ~370; check ROOT and the glob."
+    status=1
+    return
+  fi
+  over="$(echo "$raw" | grep '^OVER ' || true)"
+  largest="$(echo "$raw" | sed -n 's/^LARGEST://p' | tail -1)"
+  if [ -n "$over" ]; then
+    echo "$over" | while IFS= read -r row; do
+      echo "  $row"
+    done
+    echo "  FAIL: $(( $(echo "$over" | grep -c .) )) file(s) over $MAX_FILE_LINES lines."
+    echo "        Split each along a cohesive seam as pure code motion, keeping the"
+    echo "        public API (docs/repository-layout.md)."
+    status=1
+    return
+  fi
+  echo "  ok (largest: $largest, $scanned files scanned)"
 }
 
 # --- unchecked Sendable -----------------------------------------------------
@@ -924,10 +1011,11 @@ check_javascript() {
 }
 
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
+  file-length)   check_file_length ;;
   sendable)    check_unchecked_sendable ;;
   converter)   check_converter_expert_order ;;
   arch-path)   check_arch_path ;;
@@ -940,7 +1028,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|converter|arch-path|test-skip|shell|shellcheck|swiftlint|swift-format|javascript|python)" >&2; exit 2 ;;
 esac
 
 exit $status
