@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:1  Done:61  Blocked:1  Total:63**
+**Open:0  Done:62  Blocked:1  Total:63**
 
 ## Table
 
@@ -18,7 +18,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
 | AUD-143 | S1 | A | server | `sources/TinyTitan/Infrastructure/Concurrency/SuspensionSlot.swift (new); sources/TinyTitanServer/Core/ModelRouterError.swift acquire/turn/beginSwitch/releaseSwitchClaim/wait/drop/wakeWaiters; sources/TinyTitanServer/Core/ServerCoordinator.swift; sources/TinyTitanServer/Core/ManagedModelBackend.swift; sources/TinyTitanServer/Core/MemoryBackend.swift; sources/TinyTitan/Runtime/Inference/ForwardStepGate.swift; sources/TinyTitanLib/ServerModelSession.swift +PromptCache.swift; tests/TinyTitan/Infrastructure/Concurrency/SuspensionSlotTests.swift; tests/TinyTitanServer/ModelRouterTests.swift` | A pending model switch can be overtaken by new work for the resident model, and in a release build the same test aborts the server bundle with signal 6 on this host | residency fairness bug plus a release-only abort of the server bundle — one defect, two symptoms: the actor's waiter array was mutated from a non-isolated continuation closure | DONE | Mac (primary) |
 | AUD-163 | S1 | A | plugin | `plugins/dsh-tinytitan/src/generate.js:620 (applyRouteThroughSettings), tools/dsh_local.sh:586 (write_default_model)` | The boot-time route refresh keeps the picker current but leaves `agent-default-model` naming a model the server no longer serves, so every turn fails with UNKNOWN_MODEL | half-covered refresh: two namespaces written by one install, only one of them revisited | DONE | Mac (primary) |
-| AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
@@ -33,6 +32,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | DONE | Mac (primary) |
 | AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | DONE | Mac (primary) |
+| AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | DONE | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | DONE | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
@@ -259,20 +259,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Measured 2026-10-06. 7 new tests in `test/generate.test.js`; against the pre-fix `generate.js` the suite fails outright on the missing export, so the probes bind to the fix. Plugin suite 144/144 with 0 skipped (js-yaml resolved here, so the integration case ran rather than reporting a pass it never asserted); `tools/lint.sh javascript` clean after prettier. Live: `ensure` then `smoke` exits 0 with `answer matching /\b42\b/ appeared` on the 125B, and the patch's default now reads `qwen3.8-flash-next_4-Bit` -- the repair is confirmed by mechanism, not only by the page answering. NOT covered: the pre-0.2.0 file path (`generateRoute`/`writeRouteSettings`, reached when a harness has no settings service) still writes only `llm-pi-ai` and inherits the same stale-default defect. It is not the pinned harness, so the fix is on the live path and this sentence is the record of the gap.
 
 **Commit.** `a0fae6d`
-
-### AUD-120 — No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** ci
-- **Location:** `.github/dependabot.yml (absent) and Package.resolved`
-- **Category:** missing CVE coverage on one of three languages
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §3 baseline
-
-**Evidence before.** pip-audit 2.10.1 covers benchmark/requirements.txt and `npm audit` covers both plugin packages, both clean at baseline (see baseline.md). For Swift there is no scanner in the toolchain, no .github/dependabot.yml in the repo, and ci.yml installs nothing that would consult an advisory feed. Package.resolved carries exact pins, which is reproducibility, not vulnerability coverage.
-
-**Evidence after.** None yet.
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -526,6 +512,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Measured on current main with the pins installed (numpy 25.3/safetensors 0.8.0/ml_dtypes 0.6.0 as pinned): `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` -> `Ran 75 tests in 34.630s`, OK; `python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e test_prepare_agentworld` -> `Ran 87 tests in 35.395s`, OK, 0 skipped. Both match the numbers now written into requirements.txt, and the command in AGENTS.md is the one that produced the 87-test run. ci.yml:129-130 unchanged, and it is still the authority the docs now agree with.
 
 **Commit.** `218a210`
+
+### AUD-120 — No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** ci
+- **Location:** `.github/dependabot.yml (absent) and Package.resolved`
+- **Category:** missing CVE coverage on one of three languages
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §3 baseline
+
+**Evidence before.** pip-audit 2.10.1 covers benchmark/requirements.txt and `npm audit` covers both plugin packages, both clean at baseline (see baseline.md). For Swift there is no scanner in the toolchain, no .github/dependabot.yml in the repo, and ci.yml installs nothing that would consult an advisory feed. Package.resolved carries exact pins, which is reproducibility, not vulnerability coverage.
+
+**Fix.** `.github/dependabot.yml`: `swift` at the root for `Package.resolved`, `npm` for both plugin packages, `pip` for `benchmark/requirements.txt`, `github-actions` for the SHA-pinned workflow actions. Version updates are `open-pull-requests-limit: 0` on the first three -- every gate here is measured on the pin it names -- while alerts and security updates still arrive; actions do get PRs, because a re-pin there is a supply-chain event that should be visible. The row's premise was checked and did not hold: 'no feed exists for Swift' was inferred from 'no scanner in the toolchain', but the dependency graph lists Swift Package Manager and reads `Package.resolved`, and `gh api repos/Pummelchen/TinyTitan -q '.security_and_analysis'` reports `dependabot_security_updates: enabled` on a PUBLIC repo -- so the missing piece was the config file, and no owner decision was required after all. `benchmark/test_supply_chain.py` derives the required ecosystems from the manifests `git ls-files` actually finds, so a new package directory or requirements file without an entry fails there, and a second test refuses an entry whose directory is gone.
+
+**Evidence after.** Measured 2026-10-06. The probes fail observably: with the config moved aside the suite errors on the missing file, and the derived inputs are non-empty (2 package locks, 1 requirements file, 2 workflow files), so no assertion passes vacuously. Full CI tooling batch 175/175 locally including the 4 new tests; `tools/lint.sh python` clean on ruff 0.16.7; the YAML parses and every entry carries a schedule. LIMITS, stated rather than assumed: (1) the file was validated by parsing and by GitHub's documented keys, not against a machine-readable schema -- SchemaStore's dependabot schema was not reachable from this host, so no schema check is claimed; (2) whether Dependabot opens *security update* PRs for `swift` or only version PRs is settled by the first advisory match on the graph, not by this commit -- dependency-graph support (which alerts require) is documented, updater behaviour for the ecosystem was not exercised here; (3) nothing in this repository asserts that alerts have appeared, and the test pins coverage intent, not GitHub's response.
+
+**Commit.** `36e601a`
 
 ### AUD-122 — Seven production files have zero covered lines with no model gate explaining it
 

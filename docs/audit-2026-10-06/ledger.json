@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 63,
-    "done": 61,
-    "open": 1,
+    "done": 62,
+    "open": 0,
     "blocked": 1
   },
   "tasks": [
@@ -341,13 +341,13 @@
       "file_line": ".github/dependabot.yml (absent) and Package.resolved",
       "title": "No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source",
       "category": "missing CVE coverage on one of three languages",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "\u00a73 baseline",
       "evidence-before": "pip-audit 2.10.1 covers benchmark/requirements.txt and `npm audit` covers both plugin packages, both clean at baseline (see baseline.md). For Swift there is no scanner in the toolchain, no .github/dependabot.yml in the repo, and ci.yml installs nothing that would consult an advisory feed. Package.resolved carries exact pins, which is reproducibility, not vulnerability coverage.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "`.github/dependabot.yml`: `swift` at the root for `Package.resolved`, `npm` for both plugin packages, `pip` for `benchmark/requirements.txt`, `github-actions` for the SHA-pinned workflow actions. Version updates are `open-pull-requests-limit: 0` on the first three -- every gate here is measured on the pin it names -- while alerts and security updates still arrive; actions do get PRs, because a re-pin there is a supply-chain event that should be visible. The row's premise was checked and did not hold: 'no feed exists for Swift' was inferred from 'no scanner in the toolchain', but the dependency graph lists Swift Package Manager and reads `Package.resolved`, and `gh api repos/Pummelchen/TinyTitan -q '.security_and_analysis'` reports `dependabot_security_updates: enabled` on a PUBLIC repo -- so the missing piece was the config file, and no owner decision was required after all. `benchmark/test_supply_chain.py` derives the required ecosystems from the manifests `git ls-files` actually finds, so a new package directory or requirements file without an entry fails there, and a second test refuses an entry whose directory is gone.",
+      "evidence-after": "Measured 2026-10-06. The probes fail observably: with the config moved aside the suite errors on the missing file, and the derived inputs are non-empty (2 package locks, 1 requirements file, 2 workflow files), so no assertion passes vacuously. Full CI tooling batch 175/175 locally including the 4 new tests; `tools/lint.sh python` clean on ruff 0.16.7; the YAML parses and every entry carries a schedule. LIMITS, stated rather than assumed: (1) the file was validated by parsing and by GitHub's documented keys, not against a machine-readable schema -- SchemaStore's dependabot schema was not reachable from this host, so no schema check is claimed; (2) whether Dependabot opens *security update* PRs for `swift` or only version PRs is settled by the first advisory match on the graph, not by this commit -- dependency-graph support (which alerts require) is documented, updater behaviour for the ecosystem was not exercised here; (3) nothing in this repository asserts that alerts have appeared, and the test pins coverage intent, not GitHub's response.",
+      "commit": "36e601a",
       "blocked-reason": ""
     },
     {
