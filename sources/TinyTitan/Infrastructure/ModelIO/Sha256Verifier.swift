@@ -1,4 +1,4 @@
-import CommonCrypto
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -30,8 +30,7 @@ public enum Sha256Verifier {
         guard chunkBytes > 0 else {
             throw ModelError.indexCorrupt(detail: "SHA-256 chunk size must be positive")
         }
-        var ctx = CC_SHA256_CTX()
-        CC_SHA256_Init(&ctx)
+        var hasher = SHA256()
         var buf = [UInt8](repeating: 0, count: chunkBytes)
         while true {
             let got: Int = buf.withUnsafeMutableBytes { raw -> Int in
@@ -45,36 +44,21 @@ public enum Sha256Verifier {
             if got < 0 {
                 throw ModelError.posixFailed(call: "read(\(displayName))", errno: errno)
             }
-            buf.withUnsafeBytes { raw in
-                if let base = raw.baseAddress, got > 0 {
-                    _ = CC_SHA256_Update(&ctx, base, CC_LONG(got))
-                }
+            // `got` is in 1...chunkBytes by here: 0 broke out of the loop and a
+            // negative read threw, so the slice is never empty and never longer
+            // than the buffer.
+            buf[0..<got].withUnsafeBytes {
+                hasher.update(bufferPointer: $0)
             }
         }
-        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        digest.withUnsafeMutableBytes { raw in
-            if let base = raw.baseAddress {
-                _ = CC_SHA256_Final(base.assumingMemoryBound(to: UInt8.self), &ctx)
-            }
-        }
-        return digest.map { String(format: "%02x", $0) }.joined()
+        return hex(of: hasher.finalize())
     }
 
+    /// SHA-256 of an in-memory buffer. Cannot fail: CryptoKit's hasher has no
+    /// error state to discard, which is why this is `hashData` rather than a
+    /// throwing function wrapping a CommonCrypto context.
     public static func hashData(_ data: Data) -> String {
-        var ctx = CC_SHA256_CTX()
-        CC_SHA256_Init(&ctx)
-        data.withUnsafeBytes { raw in
-            if let base = raw.baseAddress, raw.count > 0 {
-                _ = CC_SHA256_Update(&ctx, base, CC_LONG(raw.count))
-            }
-        }
-        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        digest.withUnsafeMutableBytes { raw in
-            if let base = raw.baseAddress {
-                _ = CC_SHA256_Final(base.assumingMemoryBound(to: UInt8.self), &ctx)
-            }
-        }
-        return digest.map { String(format: "%02x", $0) }.joined()
+        hex(of: SHA256.hash(data: data))
     }
 
     /// Throw `ModelError.checksumMismatch(file)` if the on-disk file's
@@ -100,5 +84,9 @@ public enum Sha256Verifier {
         if actual.lowercased() != expectedHex.lowercased() {
             throw ModelError.checksumMismatch(file: name)
         }
+    }
+
+    private static func hex(of digest: SHA256.Digest) -> String {
+        digest.map { String(format: "%02x", $0) }.joined()
     }
 }
