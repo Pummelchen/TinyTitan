@@ -1,7 +1,8 @@
 import Foundation
+import TinyTitanFormat
 
 enum VerifiedInstallReceiptWriter {
-    static let fileName = "verified-install.json"
+    static let fileName = SSDAIInstallFileNames.verifiedInstallReceipt
 
     static func encode(
         outputDir: String,

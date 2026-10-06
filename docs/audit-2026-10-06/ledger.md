@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:30  Done:13  Blocked:1  Total:44**
+**Open:27  Done:16  Blocked:1  Total:44**
 
 ## Table
 
@@ -22,18 +22,15 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
 | AUD-141 | S2 | A | runtime | `sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift:270-272` | The load path cross-checks only one expert per layer, so a width or shape lie confined to any later expert loads and answers wrongly | incomplete validation on the load path (found by the AUD-124 fix, not fixed by it) | START | Mac (primary) |
 | AUD-106 | S2 | C | docs | `docs/handover-tinytitan.md:1-37` | The handover brief describes release 5.15 as current while 5.16, 5.17 and 5.18 are published | documentation drift | OPEN | Mac (primary) |
-| AUD-114 | S2 | B | build-config | `Package.swift:81-83` | A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02 | contract drift / stale documentation on a load-bearing rule | OPEN | Mac (primary) |
 | AUD-115 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:121 → sources/TinyTitanFormat/SSDAIManifestV1.swift:321` | bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read | dead contract field | OPEN | Mac (primary) |
 | AUD-116 | S2 | A | repack | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:149` | A per-tensor quant override whose stem equals a slot name is silently skipped — the failure class the hand-written decoder exists to fix | silent drop on a numerics-affecting field | OPEN | Mac (primary) |
 | AUD-117 | S2 | A | contract | `sources/TinyTitanRepack/Core/Format/SSDAIJSON.swift:79-96 → sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:322-327` | hc/indexer/ple geometry is emitted for one family only, and the reader treats every absent optional field as fine, so a family that needs them loads unvalidated | unvalidated external input / contract drift | OPEN | Mac (primary) |
-| AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | OPEN | Mac (primary) |
 | AUD-119 | S2 | C | docs | `AGENTS.md (Test rules, 'The converter's gate is two python suites') and benchmark/requirements.txt:4-5` | Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce | documentation drift / stale measurement quoted as fact | OPEN | Mac (primary) |
 | AUD-120 | S2 | B | ci | `.github/dependabot.yml (absent) and Package.resolved` | No dependency vulnerability feed for Swift: swift-nio 2.100.0 and swift-transformers are pinned but never checked against a CVE source | missing CVE coverage on one of three languages | OPEN | Mac (primary) |
 | AUD-122 | S2 | B | tests | `sources/TinyTitan/Infrastructure/ModelIO/ArchConfig+Manifest.swift and 6 more` | Seven production files have zero covered lines with no model gate explaining it | coverage gap on non-gated code | OPEN | Mac (primary) |
 | AUD-123 | S2 | A | fleet | `plugins/dsh-lan-manager/src/net.js:38 and src/config.js:38` | The LAN manager admits link-local peers by default and its default group key is a published literal | permissive default on a network-facing surface | OPEN | Mac (primary) |
 | AUD-126 | S2 | B | tests | `benchmark/test_launcher_ram.py:135, :194 and 5 more` | Six benchmark suites skip when models/ has no install, so their gate is a no-op on the host that runs it most | coverage gap on a CI gate | OPEN | Mac (primary) |
 | AUD-127 | S2 | C | tests | `tests/TinyTitanRepack/Core/Format/Qwen4ExpArchInfoTests.swift:141-143` | A guard-else-return inside a test body passes green when its env var is unset, and is not recorded as a skip | test that asserts nothing on the path it did not take | OPEN | Mac (primary) |
-| AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
@@ -47,7 +44,10 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-111 | S2 | A | engine | `sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift:478, :489 (before); RealForwardRunner+Diagnostics.swift:9-28 (after)` | Two env-named trace files open 0o644 with no O_NOFOLLOW: world-readable routing traces | permissive file mode + symlink following | DONE | Mac (primary) |
 | AUD-112 | S2 | A | repack | `sources/TinyTitan/Infrastructure/ModelIO/Sha256Verifier.swift:34, 50, 57, 65, 68, 74 (before); :1, :25-62 (after)` | Six CommonCrypto SHA-256 return values are discarded on the integrity-hash path | unchecked return value | DONE | Mac (primary) |
 | AUD-113 | S2 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:33 (before); PLEConstants.swift:35-46, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:172-189, sources/TinyTitanServer/Core/ModelCatalog.swift:278-293 (after)` | ple_constants.json is read with an uncapped Data(contentsOf:) although its sibling receipts cap the same file class | unbounded memory on a model-supplied file | DONE | Mac (primary) |
+| AUD-114 | S2 | B | build-config | `Package.swift:81-83` | A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02 | contract drift / stale documentation on a load-bearing rule | DONE | Mac (primary) |
+| AUD-118 | S2 | A | contract | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76` | The receipt file name is declared twice, once per side of the contract | duplication on a cross-target constant | DONE | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
+| AUD-129 | S2 | B | docs | `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328` | Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work | surface wired to nothing (§5) | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | OPEN | Mac (primary) |
@@ -278,20 +278,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence before.** AGENTS.md: 'Work in flight is handed over in docs/handover-<name>.md; docs/handover-tinytitan.md is the current one and starts with the prompt for the next session. Read it before installing, converting or moving anything.' The file's title and pasted prompt are 5.15, its 'Where the work stands' table says main is level with the v5.15 tag and models/ holds 8 installs at 244 GB, while v5.18 is published (2026-10-05) and models/ holds 2 installs (163 GB). A next session that follows it acts on the wrong release and the wrong install set.
 
-### AUD-114 — A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** build-config
-- **Location:** `Package.swift:81-83`
-- **Category:** contract drift / stale documentation on a load-bearing rule
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L1 architecture pass
-
-**Evidence before.** Package.swift:81-83 says `.unsafeFlags` 'is the only way to set it, which is why this package cannot be consumed as a dependency'. AGENTS.md:140-147 records the opposite as measured on 2026-10-02 in Swift 6.4, and tools/embedded-dependency-check.sh builds examples/embedded (Package.swift:27 depends on the TinyTitanLib product) precisely to keep that property true. Two authoritative files disagree, and the compiler does not notice.
-
-**Evidence after.** None yet.
-
 ### AUD-115 — bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read
 
 - **Severity / tier:** S2 / Tier A
@@ -331,20 +317,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** L1 architecture pass
 
 **Evidence before.** SSDAIJSON.swift:79 gates the extension fields on `.qwen38flash`. ManifestReader.swift:322-327 `checkOptional` skips whatever is absent, so a second family that requires the same geometry would produce no manifest fields and no error. PLEConstants.validate() (:56-89) is what catches the ple half at load — but only if something calls it, and nothing in the manifest layer requires it.
-
-**Evidence after.** None yet.
-
-### AUD-118 — The receipt file name is declared twice, once per side of the contract
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** contract
-- **Location:** `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76`
-- **Category:** duplication on a cross-target constant
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** L1 architecture pass
-
-**Evidence before.** Both declare `verified-install.json` independently. Equal today. The receipt is the trust anchor AGENTS.md documents (path binding, re-issue with --verify-install), so a one-sided edit is a silent contract break the tests would only catch by accident.
 
 **Evidence after.** None yet.
 
@@ -429,20 +401,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** §5 facade sweep
 
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `guard let path, fileExists(...) else { return }` in the test body. Swift Testing's `try #require` or `.enabled(if:)` would record the skip instead of hiding it.
-
-**Evidence after.** None yet.
-
-### AUD-129 — Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work
-
-- **Severity / tier:** S2 / Tier B
-- **Project:** docs
-- **Location:** `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328`
-- **Category:** surface wired to nothing (§5)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
-
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported against ServerArguments.swift:305 (the real flag) and :421 (unknown flags throw), so the failure is loud rather than silent — but the documented spelling can never work, and a reader following the doc gets an error.
 
 **Evidence after.** None yet.
 
@@ -653,6 +611,42 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `7b614a8`
 
+### AUD-114 — A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** build-config
+- **Location:** `Package.swift:81-83`
+- **Category:** contract drift / stale documentation on a load-bearing rule
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L1 architecture pass
+
+**Evidence before.** Package.swift:81-83 says `.unsafeFlags` 'is the only way to set it, which is why this package cannot be consumed as a dependency'. AGENTS.md:140-147 records the opposite as measured on 2026-10-02 in Swift 6.4, and tools/embedded-dependency-check.sh builds examples/embedded (Package.swift:27 depends on the TinyTitanLib product) precisely to keep that property true. Two authoritative files disagree, and the compiler does not notice.
+
+**Fix.** The Package.swift comment now states what was measured: `.unsafeFlags` is the only way to set -O2 on a C target, and it does not stop the package being consumed as a dependency; the toolchain's "contains unsafe build flags" diagnostic is noise, not a refusal. The comment names tools/embedded-dependency-check.sh as the thing that keeps the property true, so a future reader has the check, not just the claim.
+
+**Evidence after.** No behaviour to test -- the manifest, the build and the dependency edge are unchanged, and `swift build -c debug` is clean after the edit. The property the comment asserts is checked by tools/embedded-dependency-check.sh (task #23), which resolves the released tag from another package and builds examples/embedded against it; the defect here was two authoritative files disagreeing, and they now agree.
+
+**Commit.** `this commit`
+
+### AUD-118 — The receipt file name is declared twice, once per side of the contract
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** contract
+- **Location:** `sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76`
+- **Category:** duplication on a cross-target constant
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** L1 architecture pass
+
+**Evidence before.** Both declare `verified-install.json` independently. Equal today. The receipt is the trust anchor AGENTS.md documents (path binding, re-issue with --verify-install), so a one-sided edit is a silent contract break the tests would only catch by accident.
+
+**Fix.** The receipt's name is declared once, in TinyTitanFormat, as `SSDAIInstallFileNames` (`manifest`, `verifiedInstallReceipt`, and the `reserved` set built from both). The three sites that each carried their own copy -- `VerifiedInstallReceiptWriter.fileName` (the repacker writes), `VerifiedInstallReceiptReader.fileName` (the engine reads) and `SSDAIManifestV1.validate`'s `reservedFiles` (a checkpoint may not smuggle either name in as a payload file) -- now reference it, so the two sides of the contract cannot be edited apart. TinyTitanFormat is the only target all three already depend on, which is why the constant lives there and not in the engine.
+
+**Evidence after.** New test `aReservedArtifactNameIsRefusedAsPayload` repacks the synthetic Qwen snapshot and, for each name in `SSDAIInstallFileNames.reserved`, adds it to the manifest's `files` table and asserts the validator throws `.invalid(field: "manifest.files.<name>", reason: "reserved artifact filename")`. It reads the names from the shared constant rather than hardcoding them, so the reserved-file rule follows a rename instead of stranding one side. `swift test --filter QuantManifestPayloadAgreementTests` -> 13 tests in 1 suite passed (12 before). The single-sourcing itself is proved by the compiler -- there is now one literal to get wrong, not three -- and the test is what keeps the rule it feeds honest.
+
+**Commit.** `this commit`
+
 ### AUD-125 — memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing)
 
 - **Severity / tier:** S2 / Tier A
@@ -670,6 +664,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** RECLASSIFICATION, recorded rather than quietly narrowed: the sweep's claim that memory_delete 'answers deleted when nothing was archived' is not reachable by the main failure path. ContinuityEngine+Internals.swift:42-47 wraps EVERY journal append failure as ContinuityError.notPersisted, which is the branch the old code already rethrew. The only errors that could reach the empty catch were non-notPersisted ContinuityError cases, and archive has no reachable throw of those (the key is validated before the call). So this is hardening, not a live wrong answer: S1 -> S2, and no failing-before test exists because no observable behaviour changed. The behaviour IS already pinned by MemoryJournalFailureTests.aDeleteTheJournalRefusesIsAFailure and by ContinuityCore's failedWritesAreReportedNotSwallowed. Evidence run: swift build clean, those suites 57 + 4 tests green.
 
 **Commit.** `see the audit(AUD-125) commit`
+
+### AUD-129 — Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** docs
+- **Location:** `docs/agent-memory.md:141 and docs/side-engine-tasks.md:328`
+- **Category:** surface wired to nothing (§5)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** §5 facade sweep
+
+**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported against ServerArguments.swift:305 (the real flag) and :421 (unknown flags throw), so the failure is loud rather than silent — but the documented spelling can never work, and a reader following the doc gets an error.
+
+**Fix.** Both documents now name `--models-dir`, which is the flag the parser accepts (ServerArguments.swift:305): docs/agent-memory.md's TINYTITAN_SIDE_ENGINE row and docs/side-engine-tasks.md's side-engine paragraph. No other document in the tree, README or the wiki spells it the other way.
+
+**Evidence after.** Verified before fixing, as the row required: `grep -rn models-directory sources/ tests/` returns nothing while `--models-dir` is the parsed case at ServerArguments.swift:305 and the unknown-flag throw means a reader following the old spelling got a loud error, not a silent default -- which is why this was S2 and not S1. After the edit `grep -rn models-directory docs/ README.md` returns only the ledger rows that record this finding. No code change, so no new test.
+
+**Commit.** `this commit`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 

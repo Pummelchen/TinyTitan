@@ -1,4 +1,5 @@
 import Foundation
+import TinyTitanFormat
 
 public enum ModelIntegrityPolicy: Sendable, Equatable {
     case fullSha256
@@ -73,7 +74,7 @@ public struct VerifiedInstallReceipt: Codable, Equatable, Sendable {
 }
 
 public enum VerifiedInstallReceiptReader {
-    public static let fileName = "verified-install.json"
+    public static let fileName = SSDAIInstallFileNames.verifiedInstallReceipt
     /// The receipt itself is small (one entry per install file), but it is read
     /// and validated beside the manifest at load, so it shares that document's
     /// bound rather than carrying a second, unrelated one that can drift below

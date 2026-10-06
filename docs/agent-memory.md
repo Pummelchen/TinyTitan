@@ -138,7 +138,7 @@ Environment variables, which is how the start scripts pass them:
 | `TINYTITAN_MEMORY_CONSOLIDATION_IDLE_SECONDS` | `30` | Quiet time after a turn before a session is distilled |
 | `TINYTITAN_MEMORY_LOCAL_FALLBACK` | `1` | `0` disables memory instead of degrading |
 | `TINYTITAN_MEMORY_GUARD` | `1` | Stops a model-derived fact from silently superseding one the person asserted. `0` turns it off; see below for what it is worth. |
-| `TINYTITAN_SIDE_ENGINE` | `qwen3.5_4B_4Bit` under the models directory | The resident CPU model the judgements run on: a directory, an install name under `--models-directory`, or `0` to leave it out. The weights load on the first judgement, never at boot. |
+| `TINYTITAN_SIDE_ENGINE` | `qwen3.5_4B_4Bit` under the models directory | The resident CPU model the judgements run on: a directory, an install name under `--models-dir`, or `0` to leave it out. The weights load on the first judgement, never at boot. |
 
 ### The side-engine
 

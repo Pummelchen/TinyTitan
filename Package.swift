@@ -77,11 +77,15 @@ let package = Package(
         // release (the older native planner used `-O2`), and the difference on
         // the CPU int8 GEMV is 1.24x -- 2.06 against 1.66 ms per pass, min of
         // six interleaved rounds an arm, checksum identical
-        // (390266.62). `.unsafeFlags` is the only way to set it, which is why
-        // this package cannot be consumed as a dependency; TinyTitan is an
-        // application package and nothing depends on it. Raising Swift to
-        // `-O3` was tried and rejected for the same constraint, having measured
-        // the same as the release default (0.675 vs 0.680 ms).
+        // (390266.62). `.unsafeFlags` is the only way to set it, and it does
+        // *not* stop this package being consumed as a dependency: measured on
+        // 2026-10-02 in Swift 6.4, a package that depends on the released tag
+        // resolves, builds and links, and `tools/embedded-dependency-check.sh`
+        // builds `examples/embedded` to keep that property from rotting. The
+        // toolchain still prints its "contains unsafe build flags" diagnostic
+        // for the consumer, which is noise, not a refusal. Raising Swift to
+        // `-O3` was tried and rejected, having measured the same as the release
+        // default (0.675 vs 0.680 ms).
         //
         // The language standard and the hardening warnings are enforced here,
         // not merely declared: `-std=c99` comes from `cLanguageStandard` above,

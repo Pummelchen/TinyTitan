@@ -325,7 +325,7 @@ Only the tasks the matrix above says are ready have a method, and `nil` means
 deterministic path exactly as it was.
 
 The model is `TINYTITAN_SIDE_ENGINE` — an install name under
-`--models-directory`, a directory, or `0` — and defaults to the 4B. The weights
+`--models-dir`, a directory, or `0` — and defaults to the 4B. The weights
 load on the first judgement, and the width comes from the server's
 `ServerCoordinator.generating` signal.
 

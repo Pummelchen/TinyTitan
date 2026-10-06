@@ -102,3 +102,18 @@ package enum SSDAIPathValidator {
         }
     }
 }
+
+/// The two names an install directory reserves at its root.
+///
+/// `verified-install.json` is the trust anchor and it has three declarations:
+/// the repacker writes it, the engine reads it, and the manifest validator
+/// refuses either name as a payload file so a checkpoint cannot smuggle one in.
+/// One string here rather than one per side, because a one-sided edit to the
+/// receipt's name is a silent contract break.
+public enum SSDAIInstallFileNames {
+    public static let manifest = "manifest.json"
+    public static let verifiedInstallReceipt = "verified-install.json"
+
+    /// Names the manifest may never declare among its payload files.
+    public static let reserved: Set<String> = [manifest, verifiedInstallReceipt]
+}

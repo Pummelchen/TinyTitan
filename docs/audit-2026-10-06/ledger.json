@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 44,
-    "done": 13,
-    "open": 30,
+    "done": 16,
+    "open": 27,
     "blocked": 1
   },
   "tasks": [
@@ -256,13 +256,13 @@
       "file_line": "Package.swift:81-83",
       "title": "A build-config comment still claims the package cannot be consumed as a dependency, which was measured false on 2026-10-02",
       "category": "contract drift / stale documentation on a load-bearing rule",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L1 architecture pass",
       "evidence-before": "Package.swift:81-83 says `.unsafeFlags` 'is the only way to set it, which is why this package cannot be consumed as a dependency'. AGENTS.md:140-147 records the opposite as measured on 2026-10-02 in Swift 6.4, and tools/embedded-dependency-check.sh builds examples/embedded (Package.swift:27 depends on the TinyTitanLib product) precisely to keep that property true. Two authoritative files disagree, and the compiler does not notice.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "The Package.swift comment now states what was measured: `.unsafeFlags` is the only way to set -O2 on a C target, and it does not stop the package being consumed as a dependency; the toolchain's \"contains unsafe build flags\" diagnostic is noise, not a refusal. The comment names tools/embedded-dependency-check.sh as the thing that keeps the property true, so a future reader has the check, not just the claim.",
+      "evidence-after": "No behaviour to test -- the manifest, the build and the dependency edge are unchanged, and `swift build -c debug` is clean after the edit. The property the comment asserts is checked by tools/embedded-dependency-check.sh (task #23), which resolves the released tag from another package and builds examples/embedded against it; the defect here was two authoritative files disagreeing, and they now agree.",
+      "commit": "this commit",
       "blocked-reason": ""
     },
     {
@@ -324,13 +324,13 @@
       "file_line": "sources/TinyTitanRepack/Core/Verification/VerifiedInstallReceiptWriter.swift:4 and sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:76",
       "title": "The receipt file name is declared twice, once per side of the contract",
       "category": "duplication on a cross-target constant",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "L1 architecture pass",
       "evidence-before": "Both declare `verified-install.json` independently. Equal today. The receipt is the trust anchor AGENTS.md documents (path binding, re-issue with --verify-install), so a one-sided edit is a silent contract break the tests would only catch by accident.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "The receipt's name is declared once, in TinyTitanFormat, as `SSDAIInstallFileNames` (`manifest`, `verifiedInstallReceipt`, and the `reserved` set built from both). The three sites that each carried their own copy -- `VerifiedInstallReceiptWriter.fileName` (the repacker writes), `VerifiedInstallReceiptReader.fileName` (the engine reads) and `SSDAIManifestV1.validate`'s `reservedFiles` (a checkpoint may not smuggle either name in as a payload file) -- now reference it, so the two sides of the contract cannot be edited apart. TinyTitanFormat is the only target all three already depend on, which is why the constant lives there and not in the engine.",
+      "evidence-after": "New test `aReservedArtifactNameIsRefusedAsPayload` repacks the synthetic Qwen snapshot and, for each name in `SSDAIInstallFileNames.reserved`, adds it to the manifest's `files` table and asserts the validator throws `.invalid(field: \"manifest.files.<name>\", reason: \"reserved artifact filename\")`. It reads the names from the shared constant rather than hardcoding them, so the reserved-file rule follows a rename instead of stranding one side. `swift test --filter QuantManifestPayloadAgreementTests` -> 13 tests in 1 suite passed (12 before). The single-sourcing itself is proved by the compiler -- there is now one literal to get wrong, not three -- and the test is what keeps the rule it feeds honest.",
+      "commit": "this commit",
       "blocked-reason": ""
     },
     {
@@ -562,13 +562,13 @@
       "file_line": "docs/agent-memory.md:141 and docs/side-engine-tasks.md:328",
       "title": "Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work",
       "category": "surface wired to nothing (§5)",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "§5 facade sweep",
       "evidence-before": "Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported against ServerArguments.swift:305 (the real flag) and :421 (unknown flags throw), so the failure is loud rather than silent — but the documented spelling can never work, and a reader following the doc gets an error.",
-      "fix-summary": "",
-      "evidence-after": "None yet.",
-      "commit": "",
+      "fix-summary": "Both documents now name `--models-dir`, which is the flag the parser accepts (ServerArguments.swift:305): docs/agent-memory.md's TINYTITAN_SIDE_ENGINE row and docs/side-engine-tasks.md's side-engine paragraph. No other document in the tree, README or the wiki spells it the other way.",
+      "evidence-after": "Verified before fixing, as the row required: `grep -rn models-directory sources/ tests/` returns nothing while `--models-dir` is the parsed case at ServerArguments.swift:305 and the unknown-flag throw means a reader following the old spelling got a loud error, not a silent default -- which is why this was S2 and not S1. After the edit `grep -rn models-directory docs/ README.md` returns only the ledger rows that record this finding. No code change, so no new test.",
+      "commit": "this commit",
       "blocked-reason": ""
     },
     {

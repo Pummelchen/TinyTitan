@@ -436,7 +436,7 @@ package enum SSDAIManifestCodec {
                 }
             }
         }
-        let reservedFiles: Set<String> = ["manifest.json", "verified-install.json"]
+        let reservedFiles = SSDAIInstallFileNames.reserved
         let filePaths = manifest.files.keys.sorted()
         var canonicalPaths: [String: String] = [:]
         for path in filePaths {

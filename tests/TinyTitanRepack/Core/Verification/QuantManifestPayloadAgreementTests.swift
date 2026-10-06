@@ -137,6 +137,45 @@ import TinyTitanFormat
 
     // MARK: - The validator's own rules
 
+    /// Neither reserved artifact may appear in the manifest's payload table.
+    ///
+    /// `verified-install.json` attests an install from outside it, so a `files`
+    /// entry naming it would have the install attesting to its own receipt. The
+    /// name is declared once, in `TinyTitanFormat`, for the writer, the reader
+    /// and this validator, and the test reads it from there rather than
+    /// hardcoding it: a rename that updates one side only fails here instead of
+    /// shipping the split.
+    @Test func aReservedArtifactNameIsRefusedAsPayload() async throws {
+        let root = temporaryRoot("reserved-names")
+        let snapshot = (root as NSString).appendingPathComponent("snapshot")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        _ = try SyntheticSnapshot.buildQwen(at: snapshot, weightBits: 4)
+        try writeTokenizerFiles(at: snapshot)
+        _ = try await RemoteStreamingRepacker.runLocalSnapshot(
+            options: LocalSnapshotRepackOptions(
+                inputSnapshotDir: snapshot,
+                outputDir: output,
+                modelID: "synthetic-qwen-4bit",
+                minFreeReserveBytes: 0))
+
+        let clean = try readManifestObject(at: output)
+        for name in SSDAIInstallFileNames.reserved.sorted() {
+            var manifest = clean
+            var files = try #require(manifest["files"] as? [String: Any])
+            files[name] = ["size": 1, "sha256": String(repeating: "0", count: 64)]
+            manifest["files"] = files
+            #expect(
+                throws: TinyTitanFormatError.invalid(
+                    field: "manifest.files.\(name)",
+                    reason: "reserved artifact filename")
+            ) {
+                _ = try SSDAIManifestCodec.decode(
+                    try JSONSerialization.data(withJSONObject: manifest))
+            }
+        }
+    }
+
     /// The dense shape: a slot fallback is what the CPU reader uses, so a slot
     /// that disagrees with the bytes is the original bug.
     @Test func aDenseSlotFallbackThatDisagreesWithThePayloadIsRefused() throws {
