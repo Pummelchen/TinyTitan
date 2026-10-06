@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:33  Done:5  Blocked:0  Total:38**
+**Open:32  Done:6  Blocked:0  Total:38**
 
 ## Table
 
@@ -10,11 +10,11 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | AUD-108 | S1 | A | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:359-385` | Request JSON is walked with unbounded recursion: a 1 MiB body affords ~10^5 nesting levels and no depth cap exists in the file | missing error handling, unbounded resource, network-facing input | START | Mac (primary) |
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:214-229, :246-253` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | START | Mac (primary) |
-| AUD-121 | S1 | A | converter-gates | `benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | START | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | START | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | DONE | Mac (primary) |
+| AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | START | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | START | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | START | Mac (primary) + GitHub |
@@ -76,20 +76,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** install_tinytitan.sh:214 fetches $asset.sha256 under `if curl -fsSL`; on failure the else branch at :227-229 only warns 'No checksum published for $tag; continuing without verification' and installs. tools/release.sh:320/349 always generate the .sha256 and :451 uploads it as a release asset, so the branch is a fail-open on a path that always has a checksum. The second artifact — src_url at :246, the tag archive holding tools/, extracted to $SRC_PATH and executed later by tools/server_launcher.sh — has no checksum code at all. Severity rationale, recorded so it is not later re-litigated: both downloads come over HTTPS from the same github.com origin as the digest itself, so the digest is corruption and rename detection, not publisher identity; that is S1, not a supply-chain S0.
 
 **Evidence after.** Expected: a missing or unverifiable checksum stops the install, and the tools archive is verified the same way the engine archive is. Both artifacts.
-
-### AUD-121 — A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** converter-gates
-- **Location:** `benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')`
-- **Category:** test that cannot distinguish 'environment missing' from 'code broken'
-- **Status:** START
-- **Host:** Mac (primary)
-- **Discovered by:** baseline run, this host
-
-**Evidence before.** Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in "missing dependency: No module named 'ml_dtypes' …"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. With the pins installed the same three suites run `Ran 87 tests … OK`, exit 0.
-
-**Evidence after.** Expected: with a dependency absent the suite reports skip (or error before the run) and exit 0 for the skip reason, never a failure that reads like a code defect.
 
 ### AUD-124 — A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits
 
@@ -158,6 +144,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** Before: a standalone `UInt64(negative Int64)` under this toolchain dies with `Fatal error: Negative value is not representable`, exit 133 -- the exact failure `ple_constants.json` could produce at RealForwardRunner+BuildCore.swift:333. After: `swift test --no-parallel --filter PLE` -> 26 tests in 4 suites passed, PLEConstantsGeometryTests 4 -> 12 tests, including `acceptsProductionConstants`, which feeds the checkpoint's own constants (the ple_golden fixture, whose offsets equal the installed model's ple_constants.json) through validate() and pins 320001446 rows, so the new invariants are the checkpoint's rules and not a refusal waiting for a working model. Full `swift test --no-parallel` exit 0; `swift build -c release` exit 0 (583 steps, 121.52 s); swift-format, swiftlint, force-cast, func-length all ok. Sibling audit: PLEConstants was the only model-supplied signed-to-unsigned conversion in sources/ (grep for `[Int64]` decodables finds only its three arrays; CPUEngine/SafeTensors.swift:119 already guards `offsets[0] >= 0`; ModelCatalog.sizeBytes is our own number, used only for display), and the guard against a repeat is that the count now cannot be obtained without the checks running.
 
 **Commit.** `fa1ca79`
+
+### AUD-121 — A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** converter-gates
+- **Location:** `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests`
+- **Category:** test that cannot distinguish 'environment missing' from 'code broken'
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** baseline run, this host
+
+**Evidence before.** Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in "missing dependency: No module named 'ml_dtypes' …"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. (The row originally recorded `Ran 87 tests … OK` for the with-deps run; re-measured on this host the two converter suites are 75 tests with and without the pins — the delta is skip vs run, not count.)
+
+**Fix.** FinishedOutputGuardTests was the only class in the file without the module-availability skip its nine siblings carry. It spawns tools/prepare_qwen38.py, which exits at import time (line 70) when a pin is missing — before argument handling — so the guard it asserts can never be reached in that environment. One `@unittest.skipIf(prepare is None, …)` decorator added. Not an assertion change: the class body is untouched and still fails if the guard regresses.
+
+**Evidence after.** Dep-less venv: `Ran 75 tests in 0.001s / OK (skipped=75)`, exit 0 (was failures=1, skipped=74, exit 1). Pinned interpreter 3.13.16 with numpy/safetensors/ml_dtypes: `Ran 75 tests in 34.609s / OK`, exit 0, and `-v test_prepare_qwen38.FinishedOutputGuardTests` shows the single test running and passing, so the guard still bites. `tools/lint.sh python` clean under the pinned ruff 0.16.7.
+
+**Commit.** `fc68d72`
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 

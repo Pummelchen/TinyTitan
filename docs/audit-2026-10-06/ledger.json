@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 38,
-    "done": 5,
-    "open": 33,
+    "done": 6,
+    "open": 32,
     "blocked": 0
   },
   "tasks": [
@@ -168,16 +168,16 @@
       "severity": "S1",
       "tier": "A",
       "project": "converter-gates",
-      "file_line": "benchmark/test_qwen38_resume_e2e.py (assertIn 'already holds a finished snapshot')",
+      "file_line": "benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests",
       "title": "A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure",
       "category": "test that cannot distinguish 'environment missing' from 'code broken'",
-      "status": "START",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "baseline run, this host",
-      "evidence-before": "Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in \"missing dependency: No module named 'ml_dtypes' …\"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. With the pins installed the same three suites run `Ran 87 tests … OK`, exit 0.",
-      "fix-summary": "",
-      "evidence-after": "Expected: with a dependency absent the suite reports skip (or error before the run) and exit 0 for the skip reason, never a failure that reads like a code defect.",
-      "commit": "",
+      "evidence-before": "Reproduced during the §3 baseline: `/tmp/tt-audit/venv/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e` in a venv that lacks numpy/safetensors/ml_dtypes → `AssertionError: 'already holds a finished snapshot' not found in \"missing dependency: No module named 'ml_dtypes' …\"`, `Ran 75 tests`, `FAILED (failures=1, skipped=74)`, exit 1. (The row originally recorded `Ran 87 tests … OK` for the with-deps run; re-measured on this host the two converter suites are 75 tests with and without the pins — the delta is skip vs run, not count.)",
+      "fix-summary": "FinishedOutputGuardTests was the only class in the file without the module-availability skip its nine siblings carry. It spawns tools/prepare_qwen38.py, which exits at import time (line 70) when a pin is missing — before argument handling — so the guard it asserts can never be reached in that environment. One `@unittest.skipIf(prepare is None, …)` decorator added. Not an assertion change: the class body is untouched and still fails if the guard regresses.",
+      "evidence-after": "Dep-less venv: `Ran 75 tests in 0.001s / OK (skipped=75)`, exit 0 (was failures=1, skipped=74, exit 1). Pinned interpreter 3.13.16 with numpy/safetensors/ml_dtypes: `Ran 75 tests in 34.609s / OK`, exit 0, and `-v test_prepare_qwen38.FinishedOutputGuardTests` shows the single test running and passing, so the guard still bites. `tools/lint.sh python` clean under the pinned ruff 0.16.7.",
+      "commit": "fc68d72",
       "blocked-reason": ""
     },
     {
