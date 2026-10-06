@@ -17,8 +17,8 @@
 #   test-hollow         no @Test body that cannot fail (see below)
 #   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
 #                       no stdout write (AGENTS.md "Two products" rules 1 and 3)
-#   docs                a documented count, mode name or tag->commit sha must
-#                       match what the repository computes (see below)
+#   docs                a documented count, mode name, tag->commit sha or table
+#                       shape must match what the repository computes (see below)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -1391,7 +1391,7 @@ check_library_facade() {
 # corrected forward, so failing on a quotation would demand an edit to the record
 # instead of an addition to it.
 check_docs() {
-  echo "== docs: a documented count, name or sha must match the repository =="
+  echo "== docs: a documented count, name, sha or table must match the repository =="
   local out rc
   out="$(python3 "$SCRIPT_DIR/docs-facts.py")"
   rc=$?

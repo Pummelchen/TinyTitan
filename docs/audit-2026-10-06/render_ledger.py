@@ -62,13 +62,15 @@ def detail(task: dict) -> list[str]:
     )
     lines += [f"- **{label}:** {value}" for label, value in facts]
     lines += ["", f"**Evidence before.** {task['evidence-before']}", ""]
-    if task["fix-summary"]:
+    # Optional fields, read as optional: a row that has not been closed yet has
+    # nothing to put here, and a traceback that names no row is not a verdict.
+    if task.get("fix-summary"):
         lines += [f"**Fix.** {task['fix-summary']}", ""]
-    if task["evidence-after"]:
+    if task.get("evidence-after"):
         lines += [f"**Evidence after.** {task['evidence-after']}", ""]
-    if task["commit"]:
+    if task.get("commit"):
         lines += [f"**Commit.** `{task['commit']}`", ""]
-    if task["blocked-reason"]:
+    if task.get("blocked-reason"):
         lines += [
             f"**Blocked.** owner `{task.get('owner') or 'UNASSIGNED — a blocked row needs one'}` "
             f"— {task['blocked-reason']}",

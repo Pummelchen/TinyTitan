@@ -14,6 +14,7 @@ it needs a clean checkout of this repository two directories up.
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 
@@ -52,6 +53,31 @@ def write(rel, text):
 
 
 SNAP = {f: read(f) for f in FILES}
+
+
+def ledger_counts_pair(rel):
+    """The handover's restated ledger `counts` and an off-by-one copy of it, read
+    out of the file rather than hard-coded, so the probe survives a ledger close."""
+    text = SNAP[rel]
+    match = re.search(r"\*\*(\d+) rows / (\d+) closed / (\d+) open / (\d+) blocked\*\*", text)
+    total, done, open_, blocked = (int(group) for group in match.groups())
+    old = match.group(0)
+    new = f"**{total - 1} rows / {done} closed / {open_} open / {blocked} blocked**"
+    return old, new, f"says “{new[2:-2]}”"
+
+
+def table_row_pair(rel):
+    """The first body row of the table that carries the ledger counts, plus a copy
+    with one cell appended -- found by walking back to the separator row, so the
+    arm does not depend on what that row currently says."""
+    lines = SNAP[rel].splitlines(keepends=True)
+    counts_line = next(
+        i for i, line in enumerate(lines) if re.search(r"\d+ rows / \d+ closed", line)
+    )
+    row = lines[counts_line]
+    return row, row.rstrip("\n") + " an extra cell |\n"
+
+
 failures = []
 
 
@@ -105,14 +131,8 @@ arm(
 )
 
 # M3 — a restated ledger count that disagrees with ledger.json.
-arm(
-    "M3 wrong ledger counts",
-    "docs/handover-tinytitan.md",
-    "**61 rows / 57 closed / 3 open / 1 blocked**",
-    "**60 rows / 57 closed / 3 open / 1 blocked**",
-    1,
-    ["says “60 rows / 57 closed / 3 open / 1 blocked”"],
-)
+_old, _new, _needle = ledger_counts_pair("docs/handover-tinytitan.md")
+arm("M3 wrong ledger counts", "docs/handover-tinytitan.md", _old, _new, 1, [_needle])
 
 # M4 — a tag citation that names the tag object instead of the tagged commit.
 arm(
@@ -166,6 +186,27 @@ arm(
     "library-facade|",
     1,
     ["unknown-check message omits docs"],
+)
+
+# M16 — a table row with one cell too many: the renderer drops or pads it in
+# silence, so nothing but this check makes it visible. This is the defect the
+# author of this gate introduced while editing the handover, found by reading the
+# line back. The row is located from the file, not hard-coded, so the arm survives
+# the next edit to the table it perturbs.
+_old, _new = table_row_pair("docs/handover-tinytitan.md")
+arm("M16 table column mismatch", "docs/handover-tinytitan.md", _old, _new, 1, ["columns"])
+
+# M17 — an escaped pipe inside a code span is not a cell boundary, or the `pgrep`
+# row in docs/release-process.md would fail every run: that row has nine pipes
+# and is a correct three-column row.
+arm(
+    "M17 escaped pipes exempt",
+    "CONTRIBUTING.md",
+    "## Pull requests",
+    "| Command | Notes |\n| --- | --- |\n| `pgrep -fl 'A\\|B\\|C'` | three pipes, "
+    "one column of code |\n\n## Pull requests",
+    0,
+    ["ok ("],
 )
 
 # M9 — a history section stays wrong on purpose: must NOT fail.
@@ -261,5 +302,5 @@ if drift:
     print(f"     drifted: {drift}")
     failures.append("M15 drift")
 print("git status:\n" + status)
-print(f"\n{16 - len(failures)}/16 arms ok" if not failures else f"\nFAILURES: {failures}")
+print(f"\n{18 - len(failures)}/18 arms ok" if not failures else f"\nFAILURES: {failures}")
 sys.exit(1 if failures else 0)

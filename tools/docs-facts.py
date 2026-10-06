@@ -17,7 +17,11 @@ The gate reads the gate set out of `tools/lint.sh` itself -- the `all)` chain,
 its `case` arms, its usage header and its unknown-check message, which must agree
 with each other before any document is judged against them -- then scans the
 tracked Markdown and workflow YAML for count claims, mode names that no longer
-exist, and `<tag> -> <sha>` citations.
+exist, `<tag> -> <sha>` citations, and tables whose rows do not all have the
+header's column count. That last one is not a style rule: a row with too many or
+too few cells renders as a table that silently drops or pads them, so the table
+looks right and says something else, and it was introduced while this gate was
+being written.
 
 Excluded on purpose: this audit's own ledger and tool-coverage notes. The ledger
 quotes wrong numbers and wrong shas *verbatim* as the thing it later refutes, and
@@ -371,6 +375,49 @@ def is_history(heading):
     return bool(HISTORY_HEADING.search(heading or ""))
 
 
+def delimiters(line):
+    """Unescaped `|` in a line. GFM splits a table row on these only, and a pipe
+    inside an inline code span splits it too unless it is written `\\|` -- which is
+    why `docs/release-process.md`'s `pgrep` row has nine of them and is correct."""
+    count, escaped = 0, False
+    for char in line:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "|":
+            count += 1
+    return count
+
+
+def check_tables(path, text):
+    """A row with the wrong number of cells does not fail anything: the renderer
+    silently drops the extra columns or pads the short ones, so the table looks
+    fine and says something else. Written while fixing a document, this is the
+    defect that was introduced and caught only by reading the line back."""
+    rows = []
+    lines = text.splitlines()
+    block = []
+    for number, line in enumerate(lines + [""], 1):
+        if line.lstrip().startswith("|"):
+            block.append((number, line))
+            continue
+        # A table is a header, a separator row, then body rows.
+        if len(block) >= 2 and re.fullmatch(r" *\|[\s:|-]+\| *", block[1][1]):
+            want = delimiters(block[0][1])
+            if want >= 2:
+                for row_number, row_line in block:
+                    got = delimiters(row_line)
+                    if got != want:
+                        rows.append(
+                            f"{kind_for(path)} {path}:{row_number}: a "
+                            f"{want - 1}-column table has a row with {got - 1} "
+                            "columns; the renderer will drop or pad it in silence"
+                        )
+        block = []
+    return rows
+
+
 def main():
     modes, checks, problems = gate_set()
     docs, listing = tracked_docs()
@@ -393,6 +440,7 @@ def main():
         rows += check_names(path, paragraphs, modes)
         rows += check_ledger_counts(path, paragraphs, totals, ledgers)
         rows += check_tag_citations(path, paragraphs)
+        rows += check_tables(path, text)
 
     for row in rows:
         print(row)
