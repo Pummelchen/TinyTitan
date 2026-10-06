@@ -27,12 +27,12 @@ import {
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SHELL = join(REPO_ROOT, "tools", "dsh_route.sh");
 const MODELS_DIR = join(REPO_ROOT, "models");
-// The shell tool hardcodes this build path; the test binary may also be the
-// `.build/release` symlink, so both are probed.
-const SHELL_BINARY = join(REPO_ROOT, ".build", "arm64-apple-macosx", "release", "TinyTitanServer");
-const TEST_BINARY = existsSync(join(REPO_ROOT, ".build", "release", "TinyTitanServer"))
-  ? join(REPO_ROOT, ".build", "release", "TinyTitanServer")
-  : SHELL_BINARY;
+// The release build the checkout comparison needs, named the way the shell tool
+// names it: `tools/dsh_route.sh` resolves its server through `$TINYTITAN_BIN_DIR`
+// and then the checkout's `.build/release` (SwiftPM keeps that as a link to the
+// triple directory), so both sides of the comparison read the same binary and
+// the assertion is about the two writers, not about discovery.
+const SHELL_BINARY = join(REPO_ROOT, ".build", "release", "TinyTitanServer");
 
 /** A two-model catalog with one binary and one four-level family. */
 const FAKE = [
@@ -64,7 +64,7 @@ function count(haystack, needle) {
 
 /** The catalog exactly as the shell tool would read it, with no ambient env. */
 function readCatalog() {
-  const stdout = execFileSync(TEST_BINARY, ["--catalog", "--models-dir", MODELS_DIR], {
+  const stdout = execFileSync(SHELL_BINARY, ["--catalog", "--models-dir", MODELS_DIR], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -79,6 +79,10 @@ function shellBlock(extra = []) {
     "TINYTITAN_MODELS_DIR",
     "TINYTITAN_PORT",
     "TINYTITAN_SERVER",
+    // The tool checks this before the checkout's own `.build/release`, so an
+    // ambient one would have the two sides read different binaries and the
+    // comparison would be about build versions rather than about the writers.
+    "TINYTITAN_BIN_DIR",
   ]) {
     delete env[name];
   }
@@ -92,15 +96,10 @@ function shellBlock(extra = []) {
 
 /** Whether this machine can run the checkout comparison at all. */
 function shellComparable(t) {
-  if (
-    existsSync(SHELL) &&
-    existsSync(SHELL_BINARY) &&
-    existsSync(TEST_BINARY) &&
-    existsSync(MODELS_DIR)
-  ) {
+  if (existsSync(SHELL) && existsSync(SHELL_BINARY) && existsSync(MODELS_DIR)) {
     return true;
   }
-  t.skip("no built TinyTitanServer or tools/dsh_route.sh here; skipping shell byte-equality");
+  t.skip(`no ${SHELL_BINARY} or tools/dsh_route.sh or models/ here; skipping shell byte-equality`);
   return false;
 }
 
