@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:33  Done:3  Blocked:0  Total:36**
+**Open:35  Done:3  Blocked:0  Total:38**
 
 ## Table
 
@@ -38,12 +38,14 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-132 | S2 | A | fleet | `plugins/dsh-lan-manager/src/router.js:186-192` | The origin guard only rejects an Origin that is present: a mutating request with no Origin header passes it outright | CSRF guard with an absent-header hole | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
-| AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :78, :203 and 7 more` | A cluster of try?-to-empty fallbacks turns a thrown journal error into 'no memories found' on the retrieval and consolidation paths | silent failure, error swallowed into an empty answer | OPEN | Mac (primary) |
+| AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | OPEN | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | OPEN | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | OPEN | Mac (primary) |
 | AUD-125 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:110` | memory_delete swallows every non-notPersisted archive error in an empty catch (reclassified from S1: the dominant failure path was already rethrowing) | silent failure, wrong result reported to the model | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
+| AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | OPEN | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | OPEN | Mac (primary) |
+| AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | OPEN | Mac (primary) |
 
 ## Detail
 
@@ -467,19 +469,19 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet.
 
-### AUD-134 — A cluster of try?-to-empty fallbacks turns a thrown journal error into 'no memories found' on the retrieval and consolidation paths
+### AUD-134 — Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing'
 
 - **Severity / tier:** S2 / Tier A
 - **Project:** memory
-- **Location:** `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :78, :203 and 7 more`
+- **Location:** `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52`
 - **Category:** silent failure, error swallowed into an empty answer
 - **Status:** OPEN
 - **Host:** Mac (primary)
-- **Discovered by:** §5 facade sweep
+- **Discovered by:** §5 facade sweep, verified and narrowed by the auditor on this branch
 
-**Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. MemoryService+Sessions.swift:39/:42 (`(try? await localStore.sessionInit(...)) ?? .empty`), :78, :203 (`?? []`); MemoryService+Consolidation.swift:31/:73/:75; MemoryRetrieval.swift:52/:233/:289; ContinuityJournalStore.swift:71/:92. MemoryRetrieval.swift:256 is `try? await Task.sleep`, a poll and not a swallow, so it is excluded. The fix's scope depends on a determination the sweep did not make: whether each site is already surfaced through journalFailed(in:)/reportedJournalFailures — a documented degradation — or swallowed outright.
+**Evidence before.** Every site re-read on this branch; the sweep's list was wrong in both directions. `journalFailed(in:)` (MemoryService+Maintenance.swift:128-136) reports a *write* refusal once per scope through `log(.degraded(operation: "journal"))`, and MemoryService+Sessions.swift:108 reads it -- so open and write failures ARE surfaced. None of these *reads* set that flag, and each returns a value indistinguishable from an empty workspace: (1) :39/:42 `(try? await localStore.sessionInit(...)) ?? .empty` -- on the :42 branch (no workspace at all) `isDegraded` stays false, so a throwing local store yields an empty bootstrap and a prompt that says the model has no memories; (2) :202 recordedFacts `(try? await store.search(...)) ?? []` -- the tool-facing fact list and, at MemoryBackend+Consolidation.swift:111, the consolidation prompt's `existing:` facts, so consolidation is told there is nothing on file and re-adds what is already there; (3) Consolidation.swift:29-31 and :72-73 `(try? await store.search(limit: 400)) ?? []` -- the duplicate/conflict candidate pool, so a failed read silently disables the dedup that T2/T4/T5 exist to do; (4) ContinuityJournalStore.turns():52 `guard let taskID = try? await store.taskID(...)` else `[]` -> MemoryBackend+Consolidation.swift:97 logs 'consolidation skipped ... no new turns' when the truth is 'the journal could not be read'. The last is the actively misleading one: the log names the wrong cause.
 
-**Evidence after.** None yet — first: verify each site and split reported from swallowed.
+**Evidence after.** None yet -- first: a test that makes the read throw and asserts the caller says 'unavailable' rather than 'empty'. Scope corrections, recorded here per §0 rather than by editing the finding away: MemoryService+Sessions.swift:78 and MemoryService+Consolidation.swift:75 are not `try?` sites at all (sweep false positives, :78 is `guard configuration.isEnabled else { return [] }`, :75 a plain `pool = sharedCandidates ?? []` over an already-read value); MemoryRetrieval.swift:256 is `try? await Task.sleep`; MemoryRetrieval.swift:52/:233 and ContinuityJournalStore.sessions():71/search():92 are real `try?`-to-empty but benign -- the first two cost recall on a background path, the last two have no production caller (the only consumer of journalStore(for:) is consolidation, which calls turns()), and MemoryRetrieval.swift:289 is documented intent ('a failure is never a hint', :285-287). Those four moved to AUD-138 so this row can be closed on what is actually model-visible.
 
 ### AUD-135 — expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log
 
@@ -541,6 +543,22 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
 
+### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** `docs/release-notes-v5.8.md:132`
+- **Category:** stale documentation, documented switch with no consumer (L0/§6)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** L0 repository pass + §6 unused-code sweep (row re-added: the first append script aborted before writing it)
+
+**Evidence before.** Re-derived on this branch rather than reconstructed from the aborted run, and the wider hypothesis was tested and rejected first: a scan of every TINYTITAN_* token in README.md and the non-historical docs, and in tools/ and plugins/, against actual readers (`${VAR}` in bash, a string literal in Swift, `os.environ`, `process.env`) found NO documented-but-unread switch -- TINYTITAN_ALL_MODELS (tools/tinytitan_models.sh:296 sets it, :440 reads it), TINYTITAN_STUB_SERVER_SECONDS (tests/TinyTitanServer/ClientCLITests.swift:168) and TINYTITAN_RELEASE_{NOTES_MAX_CHARS,SKIP_GOLDENS_REASON} (tools/release.sh:422, :71) are all live, so that whole class is clean and only the knob-deletion case survives. `git show --stat 3eb11cf` ('runtime: remove every decode knob that measured a wash or a loss') deletes 18 tokens; 13 of them have no reader anywhere in sources/, tools/ or plugins/. Of the docs that name a dead token, all carry a superseded note except three dated measurement records (docs/qwen38-prefetch-predictor-study.md, docs/v4.2-experiments.md, docs/v4.3-predictive-prefetch-plan.md -- accurate as records of what was measured then, not claims about the current engine) and docs/release-notes-v5.8.md:132, which says in the present tense that '`TINYTITAN_KEEP_WIRED` is a tri-state so `=0` pages the expert cache out'. docs/release-notes-v5.1.md:57 and docs/qwen38-decode-profile-2026-09-05.md:3-13 establish the house convention for exactly this: a `> **Superseded.**` block that names what was retired and keeps the text as the record of what that release shipped. The real model sidecar and the tests confirm the knob is gone: tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:119-122 asserts 'The tri-state `TINYTITAN_KEEP_WIRED` override is gone' and that the profile row decides.
+
+**Fix.** Add the Superseded banner to the 5.8 note's 'Also in this release' item, in the form release-notes-v5.1.md:57 already uses, naming the deletion commit and where the surviving decision lives (the profile row). Historical measurement records are left alone.
+
+**Evidence after.** None yet.
+
 ### AUD-137 — An unreachable ?? 262_144 fallback on a non-empty constant array
 
 - **Severity / tier:** S3 / Tier B
@@ -552,5 +570,21 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 - **Discovered by:** §5 facade sweep
 
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. Reported as `supportedContextTokens.max() ?? 262_144` where the array is a non-empty constant, so the fallback can never run — a magic number standing in for an impossible branch.
+
+**Evidence after.** None yet.
+
+### AUD-138 — Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92`
+- **Category:** error swallowed into an empty answer (low reach)
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** split from AUD-134 during its verification
+
+**Evidence before.** Read and confirmed while narrowing AUD-134. MemoryRetrieval.swift:52 skips one promoted fact and :233 caches a question with an empty candidate set when the store read throws -- the cost is recall on the background retrieval path, never a wrong answer shown as right. ContinuityJournalStore.sessions():71 and search():92 both `guard let taskID = try? await store.taskID(...) else { return [] }`; they satisfy the SessionJournal protocol (SessionJournal.swift:25-28) and the only production consumer of `journalStore(for:)` is consolidation, which calls `turns()` (MemoryBackend+Consolidation.swift:88-91). Benign only while that stays true, which is why this is a row and not a dismissal.
+
+**Fix.** Decide once: either give these reads the same report AUD-134 adds, or note in the protocol that a journal read cannot distinguish empty from failed and leave them.
 
 **Evidence after.** None yet.
