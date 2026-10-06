@@ -17,6 +17,8 @@ import { registerRoute } from "../src/route.js";
 import {
   applyRouteThroughSettings,
   applyRouteToSettings,
+  DEFAULT_MODEL_SETTINGS_NS,
+  ensureDefaultModel,
   findModelsDir,
   findServerBinary,
   generateBlock,
@@ -714,4 +716,139 @@ test("applyRouteThroughSettings reports a missing settings service", async () =>
   });
   assert.equal(result.status, "failed");
   assert.ok(messages.some((message) => message.includes("no settings service")));
+});
+
+/**
+ * A settings service that reads back one profile form, the way the harness's
+ * `describe()` does: `{ns, user}` is the user layer, which is the only layer
+ * that counts as a choice.
+ */
+function stubSettings(user, { fail = false } = {}) {
+  const updates = [];
+  return {
+    updates,
+    describe: () => {
+      if (fail) throw new Error("the settings service is not readable");
+      return [{ ns: DEFAULT_MODEL_SETTINGS_NS, user }];
+    },
+    update: async (ns, patch) => {
+      updates.push({ ns, patch });
+    },
+  };
+}
+
+test("a default model the route no longer serves is repointed", async () => {
+  // The real case: the install moved from a 4B dense model to the 125B, the
+  // route refresh updated the picker, and `agent-default-model` went on naming
+  // the old id. The page looked configured and every turn failed with
+  // `pi-ai provider "tinytitan" has no configured model qwen3.5-4b_4-Bit`.
+  const settings = stubSettings({ provider: "tinytitan", model: "gone_4-Bit" });
+  const messages = [];
+  const result = await ensureDefaultModel({
+    settings,
+    ids: ["alpha_4-Bit", "beta_4-Bit"],
+    log: (message) => messages.push(message),
+  });
+  assert.equal(result.status, "repaired");
+  assert.equal(result.replaced, "gone_4-Bit");
+  assert.equal(settings.updates.length, 1);
+  assert.equal(settings.updates[0].ns, DEFAULT_MODEL_SETTINGS_NS);
+  assert.deepEqual(settings.updates[0].patch, { provider: "tinytitan", model: "alpha_4-Bit" });
+  // The name that was broken is named in the log, so a person can see what the
+  // refresh decided and why it had to.
+  assert.ok(messages.some((message) => message.includes("replaces gone_4-Bit")));
+});
+
+test("a default that names a served model is left alone", async () => {
+  // Not the first id: a person who chose the second install made a choice, and
+  // a refresh that "corrects" it to the first would take their selection away.
+  const settings = stubSettings({ provider: "tinytitan", model: "beta_4-Bit" });
+  const result = await ensureDefaultModel({
+    settings,
+    ids: ["alpha_4-Bit", "beta_4-Bit"],
+  });
+  assert.equal(result.status, "kept");
+  assert.equal(settings.updates.length, 0);
+});
+
+test("another provider's default is not ours to rewrite", async () => {
+  const settings = stubSettings({ provider: "deepseek-official", model: "deepseek-flash" });
+  const result = await ensureDefaultModel({ settings, ids: ["alpha_4-Bit"] });
+  assert.equal(result.status, "kept");
+  assert.equal(settings.updates.length, 0);
+});
+
+test("a default that was never set is the installer's job", async () => {
+  // Writing one here would be inventing a choice, and `dsh_local.sh ensure`
+  // already owns first-run defaults.
+  for (const user of [undefined, {}, { provider: "tinytitan" }]) {
+    const settings = stubSettings(user);
+    const result = await ensureDefaultModel({ settings, ids: ["alpha_4-Bit"] });
+    assert.equal(result.status, "skipped");
+    assert.equal(settings.updates.length, 0);
+  }
+});
+
+test("an unreadable settings service leaves the default alone", async () => {
+  const settings = stubSettings({ provider: "tinytitan", model: "gone_4-Bit" }, { fail: true });
+  const result = await ensureDefaultModel({ settings, ids: ["alpha_4-Bit"] });
+  assert.equal(result.status, "skipped");
+  assert.ok(result.reason.includes("not readable"));
+  assert.equal(settings.updates.length, 0);
+});
+
+test("a failed default write does not fail the route refresh", async () => {
+  // The route is already applied at this point; reporting the whole refresh as
+  // failed would hide that and send the caller down the "leaving the route as it
+  // is" path.
+  const settings = stubSettings({ provider: "tinytitan", model: "gone_4-Bit" });
+  settings.update = async (ns) => {
+    if (ns === DEFAULT_MODEL_SETTINGS_NS) throw new Error("the profile is read-only");
+  };
+  const messages = [];
+  const result = await ensureDefaultModel({
+    settings,
+    ids: ["alpha_4-Bit"],
+    log: (message) => messages.push(message),
+  });
+  assert.equal(result.status, "failed");
+  assert.ok(messages.some((message) => message.includes("could not repoint the default model")));
+});
+
+test("the route refresh repairs a stale default in the same pass", async (t) => {
+  try {
+    await import("js-yaml");
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      t.skip("js-yaml is not installed here; the harness's own copy resolves it");
+      return;
+    }
+    throw error;
+  }
+  const settings = stubSettings({ provider: "tinytitan", model: "gone_4-Bit" });
+  const result = await applyRouteThroughSettings({
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: "/models",
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    run: () => JSON.stringify({ models: FAKE }),
+    settings,
+    log: () => {},
+  });
+  assert.equal(result.status, "applied");
+  assert.equal(result.defaultModel.status, "repaired");
+  assert.equal(settings.updates.length, 2);
+  assert.equal(settings.updates[0].ns, "llm-pi-ai");
+  assert.equal(settings.updates[1].ns, DEFAULT_MODEL_SETTINGS_NS);
+  // The ids compared against are the ones just written, not a re-read of the
+  // file: the repair must agree with the picker in the same boot.
+  assert.deepEqual(
+    settings.updates[1].patch,
+    {
+      provider: "tinytitan",
+      model: settings.updates[0].patch.providers.tinytitan.models[0].id,
+    },
+    "the default names a model the refreshed route does not serve",
+  );
 });

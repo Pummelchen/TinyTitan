@@ -614,6 +614,11 @@ export function generateRoute({
  * reaches the picker without a settings file. `settings.update` deep-merges
  * objects but replaces arrays, so a removed model's entry does not linger.
  *
+ * The picker is not the whole story: `agent-default-model` is a separate
+ * namespace, and refreshing only the provider left a stale default behind that
+ * no longer named a served model — every turn then failed with `UNKNOWN_MODEL`.
+ * {@link ensureDefaultModel} repairs that reference on the same pass.
+ *
  * @param options - {@link collectRoute} options plus `settings` (the service).
  * @returns `{status, …}`; `applied`, or a discovery/`failed` result.
  */
@@ -632,11 +637,17 @@ export async function applyRouteThroughSettings({ settings, ...options } = {}) {
       throw new Error("the generated block is not a single settings section");
     }
     await settings.update(namespace, parsed[namespace]);
+    const defaultModel = await ensureDefaultModel({
+      settings,
+      ids: rows.map((row) => row.id),
+      provider: options.provider ?? ROUTE_DEFAULTS.provider,
+      log: options.log,
+    });
     options.log?.(
       `dsh-tinytitan: route applied through the settings service ` +
         `(${rows.length} model(s) from the ${source})`,
     );
-    return { status: "applied", models: rows.length, source };
+    return { status: "applied", models: rows.length, source, defaultModel };
   } catch (error) {
     const detail = String(error?.message ?? error)
       .trim()
@@ -644,4 +655,74 @@ export async function applyRouteThroughSettings({ settings, ...options } = {}) {
     options.log?.(`dsh-tinytitan: route refresh failed: ${detail}`);
     return { status: "failed", detail };
   }
+}
+
+/** The namespace the harness opens a new session with. */
+export const DEFAULT_MODEL_SETTINGS_NS = "agent-default-model";
+
+/**
+ * Repair a default model that names an install the route no longer serves.
+ *
+ * `tools/dsh_local.sh` writes `agent-default-model` once, at install time, and
+ * the harness migrates it into the profile patch. Nothing kept it in step with
+ * the route afterwards, so changing which model the server runs left the window
+ * pointed at an id the provider does not have: the picker showed the live model,
+ * the composer sent the old one, and every turn died with
+ * `pi-ai provider "tinytitan" has no configured model <id>` / `UNKNOWN_MODEL`.
+ * Discovered by a real `smoke` run, not by reading — the page looks configured.
+ *
+ * Deliberately narrow, because this runs inside somebody else's profile:
+ * a default that names a served model is a choice and is left alone, however
+ * surprising; a default belonging to another provider is a choice too; and a
+ * default that was never set is the installer's job, not a defect to invent.
+ * Only a reference this repository wrote and can now prove is dead gets rewritten.
+ *
+ * @param options - `settings` (the harness service), the served `ids`, the
+ *   provider name, and a logger.
+ * @returns `{status, …}` — `repaired`, `kept`, `skipped` or `failed`.
+ */
+export async function ensureDefaultModel({
+  settings,
+  ids = [],
+  provider = ROUTE_DEFAULTS.provider,
+  log = () => {},
+} = {}) {
+  if (settings === undefined || settings === null || typeof settings.update !== "function") {
+    return { status: "skipped", reason: "no settings service" };
+  }
+  if (ids.length === 0) return { status: "skipped", reason: "the route serves no models" };
+  let current;
+  try {
+    const forms = typeof settings.describe === "function" ? settings.describe() : [];
+    const row = Array.isArray(forms)
+      ? forms.find((form) => form?.ns === DEFAULT_MODEL_SETTINGS_NS)
+      : null;
+    current = row?.user;
+  } catch (error) {
+    const detail = String(error?.message ?? error)
+      .trim()
+      .split("\n")[0];
+    return { status: "skipped", reason: detail };
+  }
+  const chosen = typeof current?.model === "string" ? current.model : "";
+  if (chosen === "") return { status: "skipped", reason: "no default model is set" };
+  if (chosen !== "" && ids.includes(chosen)) return { status: "kept", model: chosen };
+  const chosenProvider = typeof current?.provider === "string" ? current.provider : "";
+  if (chosenProvider !== "" && chosenProvider !== provider) {
+    return { status: "kept", provider: chosenProvider, model: chosen };
+  }
+  const model = ids[0];
+  try {
+    await settings.update(DEFAULT_MODEL_SETTINGS_NS, { provider, model });
+  } catch (error) {
+    const detail = String(error?.message ?? error)
+      .trim()
+      .split("\n")[0];
+    log(`dsh-tinytitan: could not repoint the default model: ${detail}`);
+    return { status: "failed", reason: detail };
+  }
+  log(
+    `dsh-tinytitan: default model ${provider}/${model} replaces ${chosen}, which no longer serves`,
+  );
+  return { status: "repaired", model, replaced: chosen };
 }
