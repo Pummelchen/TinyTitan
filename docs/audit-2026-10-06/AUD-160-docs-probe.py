@@ -22,6 +22,7 @@ ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, os.pardir)
 )
 FILES = [
+    "docs/audit-2026-10-06/tool-coverage.md",
     "CONTRIBUTING.md",
     "RELEASE.md",
     "docs/handover-tinytitan.md",
@@ -66,6 +67,13 @@ def ledger_counts_pair(rel):
     return old, new, f"says “{new[2:-2]}”"
 
 
+def row_pair(rel, startswith):
+    """The first line of `rel` beginning `startswith`, plus a copy with one cell
+    appended. Located from the file so the arm outlives the next edit to it."""
+    row = next(line for line in SNAP[rel].splitlines(keepends=True) if line.startswith(startswith))
+    return row, row.rstrip("\n") + " an extra cell |\n"
+
+
 def table_row_pair(rel):
     """The first body row of the table that carries the ledger counts, plus a copy
     with one cell appended -- found by walking back to the separator row, so the
@@ -79,11 +87,25 @@ def table_row_pair(rel):
 
 
 failures = []
+ARMS = []
+
+
+def derived_pair(rel, phrase):
+    """The first claim matching `phrase` in the file, plus a copy with its number
+    moved by one. Read out of the document rather than hard-coded, so an arm
+    survives the next edit to the sentence it perturbs."""
+    match = re.search(phrase, SNAP[rel])
+    if not match:
+        return None, None
+    old = match.group(0)
+    number = int(match.group(1))
+    return old, old.replace(str(number), str(number + 1), 1)
 
 
 def arm(name, rel, old, new, expect_rc, needles, absent=()):
+    ARMS.append(name)
     text = SNAP[rel]
-    if old not in text:
+    if old is None or old not in text:
         failures.append(f"{name}: anchor not found in {rel}")
         print(f"FAIL {name}: anchor missing")
         return
@@ -102,6 +124,7 @@ def arm(name, rel, old, new, expect_rc, needles, absent=()):
 
 
 # M0 — the baseline is green with the owner note printed and not enforced.
+ARMS.append("M0 baseline")
 rc, out = run()
 ok = rc == 0 and "OWNER AGENTS.md" in out and "FAIL" not in out
 print(f"{'ok  ' if ok else 'FAIL'} M0 baseline green, owner note printed")
@@ -130,9 +153,19 @@ arm(
     ["names “audit-coverage”"],
 )
 
-# M3 — a restated ledger count that disagrees with ledger.json.
+# M3 — a restated ledger count that disagrees with ledger.json. The `absent`
+# needle proves the new `N rows` pattern leaves it alone: that phrase belongs to
+# check_ledger_counts and the ledger is not a ratchet baseline.
 _old, _new, _needle = ledger_counts_pair("docs/handover-tinytitan.md")
-arm("M3 wrong ledger counts", "docs/handover-tinytitan.md", _old, _new, 1, [_needle])
+arm(
+    "M3 wrong ledger counts",
+    "docs/handover-tinytitan.md",
+    _old,
+    _new,
+    1,
+    [_needle],
+    absent=["rests on (tools/"],
+)
 
 # M4 — a tag citation that names the tag object instead of the tagged commit.
 arm(
@@ -209,6 +242,77 @@ arm(
     ["ok ("],
 )
 
+# M18 — a ratchet baseline's row count, restated one off (AUD-162).
+_old, _new = derived_pair("CONTRIBUTING.md", r"\((\d{1,3}) rows")
+arm(
+    "M18 wrong baseline rows",
+    "CONTRIBUTING.md",
+    _old,
+    _new,
+    1,
+    ["says “15 rows”", "tools/func-length-baseline.txt holds 14 rows"],
+)
+
+# M19 — the file the count is attributed to does not exist: the gate must say it
+# could not check, not wave the claim through.
+arm(
+    "M19 baseline file missing",
+    "CONTRIBUTING.md",
+    "`tools/func-length-baseline.txt` carries the audited exemptions",
+    "`tools/no-such-baseline.txt` carries the audited exemptions",
+    1,
+    ["cannot count the rows", "tools/no-such-baseline.txt"],
+)
+
+# M20/M21 — the golden store's two counts: tracked files in the directory, and
+# the targets tools/golden-baseline.sh answers to.
+_old, _new = derived_pair("docs/handover-tinytitan.md", r"(\d+) files under `benchmark/golden/`")
+arm(
+    "M20 wrong golden file count",
+    "docs/handover-tinytitan.md",
+    _old,
+    _new,
+    1,
+    ["says “17 files under `benchmark/golden/`”", "git ls-files benchmark/golden/ lists 16"],
+)
+
+_old, _new = derived_pair(
+    "docs/handover-tinytitan.md", r"(\d+) targets in `tools/golden-baseline\.sh`"
+)
+arm(
+    "M21 wrong golden target count",
+    "docs/handover-tinytitan.md",
+    _old,
+    _new,
+    1,
+    ["says “17 targets in `tools/golden-baseline.sh`”", "golden-baseline.sh lists 16 targets"],
+)
+
+# M22 — `N rows` with no ratchet file within the window is prose about a tensor,
+# not a claim about a file here: must NOT fail.
+arm(
+    "M22 unanchored rows exempt",
+    "CONTRIBUTING.md",
+    "## Pull requests",
+    "Two layers x 8 heads x 3 n-gram sizes is 48 rows per token.\n\n## Pull requests",
+    0,
+    ["ok ("],
+)
+
+# M24 — a table inside a document the number checks are told to skip. The audit's
+# own notes are excluded from `check_counts` because they quote wrong numbers as
+# history; a mis-shaped row is not a quotation, so `check_tables` still reads
+# them, and this arm is the proof that it does.
+_old, _new = row_pair("docs/audit-2026-10-06/tool-coverage.md", "| `docs` |")
+arm(
+    "M24 table shape reaches excluded documents",
+    "docs/audit-2026-10-06/tool-coverage.md",
+    _old,
+    _new,
+    1,
+    ["tool-coverage.md:", "columns"],
+)
+
 # M9 — a history section stays wrong on purpose: must NOT fail.
 arm(
     "M9 history exempt",
@@ -265,6 +369,7 @@ proc = subprocess.run(
 )
 out = proc.stdout + proc.stderr
 ok = proc.returncode == 1 and ("no tracked documents" in out or "cannot list tracked" in out)
+ARMS.append("M13 empty root")
 print(f"{'ok  ' if ok else 'FAIL'} M13 empty root fails loudly: rc={proc.returncode}")
 if not ok:
     print(out)
@@ -281,6 +386,7 @@ proc = subprocess.run(
 )
 out = proc.stdout + proc.stderr
 ok = proc.returncode == 1 and "cannot read" in out and "lint.sh" in out
+ARMS.append("M14 missing lint.sh")
 print(f"{'ok  ' if ok else 'FAIL'} M14 missing lint.sh fails: rc={proc.returncode}")
 if not ok:
     print(out)
@@ -297,10 +403,15 @@ drift = [
 ]
 rc, out = run()
 ok = not drift and rc == 0
+ARMS.append("M15 restore integrity")
 print(f"{'ok  ' if ok else 'FAIL'} M15 restored byte-identical and green: rc={rc}")
 if drift:
     print(f"     drifted: {drift}")
     failures.append("M15 drift")
 print("git status:\n" + status)
-print(f"\n{18 - len(failures)}/18 arms ok" if not failures else f"\nFAILURES: {failures}")
+print(
+    f"\n{len(ARMS) - len(failures)}/{len(ARMS)} arms ok"
+    if not failures
+    else f"\nFAILURES: {failures}"
+)
 sys.exit(1 if failures else 0)

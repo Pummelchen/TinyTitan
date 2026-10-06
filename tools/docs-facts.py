@@ -17,7 +17,9 @@ The gate reads the gate set out of `tools/lint.sh` itself -- the `all)` chain,
 its `case` arms, its usage header and its unknown-check message, which must agree
 with each other before any document is judged against them -- then scans the
 tracked Markdown and workflow YAML for count claims, mode names that no longer
-exist, `<tag> -> <sha>` citations, and tables whose rows do not all have the
+exist, the other restated counts the repository can compute (a ratchet baseline's
+rows, a directory's tracked files, the golden target list), `<tag> -> <sha>`
+citations, and tables whose rows do not all have the
 header's column count. That last one is not a style rule: a row with too many or
 too few cells renders as a table that silently drops or pads them, so the table
 looks right and says something else, and it was introduced while this gate was
@@ -101,6 +103,16 @@ RUN_RECORD = re.compile(r"\b(ok|okay|clean|passing|passed|green|verified|failure
 # a value it has just retired, and a gate that failed on it would demand the
 # record be rewritten.
 QUOTED = re.compile(r'["“][^"”]*["”]')
+# AUD-162: the same drift in three other restated counts. Each demands the file
+# or directory its number is about, because `N rows|files|targets` on its own
+# matches n-gram tables, git diffs and locale catalogues.
+BASELINE_ROWS = re.compile(r"(?<![\w.,\-/])(\d{1,3})\s+rows\b")
+BASELINE_PATH = re.compile(r"\b(tools/[A-Za-z0-9._-]+\.txt)\b")
+FILES_UNDER = re.compile(r"(?<![\w.,\-/])(\d{1,4})\s+files?\s+under\s+`([^`\n]+)`")
+GOLDEN_TARGETS = re.compile(
+    r"(?<![\w.,\-/])(\d{1,3})\s+targets?\s+in\s+`tools/golden-baseline\.sh`"
+)
+
 BACKTICK = re.compile(r"`([^`\n]+)`")
 BOLD = re.compile(r"\*\*([^*\n]+)\*\*")
 HEX_SHA = re.compile(r"\b([0-9a-f]{7,40})\b")
@@ -193,17 +205,22 @@ def gate_set():
 
 
 def tracked_docs():
+    """(documents the number checks may read, every tracked document, errors).
+
+    The second list is for `check_tables` only: a row with the wrong number of
+    cells is a rendering defect, not a quotation of history, so the audit's own
+    ledger and these notes are exempt from the number checks and not from that
+    one. It found one -- the `library-facade` row in `tool-coverage.md` carried a
+    fourth column in a three-column table, and said so on its own line as if it
+    were a row of its own."""
     rc, out, err = sh("git", "ls-files", "*.md", "*.yml", "*.yaml")
     if rc != 0:
-        return [], [f"FAIL cannot list tracked documents: {err}"]
-    paths = [
-        p
-        for p in out.splitlines()
-        if not EXCLUDED.match(p) and os.path.isfile(os.path.join(ROOT, p))
-    ]
+        return [], [], [f"FAIL cannot list tracked documents: {err}"]
+    everything = [p for p in out.splitlines() if os.path.isfile(os.path.join(ROOT, p))]
+    paths = [p for p in everything if not EXCLUDED.match(p)]
     if not paths:
-        return [], ["FAIL no tracked documents to compare"]
-    return paths, []
+        return [], everything, ["FAIL no tracked documents to compare"]
+    return paths, everything, []
 
 
 def quoted_at(line, offset):
@@ -288,6 +305,107 @@ def check_ledger_counts(path, paragraphs, totals, ledgers):
                 f"ledger(s) {', '.join(ledgers)} total {want[0]} rows / "
                 f"{want[1]} closed / {want[2]} open / {want[3]} blocked"
             )
+    return rows
+
+
+def baseline_rows(rel):
+    """A ratchet file's row count, blank lines ignored."""
+    try:
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as handle:
+            return sum(1 for line in handle if line.strip())
+    except OSError:
+        return None
+
+
+def tracked_file_count(pattern):
+    rc, out, _ = sh("git", "ls-files", pattern)
+    if rc != 0:
+        return None
+    return len([path for path in out.splitlines() if path])
+
+
+def golden_target_count():
+    """How many targets `tools/golden-baseline.sh` answers to, read from the
+    `unknown target:` message -- the same list a user sees when they typo one."""
+    try:
+        with open(os.path.join(ROOT, "tools", "golden-baseline.sh"), encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    match = re.search(r"unknown target: \$t \(([^)]*)\)", text)
+    if not match:
+        return None
+    return len([name for name in match.group(1).split(",") if name.strip()])
+
+
+def find_baseline(text, match):
+    """The ratchet file named within 300 characters of a `N rows` claim, taking
+    the closest one. A row count with no file beside it is prose about something
+    else -- an n-gram table, a git diff -- and is not this gate's business; the
+    window rather than the whole paragraph matters because a bulleted list is one
+    paragraph, and a claim in the last bullet would otherwise inherit the first
+    bullet's file."""
+    start = max(0, match.start() - 300)
+    before, after = text[start : match.start()], text[match.end() : match.end() + 300]
+    hits = [(len(before) - h.end(), h.group(1)) for h in BASELINE_PATH.finditer(before)]
+    hits += [(h.end(), h.group(1)) for h in BASELINE_PATH.finditer(after)]
+    if not hits:
+        return None
+    return min(hits)[1]
+
+
+LEDGER_TAIL = re.compile(r"\s*/\s*\d+ closed")
+
+
+def check_derived_counts(path, paragraphs):
+    """AUD-162: three more restated counts, each computable from the tree -- a
+    ratchet baseline's rows, a directory's tracked files, the golden target
+    list. Matched by phrase rather than by number: a corpus scan of `N
+    rows|files|targets` turned up 23 hits and most describe n-gram tables, git
+    diffs and locales rather than anything here, so each pattern demands the
+    file or directory its number is a claim about."""
+    rows = []
+    for start, text, heading in paragraphs:
+        if is_history(heading):
+            continue
+        for phrase, kind in (
+            (BASELINE_ROWS, "rows"),
+            (FILES_UNDER, "files"),
+            (GOLDEN_TARGETS, "targets"),
+        ):
+            for match in phrase.finditer(text):
+                prefix = text[: match.start()].rsplit("\n", 1)[-1]
+                line = prefix + text[match.end() :].split("\n", 1)[0]
+                if quoted_at(line, len(prefix)):
+                    continue
+                if kind == "rows":
+                    # "62 rows / 58 closed" is the ledger count, and
+                    # check_ledger_counts already judges it against ledger.json.
+                    if LEDGER_TAIL.match(text[match.end() :]):
+                        continue
+                    source = find_baseline(text, match)
+                    if source is None:
+                        continue
+                    got, truth = baseline_rows(source), f"{source} holds"
+                elif kind == "files":
+                    source = match.group(2).strip().strip("`")
+                    got, truth = tracked_file_count(source), f"git ls-files {source} lists"
+                else:
+                    source = "tools/golden-baseline.sh"
+                    got, truth = golden_target_count(), "tools/golden-baseline.sh lists"
+                if got is None:
+                    rows.append(
+                        f"FAIL {path}: cannot count the {kind} a claim of "
+                        f"“{match.group(0)}” rests on ({source})"
+                    )
+                    continue
+                if int(match.group(1)) == got:
+                    continue
+                number = start + text[: match.start()].count("\n")
+                rows.append(
+                    f"{kind_for(path)} {path}:{number}: says "
+                    f"“{match.group(0).replace('*', '')}”; {truth} {got} {kind}"
+                )
     return rows
 
 
@@ -420,14 +538,15 @@ def check_tables(path, text):
 
 def main():
     modes, checks, problems = gate_set()
-    docs, listing = tracked_docs()
+    docs, everything, listing = tracked_docs()
     rows = list(problems) + list(listing)
     totals, ledgers, ledger_errors = ledger_totals()
     rows += ledger_errors
     if not checks:
         rows.append("FAIL tools/lint.sh: derived no checks from the all chain")
 
-    for path in docs:
+    scored = set(docs)
+    for path in everything:
         full = os.path.join(ROOT, path)
         try:
             with open(full, encoding="utf-8") as handle:
@@ -435,12 +554,15 @@ def main():
         except (OSError, UnicodeDecodeError) as error:
             rows.append(f"FAIL cannot read {path}: {error}")
             continue
+        rows += check_tables(path, text)
+        if path not in scored:
+            continue
         paragraphs = paragraphs_of(text.splitlines())
         rows += check_counts(path, paragraphs, len(checks))
         rows += check_names(path, paragraphs, modes)
         rows += check_ledger_counts(path, paragraphs, totals, ledgers)
+        rows += check_derived_counts(path, paragraphs)
         rows += check_tag_citations(path, paragraphs)
-        rows += check_tables(path, text)
 
     for row in rows:
         print(row)
@@ -448,8 +570,8 @@ def main():
     owner = [r for r in rows if r.startswith("OWNER")]
     summary = (
         f"{len(docs)} documents against {len(checks)} gates derived "
-        f"from tools/lint.sh; {len(owner)} owner-file note(s) reported "
-        "and not enforced"
+        f"from tools/lint.sh, table shape in all {len(everything)}; "
+        f"{len(owner)} owner-file note(s) reported and not enforced"
     )
     if fails:
         print(f"  FAIL: {len(fails)} documented fact(s) disagree with the repository ({summary})")
