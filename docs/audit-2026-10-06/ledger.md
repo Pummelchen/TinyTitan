@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:14  Done:34  Blocked:1  Total:49**
+**Open:14  Done:36  Blocked:1  Total:51**
 
 ## Table
 
@@ -25,7 +25,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-130 | S2 | B | plugins | `plugins/dsh-tinytitan/src/route.js:45-46, :99-100 and src/config.js:294-351` | context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS | surface wired to nothing (§5) | OPEN | Mac (primary) |
 | AUD-133 | S2 | A | fleet | `plugins/dsh-lan-manager/src/discovery.js:238-248` | A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe | silent failure on a network path | OPEN | Mac (primary) |
 | AUD-140 | S2 | A | installer | `tools/dsh_local.sh:256-275` | The sanctioned browser client downloads a Node tarball and runs what it extracts without checking any digest | integrity / download-and-execute, fail-open check | OPEN | Mac (primary) |
-| AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | OPEN | Mac (primary) |
 | AUD-103 | S2 | B | python-tooling | `pyproject.toml:20-24` | Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do | check coverage gap | DONE | Mac (primary) |
 | AUD-104 | S2 | A | lint-gates | `tools/lint.sh:319-330` | The converter expert-order gate reports nothing when the converter dependencies are missing | gate fails open | DONE | Mac (primary) |
 | AUD-105 | S2 | B | release | `tools/release.sh, docs/release-process.md:3` | Nothing in the release runbook requires CI to be green on the tag, and v5.18 was published while its commit's CI was failing | missing gate | DONE | Mac (primary) + GitHub |
@@ -47,11 +46,14 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-134 | S2 | A | memory | `sources/TinyTitanMemory/MemoryService+Sessions.swift:39, :42, :202; MemoryService+Consolidation.swift:29-31, :72-73; sources/TinyTitanMemory/ContinuityJournalStore.swift:52` | Journal and store reads fall back to `?? []` / `.empty` on a thrown error, and that fallback is not covered by journalFailed, so a broken memory answers 'there is nothing' | silent failure, error swallowed into an empty answer | DONE | Mac (primary) |
 | AUD-135 | S2 | B | memory | `sources/TinyTitanMemory/MemoryService+Maintenance.swift:77-79` | expireSessionLog returns true after a try?-wrapped compactJournal, so a failed compaction reads as an expired log | silent failure | DONE | Mac (primary) |
 | AUD-136 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:88-92, :140-146` | reasoning_budget_tokens and parallel_tool_calls are accepted from the wire and not enforced | surface wired to nothing, publicly disclosed (§5) | DONE | Mac (primary) |
+| AUD-142 | S2 | A | engine | `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanLib/ServerPromptStateStore.swift:121, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/IndexLoader.swift:72, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250 (before); sources/TinyTitan/Infrastructure/ModelIO/BoundedMetadataRead.swift (after)` | Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap | unbounded memory on an input file (found by the AUD-113 fix, not fixed by it) | DONE | Mac (primary) |
 | AUD-144 | S2 | A | memory | `sources/ContinuityCore/Persistence/Journal.swift:116, :137, :382, :416` | Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer | symlink following on a predicted path | DONE | Mac (primary) |
+| AUD-150 | S2 | A | engine | `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)` | AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file | unbounded memory on an input file (found while converting AUD-142's sites) | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/ (18 sites, see evidence)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | OPEN | Mac (primary) |
-| AUD-146 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
 | AUD-147 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:61-87` | readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist | single-layer CSRF defence recorded as two-layer | OPEN | Mac (primary) |
 | AUD-148 | S3 | A | fleet | `plugins/dsh-lan-manager/src/router.js:244` | isAllowedOrigin calls an origin same-origin whenever its host equals the request's Host, which is the DNS-rebinding shape | trust boundary decided by an attacker-supplied header pair | OPEN | Mac (primary) |
+| AUD-149 | S3 | C | docs | `docs/handover-tinytitan.md:103-106` | The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin | stated state that the tree disproves | OPEN | Mac (primary) |
+| AUD-151 | S3 | C | lint-gates | `docs/repository-layout.md:135-140 (the claim), sources/TinyTitanLib/Engine.swift:529, sources/TinyTitanServer/Core/OpenAIRequestValidator.swift:521, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:519 (the tree)` | The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do | missing gate, contract drift / stale documentation on a load-bearing rule | OPEN | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
 | AUD-138 | S3 | C | memory | `sources/TinyTitanMemory/MemoryRetrieval.swift:52, :233; sources/TinyTitanMemory/ContinuityJournalStore.swift:71, :92` | Four try?-to-empty reads split off AUD-134: recall quality on a background path, and two protocol methods with no production caller | error swallowed into an empty answer (low reach) | DONE | Mac (primary) |
@@ -332,27 +334,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** dsh_local.sh:264 `run "download Node from nodejs.org" curl -fsSL "$url" -o "$tmp/$tarball"`, then unpacks it and uses the resulting node/npm to install packages that are then executed by the chat window. No SHASUMS256.txt is fetched and nothing hashes the tarball; nodejs.org publishes the digest beside every download, so unlike AUD-109 the verified path exists and is simply not taken. The npm dependencies are a separate surface -- npm verifies its own tarballs against the lockfile's integrity field, so the gap is the runtime that runs npm, not the packages.
 
 **Evidence after.** Expected: the Node download is checked against nodejs.org's published SHASUMS256.txt for that exact version, and a missing or non-matching digest stops the setup -- the same fail-closed shape AUD-109 gave the engine and tools archives, with a harness that stubs curl and proves the refusal.
-
-### AUD-142 — Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap
-
-- **Severity / tier:** S2 / Tier A
-- **Project:** engine
-- **Location:** `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250`
-- **Category:** unbounded memory on an input file (found by the AUD-113 fix, not fixed by it)
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-113 fix, sibling sweep
-
-**Evidence before.** Swept from `grep -rn 'Data(contentsOf:' sources/`: fourteen code lines remain in the tree after AUD-113. Six are already bounded — `VerifiedInstallReceipt.swift:95` is the K17 read-then-check AUD-113 cites as its model, `ModelCatalog.swift:287` and `ANEPrefillAttention.swift:182` are AUD-113's own, and three (`ServerPromptStateStore.swift:121`, `RemoteSnapshotLoader.swift:88` and `:113`) are bounded by a check that runs before or beside the read — and one (`AffineSnapshot.swift:263`) is a mapped weight file rather than a metadata document. That leaves seven uncapped, and they split by who supplied the bytes, which is why this is a row and not a search-and-replace of `maxBytes`:
-    (1) Model directory, engine-side — same attacker model as AUD-113 (§2.3: an install may have been copied off another machine). `AffineSnapshot.swift:131` reads `config.json` uncapped on every CPU-engine path (CPUModelBackend.swift:97, SideEngine.swift:364, and the bench at CPUCommands.swift:207); `Detokenizer.swift:51` (`GFByteLevelDecoderConfiguration.load`, reached from `Tokenizer+Helpers.swift:45` during `GFTokenizer.load`) reads the whole `tokenizer.json`, which measures 12,809,320 bytes in the installed 125B tokenizer on this host — a real document, not a rounding error; `ServerModelSession+Loading.swift:293` reads `chat_template.jinja` (8,952 bytes installed) into `SHA256.hash` for the runtime identity with no bound. For these three the measured files sit under the manifest's 64 MiB, so `ManifestReader.defaultMaxBytes` is defensible.
-    (2) Operator-supplied HF checkpoint, converter-side — `ArchInfo.swift:168` reads the snapshot's `config.json`. The operator chose that directory, and a cap here refuses a legitimate checkpoint rather than an attacker's, so the right bound is a stated limit, not a borrowed one.
-    (3) A file the tool was handed on the command line — `CPUCommands.swift:229` (`vocab.json`) and `TinyTitanFleet/Command/main.swift:250`, where the same function's `path == "-"` branch reads stdin to end-of-file at :248, so a bound on the file and none on the pipe protects neither. Both are dev/CLI surfaces over the operator's own input.
-    (4) Own output, re-read as a round-trip check — `SSDAILayoutValidator.swift:5` is called only at RemoteStreamingRepacker+Local.swift:211 and +Remote.swift:308, each immediately after `writeSmall` wrote that very file into the partial directory. Uncapped, but there is no adversary on that path; it is a self-check, and belongs to the §6 unused/low-tier classification, not to AUD-113's.
-    Bounded already, recorded so the next sweep does not re-count them: `RemoteSnapshotLoader.swift:88` reads an 8-byte range we requested and then asserts `prefixData.count == 8` (:89); `RemoteSnapshotLoader.swift:113` reads a header whose size was checked against `Safetensors.maxHeaderBytes` *before* the range was requested (:100-105), so the network cannot make that allocation grow; `ServerPromptStateStore.swift:121` checks `metadataSize <= maximumMetadataBytes` via `resourceValues` first — bounded, but by a stat followed by a re-read, which is precisely the K17 window, so it is the one of the three where AUD-113's convention should be applied.
-    Excluded from this row: `AffineSnapshot.swift:263` — `Data(contentsOf:options:.alwaysMapped)` over `model_weights.bin` maps lazily and is held for the snapshot's life by design (ResidentWeights), so bounding it is a different decision about resident weight size, not a metadata read.
-    Not fixed with AUD-113 because none of these seven is the file that row named, three of the four groups need a cap chosen for their boundary rather than the manifest's, and the three engine-side sites are load-path changes that each need a golden-baseline run to close.
-
-**Evidence after.** Expected: group (1) reads under a stated bound and says so on refusal, with a test per site in the shape AUD-113's `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder` uses (the bound fires, not the decoder); `ServerPromptStateStore.swift:121` moves to read-then-check so its bound stops being a TOCTOU; groups (2) and (3) get a limit written down where the operator can see it, or an explicit note that the operator's own checkpoint is out of scope; group (4) classified as a self-check rather than left to look like an unfixed hole. Load-path sites need `tools/golden-baseline.sh --check qwen38-4` before and after.
 
 ### AUD-103 — Five of the nine Python pitfalls the audit standard names have no rule behind them, and the config comment claims they do
 
@@ -729,6 +710,58 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `6b742ec`
 
+### AUD-142 — Seven metadata reads still have no size bound, and they sit at four different trust boundaries, so they do not all want the same cap
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/CPUEngine/AffineSnapshot.swift:131, sources/TinyTitan/Tokenization/Detokenizer.swift:51, sources/TinyTitanLib/ServerModelSession+Loading.swift:293, sources/TinyTitanLib/ServerPromptStateStore.swift:121, sources/TinyTitanRepack/Core/Format/ArchInfo.swift:168, sources/TinyTitanRepack/Core/Format/IndexLoader.swift:72, sources/TinyTitanRepack/Core/Format/SSDAILayoutValidator.swift:5, sources/TinyTitanBench/CPUCommands.swift:229, sources/TinyTitanFleet/Command/main.swift:248-250 (before); sources/TinyTitan/Infrastructure/ModelIO/BoundedMetadataRead.swift (after)`
+- **Category:** unbounded memory on an input file (found by the AUD-113 fix, not fixed by it)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-113 fix, sibling sweep
+
+**Evidence before.** Swept from `grep -rn 'Data(contentsOf:' sources/`: fourteen code lines remain in the tree after AUD-113. Six are already bounded — `VerifiedInstallReceipt.swift:95` is the K17 read-then-check AUD-113 cites as its model, `ModelCatalog.swift:287` and `ANEPrefillAttention.swift:182` are AUD-113's own, and three (`ServerPromptStateStore.swift:121`, `RemoteSnapshotLoader.swift:88` and `:113`) are bounded by a check that runs before or beside the read — and one (`AffineSnapshot.swift:263`) is a mapped weight file rather than a metadata document. That leaves seven uncapped, and they split by who supplied the bytes, which is why this is a row and not a search-and-replace of `maxBytes`:
+    (1) Model directory, engine-side — same attacker model as AUD-113 (§2.3: an install may have been copied off another machine). `AffineSnapshot.swift:131` reads `config.json` uncapped on every CPU-engine path (CPUModelBackend.swift:97, SideEngine.swift:364, and the bench at CPUCommands.swift:207); `Detokenizer.swift:51` (`GFByteLevelDecoderConfiguration.load`, reached from `Tokenizer+Helpers.swift:45` during `GFTokenizer.load`) reads the whole `tokenizer.json`, which measures 12,809,320 bytes in the installed 125B tokenizer on this host — a real document, not a rounding error; `ServerModelSession+Loading.swift:293` reads `chat_template.jinja` (8,952 bytes installed) into `SHA256.hash` for the runtime identity with no bound. For these three the measured files sit under the manifest's 64 MiB, so `ManifestReader.defaultMaxBytes` is defensible.
+    (2) Operator-supplied HF checkpoint, converter-side — `ArchInfo.swift:168` reads the snapshot's `config.json`. The operator chose that directory, and a cap here refuses a legitimate checkpoint rather than an attacker's, so the right bound is a stated limit, not a borrowed one.
+    (3) A file the tool was handed on the command line — `CPUCommands.swift:229` (`vocab.json`) and `TinyTitanFleet/Command/main.swift:250`, where the same function's `path == "-"` branch reads stdin to end-of-file at :248, so a bound on the file and none on the pipe protects neither. Both are dev/CLI surfaces over the operator's own input.
+    (4) Own output, re-read as a round-trip check — `SSDAILayoutValidator.swift:5` is called only at RemoteStreamingRepacker+Local.swift:211 and +Remote.swift:308, each immediately after `writeSmall` wrote that very file into the partial directory. Uncapped, but there is no adversary on that path; it is a self-check, and belongs to the §6 unused/low-tier classification, not to AUD-113's.
+    Bounded already, recorded so the next sweep does not re-count them: `RemoteSnapshotLoader.swift:88` reads an 8-byte range we requested and then asserts `prefixData.count == 8` (:89); `RemoteSnapshotLoader.swift:113` reads a header whose size was checked against `Safetensors.maxHeaderBytes` *before* the range was requested (:100-105), so the network cannot make that allocation grow; `ServerPromptStateStore.swift:121` checks `metadataSize <= maximumMetadataBytes` via `resourceValues` first — bounded, but by a stat followed by a re-read, which is precisely the K17 window, so it is the one of the three where AUD-113's convention should be applied.
+    Excluded from this row: `AffineSnapshot.swift:263` — `Data(contentsOf:options:.alwaysMapped)` over `model_weights.bin` maps lazily and is held for the snapshot's life by design (ResidentWeights), so bounding it is a different decision about resident weight size, not a metadata read.
+    Not fixed with AUD-113 because none of these seven is the file that row named, three of the four groups need a cap chosen for their boundary rather than the manifest's, and the three engine-side sites are load-path changes that each need a golden-baseline run to close.
+
+**Fix.** Nine read sites now go through one primitive, `BoundedMetadataRead.read(fileAt:maxBytes:)` (sources/TinyTitan/Infrastructure/ModelIO/BoundedMetadataRead.swift), which opens the document once, `fstat`s *that* descriptor, refuses over the cap before any buffer exists, and reads through `SSDAIModelDirectory` — so it inherits root anchoring, `O_NOFOLLOW` on every component, the `S_IFREG` requirement and the short-read refusal. Engine-side model-directory documents (group 1) take the manifest's 64 MiB: `AffineSnapshot.init(directory:maxBytes:)`, `Detokenizer.load(from:tokenizer:maxBytes:)`, the `chat_template.jinja` digest in `ServerModelSession+Loading.swift`, and the bench's `vocab.json`. `ServerPromptStateStore` keeps its own stated 16 MiB and loses the stat-then-re-read. The converter (group 2) gets a ceiling written down where the operator can read it — `ArchInfo.maxConfigBytes = 8 MiB` with the measured 12,935-byte config and this repository's own 4 MiB-refused-a-legitimate-9.7 MiB-index history in the comment — and `IndexLoader` now shares that constant instead of holding a second 1 MiB literal, which is a deliberate **loosening**: a `layout.json` of 1–8 MiB that the old literal refused now validates. Group 3's fleet inventory is capped at 32 MiB on *both* branches, in `FleetInventorySource` inside `TinyTitanFleetCore` where a test target exists rather than in `Command/main.swift` where none does; the `--from -` stdin branch was the row's asymmetry and is the reason the cap is checked as bytes arrive (a pipe has no size to stat). Group 4, `SSDAILayoutValidator`, is bounded with the runtime's own 128 MiB and documented as what it is — a self-check of a file the tool just wrote, refusing over the bound the runtime itself applies when it loads that document.
+    Error taxonomies are preserved at each boundary rather than unified, because two of them are caught by type and the catch is the feature: `VerifiedInstallReceiptReader` still throws `trustedReceiptInvalid(detail:)` with the same wording, `ModelCatalog.readSnapshotConfig` still throws `CPUBackendError.unsupported` so `probeSnapshot` turns an oversized scan target into that directory's `ProbeFailure` instead of taking the server down, `loadSidecarMetadata` still throws `PrefillError.chunkedUnsupported` so a bound sidecar stays a re-export question, and the new `ModelError.metadataOverBound(document:bytes:cap:)` is classified in `Engine.swift`'s load switch as an `integrityFailure` — a document over its bound is a corrupt or planted file, not a support question. That switch is exhaustive by design, so the new case forced the classification; it did not arrive silently.
+    Guard, not just fix: `tools/lint.sh unbounded-read` is the thirteenth gate. Any whole-file `Data(contentsOf:)` / `String(contentsOf:)` under `sources/` fails unless a `lint:allow-unbounded-read <reason>` comment sits directly above it, mirroring `force-cast`'s comment walk. It skips comment lines (3 of the 10 matches on this tree are prose — every reader this row converted left its explanation behind). The 7 surviving reads are exempted with the bound each one already has: a range this process requested (`RemoteSnapshotLoader` ×2), a resource the package ships and `Bundle.module` resolves (`MetalContext` ×2), a benchmark corpus the operator named on the command line (`CPUQwenCommands` ×2), and `AffineSnapshot`'s `.alwaysMapped` weight blob, which is a mapping that faults in as the kernels touch it rather than an eager allocation, so it does not have the defect the gate hunts.
+
+**Evidence after.** Corrections first, because this row's own `Expected` was wrong and the wrongness is the finding: it asked `ServerPromptStateStore.swift:121` to "move to read-then-check". Read-then-check is the shape that allocates before it checks. Measured on this host against a 2 GiB sparse file (0 B allocated on disk, so the read is pure allocation): `Data(contentsOf:)` took 0.350 s and raised `phys_footprint` by **2,049 MB** on a 24 GB Mac — 8% of the machine, for a document a bound was supposed to reject. The store's 16 MiB cap therefore gated the decision and not the memory. Every site above uses check-before-allocation instead, and the three sites AUD-113 fixed read-then-check are filed as AUD-150. `BoundedMetadataRead`'s doc comment carries the measurement so the next reader does not "simplify" back to the cheaper-looking form.
+    Sixteen new or extended tests, one per guard, and each pins that the *bound* fires rather than a parser wearing its clothes: `BoundedMetadataReadTests` (6, new file) — `boundIsAppliedBeforeTheAllocation` asserts the refusal names the document, the size and the cap **and** that `phys_footprint` grew by less than 32 MiB while refusing a 256 MiB sparse document; `refusalIsLegible`, `readsWhatItPromises` (the boundary is inclusive), `symlinksAreNotFollowed`, `absentIsAbsent`, `nonRegularFileIsRefused`. `CPUEngineTests.anOversizedConfigIsRefusedByTheBoundNotByTheArchitectureParse` reuses the file's real quantized-shard fixture and loads it at `maxBytes: size - 1`. `TokenizerTests.oversizedTokenizerJSONIsRefusedByTheBound` does the same against the ChatML bundle fixture. `ServerPromptStateStoreTests` adds `oversizedDiskMetadataIsSkippedWithoutBeingRead` (a real record saved through the store, its `metadata.json` then truncated past 16 MiB, the reopened store reporting no entries — the record scan is `try?`-shaped, so refusal means skip, which is this file's existing behaviour for a corrupt record) and `symlinkedDiskMetadataIsSkipped`. `BoundedConfigReadTests` (2, new file) separates the two failures by using a document that is valid JSON and not an architecture: at a small cap the refusal is the 64-byte bound, at a large cap it is "not a JSON object", and `theConfigCeilingIsStatedWhereTheOperatorCanSeeIt` pins the 8 MiB constant and that it exceeds the measured 12,935-byte config. `InventorySourceTests` (4, new file) covers the stream refusal's wording, the file branch's declared ceiling, within-bound reads, and `.unreadable` for an absent source.
+    The footprint assertion was mutation-checked: replacing the pre-allocation guard with the read-then-check form the row originally asked for makes exactly one test fail — `grew < 32` at BoundedMetadataReadTests.swift:61 — and nothing else, exit 1. That is the proof that the suite can see this defect and that the assertion is not decoration; the mutation was reverted and the tree re-verified.
+    Verification on the final tree (65bf241), each exit code read from the command's own status and not a
+    pipe: `swift build` and `swift build -c release` clean with no warnings; `swift test --no-parallel` exit 0,
+    **1,631 tests in seven bundles, 0 failures** (756 + 389 + 143 + 173 + 28 + 48 + 94, read from
+    /tmp/audit142-fullsuite.log); `tools/lint.sh` **thirteen-for-thirteen, exit 0** with the pinned versions
+    (shellcheck 0.11.0 over 25 scripts on bash 3.2.57, swiftlint 0.65.1 --strict, xcrun swift-format --strict,
+    eslint 10.11.0/prettier 3.9.9 in both plugin packages, ruff 0.16.7, 2,108 functions scanned); the
+    converter's three python suites, 87 tests OK, because `ArchInfo`, `IndexLoader` and
+    `SSDAILayoutValidator` are on that read path. Model gate, because every group-1 site is load-path code:
+    preconditions first (macOS 27.0.1, Swift 6.4, 334 GiB free, `memory_pressure -Q` at 81% free,
+    qwen3.8-flash-next_125B_A6B_4Bit installed, `pgrep` for a model process empty), then
+    `tools/golden-baseline.sh --check qwen38-4` exit 0 — `ok — output identical to baseline`. That run is the
+    one that matters for this row: it loads `config.json`, `tokenizer.json` and `chat_template.jinja` through
+    the new primitive and the ANE sidecar through its bound, on the real 125B install. Ornith 1.5 8-bit, the
+    default target, has no install on this host and is reported **not checked**; nothing was fetched.
+    Sibling sweep, filed rather than fixed. (a) **AUD-150** — the three sites AUD-113 recorded as bounded by
+    read-then-check (`VerifiedInstallReceipt.swift:96`, `ModelCatalog.swift:287`, `ANEPrefillAttention.swift:182`)
+    allocate before they check, and are converted in this commit. (b) **AUD-151** — while measuring this row's own
+    additions against the 500-line file standard, three production files turned out to be over it
+    (`Engine.swift` 529, `OpenAIRequestValidator.swift` 521, `ANEPrefillAttention.swift` 519) with no gate to
+    notice, while `docs/repository-layout.md` still claimed none were; the claim is dated and corrected in this
+    commit, the splits are the row. (c) The seven remaining whole-file reads are exempted with reasons, and the
+    gate is what stops a sixth appearing in the load path unnoticed.
+    Two gate stories worth recording. `func-length` initially FAILED here because the two exemption comments pushed `RemoteSnapshotLoader.load` from 116 to 123 lines, and the comments were shortened to 119 rather than a baseline row added for length bought by prose. And the new gate was proved with a temporary `sources/` probe: exit 1 with no marker, exit 1 with a marker and no reason, exit 0 with a reasoned marker, exit 0 once the probe was deleted (full text in tool-coverage.md).
+
+**Commit.** `65bf241`
+
 ### AUD-144 — Four journal openers create files without O_NOFOLLOW, the pattern AUD-110 just closed in the installer
 
 - **Severity / tier:** S2 / Tier A
@@ -748,6 +781,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Commit.** `a9ab3c5`
 
+### AUD-150 — AUD-113's read-then-check convention bounds the decision, not the memory: the cap is applied after Data(contentsOf:) has already allocated the file
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** engine
+- **Location:** `sources/TinyTitan/Infrastructure/ModelIO/VerifiedInstallReceipt.swift:96, sources/TinyTitanServer/Core/ModelCatalog.swift:287, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:182 (before); all three through BoundedMetadataRead.read (after)`
+- **Category:** unbounded memory on an input file (found while converting AUD-142's sites)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-142 fix, measurement of the shape AUD-113 chose
+
+**Evidence before.** Three sites that AUD-113 recorded as fixed, and AUD-142's `evidence-before` as filed recorded as 'already bounded': `Data(contentsOf: url)` followed by `guard UInt64(data.count) <= maxBytes`. AUD-113's fix-summary names the reason — read, then check the size of the bytes actually read, because stat-then-re-read is a TOCTOU window — and that argument is sound about *which file* gets checked and wrong about *when the memory is spent*. Measured on this host, a 2 GiB sparse file (0 B allocated on disk, so the read is pure allocation, not page-cache) through `Data(contentsOf:)`: 0.350 s, `phys_footprint` +2,049 MB on a 24 GB Mac. The receipt path is reachable with a hostile install, which is exactly AUD-113's attacker model: a 2 GiB `verified-install.json` swaps the resident model out before the 64 MiB cap refuses it. The same shape sat in the sidecar reader and the catalog probe.
+
+**Fix.** All three now call `BoundedMetadataRead.read(fileAt:maxBytes:)`, which `fstat`s the descriptor it is about to read and refuses before allocating — so both properties AUD-113 wanted hold at once: the size checked belongs to the file actually read (no K17 window), and the cap fires before the bytes exist. Error contracts are unchanged at each boundary by rewrapping `ModelError.metadataOverBound` into what each caller already catches: `trustedReceiptInvalid(detail:)` with the original wording, `CPUBackendError.unsupported`, `PrefillError.chunkedUnsupported`. BoundedMetadataRead's doc comment records the 2,049 MB measurement and why read-then-check is not the cheaper-safe option, so the convention cannot be re-adopted by mistake. AUD-113's own row is not rewritten; this row corrects it forward.
+
+**Evidence after.** `BoundedMetadataReadTests.boundIsAppliedBeforeTheAllocation` is the guard: a 256 MiB sparse `tokenizer.json` refused at `maxBytes: 64`, asserting both the refusal text and that `phys_footprint` grew by less than 32 MiB. Mutation check: reinstating read-then-check fails that one assertion and nothing else (exit 1, `grew < 32` at line 61), then passes again when reverted — so the test is the only thing in the suite that can see this class, and it sees it. Existing AUD-113 tests still pass unchanged, which is the point of the rewrap: `anOversizedSidecarIsRefusedByTheBoundNotByTheDecoder`, `aScannedConfigOverTheBoundIsRefusedAndSaysSo`, and the receipt suite assert the same types and the same size-and-cap wording, now from a bound that precedes the allocation. Full serial suite and the qwen38-4 golden gate under AUD-142's evidence.
+
+**Commit.** `65bf241`
+
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
 - **Severity / tier:** S3 / Tier C
@@ -761,20 +812,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** Reported by the discovery sweep at these lines; NOT yet re-read by the auditor — verification precedes any fix. RMSNormReferenceTests.swift:55 (`_ = (RmsNormRef.apply, "precondition…")`, comment says documentation-only); Sha256VerifierTests.swift:32 (asserts against a hex produced by the function under test, so it passes by construction); ManifestReaderTests.swift:625/:633; RouterTopKTests.swift:220/:228 (comment concedes the precondition traps); non-throw-only bodies at HyperConnectionTests:31, SampleTopK64Tests:16, PLEHashTests:167, Qwen38FlashSchemaTests:191/:210, ReasoningControlTests:20/:118, RoleUniformityTests:21/:94/:100, PrefillGroupedRoutedMoETests+Binding:144, HTTPServerTests:607, QuantManifestPayloadAgreementTests:269/:324; ClientCLITests.swift:162-168 whose own comment reads 'Not a test of anything'. The framework is Swift Testing throughout (209 files import Testing, no XCTest).
 
 **Evidence after.** None yet — S3 by rule sweep; Sha256VerifierTests:32 is behavioural and reclassifies S2 once confirmed.
-
-### AUD-146 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
-
-- **Severity / tier:** S3 / Tier C
-- **Project:** docs
-- **Location:** `docs/handover-tinytitan.md:103-106`
-- **Category:** stated state that the tree disproves
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-127 sibling audit
-
-**Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
-
-**Evidence after.** None yet.
 
 ### AUD-147 — readJsonBody never inspects content-type, so the second mitigation AUD-132 assumed does not exist
 
@@ -803,6 +840,36 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence before.** `if (host && parsed.host === host) return true;` compares the Origin against the request's own Host header, so equality is granted by the attacker's naming, not by anything the server knows. A page served from an attacker domain that resolves to 127.0.0.1 (a TTL-0 record, the classic rebinding) and reaches the harness on its own port sends Origin: http://attacker.example:<port> with Host: attacker.example:<port> -- equal, so allowed, and the mutating routes are open to it. Two facts narrow it and belong in the row: it needs the attacker's page served on the *same port* the harness listens on, and a shared token (Guard 2) defeats it outright -- but the token is opt-in, `config.token` empty means Guard 2 is skipped entirely (router.js:172). The shape of the fix is a Host allowlist the server knows (127.0.0.1, localhost, ::1, and the host's own configured base path authority) instead of an origin-equals-host equality, and the decision belongs with AUD-147, since both change the same guard. Not verified live: no rebinding harness was run here; the claim is read from the code and is stated as such.
 
 **Evidence after.** None yet.
+
+### AUD-149 — The handover's status table contradicts the brief fixed in AUD-106: 8 installs / 244 GB, release 5.15, main level with origin
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** `docs/handover-tinytitan.md:103-106`
+- **Category:** stated state that the tree disproves
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-127 sibling audit
+
+**Evidence before.** Found while updating the gate counts in the same table. Measured against the tree: `du -sh models/*` gives 2 installs, 162 GB + 1.4 GB (`qwen3.8-flash-next_125B_A6B_4Bit` and its MTP draft), not "**8 installs, 244 GB**"; the row also claims "**7 checked**" golden targets, while `tools/golden-baseline.sh` maps only `qwen38-4` to a directory that exists here — the MTP install names no target at all, so 15 of the 16 stored goldens are *not checked*. `main` is 15 commits ahead of `origin/main` and the row still describes v5.15 as the published release with v5.18 tagged. AUD-106 rewrote the paste block at the top of this file for exactly this failure mode and did not reach the table below it.
+
+**Evidence after.** None yet.
+
+### AUD-151 — The 500-line production-file standard has no gate, and three files exceed it while the layout doc still states that none do
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** lint-gates
+- **Location:** `docs/repository-layout.md:135-140 (the claim), sources/TinyTitanLib/Engine.swift:529, sources/TinyTitanServer/Core/OpenAIRequestValidator.swift:521, sources/TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift:519 (the tree)`
+- **Category:** missing gate, contract drift / stale documentation on a load-bearing rule
+- **Status:** OPEN
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-142 fix, sibling sweep (the file-length measurement taken to keep this row's own additions inside the standard)
+
+**Evidence before.** `AGENTS.md` states the rule (a file under `sources/` stays at 500 physical lines or fewer, comments and blanks included, `tests/` exempt) and `docs/repository-layout.md:137` records it as fact, in the present tense: 'No file under `sources/` is above it as of 2026-09-28 — git ls-files 'sources/**/*.swift' | xargs wc -l lists 353 files and the largest is under the limit'. Measured 2026-10-06 with that same command, three are over it: `TinyTitanLib/Engine.swift` 529, `TinyTitanServer/Core/OpenAIRequestValidator.swift` 521, `TinyTitan/Runtime/Prefill/ANEPrefillAttention.swift` 519. Nothing in `tools/lint.sh` checks file length — `func-length` measures functions, and swiftlint's own file-length rule is not in the committed config — so the standard is carried entirely by the habit of whoever last touched each file. The evidence that habit is not enough is this sweep's own row: AUD-142 added 4 lines to `Engine.swift` (525 -> 529) and 7 to `ANEPrefillAttention.swift` (512 -> 519), and neither the compiler nor any of the twelve gates then running objected. Both files were already over before it.
+
+**Fix.** Only the false claim is corrected here, forward rather than silently: repository-layout.md now dates itself ('No file under `sources/` **was** above it as of 2026-09-28') and states the 2026-10-06 measurement with the three names, so the next reader is not told the tree is compliant when it is not. The splits themselves are not done — that is this row's remaining work, and it is deliberately not bundled into a read-bounds commit.
+
+**Evidence after.** Expected: a decision recorded in one place — split the three along a cohesive seam as pure code motion with the public API preserved (the doc's own precedent is `RealForwardRunner.swift` 1,449 -> 496), or amend the standard to say what the tree actually follows. Then the 14th gate, `file-length`, with a ratchet baseline exactly like `func-length`'s so a stale exemption row fails: the 2026-09-28 claim stayed true for a week and no longer, which is what an unenforced number costs. Note for whoever writes it — the gate must count *physical* lines, as the written rule does, or it will disagree with the doc it exists to protect.
 
 ### AUD-131 — release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this
 
