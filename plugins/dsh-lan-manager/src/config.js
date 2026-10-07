@@ -47,6 +47,9 @@ export const DEFAULT_BASE_PATH = "/dsh-lan";
  * The group key an unconfigured install shares. Public by design: it keeps a
  * fleet of freshly-installed Macs talking to each other with no setup, and it is
  * the first thing to change on a network you do not solely own.
+ *
+ * The CLI's `FleetGroupKey.shippedDefault` is the same string, and
+ * `tools/docs-facts.py` fails the docs gate if the two drift (AUD-175).
  */
 export const DEFAULT_GROUP_KEY = "tinytitan-lan";
 

@@ -305,7 +305,11 @@ linters:
 - `docs` — a documented count, name, sha or table must match the repository, via
   `tools/docs-facts.py`. This is what catches the class the audit kept finding:
   a gate name in `AGENTS.md` that `tools/lint.sh` does not accept, and a restated
-  audit count in `docs/handover-tinytitan.md` that `ledger.json` contradicts.
+  audit count in `docs/handover-tinytitan.md` that `ledger.json` contradicts. It
+  also reads one value defined twice in two languages — the shipped fleet group
+  key, `FleetGroupKey.shippedDefault` in Swift and `DEFAULT_GROUP_KEY` in the
+  plugin's `config.js` — and fails when the two differ, because a drifted default
+  empties a peer table instead of raising an error.
 - `shell-portability` — every shell script parses and runs under `/bin/bash`,
   which is 3.2.57 on a factory Mac, not the Homebrew 5.x a development machine
   puts first on `PATH`. That one is not academic: a single-quoted heredoc holding

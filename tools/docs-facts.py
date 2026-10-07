@@ -536,12 +536,57 @@ def check_tables(path, text):
     return rows
 
 
+def shared_group_key():
+    """AUD-170: the shipped group key is one value written in two languages.
+
+    The fleet manager is Swift, the harness plugin is JavaScript, and one Mac runs
+    both against the same LAN -- so the default that lets an unconfigured install
+    join the group has to be the *same string* in each. It lives at two definitional
+    sites, `FleetGroupKey.shippedDefault` and `DEFAULT_GROUP_KEY`, and only prose
+    said so. Move one of them and every other member reads a peer reporting a group
+    that is not ours: a silently empty peer table, not an error.
+
+    Derived rather than asserted, and it fails when it cannot read. A check that
+    found nothing and reported a pass is the exact defect this gate hunts.
+    """
+    sites = (
+        (
+            "sources/TinyTitanFleet/Core/FleetGroupKey.swift",
+            'static let shippedDefault = "([^"]+)"',
+        ),
+        (
+            "plugins/dsh-lan-manager/src/config.js",
+            'export const DEFAULT_GROUP_KEY = "([^"]+)"',
+        ),
+    )
+    rows = []
+    found = {}
+    for rel, pattern in sites:
+        full = os.path.join(ROOT, rel)
+        try:
+            with open(full, encoding="utf-8") as handle:
+                body = handle.read()
+        except (OSError, UnicodeDecodeError) as error:
+            rows.append(f"FAIL cannot read {rel} for the group key: {error}")
+            continue
+        match = re.search(pattern, body)
+        if match is None:
+            rows.append(f"FAIL {rel}: no shipped default group key matched {pattern}")
+            continue
+        found[rel] = match.group(1)
+    if len(found) == len(sites) and len(set(found.values())) > 1:
+        joined = "; ".join(f"{rel} = {value!r}" for rel, value in sorted(found.items()))
+        rows.append(f"FAIL the shipped group key has two values: {joined}")
+    return rows
+
+
 def main():
     modes, checks, problems = gate_set()
     docs, everything, listing = tracked_docs()
     rows = list(problems) + list(listing)
     totals, ledgers, ledger_errors = ledger_totals()
     rows += ledger_errors
+    rows += shared_group_key()
     if not checks:
         rows.append("FAIL tools/lint.sh: derived no checks from the all chain")
 
