@@ -130,6 +130,15 @@ fleet uses it to recognise itself on screen. A member still on the previous buil
 answers with the literal, and is accepted: an upgrade that emptied every peer
 table would be a worse outage than the plaintext it removed.
 
+**A failure's reason is in the log, not the response.** Every answer to a failed
+operation carries its `error` code and its HTTP status — those are the documented
+contract a caller acts on — and a message written here. What it does not carry is
+the harness's own text: a `node:fs` or `child_process` failure names an absolute
+path, and inside the address fence anyone can ask, so
+`the reason is in the manager's log` is where an operator looks. The exception is a
+failure this plugin or the harness _authored_ (`not-found`, `workspace/not-found`,
+`session-busy`): its message is already a documented answer and goes out as written.
+
 ### Reaching it from another machine
 
 **It cannot, on the pinned harness.** The API is registered on the harness's own

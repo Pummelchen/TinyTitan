@@ -316,6 +316,7 @@ export function createHandler(options) {
         messageFactory: readFactory(),
         maxBodyBytes,
         source: verdict,
+        log,
       });
       if (result !== undefined) sendJson(res, result.status ?? 200, result.body ?? result);
     } catch (error) {
@@ -429,6 +430,7 @@ async function dispatch({
   messageFactory,
   maxBodyBytes,
   source,
+  log,
 }) {
   if (method === "OPTIONS") return { status: 204, body: { ok: true } };
 
@@ -531,7 +533,7 @@ async function dispatch({
   // plugin does not reimplement agent composition (TT-028).
   if (method === "POST" && route === "/workspaces") {
     const body = await readJsonBody(req, maxBodyBytes);
-    const receipt = await createWorkspace(ctx, { path: body.path, title: body.title });
+    const receipt = await createWorkspace(ctx, { path: body.path, title: body.title }, { log });
     // Starting needs the workspace to exist, so it is a second step. If it fails,
     // the typed error propagates and the workspace half is still there — which the
     // message says rather than implying nothing happened.
@@ -575,7 +577,8 @@ async function dispatch({
   if (method === "GET" && sessionMessages) {
     const sessionId = decodeURIComponent(sessionMessages[1]);
     const limit = new URL(String(req.url ?? "/"), "http://placeholder").searchParams.get("limit");
-    return { body: { ok: true, ...(await readSessionMessages(ctx, sessionId, { limit })) } };
+    const messages = await readSessionMessages(ctx, sessionId, { limit }, { log });
+    return { body: { ok: true, ...messages } };
   }
 
   // The tail may be a registry id or a path (a page-visible workspace that was
@@ -598,7 +601,7 @@ async function dispatch({
   if (method === "POST" && route === "/prompt-all") {
     const body = await readJsonBody(req, maxBodyBytes);
     if (body.prompt === undefined) throw new ApiError("bad-request", "prompt is required", 400);
-    const result = promptAllActive(ctx, body.prompt, messageFactory, body);
+    const result = promptAllActive(ctx, body.prompt, messageFactory, body, { log });
     return {
       status: result.failed.length > 0 && result.delivered.length === 0 ? 502 : 200,
       body: { ok: result.delivered.length > 0, ...result },
@@ -616,9 +619,12 @@ async function dispatch({
   if (method === "POST" && removeWs) {
     const workspaceId = decodeURIComponent(removeWs[1]);
     const body = await readJsonBody(req, maxBodyBytes);
-    const receipt = await deleteWorkspace(ctx, workspaceId, {
-      archiveSessions: body.archiveSessions !== false,
-    });
+    const receipt = await deleteWorkspace(
+      ctx,
+      workspaceId,
+      { archiveSessions: body.archiveSessions !== false },
+      { log },
+    );
     return { body: { ok: true, ...receipt } };
   }
 

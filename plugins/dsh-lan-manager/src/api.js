@@ -75,6 +75,87 @@ export class ApiError extends Error {
   }
 }
 
+/** The raw text of a failure. For the log — never for an answer. */
+function failureReason(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * An error to answer a harness failure with, without repeating its detail.
+ *
+ * AUD-171 fenced an unexpected throw at the router, and left the sites that
+ * catch a failure *inside* an operation and give it a code and a status of their
+ * own. Those still interpolated the harness's message, and a harness message
+ * is most often a filesystem or child-process one — Node puts the absolute path
+ * in it — so `…could not be read from storage: ENOENT, open
+ * '/Users/me/.dsh/home/profiles/web/s-a1.json'` told any peer inside the address
+ * fence where this Mac keeps its profiles. The code and status are the documented
+ * answer for this failure and stay; the reason goes to the manager's log, which
+ * is where the operator who needs it is already looking.
+ *
+ * @param error - what the harness threw.
+ * @param options - `code`, `prefix` (the sentence authored here), `status`,
+ *   and the optional `log` this module's caller supplies.
+ * @returns an `ApiError` for the caller to throw.
+ */
+function loggedApiError(error, { code, prefix, status, log } = {}) {
+  const reason = failureReason(error);
+  if (typeof log === "function") log(`${prefix}: ${reason}`);
+  return new ApiError(code, `${prefix}; the reason is in the manager's log`, status);
+}
+
+/**
+ * One failure inside a fan-out receipt, under the same rule.
+ *
+ * A receipt is not an exception, so the router's fence never sees it: the
+ * manager answers `200` with a per-session list, and each entry used to carry the
+ * harness's own message. `code` is that failure's declared code when it has one
+ * (a stable vocabulary, no paths in it), so a caller can still tell a busy
+ * session from a missing one.
+ *
+ * @param error - what one session threw.
+ * @param options - `sessionId`, and the optional `log`.
+ * @returns `{sessionId, code, message}` for the receipt.
+ */
+function loggedReceipt(error, { sessionId, log } = {}) {
+  const code = typeof error?.code === "string" ? error.code : "error";
+  const reason = failureReason(error);
+  if (error instanceof ApiError) return { sessionId, code, message: reason };
+  if (typeof log === "function") log(`session ${sessionId} failed: ${reason}`);
+  return {
+    sessionId,
+    code,
+    message: "the harness failed this one; the reason is in the manager's log",
+  };
+}
+
+/**
+ * The last argument of the operations below.
+ *
+ * Deliberately separate from the options the caller of the endpoint sends: this
+ * one carries the manager's own plumbing, and a request body must not be able to
+ * hand the plugin a function.
+ *
+ * @typedef {{log?: (message: string) => void}} Plumbing
+ */
+
+/**
+ * Whether a code names a failure someone *authored*.
+ *
+ * Every documented code here is lowercase, hyphenated, and sometimes namespaced
+ * (`workspace/not-found` from the harness's controller). A Node or OS error also
+ * has a string `code`, but it is uppercase (`ENOENT`, `EACCES`,
+ * `ERR_INVALID_ARG_TYPE`), and its message has a path in it. Telling those apart
+ * is what keeps a passthrough from republishing this Mac's filesystem as though it
+ * were a documented reason.
+ *
+ * @param code - the `code` off a caught error.
+ * @returns true for an authored code.
+ */
+function isDocumentedCode(code) {
+  return typeof code === "string" && /^[a-z][a-z0-9._/-]*$/.test(code);
+}
+
 /**
  * Build the user-message factory, tolerating an older harness that does not
  * export `createUserMessage` from `dsh-llm`.
@@ -522,9 +603,10 @@ function messageLimit(value) {
  *
  * @param ctx - harness context.
  * @param sessionId - target session.
+ * @param plumbing - this module's plumbing, for the log channel.
  * @returns the derived message array.
  */
-async function derivedMessagesFromStore(ctx, sessionId) {
+async function derivedMessagesFromStore(ctx, sessionId, plumbing = {}) {
   const query = ctx?.get?.("sessionQuery");
   const store = ctx?.get?.("sessions");
   if (typeof query?.readSession !== "function" || typeof store?.prepare !== "function") {
@@ -542,11 +624,12 @@ async function derivedMessagesFromStore(ctx, sessionId) {
     if (code === "SESSION_QUERY_SESSION_NOT_FOUND") {
       throw new ApiError(Failure.NOT_FOUND, `no session ${sessionId}`, 404);
     }
-    throw new ApiError(
-      Failure.NO_AGENTS,
-      `session ${sessionId} could not be read from storage: ${error instanceof Error ? error.message : String(error)}`,
-      503,
-    );
+    throw loggedApiError(error, {
+      code: Failure.NO_AGENTS,
+      prefix: `session ${sessionId} could not be read from storage`,
+      status: 503,
+      log: plumbing.log,
+    });
   }
   const { session: header, inheritedEventCount, events } = loaded ?? {};
   let detached;
@@ -558,11 +641,12 @@ async function derivedMessagesFromStore(ctx, sessionId) {
       eventState: "detached",
     });
   } catch (error) {
-    throw new ApiError(
-      Failure.NO_AGENTS,
-      `session ${sessionId} could not be prepared for reading: ${error instanceof Error ? error.message : String(error)}`,
-      503,
-    );
+    throw loggedApiError(error, {
+      code: Failure.NO_AGENTS,
+      prefix: `session ${sessionId} could not be prepared for reading`,
+      status: 503,
+      log: plumbing.log,
+    });
   }
   return detached.deriveMessages() ?? [];
 }
@@ -579,9 +663,10 @@ async function derivedMessagesFromStore(ctx, sessionId) {
  * @param ctx - harness context.
  * @param sessionId - target session.
  * @param options - `{ limit?: number }`.
+ * @param plumbing - `{ log? }`, this module's plumbing: where a harness reason goes instead of the answer.
  * @returns `{ sessionId, total, returned, truncated, messages }`.
  */
-export async function readSessionMessages(ctx, sessionId, options = {}) {
+export async function readSessionMessages(ctx, sessionId, options = {}, plumbing = {}) {
   const agent = agents(ctx).get(sessionId);
   let derived;
   if (agent) {
@@ -595,7 +680,7 @@ export async function readSessionMessages(ctx, sessionId, options = {}) {
     }
     derived = session.deriveMessages() ?? [];
   } else {
-    derived = await derivedMessagesFromStore(ctx, sessionId);
+    derived = await derivedMessagesFromStore(ctx, sessionId, plumbing);
   }
   const limit = messageLimit(options.limit);
   const kept = derived.slice(-limit);
@@ -669,9 +754,10 @@ export function promptSession(ctx, sessionId, prompt, factory) {
  * @param prompt - string or content blocks.
  * @param factory - a resolved message factory.
  * @param options - `{ sessionIds?: string[], limit?: number }`.
+ * @param plumbing - `{ log? }`, this module's plumbing: where a harness reason goes instead of the answer.
  * @returns `{ delivered, failed, total }`.
  */
-export function promptAllActive(ctx, prompt, factory, options = {}) {
+export function promptAllActive(ctx, prompt, factory, options = {}, plumbing = {}) {
   const { sessions } = listAllActiveSessions(ctx);
   const wanted =
     Array.isArray(options.sessionIds) && options.sessionIds.length > 0
@@ -686,11 +772,7 @@ export function promptAllActive(ctx, prompt, factory, options = {}) {
     try {
       delivered.push(promptSession(ctx, session.sessionId, prompt, factory));
     } catch (error) {
-      failed.push({
-        sessionId: session.sessionId,
-        code: error?.code ?? "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      failed.push(loggedReceipt(error, { sessionId: session.sessionId, log: plumbing.log }));
     }
   }
   return { delivered, failed, total: capped.length, considered: sessions.length };
@@ -723,9 +805,10 @@ export async function archiveSession(ctx, sessionId) {
  * @param ctx - harness context.
  * @param workspaceId - target workspace.
  * @param options - `{ archiveSessions?: boolean }`.
+ * @param plumbing - `{ log? }`, this module's plumbing: where a harness reason goes instead of the answer.
  * @returns a deletion receipt.
  */
-export async function deleteWorkspace(ctx, workspaceId, options = {}) {
+export async function deleteWorkspace(ctx, workspaceId, options = {}, plumbing = {}) {
   const reg = registry(ctx);
   const workspace = findWorkspace(ctx, { workspaceId });
   const sessionIds = (workspace.sessionIds ?? []).map(String);
@@ -738,10 +821,7 @@ export async function deleteWorkspace(ctx, workspaceId, options = {}) {
         await reg.archiveSession(id);
         archived.push(id);
       } catch (error) {
-        archiveFailures.push({
-          sessionId: id,
-          message: error instanceof Error ? error.message : String(error),
-        });
+        archiveFailures.push(loggedReceipt(error, { sessionId: id, log: plumbing.log }));
       }
     }
   }
@@ -806,12 +886,14 @@ export async function startSession(ctx, selector = {}) {
     };
   } catch (error) {
     // Only an error the controller *authored* keeps its code and its message: that
-    // is how a caller tells "no such workspace" from "the preset is wrong". A throw
-    // with no code is not a documented failure -- it is `node:fs`, a child process,
-    // or a bug -- and its message can name a path on this Mac, so it goes back out
-    // unchanged and the router's catch-all logs it and answers a fixed 500. It is
-    // also not the caller's bad request, which is what the old fallback said.
-    if (typeof error?.code !== "string") throw error;
+    // is how a caller tells "no such workspace" from "the preset is wrong". A code
+    // that is not a documented one is `node:fs`, a child process, or a bug — and a
+    // Node error has a `code` too, so the test is its shape rather than its
+    // presence (`isDocumentedCode`). Its message can name a path on this Mac, so it
+    // goes back out unchanged and the router's catch-all logs it and answers a fixed
+    // 500. It is also not the caller's bad request, which is what the old fallback
+    // said.
+    if (!isDocumentedCode(error?.code)) throw error;
     const status = error.code.includes("not-found") ? 404 : 400;
     throw new ApiError(error.code, error.message, status);
   }
@@ -827,9 +909,10 @@ export async function startSession(ctx, selector = {}) {
  *
  * @param ctx - harness context.
  * @param selector - `{ path, title }`.
+ * @param plumbing - `{ log? }`, this module's plumbing: where a harness reason goes instead of the answer.
  * @returns a receipt for the created (or already-present) workspace.
  */
-export async function createWorkspace(ctx, selector = {}) {
+export async function createWorkspace(ctx, selector = {}, plumbing = {}) {
   const reg = registry(ctx);
   const path = typeof selector.path === "string" ? selector.path.trim() : "";
   if (!path) throw new ApiError(Failure.BAD_REQUEST, "path is required", 400);
@@ -841,12 +924,17 @@ export async function createWorkspace(ctx, selector = {}) {
     workspace = await reg.create(path, selector.title);
   } catch (error) {
     // `create` throws for a missing directory and for a path that is a file;
-    // both are the caller's to fix, so they are a 400 and not a 500.
-    throw new ApiError(
-      Failure.BAD_REQUEST,
-      error instanceof Error ? error.message : String(error),
-      400,
-    );
+    // both are the caller's to fix, so they are a 400 and not a 500. Its message
+    // is not echoed (AUD-174): a relative `path` comes back resolved, and the
+    // answer goes to any peer inside the address fence, not only to whoever
+    // typed it. The code and status are the caller's to act on; the reason is
+    // the operator's, and it is in the log.
+    throw loggedApiError(error, {
+      code: Failure.BAD_REQUEST,
+      prefix: "the workspace could not be created",
+      status: 400,
+      log: plumbing.log,
+    });
   }
   return {
     workspaceId: String(workspace?.id ?? ""),

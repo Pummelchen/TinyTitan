@@ -1624,3 +1624,221 @@ test("a degraded discovery shows up on the peer list and on health", async () =>
     bare.store.cleanup();
   }
 });
+
+/**
+ * AUD-174: the harness's own failure text is the operator's, not the caller's.
+ *
+ * A path-shaped message from Node or the harness goes in an answer to *any* peer
+ * inside the address fence, and it names where this Mac keeps its profiles. The
+ * code and the status are the documented answer for the failure and stay.
+ */
+const STORAGE_ERROR = new Error(
+  "ENOENT: no such file or directory, open '/Users/me/.dsh/home/profiles/web/s-a1.json'",
+);
+
+test("a cold read that fails answers the status, never the storage path", async () => {
+  const lines = [];
+  const { handler, store } = await setup({
+    agents: { get: () => undefined },
+    // The cold path composes only when both services answer; with just a
+    // reader it takes the "no cold session reader" branch instead of this one.
+    sessions: { prepare: () => ({ deriveMessages: () => [] }) },
+    sessionQuery: {
+      readSession: async () => {
+        throw STORAGE_ERROR;
+      },
+    },
+    log: (line) => lines.push(line),
+  });
+  try {
+    const res = await call(handler, { method: "GET", url: "/dsh-lan/sessions/s-a1/messages" });
+    assert.equal(res.status, 503);
+    assert.equal(res.body.error, "agent-service-unavailable");
+    assert.doesNotMatch(JSON.stringify(res.body), /\/Users\/me/, JSON.stringify(res.body));
+    assert.match(String(res.body.message), /could not be read from storage/);
+    assert.ok(
+      lines.some((line) => line.includes("profiles/web/s-a1.json")),
+      `the reason must reach the log: ${lines.join(" | ")}`,
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a cold read the store cannot prepare answers the same way", async () => {
+  const lines = [];
+  const { handler, store } = await setup({
+    agents: { get: () => undefined },
+    sessionQuery: { readSession: async () => ({ session: { id: "s-a1" }, events: [] }) },
+    sessions: {
+      prepare: () => {
+        throw STORAGE_ERROR;
+      },
+    },
+    log: (line) => lines.push(line),
+  });
+  try {
+    const res = await call(handler, { method: "GET", url: "/dsh-lan/sessions/s-a1/messages" });
+    assert.equal(res.status, 503);
+    assert.doesNotMatch(JSON.stringify(res.body), /\/Users\/me/, JSON.stringify(res.body));
+    assert.match(String(res.body.message), /could not be prepared for reading/);
+    assert.ok(
+      lines.some((line) => line.includes("profiles/web/s-a1.json")),
+      lines.join(" | "),
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a fan-out receipt carries a code, not the harness's message", async () => {
+  const lines = [];
+  const agents = fakeAgents(["s-a1", "s-b1"]);
+  agents.get = (id) =>
+    id === "s-a1"
+      ? { id, followup: () => agents.delivered.push({ id }) }
+      : id === "s-b1"
+        ? {
+            id,
+            followup: () => {
+              throw new Error(
+                "ENOENT: no such file or directory, open '/Users/me/.dsh/home/profiles/web/s-b1.json'",
+              );
+            },
+          }
+        : undefined;
+  const { handler, ctx, store } = await setup({ agents, log: (line) => lines.push(line) });
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt-all",
+      body: { prompt: "status?" },
+    });
+    // One of the three active sessions takes the prompt, so the request
+    // succeeds and the rest come back as receipts — the status is not the leak.
+    assert.equal(res.status, 200);
+    assert.equal(res.body.delivered.length, 1);
+    assert.equal(res.body.failed.length, 2);
+    assert.equal(ctx._agents.delivered.length, 1, "the good session did get its prompt");
+    for (const failure of res.body.failed) {
+      assert.doesNotMatch(
+        String(failure.message),
+        /\/Users\/me/,
+        `a receipt echoed the harness's text: ${JSON.stringify(failure)}`,
+      );
+    }
+    assert.ok(
+      lines.some((line) => line.includes("profiles/web/s-b1.json")),
+      lines.join(" | "),
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("an authored ApiError still says what it means inside a fan-out", async () => {
+  const { handler, store } = await setup({ agents: fakeAgents(["s-a1"]) });
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt-all",
+      body: { prompt: "status?", sessionIds: ["s-a2"] },
+    });
+    assert.equal(res.body.failed.length, 1);
+    assert.equal(res.body.failed[0].code, "not-found");
+    assert.match(String(res.body.failed[0].message), /session s-a2 has no live agent/);
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a workspace delete reports an archive failure without its path", async () => {
+  const lines = [];
+  const archived = new Set(["s-hidden"]);
+  const registry = fakeRegistry(archived);
+  const realArchive = registry.archiveSession;
+  registry.archiveSession = async (id) => {
+    if (id === "s-a2") {
+      throw new Error(
+        "EACCES: permission denied, open '/Users/me/.dsh/home/profiles/web/s-a2.json'",
+      );
+    }
+    await realArchive(id);
+  };
+  const { handler, ctx, store } = await setup({ registry, log: (line) => lines.push(line) });
+  try {
+    const res = await call(handler, { method: "POST", url: "/dsh-lan/workspaces/ws-1/delete" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.archiveFailures.length, 1, JSON.stringify(res.body));
+    assert.equal(res.body.archiveFailures[0].sessionId, "s-a2");
+    // The receipt keeps the workspace path — the caller registered that path and
+    // owns it. What must not travel is the harness's own text about this Mac.
+    assert.doesNotMatch(
+      String(res.body.archiveFailures[0].message),
+      /\/Users\/me/,
+      JSON.stringify(res.body.archiveFailures[0]),
+    );
+    assert.ok(
+      lines.some((line) => line.includes("profiles/web/s-a2.json")),
+      lines.join(" | "),
+    );
+    assert.equal(ctx._registry.get("ws-1"), undefined, "the delete still happens");
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a session start the harness fails inside answers 500, not its code and path", async () => {
+  const lines = [];
+  // A Node error has a string `code` as well, so "it has a code" is not evidence
+  // that somebody authored the failure. This one is `child_process`, and its
+  // message is the absolute path of the binary the harness tried to spawn.
+  const failure = Object.assign(new Error("spawn /Users/me/.dsh/bin/deepseek ENOENT"), {
+    code: "ENOENT",
+  });
+  const { handler, store } = await setup({
+    sessionController: fakeSessions(failure),
+    log: (line) => lines.push(line),
+  });
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/sessions",
+      body: { workspaceId: "ws-1" },
+    });
+    assert.equal(res.status, 500, "an internal failure is not the caller's bad request");
+    assert.equal(res.body.error, "internal-error");
+    assert.doesNotMatch(JSON.stringify(res.body), /\/Users\/me/, JSON.stringify(res.body));
+    assert.ok(
+      lines.some((line) => line.includes("spawn /Users/me")),
+      lines.join(" | "),
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("a workspace create answers 400 without echoing the resolved path", async () => {
+  const lines = [];
+  const registry = fakeRegistry(new Set(["s-hidden"]));
+  registry.create = async () => {
+    throw new Error("ENOENT: no such file or directory, stat '/Users/me/Projects/missing'");
+  };
+  const { handler, store } = await setup({ registry, log: (line) => lines.push(line) });
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/workspaces",
+      body: { path: "missing" },
+    });
+    assert.equal(res.status, 400, "a bad path is still the caller's to fix");
+    assert.equal(res.body.error, "bad-request");
+    assert.doesNotMatch(JSON.stringify(res.body), /\/Users\/me/, JSON.stringify(res.body));
+    assert.ok(
+      lines.some((line) => line.includes("Projects/missing")),
+      lines.join(" | "),
+    );
+  } finally {
+    store.cleanup();
+  }
+});
