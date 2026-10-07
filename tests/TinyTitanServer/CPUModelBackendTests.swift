@@ -159,6 +159,29 @@ import Testing
             reasoning: reasoning)
     }
 
+    /// AUD-176. Every field the validator put on the config has to *arrive* at
+    /// the sampler. Each one is read by the shared validator and applied by the
+    /// GPU sampler, so a field that stops here makes `--cpu` answer the same
+    /// request with a different distribution than the GPU entry -- silently, and
+    /// with no golden baseline on the CPU path to catch it. `seed` and both
+    /// penalties were exactly such a stop.
+    @Test func everySamplingFieldReachesTheCPUSampler() throws {
+        let configuration = GenerationConfig(
+            maxNewTokens: 8, temperature: 0.8, topK: 40, topP: 0.9,
+            presencePenalty: 1.5, minP: 0, repetitionPenalty: 1.1, seed: 1234)
+        let sampler = CPUModelBackend.cpuSampler(for: configuration)
+        #expect(sampler.temperature == 0.8)
+        #expect(sampler.topK == 40)
+        #expect(sampler.topP == 0.9)
+        #expect(sampler.presencePenalty == 1.5)
+        #expect(sampler.repetitionPenalty == 1.1)
+        #expect(sampler.seed == 1234)
+        // An absent seed stays absent, which is the clock. It is not seed 0: the
+        // generator gives 0 its own fixed state, so folding nil into 0 would
+        // make every unseeded request draw the same sequence.
+        #expect(CPUModelBackend.cpuSampler(for: GenerationConfig(temperature: 1)).seed == nil)
+    }
+
     /// The scripted backend, without running a generation: the tests that ask
     /// the backend about itself need the object, not an answer.
     private func scriptedBackend(thinking: ModelThinkingMode) async throws

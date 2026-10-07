@@ -147,6 +147,28 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         }
     }
 
+    /// The sampler a request's generation config asks for.
+    ///
+    /// Its own function because every field on that config has to cross into
+    /// the CPU sampler or the two engines answer the same request with two
+    /// different distributions -- and `--cpu` is a documented, operator-facing
+    /// mode, not a debug switch (AUD-176: the seed and both penalties were read
+    /// by the validator, reached this line, and were dropped). The defaults when
+    /// a field is absent are the validator's, not this function's invention:
+    /// `topP` 1 and `topK` 0 mean "no filter", which is what the GPU path's
+    /// kernel does with the same absent values.
+    static func cpuSampler(for configuration: GenerationConfig) -> CPUSampler {
+        CPUSampler(
+            temperature: configuration.temperature,
+            topP: configuration.topP ?? 1,
+            topK: configuration.topK ?? 0,
+            presencePenalty: configuration.presencePenalty,
+            repetitionPenalty: configuration.repetitionPenalty,
+            // The seed the request sent, or nil for the clock -- the same rule
+            // the GPU path's `seedFor` applies. Greedy ignores it either way.
+            seed: configuration.seed)
+    }
+
     /// The thread width, which the caller sets from whether anyone is
     /// waiting on the GPU. One thread costs a concurrent 35B generation 3%
     /// and four costs 31%, measured, so this is not a detail.
@@ -186,13 +208,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
                 table: table, node: node,
                 vocab: model.configuration.vocabulary)
         }
-        let sampler = CPUSampler(
-            temperature: configuration.temperature,
-            topP: configuration.topP ?? 1,
-            topK: configuration.topK ?? 0,
-            // Deterministic unless the request asks for variety, so the same
-            // prompt gives the same answer and a regression is visible.
-            seed: configuration.temperature > 0 ? nil : 0)
+        let sampler = Self.cpuSampler(for: configuration)
         let generator = sampler.makeGenerator()
 
         model.reset()
@@ -200,6 +216,10 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         for (index, token) in prompt.enumerated() {
             logits = try model.step(token: token, needsLogits: index == prompt.count - 1)
         }
+        // What the penalties are measured against: the prompt is already in the
+        // model's context, so a token the prompt used is a token the history
+        // contains. The GPU sampler gets the same thing from its caller.
+        var history = promptIDs
 
         // The same decoder the GPU path runs, so a thought is split the same
         // way on either engine. This path renders no tool template, so the
@@ -220,7 +240,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
                 guard !mask.isEmpty else { throw GeneratorError.constrainedDecodeStalled }
                 mask.apply(toLogits: &logits)
             }
-            let next = sampler.pick(logits, using: generator)
+            let next = sampler.pick(logits, history: history, using: generator)
             if let constraint = configuration.constraint, !constraint.observe(Int32(next)) {
                 throw GeneratorError.constrainedDecodeViolation(id: Int32(next))
             }
@@ -229,6 +249,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
                 break
             }
             produced += 1
+            history.append(Int32(next))
             output.publish(
                 try events(
                     for: Int32(next), decoder: decoder,

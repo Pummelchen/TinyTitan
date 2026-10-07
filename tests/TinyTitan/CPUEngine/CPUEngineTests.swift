@@ -1029,4 +1029,60 @@ import Testing
         for _ in 0..<20 { #expect(sampler.pick(logits, using: generator) == 1) }
     }
 
+    /// AUD-176. A presence penalty takes a token the history already contains
+    /// out of contention, and it does it while greedy: the GPU sampler edits
+    /// the logits before the argmax, so a penalised greedy run is not the plain
+    /// argmax either.
+    @Test func presencePenaltyTakesASeenTokenOutOfContention() {
+        let logits: [Float] = [1, 5, 4]
+        let generator = CPUSampler(presencePenalty: 10).makeGenerator()
+        #expect(CPUSampler(presencePenalty: 10).pick(logits, history: [], using: generator) == 1)
+        #expect(CPUSampler(presencePenalty: 10).pick(logits, history: [1], using: generator) == 2)
+    }
+
+    /// AUD-176. The repetition penalty scales by the logit's **sign**, matching
+    /// `Sampler.applyPenaltiesInPlace`: a positive logit is divided and a
+    /// negative one is multiplied, so both move away from being chosen. Testing
+    /// only the positive case would let an implementation that always divided
+    /// pass, and that one *raises* a negative logit toward the top.
+    @Test func repetitionPenaltyScalesBySignNotByMagnitude() {
+        let logits: [Float] = [3, 2.5]
+        let negativeLogits: [Float] = [-2, -2.5]
+        let generator = CPUSampler(repetitionPenalty: 2).makeGenerator()
+        // 3 / 2 = 1.5, under the 2.5 that was second.
+        #expect(CPUSampler(repetitionPenalty: 2).pick(logits, history: [0], using: generator) == 1)
+        // -2 * 2 = -4, under the -2.5 that was second.
+        #expect(
+            CPUSampler(repetitionPenalty: 2)
+                .pick(negativeLogits, history: [0], using: generator) == 1)
+        #expect(
+            CPUSampler(repetitionPenalty: 2)
+                .pick(negativeLogits, history: [], using: generator) == 0)
+    }
+
+    /// Both penalties at their defaults must change nothing, or this fix would
+    /// have traded one wrong answer for a slower right one: every request that
+    /// does not ask for a penalty keeps the distribution it had.
+    @Test func penaltiesAreNeutralAtTheirDefaults() {
+        let logits: [Float] = [0.1, 5.0, -2, 4.9, 0]
+        let history: [Int32] = [1, 2, 3, 4]
+        let sampler = CPUSampler(
+            temperature: 0, topP: 1, topK: 0,
+            presencePenalty: 0, repetitionPenalty: 1, seed: 5)
+        let generator = sampler.makeGenerator()
+        for _ in 0..<20 {
+            #expect(sampler.pick(logits, history: history, using: generator) == 1)
+        }
+    }
+
+    /// The history is model output, and an id outside the row is a bad id, not
+    /// a crash: this engine takes a snapshot a converter wrote, so a shape
+    /// mismatch has to cost a token, not the process.
+    @Test func aHistoryIdPastTheRowIsSkippedRatherThanFatal() {
+        let logits: [Float] = [1, 5, 4]
+        let sampler = CPUSampler(presencePenalty: 2, repetitionPenalty: 1.5)
+        let generator = sampler.makeGenerator()
+        #expect(sampler.pick(logits, history: [999, -3], using: generator) == 1)
+    }
+
 }

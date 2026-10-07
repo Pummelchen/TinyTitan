@@ -16,17 +16,26 @@ public struct CPUSampler: Sendable {
     public var temperature: Float
     public var topP: Float
     public var topK: Int
-    /// Nil is deterministic: the same prompt gives the same answer, which is
-    /// what makes a regression visible.
+    /// The two penalties the wire and a model's published sampling row carry.
+    /// Neutral at their defaults -- presence 0, repetition 1 -- so a request
+    /// that does not ask for one is sampled exactly as before.
+    public var presencePenalty: Float
+    public var repetitionPenalty: Float
+    /// A seed makes the draw reproducible across runs, which is what makes a
+    /// regression visible; nil takes the clock. This is the same rule the GPU
+    /// path's `seedFor` applies to `GenerationConfig.seed`.
     public var seed: UInt64?
 
     public init(
         temperature: Float = 0, topP: Float = 1, topK: Int = 0,
+        presencePenalty: Float = 0, repetitionPenalty: Float = 1,
         seed: UInt64? = nil
     ) {
         self.temperature = temperature
         self.topP = topP
         self.topK = topK
+        self.presencePenalty = presencePenalty
+        self.repetitionPenalty = repetitionPenalty
         self.seed = seed
     }
 
@@ -49,7 +58,11 @@ public struct CPUSampler: Sendable {
         Generator(seed: seed ?? UInt64(Date().timeIntervalSince1970 * 1000))
     }
 
-    public func pick(_ logits: [Float], using generator: Generator) -> Int {
+    public func pick(
+        _ logits: [Float], history: [Int32] = [], using generator: Generator
+    ) -> Int {
+        var logits = logits
+        applyPenalties(&logits, history: history)
         guard !isGreedy else {
             var best = 0
             for index in logits.indices where logits[index] > logits[best] { best = index }
@@ -99,6 +112,30 @@ public struct CPUSampler: Sendable {
         }
         trace(logits, chosen: order[0])
         return order[0]
+    }
+
+    /// The penalties, applied the way the GPU sampler applies them
+    /// (`Sampler.applyPenaltiesInPlace`, minus its softcap branch because this
+    /// engine has no softcap): a logit the history already contains is divided
+    /// by the repetition factor while positive and multiplied by it while
+    /// negative, then has the presence penalty subtracted. Each distinct id is
+    /// penalized once whatever its count in the history, and out-of-vocabulary
+    /// ids are skipped rather than trapping -- the history is model output, and
+    /// a tokenizer that emits an id past `logits.count` must not abort a
+    /// generation.
+    private func applyPenalties(_ logits: inout [Float], history: [Int32]) {
+        guard !history.isEmpty, presencePenalty != 0 || repetitionPenalty != 1 else { return }
+        for id in Set(history) {
+            guard id >= 0, Int(id) < logits.count else { continue }
+            var value = logits[Int(id)]
+            if repetitionPenalty != 1 {
+                value = value > 0 ? value / repetitionPenalty : value * repetitionPenalty
+            }
+            if presencePenalty != 0 {
+                value -= presencePenalty
+            }
+            logits[Int(id)] = value
+        }
     }
 
     /// `TINYTITAN_LOGIT_TRACE=1`: the top-2 of this step's logits, for

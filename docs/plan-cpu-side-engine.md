@@ -139,6 +139,18 @@ claims, both of which want the model's best answer and neither of which
 wants variety — and a deterministic side-engine is one whose output can be
 compared between runs.
 
+That sentence describes the *default*, and it was written when the served path
+still honoured the request's sampling knobs badly: a request with a temperature
+got it, but its `seed` and both penalties stopped at the backend and never
+reached the sampler (AUD-176, which also corrected the inverted comment on
+`CPUSampler.seed`). What is true now is that a CPU entry and a GPU entry see the
+same configuration — not the same arithmetic: the nucleus here is measured over
+the top-k subset, while the Metal sampler accumulates it over the whole row
+(`CPUSampler.swift` against `logit.metal`), so a request that sets `top_k` and
+`top_p` together does not have to pick the same token. That difference is an
+open numerics question for the user, not a fence, and it is recorded as
+unclosed in the ledger.
+
 | threads | end-to-end tok/s |
 | --- | --- |
 | 1 | 6.7 |
