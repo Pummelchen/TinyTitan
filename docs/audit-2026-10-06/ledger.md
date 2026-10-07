@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:72  Blocked:1  Total:73**
+**Open:0  Done:73  Blocked:1  Total:74**
 
 ## Table
 
@@ -81,6 +81,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-170 | S3 | A | fleet | `sources/TinyTitanFleet/Command/main.swift:115 (was the inline `??` chain), sources/TinyTitanFleet/Core/FleetGroupKey.swift` | `ttlanmanager --key` puts the group key in argv, where every other local account reads it with ps, and nothing said so | secret through a world-visible channel, on the one path where the secret is the operator's own | DONE | Mac (primary) |
 | AUD-171 | S3 | B | plugins | `plugins/dsh-lan-manager/src/router.js:326 (the catch-all), plugins/dsh-lan-manager/src/api.js:800 (the session-controller wrapper)` | An unexpected throw answers with its own message, so a filesystem failure names this Mac's paths to any peer that can reach the port | internal detail in an error answer, plus a mislabelled status on the sibling site | DONE | Mac (primary) |
 | AUD-173 | S3 | A | fleet | `plugins/dsh-lan-manager/src/peers.js:435 (the untested limit argument)` | The peer prober's fan-out bound is applied but pinned by no test, so deleting it leaves the whole suite green | unpinned guard (missing test) | DONE | Mac (primary) |
+| AUD-174 | S3 | B | plugins | `plugins/dsh-lan-manager/src/api.js:547,563,692,743,847 (the interpolated messages) and :814 (the authored-code test)` | The sites AUD-171 left open answer a LAN peer with the harness's own failure text, and the one that meant to keep only authored failures admits a Node error code | internal detail in an error answer (information disclosure) | DONE | Mac (primary) |
 
 ## Detail
 
@@ -1471,7 +1472,7 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 
 **Fix.** The catch-all keeps the log line that already recorded the stack and answers with a fixed message that says where the detail is. `ApiError` messages still go out unchanged, because those are authored here and are the documented answer for a known failure. The wrapper now keeps the code and message only of an error the controller *authored* -- one carrying its own code -- and rethrows anything else to the catch-all, which both logs it and calls it a 500.
 
-**Evidence after.** Measured 2026-10-06. `an unexpected throw answers a fixed 500 and keeps its detail in the log` asserts the absence of the path and the presence of the log line, so the fix cannot become a silent failure. On the unfixed sources it fails with `expected: 500` and an actual of 400 -- the path was in the body at that point. Suite 130 pass / 0 fail; the 501 case and the `workspace/not-found` case still assert their authored messages, which is the half that had to survive. NOT covered: the fan-out receipts in `prompt-all` and the archive path echo per-session failure messages, and api.js has no logger in scope to put the detail anywhere else -- fixing that needs a log channel threaded through, not a message swapped.
+**Evidence after.** Measured 2026-10-06. `an unexpected throw answers a fixed 500 and keeps its detail in the log` asserts the absence of the path and the presence of the log line, so the fix cannot become a silent failure. On the unfixed sources it fails with `expected: 500` and an actual of 400 -- the path was in the body at that point. Suite 130 pass / 0 fail; the 501 case and the `workspace/not-found` case still assert their authored messages, which is the half that had to survive. NOT covered as filed: the fan-out receipts in `prompt-all` and the archive path echo per-session failure messages, and api.js has no logger in scope to put the detail anywhere else -- fixing that needs a log channel threaded through, not a message swapped. That is what AUD-174 (cf2088d) then did, at all six sites this class has here.
 
 **Commit.** `fe467d9`
 
@@ -1492,3 +1493,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** Measured 2026-10-06. With `peers.js:435` mutated to `validated.length` the new test fails (peak 40, expected 24) and is the only failure; `src/peers.js` was then restored from a copy taken before the edit and `git diff` reports no change, i.e. the committed source is untouched -- only the test file is in the commit. Full suites after: dsh-lan-manager `npm test` 131 passed / 0 failed, `tools/lint.sh javascript` ok.
 
 **Commit.** `b3c1916`
+
+### AUD-174 — The sites AUD-171 left open answer a LAN peer with the harness's own failure text, and the one that meant to keep only authored failures admits a Node error code
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-lan-manager/src/api.js:547,563,692,743,847 (the interpolated messages) and :814 (the authored-code test)`
+- **Category:** internal detail in an error answer (information disclosure)
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** the L6 closure sweep, following the NOT-covered sentence filed in the AUD-173 row, which named exactly these sites
+
+**Evidence before.** At 9c98268 six places put a failure this process did not author into an answer any peer inside the address fence can ask for. `derivedMessagesFromStore` interpolated the caught error's message into two 503s (`…could not be read from storage: ENOENT…` at :547, `…could not be prepared for reading: ENOENT…` at :563); `promptAllActive`'s per-session receipt carried it verbatim (:692); `deleteWorkspace`'s `archiveFailures` carried it with no code at all (:741-744); `createWorkspace` answered 400 with the caught message as the whole answer (:845-848). The sixth is the same class in a different shape: `startSession` keeps a caught error's code and message when `typeof error?.code === "string"` (:814) -- and a Node error has a string `code` too (`ENOENT`, `EACCES`), so a failed spawn's `child_process` text goes out labelled a caller's bad request. Reproduced, not argued: the seven tests added with this fix were run against `git show 9c98268:` copies of `src/api.js` and `src/router.js` (swapped in, restored afterwards, tree confirmed clean) and 6 of 7 fail there with the leak printed in the assertion output -- e.g. `{"error":"agent-service-unavailable","message":"session s-a1 could not be read from storage: ENOENT: no such file or directory, open '/Users/me/.dsh/home/profiles/web/s-a1.json'"}`, `{"sessionId":"s-b1","code":"error","message":"ENOENT: …s-b1.json"}`, and `400 !== 500` for the spawn failure. AUD-171 had already recorded that these sites were left open because none of them held a logger.
+
+**Fix.** One rule, applied at all six: the code and the status are the documented answer and stay; the reason goes to the manager's log. `loggedApiError` builds the ApiError from a sentence authored here plus `; the reason is in the manager's log`, and `loggedReceipt` does the same for a fan-out entry while keeping that failure's declared `code` -- which also gives `archiveFailures` a code it never had. The log channel is threaded `createHandler` -> `dispatch` -> the four operations as a **separate trailing `plumbing` argument**, not inside `options`: `options` is the request body's shape and a peer must not be able to hand the plugin a function. `startSession`'s authored-code test becomes `isDocumentedCode`, which accepts the lowercase-hyphen, optionally namespaced vocabulary this plugin and the harness actually emit (`not-found`, `workspace/not-found`, `session-busy`) and rethrows an uppercase Node code so the router's catch-all logs it and answers a fixed 500 -- the status also stops calling an internal failure the caller's bad request. The message rule is now written down in the plugin README's Security section, next to the key-never-in-a-response rule.
+
+**Evidence after.** Measured 2026-10-07 on commit cf2088d. Seven tests in `test/router.test.js`: one per leaking site, and each of those six asserts the answer carries no `/Users/me` **and** that the reason reached the injected log -- so a guard that only moved the leak would still fail. The seventh is the counter-test, deliberately passing before and after -- `an authored ApiError still says what it means inside a fan-out` asserts `session s-a2 has no live agent (start it in the UI, then retry)` still arrives, because fencing somebody else's text must not turn every answer into a shrug; it is why the negative probe shows 6 failures and not 7. Suite: `npm test` in dsh-lan-manager reports 138 tests / 138 pass / 0 fail (was 131 before these seven), dsh-tinytitan 154/154, and `tools/lint.sh javascript` reports ok for both packages on the pinned eslint 10.11.0 / prettier 3.9.9. The negative probe is above; after restoring, `git status --short` on the package is empty and both files matched their pre-probe checksums.
+
+**Commit.** `cf2088d`
