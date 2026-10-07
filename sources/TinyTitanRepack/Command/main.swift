@@ -6,7 +6,8 @@ private let supportedModelNames = SupportedModelSource.all.map(\.name).joined(se
 private let usage = """
     Usage:
       TinyTitanRepack [--model <\(supportedModelNames)>] --output <model.ssdai> [--overwrite] [--resume]
-      TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id> --output <model.ssdai> [--overwrite]
+      TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id>
+                      --output <model.ssdai> [--overwrite] [--draft-head] [--share-ngram-table]
       TinyTitanRepack --discard-partial --output <model.ssdai>
       TinyTitanRepack --verify-install --input-ssdai <model.ssdai>  (--input-gturbo still accepted)
       TinyTitanRepack --help
@@ -20,6 +21,11 @@ private let usage = """
     --input-snapshot imports a completed local MLX-affine safetensors snapshot.
     It is intended for reproducibly derived sidecars such as Ornith's native MTP
     draft and does not support --resume because no network payload is involved.
+    --draft-head imports only the draft head's tensors. --share-ngram-table
+    hardlinks the snapshot's n-gram table rather than rebuilding it, which works
+    only when the staging directory and the install share a filesystem. Neither
+    flag means anything without --input-snapshot, and the repack refuses that
+    combination rather than ignoring it.
     """
 
 private struct Arguments {
@@ -95,6 +101,12 @@ private struct Arguments {
 
         guard !(parsed.resume && parsed.discardPartial) else {
             throw ParseError.invalidMode("--resume and --discard-partial are mutually exclusive")
+        }
+        // Both are fields of `LocalSnapshotRepackOptions`, which the download,
+        // discard and receipt routes have no parameter for.
+        guard (!parsed.draftHead && !parsed.shareNgramTable) || parsed.inputSnapshot != nil else {
+            throw ParseError.invalidMode(
+                "--draft-head and --share-ngram-table apply only to --input-snapshot imports")
         }
         if parsed.discardPartial {
             guard parsed.output != nil else {
