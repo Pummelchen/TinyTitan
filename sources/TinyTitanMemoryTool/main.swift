@@ -127,8 +127,28 @@ case "delete", "forget":
         guard yes else {
             fail("this deletes every fact and session of \(file.workspace); repeat with --yes")
         }
-        try? FileManager.default.removeItem(at: file.url.appendingPathExtension("lock"))
-        do { try FileManager.default.removeItem(at: file.url) } catch {
+        // Own the workspace before removing anything from it, which is what
+        // `delete` already does by opening the journal. The first version of
+        // this branch skipped the open and unlinked the journal, then unlinked
+        // the `.lock` sidecar -- the file a running server's flock is attached
+        // to -- and printed `forgot <project>` over exit 0. The server keeps
+        // appending to a deleted inode, and its next compaction republishes
+        // that inode as the workspace, so everything on disk is replaced by
+        // what one process happens to hold in memory. See
+        // `MemoryService.isLockHeld`, which is the same rule for the cap.
+        let journal: FileJournal
+        do { journal = try FileJournal(url: file.url) } catch {
+            fail("\(error)\nStop the server that has this project open, or forget through it.")
+        }
+        // The lock is held for both removals rather than probed and dropped:
+        // a launch that slipped in between the check and the unlink would land
+        // on the same deleted-inode path this exists to prevent.
+        do {
+            try withExtendedLifetime(journal) {
+                try FileManager.default.removeItem(at: file.url)
+                try FileManager.default.removeItem(at: file.url.appendingPathExtension("lock"))
+            }
+        } catch {
             fail("could not delete: \(error)")
         }
         print("forgot \(file.workspace)")
