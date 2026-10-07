@@ -20,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { generateRoute } from "./generate.js";
+import { generateRoute, repairDefaultModelSettings } from "./generate.js";
 
 /** The tool this delegates to. */
 export function routeScript(repoRoot) {
@@ -28,10 +28,51 @@ export function routeScript(repoRoot) {
 }
 
 /**
+ * Repoint `agent-default-model` if the refreshed route proved it dead.
+ *
+ * AUD-163's repair lives in the settings-service branch, and a profile with no
+ * settings service never reaches it: both file writers here refresh `llm-pi-ai`
+ * and leave the default alone, so the picker showed the live model while every
+ * turn went out with the old id and came back `UNKNOWN_MODEL`. Same failure, one
+ * branch over.
+ *
+ * Called only after a writer succeeded, and its own failure is swallowed on
+ * purpose: a refresh that wrote the route has done its job, and a second defect
+ * is reported by the log line, not by turning a `written` into a `failed`.
+ *
+ * @returns the repair result, or `{status:"failed"}` when it could not run.
+ */
+function repairDefaultAfterWrite({ settingsPath, provider, log }) {
+  try {
+    const stamp = `${new Date().toISOString().replace(/[:.]/g, "-")}-default`;
+    const repaired = repairDefaultModelSettings({ settingsPath, provider, stamp });
+    if (repaired.status === "repaired") {
+      log(
+        `dsh-tinytitan: default model ${repaired.to} replaces ${repaired.from}, ` +
+          "which no longer serves",
+      );
+    }
+    return repaired;
+  } catch (error) {
+    const detail = String(error?.message ?? error)
+      .trim()
+      .split("\n")[0];
+    log(`dsh-tinytitan: could not repoint the default model: ${detail}`);
+    return { status: "failed", reason: detail };
+  }
+}
+
+/**
  * Write the route block into the DSH settings file.
+ *
+ * A settings-file writer refreshes `llm-pi-ai` only, so it also repoints
+ * `agent-default-model` when the block it just wrote proves the old default dead
+ * (`generate.js`'s `repairDefaultModelSettings`); the settings-service branch
+ * does the same through `ensureDefaultModel`.
+ *
  * @param options - resolved config fields, plus injectable `run`/`log` for tests.
  * @returns `{status}` — `written`, `written-self-contained`, `missing`, `failed`
- *   or `skipped`.
+ *   or `skipped`, plus `defaultModel` after a successful file write.
  */
 export function registerRoute({
   repoRoot,
@@ -78,7 +119,16 @@ export function registerRoute({
       const stdout = run("bash", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
       const first = String(stdout).trim().split("\n")[0] || "written";
       log(`dsh-tinytitan: route refreshed from ${script} (${first})`);
-      return { status: "written", script, detail: first };
+      return {
+        status: "written",
+        script,
+        detail: first,
+        defaultModel: repairDefaultAfterWrite({
+          settingsPath: join(dshHome, "settings.yaml"),
+          provider,
+          log,
+        }),
+      };
     } catch (error) {
       const detail = String(error?.stderr ?? error?.message ?? error)
         .trim()
@@ -101,7 +151,7 @@ export function registerRoute({
     log("dsh-tinytitan: selfContained is set; using the built-in route generator");
   }
   try {
-    return generateRoute({
+    const written = generateRoute({
       port,
       provider,
       context,
@@ -115,6 +165,14 @@ export function registerRoute({
       run,
       log,
     });
+    if (written.status === "written-self-contained") {
+      written.defaultModel = repairDefaultAfterWrite({
+        settingsPath: written.settingsPath ?? join(String(dshHome ?? ""), "settings.yaml"),
+        provider,
+        log,
+      });
+    }
+    return written;
   } catch (error) {
     const detail = String(error?.message ?? error)
       .trim()

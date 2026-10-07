@@ -353,7 +353,22 @@ export function writeRouteSettings({
     throw new Error(`no DSH settings file at ${settingsPath ?? "(no path)"}`);
   }
   const before = readFileSync(settingsPath, "utf8");
-  const after = applyRouteToSettings(before, block);
+  return replaceSettingsFile({
+    settingsPath,
+    before,
+    after: applyRouteToSettings(before, block),
+    stamp,
+    backup,
+  });
+}
+
+/**
+ * Back the file up and write the new text, unless nothing changed.
+ *
+ * Shared by the route block writer and the default-model repair so a refresh and
+ * a repair cannot disagree about whether a no-op makes a `.bak-*`.
+ */
+function replaceSettingsFile({ settingsPath, before, after, stamp, backup }) {
   if (after === before) return { settingsPath, backup: null, changed: false };
   let backupPath = null;
   if (backup) {
@@ -362,6 +377,117 @@ export function writeRouteSettings({
   }
   writeFileSync(settingsPath, after);
   return { settingsPath, backup: backupPath, changed: true };
+}
+
+/** The model ids the `llm-pi-ai` block in these lines serves, in file order. */
+function servedIdsInLines(lines) {
+  const ids = [];
+  let inside = false;
+  for (const line of lines) {
+    if (line.startsWith("llm-pi-ai:")) {
+      inside = true;
+      continue;
+    }
+    if (!inside) continue;
+    if (line.trim() !== "" && !line.startsWith(" ") && !line.startsWith("\t")) break;
+    const id = line.match(/^\s+-\s+id:\s*(\S+)\s*$/);
+    if (id) ids.push(id[1]);
+  }
+  return ids;
+}
+
+/**
+ * Point `agent-default-model` at a model the refreshed route actually serves.
+ *
+ * AUD-163's repair ran inside the settings-service branch, because that is the
+ * branch the pinned harness takes. A profile that composes no settings service
+ * takes the file branch instead (`index.js` calls `registerRoute`), and there
+ * nothing kept the default in step either: the refresh rewrote `llm-pi-ai`, the
+ * picker showed the live model, and every turn still went out with the old id and
+ * came back `UNKNOWN_MODEL`. The same failure, one branch over.
+ *
+ * Read from the file rather than handed a list, because it has to work after
+ * either writer — the shell tool or the built-in generator — has just refreshed
+ * that same block, and the block is what says which models exist now.
+ *
+ * As narrow as the service repair, and for the same reason: this edits somebody
+ * else's profile. A default naming a served model is a choice, a default
+ * belonging to another provider is a choice, and a default that was never set is
+ * the installer's job. Only a reference this repository wrote and can prove dead
+ * is rewritten.
+ *
+ * @param settingsText - the settings file's text.
+ * @param options - `provider`, the name this route writes under.
+ * @returns `{text, status, reason, from, to}`; `text` is unchanged unless
+ *   `status` is `repaired`.
+ */
+export function applyDefaultModelToSettings(
+  settingsText,
+  { provider = ROUTE_DEFAULTS.provider } = {},
+) {
+  const lines = splitKeepingEnds(String(settingsText).replace(/\r\n|\r/g, "\n"));
+  const ids = servedIdsInLines(lines);
+  if (ids.length === 0) {
+    return { text: String(settingsText), status: "skipped", reason: "the route serves no models" };
+  }
+  let inside = false;
+  let blockProvider = null;
+  let modelLine = null;
+  for (const [index, line] of lines.entries()) {
+    if (line.startsWith("agent-default-model:")) {
+      inside = true;
+      continue;
+    }
+    if (!inside) continue;
+    if (line.trim() !== "" && !line.startsWith(" ") && !line.startsWith("\t")) break;
+    const providerLine = line.match(/^\s+provider:\s*(\S+)\s*$/);
+    if (providerLine) blockProvider = providerLine[1];
+    const modelMatch = line.match(/^(\s+model:\s*)(\S+)(\s*)$/);
+    if (modelMatch && modelLine === null)
+      modelLine = { index, value: modelMatch[2], indent: modelMatch[1] };
+  }
+  if (!inside) {
+    return { text: String(settingsText), status: "skipped", reason: "no default model is set" };
+  }
+  if (modelLine === null) {
+    return { text: String(settingsText), status: "skipped", reason: "the block names no model" };
+  }
+  if (blockProvider !== null && blockProvider !== provider) {
+    return {
+      text: String(settingsText),
+      status: "kept",
+      reason: `the default belongs to ${blockProvider}`,
+    };
+  }
+  if (ids.includes(modelLine.value)) {
+    return { text: String(settingsText), status: "kept", reason: "it names a served model" };
+  }
+  const out = lines.slice();
+  out[modelLine.index] = `${modelLine.indent}${ids[0]}\n`;
+  return { text: out.join(""), status: "repaired", from: modelLine.value, to: ids[0] };
+}
+
+/**
+ * Read the settings file, repair a dead default in it, and write it back.
+ *
+ * @param options - `settingsPath`, `provider`, `stamp`, `backup`.
+ * @returns `{status, …}` from {@link applyDefaultModelToSettings}, or `skipped`
+ *   when there is no file to read.
+ */
+export function repairDefaultModelSettings({
+  settingsPath,
+  provider = ROUTE_DEFAULTS.provider,
+  stamp = new Date().toISOString().replace(/[:.]/g, "-"),
+  backup = true,
+} = {}) {
+  if (!settingsPath || !existsSync(settingsPath)) {
+    return { status: "skipped", reason: `no settings file at ${settingsPath ?? "(no path)"}` };
+  }
+  const before = readFileSync(settingsPath, "utf8");
+  const { text, status, reason, from, to } = applyDefaultModelToSettings(before, { provider });
+  if (status !== "repaired") return { status, reason };
+  const written = replaceSettingsFile({ settingsPath, before, after: text, stamp, backup });
+  return { status, from, to, backup: written.backup };
 }
 
 /** Whether a path is a file this process may execute. */

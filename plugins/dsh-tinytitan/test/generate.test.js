@@ -15,6 +15,7 @@ import test from "node:test";
 
 import { registerRoute } from "../src/route.js";
 import {
+  applyDefaultModelToSettings,
   applyRouteThroughSettings,
   applyRouteToSettings,
   DEFAULT_MODEL_SETTINGS_NS,
@@ -23,6 +24,7 @@ import {
   findServerBinary,
   generateBlock,
   generateRoute,
+  repairDefaultModelSettings,
   writeRouteSettings,
 } from "../src/generate.js";
 
@@ -579,11 +581,11 @@ test("registerRoute falls back to the generator when the checkout tool is absent
 });
 
 /** `registerRoute` on a checkout with no `tools/dsh_route.sh`, i.e. the built-in writer. */
-function throughGenerator(options) {
+function throughGenerator({ settingsText = "ui-theme:\n  preference: dark\n", ...options } = {}) {
   const repoRoot = mkdtempSync(join(tmpdir(), "dsh-tinytitan-repo-"));
   const dshHome = mkdtempSync(join(tmpdir(), "dsh-tinytitan-home-"));
   const modelsDir = mkdtempSync(join(tmpdir(), "dsh-tinytitan-models-"));
-  writeFileSync(join(dshHome, "settings.yaml"), "ui-theme:\n  preference: dark\n");
+  writeFileSync(join(dshHome, "settings.yaml"), settingsText);
   const binary = join(repoRoot, "TinyTitanServer");
   writeFileSync(binary, "#!/bin/sh\nexit 0\n");
   chmodSync(binary, 0o755);
@@ -851,4 +853,185 @@ test("the route refresh repairs a stale default in the same pass", async (t) => 
     },
     "the default names a model the refreshed route does not serve",
   );
+});
+
+/**
+ * A profile whose route serves `alpha_4-Bit` and `beta_4-Bit`, with the default
+ * block above it. This is the shape `dsh_local.sh` leaves behind: a real
+ * `agent-default-model` section and a generated `llm-pi-ai` block.
+ */
+function profile(defaultLines) {
+  return `ui-theme:\n  preference: dark\n\n${defaultLines}\n${generateBlock(FAKE)}`;
+}
+
+const DEAD_DEFAULT = "agent-default-model:\n  provider: tinytitan\n  model: gone_4-Bit\n";
+
+test("a dead default in a settings file is repointed to a served model", () => {
+  // The file-branch case (AUD-172): a profile with no settings service never
+  // reaches `ensureDefaultModel`, so the refresh rewrote `llm-pi-ai` and left
+  // `gone_4-Bit` as the default. The picker showed the live model and every turn
+  // came back `UNKNOWN_MODEL`.
+  const before = profile(DEAD_DEFAULT);
+  const result = applyDefaultModelToSettings(before);
+  assert.equal(result.status, "repaired");
+  assert.equal(result.from, "gone_4-Bit");
+  assert.equal(result.to, "alpha_4-Bit");
+  assert.ok(result.text.includes("  model: alpha_4-Bit\n"), result.text);
+  assert.ok(!result.text.includes("gone_4-Bit"), "the dead id must be gone");
+  // Only that one line moves: the person's own theme and provider stay, and the
+  // route block is untouched.
+  assert.ok(result.text.startsWith("ui-theme:\n  preference: dark\n\n"));
+  assert.ok(result.text.includes("  provider: tinytitan\n"));
+  assert.equal(count(result.text, "llm-pi-ai:"), 1);
+});
+
+test("the repair leaves a default that names a served model alone", () => {
+  // Not the first id: choosing the second install is a choice, and a refresh that
+  // "corrects" it would take the selection away.
+  for (const id of ["alpha_4-Bit", "beta_4-Bit"]) {
+    const result = applyDefaultModelToSettings(
+      profile(`agent-default-model:\n  provider: tinytitan\n  model: ${id}\n`),
+    );
+    assert.equal(result.status, "kept", id);
+    assert.equal(
+      result.text,
+      profile(`agent-default-model:\n  provider: tinytitan\n  model: ${id}\n`),
+    );
+  }
+});
+
+test("another provider's default in a settings file is not ours to rewrite", () => {
+  const before = profile(
+    "agent-default-model:\n  provider: deepseek-official\n  model: deepseek-flash\n",
+  );
+  const result = applyDefaultModelToSettings(before);
+  assert.equal(result.status, "kept");
+  assert.ok(result.reason.includes("deepseek-official"), result.reason);
+  assert.equal(result.text, before);
+});
+
+test("a default that was never set, and a route that serves nothing, are skipped", () => {
+  // Three shapes where writing a default would be inventing a choice or where
+  // there is nothing to compare against: no block at all, a block with no
+  // `model:` line, and a file whose route names no model.
+  const cases = [
+    {
+      text: `ui-theme:\n  preference: dark\n\n${generateBlock(FAKE)}`,
+      reason: "no default model is set",
+    },
+    {
+      text: profile("agent-default-model:\n  provider: tinytitan\n"),
+      reason: "the block names no model",
+    },
+    { text: "agent-default-model:\n  model: gone_4-Bit\n", reason: "the route serves no models" },
+  ];
+  for (const one of cases) {
+    const result = applyDefaultModelToSettings(one.text);
+    assert.equal(result.status, "skipped", one.text);
+    assert.equal(result.reason, one.reason);
+    assert.equal(result.text, one.text);
+  }
+});
+
+test("the default block is found whichever side of the route it sits on", () => {
+  // The scan stops at the next column-0 key, so a block *after* `llm-pi-ai:`
+  // must be read as carefully as one before it.
+  const route = generateBlock(FAKE);
+  const result = applyDefaultModelToSettings(`${route}\n${DEAD_DEFAULT}`);
+  assert.equal(result.status, "repaired");
+  assert.equal(result.to, "alpha_4-Bit");
+  assert.ok(result.text.includes("  model: alpha_4-Bit\n"), result.text);
+  assert.ok(result.text.startsWith("# DeepSeek Harness route to the "), "the route is untouched");
+});
+
+test("repairDefaultModelSettings rewrites the file once and backs it up", () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-tinytitan-default-"));
+  const path = join(home, "settings.yaml");
+  writeFileSync(path, profile(DEAD_DEFAULT));
+  const result = repairDefaultModelSettings({
+    settingsPath: path,
+    stamp: "2026-10-06T00-00-00-000Z",
+  });
+  assert.equal(result.status, "repaired");
+  assert.equal(result.backup, `${path}.bak-2026-10-06T00-00-00-000Z`);
+  assert.ok(existsSync(result.backup), "the person's file is kept before the write");
+  assert.ok(readFileSync(path, "utf8").includes("  model: alpha_4-Bit\n"));
+  // Nothing dead left, so the second pass is a no-op that makes no backup.
+  const again = repairDefaultModelSettings({ settingsPath: path, stamp: "second" });
+  assert.equal(again.status, "kept");
+  assert.equal(again.backup, undefined);
+  assert.equal(existsSync(`${path}.bak-second`), false);
+});
+
+test("repairDefaultModelSettings says so when there is no file to read", () => {
+  const result = repairDefaultModelSettings({
+    settingsPath: join(tmpdir(), "dsh-tinytitan-definitely-not-here", "settings.yaml"),
+  });
+  assert.equal(result.status, "skipped");
+  assert.ok(result.reason.includes("no settings file"));
+});
+
+test("the built-in writer repairs a stale default in the same pass", () => {
+  // AUD-172: the settings-service branch has done this since AUD-163, and the
+  // file branch is what a profile with no settings service reaches.
+  const { settings, result } = throughGenerator({ settingsText: profile(DEAD_DEFAULT) });
+  assert.equal(result.defaultModel.status, "repaired");
+  assert.equal(result.defaultModel.from, "gone_4-Bit");
+  assert.ok(settings.includes("  model: alpha_4-Bit\n"), settings);
+  assert.ok(!settings.includes("gone_4-Bit"), settings);
+});
+
+/** A checkout that does carry `tools/dsh_route.sh`, so `registerRoute` takes the script branch. */
+function checkoutWithTool() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "dsh-tinytitan-repo-"));
+  mkdirSync(join(repoRoot, "tools"), { recursive: true });
+  writeFileSync(join(repoRoot, "tools", "dsh_route.sh"), "#!/usr/bin/env bash\n");
+  return repoRoot;
+}
+
+test("the script branch repairs a stale default after the tool has written", () => {
+  const dshHome = mkdtempSync(join(tmpdir(), "dsh-tinytitan-home-"));
+  const path = join(dshHome, "settings.yaml");
+  // The checkout tool has just refreshed the block; the injected `run` stands in
+  // for it, so this pins what `registerRoute` does with the file afterwards.
+  writeFileSync(path, profile(DEAD_DEFAULT));
+  const messages = [];
+  const result = registerRoute({
+    repoRoot: checkoutWithTool(),
+    port: 8080,
+    provider: "tinytitan",
+    dshHome,
+    run: () => "replaced\n",
+    log: (message) => messages.push(message),
+  });
+  assert.equal(result.status, "written");
+  assert.equal(result.defaultModel.status, "repaired");
+  assert.ok(readFileSync(path, "utf8").includes("  model: alpha_4-Bit\n"));
+  assert.ok(
+    messages.some((message) => message.includes("replaces gone_4-Bit")),
+    messages,
+  );
+});
+
+test("a default repair that cannot write does not fail a refresh that wrote", () => {
+  // The route block is already on disk. Reporting the whole refresh as failed
+  // would undo that, and the caller would then take the "leaving the route as it
+  // is" path. The detail goes to the log instead.
+  const dshHome = mkdtempSync(join(tmpdir(), "dsh-tinytitan-home-"));
+  const path = join(dshHome, "settings.yaml");
+  writeFileSync(path, profile(DEAD_DEFAULT));
+  chmodSync(path, 0o000);
+  const messages = [];
+  const result = registerRoute({
+    repoRoot: checkoutWithTool(),
+    port: 8080,
+    provider: "tinytitan",
+    dshHome,
+    run: () => "replaced\n",
+    log: (message) => messages.push(message),
+  });
+  chmodSync(path, 0o644);
+  assert.equal(result.status, "written");
+  assert.equal(result.defaultModel.status, "failed");
+  assert.ok(messages.some((message) => message.includes("could not repoint the default model")));
 });
