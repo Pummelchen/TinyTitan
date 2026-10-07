@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 
 import { groupDigest } from "../src/config.js";
 import {
+  DEFAULT_CONCURRENCY,
   MAX_GOSSIP_ENTRIES,
   MAX_PEER_RESPONSE_BYTES,
   PeerTable,
@@ -309,6 +310,45 @@ test("a hostname is resolved once and reused, so the threadpool is not re-hit", 
   clock += 120_000;
   await table.refresh();
   assert.equal(calls, 6, "and re-resolves once the TTL has passed");
+});
+
+test("the probe fan-out is bounded, by configuration and by the default", async () => {
+  // AUD-168 bounded the size of one peer's answer; this bounds how many answers
+  // are open at once. Nothing pinned the default: dropping the limit at
+  // peers.js:435 left every existing test green while the resident manager
+  // dialled the whole candidate list simultaneously.
+  const peakWith = async (config, count) => {
+    let active = 0;
+    let peak = 0;
+    const table = new PeerTable({
+      config: { ...CONFIG, ...config },
+      discovery: async () =>
+        Array.from({ length: count }, (_, i) => ({
+          address: `192.168.18.${i + 2}`,
+          port: 3080,
+          source: "seed",
+        })),
+      fetch: async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((finish) => setTimeout(finish, 2));
+        active -= 1;
+        return { status: 0, body: undefined };
+      },
+    });
+    await table.refresh();
+    return peak;
+  };
+  assert.equal(
+    await peakWith({ discoveryConcurrency: 3 }, 12),
+    3,
+    "discoveryConcurrency must be the limit the probes run under",
+  );
+  assert.equal(
+    await peakWith({}, 40),
+    DEFAULT_CONCURRENCY,
+    `the fan-out without a configured limit must be exactly the ${DEFAULT_CONCURRENCY} default`,
+  );
 });
 
 test("hostname resolution runs on its own, shallower limit", async () => {
