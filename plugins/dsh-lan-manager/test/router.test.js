@@ -567,6 +567,66 @@ test("prompt-all can be narrowed to specific sessions and capped", async () => {
   }
 });
 
+test("prompt-all refuses a limit that cannot mean a cap", async () => {
+  const { handler, ctx, store } = await setup();
+  try {
+    for (const limit of [0, -1, 1.5, "2", null]) {
+      ctx._agents.delivered.length = 0;
+      const res = await call(handler, {
+        method: "POST",
+        url: "/dsh-lan/prompt-all",
+        body: { prompt: "capped", limit },
+      });
+      assert.equal(res.status, 400, `limit ${JSON.stringify(limit)} was accepted`);
+      assert.equal(res.body.error, "bad-request");
+      assert.equal(
+        ctx._agents.delivered.length,
+        0,
+        `limit ${JSON.stringify(limit)} reached ${ctx._agents.delivered.length} sessions`,
+      );
+    }
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("prompt-all refuses a target list it cannot read", async () => {
+  const { handler, ctx, store } = await setup();
+  try {
+    ctx._agents.delivered.length = 0;
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt-all",
+      body: { prompt: "one", sessionIds: "s-a1" },
+    });
+    assert.equal(res.status, 400, JSON.stringify(res.body));
+    assert.equal(res.body.error, "bad-request");
+    assert.equal(
+      ctx._agents.delivered.length,
+      0,
+      `a session id nobody parsed reached ${ctx._agents.delivered.length} sessions`,
+    );
+  } finally {
+    store.cleanup();
+  }
+});
+
+test("prompt-all delivers an empty session list to nothing, not to everyone", async () => {
+  const { handler, ctx, store } = await setup();
+  try {
+    const res = await call(handler, {
+      method: "POST",
+      url: "/dsh-lan/prompt-all",
+      body: { prompt: "nobody", sessionIds: [] },
+    });
+    assert.equal(ctx._agents.delivered.length, 0, "an empty target list prompted the fleet");
+    assert.equal(res.body.delivered.length, 0);
+    assert.equal(res.body.total, 0);
+  } finally {
+    store.cleanup();
+  }
+});
+
 test("archiving a session hides it without a delete", async () => {
   const { handler, store } = await setup();
   try {

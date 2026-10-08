@@ -320,7 +320,11 @@ does not invent a source, and the agent loop reads `source.kind`.
 { "prompt": "report status", "sessionIds": ["s-a1"], "limit": 10 }
 ```
 
-`sessionIds` and `limit` are optional. Delivery is per-session and never
+`sessionIds` and `limit` are optional, and both are read literally: omitting
+either means every active session, `sessionIds: []` means none, and a `limit` that
+is not a positive integer is a `400 bad-request` rather than a second way to say
+"everything" — a cap of zero that broadcast to the fleet would answer the opposite
+of what was asked. Delivery is per-session and never
 all-or-nothing: one session without a live agent is reported in `failed[]` while the
 rest are delivered, so one stale session cannot stall a fleet-wide prompt.
 

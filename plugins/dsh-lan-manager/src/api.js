@@ -750,6 +750,12 @@ export function promptSession(ctx, sessionId, prompt, factory) {
  * agent must not stop the rest of the fleet, so failures are reported beside
  * successes instead of aborting the request.
  *
+ * A target list and a cap are read literally. An absent one means everyone,
+ * which is what the route is for; a present one that cannot be parsed means a
+ * subset nobody resolved, and answering it with the whole fleet would be the
+ * opposite of the request. So `sessionIds: []` delivers to nothing, and a
+ * `limit` that is not a positive integer is refused instead of becoming no cap.
+ *
  * @param ctx - harness context.
  * @param prompt - string or content blocks.
  * @param factory - a resolved message factory.
@@ -759,12 +765,17 @@ export function promptSession(ctx, sessionId, prompt, factory) {
  */
 export function promptAllActive(ctx, prompt, factory, options = {}, plumbing = {}) {
   const { sessions } = listAllActiveSessions(ctx);
+  if (options.sessionIds !== undefined && !Array.isArray(options.sessionIds)) {
+    throw new ApiError(Failure.BAD_REQUEST, "sessionIds must be an array of session ids", 400);
+  }
+  if (options.limit !== undefined && !(Number.isInteger(options.limit) && options.limit > 0)) {
+    throw new ApiError(Failure.BAD_REQUEST, "limit must be a positive integer", 400);
+  }
   const wanted =
-    Array.isArray(options.sessionIds) && options.sessionIds.length > 0
-      ? sessions.filter((s) => options.sessionIds.includes(s.sessionId))
-      : sessions;
-  const capped =
-    Number.isInteger(options.limit) && options.limit > 0 ? wanted.slice(0, options.limit) : wanted;
+    options.sessionIds === undefined
+      ? sessions
+      : sessions.filter((s) => options.sessionIds.includes(s.sessionId));
+  const capped = options.limit === undefined ? wanted : wanted.slice(0, options.limit);
 
   const delivered = [];
   const failed = [];
