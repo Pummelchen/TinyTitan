@@ -10,6 +10,13 @@ error against the official values.
 Reference point: TinyTitan's own shipping 4-bit g64 models measure ~2% relative
 error on attention tensors. Comparable error means sound; an order of
 magnitude worse means broken.
+
+Run it from a directory holding `off_index.json`, `rt_index.json` and
+`rt_config.json` (the two `*_index.json` are a checkpoint's `weight_map`, the
+`rt_config.json` its `quantization_config`). A target that cannot be read is
+counted separately from a target that disagreed: the verdict names how many of
+`TARGETS` were actually compared, and a run that compared none prints NOT
+MEASURED and exits 1 rather than calling the build faithful.
 """
 
 import json
@@ -66,7 +73,7 @@ def fetch(repo, rev, shard, name):
     a = np.frombuffer(raw, dtype=dt)
     if m["dtype"] == "BF16":  # bf16 -> f32
         a = (a.astype(np.uint32) << 16).view(np.float32)
-    return a.reshape(m["shape"]) if m["dtype"] != "BF16" else a.reshape(m["shape"])
+    return a.reshape(m["shape"])
 
 
 def dequant(q, scales, biases, bits, group):
@@ -86,9 +93,29 @@ def dequant(q, scales, biases, bits, group):
     return (vals * s[:, :, None] + b[:, :, None]).reshape(out_rows, -1)
 
 
-off_idx = json.load(open("off_index.json", encoding="utf-8"))["weight_map"]
-mlx_idx = json.load(open("rt_index.json", encoding="utf-8"))["weight_map"]
-qcfg = json.load(open("rt_config.json", encoding="utf-8"))["quantization_config"]
+def verdict(checked: int, bad: int, skipped: int, total: int):
+    """(lines, exit status) for a run that compared `checked` of `total` targets.
+
+    `bad` counts tensors that were compared and disagreed, so it says nothing about
+    a run that compared none: zero checked is the instrument unplugged, not a
+    clean reading, and it has to be refused rather than printed as faithfulness.
+    """
+    if checked == 0:
+        return (
+            [
+                f"NOT MEASURED: 0 of {total} target(s) were compared, "
+                f"{skipped} unavailable -- the driver measured nothing"
+            ],
+            1,
+        )
+    lines = [
+        f"VERDICT: {checked} of {total} tensor(s) compared, "
+        + ("quantization is faithful" if bad == 0 else f"{bad} tensor(s) SUSPECT")
+    ]
+    if skipped:
+        lines.append(f"({skipped} target(s) were unavailable and not compared)")
+    return lines, 1 if bad else 0
+
 
 TARGETS = [
     "model.language_model.layers.3.self_attn.q_proj.weight",
@@ -99,38 +126,76 @@ TARGETS = [
     "model.language_model.layers.19.self_attn.q_proj.weight",
 ]
 
-print(f"{'tensor':52s} {'bits':>4s} {'rel err':>9s} {'max|w|':>9s} {'verdict':>9s}")
-print("-" * 90)
-bad = 0
-for name in TARGETS:
+
+def compare(name, off_idx, mlx_idx, qcfg):
+    """(outcome, bits, err, max|w|, note) for one target.
+
+    `outcome` is 'compared', 'shape' (dequantized against a reference of a
+    different shape), or 'unavailable' with the reason in `note`. The distinction
+    matters only because `bad` must count tensors that disagreed, never tensors
+    that could not be read.
+    """
     if name not in off_idx or name not in mlx_idx:
-        print(f"{name[-50:]:52s} {'':>4s} {'missing':>9s}")
-        continue
+        return "unavailable", None, None, None, "missing"
     stem = name[: -len(".weight")]
+    if stem + ".scales" not in mlx_idx or stem + ".biases" not in mlx_idx:
+        return "unavailable", None, None, None, "no scales entry"
     bits = 4
-    for k, v in qcfg.items():
-        if isinstance(v, dict) and stem.endswith(k.split("model.language_model.")[-1]):
-            bits = v["bits"]
+    for key, value in qcfg.items():
+        if isinstance(value, dict) and stem.endswith(key.split("model.language_model.")[-1]):
+            bits = value["bits"]
     group = qcfg.get("group_size", 64)
     ref = fetch(OFF, "main", off_idx[name], name)
-    q = fetch(MLX, MLX_REV, mlx_idx[name], name)
-    sc = fetch(MLX, MLX_REV, mlx_idx[stem + ".scales"], stem + ".scales")
-    bi = fetch(MLX, MLX_REV, mlx_idx[stem + ".biases"], stem + ".biases")
-    if any(x is None for x in (ref, q, sc, bi)):
-        print(f"{name[-50:]:52s} {bits:>4d} {'fetch fail':>9s}")
-        continue
-    deq = dequant(q, sc, bi, bits, group)
+    quantised = fetch(MLX, MLX_REV, mlx_idx[name], name)
+    scales = fetch(MLX, MLX_REV, mlx_idx[stem + ".scales"], stem + ".scales")
+    biases = fetch(MLX, MLX_REV, mlx_idx[stem + ".biases"], stem + ".biases")
+    if any(x is None for x in (ref, quantised, scales, biases)):
+        return "unavailable", bits, None, None, "fetch fail"
+    deq = dequant(quantised, scales, biases, bits, group)
     if deq.shape != ref.shape:
-        print(f"{name[-50:]:52s} {bits:>4d} SHAPE {deq.shape} vs {ref.shape}")
-        bad += 1
-        continue
-    err = np.linalg.norm(deq - ref) / max(np.linalg.norm(ref), 1e-9)
-    ok = err < (0.05 if bits == 4 else 0.02)
-    bad += 0 if ok else 1
-    print(
-        f"{name[-50:]:52s} {bits:>4d} {err:9.4f} {np.abs(ref).max():9.4f} "
-        f"{'OK' if ok else 'SUSPECT':>9s}"
-    )
-print("-" * 90)
-print("VERDICT:", "quantization is faithful" if bad == 0 else f"{bad} tensor(s) SUSPECT")
-sys.exit(1 if bad else 0)
+        return "shape", bits, None, None, f"SHAPE {deq.shape} vs {ref.shape}"
+    err = float(np.linalg.norm(deq - ref) / max(np.linalg.norm(ref), 1e-9))
+    return "compared", bits, err, float(np.abs(ref).max()), None
+
+
+def main() -> int:
+    try:
+        off_idx = json.load(open("off_index.json", encoding="utf-8"))["weight_map"]
+        mlx_idx = json.load(open("rt_index.json", encoding="utf-8"))["weight_map"]
+        qcfg = json.load(open("rt_config.json", encoding="utf-8"))["quantization_config"]
+    except OSError as exc:
+        print(
+            f"cannot read the index files ({exc.filename or exc}): run this from the "
+            "directory holding off_index.json, rt_index.json and rt_config.json",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(f"{'tensor':52s} {'bits':>4s} {'rel err':>9s} {'max|w|':>9s} {'verdict':>9s}")
+    print("-" * 90)
+    checked = bad = skipped = 0
+    for name in TARGETS:
+        outcome, bits, err, max_abs, note = compare(name, off_idx, mlx_idx, qcfg)
+        label = name[-50:]
+        if outcome == "unavailable":
+            skipped += 1
+            print(f"{label:52s} {'' if bits is None else f'{bits:>4d}'} {note:>9s}")
+            continue
+        if outcome == "shape":
+            checked += 1
+            bad += 1
+            print(f"{label:52s} {bits:>4d} {note}")
+            continue
+        ok = err < (0.05 if bits == 4 else 0.02)
+        checked += 1
+        bad += 0 if ok else 1
+        print(f"{label:52s} {bits:>4d} {err:9.4f} {max_abs:9.4f} {'OK' if ok else 'SUSPECT':>9s}")
+    print("-" * 90)
+    lines, status = verdict(checked, bad, skipped, len(TARGETS))
+    for line in lines:
+        print(line)
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(main())
