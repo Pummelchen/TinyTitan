@@ -40,6 +40,19 @@ extension ServerHTTPHandler {
                     message: "nothing to compact: input carries no messages",
                     param: "input", code: "invalid_value")
             }
+            // A budget is the one number the caller chose, so a value that cannot
+            // be read as one is refused rather than answered with the server's
+            // own default: `targetTokens` keeps a positive floor for its own
+            // callers, and that floor used to be the answer to `0` — a client
+            // asking for no room at all got a 4096-token note and no signal.
+            if let requested = decoded.maxCompactionTokens {
+                guard requested > 0 else {
+                    throw ServerRequestError.invalid(
+                        message: "max_compaction_tokens must be greater than 0; omit it "
+                            + "to let the server choose from the context window",
+                        param: "max_compaction_tokens", code: "invalid_value")
+                }
+            }
             let budget = ServerCompaction.targetTokens(
                 maxContext: target.maximumContext, requested: decoded.maxCompactionTokens)
             let resourceID =

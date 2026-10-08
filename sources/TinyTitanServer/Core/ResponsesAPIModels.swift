@@ -207,6 +207,8 @@ public struct CompactionRequest: Decodable, Sendable {
     public let promptCacheKey: String?
     /// This server's own ceiling for the compacted note, in tokens. Absent
     /// leaves `ServerCompaction.targetTokens` to choose one from the context.
+    /// Present but not positive is refused by name — the default is for the
+    /// caller who asked for none, not for the one who set a number.
     public let maxCompactionTokens: Int?
 
     enum CodingKeys: String, CodingKey {

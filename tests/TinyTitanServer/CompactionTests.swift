@@ -314,6 +314,52 @@ struct CompactionTests {
         }
     }
 
+    /// A budget of zero is a cap the caller set, not an omitted one. It used to
+    /// fall through to the server's own default, so a client that asked for no
+    /// room got a note of up to 4096 tokens and no signal that its number was
+    /// not the one used.
+    @Test func aNonPositiveCompactionBudgetIsRefusedRatherThanReinterpreted() async throws {
+        for requested in [0, -5] {
+            let backend = CompactionBackend(notes: ["Decision: launch Tuesday."])
+            try await withServer(backend) { port in
+                let (data, response) = try await post(
+                    port, "/v1/responses/compact",
+                    """
+                    {"model":"test-model","max_compaction_tokens":\(requested),
+                     "input":[{"type":"message","role":"user","content":"launch Tuesday"}]}
+                    """)
+                #expect(
+                    response.statusCode == 400,
+                    "max_compaction_tokens \(requested) was accepted")
+                let body = try object(data)
+                let error = body["error"] as? [String: Any]
+                #expect(error != nil, "no error envelope; keys \(body.keys.sorted())")
+                #expect(error?["param"] as? String == "max_compaction_tokens")
+                #expect(
+                    backend.log.requests.isEmpty,
+                    "a refused budget still ran the summariser")
+            }
+        }
+    }
+
+    /// The other side of the same boundary: a readable budget is used exactly as
+    /// sent, so the refusal above is about the unreadable value and not about
+    /// the field being unwelcome.
+    @Test func aCompactionBudgetIsUsedExactlyAsTheCallerSentIt() async throws {
+        let backend = CompactionBackend(notes: ["Decision: launch Tuesday."])
+        try await withServer(backend) { port in
+            let (_, response) = try await post(
+                port, "/v1/responses/compact",
+                """
+                {"model":"test-model","max_compaction_tokens":256,
+                 "input":[{"type":"message","role":"user","content":"launch Tuesday"}]}
+                """)
+            #expect(response.statusCode == 200)
+            let request = try #require(backend.log.requests.first)
+            #expect(request.maximumCompletionTokens == 256)
+        }
+    }
+
     /// The summariser must not think: a model that reasons inside its own output
     /// cap spends the cap on thoughts and returns an empty note.
     @Test func theSummariserRunsUnthinkingOnTheTranscript() async throws {

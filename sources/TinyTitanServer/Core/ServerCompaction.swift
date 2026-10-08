@@ -57,6 +57,11 @@ public enum ServerCompaction {
     /// it replaces; a note that grows with the session has bought nothing. One
     /// eighth of the window leaves the rest for the work that follows, and the
     /// absolute floor keeps a tiny context from producing an unusable note.
+    ///
+    /// A non-positive `requested` falls to that default, which is a floor for the
+    /// callers inside this repository. It is not the answer to a client: the wire
+    /// refuses such a value by name, because a caller that set a budget should
+    /// hear that its number was not the one used.
     public static func targetTokens(maxContext: Int, requested: Int?) -> Int {
         let share = max(256, maxContext / 8)
         let cap = min(4096, share)

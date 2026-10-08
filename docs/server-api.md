@@ -249,9 +249,13 @@ with **thinking off** — a model that reasons inside its own output cap returns
 empty note — and at temperature 0, so the same session compacts the same way.
 
 The note is then measured with this server's own tokenizer. Over the budget
-(`max_compaction_tokens`, else one eighth of the context, capped at 4096) it is
+(`max_compaction_tokens` when present, else one eighth of the context, capped at
+4096) it is
 **compressed by a second pass rather than truncated**, because truncation drops
-the end of the session, which a continuation needs most. Three guards keep a bad
+the end of the session, which a continuation needs most. A budget that is present
+is used as sent, clamped only to half the context window; one that is zero or
+negative is `400 invalid_value` on `max_compaction_tokens`, because the default is
+for the caller that asked for none. Three guards keep a bad
 pass out of the caller's history: lines copied from the instruction are dropped,
 a repetition loop is recognised as a failed pass, and a pass that still produces
 nothing usable falls back to the newest text trimmed to the budget. `mode` in the
