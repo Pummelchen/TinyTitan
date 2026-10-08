@@ -199,14 +199,14 @@ public actor ContinuityStore: MemoryStore {
         // conversation. Reuse the session rather than opening a second one
         // that splits the same conversation's journal in half.
         if let existing = await engine.session(externalID: session.id, taskID: taskID) {
-            sessionIDs[session.id] = existing.id
+            remember(existing, as: session.id)
         } else {
             let continuity = try await engine.beginSession(
                 taskID: taskID,
                 model: session.modelID,
                 externalID: session.id,
                 tag: session.tag)
-            sessionIDs[session.id] = continuity.id
+            remember(continuity, as: session.id)
         }
         // Ranked by what is being asked, not by a static importance. A flat
         // list ranked by importance dropped a character's eye colour out of

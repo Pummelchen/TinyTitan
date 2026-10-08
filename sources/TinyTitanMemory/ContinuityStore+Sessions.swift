@@ -41,11 +41,15 @@ extension ContinuityStore {
         return opened.id
     }
 
-    private func remember(_ session: Session, as name: String) {
+    /// Remember a session under the name the caller uses, in both maps.
+    ///
+    /// The two must be written together. `loadLabels` fills the id→name map
+    /// once per task, by walking the sessions that exist at that moment, so a
+    /// session resolved after the first read is never walked and has to be
+    /// labelled here — otherwise its records come back saying nobody wrote
+    /// them, and `memory_get` reports a fact with no `source_session`.
+    func remember(_ session: Session, as name: String) {
         sessionIDs[name] = session.id
-        // The label map is filled once per task, by walking the sessions that
-        // exist at that moment, so a session resolved after the first read has
-        // to be labelled here or its records come back saying nobody wrote them.
         sessionLabels[session.id] = name
     }
 }

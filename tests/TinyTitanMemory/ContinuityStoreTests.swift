@@ -56,6 +56,30 @@ import Testing
         #expect(loaded.tags == ["sync", "concurrency"])
     }
 
+    /// A workspace's *second* session is the one that loses its name.
+    ///
+    /// `loadLabels` fills the id→name map once per task, by walking whichever
+    /// sessions exist at that moment, and `sessionInit` opens a session without
+    /// labelling it — so any session opened after the workspace's first read
+    /// writes facts that read back saying nobody wrote them, which is what
+    /// `memory_get` and `memory_list` then show the model as `source_session`.
+    @Test func aSessionOpenedAfterTheFirstReadStillSignsItsFacts() async throws {
+        let store = makeStore()
+        let scope = try scope()
+        _ = try await store.sessionInit(MemorySession(id: "session-1"), in: scope)
+        _ = try await store.sessionInit(MemorySession(id: "session-2"), in: scope)
+        try await store.set(
+            MemoryRecord(
+                key: try key("decisions/sync"),
+                value: "FooManager stays; it prevents a sync race.",
+                importance: 0.9,
+                sourceSession: "session-2"),
+            in: scope)
+
+        let loaded = try #require(try await store.get(try key("decisions/sync"), in: scope))
+        #expect(loaded.sourceSession == "session-2")
+    }
+
     @Test func scopesDoNotSeeEachOther() async throws {
         let store = makeStore()
         let first = try scope("repo-a")
