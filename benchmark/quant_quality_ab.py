@@ -21,6 +21,14 @@ answerable prompts cannot see a small perplexity difference, and a ceiling
 result — both installs at 20/20 — is evidence that this instrument is too blunt,
 not that precision does not matter. It is here so a promotion has something to
 fail against before it costs a 360 GB fetch.
+
+A case the CLI refuses is not a case the model answered wrongly. Refusals are
+counted apart, the score's denominator is the cases that ran, and any refusal makes
+the run exit 1: two installs that never ran would otherwise print as a tie, which
+is the one reading that could not support any decision. A score of 0/20 from twenty
+real replies still exits 0, because that is a result.
+
+    cd benchmark && python3 -m unittest test_quant_quality_ab_exit
 """
 
 from __future__ import annotations
@@ -91,6 +99,10 @@ def passed(reply: str, expected: str, kind: str) -> bool:
     return expected.lower() in text.lower()
 
 
+class CaseRefused(RuntimeError):
+    """The CLI answered nothing, so this case has no answer to score."""
+
+
 def run_case(model: str, prompt: str) -> str:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as handle:
         json.dump(
@@ -118,7 +130,12 @@ def run_case(model: str, prompt: str) -> str:
     finally:
         Path(path).unlink(missing_ok=True)
     if result.returncode != 0:
-        return f"<exit {result.returncode}>"
+        # The reason travels: a refusal that only prints `<exit 127>` is the shape
+        # that let a broken install read as a score, and the CLI's own line — a moved
+        # model directory, an unsupported flag — is what tells them apart.
+        tail = [line.strip() for line in result.stderr.strip().splitlines() if line.strip()]
+        reason = tail[-1] if tail else f"no output on exit {result.returncode}"
+        raise CaseRefused(f"exit {result.returncode}: {reason[:200]}")
     return completion_of(result.stdout)
 
 
@@ -133,21 +150,37 @@ def main() -> int:
         )
         return 2
 
-    results: dict[str, list[bool]] = {}
+    # A case that refused is not a case that was answered wrongly. `hits` is
+    # therefore the answers that were actually measured, and `refused` rides beside it
+    # so the denominator cannot absorb the failures the way `<exit N>` used to.
+    results: dict[str, tuple[list[bool], int]] = {}
     for model in args.models:
         print(f"\n=== {model}")
         hits: list[bool] = []
+        refused = 0
         for prompt, expected, kind in CASES:
-            reply = run_case(model, prompt)
+            try:
+                reply = run_case(model, prompt)
+            except CaseRefused as case:
+                refused += 1
+                print(f"  ERR   want={expected:12s} {case}")
+                continue
             ok = passed(reply, expected, kind)
             hits.append(ok)
             print(f"  {'ok  ' if ok else 'MISS'} want={expected:12s} got={reply[:40]!r}")
-        results[model] = hits
+        results[model] = (hits, refused)
 
     print("\n=== totals")
-    for model, hits in results.items():
-        print(f"  {model:44s} {sum(hits)}/{len(hits)}")
-    return 0
+    any_refused = False
+    for model, (hits, refused) in results.items():
+        line = f"  {model:44s} {sum(hits)}/{len(hits)}"
+        if refused:
+            any_refused = True
+            line += f" measured, {refused} errored"
+        print(line)
+    # Zeroed cases are a result and exit 0; refused cases mean nothing was measured,
+    # and a tie between two installs that never ran is the false finding this avoids.
+    return 1 if any_refused else 0
 
 
 if __name__ == "__main__":
