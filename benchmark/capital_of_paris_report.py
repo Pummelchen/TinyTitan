@@ -14,13 +14,19 @@ mean and range of TTFT, decode rate and load across repeats, and says how many
 repeats answered in `content` -- the column that matters for a model that
 thinks with the switch off.
 
-Every number in the tables comes from the rows. The prose around them is fixed
-and says which session's rows it is describing, because the honest comparison
-across sessions (the 167 s outlier, the cold load) is not derivable from one
-file.
+Every number in the tables comes from the rows, and the page names the files it
+read them from. The prose around them is fixed and belongs to the 2026-09-11
+session's rows (the 167 s outlier, the cold load) -- the comparison across
+sessions is not derivable from one file, so it is labelled rather than generated.
 
 Rows that predate `repeat`/`content_chars` still render: the fields are derived
 when missing, so an archived file can be regenerated rather than lost.
+
+A row exists for a run that completed, so a run that died before writing one is
+invisible to the row count. The page therefore states the plan and the shortfall
+separately: `{combinations} x {prompts} x {repeats}` is what should have returned,
+and a cell that returned fewer repeats than that is named. A combination that
+returned no row at all cannot be detected from inside the file.
 """
 
 import json
@@ -82,6 +88,26 @@ def by_key(rows):
 
 def answered(rows):
     return sum(1 for r in rows if r.get("content_chars", 0) > 0)
+
+
+def shortfalls(rows, prompts, repeats):
+    """(combination, prompt, repeats returned) for every cell short of the plan.
+
+    A run that died before the harness wrote its row leaves no row behind, so it
+    cannot be counted as a failure; it can only be found as a cell with fewer
+    repeats than the matrix promised.
+    """
+    seen = {}
+    for row in rows:
+        key = (row["label"], row["quant"], row["engine"], row["prompt"])
+        seen.setdefault(key, set()).add(row.get("repeat", 1))
+    combos = OrderedDict.fromkeys((row["label"], row["quant"], row["engine"]) for row in rows)
+    return [
+        (combo, prompt, len(seen.get((*combo, prompt), ())))
+        for combo in combos
+        for prompt in prompts
+        if len(seen.get((*combo, prompt), ())) < repeats
+    ]
 
 
 def table(groups, prompt):
@@ -191,12 +217,26 @@ def verbatim(rows, prompt, repeat=1):
 
 
 def main():
-    rows = load(sys.argv[1:] or ["/tmp/smartness_v2.jsonl"])
+    paths = sys.argv[1:]
+    if not paths:
+        print(
+            "usage: python3 benchmark/capital_of_paris_report.py results.jsonl "
+            "[more.jsonl ...] > page.md",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        rows = load(paths)
+    except (OSError, ValueError) as error:
+        print(f"error: no rows read from {', '.join(paths)}: {error}", file=sys.stderr)
+        return 2
     prompts = list(OrderedDict((r["prompt"], None) for r in rows))
     groups = by_key(rows)
     repeats = max((r.get("repeat", 1) for r in rows), default=1)
     models = len({(r["label"], r["quant"], r["engine"]) for r in rows})
     ok = sum(1 for r in rows if r["status"] == "ok")
+    short = shortfalls(rows, prompts, repeats)
+    missing_runs = sum(repeats - got for _, _, got in short)
 
     print('<img src="assets/wordmark.svg" alt="TinyTitan" height="34">\n')
     print('# "Capital of Paris" on every served model and engine\n')
@@ -205,10 +245,18 @@ def main():
     print("plain control question, with **thinking off**. The tables are generated from")
     print("the raw rows by `benchmark/capital_of_paris_report.py`; the harness that")
     print("produced them is `benchmark/capital_of_paris_smartness.py`, both in the")
-    print("[TinyTitan repository](https://github.com/Pummelchen/TinyTitan). The rows")
-    print("themselves are gitignored, under")
-    print("`benchmark/benchmark-results/capital-of-paris-20260911T1935/` (`results-v2-3x2.jsonl`")
-    print("for this page, `results.jsonl` for the single-pass first run).\n")
+    print("[TinyTitan repository](https://github.com/Pummelchen/TinyTitan).\n")
+    print("## Provenance\n")
+    print("The rows read for this page:")
+    for path in paths:
+        print(f"- `{path}`")
+    print(
+        "\nRaw rows are gitignored. The commentary below about the 167 s outlier,"
+        " the 2B degenerate reply and the cold loads is fixed text describing the"
+        " `benchmark/benchmark-results/capital-of-paris-20260911T1935/` matrix, not"
+        " these rows: the honest comparison across sessions is not derivable from one"
+        " file, so it is labelled rather than generated.\n"
+    )
 
     print("## Protocol\n")
     print(f"- Commit `{COMMIT}`; `{DEVICE}`.")
@@ -217,10 +265,28 @@ def main():
         "- Request: `POST /v1/chat/completions`, `temperature: 0`, `max_tokens: 128`, "
         "`stream: true` with usage, `thinking off`."
     )
-    print(
-        f"- {models} model/engine combinations x {len(prompts)} prompts x "
-        f"{repeats} repeats = **{len(rows)} measured runs**, {ok} of them ok."
-    )
+    if missing_runs:
+        print(
+            f"- {models} model/engine combinations x {len(prompts)} prompts x "
+            f"{repeats} repeats = {models * len(prompts) * repeats} planned runs, "
+            f"but **{len(rows)} of {models * len(prompts) * repeats} measured runs** "
+            f"returned: {missing_runs} never wrote a row."
+        )
+        for combo, prompt, got in short:
+            print(
+                f"  - {combo[0]} {combo[1]}-bit {combo[2]}, prompt `{prompt}`: "
+                f"{got} of {repeats} repeats returned"
+            )
+        print(
+            "  - A combination that returned no row at all cannot be detected from inside the file."
+        )
+    else:
+        print(
+            f"- {models} model/engine combinations x {len(prompts)} prompts x "
+            f"{repeats} repeats = **{len(rows)} measured runs**, {ok} of them ok, "
+            "every planned run accounted for."
+        )
+
     print(
         "- One model resident at a time. A warm-up request runs only when the model "
         "*changes*, with the prompt that is then measured, so a repeat is measured "
@@ -304,12 +370,19 @@ def main():
     if truncated:
         print(f"- **{len(truncated)} run(s) hit the token cap** (`finish_reason: length`).")
     failed = [r for r in rows if r["status"] != "ok"]
-    print(
-        f"- **{len(failed)} run(s) failed.**"
-        if failed
-        else "- **No run failed**: every request was served, including the ones whose "
-        "answer was empty."
-    )
+    if failed:
+        print(f"- **{len(failed)} run(s) failed.**")
+    elif missing_runs:
+        print(
+            f"- **None of the {len(rows)} rows failed**, but {missing_runs} planned "
+            "run(s) never wrote a row, so they are not counted here and were never "
+            "served at all."
+        )
+    else:
+        print(
+            "- **No run failed**: every request was served, including the ones whose "
+            "answer was empty."
+        )
     for r in failed:
         print(f"  - {r['label']} {r['quant']}-bit {r['engine']}: {r.get('error')}")
 
@@ -318,4 +391,5 @@ def main():
         print(verbatim(rows, prompt))
 
 
-main()
+if __name__ == "__main__":
+    sys.exit(main())
