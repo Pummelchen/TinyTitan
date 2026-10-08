@@ -21,6 +21,10 @@
 #   tools/tsan-storm.sh --filter ResponsesAPIHTTPTests
 #
 # Exits 0 when no process reported, 1 when at least one did, 2 on a setup error.
+# The last one matters more than it looks: an instrumented process that dies
+# before running a single test produces no warning either way, so the grep alone
+# cannot tell "no race" from "no run". Every run's exit status is therefore
+# collected, and a non-zero one with no report is the setup error, with logs kept.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -53,6 +57,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$runs" in ''|*[!0-9]*|0) die "--runs must be a positive integer, got '$runs'" ;; esac
+case "$parallel" in ''|*[!0-9]*|0) die "--parallel must be a positive integer, got '$parallel'" ;; esac
+
 [ -x "$HELPER" ] || die "no swiftpm-testing-helper under $SDK_ROOT; is Xcode installed?"
 [ -d "$FRAMEWORKS/XCTest.framework" ] || die "no XCTest.framework under $FRAMEWORKS"
 [ -f "$TSAN_LIB" ] || die "no ThreadSanitizer runtime at $TSAN_LIB"
@@ -80,21 +87,30 @@ say "Running $((runs * parallel)) instrumented runs, $parallel at a time"
 [ "$use_suppressions" = 1 ] && echo "  suppressions: $SUPPRESSIONS" || echo "  suppressions: OFF (raw report expected)"
 
 round=1
+: > "$work/statuses"
 while [ "$round" -le "$runs" ]; do
   pids=()
+  logs=()
   slot=1
   while [ "$slot" -le "$parallel" ]; do
+    log="$work/run-$round-$slot.log"
     env DYLD_INSERT_LIBRARIES="$TSAN_LIB" \
         DYLD_FRAMEWORK_PATH="$FRAMEWORKS" \
         DYLD_LIBRARY_PATH="$XCODE_LIBS" \
         TSAN_OPTIONS="$tsan_options" \
         "$HELPER" --test-bundle-path "$BUNDLE" --no-parallel "$BUNDLE" \
         --testing-library swift-testing "${extra[@]+"${extra[@]}"}" \
-        > "$work/run-$round-$slot.log" 2>&1 &
+        > "$log" 2>&1 &
     pids+=($!)
+    logs+=("$log")
     slot=$((slot + 1))
   done
-  wait "${pids[@]+"${pids[@]}"}"
+  i=0
+  while [ "$i" -lt "${#pids[@]}" ]; do
+    wait "${pids[$i]}"
+    printf '%s %s\n' "${logs[$i]}" "$?" >> "$work/statuses"
+    i=$((i + 1))
+  done
   reported="$(grep -l 'WARNING: ThreadSanitizer' "$work"/run-"$round"-*.log 2>/dev/null | wc -l | tr -d ' ')"
   echo "  round $round: $reported of $parallel reported"
   round=$((round + 1))
@@ -110,6 +126,22 @@ if [ -n "$hits" ]; then
   done
   echo "  logs kept in $work"
   exit 1
+fi
+
+# Nothing reported. That is only a clean verdict if every run finished its tests:
+# a run that died early leaves no warning, so its exit status is the evidence.
+incomplete=""
+incomplete_count=0
+while read -r log status; do
+  if [ "$status" != 0 ]; then
+    incomplete_count=$((incomplete_count + 1))
+    incomplete="$incomplete ${log##*/}=$status"
+  fi
+done < "$work/statuses"
+if [ "$incomplete_count" -gt 0 ]; then
+  die "no run reported, but $incomplete_count of $((runs * parallel)) exited non-zero \
+($incomplete) — an instrumented run that never reached a test proves nothing about the race. \
+Logs kept in $work"
 fi
 
 say "Clean: no report in $((runs * parallel)) instrumented runs"
