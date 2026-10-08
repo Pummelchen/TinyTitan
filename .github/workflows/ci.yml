@@ -228,6 +228,16 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_docs_facts_ledger
+      - name: Memory-matrix exit gates
+        # `benchmark/memval_matrix.sh` is a day of twelve `memval_run.sh` arms and
+        # its verdict is the exit code an operator or a script reads afterwards.
+        # Each arm's status used to go only into its own log line, so the matrix
+        # exited 0 however many arms failed. These tests drive a copy of it with a
+        # stub `memval_run.sh` — no model, no server, no GPU — and pin that one
+        # failed arm, every failed arm, the named summary, and the per-arm log line.
+        run: |
+          cd benchmark
+          python3 -m unittest test_memval_matrix_exit
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
