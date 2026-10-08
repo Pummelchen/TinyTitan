@@ -125,7 +125,7 @@ if the date is old.
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **122 rows / 121 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **123 rows / 122 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -348,24 +348,36 @@ is the authority. On 2026-10-04 it holds one Open row:
    partial run read as a complete one). Its fix moved the length onto the
    `parse_max_tokens()` now shared in `tinytitan_profile.py`, which the determinism
    probe had written for itself, so both probes refuse a non-integer, a zero and a
-   negative identically.
-   **The next sweep along this seam is the unguarded driver.** Five non-test
-   drivers have no `if __name__ == "__main__"` at all, measured by
-   `for f in *.py; do grep -q '__main__' $f || echo $f; done` over `benchmark/`
-   (`tinytitan_profile.py` is a library, so the other four are the list):
-   `capital_of_paris_smartness.py:177` calls `main()` at module scope,
-   `tinytitan_gap_bisect.py:105-106` calls `run(128, ...)` and `run(1024, ...)`
-   there, so importing either starts a benchmark, and
-   `tinytitan_quant_fidelity.py:135` is the one that also carries the verdict
-   shape: `print("VERDICT:", "quantization is faithful" if bad == 0 else ...)`
-   where `bad` counts tensors that failed a threshold, so a run that examined
-   **no** tensor reports the whole file faithful -- the same
-   measure-nothing-passes class as AUD-212, 218 and 224, in a check whose answer
-   is quoted when a width is promoted. `tinytitan_rdadvise_ab.py` is the fifth.
+   negative identically), and **AUD-226**
+   (`tinytitan_quant_fidelity.py` printed `VERDICT: quantization is faithful` and
+   exited 0 whenever `bad == 0`, where `bad` counts tensors that were compared and
+   disagreed -- measured on the pre-fix blob with an empty `off_index.json`: six
+   `missing` rows, "faithful", exit 0, with no `checked` counter anywhere in the
+   file -- while reading its three index files at module scope, so
+   `python3 -c "import tinytitan_quant_fidelity"` ran the whole probe and died on
+   `FileNotFoundError`, and indexing `mlx_idx[stem + ".scales"]` beside a guarded
+   weight-name check turned an absent affine entry into a `KeyError`).
+   **The next sweep along this seam is `tinytitan_rdadvise_ab.py`.** Re-measured,
+   the drivers with no `if __name__ == "__main__"` are four: `tinytitan_profile.py`
+   is a library, so the list is
+   `capital_of_paris_smartness.py:177` (`main()` at module scope),
+   `tinytitan_gap_bisect.py:105-106` (`run(128, …)` and `run(1024, …)` there), and
+   `tinytitan_rdadvise_ab.py:102-103` (`for mode in ("default", "off"): run(mode)`),
+   which is the one to take next because it is AUD-225 in full and worse: `run()`
+   opens a log and `Popen`s `TinyTitanServer` (:35-38), so importing it starts a
+   model process *twice*, and its `--- {mode} ---` header prints over whatever
+   `gen`/`runner`/`gpu` captured with no line count and no refusal, so an A/B in
+   which neither arm reached decode reads as two clean measurements and exits 0 --
+   the only `sys.exit` in the file is :43, for a server that died before
+   `/health`, and nothing on the capture side ever fails. `memory_volume.py:428` calls `check_scenario()` at
+   module scope too, and it is a different kind: it audits the `QUIZ_PLAN` fixture
+   and raises `SystemExit` on a duplicated key, so it is an import-time guard rather
+   than an import-time benchmark -- worth reading, not yet worth filing.
    The argv half of the seam is drained: every remaining `sys.argv` read in a
    non-test driver sits inside a function (`grep -rn "sys\.argv" benchmark/*.py`,
    no unindented hit left), and no driver opens a log or `Popen`s at module scope
-   any more. `claude_openai_adapter.py`, which an
+   any more -- both re-checked here, not carried over from the last note.
+   `claude_openai_adapter.py`, which an
    earlier note here listed as carrying the same shape, does not: it reads no argv at
    all (`grep -n argv` over it is empty), so it is off the list on measurement.
    A method note the second finding cost: a mutation harness that greps for `FAIL:`
@@ -376,6 +388,15 @@ is the authority. On 2026-10-04 it holds one Open row:
    the mutant a stub argv, so the regression trips the guard (`RuntimeError: Popen
    ran at import`, rc 1) instead of loading a model, and prove the guard is not
    hollow with the same child against the current file (`imported clean`, rc 0).
+   A second corollary from AUD-226, where the side effect was a file read rather
+   than a process: the same child works with `builtins.open` guarded for the names
+   the driver wants, and it is cheap enough to use on the control run, so "the
+   guard is hollow" cannot be the excuse for leaving an import-time read unfixed.
+   One more, about finding them: a bare-call grep (`^[a-zA-Z_][a-zA-Z_0-9]*\(`) over
+   `benchmark/*.py` also matches source snippets embedded in strings --
+   `ornith_concise_tool_ab.py:106` and `ornith_four_program_matrix.py:120,131,159,188`
+   are Swift, Dart, PyTorch and JAX samples inside a dict literal, not code this
+   repository runs. Read every hit in context before filing it.
 
 TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
 machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
