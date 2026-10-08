@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-"""Cross-process greedy determinism check: two fresh servers, 512-token greedy
-for the essay and digit-cycle prompts, comparing the CONTENT deltas token by
-token (never the raw SSE bytes). A raw-byte comparison is invalid: each
-response embeds a per-request chatcmpl id and created timestamp, so identical
-content hashes differently across processes. first_diff_index=None means the
-streams are identical token-for-token.
+"""Cross-process greedy determinism check: two fresh servers, greedy at
+`max_tokens` (default 512) for the essay and digit-cycle prompts, comparing the
+CONTENT deltas token by token (never the raw SSE bytes). A raw-byte comparison is
+invalid: each response embeds a per-request chatcmpl id and created timestamp, so
+identical content hashes differently across processes. first_diff_index=None means
+the streams are identical token-for-token.
+
+A pair of streams that carried no content is not a result: `extract_deltas` returns
+[] for a response that is not an SSE stream, and two empty lists neither differ nor
+differ in hash, so the conclusion prints only when every prompt streamed content on
+both sides. A difference is a result and exits 0; a prompt that streamed nothing
+exits 1.
 
 Usage: python3 benchmark/tinytitan_determinism_ab.py [max_tokens]
 """
@@ -29,7 +35,6 @@ BASE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 BIN = os.path.join(BASE, ".build", "release", "TinyTitanServer")
 MODEL = str(DEFAULT_MODEL_PATH)
 PORT = 8114
-MAX_TOKENS = int(sys.argv[1]) if len(sys.argv) > 1 else 512
 PROMPTS = [
     ("essay", "Write a detailed essay about the history of computing."),
     (
@@ -71,7 +76,7 @@ def first_diff_index(a, b):
     return None
 
 
-def run_server():
+def run_server(max_tokens):
     log = open(benchmark_log_path("tinytitan_determinism_server.log"), "w", encoding="utf-8")
     proc = subprocess.Popen(
         server_command(BIN, PORT, model=MODEL),
@@ -104,7 +109,7 @@ def run_server():
                 "top_p": 0.95,
                 "top_k": 20,
                 "presence_penalty": 0.0,
-                "max_completion_tokens": MAX_TOKENS,
+                "max_completion_tokens": max_tokens,
                 "stream": True,
             }
         ).encode()
@@ -128,26 +133,74 @@ def run_server():
     return result
 
 
-def main():
-    print(f"max_tokens={MAX_TOKENS} prompts={[n for n, _ in PROMPTS]}")
-    print("server A...", flush=True)
-    a = run_server()
-    print("server B...", flush=True)
-    b = run_server()
-    for name, _ in PROMPTS:
-        da, db = a[name], b[name]
+def parse_max_tokens(argv):
+    """(tokens, error) for the driver's one argument, read when it runs.
+
+    It used to be a module-level `int(sys.argv[1])`, which made every importer of
+    this file run the cast against the *importing program's* argv.
+    """
+    if len(argv) < 2:
+        return 512, None
+    try:
+        value = int(argv[1])
+    except ValueError:
+        return None, f"max_tokens must be an integer, got {argv[1]!r}"
+    if value < 1:
+        return None, f"max_tokens must be at least 1, got {value}"
+    return value, None
+
+
+def verdict(pairs, max_tokens):
+    """(lines, status): the per-prompt rows, then the conclusion or why there is none.
+
+    Two streams that carried no content look identical to the comparison — no first
+    difference, and `sha256` of two empty answers is the same hash — so "identical"
+    has to be earned by content on both sides before it can be called determinism.
+    """
+    lines, unmeasured = [], []
+    for name, da, db in pairs:
         diff = first_diff_index(da, db)
         joined_a = "".join(da)
         joined_b = "".join(db)
         sha_a = hashlib.sha256(joined_a.encode()).hexdigest()[:16]
         sha_b = hashlib.sha256(joined_b.encode()).hexdigest()[:16]
-        print(
+        lines.append(
             f"{name}: tokens A={len(da)} B={len(db)} "
             + f"first_diff_index={diff} "
             + f"content_sha256={sha_a}=={sha_b} equal={sha_a == sha_b}"
         )
-    print("None for both => 512-token greedy is deterministic across fresh processes")
+        if not da or not db:
+            side = "A and B" if not da and not db else ("A" if not da else "B")
+            lines.append(f"  NOT MEASURED: {name} carried no content deltas on side {side}")
+            unmeasured.append(name)
+    if unmeasured:
+        lines.append(
+            f"{len(unmeasured)} of {len(pairs)} prompt(s) streamed no content, so "
+            "nothing was compared: determinism is not established and this run exits 1."
+        )
+        return lines, 1
+    lines.append(
+        f"None for both => {max_tokens}-token greedy is deterministic across fresh processes"
+    )
+    return lines, 0
+
+
+def main():
+    max_tokens, error = parse_max_tokens(sys.argv)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
+        print("usage: python3 benchmark/tinytitan_determinism_ab.py [max_tokens]", file=sys.stderr)
+        return 2
+    print(f"max_tokens={max_tokens} prompts={[n for n, _ in PROMPTS]}")
+    print("server A...", flush=True)
+    a = run_server(max_tokens)
+    print("server B...", flush=True)
+    b = run_server(max_tokens)
+    lines, status = verdict([(name, a[name], b[name]) for name, _ in PROMPTS], max_tokens)
+    for line in lines:
+        print(line)
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
