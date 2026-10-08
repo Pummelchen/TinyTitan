@@ -67,6 +67,25 @@ def benchmark_log_path(name: str) -> str:
     return str(directory / name)
 
 
+def parse_max_tokens(argv, default: int = 512) -> tuple[int | None, str | None]:
+    """(tokens, error) for a probe's one length argument, read where it runs.
+
+    Two probes held this as a module-level `int(sys.argv[1])`, which made every
+    importer of those files run the cast against the *importing program's* argv --
+    and silently re-lengthened the probe for an importer whose argument happened to
+    parse.
+    """
+    if len(argv) < 2:
+        return default, None
+    try:
+        value = int(argv[1])
+    except ValueError:
+        return None, f"max_tokens must be an integer, got {argv[1]!r}"
+    if value < 1:
+        return None, f"max_tokens must be at least 1, got {value}"
+    return value, None
+
+
 def catalog_id_for(model: str | os.PathLike[str]) -> str:
     """The catalog id of an install: `<modelID>_<bits>-Bit`.
 

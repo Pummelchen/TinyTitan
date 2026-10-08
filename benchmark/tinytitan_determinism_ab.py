@@ -26,6 +26,7 @@ import time
 from tinytitan_profile import (
     DEFAULT_MODEL_PATH,
     benchmark_log_path,
+    parse_max_tokens,
     server_command,
     server_environment,
     resolve_api_model,
@@ -131,23 +132,6 @@ def run_server(max_tokens):
         proc.kill()
     time.sleep(0.5)
     return result
-
-
-def parse_max_tokens(argv):
-    """(tokens, error) for the driver's one argument, read when it runs.
-
-    It used to be a module-level `int(sys.argv[1])`, which made every importer of
-    this file run the cast against the *importing program's* argv.
-    """
-    if len(argv) < 2:
-        return 512, None
-    try:
-        value = int(argv[1])
-    except ValueError:
-        return None, f"max_tokens must be an integer, got {argv[1]!r}"
-    if value < 1:
-        return None, f"max_tokens must be at least 1, got {value}"
-    return value, None
 
 
 def verdict(pairs, max_tokens):
