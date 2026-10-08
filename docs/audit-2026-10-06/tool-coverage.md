@@ -265,3 +265,19 @@ than a trap:
   the test's name claims the runner carries `k`. Two of those were in `RouterTopKTests`, and
   they are what the `#expect(moe.maxStreamedExperts == 10)` replacements are for. A rule
   cannot catch a discarded value; that one needs a reader.
+
+AUD-235 closed a python shape no gate here can see, and it is worth naming for the
+next reader because the suite that catches it is written per driver. A report section
+behind `if <path>.exists():` with no else prints nothing when the path is missing, and
+the run's verdict is computed from the sections that *did* print -- so a check that
+never ran is indistinguishable from a check that passed. Its companion is
+`Path(os.environ.get(NAME, ""))`: an unset variable is the empty string, `Path("")` is
+`PosixPath('.')`, and `.` exists, so the section does not skip, it reads the directory
+the run happened to launch from. Neither shape is something the pinned ruff can flag --
+there is no rule for "a verdict printed over a section that did not run", and `Path("")`
+is just a call -- so the two rules to apply by hand are: a guard that wraps a report
+owes an else that reports, and an environment path needs its blank case named before it
+is a `Path`. Measured on this tree: `memory_smoke.py:22` is the only `Path(os.environ.get(
+..., ""))`, and `memory_projects.py` already does both right (`:364` guards on the string
+before it globs, `:449` aborts naming the two variables it needs), which is how the fix
+knew what the correct shape looked like rather than inventing one.

@@ -249,7 +249,7 @@ jobs:
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
         # gates a release. Every one of them is stdlib-only, measured on this host
-        # 2026-10-09 as 28 suites and 454 tests with no model, no server, no Xcode and
+        # 2026-10-09 as 29 suites and 500 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -306,6 +306,18 @@ jobs:
         # froze its install at `str(DEFAULT_MODEL_PATH)` so TINYTITAN_BENCH_MODEL was
         # ignored, polled /health for two minutes without ever looking at the process
         # it was waiting for, and returned no status at all.
+        # test_memory_smoke drives the memory smoke check's real main() with
+        # urlopen, time.sleep, the memory directory and the server log faked -- it
+        # exists because that driver read the status of one request out of three, so
+        # a 500 on the placement-isolation probe left an empty reply that cannot
+        # contain the stored fact and the run printed `SMOKE OK` with exit 0; because
+        # `if MEMDIR.exists():` skipped the journal section with no line at all, and
+        # `Path(os.environ.get(..., ""))` is `Path('.')`, so a direct run scanned the
+        # directory it launched from; because an unconfigured or missing server log was
+        # reported as the model failing to consolidate after 180 s of sleeping; because
+        # a refused connection was an uncaught URLError traceback; and because the
+        # verdict rode on a `raise SystemExit(1)` inside main() while the guard
+        # discarded whatever main() returned.
         # wall time was 22.5 s at load average 4.3 with the operator's own server still
         # listening on 8080, 19.1 s of it reported by the runner — the 22-suite list
         # measured 24.9 s at load 6.5 and 18.8 s at load 3 an hour earlier, so the
@@ -320,6 +332,9 @@ jobs:
         # server on 8080 and untouched. The 28-suite list measured 24.7 s wall and
         # 24.4 s reported at load average 5.1, and re-measured 22.4 s and 22.1 s at
         # load 4.7, both with the operator's server on 8080 and untouched. The
+        # 29-suite list measured 20.0 s wall and 19.8 s reported at load average 3.4,
+        # and re-measured 19.2 s and 19.0 s at load 3.2, again with the operator's
+        # server on 8080 and untouched. The
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -339,7 +354,7 @@ jobs:
             test_tinytitan_rdadvise_ab test_tinytitan_gap_bisect \
             test_capital_of_paris_smartness test_tinytitan_maxthroughput \
             test_tinytitan_slots_ab test_tinytitan_longgen \
-            test_tinytitan_benchmark test_tinytitan_longctx
+            test_tinytitan_benchmark test_tinytitan_longctx test_memory_smoke
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
