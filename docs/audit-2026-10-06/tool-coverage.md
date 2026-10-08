@@ -169,7 +169,9 @@ because these scripts call `pgrep` (exit 1 means "no match"), `sysctl` and `curl
 failure each one handles with its own message. What the rule buys is that the choice can no
 longer be an accident of the default. `time.strftime()` and `time.localtime()` sit outside
 `DTZ`, which reads only `datetime` — `benchmark/tinytitan_benchmark.py:604` still labels a
-run directory with a naive local stamp, and no rule sees it.
+run directory with a naive local stamp, and no rule sees it. `benchmark/tinytitan_longctx.py:443`
+names its summary file the same way, which AUD-234 left alone rather than inventing a second
+stamp format for one driver while the rule that would catch both is still the gap recorded here.
 
 
 ## Repository gate proofs
