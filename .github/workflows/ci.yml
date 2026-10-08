@@ -169,13 +169,16 @@ jobs:
         # bytes must stop the install. They drive the real scripts against a stub
         # `curl`, so they fetch nothing and need no token. None needs dependencies
         # beyond the runner's python3.
-        # The five `test_launcher_*`/`test_coder_clients`/`test_tinytitan_profile`
+        # The six `test_launcher_*`/`test_coder_clients`/`test_tinytitan_profile`
         # suites are the launcher's own arithmetic — the RAM half and its warning
         # boundary, the port's three ways in, the concurrency width and its red
-        # warning, the client catalogue, and the benchmark profile's server
-        # command. They name their model through `launcher_fixture`, which turns
-        # `tools/testdata/catalog-example.json` into empty directories under a
-        # temporary `models/`: a runner has no install by policy and none may be
+        # warning, the client catalogue, the benchmark profile's server command,
+        # and the lifetime of the server it starts (a stub binary through
+        # `TINYTITAN_BIN_DIR`, so the suite proves the model dies with the
+        # launcher without loading one). They name their model through
+        # `launcher_fixture`, which turns `tools/testdata/catalog-example.json`
+        # into empty directories under a temporary `models/`: a runner has no
+        # install by policy and none may be
         # fetched to satisfy a gate, so before that seam existed these suites
         # skipped here — 47 of the 59 tests on an install-free tree — and the
         # launcher's rules were checked on no machine at all. `launcher_fixture`
@@ -185,7 +188,8 @@ jobs:
           cd benchmark
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
             test_launcher_install test_launcher_ram test_launcher_port \
-            test_launcher_concurrency test_coder_clients test_tinytitan_profile \
+            test_launcher_concurrency test_launcher_lifetime test_coder_clients \
+            test_tinytitan_profile \
             launcher_fixture test_progress \
             test_release_installer_verification test_dsh_node_digest test_supply_chain
       - name: Release gates (the CI-green precondition)

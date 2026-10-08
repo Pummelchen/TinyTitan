@@ -1904,10 +1904,13 @@ fi
 echo "Launching $(client_label "$CLIENT")..."
 echo ""
 
-# The model keeps running after the client exits; the next launcher run stops
-# it on this port and starts fresh. The trap was installed with the server
-# above, so the server-only path is covered too; this keeps the two lifetimes
-# matched when the person Ctrl-Cs the client instead.
+# The server does not outlive this script. The EXIT/INT/TERM trap installed with
+# it above fires when the launcher returns, so the model stops when the client
+# exits and the port is free for the next run — which is what this project's own
+# precondition asks for: an orphaned model process makes the next gate or golden
+# run refuse to start. The stale-server stop further up therefore exists for a
+# server this script did not start — a bare `swift run`, or a launcher killed with
+# SIGKILL, which no trap can catch.
 
 case "$CLIENT" in
   codex)    "$BIN" ;;
