@@ -249,6 +249,24 @@ func loadGroup(runner: FleetRunner, seed: FleetTarget, from path: String?) async
     return try await runner.read(seed: seed)
 }
 
+/// Read the group an action acts on: always live, and never from `--from`.
+///
+/// `--from` says "render this inventory instead of dialing a fleet", which a
+/// getter can honour and an action cannot. Reading the peer anyway would send a
+/// `prompt` or a `workspace delete` to machines the operator had just asked the
+/// tool not to contact, so the option is refused where it cannot be honoured.
+func liveGroup(
+    runner: FleetRunner, seed: FleetTarget, from path: String?, doing action: String
+) async throws -> FleetRead {
+    if path != nil {
+        fail(
+            "--from reads an inventory instead of dialing a fleet, and \(action) dials one; "
+                + "use `list`, or `top --once`, to render a file or `-` from stdin"
+        )
+    }
+    return try await runner.read(seed: seed)
+}
+
 /// Read an inventory from a file, or stdin with `-`.
 ///
 /// The same JSON a member answers `/inventory` with, so a snapshot can be
@@ -276,6 +294,13 @@ do {
             )
             print(frame.lines.joined(separator: "\n"))
         } else {
+            if fromOption != nil {
+                fail(
+                    "--from reads an inventory instead of dialing a fleet, and a live "
+                        + "dashboard dials one; use `top --once --from FILE` for one frame, "
+                        + "or `list --from FILE`"
+                )
+            }
             await runDashboard(
                 runner: runner, seed: seed, scanSeconds: max(2, intervalOption ?? 30))
         }
@@ -288,14 +313,16 @@ do {
                 : FleetRenderer.text(read.group))
 
     case "prompt":
-        let read = try await runner.read(seed: seed)
+        let read = try await liveGroup(
+            runner: runner, seed: seed, from: fromOption, doing: "prompt")
         let outcome = try await runner.prompt(
             group: read.group, sessionId: requireSession(), text: requireText())
         print(asJSON ? outcomesJSON([outcome]) : FleetRenderer.outcomes([outcome]))
         exit(outcome.ok ? 0 : 1)
 
     case "prompt-all":
-        let read = try await runner.read(seed: seed)
+        let read = try await liveGroup(
+            runner: runner, seed: seed, from: fromOption, doing: "prompt-all")
         let outcomes = await runner.promptAll(
             group: read.group,
             text: requireText(),
@@ -308,7 +335,8 @@ do {
     case "workspace":
         guard let sub = arguments.first else { fail("workspace needs create or delete") }
         arguments.removeFirst()
-        let read = try await runner.read(seed: seed)
+        let read = try await liveGroup(
+            runner: runner, seed: seed, from: fromOption, doing: "workspace")
         switch sub {
         case "create":
             guard let pathOption else { fail("workspace create needs --path DIR") }
@@ -332,7 +360,8 @@ do {
         guard let sub = arguments.first else { fail("session needs archive") }
         arguments.removeFirst()
         guard sub == "archive" else { fail("session needs archive, not \(sub)") }
-        let read = try await runner.read(seed: seed)
+        let read = try await liveGroup(
+            runner: runner, seed: seed, from: fromOption, doing: "session archive")
         report(try await runner.archive(group: read.group, sessionId: requireSession()))
 
     default:

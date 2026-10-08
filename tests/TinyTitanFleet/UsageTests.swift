@@ -179,4 +179,49 @@ import TinyTitanFleetCore
             bounded.stderr.contains("unreachable"),
             "a valid limit should reach the peer and fail on it: \(bounded.stderr)")
     }
+
+    /// `--from` is the option that says "read this inventory instead of dialing a
+    /// fleet", and `--help` promises it with no fleet running. Two arms honor it;
+    /// the rest call `runner.read` and never look at the value, so a snapshot the
+    /// operator named is dropped and the run polls the peer they asked it not to
+    /// contact. The stray-option guard cannot catch this, because `--from` is a
+    /// known option — it is only unread.
+    @Test func anInventoryIsOnlyAcceptedWhereAnInventoryIsRead() throws {
+        let fixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ttlanmanager-inventory-\(UUID().uuidString).json")
+        try Data(#"{"ok":true}"#.utf8).write(to: fixture)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let path = fixture.path
+
+        // The two arms that read it, asserted as working so the rule below cannot
+        // be satisfied by refusing `--from` everywhere.
+        let listed = try run(["list", "--from", path, "--peer", "127.0.0.1:1"])
+        #expect(listed.status == 0, "list --from: \(listed.stderr)")
+        let frame = try run(["top", "--once", "--from", path, "--peer", "127.0.0.1:1"])
+        #expect(frame.status == 0, "top --once --from: \(frame.stderr)")
+
+        for arguments in [
+            ["prompt", "--session", "s-1", "--text", "hi"],
+            ["prompt-all", "--text", "hi"],
+            ["workspace", "delete", "--workspace", "w-1"],
+            ["session", "archive", "--session", "s-1"],
+        ] {
+            let ignored = try run(arguments + ["--from", path, "--peer", "127.0.0.1:1"])
+            #expect(
+                ignored.status != 0,
+                "\(arguments) read the peer, not the file: stdout \(ignored.stdout)")
+            #expect(
+                ignored.stderr.contains("--from"),
+                "\(arguments) stderr named no option: \(ignored.stderr)")
+        }
+
+        // The live dashboard is the case the help text is closest to: `top` draws the
+        // group, and a file named beside it was never opened. A spawned `top` has no
+        // terminal, so before the fix it died at the guard inside `runDashboard` —
+        // which is why this needs no deadline, and why the name of the option in
+        // stderr is the whole assertion: the refusal sits ahead of that guard.
+        let live = try run(["top", "--from", path, "--peer", "127.0.0.1:1"])
+        #expect(live.status != 0, "stdout: \(live.stdout), stderr: \(live.stderr)")
+        #expect(live.stderr.contains("--from"), "stderr: \(live.stderr)")
+    }
 }

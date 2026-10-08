@@ -27,7 +27,9 @@ public enum FleetUsage {
         and never needs more than 44x6. `--once` prints a single frame instead
         (useful in a pipe, and with --width/--height for a fixed size). `--from FILE`
         renders an inventory JSON taken earlier — or from stdin with `-` — with no fleet
-        running.
+        running, and belongs to the two commands that only read: `list` and `top --once`.
+        Every other command acts on the fleet, so it refuses `--from` instead of accepting
+        the file and dialing the peer anyway.
 
         --peer is the member the group is *read* from (default 127.0.0.1:3080); --on is
         the member an action is sent to. Every action then goes directly to the Mac that
