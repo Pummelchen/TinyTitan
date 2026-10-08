@@ -204,10 +204,7 @@ extension ServerHTTPHandler {
                 surface: .anthropic, requestID: requestID)
         } catch {
             writeRequestError(
-                context,
-                .invalid(
-                    message: "malformed JSON request",
-                    param: nil, code: "invalid_json"),
+                context, RequestDecodingFailure.serverError(error, body: body),
                 status: .badRequest, surface: .anthropic, requestID: requestID)
         }
     }
@@ -259,10 +256,7 @@ extension ServerHTTPHandler {
                 surface: .anthropic, requestID: requestID)
         } catch {
             writeRequestError(
-                context,
-                .invalid(
-                    message: "malformed JSON request",
-                    param: nil, code: "invalid_json"),
+                context, RequestDecodingFailure.serverError(error, body: body),
                 status: .badRequest, surface: .anthropic, requestID: requestID)
         }
     }

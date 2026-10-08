@@ -397,6 +397,116 @@ struct HTTPServerTests {
         try await server.shutdown()
     }
 
+    /// A body whose JSON is fine but whose shape is not is an error in one named
+    /// parameter, and Foundation hands the server exactly that name. Answering
+    /// "malformed JSON request" instead sends the client to its serializer for a
+    /// payload whose syntax was never the problem.
+    @Test func aWrongTypedFieldInValidJSONNamesTheParameter() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+        var request = URLRequest(
+            url: try localURL(port: port, "/v1/chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = Data(
+            #"""
+            {"model":"test-model","messages":[{"role":"user","content":"hi"}],"max_tokens":"abc"}
+            """#.utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        #expect((response as? HTTPURLResponse)?.statusCode == 400)
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let detail = try #require(object["error"] as? [String: Any])
+        let message = try #require(detail["message"] as? String)
+        let param = detail["param"] as? String
+        #expect(param == "max_tokens", "param was \(String(describing: param)): \(message)")
+        #expect(!message.contains("malformed JSON"), "message was \(message)")
+
+        try await server.shutdown()
+    }
+
+    /// The half of the fix that must not move: bytes that are not JSON at all
+    /// still answer `invalid_json`, because that is the one thing the client
+    /// genuinely needs to hear.
+    @Test func bytesThatAreNotJSONStillAnswerInvalidJSON() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+        var request = URLRequest(
+            url: try localURL(port: port, "/v1/chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = Data("{not json".utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let body = data.lossyUTF8String
+        #expect((response as? HTTPURLResponse)?.statusCode == 400)
+        #expect(body.contains("invalid_json"), "body was \(body)")
+        #expect(body.contains("malformed JSON request"), "body was \(body)")
+
+        try await server.shutdown()
+    }
+
+    /// Foundation refuses a document nested past its parser's ceiling as a
+    /// syntax failure, and `JSONSchemaNode`'s depth note records that the server
+    /// answers it `invalid_json`. The new branch decides shape-vs-syntax by
+    /// re-parsing with that same parser, so this is the case where the two
+    /// answers must not come apart.
+    @Test func aBodyPastTheParsersNestingLimitStillAnswersInvalidJSON() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+        var request = URLRequest(
+            url: try localURL(port: port, "/v1/chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        let depth = 600
+        let body =
+            String(repeating: "[", count: depth) + String(repeating: "]", count: depth)
+        request.httpBody = Data(body.utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let text = data.lossyUTF8String
+        #expect((response as? HTTPURLResponse)?.statusCode == 400)
+        #expect(text.contains("invalid_json"), "body was \(text)")
+
+        try await server.shutdown()
+    }
+
+    /// The Anthropic surface has no `param` field, so the name has to survive in
+    /// the message; it is the second route a client uses and the same refusal
+    /// rule applies there.
+    @Test func theAnthropicRouteNamesTheFieldItRefused() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+        var request = URLRequest(url: try localURL(port: port, "/v1/messages"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = Data(
+            #"""
+            {"model":"test-model","max_tokens":"abc","messages":[{"role":"user","content":"hi"}]}
+            """#.utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let body = data.lossyUTF8String
+        #expect((response as? HTTPURLResponse)?.statusCode == 400)
+        #expect(body.contains("max_tokens"), "body was \(body)")
+        #expect(!body.contains("malformed JSON request"), "body was \(body)")
+
+        try await server.shutdown()
+    }
+
     @Test func streamingHeartbeatKeepsSlowFirstEventAlive() async throws {
         let server = TinyTitanHTTPServer(
             modelID: "test-model",

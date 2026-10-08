@@ -103,9 +103,7 @@ extension ServerHTTPHandler {
         } catch {
             writeError(
                 context, status: .badRequest,
-                OpenAIErrorEnvelope(
-                    message: "malformed JSON request",
-                    code: "invalid_json"))
+                RequestDecodingFailure.serverError(error, body: body).envelope)
         }
     }
 
