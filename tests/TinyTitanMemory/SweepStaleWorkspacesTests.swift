@@ -101,6 +101,56 @@ import Testing
         #expect(manager.fileExists(atPath: newer.path))
     }
 
+    /// The cap is the one retention rule that removes facts, so a file it could
+    /// not delete has to stay out of the list it reports as deleted. The expiry
+    /// rule already refuses to report a file it could not expire
+    /// (`theSweepReportsARefusalOnceAndNeverSaysExpired`); the delete rule's own
+    /// `try?` swallowed the failure, named the file as swept anyway, and left a
+    /// read-only volume with the disk still growing and the log saying it had
+    /// been reclaimed.
+    @Test func theCapReportsOnlyFilesItActuallyDeleted() async throws {
+        let directory = try makeDirectory()
+        let now = Date()
+        let stuck = directory.appendingPathComponent("tinytitan/local/stuck.ndjson")
+        let kept = directory.appendingPathComponent("tinytitan/local/kept.ndjson")
+        try write(stuck, modified: now.addingTimeInterval(-300))
+        try write(kept, modified: now.addingTimeInterval(-100))
+        // Nothing inside this directory can be unlinked, so the doomed journal
+        // survives its removal. The lock probe still answers "not held" (it
+        // opens without `O_CREAT`, and there is no lock file), so the sweep
+        // really does attempt the delete rather than skipping the file.
+        let parent = stuck.deletingLastPathComponent()
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o500], ofItemAtPath: parent.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: parent.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let events = EventBox()
+        let service = MemoryService(
+            configuration: configuration(directory: directory, cap: 1),
+            log: { events.append($0) })
+        await service.sweepStaleWorkspaces()
+        await service.sweepStaleWorkspaces()
+
+        let manager = FileManager.default
+        #expect(
+            manager.fileExists(atPath: stuck.path),
+            "the probe failed: the read-only directory did not refuse the removal")
+        let messages = events.messages()
+        #expect(
+            !messages.filter { $0.contains("memory swept") }
+                .contains { $0.contains("stuck.ndjson") },
+            "a file that is still on disk was reported as deleted: \(messages)")
+        let refusals = messages.filter { $0.contains("degraded during sweep") }
+        #expect(refusals.count == 1, "one refusal per stuck file, got \(refusals)")
+        #expect(
+            refusals.first?.contains("stuck.ndjson") == true,
+            "the refusal should name the file and the step: \(refusals)")
+    }
+
     /// A workspace with no `.lock` file at all was never opened by a journal, so
     /// nothing can be holding it and the probe must say so rather than treating
     /// the missing file as "in use" (which would disable the cap for every
@@ -144,5 +194,13 @@ import Testing
 
         #expect(MemoryService.isLockHeld(at: journal))
         #expect(try Data(contentsOf: victim) == canary)
+    }
+
+    /// unchecked-invariant: `events` is only ever touched under `lock`.
+    private final class EventBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var events: [MemoryLogEvent] = []
+        func append(_ event: MemoryLogEvent) { lock.withLock { events.append(event) } }
+        func messages() -> [String] { lock.withLock { events.map(\.message) } }
     }
 }

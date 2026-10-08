@@ -123,6 +123,7 @@ extension MemoryService {
         lastUsed.removeAll()
         reportedJournalFailures.removeAll()
         reportedExpiries.removeAll()
+        reportedSweeps.removeAll()
         reportedReadFailures.removeAll()
         // The side-engine is a second resident model, so it is released on the
         // same shutdown that releases the stores rather than at process exit.

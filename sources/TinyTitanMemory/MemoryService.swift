@@ -64,6 +64,9 @@ public actor MemoryService {
     /// Project files whose failed expiry has been logged, for the same reason:
     /// retention offers an unexpirable file again on every sweep.
     var reportedExpiries: Set<String> = []
+    /// Project files whose failed deletion has been logged, for the same
+    /// reason: a file the cap cannot remove stays a candidate on every sweep.
+    var reportedSweeps: Set<String> = []
     /// Reads whose failure has been reported, keyed by operation and
     /// workspace, so a store that stays broken produces one line per
     /// operation rather than one per call.
@@ -186,17 +189,38 @@ public actor MemoryService {
         }
         if !doomed.isEmpty {
             var removed: [String] = []
+            var refused: [(path: String, file: String, reason: String)] = []
             for url in doomed {
                 // Never remove a workspace another process is inside. The cap is
                 // the one rule here that deletes facts, and `open` only knows
                 // *this* process's workspaces.
                 guard !Self.isLockHeld(at: url) else { continue }
-                try? manager.removeItem(at: url)
+                // The journal going is what makes the removal a fact. A volume
+                // that refuses it leaves the workspace on disk, so the sweep
+                // must neither claim it was deleted nor take the `.lock` that
+                // still protects it -- the sibling expiry rule says the same
+                // thing about a file it could not rewrite.
+                do {
+                    try manager.removeItem(at: url)
+                } catch {
+                    refused.append((url.path, url.lastPathComponent, String(describing: error)))
+                    continue
+                }
                 try? manager.removeItem(at: url.appendingPathExtension("lock"))
                 try? manager.removeItem(at: url.appendingPathExtension("compacting"))
                 removed.append(url.lastPathComponent)
             }
-            log(.swept(removed: removed, reason: "more than \(storage.maximumWorkspaces) projects"))
+            if !removed.isEmpty {
+                log(
+                    .swept(
+                        removed: removed,
+                        reason: "more than \(storage.maximumWorkspaces) projects"))
+            }
+            // Once per file, on the precedent of `reportedExpiries`: a workspace
+            // the volume will not give up is offered to every later sweep.
+            for refusal in refused where reportedSweeps.insert(refusal.path).inserted {
+                log(.degraded(operation: "sweep", detail: "\(refusal.file): \(refusal.reason)"))
+            }
         }
         // Retention expires the session log and keeps the facts.
         guard storage.retentionDays > 0 else { return }
