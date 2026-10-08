@@ -402,6 +402,16 @@ install_pnpm() {
     (( DRY_RUN )) && return 0
   fi
 
+  # The guard above sits inside the branch that has to fetch the package, so a
+  # dry run only returns there when pnpm is missing. Reaching this line means the
+  # package is unpacked and the shim is not working — the repair case — and the
+  # mkdir and the heredoc below would write an executable into the private root
+  # during a run that promised to change nothing.
+  if (( DRY_RUN )); then
+    echo "  would write the private pnpm shim at $shim"
+    return 0
+  fi
+
   mkdir -p "$DSH_BIN_DIR"
   if [[ -x "$native" ]]; then
     cat > "$shim" <<SHIM

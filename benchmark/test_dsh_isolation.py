@@ -178,6 +178,50 @@ class PrivateHarnessIsolationTests(unittest.TestCase):
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
+    def test_a_dry_run_writes_no_shim_when_the_package_is_already_there(self) -> None:
+        """The repair path is the one the fresh-home dry run cannot reach.
+
+        `install_pnpm` returns early from its dry-run guard only when the pnpm
+        package itself is missing and would have to be fetched. With the package
+        unpacked and no working shim — which is the state a user runs into when
+        the shim is the thing that broke — the guard is behind it, and the
+        `mkdir` and the two heredocs write an executable anyway and print its
+        version as if the run had installed it.
+        """
+        home = pathlib.Path(tempfile.mkdtemp(prefix="dsh-isolation-shim-"))
+        root = home / ".tinytitan" / "dsh"
+        entry = root / "npm-prefix" / "node_modules" / "pnpm" / "bin" / "pnpm.mjs"
+        try:
+            entry.parent.mkdir(parents=True)
+            entry.write_text("// stub\n", encoding="utf-8")
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                TINYTITAN_DSH_ROOT=str(root),
+                TINYTITAN_DSH_DRY_RUN="1",
+            )
+            result = subprocess.run(
+                ["bash", str(DSH_LOCAL), "ensure"],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr[-400:])
+            # The fixture has to reach the write section rather than the fetch
+            # section; a dry run that took the other branch proves nothing here.
+            self.assertNotIn("would install pnpm", result.stdout)
+            self.assertFalse((root / "bin").exists(), "the dry run created the private bin dir")
+            written = sorted(
+                str(p.relative_to(home))
+                for p in home.rglob("*")
+                if p.is_file() and p != home / "marker" and p != entry
+            )
+            self.assertEqual(written, [], "the dry run wrote a shim into the private root")
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
 
 class PrivateHarnessStatusTests(unittest.TestCase):
     """`status` reports what is installed, not what is pinned.
