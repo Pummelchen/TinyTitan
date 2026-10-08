@@ -198,8 +198,7 @@ def run_quant(model, tag, port=PORT):
         try:
             if not wait_for_health(proc, port, timeout=SERVER_LOAD_TIMEOUT):
                 print(
-                    f"{tag}: the server never answered /health within "
-                    f"{SERVER_LOAD_TIMEOUT}s -- no request was sent",
+                    f"{tag}: the server process exited before /health answered -- see {log_path}",
                     flush=True,
                 )
                 return None

@@ -249,7 +249,7 @@ jobs:
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
         # gates a release. Every one of them is stdlib-only, measured on this host
-        # 2026-10-08 as 26 suites and 379 tests with no model, no server, no Xcode and
+        # 2026-10-08 as 26 suites and 380 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -291,7 +291,8 @@ jobs:
         # wall and 16.1 s reported at load average 2.7, and re-measured 16.7 s and 16.6 s
         # at load 4.8, both with the operator's server on 8080 and untouched. The
         # 26-suite list measured 20.4 s wall and 20.1 s reported at load average 4.0,
-        # again with the operator's server on 8080 and untouched. The
+        # re-measured at 380 tests as 20.0 s and 19.8 s at load 4.6. Both with the
+        # operator's server on 8080 and untouched. The
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in

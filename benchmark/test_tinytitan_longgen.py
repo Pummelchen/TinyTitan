@@ -369,6 +369,14 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(sent, [], output)
         self.assertIn("ARM FAILED", output)
 
+    def test_the_reason_names_the_dead_process_and_not_a_timeout(self):
+        """`wait_for_health()` returns False for exactly one thing: the process
+        exited. A slow-but-alive load returns True, so a message blaming the
+        timeout sends the operator to the wrong cause."""
+        _, output, _, _, _, _ = self.run_main(["models/a_4Bit"], healthy=False)
+        self.assertIn("exited before /health answered", output)
+        self.assertNotIn("never answered /health within", output)
+
     def test_the_health_budget_is_the_server_load_timeout_and_reaches_the_wait(self):
         """A long-generation arm loads the install behind that wait, and the
         profile's 120 s default is the budget that timed out into the run."""
