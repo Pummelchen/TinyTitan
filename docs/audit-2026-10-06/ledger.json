@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 95,
-    "done": 94,
+    "total": 96,
+    "done": 95,
     "open": 0,
     "blocked": 1
   },
@@ -1603,6 +1603,22 @@
       "evidence-after": "GREEN: node --test test/handoff.test.js -> \"tests 31, pass 31, fail 0\"; full plugin suite node --test test/ -> \"tests 156, pass 156, fail 0\" (154 before the two). ./tools/lint.sh javascript exit 0 (eslint 10.11.0 + prettier 3.9.9 over both packages); all eighteen gates ./tools/lint.sh all exit 0. Mutation checks, one per branch: swallowing only the child loop fails only \"a tracked child's failed disposal is reported too\" and swallowing only the runs loop fails only \"a disposal that throws is reported, not swallowed\" -- which is why the two messages differ; a shared \"...disposal failed\" tail would let either test pass on the other branch's line.",
       "fix-summary": "Each catch now logs through the file's own describe() the way its eleven siblings do, with the child line carrying entry.key so the operator can tell which handoff child went undisposed. Control flow is untouched: teardown still visits every run, still clears the maps, and a throwing dispose still cannot stop the ones after it.",
       "commit": "c392236"
+    },
+    {
+      "id": "AUD-196",
+      "severity": "S2",
+      "tier": "B",
+      "project": "release",
+      "file_line": "tools/release.sh:105-108 (the only writer), read bare at :535-537 in the notes block that starts at :480",
+      "title": "The documented publish command died with `unbound variable` on every green release, at the last step after both archives were built and hashed",
+      "category": "a variable written on one branch and read on the other, under `set -u`: the guard that exists to make an override honest is unreachable whenever CI is actually green",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "Phase D convergence on the fleet and tools surface, following each conditionally-assigned shell variable to its read site. A scan of all 26 tracked .sh files, scoped to the 15 that set -u, found exactly one bare read of a variable whose every assignment sits inside a block: this one. Its sibling candidates were dismissed by reading the block — NOTES_MAX_CHARS is written three lines before it is read, inside the same `if [ -n \"$NOTES\" ]`.",
+      "evidence-before": "RED, by executing the script's own lines: the CI-status region and the whole `# --- notes` block were taken verbatim out of tools/release.sh and run by factory /bin/bash under set -uo pipefail with CI_REPORT set to the helper's green answer. Exit 127 with `/bin/bash: line 109: CI_NOTES_REQUIRE: unbound variable` after the six digest greps had printed; python3 -m unittest test_release_ci_green -> \"Ran 19 tests ... FAILED (failures=2)\". The same harness under /bin/bash 3.2.57 and Homebrew 5.3.20 aborts identically, so it is not a factory-shell artifact. v5.18 predates the line (`git show v5.18:tools/release.sh` has no CI_NOTES_REQUIRE), which is why no published release had hit it.",
+      "evidence-after": "GREEN: the else branch gives the green path a value and python3 -m unittest test_release_ci_green -> \"Ran 19 tests in 1.106s, OK\"; the compactor is reached with --max-chars and no extra --require. All three mutations measured: removing the else fails exactly the two green tests while the overridden test still passes; replacing the else with an unconditional CI_NOTES_REQUIRE=\"$CI_RED_URL\" fails exactly test_a_green_ci_does_not_require_a_placeholder_dash with '-' unexpectedly found in the requires list, which is the wrong fix the shape invites, since a green helper line ends in the - placeholder; the anchor test fails if the extracted region stops containing the guard. Gates: ./tools/lint.sh python exit 0 (ruff 0.16.7 check and format clean) and all eighteen ./tools/lint.sh all exit 0.",
+      "fix-summary": "Both branches of the CI-status parse now write CI_NOTES_REQUIRE, so the read at the notes guard is of a variable that always exists, and the guard itself stays a plain `[ -n ... ]` like its neighbours. The regression is AUD-105's own, which is why the test file is that finding's: its ReleaseScriptTests asserted on the script's text, and text was the one thing that could not show an unbound read. The new class runs the script's real lines with a stub python3 that records the arguments the compaction step is handed, and nothing is fetched, built or published.",
+      "commit": "14fdfb7"
     }
   ]
 }
