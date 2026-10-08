@@ -105,6 +105,13 @@ CI_RED_URL="$(printf '%s\n' "$CI_REPORT" | tail -1 | cut -f3)"
 if [ "$CI_STATUS" = "overridden" ]; then
   CI_NOTES_REQUIRE="$CI_RED_URL"
   printf '%s\n' "$CI_REPORT" | sed '$d'
+else
+  # Both branches have to write it. The notes guard reads this under `set -u`, so
+  # leaving the green path unassigned is an `unbound variable` abort at the last
+  # step of a publish, after the archives are built. Assigning `$CI_RED_URL`
+  # outside the branch is no better: on a green run that is the helper's `-`
+  # placeholder, and the notes would then be required to quote a dash.
+  CI_NOTES_REQUIRE=""
 fi
 
 # A skipped baseline needs its reason before anything expensive starts, so a

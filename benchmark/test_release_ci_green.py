@@ -197,5 +197,125 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertLess(start, end, "the notes guard must come after the precondition")
 
 
+PYTHON_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$@" > "$TT_ARGV"
+exit 0
+"""
+
+# Six values the notes must carry, and the placeholder each is filled from.
+PLACEHOLDERS = {
+    "SHA256_PENDING": "e" * 64,
+    "ARCHIVE_BYTES_PENDING": "12345678",
+    "LIBRARY_SHA256_PENDING": "a" * 64,
+    "LIBRARY_BYTES_PENDING": "22334455",
+    "TOOLS_SHA256_PENDING": "b" * 64,
+    "TOOLS_BYTES_PENDING": "66778899",
+}
+
+
+def run_notes_block(ci_report: str) -> subprocess.CompletedProcess[str]:
+    """Run the release script's own notes block, under the CI answer it is given.
+
+    Two regions are taken verbatim out of `tools/release.sh` — the lines that read
+    the helper's answer, and everything from `# --- notes` to `# --- publish` —
+    and executed by factory `/bin/bash` with `set -uo pipefail`, the same way the
+    script starts. Nothing is reimplemented here: the only thing the harness adds
+    is the variables the earlier part of the script would have set by then, and a
+    `python3` that records the arguments the compaction step is handed.
+    """
+    text = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
+    status_start = text.index('CI_STATUS="$(printf')
+    status_end = text.index("# A skipped baseline needs its reason", status_start)
+    notes_start = text.index("# --- notes")
+    notes_end = text.index("# --- publish", notes_start)
+    with tempfile.TemporaryDirectory() as work:
+        prelude = [
+            "set -uo pipefail",
+            'die() { echo "error: $*" >&2; exit 1; }',
+            f'SCRIPT_DIR="{ROOT / "tools"}"',
+            f'CI_REPORT="{ci_report}"',
+            "GOLDEN_SKIPPED=''",
+            "GOLDEN_ABSENT=''",
+            f'STAGE_ROOT="{work}"',
+            'NOTES="$STAGE_ROOT/notes-fixture.md"',
+            f'SHA="{PLACEHOLDERS["SHA256_PENDING"]}"',
+            f'BYTES="{PLACEHOLDERS["ARCHIVE_BYTES_PENDING"]}"',
+            f'LIB_SHA="{PLACEHOLDERS["LIBRARY_SHA256_PENDING"]}"',
+            f'LIB_BYTES="{PLACEHOLDERS["LIBRARY_BYTES_PENDING"]}"',
+            f'TOOLS_SHA="{PLACEHOLDERS["TOOLS_SHA256_PENDING"]}"',
+            f'TOOLS_BYTES="{PLACEHOLDERS["TOOLS_BYTES_PENDING"]}"',
+        ]
+        stub = pathlib.Path(work) / "python3"
+        stub.write_text(PYTHON_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        notes = pathlib.Path(work) / "notes-fixture.md"
+        notes.write_text("\n".join(PLACEHOLDERS) + "\n", encoding="utf-8")
+        argv_path = pathlib.Path(work) / "argv"
+        argv_path.write_text("", encoding="utf-8")
+        env = {
+            "PATH": f"{work}{os.pathsep}/bin:/usr/bin",
+            "TT_ARGV": str(argv_path),
+            "LANG": "C",
+        }
+        script = (
+            "\n".join(prelude) + "\n" + text[status_start:status_end] + text[notes_start:notes_end]
+        )
+        result = subprocess.run(
+            ["/bin/bash", "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        result.argv = argv_path.read_text(encoding="utf-8").splitlines()  # type: ignore[attr-defined]
+        return result
+
+
+class NotesGuardRunsTests(unittest.TestCase):
+    """The notes guard has to run on the green path, not only on the override.
+
+    AUD-105 added `CI_NOTES_REQUIRE` inside the `overridden` branch and read it
+    bare at the compaction step. `tools/release.sh` sets `set -u`, so on a green
+    run the read is of a variable that was never assigned — and the abort lands
+    after the archives are built and hashed, which is the last place on the
+    publish path to discover it. v5.18 predates the line, so no release has run
+    through it yet. These tests execute the script's own lines rather than
+    asserting on their text, because the text-only assertion above is what let
+    the shape look covered.
+    """
+
+    def test_the_harness_runs_the_scripts_own_guard_line(self) -> None:
+        # A silent slip of the anchors would make every test below pass over an
+        # empty slice, so the extracted region is checked to contain the line.
+        text = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
+        notes_start = text.index("# --- notes")
+        notes_end = text.index("# --- publish", notes_start)
+        self.assertIn(
+            'REQUIRE_ARGS+=(--require "$CI_NOTES_REQUIRE")',
+            text[notes_start:notes_end],
+        )
+
+    def test_a_green_ci_reaches_the_compactor(self) -> None:
+        result = run_notes_block("result\tgreen\t-")
+        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
+        self.assertIn("--max-chars", result.argv)
+        self.assertNotIn("unbound variable", result.stderr)
+
+    def test_a_green_ci_does_not_require_a_placeholder_dash(self) -> None:
+        # The tempting fix — assign from CI_RED_URL unconditionally — is wrong on
+        # this path, because the helper's green line ends in `-` and the notes
+        # would then have to quote a dash to be publishable.
+        result = run_notes_block("result\tgreen\t-")
+        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
+        requires = [result.argv[i + 1] for i, a in enumerate(result.argv) if a == "--require"]
+        self.assertNotIn("-", requires)
+
+    def test_an_overridden_ci_requires_the_red_run_url(self) -> None:
+        result = run_notes_block("result\toverridden\thttps://x/9")
+        self.assertEqual(result.returncode, 0, f"{result.stdout}\n{result.stderr}")
+        requires = [result.argv[i + 1] for i, a in enumerate(result.argv) if a == "--require"]
+        self.assertIn("https://x/9", requires)
+
+
 if __name__ == "__main__":
     unittest.main()
