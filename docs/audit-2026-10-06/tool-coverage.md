@@ -168,7 +168,7 @@ are named in `pyproject.toml` itself. The `subprocess` row moved from *without
 because these scripts call `pgrep` (exit 1 means "no match"), `sysctl` and `curl` whose
 failure each one handles with its own message. What the rule buys is that the choice can no
 longer be an accident of the default. `time.strftime()` and `time.localtime()` sit outside
-`DTZ`, which reads only `datetime` — `benchmark/tinytitan_benchmark.py:506` still labels a
+`DTZ`, which reads only `datetime` — `benchmark/tinytitan_benchmark.py:604` still labels a
 run directory with a naive local stamp, and no rule sees it.
 
 
