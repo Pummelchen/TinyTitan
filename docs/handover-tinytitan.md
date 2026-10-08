@@ -121,11 +121,11 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-08, **192 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 191 before the commit that edits this row lands, so it reads 192 once it has); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `5db0471` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-08, **195 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 194 before the commit that edits this row lands, so it reads 195 once it has); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `c4b1672` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **126 rows / 125 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **128 rows / 127 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -412,24 +412,68 @@ is the authority. On 2026-10-04 it holds one Open row:
    run never reached a value. Its sibling on the read side was checked, not assumed:
    `capital_of_paris_report.py` (AUD-223) filters to `status == "ok"` at :121 before it reads
    `load_s`/`cold` at :131, and `stat()` drops non-numbers, so the explicit `null` a failed row now
-   carries cannot reach a table cell.)
-   **The next sweep along this seam is the entry points that throw their status away.** Measured by
-   reading every non-test driver's `__main__` body in `benchmark/`: nine call `main()` and discard
-   what it returns -- `memory_smoke.py:152`, `tinytitan_3bit_probe.py:194`,
-   `tinytitan_ane_attention_probe.py:358`, `tinytitan_ane_realweight_rehearsal.py:200`,
-   `tinytitan_benchmark.py:656`, `tinytitan_longctx.py:211`, `tinytitan_longgen.py:135`,
-   `tinytitan_maxthroughput.py:176`, `tinytitan_slots_ab.py:125` -- while the rest of the guarded
-   files use `raise SystemExit(main())`, which is the same thing done right. Two of the nine are
-   suspect on measurement rather than on shape: `tinytitan_maxthroughput.py` returns no status
-   anywhere in the file, and `tinytitan_slots_ab.py` keeps its only `sys.exit` at :52 *inside* the
-   per-arm function, which is AUD-227/228's pair in one file -- a dead arm ends the run, and the
-   verdict is an exit code nobody reads. The unguarded-`__main__` list itself has drained: `for f
+   carries cannot reach a table cell.), **AUD-230**
+   (`tinytitan_maxthroughput.py` -- the peak-throughput ladder sliced its scraped rate list by
+   prompt index (`r = rates[idx : idx + 2]` at :167) while the footers it scraped came from a
+   request loop whose count it never checked, so two prompts and three footers printed
+   `8bit essay: measured=44.00 (warmup 50.00) ct=[]` and `8bit digits: missing rate footer
+   (request failed?)`: the 44.00 and the 50.00 were both *digits*' rates, `essay`'s two were never
+   printed, and the row that read as a measurement measured the wrong prompt. A log with no
+   footers at all printed two `missing rate footer` rows and `main()` returned `None`, so the run
+   exited **0** having measured nothing. `MAXTPUT_PROMPTS` was read and filtered at module scope
+   (:45-50, ending in `raise SystemExit`), so a typo killed the process during *collection* rather
+   than refusing it; `--mtp` passed the one draft head to the baseline arm too (:83), which is the
+   comparison the flag exists to make run twice against the same server; `TINYTITAN_BENCH_MODEL`
+   was ignored while the dead `MODEL` global at :25 was read by nothing; and a path naming no
+   width fell through the ternary at :80 and was reported as `4bit`. The fix counts footers and
+   completion records against `REQUESTS_PER_PROMPT * len(prompts)` before it prints a row, carries
+   the arm's status out of `run_quant()`, parses all four run variables inside `main()` behind a
+   `ConfigError` (status 2), gives the two `--mtp` arms distinct commands, and names the install
+   directory when its path carries no width.), and **AUD-231**
+   (`tinytitan_slots_ab.py` -- `run()` printed its `--- slots=32 pin=None boot_s=0.0 ---` header
+   unconditionally at :64 and then three uncounted `for line in ...: print(line)` loops (:104-109),
+   so two servers that answered `/health` and emitted no counter line produced two headers, three
+   empty bodies and exit **0**; its only exit was `sys.exit(1)` *inside* that per-arm function at
+   :52, so the first arm whose server died ended the sweep and the second was never tried. The
+   runner channel keyed on `cb1_ms=` (:100) while the line the runner prints carries `io_ms=`, so a
+   line with the wrong field was collected as the decisive number; `pin=False` and a plain
+   `pin=None` both wrote `tinytitan_slots_32.log` (:42), so a nopin arm and an unmoded run
+   overwrote each other's log; and `int()` ran at :116/:120 with no handler, so `slots_ab 32 128x`
+   and `TINYTITAN_AB_TOKENS=512x` were tracebacks at import rather than refusals. The fix puts the
+   three channels in one `CHANNELS` table keyed on the field each prints, has `capture()` return
+   them and `verdict()` emit `NOT MEASURED: {tag} -- no log line contained {marker!r}` for an empty
+   one (status 1) and `ARM FAILED: {tag}` for an arm whose server never loaded *while still running
+   every other arm*, moves the token count into `max_tokens(env)` and the slot list into
+   `parse_args()` behind `ConfigError` (status 2), and makes `tag_for()` carry the pin mode so the
+   tag and the log name cannot collide.)
+   **The next sweep along this seam is the entry points that throw their status away, and seven of
+   the nine remain.** Measured by reading every non-test driver's `__main__` body in `benchmark/`:
+   nine call `main()` and discard what it returns -- `memory_smoke.py:152`,
+   `tinytitan_3bit_probe.py:194`, `tinytitan_ane_attention_probe.py:358`,
+   `tinytitan_ane_realweight_rehearsal.py:200`, `tinytitan_benchmark.py:656`,
+   `tinytitan_longctx.py:211`, `tinytitan_longgen.py:135`, `tinytitan_maxthroughput.py:176`,
+   `tinytitan_slots_ab.py:125` -- while the rest of the guarded files use `raise SystemExit(main())`,
+   which is the same thing done right. The last two of those nine are now closed (AUD-230 found
+   `tinytitan_maxthroughput.py` returning no status anywhere in the file, AUD-231 found
+   `tinytitan_slots_ab.py` keeping its only `sys.exit` inside the per-arm function), so what is left
+   is the shape rather than a measured verdict: each of the seven needs the same three questions
+   read against it -- what does the file run at import, does its prose match what runs, and can the
+   verdict it prints be passed by a run that measured nothing. Two of them are already suspect on
+   that reading, and both were read rather than guessed: `tinytitan_benchmark.py:641` prints
+   `Port {port} FAILED to become ready!` and `continue`s, so a matrix in which **every** cell failed
+   to launch still reaches the unconditional `{label} COMPLETE` footer at :653 and exits **0**; and
+   `tinytitan_longgen.py:124` prints `{label}: FAILED` and `continue`s under a `main()` that returns
+   nothing, while :127 computes `mean = sum(rates) / len(rates) if rates else 0` -- an arm whose log
+   carried no footer has an empty `rates` yet a truthy `(rates, cts)` tuple, so it prints
+   `mean=0.00 tok/s` as a measurement. The unguarded-`__main__` list itself has drained: `for f
    in *.py; do grep -q '__main__' $f || echo $f; done` now names only `tinytitan_profile.py`, which
    is a library, and `test_qwen38_resume_e2e.py`, which is a test. Module-scope `os.environ` reads
-   do survive in eight drivers (`tinytitan_knob_sweep.py:35,39`, `tinytitan_slots_ab.py:26,29`,
-   `tinytitan_overlap_measure.py:40`, `tinytitan_maxthroughput.py:45`,
-   `capital_of_paris_report.py:37-43`, `tinytitan_vs_competitors.py:91-100`, and the `memory_*`
-   files), but on their own they only freeze a value an importer cannot re-set, so they are worth
+   do survive in `tinytitan_knob_sweep.py:35,39`,
+   `tinytitan_overlap_measure.py:40`, `capital_of_paris_report.py:37-43`,
+   `tinytitan_vs_competitors.py:91-100` and every `memory_*` driver
+   (`memory_book.py:45-53`, `memory_correct.py:58-65`, `memory_master.py:47-61`,
+   `memory_mini.py:47`, and their siblings), but on their own they only freeze a value an importer
+   cannot re-set, so they are worth
    reading while in the same file rather than a finding by themselves. `memory_volume.py:428` calls
    `check_scenario()` at module scope too, and it is a different kind: it audits the `QUIZ_PLAN`
    fixture and raises `SystemExit` on a duplicated key, so it is an import-time guard rather than
