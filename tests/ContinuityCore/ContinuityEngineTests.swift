@@ -46,6 +46,66 @@ import Testing
         #expect(titles == ["kept"], "the task was lost to a failed replay")
     }
 
+    /// A retry after the reason is cleared has to do the work, not report success.
+    ///
+    /// `start()` sets its own `started` flag *before* the replay, so a replay
+    /// that fails — a journal another process holds, a file unreadable for a
+    /// moment — leaves the flag set. The next `start()` then returns at its own
+    /// guard: the engine serves a workspace that was never restored and, because
+    /// `installObservers()` sits on the same path it skipped, records no session
+    /// event at all. The caller who caught the error and fixed what caused it
+    /// gets no error back, and `persists: true` in the workspace beside it.
+    @Test func aRetryAfterAFailedReplayRestoresAndRecords() async throws {
+        let url = temporaryURL()
+        let first = ContinuityEngine(journal: try FileJournal(url: url))
+        try await first.start()
+        _ = try await first.createTask(title: "on disk", objective: "must come back")
+        await first.shutDown()
+
+        let reopened = ContinuityEngine(journal: try FileJournal(url: url))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000],
+            ofItemAtPath: url.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: url.path)
+        }
+        await #expect(throws: JournalError.self) { try await reopened.start() }
+
+        // The cause is gone — which is the case the error message exists to
+        // lead an operator into.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path)
+        try await reopened.start()
+        let restored = (await reopened.tasks()).map(\.title)
+        #expect(restored == ["on disk"], "the retry restored nothing: \(restored)")
+
+        // And the retry has to wire recording. A task or a fact still reaches the
+        // file through `record(_:)`, but a turn only reaches it through the
+        // session observer `start()` installs — so a silent no-op retry leaves a
+        // workspace whose conversations are never journaled.
+        let task = try await reopened.createTask(
+            title: "after the retry", objective: "and a turn")
+        let session = try await reopened.beginSession(taskID: task.id, model: "qwen35b")
+        try await reopened.recordUserPrompt(
+            sessionID: session.id, text: "does this reach the file?")
+        await reopened.shutDown()
+
+        let stored = try FileJournal.read(contentsOf: url)
+        let titles = stored.compactMap { record -> String? in
+            guard case .task(let item) = record else { return nil }
+            return item.title
+        }
+        let turnCount = stored.reduce(0) { count, record in
+            guard case .event(let event) = record, event.kind == .userPrompt else { return count }
+            return count + 1
+        }
+        #expect(titles.contains("after the retry"), "the retry's own task is missing: \(titles)")
+        #expect(turnCount == 1, "the retry recorded no turn: \(turnCount)")
+    }
+
     @Test func aSessionCanBeRecordedEndToEnd() async throws {
         let engine = ContinuityEngine()
         try await engine.start()

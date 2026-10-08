@@ -45,8 +45,21 @@ public actor ContinuityEngine {
     /// written back to the file it came from.
     public func start() async throws {
         guard !started else { return }
+        // Set before the replay so two concurrent `start()`s cannot replay
+        // twice, and rolled back if the replay throws. It can only throw at its
+        // first line — `journal.replay()`, before any snapshot is applied — so
+        // an engine that restored nothing must not remember having started.
+        // Retrying is what the error message tells an operator to do once the
+        // journal is readable again, and the flag left set made that retry
+        // return at the guard: nothing restored, no observers installed, so no
+        // session event journaled from then on, and no error to say so.
         started = true
-        try await restoreFromJournal()
+        do {
+            try await restoreFromJournal()
+        } catch {
+            started = false
+            throw error
+        }
         await installObservers()
     }
 
