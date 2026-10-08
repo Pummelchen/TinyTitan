@@ -97,6 +97,54 @@ struct ServerPromptStateStoreTests {
         #expect(saved.diskBytes == 6)
     }
 
+    @Test func diskEvictionTheVolumeRefusesKeepsItsBytesCounted() async throws {
+        let root = temporaryDirectory()
+        let first = makeEntry(tokens: [1])
+        let second = makeEntry(tokens: [2])
+        let firstPayload =
+            root
+            .appendingPathComponent(first.id.uuidString.lowercased())
+            .appendingPathComponent("state.bin")
+        defer {
+            // Clearing the flag is what lets the cleanup below finish; left set, the
+            // temp directory survives for the same reason the eviction failed.
+            chflags(firstPayload.path, 0)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let store = try ServerPromptStateStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0,
+                diskDirectory: root,
+                diskLimitBytes: 10))
+
+        _ = await store.save(
+            entry: first,
+            snapshot: makeSnapshot(
+                position: 1,
+                payload: Data(repeating: 1, count: 6)))
+        // UF_IMMUTABLE on one file inside the entry directory is the volume this
+        // store could not otherwise be made to meet: writing into the directory
+        // still succeeds, and unlinking the directory answers EPERM. Measured with
+        // the same two calls outside the store before this test was written.
+        #expect(chflags(firstPayload.path, UInt32(UF_IMMUTABLE)) == 0)
+
+        let saved = await store.save(
+            entry: second,
+            snapshot: makeSnapshot(
+                position: 1,
+                payload: Data(repeating: 2, count: 6)))
+
+        // Twelve bytes are on the volume, so twelve must be what the store reports.
+        // Subtracting `payloadBytes` before the `try? removeItem` that has to free
+        // them is the defect: the cap then believes it has room.
+        #expect(saved.diskBytes == 12)
+        #expect(saved.diskError != nil)
+        #expect(store.contains(first.id))
+        #expect(!saved.unbackedEntryIDs.contains(first.id))
+        let restored = try store.loadSnapshot(entryID: first.id)
+        #expect(restored.snapshot.payload == Data(repeating: 1, count: 6))
+    }
+
     @Test func corruptDiskPayloadFailsClosedAndIsRemoved() async throws {
         let root = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

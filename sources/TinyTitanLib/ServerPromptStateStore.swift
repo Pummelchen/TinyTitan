@@ -152,7 +152,11 @@ final class ServerPromptStateStore: @unchecked Sendable {
                 state.diskBytes += record.metadata.descriptor.payloadBytes
             }
         }
-        _ = evictDiskIfNeeded()
+        // The evicted ids mean nothing to a listing; a refusal is the cap not being
+        // honoured, and this path has no result to carry it in.
+        if let refusal = evictDiskIfNeeded().refusal {
+            ServerLog.diagnostic("prompt state: eviction refused on load: \(refusal)")
+        }
         return state.withLock { state in
             state.diskLRU.compactMap {
                 guard let entry = state.disk[$0]?.metadata.entry,
@@ -203,7 +207,13 @@ final class ServerPromptStateStore: @unchecked Sendable {
         }
 
         let memoryEvicted = evictMemoryIfNeeded()
-        let diskEvicted = evictDiskIfNeeded()
+        let diskEviction = evictDiskIfNeeded()
+        let diskEvicted = diskEviction.evicted
+        if let refusal = diskEviction.refusal {
+            // Both are the disk not doing what was asked, so both travel in the one
+            // field rather than the later one overwriting the earlier.
+            diskError = diskError.map { "\($0) / \(refusal)" } ?? refusal
+        }
         for id in memoryEvicted + diskEvicted where !contains(id) {
             if !unbacked.contains(id) { unbacked.append(id) }
         }
@@ -303,23 +313,40 @@ final class ServerPromptStateStore: @unchecked Sendable {
     }
 
     func remove(entryIDs: some Sequence<UUID>) {
-        var directories: [URL] = []
-        state.withLock { state in
-            for id in entryIDs {
+        for id in entryIDs {
+            state.withLock { state in
                 if let snapshot = state.memory.removeValue(forKey: id) {
                     state.memoryBytes -= snapshot.payload.count
                 }
                 state.memoryLRU.removeAll { $0 == id }
-                if let record = state.disk.removeValue(forKey: id) {
-                    state.diskBytes -= record.metadata.descriptor.payloadBytes
-                    directories.append(record.directory)
-                }
-                state.diskLRU.removeAll { $0 == id }
+            }
+            if let refusal = releaseDiskRecord(id: id) {
+                ServerLog.diagnostic("prompt state: unlink refused for \(id): \(refusal)")
             }
         }
-        for directory in directories {
-            try? fileManager.removeItem(at: directory)
+    }
+
+    /// Give one entry's directory back to the volume, and its bytes back to the ledger
+    /// only if the volume took the directory. Subtracting `payloadBytes` before the
+    /// unlink that has to free them left a refused eviction counting space that was
+    /// still occupied, so the cap believed it had room and stopped evicting.
+    private func releaseDiskRecord(id: UUID) -> String? {
+        guard let record = state.withLock({ $0.disk[id] }) else {
+            state.withLock { $0.diskLRU.removeAll { $0 == id } }
+            return nil
         }
+        do {
+            try fileManager.removeItem(at: record.directory)
+        } catch {
+            return String(describing: error)
+        }
+        state.withLock { state in
+            if let current = state.disk.removeValue(forKey: id) {
+                state.diskBytes -= current.metadata.descriptor.payloadBytes
+            }
+            state.diskLRU.removeAll { $0 == id }
+        }
+        return nil
     }
 
     private func insertMemory(_ snapshot: InferenceStateSnapshot, id: UUID) {
@@ -375,26 +402,26 @@ final class ServerPromptStateStore: @unchecked Sendable {
         }
     }
 
-    private func evictDiskIfNeeded() -> [UUID] {
-        var directories: [URL] = []
-        let evicted = state.withLock { state -> [UUID] in
-            var evicted: [UUID] = []
-            while state.diskBytes > configuration.diskLimitBytes,
-                let id = state.diskLRU.first
-            {
+    private func evictDiskIfNeeded() -> (evicted: [UUID], refusal: String?) {
+        var evicted: [UUID] = []
+        while let id = oldestEvictableDiskEntry() {
+            // Stop at the first refusal rather than evicting the next-oldest entry to
+            // pay for space this one never gave up.
+            if let refusal = releaseDiskRecord(id: id) { return (evicted, refusal) }
+            evicted.append(id)
+        }
+        return (evicted, nil)
+    }
+
+    private func oldestEvictableDiskEntry() -> UUID? {
+        state.withLock { state in
+            guard state.diskBytes > configuration.diskLimitBytes else { return nil }
+            while let id = state.diskLRU.first {
+                if state.disk[id] != nil { return id }
                 state.diskLRU.removeFirst()
-                if let record = state.disk.removeValue(forKey: id) {
-                    state.diskBytes -= record.metadata.descriptor.payloadBytes
-                    directories.append(record.directory)
-                    evicted.append(id)
-                }
             }
-            return evicted
+            return nil
         }
-        for directory in directories {
-            try? fileManager.removeItem(at: directory)
-        }
-        return evicted
     }
 
     private func writeDisk(
