@@ -35,6 +35,11 @@ public actor ContinuityJournalStore: SessionJournal {
     /// turn, leaves the workspace reporting itself not durable, and is said in
     /// the log once — which is the only honest thing a path with no caller can
     /// do with a failure.
+    ///
+    /// `unknownSession` is the one failure that would not have left that trace,
+    /// because a dropped session throws before anything reaches the file. It is
+    /// why the id comes from `session(for:)` live-checking the log rather than
+    /// straight from the cache.
     public func record(_ turn: JournalTurn, in scope: MemoryScope) async {
         guard let taskID = try? await store.taskID(for: scope),
             let sessionID = await session(
@@ -145,9 +150,20 @@ public actor ContinuityJournalStore: SessionJournal {
     /// Reuses the session the memory store already opened for this id, so a
     /// turn and the facts written during it belong to the same session rather
     /// than to two that merely share a name.
+    ///
+    /// Every id found here is checked against the live log before it is
+    /// returned. Retention can drop a session at any turn — `record` prunes the
+    /// task's oldest sessions itself, and `enforceByteBudget` drops some without
+    /// reporting them to the caller — so a remembered id is only a claim that
+    /// the log handed it out, not that it still holds it.
     private func session(for id: String, taskID: UUID, model: String?) async -> UUID? {
-        if let known = sessions[id] { return known }
-        if let shared = await store.continuitySession(for: id) {
+        if let known = sessions[id] {
+            if await isLogged(known, taskID: taskID) { return known }
+            forget(known, keyedBy: id)
+        }
+        if let shared = await store.continuitySession(for: id),
+            await isLogged(shared, taskID: taskID)
+        {
             sessions[id] = shared
             return shared
         }
@@ -162,6 +178,21 @@ public actor ContinuityJournalStore: SessionJournal {
         else { return nil }
         sessions[id] = opened.id
         return opened.id
+    }
+
+    /// Whether the session log still knows this session.
+    ///
+    /// Cost is one walk of the task's sessions, which `record` already pays for
+    /// the `pruneSessions` that ends every turn.
+    private func isLogged(_ id: UUID, taskID: UUID) async -> Bool {
+        await engine.sessions(taskID: taskID).contains { $0.id == id }
+    }
+
+    /// Drop a remembered session the log no longer holds, and the turn count
+    /// keyed by it, which nothing else can reach again.
+    private func forget(_ id: UUID, keyedBy externalID: String) {
+        sessions[externalID] = nil
+        turnCounts[id] = nil
     }
 
     private static func journalTurn(

@@ -457,6 +457,74 @@ import Testing
         #expect(stored.first?.prompt == "ask 9")
         #expect(stored.last?.prompt == "ask 7")
     }
+
+    /// A session the log pruned away must not stay cached under its name.
+    ///
+    /// `record` prunes a workspace's oldest sessions, but the store keeps its
+    /// own external-id-to-session cache and never invalidates it, so a pruned
+    /// name kept resolving to a session the log no longer knows. Every later
+    /// turn of that conversation threw `unknownSession` into the `try?` in
+    /// `record` — lost, with nothing on the engine's failure channel to say so,
+    /// for the rest of the process's life.
+    @Test func aPrunedSessionStillAcceptsItsTurns() async throws {
+        let engine = ContinuityEngine()
+        let store = ContinuityStore(engine: engine)
+        let journal = ContinuityJournalStore(
+            engine: engine, store: store,
+            limits: JournalLimits(turnsPerSession: 10, sessionsPerWorkspace: 1))
+        let scope = try scope()
+        await journal.record(
+            turn(0, session: "s-1", prompt: "one", reply: "a"),
+            in: scope)
+        await journal.record(
+            turn(0, session: "s-2", prompt: "two", reply: "b"),
+            in: scope)
+        await journal.record(
+            turn(1, session: "s-1", prompt: "three", reply: "c"),
+            in: scope)
+
+        let stored = try await journal.turns(session: "s-1", limit: 10, in: scope)
+        #expect(stored.map(\.prompt) == ["three"])
+        // The loss has to be closed by the turn landing, not by a failure
+        // being reported instead: the append channel must stay clean.
+        #expect(await engine.journalFailure == nil)
+    }
+
+    /// The same dangling id can arrive through the *store's* cache instead of
+    /// the journal's, and the journal has no way to invalidate what it does not
+    /// own — so it has to refuse to write through it.
+    ///
+    /// `sessionInit` opens the session and remembers its id; a later turn under
+    /// another name prunes the oldest session, which is that one; the journal
+    /// then asks the store for the session shared with it and is handed a
+    /// session the log dropped.
+    @Test func aPrunedStoreSessionDoesNotStrandTheJournal() async throws {
+        let engine = ContinuityEngine()
+        let store = ContinuityStore(engine: engine)
+        let journal = ContinuityJournalStore(
+            engine: engine, store: store,
+            limits: JournalLimits(turnsPerSession: 10, sessionsPerWorkspace: 1))
+        let scope = try scope()
+        _ = try await store.sessionInit(
+            MemorySession(id: "shared", modelID: "qwen35b"), in: scope)
+        let opened = try #require(await store.continuitySession(for: "shared"))
+        let taskID = try await store.taskID(for: scope)
+        await journal.record(
+            turn(0, session: "other", prompt: "one", reply: "a"),
+            in: scope)
+        // The prune that turn ends with dropped "shared", and the store still
+        // names it.
+        #expect(await engine.sessions(taskID: taskID).count == 1)
+
+        await journal.record(
+            turn(1, session: "shared", prompt: "two", reply: "b"),
+            in: scope)
+
+        let stored = try await journal.turns(session: "shared", limit: 10, in: scope)
+        #expect(stored.map(\.prompt) == ["two"])
+        #expect(await engine.session(externalID: "shared")?.id != opened)
+        #expect(await engine.journalFailure == nil)
+    }
 }
 
 /// The path the server actually takes: a `MemoryService` built from a
