@@ -146,6 +146,69 @@ import Testing
         #expect(empty.isEmpty)
     }
 
+    /// Seed the same fact in both backends and ask both the same question.
+    ///
+    /// The parity is the point. `MemoryStore.search` promises "records matching
+    /// a query" and the query type's own comment says text matching is
+    /// "substring-and-token based", with `MemoryRanking` scoring each term
+    /// separately — but the durable backend handed the whole `text` to the
+    /// engine first, and the engine's predicate is one case-insensitive
+    /// substring of address and value. So the backend the server runs answered a
+    /// different question from the backend every memory test was written
+    /// against. Returns the keys each one matched, keyed by backend name.
+    private func matchedByBothBackends(
+        value: String, tags: [String] = [], asking text: String
+    ) async throws -> [String: [String]] {
+        let backends: [(String, any MemoryStore)] = [
+            ("durable", ContinuityStore(engine: ContinuityEngine())),
+            ("reference", InMemoryStore()),
+        ]
+        var answers: [String: [String]] = [:]
+        for (name, store) in backends {
+            let storeScope = try scope("search-\(name)")
+            try await store.set(
+                MemoryRecord(
+                    key: try key("decisions/sync"), value: value, importance: 0.9, tags: tags),
+                in: storeScope)
+            answers[name] =
+                try await store.search(MemoryQuery(text: text, limit: 5), in: storeScope)
+                .map(\.key.rawValue)
+        }
+        return answers
+    }
+
+    /// Two terms in a query are two terms, in any order, not a phrase.
+    ///
+    /// Reversed order is the shape that cannot be satisfied by any substring of
+    /// a sentence that does not already read "race sync".
+    @Test func aQueryIsASetOfTermsNotAPhrase() async throws {
+        let answers = try await matchedByBothBackends(
+            value: "the sync race is prevented by FooManager holding the lock",
+            asking: "race sync")
+        #expect(
+            answers["reference"] == ["decisions/sync"],
+            "the reference store lost the token matching it already had: \(answers)")
+        #expect(
+            answers["durable"] == ["decisions/sync"],
+            "the durable store read the query as a phrase and answered nothing: \(answers)")
+    }
+
+    /// A tag is part of what a record says about itself, and the ranker reads it.
+    ///
+    /// `MemoryRanking.haystack` is key + value + tags; the engine's predicate is
+    /// address + value only, so a fact filed under `concurrency` whose sentence
+    /// never uses the word was findable on one backend and not the other.
+    @Test func aTermThatAppearsOnlyInATagStillMatches() async throws {
+        let answers = try await matchedByBothBackends(
+            value: "FooManager prevents the race",
+            tags: ["concurrency"],
+            asking: "concurrency")
+        #expect(answers["reference"] == ["decisions/sync"], "\(answers)")
+        #expect(
+            answers["durable"] == ["decisions/sync"],
+            "the durable backend cannot see its own tags from a text query: \(answers)")
+    }
+
     @Test func appendExtendsAnExistingRecordAndCreatesAMissingOne() async throws {
         let store = makeStore()
         let scope = try scope()

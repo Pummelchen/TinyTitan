@@ -141,14 +141,20 @@ public actor ContinuityStore: MemoryStore {
 
     public func search(_ query: MemoryQuery, in scope: MemoryScope) async throws -> [MemoryRecord] {
         let taskID = try await task(for: scope)
-        // Filtering is pushed into the engine; ranking stays here because it
-        // is the memory layer's own policy, shared with the reference store so
-        // the two cannot drift.
+        // What the ranker cannot redo is pushed into the engine, and ranking
+        // stays here because it is the memory layer's own policy, shared with the
+        // reference store so the two cannot drift.
+        //
+        // `text` and `tags` used to be pushed down too, and that is how the two
+        // did drift: the engine's predicate is one case-insensitive substring of
+        // address and value, so a query for "race sync" had to appear as that
+        // phrase, and its tag compare is exact where the ranker lowercases both
+        // sides. The prefix and the importance floor stay, because the ranker
+        // applies the same rule to those and pushing them down only narrows the
+        // scan.
         let plan = Self.pushDown(prefix: query.prefix ?? "")
         let engineQuery = ContinuityCore.MemoryQuery(
             namespacePrefix: plan.namespace,
-            text: query.text,
-            tags: query.tags,
             minimumImportance: query.minimumImportance,
             limit: maximumScan,
             order: .recency)
