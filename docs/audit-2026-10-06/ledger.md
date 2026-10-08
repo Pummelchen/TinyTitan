@@ -148,7 +148,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Before: `TINYTITAN_MODELS_DIR=<empty> bash tools/server_launcher.sh --dry-run --client server --model katcoder --bits 4` -> exit 2, 'ERROR: no install under … matches the built-in list'. After: exit 1 and 'Install it with:  tools/install_models.sh katcoder'. Menu with an empty dir: rows 1-16 drawn, 'Rows 1-16 are not installed yet', choice 9 -> exit 1 + 'Install it with: tools/install_models.sh qwen38flash'; EOF at the menu -> exit 1, nothing downloaded. The empty dir stayed empty in all four cases. New EmptyModelsDirTests fail (2 failures) against HEAD's launcher and pass against the fixed one; test_launcher_install 16/16 OK.
 
-**Commit.** `see the audit(AUD-101) commit`
+**Commit.** `ab4b791`
 
 ### AUD-102 — The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes
 
@@ -166,7 +166,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Pre-fix launcher: `Ran 16 tests … FAILED (failures=2)`. Fixed launcher: `Ran 16 tests in 1.357s OK`. Sibling suites still green on this host: test_launcher_ram, test_launcher_port, test_progress, test_coder_clients -> Ran 45 tests, OK.
 
-**Commit.** `see the audit(AUD-101) commit`
+**Commit.** `ab4b791`
 
 ### AUD-107 — tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose
 
@@ -202,7 +202,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** New tests, all green: JSONSchemaCompileTests.theNestingCapIsExactlyWhereItSaysItIs (64 accepted, 65 refused, via properties and via items), .aRefusedDepthIsAMalformedSchemaErrorThatNamesTheCap, .theDecoderBoundsWhatTheCompilerCanBeHanded (513 still throws -- the tripwire if the platform bound moves); OpenAIValidationTests.aToolSchemaPastTheNestingCapIsRefusedAsBadRequest asserts the 400 envelope shape through the real wire types. Affected suites: 111 tests in 6 suites passed. Full package suite `swift test --no-parallel`: exit 0, 1540 tests in 7 Swift Testing targets, 0 failures. swift-format, swiftlint and func-length clean. Regression surface measured before choosing 64: the deepest schema in any client config cached on this host nests 11 levels, and no JSON owned by this repository comes within 50 of the cap.
 
-**Commit.** `14710ba`
+**Commit.** `14a4e06`
 
 ### AUD-109 — The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes
 
@@ -499,7 +499,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** No behaviour to test -- the manifest, the build and the dependency edge are unchanged, and `swift build -c debug` is clean after the edit. The property the comment asserts is checked by tools/embedded-dependency-check.sh (task #23), which resolves the released tag from another package and builds examples/embedded against it; the defect here was two authoritative files disagreeing, and they now agree.
 
-**Commit.** `this commit`
+**Commit.** `8ecc2ea`
 
 ### AUD-115 — bitWidthOverridesHonored is written and decoded but never reaches the runtime Manifest: a documented contract field no consumer can read
 
@@ -571,7 +571,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** New test `aReservedArtifactNameIsRefusedAsPayload` repacks the synthetic Qwen snapshot and, for each name in `SSDAIInstallFileNames.reserved`, adds it to the manifest's `files` table and asserts the validator throws `.invalid(field: "manifest.files.<name>", reason: "reserved artifact filename")`. It reads the names from the shared constant rather than hardcoding them, so the reserved-file rule follows a rename instead of stranding one side. `swift test --filter QuantManifestPayloadAgreementTests` -> 13 tests in 1 suite passed (12 before). The single-sourcing itself is proved by the compiler -- there is now one literal to get wrong, not three -- and the test is what keeps the rule it feeds honest.
 
-**Commit.** `this commit`
+**Commit.** `8ecc2ea`
 
 ### AUD-119 — Documented converter command names two suites where CI runs three, and the requirements comment states a test count the baseline does not reproduce
 
@@ -661,7 +661,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** RECLASSIFICATION, recorded rather than quietly narrowed: the sweep's claim that memory_delete 'answers deleted when nothing was archived' is not reachable by the main failure path. ContinuityEngine+Internals.swift:42-47 wraps EVERY journal append failure as ContinuityError.notPersisted, which is the branch the old code already rethrew. The only errors that could reach the empty catch were non-notPersisted ContinuityError cases, and archive has no reachable throw of those (the key is validated before the call). So this is hardening, not a live wrong answer: S1 -> S2, and no failing-before test exists because no observable behaviour changed. The behaviour IS already pinned by MemoryJournalFailureTests.aDeleteTheJournalRefusesIsAFailure and by ContinuityCore's failedWritesAreReportedNotSwallowed. Evidence run: swift build clean, those suites 57 + 4 tests green.
 
-**Commit.** `see the audit(AUD-125) commit`
+**Commit.** `9be9067`
 
 ### AUD-126 — Six launcher suites skip when models/ has no install, and none of them is in any CI step — so the launcher's own rules are checked on no clean clone
 
@@ -697,6 +697,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Measured on Mac15,3 / M3 / 24 GB / macOS 27.0.1 / Swift 6.4. Default run, `swift test --no-parallel --filter 'Qwen4Exp|KVCacheGrowth|PrefillAttention|StubServerForManualRuns'` exit 0: 27 tests in 3 suites and 20 tests in 4 suites, and the gated ones now print as skips — `Test "The pinned checkpoint's own config.json parses and matches" skipped.`, `Suite "Qwen4Exp real config" skipped.`, `Test tensorOps2DFullAttentionMatchesReferenceAtTileBoundaries(_:) skipped.` (this M3 is not Apple10), `Test stubServer() skipped.` — where before the same command reported them as passed. Gate flipped both ways: with TINYTITAN_QWEN38_CONFIG pointed at a config carrying the production shape the test *runs and passes* (1 test in 1 suite, 0.001 s), and with `num_experts_per_tok: 8` in that file it *runs and fails with 1 issue* (exit 1), so the gate enables a real check rather than decorating a skip. The probe config was a reconstruction written to /tmp, not a fetched artifact, and both files were deleted after; the real pinned checkpoint's config.json is not on this host and nothing was downloaded for it — so the row's own purpose (a run against the actual artifact) stays unexercised here and belongs to the model-gated milestone. `TINYTITAN_STUB_SERVER_SECONDS=1` runs the stub server and passes in 1.006 s. KVCacheGrowthTests' six tests run and assert on this host's GPU (suite passed after 0.002 s). New gate proven: a temporary `tests/` file reproducing the reported shape makes `tools/lint.sh test-skip` exit 1 naming `tests/TinyTitanServer/GateProbeTmp.swift:9`, and deleting it returns exit 0. Full serial suite exit 0: 1,615 tests in seven bundles (748+387+141+173+28+44+94), 0 failures, 14 recorded skips. All twelve gates exit 0, after the pinned `xcrun swift-format` reflowed the four touched test files — the first full gate run failed on that drift and is corrected here rather than claimed early. Not run: the golden baseline, because no production source changed. Apple10 hardware not available, so the TensorOps test's enabled path is reported *not checked* on this host. Commit b036b5a.
 
+**Commit.** `b036b5a`
+
 ### AUD-129 — Two documents tell the reader to pass --models-directory; the parser's flag is --models-dir, so the documented flag cannot work
 
 - **Severity / tier:** S2 / Tier B
@@ -713,7 +715,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 **Evidence after.** Verified before fixing, as the row required: `grep -rn models-directory sources/ tests/` returns nothing while `--models-dir` is the parsed case at ServerArguments.swift:305 and the unknown-flag throw means a reader following the old spelling got a loud error, not a silent default -- which is why this was S2 and not S1. After the edit `grep -rn models-directory docs/ README.md` returns only the ledger rows that record this finding. No code change, so no new test.
 
-**Commit.** `this commit`
+**Commit.** `8ecc2ea`
 
 ### AUD-130 — context and maxTokens are plumbed into the route writer but resolveConfig never emits them, so every route write uses ROUTE_DEFAULTS
 
@@ -748,6 +750,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Fix.** True as reported, and not a defect. `router.js:187` is `if (origin && !isAllowedOrigin(origin, req.headers.host, config))`, so a mutating request with no Origin is not refused -- but a browser sends Origin on every POST (same-origin, cross-origin and plain <form> submissions all carry it), so no browser request reaches these routes without the header, and the callers that do arrive header-less are programs. The plugin's own client is one: `sources/TinyTitanFleet/Core/FleetClient.swift:198` posts through URLSession, which sets no Origin. Both of the row's assumed mitigations were then checked rather than trusted: the loopback claim is TRUE (index.js:231-233 records that the harness webserver accepts only 127.0.0.1 or 0.0.0.0 and refuses 0.0.0.0, so nothing listens on the LAN address the plugin advertises), and the content-type claim is FALSE -- readJsonBody (router.js:61) parses any body as JSON and never inspects content-type. So the fix is the reasoning plus the proof, not a new refusal: the Guard 3 comment now names the browser behaviour, the CLI that depends on it, and the guards that authorise a non-browser caller (source address, token); a new test pins three halves of that contract in one request shape -- bodyless POST /sessions/:id/archive with no Origin returns 200 ok, the same request from 203.0.113.9 is 403 source-not-allowed, and with a token configured it is 401 without the token and 200 with it. The content-type silence and the origin==host equality became their own rows, AUD-147 and AUD-148, because neither is what this row reported.
 
 **Evidence after.** Measured, and it is the measurement that decides. Mutating the guard to require the header (`!isAllowedOrigin(origin ?? "", ...)`) fails 19 of 108 tests in `npm test` -- every POST in the package, because every one of them legitimately sends no Origin -- so the fix the row implies would break the sanctioned client and close no browser path. Turning the guard into a wall (`true || ...`) fails 12 including the new test, so the new test is load-bearing rather than decorative. Both mutations restored, and `git diff` on router.js shows only the comment. `npm test` in plugins/dsh-lan-manager: 108 pass, 0 fail. router.test.js goes 41 -> 42 tests (the commit message says '105 before', which is wrong; the checked numbers are these: 108 after, 107 before, one test added). All twelve `tools/lint.sh` gates exit 0, including eslint 10.11.0 and prettier 3.9.9 over this package. No model run and nothing fetched. Commit 88472d2.
+
+**Commit.** `88472d2`
 
 ### AUD-133 — A failed tailscale or Bonjour probe is swallowed by a per-source catch, so /peers is quietly short rather than reporting a degraded probe
 

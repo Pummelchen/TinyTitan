@@ -18,8 +18,9 @@
 #   test-hollow         no @Test body that cannot fail (see below)
 #   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
 #                       no stdout write (AGENTS.md "Two products" rules 1 and 3)
-#   docs                a documented count, mode name, tag->commit sha or table
-#                       shape must match what the repository computes (see below)
+#   docs                a documented count, mode name, tag->commit sha, ledger
+#                       commit reference or table shape must match what the
+#                       repository computes (see below)
 #   shell-portability   scripts run on the system bash (3.2), not just the dev one
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
@@ -1551,10 +1552,12 @@ check_library_facade() {
 # `tools/docs-facts.py` derives the gate set from this script's own `all` chain,
 # `case` arms, usage header and unknown-check message -- they must agree with each
 # other before any document is judged -- then compares every tracked Markdown
-# and workflow YAML against it. This audit's own ledger is excluded on purpose: it
-# quotes wrong numbers and shas verbatim as the thing it later refutes, and it is
-# corrected forward, so failing on a quotation would demand an edit to the record
-# instead of an addition to it.
+# and workflow YAML against it. This audit's own ledger prose is excluded on
+# purpose: it quotes wrong numbers and shas verbatim as the thing it later refutes,
+# and it is corrected forward, so failing on a quotation would demand an edit to the
+# record instead of an addition to it. The boundary is prose versus reference — the
+# ledger's structured `commit` field is not a quotation, it is the pointer a reader
+# follows to check a fix, and `ledger_commit_evidence` does judge it (AUD-209).
 check_docs() {
   echo "== docs: a documented count, name, sha or table must match the repository =="
   local out rc

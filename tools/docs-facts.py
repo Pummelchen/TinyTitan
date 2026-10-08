@@ -25,10 +25,12 @@ too few cells renders as a table that silently drops or pads them, so the table
 looks right and says something else, and it was introduced while this gate was
 being written.
 
-Excluded on purpose: this audit's own ledger and tool-coverage notes. The ledger
-quotes wrong numbers and wrong shas *verbatim* as the thing it later refutes, and
-it is corrected forward, so a gate that failed on a quotation would demand an
-edit to the record rather than an addition to it.
+Excluded on purpose: this audit's own ledger prose and the tool-coverage notes. The
+ledger quotes wrong numbers and wrong shas *verbatim* as the thing it later refutes,
+and it is corrected forward, so a gate that failed on a quotation would demand an
+edit to the record rather than an addition to it. The boundary is prose versus
+reference: the ledger's `commit` *field* is not a quotation, it is the pointer a
+reader follows to check a fix, and `ledger_commit_evidence` below does judge it.
 
 Output: one line per finding. `FAIL` fails the gate. `OWNER` is the same
 mismatch inside `AGENTS.md`, which is the maintainer's file: it is printed on
@@ -47,10 +49,11 @@ ROOT = os.environ.get("ROOT") or os.path.abspath(
 )
 LINT = os.path.join(ROOT, "tools", "lint.sh")
 OWNER_FILES = ("AGENTS.md",)
-# The audit's own record and the dated release notes: both quote wrong numbers
+# The audit's prose records and the dated release notes: both quote wrong numbers
 # and shas verbatim as the thing they later refute, and both are corrected
 # forward, so a gate that failed on a quotation would demand an edit to history
-# rather than an addition to it.
+# rather than an addition to it. The ledger's structured `commit` field is not in
+# that exemption -- see ledger_commit_evidence().
 EXCLUDED = re.compile(r"^(docs/audit-[0-9-]+/|docs/release-notes-)")
 
 WORD_NUMBER = {
@@ -127,14 +130,18 @@ HISTORY_HEADING = re.compile(
 )
 
 
-def sh(*args):
+def sh_in(repo, *args):
     try:
-        proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=False)
+        proc = subprocess.run(args, cwd=repo, capture_output=True, text=True, check=False)
     except OSError as error:
         # Missing git, or a ROOT that is not a directory: report and fail, rather
         # than letting a traceback read as a gate that ran.
         return 1, "", str(error)
     return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def sh(*args):
+    return sh_in(ROOT, *args)
 
 
 def kind_for(path):
@@ -306,6 +313,70 @@ def check_ledger_counts(path, paragraphs, totals, ledgers):
                 f"{want[1]} closed / {want[2]} open / {want[3]} blocked"
             )
     return rows
+
+
+COMMIT_REF = re.compile(r"\b([0-9a-f]{7,40})\b")
+
+
+def ledger_commit_evidence(ledgers, root=None):
+    """AUD-209: every commit a ledger row names has to be a commit.
+
+    The ledger is the audit's evidence, and the `commit` field is the part a reader
+    is meant to check: `git show <sha>` answers whether the fix is what the row
+    claims. Nothing read that field, and it had already rotted in seven rows. AUD-108
+    names `14710ba`, on which `git cat-file -e` says there is no such object -- the
+    depth cap landed at `14a4e06`. Six rows say `this commit` or `see the audit(…)
+    commit`, which was true at the moment they were written and resolves to nothing
+    afterwards. Two more record a fix that is committed and name no commit at all.
+
+    A blank field stays allowed, and is the point of the exception rather than an
+    oversight: a row that refuted its finding (AUD-132) or is blocked (AUD-139) has
+    no fix commit to name, and a gate that demanded one would invent it. What is not
+    allowed is a field that *looks* like a reference and is not one -- prose, or a
+    sha that does not exist, or one that exists on a branch this history cannot
+    reach. Returns (finding lines, references resolved); the count is printed by
+    main(), because a check that resolved nothing would otherwise read as a pass.
+    """
+    repo = str(root) if root is not None else ROOT
+    lines = []
+    if not ledgers:
+        lines.append(
+            "FAIL no docs/audit-*/ledger.json is tracked, so no commit reference could be read"
+        )
+        return lines, 0
+    checked = 0
+    for rel in ledgers:
+        try:
+            with open(os.path.join(repo, rel), encoding="utf-8") as handle:
+                tasks = json.load(handle).get("tasks", [])
+        except (OSError, ValueError) as error:
+            lines.append(f"FAIL cannot read {rel} for its commit references: {error}")
+            continue
+        if not tasks:
+            lines.append(f"FAIL {rel}: derived no task rows to check")
+            continue
+        for task in tasks:
+            field = str(task.get("commit", ""))
+            if not field.strip():
+                continue
+            refs = COMMIT_REF.findall(field)
+            if not refs:
+                lines.append(f"FAIL {task['id']}: commit field “{field}” names no commit")
+                continue
+            for sha in refs:
+                checked += 1
+                rc, _, _ = sh_in(repo, "git", "cat-file", "-e", f"{sha}^{{commit}}")
+                if rc != 0:
+                    lines.append(
+                        f"FAIL {task['id']}: commit {sha} -- no such commit in this repository"
+                    )
+                    continue
+                rc, _, _ = sh_in(repo, "git", "merge-base", "--is-ancestor", sha, "HEAD")
+                if rc != 0:
+                    lines.append(
+                        f"FAIL {task['id']}: commit {sha} exists but is not reachable from HEAD"
+                    )
+    return lines, checked
 
 
 def baseline_rows(rel):
@@ -586,6 +657,8 @@ def main():
     rows = list(problems) + list(listing)
     totals, ledgers, ledger_errors = ledger_totals()
     rows += ledger_errors
+    commit_lines, commits_checked = ledger_commit_evidence(ledgers)
+    rows += commit_lines
     rows += shared_group_key()
     if not checks:
         rows.append("FAIL tools/lint.sh: derived no checks from the all chain")
@@ -615,7 +688,8 @@ def main():
     owner = [r for r in rows if r.startswith("OWNER")]
     summary = (
         f"{len(docs)} documents against {len(checks)} gates derived "
-        f"from tools/lint.sh, table shape in all {len(everything)}; "
+        f"from tools/lint.sh, table shape in all {len(everything)}, "
+        f"{commits_checked} ledger commit reference(s) resolved; "
         f"{len(owner)} owner-file note(s) reported and not enforced"
     )
     if fails:
