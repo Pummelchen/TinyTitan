@@ -241,8 +241,8 @@ jobs:
       - name: Benchmark and memory tooling gates (model-free)
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
-        # gates a release. Every one of them is stdlib-only, measured as 12 suites and
-        # 117 tests in 3.4 s with no model, no server and no third-party import, and
+        # gates a release. Every one of them is stdlib-only, measured as 13 suites and
+        # 125 tests in 12.8 s with no model, no server and no third-party import, and
         # the registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
