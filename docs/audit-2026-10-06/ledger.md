@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:95  Blocked:1  Total:96**
+**Open:0  Done:96  Blocked:1  Total:97**
 
 ## Table
 
@@ -74,6 +74,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-192 | S2 | A | runtime | `sources/TinyTitan/Infrastructure/ModelIO/ManifestReader.swift:145 (the peek's literal `maxBytes: 4 * 1024 * 1024`) against :20 (`defaultMaxBytes` = 64 MiB, which every other reader of the same file uses), and the two places the refusal is fatal: sources/TinyTitanLib/Engine.swift:66-70 and sources/TinyTitanLib/ServerModelSession+Loading.swift:98` | `peekFamily`/`peekIdentity` read `manifest.json` with the 4 MiB ceiling the load moved off two years ago, so the front door refuses the installs the ceiling exists to admit | one bound declared twice, only one of them raised -- a supported model cannot be opened, and the error names the wrong thing | DONE | Mac (primary) |
 | AUD-194 | S2 | A | server | `sources/TinyTitanServer/Core/HTTPServerHandler+Streaming.swift:313-341 (finishStream), with the guard it went around at :369-388 (enqueueStreamChunk) and :397-417 (failStream)` | A chat stream whose finish frame was refused by the backpressure cap still ended with data: [DONE], so the client read a complete answer that had no finish_reason and no usage | a terminal frame that discards the result of the guard every other frame obeys: the stream reports success on the part the server knows it dropped | DONE | Mac (primary) |
 | AUD-196 | S2 | B | release | `tools/release.sh:105-108 (the only writer), read bare at :535-537 in the notes block that starts at :480` | The documented publish command died with `unbound variable` on every green release, at the last step after both archives were built and hashed | a variable written on one branch and read on the other, under `set -u`: the guard that exists to make an override honest is unreachable whenever CI is actually green | DONE | Mac (primary) |
+| AUD-197 | S2 | A | installer | `tools/dsh_local.sh:402 (the guard that only covers the fetch branch), :405-424 (the mkdir and the two shim heredocs it left in front of)` | TINYTITAN_DSH_DRY_RUN=1 wrote an executable pnpm shim anyway, on exactly the path where the shim is the thing that is broken | a guard placed on one branch of a two-branch repair: the promise in the flag's own help text held wherever the suite could reach, and nowhere else | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -1343,6 +1344,24 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 **Evidence after.** GREEN: the else branch gives the green path a value and python3 -m unittest test_release_ci_green -> "Ran 19 tests in 1.106s, OK"; the compactor is reached with --max-chars and no extra --require. All three mutations measured: removing the else fails exactly the two green tests while the overridden test still passes; replacing the else with an unconditional CI_NOTES_REQUIRE="$CI_RED_URL" fails exactly test_a_green_ci_does_not_require_a_placeholder_dash with '-' unexpectedly found in the requires list, which is the wrong fix the shape invites, since a green helper line ends in the - placeholder; the anchor test fails if the extracted region stops containing the guard. Gates: ./tools/lint.sh python exit 0 (ruff 0.16.7 check and format clean) and all eighteen ./tools/lint.sh all exit 0.
 
 **Commit.** `14fdfb7`
+
+### AUD-197 — TINYTITAN_DSH_DRY_RUN=1 wrote an executable pnpm shim anyway, on exactly the path where the shim is the thing that is broken
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** installer
+- **Location:** `tools/dsh_local.sh:402 (the guard that only covers the fetch branch), :405-424 (the mkdir and the two shim heredocs it left in front of)`
+- **Category:** a guard placed on one branch of a two-branch repair: the promise in the flag's own help text held wherever the suite could reach, and nowhere else
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D convergence on the launcher, reading each side effect against the DRY_RUN guards around it rather than trusting the existing dry-run test. install_pnpm returns early from its guard only inside the block that fetches the package; the write section below it has no guard at all.
+
+**Evidence before.** RED, twice over. Live: a temp HOME with npm-prefix/node_modules/pnpm/bin/pnpm.mjs seeded and TINYTITAN_DSH_DRY_RUN=1 tools/dsh_local.sh ensure exits 0 and leaves .tinytitan/dsh/bin/pnpm behind, which the run then prints a version for. In the suite: python3 -m unittest test_dsh_isolation.PrivateHarnessIsolationTests -> "Ran 8 tests ... FAILED (failures=1)", AssertionError: True is not false : the dry run created the private bin dir. The existing test_a_dry_run_writes_nothing_at_all passes over the same script because its home is empty, which routes the run through the fetch branch and its guard.
+
+**Fix.** The guard moves ahead of the mkdir, prints the path it would write, and returns, which is the shape the file already uses at :446 for settings.yaml. The sibling sweep of every mutation in the script found the other candidates and dismissed them: the rm -rf at :265-290 deletes only the scratch directory the same run made, and the smoke command at :886/:938 is a check that launches the harness by definition rather than an install, so the copy into its own smoke dir is its purpose, not a dry-run violation. Not covered: the fetch branch itself, which needs a real npm install to exercise and nothing here fetches.
+
+**Evidence after.** GREEN: the same live run now prints "would write the private pnpm shim at <root>/bin/pnpm" and the private root holds only the seeded npm-prefix. python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_node_digest -> "Ran 49 tests in 6.471s, OK". The write path is proven still live rather than merely quiet: the identical fixture without DRY_RUN produces a 331-byte mode-755 shim and "✓ pnpm 12.4.2 via ...". Gates: ./tools/lint.sh shell ok (27 scripts on system bash 3.2.57), ./tools/lint.sh shellcheck ok (0.11.0, no warnings), ./tools/lint.sh python ok (ruff 0.16.7).
+
+**Commit.** `4122b82`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 

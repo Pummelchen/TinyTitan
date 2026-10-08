@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 96,
-    "done": 95,
+    "total": 97,
+    "done": 96,
     "open": 0,
     "blocked": 1
   },
@@ -1619,6 +1619,22 @@
       "evidence-after": "GREEN: the else branch gives the green path a value and python3 -m unittest test_release_ci_green -> \"Ran 19 tests in 1.106s, OK\"; the compactor is reached with --max-chars and no extra --require. All three mutations measured: removing the else fails exactly the two green tests while the overridden test still passes; replacing the else with an unconditional CI_NOTES_REQUIRE=\"$CI_RED_URL\" fails exactly test_a_green_ci_does_not_require_a_placeholder_dash with '-' unexpectedly found in the requires list, which is the wrong fix the shape invites, since a green helper line ends in the - placeholder; the anchor test fails if the extracted region stops containing the guard. Gates: ./tools/lint.sh python exit 0 (ruff 0.16.7 check and format clean) and all eighteen ./tools/lint.sh all exit 0.",
       "fix-summary": "Both branches of the CI-status parse now write CI_NOTES_REQUIRE, so the read at the notes guard is of a variable that always exists, and the guard itself stays a plain `[ -n ... ]` like its neighbours. The regression is AUD-105's own, which is why the test file is that finding's: its ReleaseScriptTests asserted on the script's text, and text was the one thing that could not show an unbound read. The new class runs the script's real lines with a stub python3 that records the arguments the compaction step is handed, and nothing is fetched, built or published.",
       "commit": "14fdfb7"
+    },
+    {
+      "id": "AUD-197",
+      "severity": "S2",
+      "tier": "A",
+      "project": "installer",
+      "file_line": "tools/dsh_local.sh:402 (the guard that only covers the fetch branch), :405-424 (the mkdir and the two shim heredocs it left in front of)",
+      "title": "TINYTITAN_DSH_DRY_RUN=1 wrote an executable pnpm shim anyway, on exactly the path where the shim is the thing that is broken",
+      "category": "a guard placed on one branch of a two-branch repair: the promise in the flag's own help text held wherever the suite could reach, and nowhere else",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "Phase D convergence on the launcher, reading each side effect against the DRY_RUN guards around it rather than trusting the existing dry-run test. install_pnpm returns early from its guard only inside the block that fetches the package; the write section below it has no guard at all.",
+      "evidence-before": "RED, twice over. Live: a temp HOME with npm-prefix/node_modules/pnpm/bin/pnpm.mjs seeded and TINYTITAN_DSH_DRY_RUN=1 tools/dsh_local.sh ensure exits 0 and leaves .tinytitan/dsh/bin/pnpm behind, which the run then prints a version for. In the suite: python3 -m unittest test_dsh_isolation.PrivateHarnessIsolationTests -> \"Ran 8 tests ... FAILED (failures=1)\", AssertionError: True is not false : the dry run created the private bin dir. The existing test_a_dry_run_writes_nothing_at_all passes over the same script because its home is empty, which routes the run through the fetch branch and its guard.",
+      "evidence-after": "GREEN: the same live run now prints \"would write the private pnpm shim at <root>/bin/pnpm\" and the private root holds only the seeded npm-prefix. python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_node_digest -> \"Ran 49 tests in 6.471s, OK\". The write path is proven still live rather than merely quiet: the identical fixture without DRY_RUN produces a 331-byte mode-755 shim and \"✓ pnpm 12.4.2 via ...\". Gates: ./tools/lint.sh shell ok (27 scripts on system bash 3.2.57), ./tools/lint.sh shellcheck ok (0.11.0, no warnings), ./tools/lint.sh python ok (ruff 0.16.7).",
+      "fix-summary": "The guard moves ahead of the mkdir, prints the path it would write, and returns, which is the shape the file already uses at :446 for settings.yaml. The sibling sweep of every mutation in the script found the other candidates and dismissed them: the rm -rf at :265-290 deletes only the scratch directory the same run made, and the smoke command at :886/:938 is a check that launches the harness by definition rather than an install, so the copy into its own smoke dir is its purpose, not a dry-run violation. Not covered: the fetch branch itself, which needs a real npm install to exercise and nothing here fetches.",
+      "commit": "4122b82"
     }
   ]
 }
