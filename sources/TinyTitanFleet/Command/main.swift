@@ -16,41 +16,6 @@ import TinyTitanFleetCore
 ///   ttlanmanager session archive --session ID
 ///   ttlanmanager workspace delete --workspace ID
 
-let usage = """
-    \(FleetBrand.name) (\(FleetBrand.command)) — a control plane for a group of DSH hosts.
-
-    usage: \(FleetBrand.command) [--peer HOST[:PORT]] [--key KEY] [--json] [--timeout SECONDS] <command>
-
-      top                                              live dashboard: every member, what it holds, act on it
-      list                                             every Mac in the group, with its workspaces and sessions
-      prompt --session ID --text TEXT                  prompt one session, on the Mac that owns it
-      prompt-all --text TEXT [--limit N] [--concurrency N]
-                                                       prompt every active session in the group
-      workspace create --on NAME --path DIR [--title TITLE]
-                                                       register a folder as a workspace on one Mac
-      session archive --session ID                     hide a session (reversible; history kept)
-      workspace delete --workspace ID [--keep-sessions]
-                                                       remove a workspace from the registry
-
-    `top` draws the group live; a scanner on its own task polls the fleet every 30 s
-    by default — half the plugin's discovery period, so its polling adds at most half
-    a cycle of latency — while the window keeps drawing. It resizes with the window
-    and never needs more than 44x6. `--once` prints a single frame instead
-    (useful in a pipe, and with --width/--height for a fixed size). `--from FILE`
-    renders an inventory JSON taken earlier — or from stdin with `-` — with no fleet
-    running.
-
-    --peer is the member the group is *read* from (default 127.0.0.1:3080); --on is
-    the member an action is sent to. Every action then goes directly to the Mac that
-    owns it — nothing is relayed through another instance. --json prints the raw
-    answer. An action exits 0 only when the Mac that owns it confirms it: a refusal,
-    or an answer that does not confirm, exits 1. --version prints the name. Keys
-    resolve in this order: --key,
-    DSH_LAN_KEY, DSH_LAN_TOKEN, the plugin's shipped default. Prefer the
-    environment forms: --key puts the key in argv, where every other local
-    account can read it with ps.
-    """
-
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("\(FleetBrand.command): \(message)\n".utf8))
     exit(1)
@@ -72,6 +37,22 @@ var arguments = Array(CommandLine.arguments.dropFirst())
     return true
 }
 
+/// A numeric option's value, or `nil` when the flag is absent. Text that is not a
+/// number fails the run: `--timeout ten` means to set a timeout, and answering it
+/// with the default is a wrong answer given silently.
+@MainActor func numberOption<V: LosslessStringConvertible>(_ name: String) -> V? {
+    guard let raw = takeOption(name) else { return nil }
+    guard let value = V(raw) else {
+        fail("\(name) needs a number, not \(raw)")
+    }
+    // `Double("nan")` and `Double("inf")` parse, and a NaN timeout is not a
+    // timeout the operator meant. Integers have no such spellings.
+    if let real = value as? Double, !real.isFinite {
+        fail("\(name) needs a finite number, not \(raw)")
+    }
+    return value
+}
+
 /// Outcomes as JSON, built here rather than by hand in the middle of a `print`.
 func outcomesJSON(_ outcomes: [FleetOutcome]) -> String {
     let rows = outcomes.map { outcome in
@@ -85,7 +66,7 @@ func outcomesJSON(_ outcomes: [FleetOutcome]) -> String {
 }
 
 if arguments.contains("--help") || arguments.contains("-h") {
-    print(usage)
+    print(FleetUsage.text)
     exit(0)
 }
 if arguments.contains("--version") {
@@ -97,20 +78,20 @@ let peerText = takeOption("--peer")
 let onMember = takeOption("--on")
 let keyOption = takeOption("--key")
 let basePath = takeOption("--base-path") ?? "/dsh-lan"
-let timeout = takeOption("--timeout").flatMap(Double.init) ?? 10
+let timeout: Double = numberOption("--timeout") ?? 10
 let sessionOption = takeOption("--session")
 let workspaceOption = takeOption("--workspace")
 let textOption = takeOption("--text")
 let pathOption = takeOption("--path")
 let titleOption = takeOption("--title")
-let limitOption = takeOption("--limit").flatMap(Int.init)
-let concurrencyOption = takeOption("--concurrency").flatMap(Int.init)
+let limitOption: Int? = numberOption("--limit")
+let concurrencyOption: Int? = numberOption("--concurrency")
 let asJSON = takeFlag("--json")
 let keepSessions = takeFlag("--keep-sessions")
 let once = takeFlag("--once")
-let widthOption = takeOption("--width").flatMap(Int.init)
-let heightOption = takeOption("--height").flatMap(Int.init)
-let intervalOption = takeOption("--interval").flatMap(Int.init)
+let widthOption: Int? = numberOption("--width")
+let heightOption: Int? = numberOption("--height")
+let intervalOption: Int? = numberOption("--interval")
 let fromOption = takeOption("--from")
 
 let environment = ProcessInfo.processInfo.environment
@@ -121,10 +102,18 @@ if let warning = keyResolution.warning {
 }
 
 guard let command = arguments.first else {
-    print(usage)
+    print(FleetUsage.text)
     exit(2)
 }
 arguments.removeFirst()
+
+// An option no one reads is otherwise dropped on the floor, and the run then does
+// something other than what the operator asked: `workspace delete --workspace ID
+// --keep-session` (one "s" short) used to delete the workspace *and* archive the
+// sessions that flag was meant to protect.
+if let stray = arguments.first(where: { $0.hasPrefix("--") }) {
+    fail("unknown option: \(stray)")
+}
 
 let seedText = peerText ?? "127.0.0.1:3080"
 guard let seed = FleetTarget(text: seedText, defaultPort: 3080) else {
