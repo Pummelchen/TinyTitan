@@ -121,15 +121,15 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-08, **111 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count @{u}..HEAD` — 110 measured at `87887d9`, and the close commit this row lands in is the 111th; the commit that edits this row makes it one more, which is what the command is for, not a mistake to fix); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `87887d9` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-08, **113 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count @{u}..HEAD` — 112 measured at `21417b3`, and the close commit this row lands in is the 113th; the commit that edits this row makes it one more, which is what the command is for, not a mistake to fix); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `21417b3` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **88 rows / 87 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **89 rows / 88 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
-| CI | every `main` push runs the `test` job (eighteen gates, plugin/ converter/ installer/ release gates, the embedded-dependency check, serial tests, Markdown links) and the `thread-sanitizer` job, plus CodeQL (`languages: swift`); the release commit's push is the run to watch (`gh run list`). As of 2026-10-08 nothing has been pushed, so **no run covers the 111 commits above** (`git rev-list --count origin/main..HEAD`, measured at `87887d9` plus this commit — the row is wrong the moment anything lands, and the `main` row above carries the same number) — that is the `main` row, not a secret. Two CI arms have been run by hand on this tree because no push can cover them: `tools/embedded-dependency-check.sh` is exit 0 at `87ace2c` (`Build complete! (29.43 sec)`, `EmbeddedDemo: TinyTitanLib linked (Engine)`, `== ok: the package is consumable as a dependency ==`, `/tmp/embedded188.log`), and the plugin suites pass through `tools/lint.sh javascript` on the pinned 10.11.0/3.9.9. Neither is evidence about the *pushed* tree; they are evidence that this tree would pass |.
+| CI | every `main` push runs the `test` job (eighteen gates, plugin/ converter/ installer/ release gates, the embedded-dependency check, serial tests, Markdown links) and the `thread-sanitizer` job, plus CodeQL (`languages: swift`); the release commit's push is the run to watch (`gh run list`). As of 2026-10-08 nothing has been pushed, so **no run covers the 113 commits above** (`git rev-list --count origin/main..HEAD`, measured at `21417b3` plus this commit — the row is wrong the moment anything lands, and the `main` row above carries the same number) — that is the `main` row, not a secret. Two CI arms have been run by hand on this tree because no push can cover them: `tools/embedded-dependency-check.sh` is exit 0 at `87ace2c` (`Build complete! (29.43 sec)`, `EmbeddedDemo: TinyTitanLib linked (Engine)`, `== ok: the package is consumable as a dependency ==`, `/tmp/embedded188.log`), and the plugin suites pass through `tools/lint.sh javascript` on the pinned 10.11.0/3.9.9. Neither is evidence about the *pushed* tree; they are evidence that this tree would pass |.
 
 ## What has landed
 
@@ -269,17 +269,25 @@ is the authority. On 2026-10-04 it holds one Open row:
    token ahead. TT-021–TT-023 were closed on 2026-09-19 (no other machines; no disk
    for the ~360 GB bf16 reference), so the M1–M6 claim stays a design intent and
    Qwen 3.8 long-context stays verified only at a lowered budget.
-3. **One audit follow-up that measurement could not close** (found by AUD-188's
-   sibling sweep): `try? await flush()` at `ContinuityEngine.swift:106` and `:125`,
-   and the deferred barrier at `Journal.swift:205`, swallow a failure of the
-   durability barrier without recording it in `journalFailure` — so a workspace
-   whose `fsync` fails goes on reporting itself durable, which is the one promise
-   the memory subsystem is written to keep honestly. It was not filed because it
-   could not be reproduced here rather than because it looks fine: `flush()` casts
-   its journal to `FileJournal` and returns for anything else, so no injected
-   journal can fail a barrier through any seam, and nothing on this Mac makes
-   `fsync` fail on a file whose `write` calls all succeeded. A next attempt needs
-   a real `FileJournal` on a volume that can be made to refuse it.
+3. **Two audit follow-ups that measurement could not close.**
+   (a) `try? await flush()` at `ContinuityEngine.swift:106` and `:125`, and the
+   deferred barrier at `Journal.swift:145`, swallow a failure of the durability
+   barrier without recording it in `journalFailure` — so a workspace whose `fsync`
+   fails goes on reporting itself durable, which is the one promise the memory
+   subsystem is written to keep honestly. It was not filed because it could not be
+   reproduced here rather than because it looks fine: `flush()` casts its journal to
+   `FileJournal` and returns for anything else, so no injected journal can fail a
+   barrier through any seam, and nothing on this Mac makes `fsync` fail on a file
+   whose `write` calls all succeeded. A next attempt needs a real `FileJournal` on a
+   volume that can be made to refuse it.
+   (b) AUD-189's fix repairs a dangling journal line when the file is next *opened*;
+   an append that fails partway inside a running process leaves the same line until
+   then, and its next record would fuse onto it. The writer there already has an
+   error in hand and records the durability failure, so the loss is reported — what
+   is not pinned is the recovery. It has no test seam: a partial `write(2)` needs a
+   disk that fills mid-call, and no gate here may fill one. Closing it needs either a
+   volume that can refuse a write at a chosen byte count or a decision to accept the
+   next open as the repair point.
 
 TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
 machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
@@ -404,6 +412,14 @@ left as an upstream ask in `docs/dsh-upstream-asks.md`.
   broken links from vendored READMEs. Build output, vendored dependencies and
   model stores are not project source: exclude them explicitly, and re-run any
   whole-tree scanner after adding an install step.
+- **Opening a journal for writing now truncates its last incomplete line.**
+  `FileJournal` was append-only, except at compaction, until 2026-10-08; AUD-189 put
+  `dropDanglingTail` in the initializer, because the unterminated tail a kill leaves is
+  also the line `O_APPEND` writes the next record onto, and the fused line decodes as
+  neither. The bytes removed are ones `replay` already dropped, so no readable record
+  is lost — but a journal copied out of a workspace after a crash is shorter than the
+  same file was a minute before the server opened it, and that is the repair, not a
+  second defect.
 - **Say what a guard actually reads, not what it intends**, and **test a claim
   rather than trusting it** — both defects that reached a release in this project
   were claims broader or more specific than the code.
