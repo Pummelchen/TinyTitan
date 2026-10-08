@@ -457,9 +457,17 @@ def get_path(record: dict, dotted: str):
 
 
 def compare(baseline: dict, candidate: dict, threshold: float) -> bool:
-    """Print the diff and return True when nothing regressed."""
+    """Print the diff and return True when nothing regressed.
+
+    A metric that is not a number on both sides is skipped rather than failed,
+    because a qwen36-only ANE row is absent from every other model's record. That
+    is why the count is printed: the same rule makes a candidate whose probes all
+    wrote `{"error": …}` compare as zero rows and no regression, which is a record
+    that measured nothing, not a build that held its speeds.
+    """
     print(f"{'metric':<44} {'baseline':>12} {'now':>12} {'delta':>9}  status")
     ok = True
+    compared = 0
     for metric, direction in PERF_METRICS.items():
         before = get_path(baseline, metric)
         after = get_path(candidate, metric)
@@ -467,6 +475,7 @@ def compare(baseline: dict, candidate: dict, threshold: float) -> bool:
             continue
         if before == 0:
             continue
+        compared += 1
         delta = (after - before) / before * 100.0
         if direction == "higher":
             regressed = delta < -threshold
@@ -477,6 +486,7 @@ def compare(baseline: dict, candidate: dict, threshold: float) -> bool:
             ok = False
         print(f"{metric:<44} {before:>12.3f} {after:>12.3f} {delta:>8.1f}%  {status}")
 
+    print(f"{compared} metric(s) compared")
     base_quality = baseline.get("quality", {})
     now_quality = candidate.get("quality", {})
     base_cov = base_quality.get("keyword_coverage")
@@ -494,6 +504,12 @@ def compare(baseline: dict, candidate: dict, threshold: float) -> bool:
             "note: the greedy response changed; review the recorded text "
             "before treating the numbers as comparable"
         )
+    if compared == 0:
+        print(
+            "FAIL: no metric was comparable — a candidate whose probes all failed "
+            "is not a candidate that regressed in nothing"
+        )
+        return False
     return ok
 
 

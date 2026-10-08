@@ -21,7 +21,9 @@ Run from this directory, like the other benchmark tests:
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import pathlib
 import shutil
@@ -324,6 +326,38 @@ class CompareTests(unittest.TestCase):
                 self.candidate(), self.candidate(quality__keyword_coverage=0.2), 10.0
             )
         )
+
+    def test_a_record_whose_probes_all_failed_is_refused(self):
+        """A candidate in which nothing was measured is not a candidate that
+        regressed in nothing."""
+        broken = {
+            "model": {"path": "models/qwen3.5_4B_4Bit", "prompt": "x"},
+            "environment": {"git_describe": "v5.18"},
+            "gpu": {"error": "qkv_gemv: exit 1", "output": "…"},
+            "cpu": {"error": "cpugemv: exit 1", "output": "…"},
+            "generation": {"error": "cli exit 1", "stderr": "…"},
+        }
+        self.assertFalse(internal_speeds.compare(self.candidate(), broken, 10.0))
+
+    def test_the_number_compared_is_printed(self):
+        """The table is the only evidence a reader has that a comparison ran, so
+        the count has to be in the output rather than inferred from row height."""
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            internal_speeds.compare(self.candidate(), self.candidate(), 10.0)
+        printed = buffer.getvalue()
+        self.assertIn("10 metric(s) compared", printed)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            internal_speeds.compare(
+                self.candidate(),
+                {
+                    "model": {"path": "models/qwen3.5_4B_4Bit", "prompt": "x"},
+                    "generation": {"error": "cli exit 1"},
+                },
+                10.0,
+            )
+        self.assertIn("0 metric(s) compared", buffer.getvalue())
 
 
 if __name__ == "__main__":
