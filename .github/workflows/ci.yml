@@ -242,13 +242,15 @@ jobs:
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
         # gates a release. Every one of them is stdlib-only, measured on this host
-        # 2026-10-08 as 16 suites and 143 tests with no model, no server, no Xcode and
+        # 2026-10-08 as 17 suites and 147 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
-        # and test_memory_command_names runs each memory driver's own dispatch with a
-        # bogus command word, which needs no port at all); wall time was 19 s at load
-        # average 4, against 16 s on a quiet machine and 32-58 s while the host sat at
-        # load average 16, so the count is the claim and the timing is not. The
+        # test_memory_command_names runs each memory driver's own dispatch with a
+        # bogus command word, which needs no port at all, and
+        # test_driver_documented_commands reads a driver's docstring against its
+        # dispatch table); wall time was 19 s at load average 4, against 16 s on a
+        # quiet machine and 32-58 s while the host sat at load average 16, so the
+        # count is the claim and the timing is not. The
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -262,7 +264,8 @@ jobs:
             test_ornith_concise_tool_ab test_ornith_four_program_matrix \
             test_ane_prefill_ab_matrix test_ane_prefill_correctness \
             test_quant_quality_ab_exit test_docs_facts_suites test_memory_mini_report \
-            test_tsan_storm_exit test_memory_command_names
+            test_tsan_storm_exit test_memory_command_names \
+            test_driver_documented_commands
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

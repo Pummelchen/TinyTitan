@@ -41,7 +41,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import urllib.request
@@ -261,50 +260,6 @@ def extract(text: str) -> dict:
         if found:
             return found
     return {}
-
-
-def code_block(text: str) -> str:
-    blocks = re.findall(r"```[a-zA-Z0-9+]*\n(.*?)```", text, re.S)
-    return max(blocks, key=len) if blocks else ""
-
-
-def compiles(stage: str, code: str) -> bool | None:
-    """Whether the stage's code builds or parses. None when not attempted."""
-    if not code.strip():
-        return False
-    work = OUT / "compile"
-    work.mkdir(parents=True, exist_ok=True)
-    try:
-        if stage == "swift":
-            path = work / "pong.swift"
-            path.write_text(code)
-            done = subprocess.run(
-                ["swiftc", "-typecheck", str(path)], capture_output=True, timeout=180, check=False
-            )
-            return done.returncode == 0
-        if stage == "python":
-            path = work / "pong.py"
-            path.write_text(code)
-            done = subprocess.run(
-                [sys.executable, "-m", "py_compile", str(path)],
-                capture_output=True,
-                timeout=120,
-                check=False,
-            )
-            return done.returncode == 0
-        if stage == "c99":
-            path = work / "pong.c"
-            path.write_text(code)
-            done = subprocess.run(
-                ["cc", "-std=c99", "-fsyntax-only", str(path)],
-                capture_output=True,
-                timeout=180,
-                check=False,
-            )
-            return done.returncode == 0
-    except Exception:
-        return False
-    return None
 
 
 def report():

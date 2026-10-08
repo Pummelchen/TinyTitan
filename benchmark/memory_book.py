@@ -12,11 +12,13 @@ that range. At the end of every session the model answers a fixed continuity
 quiz as JSON, and the quiz is scored against the bible and against which
 events have happened by then.
 
-Three arms, identical chapter prompts:
+Four arms, identical chapter prompts:
 
     summary   no memory; the harness asks for a 200-word summary at the end
               of each session and prepends it to the next. This is what a
               client's own compaction does, so it is the honest baseline.
+    auto      memory on, no tools: the bootstrap fragment alone, with nothing
+              the model can write back.
     minimal   memory on, memory_set and memory_get, journal on
     full      memory on, all six tools, journal on
 
