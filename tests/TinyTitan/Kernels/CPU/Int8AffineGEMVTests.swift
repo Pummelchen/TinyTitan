@@ -110,15 +110,18 @@ import Testing
     /// One row block at one width, laid out exactly as a snapshot lays it,
     /// through `CPUOps.gemv` — the wrapper the engine itself calls.
     ///
-    /// Scale is BF16 1.0 and bias BF16 0.0, and every lane is 0...15, so both
-    /// widths multiply exactly the same products: any difference between the
-    /// two results can only have come from the order they were summed in.
+    /// Scale is BF16 1.0 and, unless `biasBits` says otherwise, bias BF16 0.0;
+    /// every lane is 0...15, so both widths multiply exactly the same products
+    /// and any difference between the two results can only have come from the
+    /// order they were summed in. A non-zero bias is the only way to make the
+    /// kernel's per-group `sum(x)` term affect the row at all.
     private static func gemvAtWidth(
         bits: Int,
         lanes: [UInt8],
         x: [Float],
         rows: Int,
-        columns: Int
+        columns: Int,
+        biasBits: UInt16 = 0
     ) -> [Float] {
         let groups = columns / Quantization.groupSize
         let bytesPerRow = columns * bits / 8
@@ -135,7 +138,7 @@ import Testing
             weights = Array(lanes)
         }
         let scales = [UInt16](repeating: 0x3F80, count: rows * groups)
-        let biases = [UInt16](repeating: 0, count: rows * groups)
+        let biases = [UInt16](repeating: biasBits, count: rows * groups)
         var out = [Float](repeating: .nan, count: rows)
         weights.withUnsafeBytes { raw in
             scales.withUnsafeBufferPointer { s in
@@ -200,6 +203,45 @@ import Testing
             #expect(
                 gap <= tolerance,
                 "row \(index): gap \(gap) over \(tolerance) (\(four[index]) vs \(eight[index]))")
+        }
+    }
+
+    /// Both kernels hoist `sum(x)` per group into a fixed 256-entry stack
+    /// table, and a row wider than that is supposed to fall back to
+    /// recomputing it inside the group loop rather than read past the table:
+    /// `int4_affine_gemv.c:18` promises exactly that ("wider rows fall back to
+    /// the per-row path rather than being wrong"). No shipping tensor is that
+    /// wide — 256 groups is an input width of 16384, past every install here —
+    /// so the branch was measured only by a scratch C probe until this test.
+    ///
+    /// 257 groups, both widths, against the same products summed in double.
+    /// The bias is BF16 0.5 rather than 0: with a zero bias the `sum(x)` term
+    /// multiplies out to nothing and the test could not see the fallback at
+    /// all, however wrong it was.
+    @Test func rowsWiderThanTheHoistedSumTableMatchTheReference() {
+        let columns = 257 * 64
+        let rows = 2
+        let bias: Double = 0.5
+        let lanes: [UInt8] = (0..<(rows * columns)).map { UInt8($0 % 16) }
+        let x = Self.pseudorandom(columns, seed: 7)
+        for bits in [4, 8] {
+            let kernel = Self.gemvAtWidth(
+                bits: bits, lanes: lanes, x: x, rows: rows, columns: columns,
+                biasBits: 0x3F00)
+            for index in 0..<rows {
+                var reference = 0.0
+                var total = 0.0
+                for column in 0..<columns {
+                    let product = Double(lanes[index * columns + column]) * Double(x[column])
+                    let biasTerm = bias * Double(x[column])
+                    reference += product + biasTerm
+                    total += abs(product) + abs(biasTerm)
+                }
+                let gap = abs(kernel[index] - Float(reference))
+                let tolerance = Float(1e-6 * total)
+                let message = "\(bits)-bit row \(index): \(kernel[index]) vs \(reference)"
+                #expect(gap <= tolerance, "gap \(gap) over \(tolerance): \(message)")
+            }
         }
     }
 
