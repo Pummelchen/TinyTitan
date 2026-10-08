@@ -395,6 +395,122 @@ def tracked_file_count(pattern):
     return len([path for path in out.splitlines() if path])
 
 
+CI_WORKFLOW = ".github/workflows/ci.yml"
+SUITE_EXEMPTIONS = "tools/python-suites-unrun.txt"
+SUITE_NAME = re.compile(r"\btest_[a-z0-9_]+\b")
+
+
+def ci_invoked_suites(workflow):
+    """The suites CI actually *invokes* -- names on a `python3 -m unittest` command
+    and its backslash continuations, with comments stripped.
+
+    Scanning the whole file instead would register a suite by mentioning it: the
+    workflow's own comment about `test_launcher_*` matched a name that is not a
+    command, and a name inside a comment runs nothing on any machine.
+    """
+    named = set()
+    pending = False
+    for raw in workflow.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if pending or "unittest" in line:
+            named.update(SUITE_NAME.findall(line))
+            pending = line.endswith("\\")
+        else:
+            pending = False
+    return named
+
+
+def python_suite_registration(root=None):
+    """AUD-211: a suite the workflow does not name is a suite that never runs.
+
+    `benchmark/` python suites are invoked by name -- `python3 -m unittest test_a
+    test_b` -- in four hand-written CI steps, so registration is a list somebody has
+    to remember to extend. The failure is silent in the worst way: the suite passes
+    locally, is cited as evidence in a commit message, and runs on no machine ever.
+    This audit filed that for the launcher suites (AUD-126) and then did it twice
+    itself, in the two suites AUD-208 and AUD-209 added.
+
+    The rule: every tracked `benchmark/test_*.py` is either named in the workflow or
+    present in `tools/python-suites-unrun.txt` as `name<TAB>reason`, for the suites
+    that genuinely cannot run there -- a model install, a live server, coremltools.
+    A stale exemption, an exemption with no reason, an exemption for a file that is
+    gone, a workflow naming a suite that does not exist, and a repository with no
+    suites at all all fail: each of them is the same silence wearing a different hat.
+    Returns (finding lines, registered, exempt); the two counts are printed by
+    main(), because `ok` over zero registered suites would be a pass with nothing
+    behind it.
+    """
+    repo = str(root) if root is not None else ROOT
+    lines = []
+    rc, out, err = sh_in(repo, "git", "ls-files", "benchmark/test_*.py")
+    if rc != 0:
+        return [f"FAIL cannot list tracked python suites: {err}"], 0, 0
+    suites = {}
+    for rel in out.splitlines():
+        if rel:
+            suites[os.path.basename(rel)[: -len(".py")]] = rel
+    if not suites:
+        return (
+            ["FAIL no benchmark/test_*.py is tracked, so suite registration checked nothing"],
+            0,
+            0,
+        )
+
+    try:
+        with open(os.path.join(repo, CI_WORKFLOW), encoding="utf-8") as handle:
+            workflow = handle.read()
+    except (OSError, UnicodeDecodeError) as error:
+        return [f"FAIL cannot read {CI_WORKFLOW} for the suite list: {error}"], 0, 0
+    named = ci_invoked_suites(workflow)
+
+    exempt = {}
+    exemption_path = os.path.join(repo, SUITE_EXEMPTIONS)
+    try:
+        with open(exemption_path, encoding="utf-8") as handle:
+            for raw in handle:
+                entry = raw.rstrip("\n")
+                if not entry.strip() or entry.startswith("#"):
+                    continue
+                name, _, reason = entry.partition("\t")
+                name = name.strip()
+                if not reason.strip():
+                    lines.append(
+                        f"FAIL {SUITE_EXEMPTIONS}: {name} is exempted with no reason -- "
+                        "the reason is the whole content of the exemption"
+                    )
+                    continue
+                if name not in suites:
+                    lines.append(
+                        f"FAIL {SUITE_EXEMPTIONS}: {name} is not a tracked suite "
+                        f"(no benchmark/{name}.py)"
+                    )
+                    continue
+                if name in named:
+                    lines.append(
+                        f"FAIL stale exemption: {name} is now named in {CI_WORKFLOW}, so "
+                        f"delete its {SUITE_EXEMPTIONS} row"
+                    )
+                    continue
+                exempt[name] = reason.strip()
+    except OSError as error:
+        if os.path.exists(exemption_path):
+            lines.append(f"FAIL cannot read {SUITE_EXEMPTIONS}: {error}")
+
+    for name, rel in sorted(suites.items()):
+        if name in named:
+            continue
+        if name not in exempt:
+            lines.append(
+                f"FAIL {rel} is tracked and named nowhere: not in {CI_WORKFLOW}, not in "
+                f"{SUITE_EXEMPTIONS} -- a suite nobody lists never runs, and its green is local only"
+            )
+    for name in sorted(named - set(suites)):
+        lines.append(f"FAIL {CI_WORKFLOW} names {name} and no benchmark/{name}.py is tracked")
+    return lines, len(suites) - len(exempt), len(exempt)
+
+
 def golden_target_count():
     """How many targets `tools/golden-baseline.sh` answers to, read from the
     `unknown target:` message -- the same list a user sees when they typo one."""
@@ -660,6 +776,8 @@ def main():
     commit_lines, commits_checked = ledger_commit_evidence(ledgers)
     rows += commit_lines
     rows += shared_group_key()
+    suite_lines, suites_registered, suites_exempt = python_suite_registration()
+    rows += suite_lines
     if not checks:
         rows.append("FAIL tools/lint.sh: derived no checks from the all chain")
 
@@ -690,6 +808,7 @@ def main():
         f"{len(docs)} documents against {len(checks)} gates derived "
         f"from tools/lint.sh, table shape in all {len(everything)}, "
         f"{commits_checked} ledger commit reference(s) resolved; "
+        f"{suites_registered}/{suites_registered + suites_exempt} python suites registered in CI; "
         f"{len(owner)} owner-file note(s) reported and not enforced"
     )
     if fails:

@@ -1,0 +1,13 @@
+# Suites that exist, are real, and cannot run on a CI runner — one row each, as
+# `name<TAB>reason`. `tools/docs-facts.py`'s `python_suite_registration()` refuses a
+# tracked `benchmark/test_*.py` that is named neither in `.github/workflows/ci.yml` nor
+# here, a row with no reason, a row whose suite is gone, and a row whose suite has since
+# been registered. The reason is the point of the row: an exemption that does not say why
+# is a suite nobody will ever re-check.
+#
+# Measured on this host 2026-10-08, one `python3 -m unittest` per suite, no model run and
+# nothing fetched.
+test_concurrent_sessions	starts one TinyTitanServer per model at --max-concurrent-sequences 4 and skips any model that is not installed; a CI runner has no install, and no gate here may fetch a model to give it one
+test_ane_gather_probe	its module imports coremltools, which the CI python does not carry — measured here as 5 tests, 5 skipped, so it asserts on a machine that has coremltools and nowhere else
+test_export_ane_prefill	its module imports coremltools via the exporter — measured here as 22 tests, 22 skipped, the same asymmetry as test_ane_gather_probe
+test_verify_ane_sidecar	its module imports coremltools to verify a sidecar — measured here as 6 tests, 6 skipped, the same asymmetry again
