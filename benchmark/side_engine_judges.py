@@ -18,6 +18,11 @@ engine and therefore the 2B/4B/9B only. `server:<url>:<model>` posts the same
 system+user prompt to a running TinyTitan server, which is how a 35B MoE or a
 125B is reached. The jobs file is the one `side_engine_tasks.py --prepare`
 writes; scoring is that script's, imported rather than copied.
+
+A request that never answered is not a judgement that answered wrongly. A
+refused case records its reason in the done file's `error` field, is counted
+apart, and stays out of every denominator; a run where every request refused
+prints no score and exits 1.
 """
 
 from __future__ import annotations
@@ -87,10 +92,13 @@ def run_server(url: str, model: str, jobs: list[dict], out: Path) -> float:
             with urllib.request.urlopen(request, timeout=600) as reply:
                 payload = json.loads(reply.read())
             completion = payload["choices"][0]["message"]["content"]
+            refusal = None
         except Exception as error:  # recorded, not fatal: one bad case is data
-            completion = f"<error {error}>"
+            completion, refusal = "", f"{type(error).__name__}: {error}"
         record = dict(job)
         record["completion"] = completion
+        if refusal:
+            record["error"] = refusal
         record.pop("system", None)
         lines.append(json.dumps(record))
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -103,11 +111,16 @@ def summarize(path: Path) -> dict:
     ]
     per_task: dict[str, dict] = {}
     for row in rows:
+        entry = per_task.setdefault(
+            row["task"], {"correct": 0, "total": 0, "refused": 0, "halves": {}}
+        )
+        if row.get("error"):
+            entry["refused"] += 1
+            continue
         expected = tasks.truth_of(row)
         answer = (row.get("completion") or "").strip().upper()
         answer = answer.split()[0].strip(".,:;\"'") if answer else ""
         legal = {"YES", "NO"} if expected in ("YES", "NO") else {"UPDATE", "CONFLICT"}
-        entry = per_task.setdefault(row["task"], {"correct": 0, "total": 0, "halves": {}})
         entry["total"] += 1
         half = entry["halves"].setdefault(expected, [0, 0])
         half[1] += 1
@@ -124,14 +137,23 @@ def line(label: str, per_task: dict, seconds: float, count: int) -> None:
     for task in sorted(per_task):
         entry = per_task[task]
         halves = "  ".join(f"{k}: {v[0]}/{v[1]}" for k, v in sorted(entry["halves"].items()))
-        worst = min((v[0] / v[1]) for v in entry["halves"].values() if v[1])
-        ready += worst >= 0.7
-        print(
-            f"{task:5s} {entry['total']:3d} "
-            f"{100 * entry['correct'] / entry['total']:7.0f}%  {halves}"
-            f"{'' if worst >= 0.7 else '   *'}"
-        )
+        scored = [v for v in entry["halves"].values() if v[1]]
+        worst = min(v[0] / v[1] for v in scored) if scored else None
+        good = worst is not None and worst >= 0.7
+        ready += good
+        score = f"{100 * entry['correct'] / entry['total']:7.0f}%" if scored else "        -"
+        flag = "" if good else "   *"
+        refused = f"   refused {entry['refused']}" if entry["refused"] else ""
+        print(f"{task:5s} {entry['total']:3d} {score}  {halves}{flag}{refused}")
+    measured = sum(entry["total"] for entry in per_task.values())
+    refused = sum(entry["refused"] for entry in per_task.values())
     print(f"  tasks good on both halves: {ready}/{len(per_task)}")
+    if refused:
+        print(
+            f"  judgements refused: {refused}; every percentage covers only the {measured} that answered"
+        )
+    if not measured:
+        print("  measured nothing: every request refused, so none of the above is a score")
 
 
 def parse_judge(spec: str) -> tuple[str, str, str | None]:
@@ -162,6 +184,7 @@ def main() -> int:
     out_dir = args.out or args.jobs.parent
     # The jobs file's stem is part of the done name: the same judge over two
     # case files must not overwrite the first result with the second.
+    any_refused = False
     for spec in args.judge:
         kind, target, model = parse_judge(spec)
         if kind == "cpu":
@@ -175,9 +198,12 @@ def main() -> int:
             seconds = run_cpu(target, jobs, done)
         else:
             seconds = run_server(target, str(model), jobs, done)
-        line(label, summarize(done), seconds, len(jobs))
+        per_task = summarize(done)
+        line(label, per_task, seconds, len(jobs))
         print(f"  done file: {done}")
-    return 0
+        if any(entry["refused"] for entry in per_task.values()):
+            any_refused = True
+    return 1 if any_refused else 0
 
 
 if __name__ == "__main__":
