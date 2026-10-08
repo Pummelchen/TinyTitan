@@ -43,7 +43,9 @@ let usage = """
     --peer is the member the group is *read* from (default 127.0.0.1:3080); --on is
     the member an action is sent to. Every action then goes directly to the Mac that
     owns it — nothing is relayed through another instance. --json prints the raw
-    answer. --version prints the name. Keys resolve in this order: --key,
+    answer. An action exits 0 only when the Mac that owns it confirms it: a refusal,
+    or an answer that does not confirm, exits 1. --version prints the name. Keys
+    resolve in this order: --key,
     DSH_LAN_KEY, DSH_LAN_TOKEN, the plugin's shipped default. Prefer the
     environment forms: --key puts the key in argv, where every other local
     account can read it with ps.
@@ -138,6 +140,8 @@ let runner = FleetRunner(
 
 @MainActor func report(_ ack: FleetAck) {
     print(asJSON ? ack.raw : (ack.ok ? "ok" : "refused"))
+    // The same status the `prompt` arms answer with: a refusal is a failed run.
+    exit(ack.ok ? 0 : 1)
 }
 
 @MainActor func requireSession() -> String {

@@ -235,6 +235,62 @@ private func loadedGroup(
         #expect(body["title"] as? String == "New")
     }
 
+    @Test func anAckThatCarriesNoBooleanOkIsNotAnAck() async throws {
+        // Every 2xx from the plugin's router has carried `ok: true` since its
+        // first commit (0ddce77), so a 2xx without one has not confirmed the
+        // action. `?? true` used to call that success.
+        let (runner, _, group) = try await loadedGroup(
+            replies: [
+                "/dsh-lan/workspaces": FakeTransport.Reply(
+                    status: 200, body: Data(#"{"workspaceId":"ws-new"}"#.utf8))
+            ]
+        )
+        await #expect(
+            throws: FleetError.decoding(
+                target: "100.114.69.128:3080",
+                reason: "a 2xx answer carries no boolean `ok`")
+        ) {
+            _ = try await runner.createWorkspace(
+                group: group, node: "Node3", path: "/Users/node3/New", title: nil)
+        }
+    }
+
+    @Test func anAckWhoseOkIsAStringIsNotAnAck() async throws {
+        let (runner, _, group) = try await loadedGroup(
+            replies: [
+                "/dsh-lan/sessions/s-local/archive": FakeTransport.Reply(
+                    status: 200, body: Data(#"{"ok":"true"}"#.utf8))
+            ]
+        )
+        await #expect(
+            throws: FleetError.decoding(
+                target: "127.0.0.1:3080",
+                reason: "a 2xx answer carries no boolean `ok`")
+        ) {
+            _ = try await runner.archive(group: group, sessionId: "s-local")
+        }
+    }
+
+    @Test func aTwoHundredPageThatIsNotJSONIsNotAnAck() async throws {
+        // A transparent proxy or a captive portal answers 200 with a page. The
+        // manager used to print the page and exit 0 as if the member had
+        // confirmed the delete — which is the arm that archives sessions.
+        let (runner, _, group) = try await loadedGroup(
+            replies: [
+                "/dsh-lan/workspaces/w-remote/delete": FakeTransport.Reply(
+                    status: 200, body: Data("<html><body>intercepted</body></html>".utf8))
+            ]
+        )
+        await #expect(
+            throws: FleetError.decoding(
+                target: "100.114.69.128:3080",
+                reason: "a 2xx answer carries no boolean `ok`")
+        ) {
+            _ = try await runner.deleteWorkspace(
+                group: group, workspaceId: "w-remote", archiveSessions: true)
+        }
+    }
+
     @Test func anHTTPFailureCarriesTheMembersOwnMessage() async throws {
         let transport = FakeTransport(replies: [
             "/dsh-lan/inventory": FakeTransport.Reply(

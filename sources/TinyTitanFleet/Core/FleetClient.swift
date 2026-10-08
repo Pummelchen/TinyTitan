@@ -208,8 +208,11 @@ public struct FleetClient: Sendable {
                 message: Self.message(in: response.body))
         }
         let object = try? JSONSerialization.jsonObject(with: response.body) as? [String: Any]
-        return FleetAck(
-            ok: (object?["ok"] as? Bool) ?? true, message: object?["message"] as? String, raw: text)
+        guard let object, let ok = object["ok"] as? Bool else {
+            throw FleetError.decoding(
+                target: "\(target)", reason: "a 2xx answer carries no boolean `ok`")
+        }
+        return FleetAck(ok: ok, message: object["message"] as? String, raw: text)
     }
 
     private func post(_ path: String, to target: FleetTarget, body: [String: Any]? = nil)
