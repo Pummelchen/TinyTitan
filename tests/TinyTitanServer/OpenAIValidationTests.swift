@@ -436,6 +436,37 @@ struct OpenAIValidationTests {
         #expect(envelope.param == "tools")
         #expect(envelope.message.contains("deeper than \(limit) levels"))
     }
+
+    /// A repetition penalty below one is not a weaker penalty: the penalty pass
+    /// multiplies the repeated logit, so it rewards repetition. The engine says
+    /// so, the wire accepted the value anyway, and then the two backends
+    /// disagreed about what to do with it.
+    @Test func aRepetitionPenaltyBelowOneIsRefusedAsBadRequest() throws {
+        func request(_ penalty: String) throws -> OpenAIChatRequest {
+            try JSONDecoder().decode(
+                OpenAIChatRequest.self,
+                from: Data(
+                    #"{"model":"m","messages":[{"role":"user","content":"x"}],"repetition_penalty":\#(penalty)}"#
+                        .utf8))
+        }
+
+        var failure: ServerRequestError?
+        do {
+            _ = try OpenAIRequestValidator.validate(request("0.5"), modelID: "m")
+        } catch let error as ServerRequestError {
+            failure = error
+        }
+        let envelope = try #require(failure?.envelope).error
+        #expect(envelope.type == "invalid_request_error")
+        #expect(envelope.param == "repetition_penalty")
+        #expect(envelope.message.contains("at least 1"))
+
+        // What the boundary promises, the engine has to keep: every value the
+        // wire accepts must survive the engine's own validation.
+        let accepted = try OpenAIRequestValidator.validate(request("1"), modelID: "m")
+        try accepted.generationConfig.validate()
+        #expect(accepted.generationConfig.repetitionPenalty == 1)
+    }
 }
 
 @Suite("Streaming stop matcher")

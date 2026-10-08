@@ -192,9 +192,16 @@ package enum OpenAIRequestValidator {
             throw invalid("top_k must be between 1 and 256", "top_k", "invalid_value")
         }
         let repetitionPenalty = request.repetitionPenalty ?? 1
-        guard repetitionPenalty > 0 else {
+        // At least 1, the same bound `--repetition-penalty` and the engine's own
+        // `GenerationConfig.validate` apply: below one the penalty pass multiplies
+        // the repeated logit instead of dividing it, so it rewards repetition --
+        // the opposite of the flag. The wire used to accept any positive value,
+        // which the engine then refused mid-request on the GPU path, after the
+        // response head was already sent, and silently inverted on the CPU path,
+        // which runs no engine validation. One boundary, one answer.
+        guard repetitionPenalty >= 1 else {
             throw invalid(
-                "repetition_penalty must be positive",
+                "repetition_penalty must be at least 1; below one it rewards repetition",
                 "repetition_penalty", "invalid_value")
         }
         // No artificial output cap: when the client omits max_tokens /
