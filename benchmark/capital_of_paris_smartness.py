@@ -1,11 +1,21 @@
 #!/usr/bin/env python3
 """Every served model, one or more prompts, TTFT and tok/s from the SSE stream.
 
-Warm-up request per *model change* (loads or switches it, discarded), then one
-measured streaming request per (model, prompt, repeat). A repeat of the model
-already resident is measured back to back, and the row says which it was, so a
-cold load can be told apart from the steady state. One JSON object per run is
-appended to $RESULTS as it goes, so progress is visible while it works.
+Reads its whole configuration from the environment inside `main()` and serves
+nothing until then: importing this module starts no run and opens no results
+file. For each (model, prompt, repeat) it sends a warm-up request on a *model
+change* (loads or switches it, discarded) and one measured streaming request to
+a server the operator already started. A repeat of the model already resident is
+measured back to back, and the row says which it was, so a cold load can be told
+apart from the steady state. One JSON object per run is appended to `$RESULTS`
+as it goes, so progress is visible while it works.
+
+`main()` returns the exit status and counts the rows it planned:
+
+    0   every planned row came back `ok`
+    1   a row failed (the line names the error), or the matrix planned nothing
+    2   a run variable was refused before the first request -- named, not a
+        traceback
 
 The run behind the wiki's `Capital-of-Paris-Smartness` page:
 
@@ -24,21 +34,94 @@ JSON array of prompts; a bare `PROMPT` string is still accepted and is one.
 
 import json
 import os
+import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 
-PORT = int(os.environ.get("PORT", "8091"))
-if "PROMPTS" in os.environ:
-    PROMPTS = json.loads(os.environ["PROMPTS"])
-else:
-    PROMPTS = [os.environ.get("PROMPT", "Capital of Paris")]
-MAXTOK = int(os.environ.get("MAXTOK", "128"))
-REPEATS = int(os.environ.get("REPEATS", "1"))
-RESULTS = os.environ.get("RESULTS", "/tmp/smartness_results.jsonl")
-RUNS = json.loads(os.environ["RUNS"])  # [[id, engine, model_label, quant], ...]
+DEFAULT_PORT = 8091
+DEFAULT_PROMPT = "Capital of Paris"
+DEFAULT_MAXTOK = 128
+DEFAULT_RESULTS = "/tmp/smartness_results.jsonl"
 
-BASE = f"http://127.0.0.1:{PORT}"
+# The one piece of configuration `post()` needs, and `main()` sets it from the
+# validated environment, so a caller that imports this module has a base URL but
+# no run.
+BASE = f"http://127.0.0.1:{DEFAULT_PORT}"
+
+
+class ConfigError(ValueError):
+    """A run variable the driver refuses with its name instead of crashing."""
+
+
+def parse_int(env, key, default=None, minimum=1):
+    raw = env.get(key)
+    if raw is None:
+        if default is None:
+            raise ConfigError(f"{key} is not set; it must be an integer of at least {minimum}")
+        raw = default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ConfigError(f"{key}={raw!r} is not an integer") from None
+    if value < minimum:
+        raise ConfigError(f"{key}={value} must be at least {minimum}")
+    return value
+
+
+def parse_prompts(env):
+    """`PROMPTS` as a JSON array, `PROMPT` as one bare string, or the default."""
+    raw = env.get("PROMPTS")
+    if raw is None:
+        bare = env.get("PROMPT")
+        return [bare] if bare is not None else [DEFAULT_PROMPT]
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise ConfigError(f"PROMPTS={raw!r} is not valid JSON") from None
+    if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+        raise ConfigError("PROMPTS must be a JSON array of strings")
+    return value
+
+
+def parse_runs(env):
+    """`RUNS` as a list of (id, engine, label, quant) tuples, every row checked."""
+    raw = env.get("RUNS")
+    if raw is None:
+        raise ConfigError("RUNS is not set; it is a JSON array of [id, engine, label, quant] rows")
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        raise ConfigError(f"RUNS={raw[:60]!r} is not valid JSON") from None
+    if not isinstance(value, list):
+        raise ConfigError("RUNS must be a JSON array of [id, engine, label, quant] rows")
+    runs = []
+    for index, row in enumerate(value):
+        if not isinstance(row, list) or len(row) != 4:
+            raise ConfigError(
+                f"RUNS row {index}={row!r} is not [id, engine, label, quant] -- four fields"
+            )
+        runs.append(tuple(row))
+    return runs
+
+
+def parse_config(env):
+    port = parse_int(env, "PORT", str(DEFAULT_PORT), 1)
+    if port > 65535:
+        raise ConfigError(f"PORT={port} is not a TCP port")
+    prompts = parse_prompts(env)
+    maxtok = parse_int(env, "MAXTOK", str(DEFAULT_MAXTOK))
+    repeats = parse_int(env, "REPEATS", "1")
+    results = env.get("RESULTS", DEFAULT_RESULTS)
+    runs = parse_runs(env)
+    return {
+        "port": port,
+        "prompts": prompts,
+        "maxtok": maxtok,
+        "repeats": repeats,
+        "results": results,
+        "runs": runs,
+    }
 
 
 def post(payload, timeout=1800):
@@ -69,11 +152,11 @@ def warm(model, prompt):
     return time.monotonic() - t0
 
 
-def measure(model, prompt):
+def measure(model, prompt, maxtok=DEFAULT_MAXTOK):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": MAXTOK,
+        "max_tokens": maxtok,
         "temperature": 0,
         "stream": True,
         "stream_options": {"include_usage": True},
@@ -127,11 +210,40 @@ def measure(model, prompt):
     }
 
 
+def shown(row, key, unit=""):
+    """A row value for the line: `n/a` where the run never reached one."""
+    value = row.get(key)
+    return "n/a" if value is None else f"{value}{unit}"
+
+
 def main():
+    try:
+        cfg = parse_config(os.environ)
+    except ConfigError as e:
+        print(f"REFUSED: {e}", flush=True)
+        return 2
+    global BASE
+    BASE = f"http://127.0.0.1:{cfg['port']}"
+    runs, prompts, repeats = cfg["runs"], cfg["prompts"], cfg["repeats"]
+    planned = len(runs) * len(prompts) * repeats
+    if planned == 0:
+        print(
+            f"NOT MEASURED: the matrix planned no request "
+            f"({len(runs)} model x {len(prompts)} prompt x {repeats} repeat)",
+            flush=True,
+        )
+        return 1
+    print(
+        f"{planned} rows planned: {len(runs)} model x {len(prompts)} prompt x "
+        f"{repeats} repeat against {BASE}, results to {cfg['results']}",
+        flush=True,
+    )
+
     resident = None
-    for model, engine, label, quant in RUNS:
-        for prompt in PROMPTS:
-            for repeat in range(1, REPEATS + 1):
+    ok = failed = 0
+    for model, engine, label, quant in runs:
+        for prompt in prompts:
+            for repeat in range(1, repeats + 1):
                 row = {
                     "model": model,
                     "engine": engine,
@@ -139,6 +251,8 @@ def main():
                     "quant": quant,
                     "prompt": prompt,
                     "repeat": repeat,
+                    "load_s": None,
+                    "cold": None,
                 }
                 switched = model != resident
                 try:
@@ -148,30 +262,38 @@ def main():
                     row["cold"] = switched
                     if switched:
                         resident = model
-                    row.update(measure(model, prompt))
+                    row.update(measure(model, prompt, cfg["maxtok"]))
                     row["status"] = "ok"
+                    ok += 1
                 except urllib.error.HTTPError as e:
                     row["status"] = "http_error"
                     row["error"] = f"{e.code} {e.read()[:300].decode('utf-8', 'replace')}"
+                    failed += 1
                 except Exception as e:  # noqa: BLE001
                     row["status"] = "error"
                     row["error"] = f"{type(e).__name__}: {e}"
+                    failed += 1
                 for k in ("ttft_s", "total_s", "decode_tok_s", "e2e_tok_s"):
                     if isinstance(row.get(k), float):
                         row[k] = round(row[k], 3)
-                with open(RESULTS, "a", encoding="utf-8") as fh:
+                with open(cfg["results"], "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(row) + "\n")
                 print(
                     f"{row['status']:10s} {label:26s} {quant}-bit {engine:3s} "
-                    f"repeat={repeat} cold={str(row.get('cold')):5s} "
-                    f"load={row.get('load_s')}s ttft={row.get('ttft_s')}s "
-                    f"tok/s={row.get('decode_tok_s')} tokens={row.get('completion_tokens')} "
-                    f"content={row.get('content_chars')}ch reasoning={row.get('reasoning_chars')}ch "
+                    f"repeat={repeat} cold={str(row['cold']):5s} "
+                    f"load={shown(row, 'load_s', 's')} ttft={shown(row, 'ttft_s', 's')} "
+                    f"tok/s={shown(row, 'decode_tok_s')} tokens={shown(row, 'completion_tokens')} "
+                    f"content={row.get('content_chars', 0)}ch "
+                    f"reasoning={row.get('reasoning_chars', 0)}ch "
                     f"prompt={prompt[:28]!r}",
                     flush=True,
                 )
                 if row["status"] != "ok":
                     print("           " + str(row.get("error"))[:300], flush=True)
 
+    print(f"{ok} ok, {failed} failed -- {ok + failed} of {planned} rows written", flush=True)
+    return 1 if failed or ok + failed != planned else 0
 
-main()
+
+if __name__ == "__main__":
+    sys.exit(main())
