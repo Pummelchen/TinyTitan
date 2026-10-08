@@ -658,12 +658,14 @@ export function installHandoff({ ctx, resolved, log = () => {} } = {}) {
         children.delete(entry.key);
         void Promise.resolve()
           .then(() => entry.run.dispose?.())
-          .catch(() => {});
+          .catch((error) =>
+            log(`dsh-tinytitan: child disposal failed: ${describe(error)} key=${entry.key}`),
+          );
       }
       for (const run of [...runs]) {
         void Promise.resolve()
           .then(() => run.dispose?.())
-          .catch(() => {});
+          .catch((error) => log(`dsh-tinytitan: run disposal failed: ${describe(error)}`));
       }
       runs.clear();
     });

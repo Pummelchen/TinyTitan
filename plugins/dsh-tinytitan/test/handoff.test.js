@@ -552,6 +552,50 @@ test("disposal releases a child that is still working", async () => {
   assert.equal(runs[0].disposed, true);
 });
 
+test("a disposal that throws is reported, not swallowed", async () => {
+  // Every other failure this file catches is logged; the two teardown
+  // `.catch(() => {})` are the only places a thrown dispose disappears, which
+  // is how a child whose stream never closed looks identical to one that did.
+  const { ctx, runs, lines } = installed({}, { handoffAtTokens: 1000 });
+  await step(ctx, "session-1", { inputTokens: 1000 });
+  runs[0].dispose = () => {
+    throw new Error("stale child socket");
+  };
+  for (const handler of ctx.listeners.dispose ?? []) handler();
+  await tick();
+  assert.ok(
+    lines.some((line) => line.includes("run disposal failed")),
+    `nothing reported the failed teardown: ${JSON.stringify(lines)}`,
+  );
+  assert.ok(
+    lines.some(
+      (line) => line.includes("run disposal failed") && line.includes("stale child socket"),
+    ),
+    "the report must name what threw",
+  );
+});
+
+test("a tracked child's failed disposal is reported too", async () => {
+  // The dispose hook has two loops, and they hold the same run twice by
+  // design: children releases leaf-first, runs releases the rest. A report
+  // from one of them is not a report from both.
+  const { ctx, runs, lines } = installed({}, { handoffAtTokens: 1000, handoffHops: 2 });
+  await step(ctx, "session-1", { inputTokens: 1000 });
+  await step(ctx, "child-1", { inputTokens: 2000 });
+  assert.equal(runs.length, 2, "the fixture must reach a tracked child");
+  for (const run of runs) {
+    run.dispose = () => {
+      throw new Error("stale child socket");
+    };
+  }
+  for (const handler of ctx.listeners.dispose ?? []) handler();
+  await tick();
+  assert.ok(
+    lines.some((line) => line.includes("child disposal failed")),
+    `the child loop swallowed its throw: ${JSON.stringify(lines)}`,
+  );
+});
+
 test("the budget follows the routed model's context window", () => {
   // The shapes this project declares and serves: a 256K route, a 1M route with
   // a round million, and the binary 1M. The reserve binds on the narrow one and
