@@ -18,6 +18,49 @@ import Testing
             VerifiedInstallReceiptReader.defaultMaxBytes == VerifiedInstallTool.metadataMaxBytes)
     }
 
+    /// The ceiling has to apply to the *peek* as well as to the load, and that
+    /// is the half the equality above cannot see: `peekFamily` read its own
+    /// literal 4 MiB while the load read the shared 64 MiB, so a KAT-Coder
+    /// manifest (6.25 MB, the very file that motivated the raise) was refused
+    /// before the ceiling that accommodates it was ever consulted. It is not a
+    /// cosmetic divergence — `peekFamily` is the first thing `Engine.load`
+    /// (`sources/TinyTitanLib/Engine.swift:66`) and the server's session
+    /// (`ServerModelSession+Loading.swift:98`) do, and `Engine` maps any error
+    /// from it to `TinyTitanError.notAnInstall`, so a real install was
+    /// reported as not being one.
+    @Test func theFamilyPeekUsesTheManifestCeilingTheLoadUses() throws {
+        let (dir, _) = try Self.writeToyManifest()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("manifest.json")
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: try Data(contentsOf: url)) as? [String: Any])
+        var files = try #require(object["files"] as? [String: Any])
+        // Pad the tensor table the way a real one grows: many small per-tensor
+        // entries, not one big blob, so the file is a plausible manifest.
+        for entry in 1...60_000 {
+            files["packed_experts/pad_\(entry).bin"] = [
+                "size": entry, "sha256": String(repeating: "0", count: 64),
+            ]
+        }
+        var padded = object
+        padded["files"] = files
+        let data = try JSONSerialization.data(withJSONObject: padded)
+        try data.write(to: url)
+        let ceiling = Int(ManifestReader.defaultMaxBytes)
+        #expect(
+            data.count > 4 * 1024 * 1024 && data.count < ceiling,
+            "padding is \(data.count) bytes, which is not between 4 MiB and \(ceiling)")
+        var peekError: Error?
+        do {
+            _ = try ManifestReader.peekFamily(directoryURL: dir)
+        } catch {
+            peekError = error
+        }
+        let bytes = data.count
+        let reason = String(describing: peekError)
+        #expect(peekError == nil, "peekFamily refused a \(bytes)-byte manifest: \(reason)")
+    }
+
     /// Build a manifest dictionary for a 2-layer toy ArchConfig and write it
     /// into a temp directory. Returns the directory URL and the toy config.
     static func writeToyManifest(

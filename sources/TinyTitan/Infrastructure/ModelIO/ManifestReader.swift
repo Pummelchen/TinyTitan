@@ -142,7 +142,8 @@ public enum ManifestReader {
     /// mapping weights or creating a Metal device.
     public static func peekIdentity(directoryURL: URL) throws -> ManifestIdentity {
         let directory = try SSDAIModelDirectory(rootURL: directoryURL)
-        let data = try directory.readMetadata("manifest.json", maxBytes: 4 * 1024 * 1024)
+        let data = try directory.readMetadata(
+            "manifest.json", maxBytes: Self.defaultMaxBytes)
         let wire = try JSONDecoder().decode(SSDAIManifestV1.self, from: data)
         guard !wire.modelID.isEmpty else {
             throw ModelError.indexCorrupt(detail: "manifest modelID is empty")
