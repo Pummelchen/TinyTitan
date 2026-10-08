@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import NIOCore
+import NIOEmbedded
 import Synchronization
 import Testing
 
@@ -191,6 +192,24 @@ private final class LoadCounter: @unchecked Sendable {
 
     func increment() {
         lock.withLock { _count += 1 }
+    }
+}
+
+/// A real pipeline context, taken the only sound way: the channel's own event
+/// loop hands it over in `handlerAdded`. `ChannelHandlerContext` is not
+/// `Sendable`, so a test reads it from here instead of capturing it across a
+/// task boundary, and the embedded channel it belongs to stays alive until
+/// that test finishes it.
+///
+/// unchecked-invariant: written once from `handlerAdded` on the channel's event
+/// loop and read only by the test that owns that channel.
+private final class ContextCatcher: ChannelInboundHandler, @unchecked Sendable {
+    typealias InboundIn = ByteBuffer
+
+    nonisolated(unsafe) static var captured: ChannelHandlerContext?
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        ContextCatcher.captured = context
     }
 }
 
@@ -629,6 +648,116 @@ struct HTTPServerTests {
             settled.withLock { $0 },
             "next() parked after cancellation instead of resolving")
         drainer.cancel()
+    }
+
+    /// S4's cap is enforced mid-stream by failing the stream: an error frame,
+    /// a closed outbox, a cancelled generation. The two finish frames went
+    /// around that guard, so a client that was one frame too slow at the very
+    /// end got `data: [DONE]` with no `finish_reason`, no usage, and no error
+    /// — a stream that reads as complete and is not. The Messages and
+    /// Responses surfaces route their terminal events through the same guard
+    /// as everything else; this pins the chat surface to it.
+    @Test func aRefusedFinishFrameFailsTheStreamInsteadOfEndingItCleanly() async throws {
+        // A pipeline context, the way the handler itself gets one: taking one
+        // out of a finished pipeline is the deprecated, unsound route.
+        let channel = EmbeddedChannel()
+        try await channel.pipeline.addHandler(ContextCatcher()).get()
+        let handler = ServerHTTPHandler(
+            modelID: "test-model",
+            backend: ScriptedServerBackend(),
+            coordinator: ServerCoordinator(queueLimit: 1),
+            heartbeatInterval: .seconds(5),
+            reasoningProfile: .default,
+            router: nil,
+            childChannels: ChildChannelRegistry(maximumChannels: 2),
+            responseStore: ResponseStore(capacity: 2))
+        // Filled to its cap by a reader that stopped pulling frames, which is
+        // the state a slow client leaves when generation reaches its end.
+        let outbox = SSEOutbox(capacity: 2)
+        #expect(outbox.enqueue(Data("one".utf8)))
+        #expect(outbox.enqueue(Data("two".utf8)))
+        let completion = ServerCompletion(
+            content: "hi",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: OpenAIUsage(promptTokens: 3, completionTokens: 2, totalTokens: 5))
+        // `failStream` cancels the task it runs in, as it must in production,
+        // so the finish runs in a child task the drain below can survive in.
+        await Task {
+            guard let context = ContextCatcher.captured else { return }
+            handler.finishStream(
+                context, id: "chatcmpl-1", created: 1,
+                completion: completion, includeUsage: true, outbox: outbox)
+        }.value
+        var received: [Data] = []
+        while let frame = await outbox.next() {
+            received.append(frame)
+        }
+        let text = received.map { $0.lossyUTF8String }.joined()
+        #expect(
+            text.contains("stream_overflow"),
+            "the client was told the stream ended cleanly: \(text)")
+        // The OpenAI shape ends a *failed* stream with `[DONE]` too, so the
+        // terminator itself is not the tell: the error has to come first, and
+        // the finish's own terminator has to be the no-op that a closed outbox
+        // makes it. Two `[DONE]`s would mean the stream both failed and
+        // completed.
+        let terminators = text.components(separatedBy: "[DONE]").count - 1
+        #expect(
+            terminators == 1,
+            "expected exactly one terminator, found \(terminators): \(text)")
+        let errorAt = text.firstRange(of: "stream_overflow")?.lowerBound
+        let doneAt = text.firstRange(of: "[DONE]")?.lowerBound
+        if let errorAt, let doneAt {
+            #expect(
+                errorAt < doneAt,
+                "the terminator arrived before the error that explains it: \(text)")
+        }
+        _ = try channel.finish()
+    }
+
+    /// The other half of the same guard: routing the finish frames through the
+    /// mid-stream checkpoint must not turn a healthy stream into a failed one.
+    /// A reader that kept up still gets `finish_reason`, then usage, then
+    /// exactly one terminator, and no error frame at all.
+    @Test func aFinishWithRoomToSpareStillDeliversEveryTerminalFrame() async throws {
+        let channel = EmbeddedChannel()
+        try await channel.pipeline.addHandler(ContextCatcher()).get()
+        let handler = ServerHTTPHandler(
+            modelID: "test-model",
+            backend: ScriptedServerBackend(),
+            coordinator: ServerCoordinator(queueLimit: 1),
+            heartbeatInterval: .seconds(5),
+            reasoningProfile: .default,
+            router: nil,
+            childChannels: ChildChannelRegistry(maximumChannels: 2),
+            responseStore: ResponseStore(capacity: 2))
+        let outbox = SSEOutbox(capacity: 8)
+        #expect(outbox.enqueue(Data("data: a chunk\r\n\r\n".utf8)))
+        let completion = ServerCompletion(
+            content: "hi",
+            toolCalls: [],
+            finishReason: "stop",
+            usage: OpenAIUsage(promptTokens: 3, completionTokens: 2, totalTokens: 5))
+        await Task {
+            guard let context = ContextCatcher.captured else { return }
+            handler.finishStream(
+                context, id: "chatcmpl-1", created: 1,
+                completion: completion, includeUsage: true, outbox: outbox)
+        }.value
+        var received: [Data] = []
+        while let frame = await outbox.next() {
+            received.append(frame)
+        }
+        let text = received.map { $0.lossyUTF8String }.joined()
+        #expect(!text.contains("stream_overflow"), "a healthy stream failed: \(text)")
+        #expect(text.contains(#""finish_reason":"stop""#), "no finish_reason: \(text)")
+        #expect(text.contains(#""completion_tokens":2"#), "no usage: \(text)")
+        let terminators = text.components(separatedBy: "[DONE]").count - 1
+        #expect(
+            terminators == 1,
+            "expected exactly one terminator, found \(terminators): \(text)")
+        _ = try channel.finish()
     }
 
     /// A HEAD response must have a head and nothing else. The two read routes

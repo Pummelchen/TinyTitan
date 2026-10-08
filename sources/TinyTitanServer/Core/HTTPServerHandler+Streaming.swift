@@ -313,25 +313,30 @@ extension ServerHTTPHandler {
         includeUsage: Bool,
         outbox: SSEOutbox
     ) {
-        if let frame = streamFrame(
+        // Both finish frames go through the same guard as every other frame:
+        // a refused one fails the stream with an error, and the closed outbox
+        // makes the `[DONE]` below a no-op. Enqueue it directly and a client
+        // that was one frame too slow at the end reads a complete stream whose
+        // finish_reason never arrived.
+        enqueueStreamChunk(
             chunk(
                 id: id, created: created,
                 delta: [:],
-                finishReason: completion.finishReason))
-        {
-            _ = outbox.enqueue(frame)
-        }
-        if includeUsage,
-            let frame = streamFrame([
-                "id": id,
-                "object": "chat.completion.chunk",
-                "created": created,
-                "model": responseModelID,
-                "choices": [],
-                "usage": usageObject(completion.usage),
-            ])
-        {
-            _ = outbox.enqueue(frame)
+                finishReason: completion.finishReason),
+            outbox: outbox,
+            context: context)
+        if includeUsage {
+            enqueueStreamChunk(
+                [
+                    "id": id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": responseModelID,
+                    "choices": [],
+                    "usage": usageObject(completion.usage),
+                ],
+                outbox: outbox,
+                context: context)
         }
         outbox.enqueueTerminal([Self.doneFrame()], closeWhenDrained: false)
     }
