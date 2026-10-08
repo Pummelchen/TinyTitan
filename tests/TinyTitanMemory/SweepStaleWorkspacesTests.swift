@@ -147,8 +147,8 @@ import Testing
         let refusals = messages.filter { $0.contains("degraded during sweep") }
         #expect(refusals.count == 1, "one refusal per stuck file, got \(refusals)")
         #expect(
-            refusals.first?.contains("stuck.ndjson") == true,
-            "the refusal should name the file and the step: \(refusals)")
+            refusals.first?.contains("sweep: stuck.ndjson: ") == true,
+            "the refusal should name the operation, the file and the step: \(refusals)")
     }
 
     /// A workspace with no `.lock` file at all was never opened by a journal, so
