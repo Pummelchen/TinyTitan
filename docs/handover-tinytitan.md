@@ -125,7 +125,7 @@ if the date is old.
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **111 rows / 110 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **112 rows / 111 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -298,19 +298,11 @@ is the authority. On 2026-10-04 it holds one Open row:
    disk that fills mid-call, and no gate here may fill one. Closing it needs either a
    volume that can refuse a write at a chosen byte count or a decision to accept the
    next open as the repair point.
-   (c) AUD-190's sibling sweep left one site of the same shape unfilled:
-   `ServerPromptStateStore.swift:314-321` and `:382-395` subtract a record's
-   `payloadBytes` from `diskBytes` *before* the `try? removeItem` that has to free
-   the directory, so an eviction the volume refused leaves the bytes counted as
-   spent — the disk cap then believes it has room and stops evicting, and
-   `ServerPromptStateSaveResult.diskBytes` reports the same fiction through the
-   server's own status. Not filed, because the failure cannot be reached on a store
-   root that will not take unlinks: `writeDisk` uses `try` and rethrows
-   (`:447`, `:464`), so a volume that refuses the directory refuses the file first
-   and says so through the `diskError` channel the type already carries. A next
-   attempt needs a directory the process can create into and cannot unlink from
-   (an `uchg` flag, or a mode change made under it), and the fix is small once that
-   is reachable: subtract on success, and put the refusal in `diskError`.
+   (c) AUD-190's sibling sweep is closed. It was filed as AUD-215 and fixed in
+   `7bd3346` on 2026-10-08, and the reason it had been left unfilled — that no
+   volume refuses the entry directory while still accepting the writes into it —
+   was false. See the `chflags` trap below before accepting any "no test seam"
+   claim about an unlink.
 
 TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
 machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
@@ -319,6 +311,15 @@ left as an upstream ask in `docs/dsh-upstream-asks.md`.
 
 ## Traps worth carrying forward
 
+- **`chflags uchg` on a file *inside* a directory builds the volume an unlink-refusal
+  test needs.** The flag makes `FileManager.removeItem` on the containing directory
+  answer EPERM while writes into that directory keep succeeding, so a store can
+  create and populate a record it cannot evict. That seam cost a deferral to find:
+  the sweep behind AUD-190 left the refused-eviction accounting bug unfilled because
+  `writeDisk` uses `try` and rethrows, and it was reasoned that any volume refusing
+  the directory must refuse the file first. It does not — the flag is on the file,
+  the refusal is on the directory. AUD-215 is what it looked like once reachable.
+  Before accepting "no test seam" for an unlink, try the flag.
 - **A hand-set `baseURL` can 404 every model call.** `dsh-llm-deepseek` defaults to
   `protocol: messages`, whose root is `https://api.deepseek.com/anthropic`;
   `https://api.deepseek.com/v1` is the chat-completions root, and every request then
