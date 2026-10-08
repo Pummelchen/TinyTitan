@@ -320,6 +320,12 @@ because its helper exits non-zero for both. Check the line above it: a real
 mismatch prints an output diff instead. Do not re-capture a baseline to make
 this go away — the baseline is valid for one (machine, build, model) triple.
 
+A third shape exits non-zero without a diff, and it is a finding rather than a
+race: `REFUSED: … has an empty body` means the stored baseline holds no captured
+output, so no comparison could have meant anything, and `REFUSED: exit 0 with no
+output` or `FAILED to write …` means a capture landed nothing. Those lines name
+the file; re-capture it deliberately, or fix why the run printed nothing.
+
 The common blocker on a shared machine is another project's
 `swiftpm-testing-helper` (a Dropbox-resident checkout, in this workspace). It
 can be a *loop* that respawns every couple of minutes; the guard is re-checked
