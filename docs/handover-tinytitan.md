@@ -125,7 +125,7 @@ if the date is old.
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **124 rows / 123 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **125 rows / 124 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -377,26 +377,59 @@ is the authority. On 2026-10-04 it holds one Open row:
    `wait_for_health`/`request_twice` in `tinytitan_profile.py` -- `tinytitan_overlap_measure.py`'s
    private copies were deleted and its call sites point at the shared ones, so AUD-225's driver
    keeps its behaviour and loses its duplication -- and put arm composition in
-   `arm_environment()`, which *clears* the policy var for the `default` arm.)
-   **The next sweep along this seam is `tinytitan_gap_bisect.py`.** Re-measured with `for f in
-   *.py; do grep -q '__main__' $f || echo $f; done` over `benchmark/`, the unguarded list is now
-   three files plus a test: `capital_of_paris_smartness.py:177` (`main()` at module scope),
-   `tinytitan_gap_bisect.py:105-106` (`run(128, "len128")` and `run(1024, "len1024")`), and
-   `tinytitan_profile.py` (a library, so not a driver). The gap bisect is the same shape as the
-   file AUD-227 just fixed and it is worse on the import: it starts **two** model servers, one
-   per length. It also has its own finding, which is prose rather than plumbing -- the docstring
-   at :2-3 says the run is "length sweep (fixed vs per-token overhead) **and an rdadvise-off
-   comparison**", but neither `run()` call passes `extra_env`, `TINYTITAN_RDADVISE_POLICY` appears
-   nowhere in the file, and the two tags are `len128`/`len1024`. The comparison the page promises
-   is the one AUD-227 now owns, so a reader of this driver's output is being pointed at an arm
-   that does not exist. `memory_volume.py:428` calls `check_scenario()` at module scope too, and
-   it is a different kind: it audits the `QUIZ_PLAN` fixture and raises `SystemExit` on a
-   duplicated key, so it is an import-time guard rather than an import-time benchmark -- worth
-   reading, not yet worth filing.
+   `arm_environment()`, which *clears* the policy var for the `default` arm.), and **AUD-228**
+   (`tinytitan_gap_bisect.py` -- `run(128, "len128")` and `run(1024, "len1024")` at :105-106 with
+   no `__main__` guard, so importing it opened a log and spawned a server **twice**, which the
+   guarded child proved (`RuntimeError: GUARD: opened a log at import: .../tinytitan_gap_len128
+   .log`); on the pre-fix blob, with `Popen`, `http.client` and `server_command` faked so the
+   server answers `/health` and writes a log with no counters, it printed
+   `--- len128 (max_tokens=128) ---` / `--- len1024 (max_tokens=1024) ---` over two empty bodies
+   and exited **0**; its only exit was `sys.exit(1)` inside `run()`, so one server that died before
+   `/health` ended the sweep before the second length was tried. Two more fell out of reading the
+   arms to find out which control varied: `MODEL` at :23 was handed to `server_command` directly,
+   so `TINYTITAN_BENCH_MODEL` was ignored, and the docstring advertised "a length sweep **and an
+   rdadvise-off comparison**" while `run()`'s `extra_env` parameter was never passed by either
+   call and `grep -c RDADVISE` over the file is **0** -- a page pointing its reader at an arm the
+   driver cannot run. The fix moved `bench_model()` and the arm verdict (`channel_verdict()`) into
+   `tinytitan_profile.py` and made the rdadvise A/B call them too, so the two drivers cannot
+   disagree about what an empty arm means.)
+   **The next sweep along this seam is `capital_of_paris_smartness.py`.** Re-measured with `for f
+   in *.py; do grep -q '__main__' $f || echo $f; done` over `benchmark/`, the only non-test driver
+   still unguarded is that one (`tinytitan_profile.py` is a library, `test_qwen38_resume_e2e.py`
+   is a test), and `tinytitan_gap_bisect.py` has left the list. Its shape is different from the
+   two drivers above -- it does not spawn a server, it drives one the operator already started --
+   so the import cost is measured rather than assumed: `python3 -c "import
+   capital_of_paris_smartness"` dies with `KeyError: 'RUNS'` because :39 reads the run matrix at
+   module scope, and with `RUNS` supplied the *same import ran the matrix* -- one row appended to
+   `$RESULTS` against a closed port, printed `error ... Connection refused`, rc 0.
+   `PORT`/`MAXTOK`/`REPEATS` (`:31`, `:36`, `:37`) `int()` their env there too,
+   so a typo makes an importer crash rather than a driver refuse. The real finding is the verdict:
+   `main()` has no return and nothing looks at the rows it wrote, so with `PORT=8399` (nothing
+   listening) every row came back `error` with `URLError: ... Connection refused`, and the run
+   exited **0** -- `:156`'s `except Exception` converts a failed request into a row and a printed
+   `error` word, and the exit status never learns. A matrix whose every row failed is indistinguishable
+   from a clean one to anything that reads its status: a script, a CI step, or the report driver
+   `capital_of_paris_report.py` that consumes this file's `$RESULTS` (AUD-223 was filed on that
+   reader, and its "every request was served" line is only as true as this writer's rows). Two
+   smaller things to weigh while in there: a failed row prints `load=Nones` and `cold=None`
+   because the keys `:147-148` only set on the success path are read anyway, and `RUNS='[]'` was
+   measured to print nothing, write no results file and exit **0**. `memory_volume.py:428` calls
+   `check_scenario()` at module scope too, and it is a different kind: it audits the `QUIZ_PLAN`
+   fixture and raises `SystemExit` on a duplicated key, so it is an import-time guard rather than
+   an import-time benchmark -- worth reading, not yet worth filing.
    The argv half of the seam is drained: every remaining `sys.argv` read in a
    non-test driver sits inside a function (`grep -rn "sys\.argv" benchmark/*.py`,
    no unindented hit left), and no driver opens a log or `Popen`s at module scope
    any more -- both re-checked here, not carried over from the last note.
+   A method note from AUD-228's mutant run, and the kind worth keeping: one mutant **survived**
+   the first ten, and it was a finding about the *suite*, not the mutant. The suite asserted that
+   `bench_model()` reads `TINYTITAN_BENCH_MODEL`, and the mutant left that function untouched but
+   passed a hardcoded path at the `server_command` call -- so the driver would have printed the
+   operator's model and launched somebody else's, and every test still passed. A fix that moves a
+   value is not pinned until an assertion follows the value to the place it is used; add the
+   call-site assertion (`test_the_named_model_is_the_one_handed_to_the_launcher`) rather than
+   trusting the unit test of the reader. The same blind spot existed in AUD-227's suite and got the
+   same assertion.
    `claude_openai_adapter.py`, which an
    earlier note here listed as carrying the same shape, does not: it reads no argv at
    all (`grep -n argv` over it is empty), so it is off the list on measurement.
