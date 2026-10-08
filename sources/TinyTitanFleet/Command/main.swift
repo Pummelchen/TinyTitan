@@ -53,6 +53,22 @@ var arguments = Array(CommandLine.arguments.dropFirst())
     return value
 }
 
+/// A count, a size or a duration, none of which has a useful meaning at or below
+/// zero: a cap of zero is a broadcast to everything, a frame of zero columns prints
+/// nothing, and `URLSession` reads a timeout of zero as *no timeout at all*, so the
+/// run never returns. Each answers the opposite of what the operator typed, so the
+/// run refuses instead.
+@MainActor
+func positiveOption<V: LosslessStringConvertible & Comparable & ExpressibleByIntegerLiteral>(
+    _ name: String
+) -> V? {
+    guard let value: V = numberOption(name) else { return nil }
+    guard value > 0 else {
+        fail("\(name) needs a positive number, not \(value)")
+    }
+    return value
+}
+
 /// Outcomes as JSON, built here rather than by hand in the middle of a `print`.
 func outcomesJSON(_ outcomes: [FleetOutcome]) -> String {
     let rows = outcomes.map { outcome in
@@ -78,19 +94,19 @@ let peerText = takeOption("--peer")
 let onMember = takeOption("--on")
 let keyOption = takeOption("--key")
 let basePath = takeOption("--base-path") ?? "/dsh-lan"
-let timeout: Double = numberOption("--timeout") ?? 10
+let timeout: Double = positiveOption("--timeout") ?? 10
 let sessionOption = takeOption("--session")
 let workspaceOption = takeOption("--workspace")
 let textOption = takeOption("--text")
 let pathOption = takeOption("--path")
 let titleOption = takeOption("--title")
-let limitOption: Int? = numberOption("--limit")
-let concurrencyOption: Int? = numberOption("--concurrency")
+let limitOption: Int? = positiveOption("--limit")
+let concurrencyOption: Int? = positiveOption("--concurrency")
 let asJSON = takeFlag("--json")
 let keepSessions = takeFlag("--keep-sessions")
 let once = takeFlag("--once")
-let widthOption: Int? = numberOption("--width")
-let heightOption: Int? = numberOption("--height")
+let widthOption: Int? = positiveOption("--width")
+let heightOption: Int? = positiveOption("--height")
 let intervalOption: Int? = numberOption("--interval")
 let fromOption = takeOption("--from")
 

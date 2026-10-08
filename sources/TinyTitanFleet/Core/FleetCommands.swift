@@ -178,6 +178,11 @@ public struct FleetRunner: Sendable {
 
     /// Prompt every active session in the group, in bounded batches. One member
     /// being down never stops the rest: each delivery reports its own result.
+    ///
+    /// `limit` is a cap on how many sessions get the prompt, so a non-positive one
+    /// caps the fan-out at nothing. Reading it as "no cap" would answer the exact
+    /// opposite of what was asked, and a negative value reaches `prefix(_:)`, which
+    /// traps.
     public func promptAll(
         group: FleetGroup,
         text: String,
@@ -185,8 +190,8 @@ public struct FleetRunner: Sendable {
         concurrency: Int = 4
     ) async -> [FleetOutcome] {
         var work = group.sessionOwners
-        if let limit, limit > 0 {
-            work = Array(work.prefix(limit))
+        if let limit {
+            work = Array(work.prefix(max(0, limit)))
         }
         let batchSize = max(1, concurrency)
         var outcomes: [FleetOutcome] = []

@@ -36,7 +36,12 @@ public enum FleetDashboardView {
     private static func tooSmall(width: Int, height: Int) -> FleetFrame {
         let message =
             "terminal too small — need \(minimumWidth)×\(minimumHeight), have \(width)×\(height)"
-        let lines = [fit("", width), fit(center(message, width), width)]
+        // This frame is the only answer a too-small window gets, so it is the one
+        // place that prints past the width it was handed: fitted to a window of one
+        // column the message was `…`, and at zero or less it was nothing at all.
+        let line = width >= message.count ? fit(center(message, width), width) : message
+        // A one-line window keeps the message rather than the blank above it.
+        let lines = height >= 2 ? [fit("", width), line] : [line]
         return FleetFrame(lines: Array(lines.prefix(max(1, height))), selectedLine: nil)
     }
 

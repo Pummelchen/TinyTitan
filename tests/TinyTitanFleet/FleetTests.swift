@@ -189,6 +189,36 @@ private func loadedGroup(
         #expect(await transport.actions().count == 2)
     }
 
+    /// `limit` is a cap. A cap of zero used to be read as "no cap", so asking for
+    /// no sessions prompted every session on every Mac in the group.
+    @Test func aLimitOfZeroPromptsNoSessionsRatherThanAllOfThem() async throws {
+        let (runner, transport, group) = try await loadedGroup(
+            replies: [
+                "/dsh-lan/prompt": FakeTransport.Reply(
+                    status: 200, body: Data(#"{"ok":true}"#.utf8))
+            ]
+        )
+        let outcomes = await runner.promptAll(group: group, text: "status?", limit: 0)
+        let calls = await transport.actions()
+        #expect(outcomes.isEmpty, "a cap of zero is zero sessions, got \(outcomes.count)")
+        #expect(calls.isEmpty, "a bounded broadcast dialled \(calls.count) sessions")
+    }
+
+    /// The same cap below zero. `Array.prefix(-1)` traps, so the only thing standing
+    /// between a negative limit and a crash was the guard that inverted its meaning.
+    @Test func aNegativeLimitPromptsNoSessionsAndDoesNotTrap() async throws {
+        let (runner, transport, group) = try await loadedGroup(
+            replies: [
+                "/dsh-lan/prompt": FakeTransport.Reply(
+                    status: 200, body: Data(#"{"ok":true}"#.utf8))
+            ]
+        )
+        let outcomes = await runner.promptAll(group: group, text: "status?", limit: -1)
+        let calls = await transport.actions()
+        #expect(outcomes.isEmpty, "a negative cap asks for no sessions, got \(outcomes.count)")
+        #expect(calls.isEmpty, "a negative cap dialled \(calls.count) sessions")
+    }
+
     @Test func mutatingPathsAreEncodedAndTargeted() async throws {
         // An id is one path component on the wire, whatever it contains: the
         // plugin's routes reject a slash inside one.

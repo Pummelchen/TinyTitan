@@ -36,7 +36,12 @@ public enum FleetUsage {
         or an answer that does not confirm, exits 1. --version prints the name and
         --help (or -h) prints this. --base-path is the route prefix a member serves
         the plugin under (default /dsh-lan); --interval SECONDS sets how often `top`
-        rescans the fleet (default 30 s, floored at 2 s). Keys resolve in this order:
+        rescans the fleet (default 30 s, floored at 2 s). --timeout, --limit,
+        --concurrency, --width and --height are a duration, a count or a size, so
+        they take a positive number: a cap of zero would mean every session, a frame
+        of zero columns prints nothing, and a timeout of zero is no timeout at all,
+        so such a value is refused rather than obeyed differently.
+        Keys resolve in this order:
         --key, DSH_LAN_KEY, DSH_LAN_TOKEN, the plugin's shipped default. Prefer the
         environment forms: --key puts the key in argv, where every other local
         account can read it with ps.

@@ -83,6 +83,23 @@ private func dashboard() -> FleetDashboard {
         #expect(frame.lines.contains { $0.contains("too small") })
     }
 
+    /// The message that tells the operator the window is too small must survive
+    /// the window. It used to be fitted to the width that triggered it, so one
+    /// column printed `…`, zero or less printed nothing at all, and a one-line
+    /// height kept only the blank line above it — each with exit 0.
+    @Test func theTooSmallMessageSurvivesASizeThatCannotHoldIt() {
+        let sizes = [
+            (width: 0, height: 30), (width: -5, height: 30), (width: 1, height: 30),
+            (width: 100, height: 1), (width: 100, height: 0), (width: 100, height: -5),
+        ]
+        for size in sizes {
+            let frame = FleetDashboardView.render(
+                dashboard(), width: size.width, height: size.height)
+            let readable = frame.lines.contains { $0.contains("too small") }
+            #expect(readable, "\(size.width)×\(size.height) printed \(frame.lines)")
+        }
+    }
+
     @Test func longNamesAndPathsAreElidedNotOverflowed() {
         let group = FleetGroup(
             group: "g",

@@ -135,4 +135,48 @@ import TinyTitanFleetCore
             misplaced.stderr.contains("--not-an-option"),
             "stderr: \(misplaced.stderr)")
     }
+
+    /// A number that parses but cannot mean what the flag is for. `--limit 0` used
+    /// to widen the fan-out to every session in the group — the opposite of a cap —
+    /// `--width 0` used to print an empty frame and exit 0, and `--timeout 0` handed
+    /// `URLSession` a timeout of zero, which means no timeout at all: measured
+    /// against a member that accepts and never answers, the run was still hanging at
+    /// 14 s while `--timeout 2` reported the timeout in 3 s. A count, a size and a
+    /// duration are positive or the run refuses.
+    @Test func aNumberThatCannotMeanWhatTheFlagSaysIsRefused() throws {
+        let cases: [(flag: String, value: String, arguments: [String])] = [
+            ("--limit", "0", ["prompt-all", "--text", "hi", "--peer", "127.0.0.1:1"]),
+            ("--limit", "-1", ["prompt-all", "--text", "hi", "--peer", "127.0.0.1:1"]),
+            ("--concurrency", "0", ["prompt-all", "--text", "hi", "--peer", "127.0.0.1:1"]),
+            ("--width", "0", ["top", "--once", "--peer", "127.0.0.1:1"]),
+            ("--height", "-5", ["top", "--once", "--peer", "127.0.0.1:1"]),
+            ("--timeout", "0", ["list", "--peer", "127.0.0.1:1"]),
+            ("--timeout", "-5", ["list", "--peer", "127.0.0.1:1"]),
+        ]
+        for each in cases {
+            let bad = try run(each.arguments + [each.flag, each.value])
+            #expect(
+                bad.status != 0,
+                "\(each.flag) \(each.value) exited 0: stdout \(bad.stdout) stderr \(bad.stderr)")
+            #expect(
+                bad.stderr.contains(each.flag),
+                "\(each.flag) \(each.value) stderr: \(bad.stderr)")
+            #expect(
+                bad.stderr.contains("positive"),
+                "\(each.flag) \(each.value) stderr: \(bad.stderr)")
+            #expect(
+                bad.stderr.contains(each.value),
+                "\(each.flag) \(each.value) stderr: \(bad.stderr)")
+        }
+
+        // The control is the same command with a value that *can* mean a cap: it
+        // reaches the peer, so the refusals above are about the number, not the flag.
+        let bounded = try run([
+            "prompt-all", "--text", "hi", "--peer", "127.0.0.1:1", "--limit", "1",
+            "--concurrency", "1",
+        ])
+        #expect(
+            bounded.stderr.contains("unreachable"),
+            "a valid limit should reach the peer and fail on it: \(bounded.stderr)")
+    }
 }
