@@ -121,7 +121,7 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-08, **160 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 159 before the commit that edits this row lands, so it reads 160 once it has); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `57ec1ce` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-08, **174 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 173 before the commit that edits this row lands, so it reads 174 once it has); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `5cede4a` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
@@ -303,6 +303,22 @@ is the authority. On 2026-10-04 it holds one Open row:
    volume refuses the entry directory while still accepting the writes into it —
    was false. See the `chflags` trap below before accepting any "no test seam"
    claim about an unlink.
+   (d) The Phase D sweep over the remaining `benchmark/` drivers is closed, and it
+   is closed on measurements rather than on the sweep's summary: AUD-216, AUD-217,
+   AUD-219 and AUD-220 were true and are fixed, and the two sites the sweep set
+   aside as "a different and smaller defect" were then re-measured instead of being
+   accepted as clear. `benchmark/ornith_four_program_matrix.py` is clear because
+   every pass count there already ANDs the error away (`:768`, `:787`, `:875`) and
+   `main()` returns 1 unless `passed == total`. `benchmark/ornith_concise_tool_ab.py`
+   is clear for a reason worth keeping: its `artifact_passed` (`:640`) does count a
+   row whose request errored — driven here with a synthesized record, an errored row
+   scores `artifact_passed 2 of total 2` against `workflow_completed 1` — but that is
+   what its name says it measures, the artifact on disk, and the two metrics sit side
+   by side so the reader is not told a fiction; the run's verdict is
+   `quality.passed and not error` over every row, which returns 1 on that same record.
+   The rule the sweep leaves behind: file when the *passing verdict* or the *number
+   the reader cannot see* is corrupted, not when a second named metric is merely
+   optimistic. Do not re-litigate these two.
 
 TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
 machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
@@ -311,6 +327,19 @@ left as an upstream ask in `docs/dsh-upstream-asks.md`.
 
 ## Traps worth carrying forward
 
+- **A driver that writes a refusal into a record is half the fix; the reader of that
+  record is the other half.** AUD-216 moved `side_engine_judges.py`'s exception out of
+  `completion` and into an `error` field, which is exactly what made
+  `t6_prose_score.py` score the refusal as a wrong answer — it had never looked at
+  either field (AUD-220). Judge files already on disk carry the *old* `<error …>`
+  shape, so a reader has to learn both, and grepping the writer is not enough: grep
+  the consumers of the file it emits. Two more traps from the same closes.
+  `test_tsan_storm_exit.py` must set `TMPDIR` to its own temporary directory, because
+  AUD-218's fix deliberately keeps the log directory on a failure and the first drafts
+  leaked 49 `tt-tsan-storm.*` directories into `/tmp`; and a stubbed ThreadSanitizer
+  runtime belongs at `Contents/Frameworks` relative to the `.xctest` bundle — that is
+  where `tools/tsan-storm.sh` looks, and one level off makes every test die on
+  "no ThreadSanitizer runtime at …".
 - **`chflags uchg` on a file *inside* a directory builds the volume an unlink-refusal
   test needs.** The flag makes `FileManager.removeItem` on the containing directory
   answer EPERM while writes into that directory keep succeeding, so a store can
