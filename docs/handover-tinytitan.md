@@ -125,7 +125,7 @@ if the date is old.
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **119 rows / 118 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-08, `counts` in `ledger.json` is **121 rows / 120 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -327,10 +327,31 @@ is the authority. On 2026-10-04 it holds one Open row:
    (`memory_book.py` documenting three arms while `ARMS` holds four, and
    `memory_value.py` shipping an uncalled `compiles()` that answers `False` when
    `swiftc` is simply missing). Both are closed with a general seam in
-   `benchmark/test_driver_documented_commands.py`. The next sweep along the same
-   seam is the non-memory drivers: `grep -n "sys.argv\[1\]" benchmark/*.py` still has
-   `capital_of_paris_report.py`, `claude_openai_adapter.py` and the `tinytitan_*`
-   probes on it, none of which was measured for this shape.
+   `benchmark/test_driver_documented_commands.py`. The same seam then swept the
+   non-memory drivers and produced two more, both closed: **AUD-223**
+   (`capital_of_paris_report.py` printed `{combinations} x {prompts} x {repeats} =
+   **N measured runs**` with `N` counted from the rows independently, so a truncated
+   matrix read as `2 x 2 x 3 = **9**` and the line under it certified "every request
+   was served" -- a row exists only for a run that *completed* -- while naming a
+   fixed September archive whatever file was passed and reading `/tmp` with no
+   argument), and **AUD-224** (`tinytitan_determinism_ab.py` printed its
+   `deterministic across fresh processes` conclusion outside the loop that compared
+   the streams, so two servers that carried no content -- `extract_deltas` answers
+   `[]` for a JSON error body and raises nothing -- hashed equal and passed, with the
+   token length hardcoded in the sentence while `max_tokens` is the argument, and
+   `int(sys.argv[1])` at module level made every importer run the cast against its
+   own argv).
+   **The next sweep along this seam is `tinytitan_overlap_measure.py`**: the same
+   module-level `int(sys.argv[1])` at :27, no `__main__` guard at all, its log
+   opened and `TinyTitanServer` `Popen`ed at import (:33-35, read rather than run --
+   that starts a model process), and three `=== ... ===` section headers (:93-101)
+   that print whether or not a single line was captured. `claude_openai_adapter.py`, which an
+   earlier note here listed as carrying the same shape, does not: it reads no argv at
+   all (`grep -n argv` over it is empty), so it is off the list on measurement.
+   A method note the second finding cost: a mutation harness that greps for `FAIL:`
+   and `ERROR:` lines reads a *crashed* run, which prints neither, as a surviving
+   mutant. Check the runner's own `Ran N tests`/exit status, not just its failure
+   lines.
 
 TT-018 (the plugin's delivery) and TT-020 (reaching the LAN manager from another
 machine) were both closed on 2026-10-01: the `awesome-dsh-plugin` fork is gone,
