@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 113,
-    "done": 112,
+    "total": 114,
+    "done": 113,
     "open": 0,
     "blocked": 1
   },
@@ -1891,6 +1891,22 @@
       "fix-summary": "A refusal is recorded, not scored. `run_server`'s `except` writes `completion=\"\"` and `error=\"<Type>: <message>\"` instead of putting the exception in the answer field; `summarize()` skips any row carrying `error` from `total`, `correct` and the per-half arithmetic and counts it in `refused`; `line()` scores only the halves that measured something, prints `-` for a column with no measurement, appends `refused N` to the row, and reports `measured nothing: every request refused, so none of the above is a score` rather than dividing by zero or taking `min()` of an empty dict; `main()` returns 1 when any judge refused, and the module docstring states that contract.",
       "evidence-after": "`cd benchmark && python3 -m unittest test_side_engine_judges` — 9 tests, OK, on the committed driver; the same suite against `34a033c^` fails the 4 tests quoted above, so each assertion is pinned to the behaviour it catches. Seven mutants of the fix, each restored byte-identically, all died: dropping the `error` branch in `run_server`; dropping the `continue` that keeps a refused row out of the denominator; `return 0` in `main()`; never setting `any_refused`; dropping `record[\"error\"]`; reverting to `<error …>` in `completion`; and `good = worst >= 0.7` without the `worst is not None` guard (crash, which is the point — a run with nothing measured must report, not raise). The refusal test uses a bound-then-closed port, so the `URLError` is urllib's own, and the clean-exit guard runs a real `http.server` on 127.0.0.1:0 answering 200 — no live TinyTitan is touched, per the rule that verification uses only what is installed. What the fix does **not** pin: a judge that answers in malformed JSON is still scored as a wrong answer rather than refused, which is AUD-210's separate finding and remains by design.",
       "commit": "34a033c"
+    },
+    {
+      "id": "AUD-217",
+      "severity": "S2",
+      "tier": "A",
+      "project": "tooling",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/memory_mini.py:210-278 (run_model), :280-399 (report), :460-473 (`__main__`); the suite in benchmark/test_memory_mini_report.py:59-160; registration in .github/workflows/ci.yml:258",
+      "title": "`memory_mini.py` quizzed a store its refused request never let the model build: an all-refused run printed 83% fidelity and 100% no-JSON",
+      "category": "a refusal converted into a measurement — the same class as AUD-216, reached from the other side: here the refused request removed a session from the record, and the reader walked the session range anyway and scored the cells that absence made unanswerable",
+      "discovered-by": "The same Phase D sibling sweep as AUD-216, on the site its report named as `the memory matrix's own report path`; re-measured against the committed driver before filing.",
+      "evidence-before": "Re-measured today by running the new suite against the pre-fix driver (`git show 6cd24a5^:benchmark/memory_mini.py`). `run_model` wrote nothing at all for a session whose request raised, and `report()` looped `for session in range(2, 11)` regardless, so every quiz cell whose fact came from that session was scored **wrong** rather than **unmeasured**. Three numbers came out of it that are not measurements of any model: a record with one refused session printed `  350m-extract   full           83%       0.9s          14     100%     1`; a record where **all ten** sessions refused printed `  350m-extract   full           83%       0.0s           0     100%     1` — 83% fidelity and 100% no-JSON for a run that issued no successful request, at zero seconds per session; and both exited 0. The `0.0s` and `0` tokens in the same row as a fidelity percentage is the tell: the row's own timing says nothing ran while its score says the store was mostly right. This is the driver whose output the handover cites for the memory-keeper choice, so the false reading is the one that would decide whether a small model can be the keeper at all.",
+      "fix-summary": "`run_model` writes an explicit refusal into the record — `per_session[session] = {\"error\": \"<Type>: <message>\", \"facts\": {}, \"seconds\": 0.0, \"prompt_tokens\": 0, \"completion_tokens\": 0}` — instead of leaving the session out, so absence and refusal are different states. `report()` derives, per run, `failures`, `refused` and `cutoff = min(failures)`, skips refused values when averaging time and tokens, quizzes only the sessions up to the first refusal (`range(2, 11)` minus `session >= cutoff`), carries `fidelity/seconds/tokens/empty` as `None` when nothing was measured and prints `-` for them, labels the row `N refused, M cells scored`, prints `model/job measured nothing: N request(s) refused, no quiz cell was scoreable` when a run scored no cell, and returns 1 if any request refused. `__main__` ends the report path with `raise SystemExit(report())` so the driver's exit code is that verdict.",
+      "evidence-after": "`cd benchmark && python3 -m unittest test_memory_mini_report` — 4 tests, OK; against `6cd24a5^` the same four fail with the outputs quoted above. The cell count is not assumed: `CELLS_PER_SESSION = len(mini.book.QUIZ_KEYS)` reads the number the quiz actually asks, which measured 14, so `1 refused, 14 cells scored` and the guard's `126 cells scored` are both pinned to the source rather than to a literal. A **measured zero still passes**: the guard test builds a record that answered everything and got every cell wrong, and asserts the row carries a `%`, no `refused` label, and exit code 0 — the fix must not turn a bad model into a broken instrument. The refusals are produced by stubbing `mini.complete` to raise `URLError`, and `report()` is driven over synthesized records through `mini.RESULTS` and a stubbed `mini.sim.load_runs`, so no model, no server and no subprocess is started. What the fix does **not** pin: `report()`'s `cutoff` assumes sessions are contiguous, which the record guarantees today because `run_model` writes a refusal row for every session it attempts; a driver that skipped a session silently would still be scored.",
+      "commit": "6cd24a5"
     }
   ]
 }
