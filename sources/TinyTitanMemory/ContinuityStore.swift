@@ -56,8 +56,9 @@ public actor ContinuityStore: MemoryStore {
         // The writing session, when the caller named one and a continuity
         // session has been opened for it. That is what makes a record
         // explainable later, so it is carried as provenance rather than
-        // duplicated into the value.
-        let sessionID = normalized.sourceSession.flatMap { sessionIDs[$0] }
+        // duplicated into the value. Resolved live rather than read straight
+        // from the cache, because the cache outlives the sessions it names.
+        let sessionID = await liveSession(for: normalized.sourceSession, taskID: taskID)
         do {
             if let sessionID {
                 try await engine.remember(

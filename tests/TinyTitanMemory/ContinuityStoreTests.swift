@@ -525,6 +525,43 @@ import Testing
         #expect(await engine.session(externalID: "shared")?.id != opened)
         #expect(await engine.journalFailure == nil)
     }
+
+    /// The same stale id sits in front of the *store's* own write path, and
+    /// there the throw is not swallowed — it reaches the model.
+    ///
+    /// `set` takes the writing session's id out of `sessionIDs` to carry as
+    /// provenance, `engine.remember(sessionID:)` rejects a session the log has
+    /// dropped, and the error the caller gets back names the backend rather
+    /// than the stale entry. The fact the model asked to keep was not written.
+    @Test func aFactWrittenAfterItsSessionWasPrunedStillLands() async throws {
+        let engine = ContinuityEngine()
+        let store = ContinuityStore(engine: engine)
+        let journal = ContinuityJournalStore(
+            engine: engine, store: store,
+            limits: JournalLimits(turnsPerSession: 10, sessionsPerWorkspace: 1))
+        let scope = try scope()
+        _ = try await store.sessionInit(MemorySession(id: "shared"), in: scope)
+        await journal.record(
+            turn(0, session: "other", prompt: "one", reply: "a"),
+            in: scope)
+
+        try await store.set(
+            MemoryRecord(
+                key: try MemoryKey(validating: "decisions/sync"),
+                value: "FooManager stays; it prevents a sync race.",
+                importance: 0.9,
+                sourceSession: "shared"),
+            in: scope)
+
+        let loaded = try #require(
+            await store.get(try MemoryKey(validating: "decisions/sync"), in: scope))
+        #expect(loaded.value == "FooManager stays; it prevents a sync race.")
+        // The conversation kept its name, so the fact stays attributable to it:
+        // provenance is carried on the session reopened under that name rather
+        // than dropped with the one that was pruned.
+        #expect(loaded.sourceSession == "shared")
+        #expect(await engine.journalFailure == nil)
+    }
 }
 
 /// The path the server actually takes: a `MemoryService` built from a

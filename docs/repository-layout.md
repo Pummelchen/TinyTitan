@@ -541,6 +541,13 @@ text forms, the normalisers, `task(for:)` and the error translation. Seven
 stored properties and `task(for:)` widened, and the new file needed
 `import ContinuityCore`.
 
+`ContinuityStore.swift` was split from that same file again when the AUD-206 fix
+needed a place for live session resolution and the file was at 496 of the 500
+allowed: `ContinuityStore+Sessions.swift` (51) now holds `liveSession(for:taskID:)`
+and the `remember(_:as:)` that keeps the name→id cache and the id→name label map
+filled together. Nothing widened — `sessionIDs` and `sessionLabels` were already
+internal for `+KeyMapping.swift`.
+
 `MoE.swift` (614 → 428) sent the persistent routed-expert encode path to
 `MoE+PersistentRouted.swift` (199): the U16 load stages, the phase-2 reduce and
 the argument-buffer helpers. Twenty-three private members widened there — the
