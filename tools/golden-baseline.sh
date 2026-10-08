@@ -134,7 +134,14 @@ if busy=$(pgrep -fl 'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-
   exit 3
 fi
 
-mkdir -p "$OUT_DIR" "$ROOT/.build"
+# Checked, because this script does not run under `set -e` and a silent failure
+# here turns every later capture into a write to a path that does not exist.
+# `benchmark/golden` being a regular file rather than a directory is not
+# hypothetical -- it is what a botched checkout or a stray redirect leaves.
+mkdir -p "$OUT_DIR" "$ROOT/.build" || {
+  echo "cannot create $OUT_DIR — is a plain file in the way?" >&2
+  exit 2
+}
 status=0
 
 # Only ever holds a PID this script started, which is what makes killing it in
@@ -308,6 +315,22 @@ for t in "${targets[@]+"${targets[@]}"}"; do
   fi
 
   if [ "$mode" = capture ]; then
+    # An empty generation is refused, not stored. `--check` compares only the
+    # body (everything after `---`), so an empty body certifies an empty run:
+    # the gate would print "identical to baseline" forever while having
+    # captured nothing. A CLI that exits 0 and prints nothing is a failure of
+    # the run, not a result.
+    if [ ! -s "$work" ]; then
+      echo "  REFUSED: exit 0 with no output — an empty body would pass every"
+      echo "  future --check without asserting anything. Nothing was stored."
+      rm -f "$work" "$work.err"; status=1; continue
+    fi
+    # Assemble into a temp file, then copy it into place with a *simple*
+    # command. A redirection error on a brace group is printed but does not
+    # fail the group -- measured on /bin/bash 3.2.57 and on Homebrew 5.x alike,
+    # so `if ! { …; } > "$file"` is a guard that can never fire. `cat src > f`
+    # does report it, which is what makes the write's status checkable.
+    full="$(mktemp "$ROOT/.build/golden-full.XXXXXX")"
     {
       echo "# prompt:      $PROMPT"
       echo "# max-new:     $MAX_NEW"
@@ -318,11 +341,26 @@ for t in "${targets[@]+"${targets[@]}"}"; do
       echo "# commit:      $(git -C "$ROOT" rev-parse --short HEAD)"
       echo "---"
       cat "$work"
-    } > "$file"
-    echo "  captured -> ${file#$ROOT/} ($(wc -c < "$work" | tr -d ' ') bytes)"
+    } > "$full"
+    if ! cat "$full" > "$file"; then
+      echo "  FAILED to write ${file#$ROOT/} — nothing was captured"
+      rm -f "$work" "$work.err" "$full"; status=1; continue
+    fi
+    rm -f "$full"
+    # The size of the file that now exists, not of the temp file that fed it:
+    # the header is part of every stored baseline, and the old line reported
+    # only the body.
+    echo "  captured -> ${file#$ROOT/} ($(wc -c < "$file" | tr -d ' ') bytes)"
   else
     if [ ! -f "$file" ]; then
       echo "  no baseline at ${file#$ROOT/}; run without --check first"; status=1
+    elif [ "$(sed '1,/^---$/d' "$file" | wc -c | tr -d ' ')" = 0 ]; then
+      # Same vacuity, from the other side: a baseline whose body is empty can
+      # only be matched by a run that produced nothing. Either way the check
+      # has stopped being a check, so refuse before the diff.
+      echo "  REFUSED: ${file#$ROOT/} has an empty body — it captures no output"
+      echo "  Re-capture it: tools/golden-baseline.sh $t"
+      status=1
     elif diff -q <(sed '1,/^---$/d' "$file") "$work" >/dev/null; then
       echo "  ok — output identical to baseline"
     else

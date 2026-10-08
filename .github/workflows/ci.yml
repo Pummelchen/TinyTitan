@@ -203,6 +203,18 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_release_ci_green
+      - name: Golden-baseline capture gates
+        # `tools/golden-baseline.sh --check` is the only gate that exercises real
+        # inference, and `tools/release.sh` runs it before a tag — so the capture
+        # arm that writes the stored baselines has to be able to fail. These
+        # tests drive it with a stub CLI inside a temporary checkout: no model,
+        # no GPU, no download. They cover the vacuous passes a capture can leave
+        # behind (an empty run stored as a baseline, a baseline with an empty
+        # body certified by an empty run), a write that cannot happen, and the
+        # byte count the operator reads as proof a capture landed.
+        run: |
+          cd benchmark
+          python3 -m unittest test_golden_baseline_capture
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
