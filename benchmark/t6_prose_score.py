@@ -6,6 +6,11 @@ and a silence false-alarm rate <= 5%. This reads one or more judge output files
 (the JSONL `benchmark/side_engine_judges.py` writes) plus the review file that
 `benchmark/t6_prose_cases.py` writes, and reports those numbers per judge.
 
+A row whose request never answered is not a wrong answer: it stays out of every
+denominator and is counted as `refused`. Exits 0 only when every judge measured
+something, passed the gate, and refused nothing — a printed `GATE FAIL` that
+exits 0 would put the gate's own verdict back on the reader to notice.
+
     python3.13 benchmark/t6_prose_score.py \
         --review /tmp/t6-prose-review.tsv \
         --done "server-35B:/tmp/t6-server-done.jsonl" \
@@ -43,13 +48,37 @@ def report(name: str, done: Path, labels: dict[str, dict]) -> dict:
         json.loads(line) for line in done.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     scored = []
+    refused = 0
     for row in rows:
         label = labels.get(row.get("note", ""))
         if label is None:
             continue
-        scored.append((label, answer_of(row.get("completion", ""))))
+        completion = str(row.get("completion", ""))
+        # A request that never answered has no answer to score. `side_engine_judges`
+        # records the refusal in `error` (AUD-216); the judge files written before
+        # that fix carry it inside `completion` as `<error …>`.
+        if row.get("error") or completion.strip().lower().startswith("<error"):
+            refused += 1
+            continue
+        scored.append((label, answer_of(completion)))
 
     total = len(scored)
+    print(f"\n== {name}  ({total} scored of {len(rows)} completions)")
+    if refused:
+        print(f"  refused           {refused} (no answer to read, so none of it is scored)")
+    if not total:
+        print("  measured nothing: every request refused, so there is no score to report")
+        return {
+            "name": name,
+            "total": 0,
+            "refused": refused,
+            "measured": False,
+            "accuracy": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "silence_rate": 0.0,
+            "gate_passed": False,
+        }
     right = sum(1 for label, answer in scored if answer == label["truth"])
     positives = [(label, a) for label, a in scored if label["truth"] == "YES"]
     negatives = [(label, a) for label, a in scored if label["truth"] == "NO"]
@@ -63,8 +92,7 @@ def report(name: str, done: Path, labels: dict[str, dict]) -> dict:
     recall = len(true_positive) / len(positives) if positives else 0.0
     silence_rate = len(silent_fired) / len(silent) if silent else 0.0
 
-    print(f"\n== {name}  ({total} scored of {len(rows)} completions)")
-    print(f"  accuracy          {right}/{total} = {100 * right / max(1, total):.1f}%")
+    print(f"  accuracy          {right}/{total} = {100 * right / total:.1f}%")
     print(f"  YES precision     {len(true_positive)}/{len(fired)} = {100 * precision:.1f}%")
     print(f"  recall            {len(true_positive)}/{len(positives)} = {100 * recall:.1f}%")
     print(f"  YES half          {len(true_positive)}/{len(positives)}")
@@ -73,10 +101,15 @@ def report(name: str, done: Path, labels: dict[str, dict]) -> dict:
     )
     print(f"  silence alarms    {len(silent_fired)}/{len(silent)} = {100 * silence_rate:.1f}%")
     print(f"  unparseable       {len(bad)}")
+    gate = {
+        "precision": precision >= 0.95,
+        "recall": recall >= 0.50,
+        "silence": silence_rate <= 0.05,
+    }
     print(
-        f"  GATE              precision {'PASS' if precision >= 0.95 else 'FAIL'}"
-        f"  recall {'PASS' if recall >= 0.50 else 'FAIL'}"
-        f"  silence {'PASS' if silence_rate <= 0.05 else 'FAIL'}"
+        f"  GATE              precision {'PASS' if gate['precision'] else 'FAIL'}"
+        f"  recall {'PASS' if gate['recall'] else 'FAIL'}"
+        f"  silence {'PASS' if gate['silence'] else 'FAIL'}"
     )
 
     per_key: dict[str, list[int]] = {}
@@ -93,10 +126,13 @@ def report(name: str, done: Path, labels: dict[str, dict]) -> dict:
     return {
         "name": name,
         "total": total,
-        "accuracy": right / max(1, total),
+        "refused": refused,
+        "measured": True,
+        "accuracy": right / total,
         "precision": precision,
         "recall": recall,
         "silence_rate": silence_rate,
+        "gate_passed": all(gate.values()),
     }
 
 
@@ -114,13 +150,22 @@ def main() -> int:
         summary.append(report(name, Path(path), labels))
     print("\n== summary")
     for row in summary:
+        if not row["measured"]:
+            print(f"  {row['name']:14s} measured nothing: {row['refused']} request(s) refused")
+            continue
         print(
             f"  {row['name']:14s} acc {100 * row['accuracy']:5.1f}%"
             f"  precision {100 * row['precision']:5.1f}%"
             f"  recall {100 * row['recall']:5.1f}%"
             f"  silence {100 * row['silence_rate']:4.1f}%"
         )
-    return 0
+    refused = sum(row["refused"] for row in summary)
+    if refused:
+        print(f"\n  refused requests: {refused}; every percentage covers only what answered")
+    failed = [row["name"] for row in summary if not row["gate_passed"]]
+    if failed:
+        print(f"  gate FAILED: {', '.join(failed)}")
+    return 1 if failed or refused else 0
 
 
 if __name__ == "__main__":

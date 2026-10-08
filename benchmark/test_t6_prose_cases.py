@@ -10,11 +10,15 @@ quietly reintroduce one.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import pathlib
+import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -187,34 +191,130 @@ class AnswerParsingTests(unittest.TestCase):
 
 
 class GateMetricTests(unittest.TestCase):
-    def test_precision_recall_and_silence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            review = pathlib.Path(tmp) / "review.tsv"
-            review.write_text(
-                "run\tsession\tkey\tkind\ttruth\tknown\tclaims\tspan\n"
-                "1\t1\tk/yes\tclaim\tYES\t-\t\t\n"
-                "1\t2\tk/missed\tclaim\tYES\t-\t\t\n"
-                "1\t3\tk/silent\tsilent\tNO\t-\t\t\n"
-                "1\t4\tk/wrong\tclaim\tNO\t-\t\t\n"
-            )
-            done = pathlib.Path(tmp) / "done.jsonl"
-            done.write_text(
-                "\n".join(
-                    json.dumps({"note": note, "completion": answer})
-                    for note, answer in [
-                        ("r1s1 k/yes", "YES"),
-                        ("r1s2 k/missed", "NO"),
-                        ("r1s3 k/silent", "YES"),
-                        ("r1s4 k/wrong", "NO"),
-                    ]
-                )
-                + "\n"
-            )
+    """What the gate scorer counts, and what it exits with.
+
+    A row whose request never answered has no answer to score: `side_engine_judges`
+    records the refusal in an `error` field (and, before AUD-216, inside
+    `completion` as `<error …>`, which is what the judge files already on disk
+    look like). Either way it must stay out of every denominator. And the gate is
+    pre-registered in `docs/t6-reply-check-offline.md`, so a `GATE FAIL` line that
+    exits 0 is a verdict the harness declines to carry.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+
+    def _files(self, *cases: tuple[str, str, str, str, str | None]):
+        """A review file and a judge output file from `(key, kind, truth, answer, error)`."""
+        review = self.root / "review.tsv"
+        lines = ["run\tsession\tkey\tkind\ttruth\tknown\tclaims\tspan"]
+        rows = []
+        for session, (key, kind, truth, completion, error) in enumerate(cases, start=1):
+            lines.append(f"1\t{session}\t{key}\t{kind}\t{truth}\t-\t\t")
+            row: dict[str, object] = {"note": f"r1s{session} {key}", "completion": completion}
+            if error:
+                row["error"] = error
+            rows.append(row)
+        review.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        done = self.root / "done.jsonl"
+        done.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+        return review, done
+
+    def _report(self, *cases):
+        review, done = self._files(*cases)
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
             result = score.report("t", done, score.load_labels(review))
+        return result, buffer.getvalue()
+
+    def _main(self, *cases) -> tuple[int, str]:
+        review, done = self._files(*cases)
+        buffer = io.StringIO()
+        argv = ["t6_prose_score.py", "--review", str(review), "--done", f"t:{done}"]
+        with (
+            unittest.mock.patch.object(sys, "argv", argv),
+            contextlib.redirect_stdout(buffer),
+        ):
+            return score.main(), buffer.getvalue()
+
+    def test_precision_recall_and_silence(self):
+        result, _ = self._report(
+            ("k/yes", "claim", "YES", "YES", None),
+            ("k/missed", "claim", "YES", "NO", None),
+            ("k/silent", "silent", "NO", "YES", None),
+            ("k/wrong", "claim", "NO", "NO", None),
+        )
         self.assertEqual(result["total"], 4)
         self.assertAlmostEqual(result["precision"], 0.5)  # fired twice, one right
         self.assertAlmostEqual(result["recall"], 0.5)  # one of two positives
         self.assertAlmostEqual(result["silence_rate"], 1.0)  # the one silent case fired
+
+    def test_a_refused_row_is_not_scored_as_a_wrong_answer(self):
+        result, out = self._report(
+            ("k/yes", "claim", "YES", "YES", None),
+            ("k/missed", "claim", "YES", "", "URLError: refused"),
+        )
+        self.assertEqual(result["total"], 1, f"a refusal was scored: {out}")
+        self.assertEqual(result["refused"], 1)
+        self.assertAlmostEqual(result["accuracy"], 1.0)
+        self.assertAlmostEqual(result["recall"], 1.0)
+
+    def test_a_refusal_written_into_the_completion_is_a_refusal_too(self):
+        # The shape every judge file written before AUD-216 carries.
+        result, _ = self._report(
+            ("k/yes", "claim", "YES", "YES", None),
+            (
+                "k/missed",
+                "claim",
+                "YES",
+                "<error <urlopen error [Errno 61] Connection refused>>",
+                None,
+            ),
+        )
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["refused"], 1)
+
+    def test_a_run_where_every_row_refused_measures_nothing(self):
+        result, out = self._report(
+            ("k/yes", "claim", "YES", "", "URLError: refused"),
+            ("k/missed", "claim", "YES", "", "URLError: refused"),
+            ("k/wrong", "claim", "NO", "", "URLError: refused"),
+        )
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["refused"], 3)
+        self.assertFalse(result["measured"])
+        self.assertIn("measured nothing", out)
+        self.assertNotIn("accuracy          0/0", out, f"0% printed for no measurement: {out}")
+
+    def test_a_gate_that_fails_is_the_exit_code(self):
+        code, out = self._main(
+            ("k/yes", "claim", "YES", "YES", None),
+            ("k/wrong", "claim", "NO", "YES", None),
+        )
+        self.assertIn("GATE", out)
+        self.assertIn("FAIL", out)
+        self.assertEqual(code, 1, f"a failed pre-registered gate exited {code}: {out}")
+
+    def test_a_gate_that_passes_exits_clean(self):
+        code, out = self._main(
+            ("k/yes", "claim", "YES", "YES", None),
+            ("k/yes2", "claim", "YES", "YES", None),
+            ("k/wrong", "claim", "NO", "NO", None),
+            ("k/silent", "silent", "NO", "NO", None),
+        )
+        self.assertNotIn("FAIL", out)
+        self.assertEqual(code, 0, f"a gate that passed must not fail the run: {out}")
+
+    def test_a_refused_row_fails_the_exit_code(self):
+        code, out = self._main(
+            ("k/yes", "claim", "YES", "YES", None),
+            ("k/wrong", "claim", "NO", "NO", None),
+            ("k/silent", "silent", "NO", "NO", None),
+            ("k/missed", "claim", "YES", "", "URLError: refused"),
+        )
+        self.assertEqual(code, 1, f"a run that measured less than it claims exited {code}: {out}")
 
 
 if __name__ == "__main__":
