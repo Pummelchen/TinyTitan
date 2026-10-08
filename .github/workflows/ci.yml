@@ -249,7 +249,7 @@ jobs:
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
         # gates a release. Every one of them is stdlib-only, measured on this host
-        # 2026-10-08 as 26 suites and 380 tests with no model, no server, no Xcode and
+        # 2026-10-09 as 27 suites and 418 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -283,6 +283,18 @@ jobs:
         # headline mean, printed `mean=0.00 tok/s` for an arm whose log held no footer and
         # returned no status at all, and sent 512-token requests to a server that had
         # never answered /health),
+        # test_tinytitan_benchmark drives the benchmark cell's real main() with Popen,
+        # the /health wait, the streaming POST, server_command(), resolve_api_model(),
+        # bench_model() and the log and results paths faked — it exists because that
+        # driver's matrix denominator was its survivors, so a cell where every prompt
+        # failed printed `Answers verified: 0 of 0 rows` under a `COMPLETE` banner and
+        # exited 0; because main() returned no status and the banner was unconditional;
+        # because wait_ready() polled /health ten times without ever looking at the
+        # process, so a server that had exited was reported as a failure and one that
+        # was merely slow was declared dead; because it froze the model, the width
+        # label and the MTP draft head at import; and because it joined the server's
+        # decode footers to its rows by zip(), which shifts every rate after the first
+        # missing one.
         # wall time was 22.5 s at load average 4.3 with the operator's own server still
         # listening on 8080, 19.1 s of it reported by the runner — the 22-suite list
         # measured 24.9 s at load 6.5 and 18.8 s at load 3 an hour earlier, so the
@@ -292,7 +304,9 @@ jobs:
         # at load 4.8, both with the operator's server on 8080 and untouched. The
         # 26-suite list measured 20.4 s wall and 20.1 s reported at load average 4.0,
         # re-measured at 380 tests as 20.0 s and 19.8 s at load 4.6. Both with the
-        # operator's server on 8080 and untouched. The
+        # operator's server on 8080 and untouched. The 27-suite list measured 20.7 s
+        # wall and 20.5 s reported at load average 3.7, again with the operator's
+        # server on 8080 and untouched. The
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -311,7 +325,8 @@ jobs:
             test_tinytitan_determinism_ab test_tinytitan_overlap_measure \
             test_tinytitan_rdadvise_ab test_tinytitan_gap_bisect \
             test_capital_of_paris_smartness test_tinytitan_maxthroughput \
-            test_tinytitan_slots_ab test_tinytitan_longgen
+            test_tinytitan_slots_ab test_tinytitan_longgen \
+            test_tinytitan_benchmark
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

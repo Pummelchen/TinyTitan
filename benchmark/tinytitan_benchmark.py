@@ -24,6 +24,15 @@ Methodology notes (production audit fixes):
   penalty 1), so the MTP cell runs at temperature 0. All other cells use the
   production defaults: temperature 0.6, top-p 0.95, top-k 20, and presence
   penalty 0.
+- Every count a cell reports is the count it *owed*: twelve prompts, and twice
+  that in sends for a cache cell. Survivors are never the denominator, because a
+  cell in which every stream ended without a usage chunk owes zero either way.
+- `main()` returns the worst cell status and `__main__` exits with it, so a
+  sweep that launched nothing is not a run that completed.
+
+    cd benchmark && python3 tinytitan_benchmark.py models/ornith-1.5_35B_A3B_8Bit
+    cd benchmark && python3 tinytitan_benchmark.py --matrix \
+        --mtp-model models/ornith-1.5_35B_A3B_MTP_4Bit
 """
 
 import argparse
@@ -37,13 +46,16 @@ import sys
 import re
 
 from tinytitan_profile import (
+    DEFAULT_API_MODEL,
     DEFAULT_CONTEXT_TOKENS,
     DEFAULT_KV_BITS,
-    DEFAULT_MODEL_PATH,
     DEFAULT_THINKING_MODE,
+    bench_model,
     benchmark_log_path,
+    resolve_api_model,
     server_command,
     server_environment,
+    wait_for_health,
 )
 
 DECODE_FOOTER_RE = re.compile(r"decode_tok_s=([0-9.]+)")
@@ -52,26 +64,12 @@ MTP_STATS_RE = re.compile(
     r"target_passes=(\d+) emitted_per_pass=([0-9.]+)"
 )
 
-# Resolved from the running server rather than hardcoded, so this harness can
-# benchmark any installed model. It used to name Ornith, which silently made
-# it the only model it could measure.
-MODEL_ID = "ornith-1.5-35b-a3b"
-
-
-def resolve_model_id(port):
-    """The API id the server derived from the model's manifest."""
-    global MODEL_ID
-    try:
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("GET", "/v1/models")
-        data = json.loads(conn.getresponse().read().decode())
-        conn.close()
-        ids = [row["id"] for row in data.get("data", []) if not row["id"].endswith("-fast")]
-        if ids:
-            MODEL_ID = ids[0]
-    except (OSError, ValueError, KeyError):
-        pass
-    return MODEL_ID
+# Every cell loads a full model, and an 8-bit MoE streams its experts off SSD,
+# so a slow boot is the measurement and not a dead server. The profile's 120 s
+# default is a warm-restart budget; this one is a cold load.
+SERVER_LOAD_TIMEOUT = 2400
+WIDTHS = ("4bit", "6bit", "8bit")
+MTP_MEMORY_MIB = 384
 
 
 PROMPTS = [
@@ -122,6 +120,97 @@ MAX_TOKENS = 128
 _spawned_servers = []
 
 
+def quant_label(model):
+    """The width the install's own name carries, or its basename.
+
+    A path naming no width used to fall through to `4bit`, which is a
+    quantisation claim about an install that never made one.
+    """
+    lowered = str(model).lower().replace("-", "")
+    for width in WIDTHS:
+        if width in lowered:
+            return width
+    return os.path.basename(os.path.normpath(str(model))) or "model"
+
+
+def sends_per_prompt(cache_mode):
+    """A cache cell sends every prompt twice; every other cell sends it once."""
+    return 2 if cache_mode == "multi-prefix" else 1
+
+
+def expected_sends(cache_mode):
+    """The sends a cell owes, counted before any of them can fail."""
+    return len(PROMPTS) * sends_per_prompt(cache_mode)
+
+
+def mtp_arguments(mtp_model):
+    """The launcher flags for a draft head, or None when no head was named."""
+    if not mtp_model:
+        return None
+    return ["--mtp-model", str(mtp_model), "--mtp-memory-mib", str(MTP_MEMORY_MIB)]
+
+
+def results_directory():
+    """Where each cell's `aggregate.json` lands."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "benchmark-results")
+
+
+def attach_footer_rates(rows, rates, cache_mode):
+    """Put each send's server-side rate on the row that sent it.
+
+    A cache cell logs two footers per prompt, and the row is the *warm* send --
+    `zip(rows, rates)` paired row 2 with prompt 1's warm rate and stopped at the
+    twelfth footer, so most of the log went unattached and what attached was
+    mislabelled.
+    """
+    if len(rates) != expected_sends(cache_mode):
+        return
+    step = sends_per_prompt(cache_mode)
+    for index, row in enumerate(rows):
+        row["footer_decode_tok_s"] = round(rates[index * step + step - 1], 2)
+
+
+def cell_report(label, rows, rates, *, cache_mode, mtp_summary=None, warm_avg=None):
+    """(lines, status) for one cell, judged against what it owed.
+
+    The denominator is the prompts configured, not the prompts that answered:
+    `expected_sends` used to be `len(results) * n` computed *after* the loop that
+    dropped every failed prompt, so twelve failures compared zero footers against
+    zero sends, matched, and printed `Answers verified: 0/0` over a `COMPLETE`.
+    """
+    lines = []
+    status = 0
+    expected = expected_sends(cache_mode)
+    missing = len(PROMPTS) - len(rows)
+    if missing:
+        status = 1
+        lines.append(
+            f"NOT MEASURED: {label} -- {len(rows)} of {len(PROMPTS)} prompts produced "
+            f"a row; {missing} produced no row (the stream ended without a usage chunk)."
+        )
+    if len(rates) != expected:
+        status = 1
+        lines.append(f"NOT MEASURED: {label} -- {len(rates)} decode footers for {expected} sends.")
+        lines.append(
+            "  Rates are tied to sends by position, so a footer that is missing or "
+            "extra shifts every row after it."
+        )
+    else:
+        footer_avg = sum(rates) / len(rates)
+        lines.append(f"FOOTER DECODE: {footer_avg:.2f} tok/s ({len(rates)} requests)")
+        if warm_avg is not None:
+            lines.append(f"  Warm-send avg: {warm_avg:.2f} tok/s")
+        lines.append(f"  Individual: {' | '.join(f'{rate:.2f}' for rate in rates)}")
+        if mtp_summary:
+            lines.append(
+                f"  MTP: drafted={mtp_summary['total_drafted']} "
+                f"accepted={mtp_summary['total_accepted']} "
+                f"acceptance={mtp_summary['acceptance']}% "
+                f"emitted_per_pass={mtp_summary['avg_emitted_per_pass']}"
+            )
+    return lines, status
+
+
 def _normalize(text):
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
@@ -151,7 +240,7 @@ def verify_response(prompt_capability, response):
     return _normalize(expected) in _normalize(response)
 
 
-def probe_continuation(port, temperature=0.6):
+def probe_continuation(port, temperature=0.6, model_id=DEFAULT_API_MODEL):
     """Exercise the multi-prefix cache's real use case: a second turn that
     continues the first, with the client echoing the assistant reply verbatim.
     Returns a dict with per-turn cached tokens and wall times, or None on a
@@ -160,7 +249,10 @@ def probe_continuation(port, temperature=0.6):
     prompt_a = "The access code is 7391. Remember it."
     prompt_b = "What is the access code? Answer with only the number."
     first = send_request_stream(
-        [{"role": "user", "content": prompt_a}], port=port, temperature=temperature
+        [{"role": "user", "content": prompt_a}],
+        port=port,
+        temperature=temperature,
+        model_id=model_id,
     )
     if not first:
         return None
@@ -173,6 +265,7 @@ def probe_continuation(port, temperature=0.6):
         ],
         port=port,
         temperature=temperature,
+        model_id=model_id,
     )
     if not second:
         return None
@@ -191,14 +284,15 @@ def probe_continuation(port, temperature=0.6):
     }
 
 
-def send_request_stream(messages, port=8080, temperature=0.6):
+def send_request_stream(messages, port=8080, temperature=0.6, model_id=DEFAULT_API_MODEL):
     """Stream request tracking TTFT using incremental read.
 
-    Returns (wall, ttft, pt, ct, cached, content) or None on protocol error.
+    Returns (wall, ttft, pt, ct, cached, content) or None when the stream ends
+    without a usage chunk -- which is a failed send, not a zero-token answer.
     """
     payload = json.dumps(
         {
-            "model": MODEL_ID,
+            "model": model_id,
             "messages": messages,
             "temperature": temperature,
             "top_p": 0.95,
@@ -285,7 +379,7 @@ def send_request_stream(messages, port=8080, temperature=0.6):
     return wall, ttft, pt, ct, cached, "".join(content)
 
 
-def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperature=0.6):
+def run_config(cache_mode, mtp_config, config_label, port, model_id, verify=True, temperature=0.6):
     print(f"\n{'#' * 110}", flush=True)
     print(f"# BENCHMARK: {config_label}", flush=True)
     print(
@@ -295,11 +389,17 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
     print(f"{'#' * 110}", flush=True)
 
     print("\n>>> Warming up...", flush=True)
-    send_request_stream([{"role": "user", "content": "Test"}], port=port, temperature=temperature)
+    send_request_stream(
+        [{"role": "user", "content": "Test"}],
+        port=port,
+        temperature=temperature,
+        model_id=model_id,
+    )
     time.sleep(0.5)
 
     results = []
-    warm_sends = cache_mode == "multi-prefix"  # second send must hit the cache
+    sends = sends_per_prompt(cache_mode)  # a cache cell's second send must hit
+    warm_sends = sends == 2
     cache_hits = 0
     verified = 0
 
@@ -312,11 +412,13 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
 
     warm_rates = []
     for i, (cap_name, prompt_text, _) in enumerate(PROMPTS):
-        sends = 2 if warm_sends else 1
         row = None
         for send in range(sends):
             result = send_request_stream(
-                [{"role": "user", "content": prompt_text}], port=port, temperature=temperature
+                [{"role": "user", "content": prompt_text}],
+                port=port,
+                temperature=temperature,
+                model_id=model_id,
             )
             if not result:
                 print(f"{i + 1:3d} {cap_name:<22s} send {send + 1}/{sends} FAILED", flush=True)
@@ -380,7 +482,7 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
     # sliced out of the cell rates below.
     continuation_probe = None
     if warm_sends:
-        continuation_probe = probe_continuation(port, temperature)
+        continuation_probe = probe_continuation(port, temperature, model_id)
         if continuation_probe:
             print(
                 f"\nCONTINUATION PROBE: turn2 cached_tokens="
@@ -423,25 +525,18 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
                     )
     except OSError as exc:
         print(f"  WARNING: could not read footer log {log_path}: {exc}", flush=True)
-    expected_sends = len(results) * (2 if warm_sends else 1)
+    # The sends owed are the prompts configured, not the prompts that answered.
+    owed = expected_sends(cache_mode)
     # Footer line order: warmup, replay sends, then (cache cell) the two
     # continuation-probe requests.
-    rates = footer_rates[1 : 1 + expected_sends]
-    probe_footer = footer_rates[1 + expected_sends :]
-    if len(rates) == expected_sends:
-        for row, rate in zip(results, rates, strict=False):
-            row["footer_decode_tok_s"] = round(rate, 2)
-    elif rates:
-        print(
-            f"  WARNING: footer lines ({len(rates)}) != sends ({expected_sends}); "
-            f"footer rates reported in summary only",
-            flush=True,
-        )
+    rates = footer_rates[1 : 1 + owed]
+    probe_footer = footer_rates[1 + owed :]
+    attach_footer_rates(results, rates, cache_mode)
     if continuation_probe and len(probe_footer) >= 2:
         continuation_probe["turn1_footer_decode_tok_s"] = round(probe_footer[0], 2)
         continuation_probe["turn2_footer_decode_tok_s"] = round(probe_footer[1], 2)
     warm_footer = []
-    if warm_sends and len(rates) == 2 * len(results):
+    if warm_sends and len(rates) == owed:
         warm_footer = [rates[2 * i + 1] for i in range(len(results))]
     footer_avg = (sum(rates) / len(rates)) if rates else 0.0
     warm_footer_avg = (sum(warm_footer) / len(warm_footer)) if warm_footer else None
@@ -465,24 +560,21 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
 
     print("\n* Cold start request", flush=True)
 
-    if footer_avg > 0:
-        print(f"FOOTER DECODE: {footer_avg:.2f} tok/s ({len(rates)} requests)", flush=True)
-        if warm_footer_avg:
-            print(f"  Warm-send avg: {warm_footer_avg:.2f} tok/s", flush=True)
-        print(f"  Individual: {' | '.join(f'{r:.2f}' for r in rates)}", flush=True)
-        if mtp_summary:
-            print(
-                f"  MTP: drafted={mtp_summary['total_drafted']} "
-                f"accepted={mtp_summary['total_accepted']} "
-                f"acceptance={mtp_summary['acceptance']}% "
-                f"emitted_per_pass={mtp_summary['avg_emitted_per_pass']}",
-                flush=True,
-            )
+    report_lines, status = cell_report(
+        config_label,
+        results,
+        rates,
+        cache_mode=cache_mode,
+        mtp_summary=mtp_summary,
+        warm_avg=warm_footer_avg,
+    )
+    for line in report_lines:
+        print(line, flush=True)
     if warm_rates:
         avg_warm = sum(warm_rates) / len(warm_rates)
         last6 = warm_rates[-6:]
         last6_avg = sum(last6) / len(last6)
-        print(f"WARM DECODE: {avg_warm:.2f} tok/s ({len(warm_rates)} requests)")
+        print(f"WARM DECODE (client-side): {avg_warm:.2f} tok/s ({len(warm_rates)} requests)")
         print(f"  Last {len(last6)} avg: {last6_avg:.2f} tok/s")
         print(f"  Individual: {' | '.join(f'{r:.2f}' for r in warm_rates)}", flush=True)
     else:
@@ -499,16 +591,18 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
     )
     if warm_sends:
         print(
-            f"Cache: {cache_hits}/{len(results)} warm sends hit the multi-prefix cache", flush=True
+            f"Cache: {cache_hits} of {len(PROMPTS)} prompts hit the multi-prefix cache "
+            f"on their warm send ({len(results)} prompts answered)",
+            flush=True,
         )
-    print(f"Answers verified: {verified}/{len(results)}", flush=True)
+    print(
+        f"Answers verified: {verified} of {len(results)} rows "
+        f"({len(results)} of {len(PROMPTS)} prompts answered)",
+        flush=True,
+    )
 
     ts = time.strftime("%Y%m%dT%H%M%S")
-    outdir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "benchmark-results",
-        f"bench-{config_label}-{ts}",
-    )
+    outdir = os.path.join(results_directory(), f"bench-{config_label}-{ts}")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "aggregate.json"), "w", encoding="utf-8") as f:
         json.dump(
@@ -525,10 +619,16 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
                 },
                 "results": results,
                 "summary": {
+                    "prompts_configured": len(PROMPTS),
+                    "sends_expected": owed,
+                    "measured": status == 0,
                     "total_requests": len(results),
                     "total_wall_s": round(total_wall, 2),
                     "total_completion_tokens": total_ct,
-                    "avg_decode_tok_s": round(footer_avg if footer_avg > 0 else avg_warm, 2),
+                    # Null when the cell did not measure: the client-side average
+                    # used to be substituted here, so an unreadable log still
+                    # published a decode number in the field named for the server's.
+                    "avg_decode_tok_s": round(footer_avg, 2) if status == 0 else None,
                     "footer_decode_tok_s": [round(r, 2) for r in rates],
                     "avg_footer_decode_tok_s": round(footer_avg, 2),
                     "warm_footer_decode_tok_s": [round(r, 2) for r in warm_footer],
@@ -547,16 +647,18 @@ def run_config(cache_mode, mtp_config, config_label, port, verify=True, temperat
             indent=2,
         )
     print(f"\nSaved: {outdir}/aggregate.json")
-    return footer_avg if footer_avg > 0 else avg_warm
+    return status
 
 
 def launch_server(base_dir, port, main_model, mtp_model, cache_mode, mtp_config):
     binary = os.path.join(base_dir, ".build", "release", "TinyTitanServer")
     cmd = server_command(binary, port, model=main_model, cache_mode=cache_mode)
     if mtp_config == "on":
-        cmd += ["--mtp-model", mtp_model, "--mtp-memory-mib", "384"]
-    log = open(benchmark_log_path(f"tinytitanserver_{port}.log"), "w", encoding="utf-8")
-    proc = subprocess.Popen(cmd, env=server_environment(), stdout=log, stderr=subprocess.STDOUT)
+        cmd += mtp_arguments(mtp_model)
+    # The child dups the descriptor at spawn, so the parent's copy closes as soon
+    # as the process exists; it used to stay open for the life of the run.
+    with open(benchmark_log_path(f"tinytitanserver_{port}.log"), "w", encoding="utf-8") as log:
+        proc = subprocess.Popen(cmd, env=server_environment(), stdout=log, stderr=subprocess.STDOUT)
     _spawned_servers.append(proc)
     return proc
 
@@ -571,21 +673,6 @@ def terminate_servers():
                 proc.kill()
                 proc.wait()
         _spawned_servers.remove(proc)
-
-
-def wait_ready(port, attempts=10):
-    for _ in range(attempts):
-        try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request("GET", "/health")
-            if "ok" in conn.getresponse().read().decode():
-                conn.close()
-                return True
-            conn.close()
-        except OSError:
-            pass
-        time.sleep(10)
-    return False
 
 
 def selected_configs(quant_label, matrix=False):
@@ -603,55 +690,95 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: (terminate_servers(), sys.exit(130)))
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    parser = argparse.ArgumentParser()
-    parser.add_argument("model", nargs="?", default=str(DEFAULT_MODEL_PATH))
+    parser = argparse.ArgumentParser(
+        description="Benchmark one installed model through the production server profile.",
+    )
+    parser.add_argument(
+        "model",
+        nargs="?",
+        default=None,
+        help="install to benchmark (default: $TINYTITAN_BENCH_MODEL)",
+    )
     parser.add_argument(
         "--matrix",
         action="store_true",
         help="run the opt-in cache-off and MTP-on comparison cells too",
     )
+    parser.add_argument(
+        "--mtp-model",
+        default=None,
+        help="draft head for the MTP cell; required by --matrix",
+    )
     args = parser.parse_args()
-    main_model = args.model
-    mtp_model = os.path.join(base_dir, "models", "ornith-1.5_35B_A3B_MTP_4Bit")
-
-    quant_label = "4bit"
-    if "6bit" in main_model:
-        quant_label = "6bit"
-    elif "8bit" in main_model:
-        quant_label = "8bit"
+    main_model = args.model if args.model is not None else bench_model()
+    label = quant_label(main_model)
 
     # MTP forces prompt cache OFF server-side, so the cache-ON x MTP-ON cell
     # is impossible; the matrix is 3 real cells. MTP engages only for
     # pure-greedy requests (temperature 0, repetition penalty 1), so the MTP
     # cell runs at temperature 0 while the non-MTP cells use the production
     # sampling defaults.
-    configs = selected_configs(quant_label, matrix=args.matrix)
+    if args.matrix and not args.mtp_model:
+        print(
+            "REFUSED: --matrix runs the MTP cell, and a draft head is not something "
+            "this driver guesses -- it used to pass models/ornith-1.5_35B_A3B_MTP_4Bit "
+            "whatever the model under benchmark was. Pass --mtp-model <install>. "
+            "Nothing launched.",
+            flush=True,
+        )
+        return 2
+
+    configs = selected_configs(label, matrix=args.matrix)
 
     print(f"\n{'#' * 110}", flush=True)
-    print(f"# BENCHMARKING MODEL: {os.path.basename(main_model)}", flush=True)
-    print(f"# Quantization: {quant_label}", flush=True)
+    print(f"# BENCHMARKING MODEL: {os.path.basename(os.path.normpath(main_model))}", flush=True)
+    print(f"# Quantization: {label}", flush=True)
     print(f"{'#' * 110}", flush=True)
 
+    statuses = []
     try:
         for cache_mode, mtp_config, config_label, port, temperature in configs:
-            proc = launch_server(base_dir, port, main_model, mtp_model, cache_mode, mtp_config)
+            proc = launch_server(base_dir, port, main_model, args.mtp_model, cache_mode, mtp_config)
             print(f"Port {port} launched (pid {proc.pid}), waiting...", flush=True)
 
-            if not wait_ready(port):
-                print(f"Port {port} FAILED to become ready!", flush=True)
+            if not wait_for_health(proc, port, timeout=SERVER_LOAD_TIMEOUT):
+                print(
+                    f"{config_label}: NOT RUN -- the server exited before /health "
+                    f"answered -- see {benchmark_log_path(f'tinytitanserver_{port}.log')}",
+                    flush=True,
+                )
+                statuses.append(1)
+                terminate_servers()
                 continue
-            print(f"Model id: {resolve_model_id(port)}", flush=True)
+            model_id = resolve_api_model(port)
+            print(f"Model id: {model_id}", flush=True)
 
-            run_config(cache_mode, mtp_config, config_label, port, temperature=temperature)
+            statuses.append(
+                run_config(
+                    cache_mode,
+                    mtp_config,
+                    config_label,
+                    port,
+                    model_id,
+                    temperature=temperature,
+                )
+            )
             terminate_servers()
             if port < 8082:
                 time.sleep(10)
     finally:
         terminate_servers()
 
-    label = "PRECISE FEATURE MATRIX" if args.matrix else "PRODUCTION PROFILE"
-    print(f"\n{'=' * 110}\n{label} COMPLETE\n{'=' * 110}", flush=True)
+    worst = max(statuses) if statuses else 1
+    banner = "PRECISE FEATURE MATRIX" if args.matrix else "PRODUCTION PROFILE"
+    footer = (
+        f"{banner} COMPLETE"
+        if worst == 0
+        else f"{banner} STOPPED -- {statuses.count(1)} of {len(statuses)} cells not measured"
+    )
+    print(f"\n{'=' * 110}\n{footer}\n{'=' * 110}", flush=True)
+    return worst
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
