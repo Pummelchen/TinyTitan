@@ -24,6 +24,17 @@ public actor ContinuityJournalStore: SessionJournal {
         self.limits = limits
     }
 
+    /// Records one completed turn, and never throws: a journal that can fail a
+    /// completion is worse than no journal.
+    ///
+    /// The two `try?` here are the losses the protocol accepts, not losses
+    /// nobody hears: every write that can fail has already recorded itself on
+    /// the engine before it throws (`record(_:)` and the session-log observer
+    /// both call `journalWriteFailed`), and `MemoryService.recordTurn` asks the
+    /// engine for that failure after every turn. So a dropped turn costs one
+    /// turn, leaves the workspace reporting itself not durable, and is said in
+    /// the log once — which is the only honest thing a path with no caller can
+    /// do with a failure.
     public func record(_ turn: JournalTurn, in scope: MemoryScope) async {
         guard let taskID = try? await store.taskID(for: scope),
             let sessionID = await session(

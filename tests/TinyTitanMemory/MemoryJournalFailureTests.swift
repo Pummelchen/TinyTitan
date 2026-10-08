@@ -6,29 +6,48 @@ import Testing
 
 /// A journal that refuses writes on demand, standing in for a full disk, an
 /// I/O error or a descriptor closed underneath it.
+///
+/// `kinds` narrows the refusal to one record kind, which is what separates the
+/// three ways a turn can be lost: the task of the workspace, the session it
+/// belongs to, and the turn's own content. Refusing everything cannot tell
+/// them apart, and they are not the same path.
 private actor RefusingJournal: ContinuityJournal {
     private(set) var records: [JournalRecord] = []
     private var refusing = false
+    private var kinds: Set<String>?
 
-    func refuse(_ value: Bool) { refusing = value }
+    func refuse(_ value: Bool, kinds: Set<String>? = nil) {
+        refusing = value
+        self.kinds = kinds
+    }
 
     func append(_ record: JournalRecord) async throws {
-        try check()
+        try check(record)
         records.append(record)
     }
 
     func replay() async throws -> [JournalRecord] { records }
 
     func compact(sessionLog: SessionLogSnapshot, memory: MemorySnapshot) async throws {
-        try check()
+        try check(.checkpoint(sessionLog, memory))
         records = [.checkpoint(sessionLog, memory)]
     }
 
     func truncate() async throws { records = [] }
 
-    private func check() throws {
-        guard !refusing else {
-            throw JournalError.writeFailed(URL(fileURLWithPath: "/journal.ndjson"), errno: ENOSPC)
+    private func check(_ record: JournalRecord) throws {
+        guard refusing, kinds.map({ $0.contains(Self.kind(of: record)) }) ?? true else { return }
+        throw JournalError.writeFailed(URL(fileURLWithPath: "/journal.ndjson"), errno: ENOSPC)
+    }
+
+    private static func kind(of record: JournalRecord) -> String {
+        switch record {
+        case .task: "task"
+        case .session: "session"
+        case .event: "event"
+        case .memory: "memory"
+        case .memoryVersion: "memoryVersion"
+        case .checkpoint: "checkpoint"
         }
     }
 }
@@ -76,6 +95,55 @@ private actor RefusingJournal: ContinuityJournal {
 
     private func journalFailureLines(_ harness: Harness) -> Int {
         harness.events.messages().filter { $0.contains("degraded during journal") }.count
+    }
+
+    private struct JournalCase {
+        let journal: RefusingJournal
+        let store: ContinuityStore
+        let journalStore: ContinuityJournalStore
+        let scope: MemoryScope
+    }
+
+    /// The journal and the two stores over it, with one record kind refused
+    /// before anything is written.
+    private func journalCase(refusing kind: String) async throws -> JournalCase {
+        let journal = RefusingJournal()
+        await journal.refuse(true, kinds: [kind])
+        let engine = ContinuityEngine(journal: journal)
+        try await engine.start()
+        let store = ContinuityStore(engine: engine)
+        return JournalCase(
+            journal: journal, store: store,
+            journalStore: ContinuityJournalStore(engine: engine, store: store),
+            scope: try MemoryScope(namespace: "tinytitan", user: "local", workspace: "repo-a"))
+    }
+
+    private func turn(session: String = "s1", index: Int) -> JournalTurn {
+        JournalTurn(
+            session: session, workspace: "repo-a", index: index,
+            prompt: "why is FooManager here?",
+            reply: "It prevents a race in background sync.")
+    }
+
+    /// The records that are a turn's own content, as opposed to the structure
+    /// around it. One refused record kind leaves the rest flowing, so "this
+    /// turn was lost" has to mean its prompt and reply rather than any event.
+    private func contentEvents(_ records: [JournalRecord]) -> [SessionEvent] {
+        records.compactMap { record in
+            guard case .event(let event) = record, Self.carriesTurn(event.kind) else { return nil }
+            return event
+        }
+    }
+
+    private static func carriesTurn(_ kind: SessionEventKind) -> Bool {
+        switch kind {
+        case .userPrompt, .assistantResponse, .assistantResponseChunk,
+            .assistantResponseCompleted:
+            return true
+        case .sessionStarted, .sessionEnded, .assistantResponseStarted, .memoryWritten,
+            .contextAssembled:
+            return false
+        }
     }
 
     @Test func aWriteThatReachesTheJournalIsStillReportedAsStored() async throws {
@@ -151,6 +219,57 @@ private actor RefusingJournal: ContinuityJournal {
 
         #expect(await harness.service.isDurable == false)
         #expect(journalFailureLines(harness) == 1)
+    }
+
+    /// `record` can lose a turn *before* its content is written: it needs the
+    /// workspace's task, and when that write fails it swallows the throw and
+    /// returns. Nothing at the caller sees the loss, so the only trace is the
+    /// engine's own failure — which is what the service reads back after every
+    /// turn, in `journalFailed(in:)`. Measured on the journal rather than
+    /// through `recordTurn`, because a session resolves its task during
+    /// `sessionInit`, so that guard is unreachable from the service.
+    @Test func aTurnLostToAFailedTaskRecordIsStillReported() async throws {
+        let testCase = try await journalCase(refusing: "task")
+        let first = turn(index: 0)
+
+        await testCase.journalStore.record(first, in: testCase.scope)
+
+        #expect(contentEvents(await testCase.journal.records).isEmpty, "the turn was written")
+        let failure = await testCase.store.journalFailure
+        #expect(failure != nil, "a swallowed task write left no trace to report")
+
+        // The task is in RAM even though its record never landed, so the loss
+        // is the one turn that met the failure rather than the workspace: the
+        // next turn of the same session journals normally.
+        let second = turn(index: 1)
+        await testCase.journalStore.record(second, in: testCase.scope)
+        #expect(contentEvents(await testCase.journal.records).count == 2)
+    }
+
+    /// The second pre-write failure: a turn whose session id the memory store
+    /// never opened has to be begun by the journal, and that begin is itself a
+    /// write. The task write succeeded here, so the refusal can only be felt
+    /// at the session — which is what makes this a distinct path from the
+    /// task's, and it fails for a reason a caller cannot see either.
+    @Test func aTurnLostToAFailedSessionRecordIsStillReported() async throws {
+        let testCase = try await journalCase(refusing: "session")
+        let lost = turn(session: "s-never-opened", index: 0)
+
+        await testCase.journalStore.record(lost, in: testCase.scope)
+
+        let records = await testCase.journal.records
+        #expect(records.contains { if case .task = $0 { true } else { false } })
+        #expect(contentEvents(records).isEmpty, "the turn was written")
+        let failure = await testCase.store.journalFailure
+        #expect(failure != nil, "a swallowed session begin left no trace to report")
+        // Reading it back gives the honest answer rather than a swallowed one:
+        // this session genuinely has no turns, and `turns` throws only when it
+        // could not ask.
+        #expect(
+            try await testCase.journalStore.turns(
+                session: "s-never-opened", limit: 10, in: testCase.scope
+            )
+            .isEmpty)
     }
 }
 
