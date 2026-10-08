@@ -114,68 +114,6 @@ enum PrefillChunkPlanner {
     }
 }
 
-public enum PrefillKVStorageMode: String, Sendable, Equatable {
-    case int4
-    case int8
-    case fp16
-
-    public init(precision: KVCachePrecision) {
-        switch precision {
-        case .int4: self = .int4
-        case .int8: self = .int8
-        case .fp16: self = .fp16
-        }
-    }
-}
-
-public enum PrefillExecutedMode: String, Sendable, Equatable {
-    case off
-    case chunked
-    case unsupported
-}
-
-public enum PrefillChunkCompleteness: String, Sendable, Equatable {
-    case complete
-    case unsupported
-}
-
-public struct PrefillExecutionDiagnostics: Sendable, Equatable {
-    public let requestedMode: PrefillRuntimeConfig.Mode
-    public let executedMode: PrefillExecutedMode
-    public let kvStorageMode: PrefillKVStorageMode?
-    public let chunkCompleteness: PrefillChunkCompleteness
-    public let unsupportedReason: String?
-
-    public init(
-        config: PrefillRuntimeConfig,
-        executedMode: PrefillExecutedMode,
-        kvStorageMode: PrefillKVStorageMode? = nil,
-        chunkCompleteness: PrefillChunkCompleteness? = nil,
-        unsupportedReason: String? = nil
-    ) {
-        self.requestedMode = config.mode
-        self.executedMode = executedMode
-        self.kvStorageMode = kvStorageMode
-        self.chunkCompleteness =
-            chunkCompleteness
-            ?? (executedMode == .unsupported ? .unsupported : .complete)
-        self.unsupportedReason = unsupportedReason
-    }
-
-    public static func unsupported(
-        config: PrefillRuntimeConfig,
-        kvStorageMode: PrefillKVStorageMode? = nil,
-        reason: String
-    ) -> PrefillExecutionDiagnostics {
-        PrefillExecutionDiagnostics(
-            config: config,
-            executedMode: .unsupported,
-            kvStorageMode: kvStorageMode,
-            chunkCompleteness: .unsupported,
-            unsupportedReason: reason)
-    }
-}
-
 public struct PrefillRuntimeConfig: Sendable, Equatable {
     public enum Mode: String, Sendable, Equatable {
         case off
