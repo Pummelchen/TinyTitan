@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:96  Blocked:1  Total:97**
+**Open:0  Done:97  Blocked:1  Total:98**
 
 ## Table
 
@@ -75,6 +75,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-194 | S2 | A | server | `sources/TinyTitanServer/Core/HTTPServerHandler+Streaming.swift:313-341 (finishStream), with the guard it went around at :369-388 (enqueueStreamChunk) and :397-417 (failStream)` | A chat stream whose finish frame was refused by the backpressure cap still ended with data: [DONE], so the client read a complete answer that had no finish_reason and no usage | a terminal frame that discards the result of the guard every other frame obeys: the stream reports success on the part the server knows it dropped | DONE | Mac (primary) |
 | AUD-196 | S2 | B | release | `tools/release.sh:105-108 (the only writer), read bare at :535-537 in the notes block that starts at :480` | The documented publish command died with `unbound variable` on every green release, at the last step after both archives were built and hashed | a variable written on one branch and read on the other, under `set -u`: the guard that exists to make an override honest is unreachable whenever CI is actually green | DONE | Mac (primary) |
 | AUD-197 | S2 | A | installer | `tools/dsh_local.sh:402 (the guard that only covers the fetch branch), :405-424 (the mkdir and the two shim heredocs it left in front of)` | TINYTITAN_DSH_DRY_RUN=1 wrote an executable pnpm shim anyway, on exactly the path where the shim is the thing that is broken | a guard placed on one branch of a two-branch repair: the promise in the flag's own help text held wherever the suite could reach, and nowhere else | DONE | Mac (primary) |
+| AUD-198 | S2 | B | fleet | `sources/TinyTitanFleet/Command/main.swift:111 (`--from` parsed), :269 and :284 (the two arms that read it), :279, :291, :298, :311, :335 (the five that did not); sources/TinyTitanFleet/Core/FleetUsage.swift:28-30 (the promise)` | `--from` is parsed by every command and read by two, so a named snapshot is dropped and the action dials the peer it was told not to contact | an option every arm parses and only two read: the file the operator named is dropped and the run contacts the machines the flag was meant to keep away | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -1362,6 +1363,24 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 **Evidence after.** GREEN: the same live run now prints "would write the private pnpm shim at <root>/bin/pnpm" and the private root holds only the seeded npm-prefix. python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_node_digest -> "Ran 49 tests in 6.471s, OK". The write path is proven still live rather than merely quiet: the identical fixture without DRY_RUN produces a 331-byte mode-755 shim and "✓ pnpm 12.4.2 via ...". Gates: ./tools/lint.sh shell ok (27 scripts on system bash 3.2.57), ./tools/lint.sh shellcheck ok (0.11.0, no warnings), ./tools/lint.sh python ok (ruff 0.16.7).
 
 **Commit.** `4122b82`
+
+### AUD-198 — `--from` is parsed by every command and read by two, so a named snapshot is dropped and the action dials the peer it was told not to contact
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** fleet
+- **Location:** `sources/TinyTitanFleet/Command/main.swift:111 (`--from` parsed), :269 and :284 (the two arms that read it), :279, :291, :298, :311, :335 (the five that did not); sources/TinyTitanFleet/Core/FleetUsage.swift:28-30 (the promise)`
+- **Category:** an option every arm parses and only two read: the file the operator named is dropped and the run contacts the machines the flag was meant to keep away
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D convergence on the fleet CLI, reading each option the parser takes to the arms that actually use it, after AUD-183 and AUD-184 both found defects in the same option block. The stray-option guard added in AUD-183 only catches names the parser does not know; this one is known and unread.
+
+**Evidence before.** `ttlanmanager prompt --session s-1 --text hi --from snapshot.json --peer 127.0.0.1:1` parsed `--from` at main.swift:111 and the arm at :291 called `runner.read(seed:)` without looking at the value. Measured against a closed port so nothing could be acted on: the run answered `ttlanmanager: 127.0.0.1:1 is unreachable: Could not connect to the server.` -- it had dialed the peer the operator asked it not to contact, and the file was gone. Same for `prompt-all`, `workspace create`, `workspace delete`, `session archive`, and live `top` (:279), which reaches the dashboard loop with the snapshot never opened. `--help` at FleetUsage.swift:28-30 promises the option 'with no fleet running'.
+
+**Fix.** `liveGroup(runner:seed:from:doing:)` beside `loadGroup`: it refuses a path in the words that name the two commands which do read one, and otherwise reads live. The four action arms (:291, :298, :311, :335) call it instead of `runner.read`, the live `top|ui|dashboard` branch refuses ahead of `runDashboard`, and `--help` now says which commands take the option. `workspace` is named by its command word rather than `workspace $sub`, because the sub is validated after the read and an unknown sub dials nothing -- the message must not claim otherwise. Sibling sweep of the same block: `--keep-sessions`, `--limit`, `--concurrency`, `--on`, `--width`/`--height`, `--interval` and `--json` are each unread by some command too, but every one of those is inert where it is ignored (a count, a size or a format on a command that has no such concept); `--from` is the only one whose ignored value changes which machines a request reaches, and the peer, key, base-path and timeout options are genuinely global. Not verified: the refusal in a real terminal (this session has no tty, so live `top` was asserted through the guard that runs ahead of the tty check, not by drawing a dashboard).
+
+**Evidence after.** Each of the five now refuses before any connection: exit 1 with `--from reads an inventory instead of dialing a fleet, and prompt dials one; use `list`, or `top --once`, to render a file or `-` from stdin` (measured for prompt, prompt-all, workspace create, workspace delete, session archive, and live top with its own message pointing at `top --once --from FILE`). `list --from /tmp/inv.json` and `top --once --from /tmp/inv.json` still exit 0 and render the file -- asserted in the same test so the rule cannot be met by refusing `--from` everywhere. Guard: FleetUsageTests.anInventoryIsOnlyAcceptedWhereAnInventoryIsRead; mutation-checked by disabling both guards, which returns exactly the five issues it failed with before the fix.
+
+**Commit.** `ab7c8f6`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 

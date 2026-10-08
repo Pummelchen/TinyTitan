@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 97,
-    "done": 96,
+    "total": 98,
+    "done": 97,
     "open": 0,
     "blocked": 1
   },
@@ -1635,6 +1635,22 @@
       "evidence-after": "GREEN: the same live run now prints \"would write the private pnpm shim at <root>/bin/pnpm\" and the private root holds only the seeded npm-prefix. python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_node_digest -> \"Ran 49 tests in 6.471s, OK\". The write path is proven still live rather than merely quiet: the identical fixture without DRY_RUN produces a 331-byte mode-755 shim and \"✓ pnpm 12.4.2 via ...\". Gates: ./tools/lint.sh shell ok (27 scripts on system bash 3.2.57), ./tools/lint.sh shellcheck ok (0.11.0, no warnings), ./tools/lint.sh python ok (ruff 0.16.7).",
       "fix-summary": "The guard moves ahead of the mkdir, prints the path it would write, and returns, which is the shape the file already uses at :446 for settings.yaml. The sibling sweep of every mutation in the script found the other candidates and dismissed them: the rm -rf at :265-290 deletes only the scratch directory the same run made, and the smoke command at :886/:938 is a check that launches the harness by definition rather than an install, so the copy into its own smoke dir is its purpose, not a dry-run violation. Not covered: the fetch branch itself, which needs a real npm install to exercise and nothing here fetches.",
       "commit": "4122b82"
+    },
+    {
+      "id": "AUD-198",
+      "severity": "S2",
+      "tier": "B",
+      "project": "fleet",
+      "file_line": "sources/TinyTitanFleet/Command/main.swift:111 (`--from` parsed), :269 and :284 (the two arms that read it), :279, :291, :298, :311, :335 (the five that did not); sources/TinyTitanFleet/Core/FleetUsage.swift:28-30 (the promise)",
+      "title": "`--from` is parsed by every command and read by two, so a named snapshot is dropped and the action dials the peer it was told not to contact",
+      "category": "an option every arm parses and only two read: the file the operator named is dropped and the run contacts the machines the flag was meant to keep away",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "Phase D convergence on the fleet CLI, reading each option the parser takes to the arms that actually use it, after AUD-183 and AUD-184 both found defects in the same option block. The stray-option guard added in AUD-183 only catches names the parser does not know; this one is known and unread.",
+      "evidence-before": "`ttlanmanager prompt --session s-1 --text hi --from snapshot.json --peer 127.0.0.1:1` parsed `--from` at main.swift:111 and the arm at :291 called `runner.read(seed:)` without looking at the value. Measured against a closed port so nothing could be acted on: the run answered `ttlanmanager: 127.0.0.1:1 is unreachable: Could not connect to the server.` -- it had dialed the peer the operator asked it not to contact, and the file was gone. Same for `prompt-all`, `workspace create`, `workspace delete`, `session archive`, and live `top` (:279), which reaches the dashboard loop with the snapshot never opened. `--help` at FleetUsage.swift:28-30 promises the option 'with no fleet running'.",
+      "evidence-after": "Each of the five now refuses before any connection: exit 1 with `--from reads an inventory instead of dialing a fleet, and prompt dials one; use `list`, or `top --once`, to render a file or `-` from stdin` (measured for prompt, prompt-all, workspace create, workspace delete, session archive, and live top with its own message pointing at `top --once --from FILE`). `list --from /tmp/inv.json` and `top --once --from /tmp/inv.json` still exit 0 and render the file -- asserted in the same test so the rule cannot be met by refusing `--from` everywhere. Guard: FleetUsageTests.anInventoryIsOnlyAcceptedWhereAnInventoryIsRead; mutation-checked by disabling both guards, which returns exactly the five issues it failed with before the fix.",
+      "fix-summary": "`liveGroup(runner:seed:from:doing:)` beside `loadGroup`: it refuses a path in the words that name the two commands which do read one, and otherwise reads live. The four action arms (:291, :298, :311, :335) call it instead of `runner.read`, the live `top|ui|dashboard` branch refuses ahead of `runDashboard`, and `--help` now says which commands take the option. `workspace` is named by its command word rather than `workspace $sub`, because the sub is validated after the read and an unknown sub dials nothing -- the message must not claim otherwise. Sibling sweep of the same block: `--keep-sessions`, `--limit`, `--concurrency`, `--on`, `--width`/`--height`, `--interval` and `--json` are each unread by some command too, but every one of those is inert where it is ignored (a count, a size or a format on a command that has no such concept); `--from` is the only one whose ignored value changes which machines a request reaches, and the peer, key, base-path and timeout options are genuinely global. Not verified: the refusal in a real terminal (this session has no tty, so live `top` was asserted through the guard that runs ahead of the tty check, not by drawing a dashboard).",
+      "commit": "ab7c8f6"
     }
   ]
 }
