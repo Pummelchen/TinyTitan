@@ -247,8 +247,8 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the seventeen checks CI enforces beyond the compiler — the
-first twelve are project-specific probes, the last five are pinned third-party
+`tools/lint.sh` runs the eighteen checks CI enforces beyond the compiler — the
+first thirteen are project-specific probes, the last five are pinned third-party
 linters:
 
 - `force-cast` — no `as!` / `try!` under `sources/` without a
@@ -284,6 +284,19 @@ linters:
   opt-out, and it prints a skip line instead of silence.
 - `arch-path` — no hardcoded SwiftPM target triple in a build path, which points
   at nothing on a newer toolchain or at a stale binary on this one.
+- `stdout-clean` — no `print`, `debugPrint` or `standardOutput` write anywhere in
+  the target closure `Package.swift` gives `TinyTitanLib`, resolved from the
+  manifest rather than listed, so a dependency enters the gate on the commit it
+  enters the library. `library-facade` already holds rule 1 over the
+  `TinyTitanLib` directory alone; the closure is where the rule actually bites,
+  because an embedder links through it. Measured before the fix: the engine's two
+  opt-in traces (`TINYTITAN_LAYER_TRACE`, `TURBO_FIELDFARE_PHASES`) wrote 6 lines
+  to stdout from `TinyTitan` through 6 `print` calls, so an embedder that turned
+  one on got trace text interleaved with its own answers. Both now write stderr.
+  The opt-out is `lint:allow-stdout <reason>`, on the line or the line above, and
+  there are none.
+  A closure that walks no target, and a manifest whose library root is missing,
+  are failures rather than passes.
 - `silent-test-skip` (`tools/lint.sh test-skip`) — no test body in `tests/` may
   `return` early on an environment variable, a file's presence, or a GPU family.
   Such a test reports **passed** while having asserted nothing, which is worse
@@ -327,14 +340,14 @@ linters:
   `PATH`.
 
 `tools/lint.sh <mode>` runs a single check (`force-cast`, `unbounded-read`,
-`func-length`, `sendable`, `converter`, `arch-path`, `test-skip`, `shell`,
-`shellcheck`, `swiftlint`, `swift-format`, `javascript`, `python`; `format` and
-`js` are aliases).
+`func-length`, `sendable`, `converter`, `arch-path`, `stdout-clean`, `test-skip`,
+`shell`, `shellcheck`, `swiftlint`, `swift-format`, `javascript`, `python`;
+`format` and `js` are aliases).
 
 In a fresh checkout the `javascript` check needs the plugin packages'
 dependencies first — `npm ci` in `plugins/dsh-lan-manager/` and
 `plugins/dsh-tinytitan/` (all CI installs before the gate); without it the check
-fails with that command in its message and the other ten still run. The
+fails with that command in its message and every other check still runs. The
 `converter` check is the same kind of dependency: it needs `numpy` and the
 converter module, so `python3 -m pip install -r benchmark/requirements.txt`
 first (CI installs those pins in the lint job too), and it fails with that

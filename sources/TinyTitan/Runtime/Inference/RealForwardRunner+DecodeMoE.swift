@@ -482,14 +482,17 @@ extension RealForwardRunner {
             let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             let attnUs = (attnCB.gpuEndTime - attnCB.gpuStartTime) * 1_000_000
             let tailUs = (tailCB.gpuEndTime - tailCB.gpuStartTime) * 1_000_000
-            print(
+            // stderr, not stdout: this target is inside `TinyTitanLib`'s closure,
+            // and stdout belongs to the program that embeds the library.
+            let trace: String =
                 "TinyTitan layer pos=\(position) L=\(L) "
-                    + "body_us=\((now - tBodyStart) / 1000) "
-                    + "wait_us=\(waitNanos / 1000) io_us=\(layerIo / 1000) "
-                    + "cb1_us=\((tWait - tCb1Start) / 1000) "
-                    + "cb2_us=\((now - tCb2Start) / 1000) "
-                    + "gpu_attn_us=\(Int(attnUs)) gpu_tail_us=\(Int(tailUs)) "
-                    + "gpu_routed_us=\(Int(prevRoutedUs))")
+                + "body_us=\((now - tBodyStart) / 1000) "
+                + "wait_us=\(waitNanos / 1000) io_us=\(layerIo / 1000) "
+                + "cb1_us=\((tWait - tCb1Start) / 1000) "
+                + "cb2_us=\((now - tCb2Start) / 1000) "
+                + "gpu_attn_us=\(Int(attnUs)) gpu_tail_us=\(Int(tailUs)) "
+                + "gpu_routed_us=\(Int(prevRoutedUs))\n"
+            FileHandle.standardError.write(Data(trace.utf8))
         }
     }
 }

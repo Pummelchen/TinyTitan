@@ -219,20 +219,17 @@ extension RealForwardRunner {
 
         if prefillProfile {
             let prefillTotal = prefillRouteNanos + prefillTileNanos + prefillTailNanos
-            print("[prefill phases over \(t) tokens, \(prefillTotal / 1_000_000) ms total]")
-            print(
-                "  route readback + GPU: \(String(format: "%.1f", Double(prefillRouteNanos) / 1e6)) ms"
-            )
-            print(
-                "  expert fetch + tiles: \(String(format: "%.1f", Double(prefillTileNanos) / 1e6)) ms"
-            )
-            print(
-                "  tail + residual:      \(String(format: "%.1f", Double(prefillTailNanos) / 1e6)) ms"
-            )
             let perLayer = Double(prefillActiveExperts) / Double(max(1, cfg.numLayers))
-            print(
-                "  active experts/layer: \(String(format: "%.2f", perLayer))"
-                    + " (topK=\(cfg.topKExperts), max possible \(t * cfg.topKExperts))")
+            // stderr, not stdout: this target is inside `TinyTitanLib`'s closure,
+            // and stdout belongs to the program that embeds the library.
+            let trace: String =
+                "[prefill phases over \(t) tokens, \(prefillTotal / 1_000_000) ms total]\n"
+                + "  route readback + GPU: \(String(format: "%.1f", Double(prefillRouteNanos) / 1e6)) ms\n"
+                + "  expert fetch + tiles: \(String(format: "%.1f", Double(prefillTileNanos) / 1e6)) ms\n"
+                + "  tail + residual:      \(String(format: "%.1f", Double(prefillTailNanos) / 1e6)) ms\n"
+                + "  active experts/layer: \(String(format: "%.2f", perLayer))"
+                + " (topK=\(cfg.topKExperts), max possible \(t * cfg.topKExperts))\n"
+            FileHandle.standardError.write(Data(trace.utf8))
         }
 
         if writeFinalHead, runEpilogue {

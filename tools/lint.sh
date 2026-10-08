@@ -13,6 +13,7 @@
 #   unchecked-sendable  new `@unchecked Sendable` must document its invariant
 #   converter           routed experts must land at their own index
 #   arch-path           no hardcoded SwiftPM triple in a build path (see below)
+#   stdout-clean        no stdout write anywhere in the library's target closure
 #   silent-test-skip    no env/capability-shaped early return in tests/ (see below)
 #   test-hollow         no @Test body that cannot fail (see below)
 #   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
@@ -33,6 +34,10 @@
 #
 # Opting out of arch-path: `lint:allow-arch-path <reason>` on the line above,
 # for a deliberate compatibility fallback rather than a build path.
+#
+# Opting out of stdout-clean: `lint:allow-stdout <reason>` on the line or the
+# line above the write, for a stdout this process legitimately owns. There are
+# none in the closure today.
 #
 # Opting out of unbounded-read: `lint:allow-unbounded-read <reason>` in the comment
 # block above, for a read whose input is already bounded by something other than a
@@ -623,6 +628,119 @@ if bad:
         print("  " + entry)
     sys.exit(1)
 print("ok (none)")
+PY
+)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "$out" | sed 's/^/  /'
+    status=1
+  else
+    echo "  $(echo "$out" | tail -1)"
+  fi
+}
+
+# --- stdout-clean -----------------------------------------------------------
+# `AGENTS.md` rule 1: the library keeps stdout clean, because "stdout belongs
+# to the embedding program, and a stray `print` is how a consumer's output
+# stops being its own". `TinyTitanLib` itself has never held a `print`, so the
+# letter of the rule was met -- and the purpose was not: the diagnostics the
+# engine writes under `TINYTITAN_LAYER_TRACE` and `TURBO_FIELDFARE_PHASES` went
+# to stdout from `TinyTitan`, which every library call runs through. An
+# embedder that turned one on got trace lines interleaved with its own answers.
+#
+# The scope is therefore the closure the manifest gives the library, not the
+# library directory: `library-facade-rules.py` already enforces rule 1 over
+# `sources/TinyTitanLib/` alone, and nothing reached past it. The closure is read
+# from `Package.swift` rather than listed here, so a new dependency enters the
+# gate on the same commit it enters the library -- and a gate that walked no
+# target reports a failure instead of a pass.
+# Front ends keep their own stdout: measured on the tree as it stands, 91
+# `print`/`debugPrint`/`standardOutput` lines in 14 files, every one in an
+# executable outside the closure (the CLI and server `Command`/main entries, the
+# bench driver, the installer's progress, the memory tool, the fleet manager, the
+# continuity demo). The scan is Swift-only; the one C target in the closure has
+# no stdout write today, measured by the same grep (`printf`/`fputs`/`stdout`
+# across `sources/TinyTitanKernelsC` finds nothing).
+check_library_stdout() {
+  echo "== stdout-clean: no stdout write in the library's target closure =="
+  local out rc
+  out="$(cd "$ROOT" && python3 - <<'PY'
+import pathlib
+import re
+import sys
+
+manifest = pathlib.Path("Package.swift").read_text()
+DECL = re.compile(r"^        \.(target|executableTarget|testTarget)\(\s*$", re.M)
+spans = [(m.group(1), m.end()) for m in DECL.finditer(manifest)]
+targets = {}
+for index, (kind, start) in enumerate(spans):
+    end = spans[index + 1][1] - 1 if index + 1 < len(spans) else len(manifest)
+    body = manifest[start:end]
+    name = re.search(r'name:\s*"([^"]+)"', body)
+    path = re.search(r'path:\s*"([^"]+)"', body)
+    if not name or not path:
+        continue
+    # Dependencies are bare strings ("TinyTitan"), `.target(name: "...")`, or
+    # `.product(name: ..., package: ...)` for something outside this package.
+    # The array is read by balancing its brackets because it spans lines, and
+    # products simply resolve to nothing below -- they are not in `targets`.
+    deps, array = [], re.search(r"dependencies:\s*\[", body)
+    if array:
+        depth, at = 1, array.end()
+        while at < len(body) and depth:
+            if body[at] == "[":
+                depth += 1
+            elif body[at] == "]":
+                depth -= 1
+            at += 1
+        text = body[array.end():at]
+        deps = re.findall(r'"([^"]+)"', text)
+        deps += re.findall(r'\.target\(name:\s*"([^"]+)"', text)
+    targets[name.group(1)] = (kind, path.group(1), deps)
+
+ROOT_TARGET = "TinyTitanLib"
+if ROOT_TARGET not in targets:
+    print("FAIL: %s is not declared in Package.swift; the gate read nothing" % ROOT_TARGET)
+    sys.exit(1)
+
+closure, queue = {ROOT_TARGET}, [ROOT_TARGET]
+while queue:
+    for dep in targets.get(queue.pop(), (None, None, []))[2]:
+        if dep in targets and dep not in closure:
+            closure.add(dep)
+            queue.append(dep)
+
+WRITE = re.compile(r"(^|[^.\w])(print|debugPrint)\s*\(|standardOutput")
+ALLOW = re.compile(r"lint:allow-stdout\s+\S+")
+scanned = 0
+dirs = []
+bad = []
+for name in sorted(closure):
+    kind, path, _ = targets[name]
+    directory = pathlib.Path(path)
+    if not directory.is_dir():
+        print("FAIL: Package.swift declares %s at %s, which does not exist" % (name, path))
+        sys.exit(1)
+    dirs.append("%s (%s)" % (name, path))
+    for swift in sorted(directory.rglob("*.swift")):
+        scanned += 1
+        lines = swift.read_text(errors="replace").splitlines()
+        for index, line in enumerate(lines):
+            if not WRITE.search(line) or ALLOW.search(line):
+                continue
+            if index and ALLOW.search(lines[index - 1]):
+                continue
+            bad.append("%s:%d: %s" % (swift, index + 1, line.strip()[:90]))
+if not scanned:
+    print("FAIL: stdout-clean walked no Swift file; a scan that read nothing is not a pass")
+    sys.exit(1)
+if bad:
+    print("FAIL: the library's closure writes stdout; diagnostics go to stderr")
+    for entry in bad:
+        print("  " + entry)
+    sys.exit(1)
+print("ok (%d targets in %s's closure, %d Swift files, no stdout write)" % (
+    len(closure), ROOT_TARGET, scanned))
 PY
 )"
   rc=$?
@@ -1457,7 +1575,7 @@ check_docs() {
 # exact name in `AGENTS.md`, exited 2 — which is what `tools/lint.sh docs` now
 # refuses. Every spelling must appear in the unknown-check message below.
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_silent_test_skip; check_test_hollow; check_library_facade; check_docs; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_library_stdout; check_silent_test_skip; check_test_hollow; check_library_facade; check_docs; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
@@ -1466,6 +1584,7 @@ case "$want" in
   unchecked-sendable) check_unchecked_sendable ;;
   converter)   check_converter_expert_order ;;
   arch-path)   check_arch_path ;;
+  stdout-clean) check_library_stdout ;;
   test-skip)   check_silent_test_skip ;;
   silent-test-skip) check_silent_test_skip ;;
   test-hollow) check_test_hollow ;;
@@ -1481,7 +1600,7 @@ case "$want" in
   javascript)  check_javascript ;;
   js)          check_javascript ;;
   python)      check_python ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|unchecked-sendable|converter|arch-path|test-skip|silent-test-skip|test-hollow|library-facade|docs|shell|shell-portability|shellcheck|shell-lint|swiftlint|swift-format|format|javascript|js|python)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|unchecked-sendable|converter|arch-path|stdout-clean|test-skip|silent-test-skip|test-hollow|library-facade|docs|shell|shell-portability|shellcheck|shell-lint|swiftlint|swift-format|format|javascript|js|python)" >&2; exit 2 ;;
 esac
 
 exit $status
