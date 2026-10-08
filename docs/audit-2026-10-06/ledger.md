@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:98  Blocked:1  Total:99**
+**Open:0  Done:99  Blocked:1  Total:100**
 
 ## Table
 
@@ -77,6 +77,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-197 | S2 | A | installer | `tools/dsh_local.sh:402 (the guard that only covers the fetch branch), :405-424 (the mkdir and the two shim heredocs it left in front of)` | TINYTITAN_DSH_DRY_RUN=1 wrote an executable pnpm shim anyway, on exactly the path where the shim is the thing that is broken | a guard placed on one branch of a two-branch repair: the promise in the flag's own help text held wherever the suite could reach, and nowhere else | DONE | Mac (primary) |
 | AUD-198 | S2 | B | fleet | `sources/TinyTitanFleet/Command/main.swift:111 (`--from` parsed), :269 and :284 (the two arms that read it), :279, :291, :298, :311, :335 (the five that did not); sources/TinyTitanFleet/Core/FleetUsage.swift:28-30 (the promise)` | `--from` is parsed by every command and read by two, so a named snapshot is dropped and the action dials the peer it was told not to contact | an option every arm parses and only two read: the file the operator named is dropped and the run contacts the machines the flag was meant to keep away | DONE | Mac (primary) |
 | AUD-199 | S2 | A | memory | `sources/TinyTitanMemory/ContinuityStore.swift:148-155 (the pushed-down predicate), :167 (the ranking that already applied the rule); sources/ContinuityCore/Memory/MemoryQuery.swift:61-74 (the engine's `matches`); sources/TinyTitanMemory/InMemoryStore.swift:211-234 (`MemoryRanking.rank`)` | The durable memory store reads a search query as one phrase, so the two backends answer the same query with different answers | a predicate pushed into a lower layer that means something else there: the shared ranking rule is bypassed on one backend only | DONE | Mac (primary) |
+| AUD-200 | S2 | A | memory | `sources/ContinuityCore/ContinuityEngine.swift:46-50 (`start()`); sources/ContinuityCore/ContinuityEngine.swift:439-441 (`journalFailure`, the only failure channel); sources/TinyTitanMemory/MemoryService+Maintenance.swift:90-115 (`journalFailed(in:)`, the reader of that channel)` | A journal replay that throws leaves the engine marked started, so the retry the error message tells you to make restores nothing and journals nothing | a success flag set before the work it certifies and never rolled back on the throw: the guarded path becomes the failure path | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -1400,6 +1401,24 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 **Evidence after.** The two new tests pass and the whole `ContinuityStoreTests` suite is green: `swift test --no-parallel --filter ContinuityStoreTests` -> exit 0, "Test run with 44 tests in 8 suites passed after 0.344 seconds" (44 is the suite including the two new tests, which is why the RED run was also 44 -- with 2 issues). Full serial suite exit 0 (1,723 tests in 253 suites across the seven run lines, the baseline plus these two), `swift build -c release` exit 0, `PATH=$HOME/.local/bin:$PATH ./tools/lint.sh all` exit 0 across all 18 gates. Mutation-checked: re-adding `text: query.text,` and `tags: query.tags,` returns exactly the 2 issues the RED run reported, so the tests guard the pushdown and not the seed.
 
 **Commit.** `18269db`
+
+### AUD-200 — A journal replay that throws leaves the engine marked started, so the retry the error message tells you to make restores nothing and journals nothing
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** memory
+- **Location:** `sources/ContinuityCore/ContinuityEngine.swift:46-50 (`start()`); sources/ContinuityCore/ContinuityEngine.swift:439-441 (`journalFailure`, the only failure channel); sources/TinyTitanMemory/MemoryService+Maintenance.swift:90-115 (`journalFailed(in:)`, the reader of that channel)`
+- **Category:** a success flag set before the work it certifies and never rolled back on the throw: the guarded path becomes the failure path
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D sweep of `ContinuityEngine` lifetime against the journal-failure tests: reading what a second `start()` does after a failed first one, which no test covered.
+
+**Evidence before.** `start()` set `started = true` and then `try await restoreFromJournal()` (pre-fix :48-49). With the journal unreadable (`chmod 000` on the file the engine opens `O_RDWR`, so it fails at open), the throw escaped with `started` still set. A retry returned at `guard !started else { return }`: no snapshot restored, `installObservers()` never ran, so from then on no session event was journaled at all and nothing was recorded on `journalFailure` to say so — while the error text tells the operator to retry once the journal is readable. Measured RED: `swift test --no-parallel --filter ContinuityEngineTests` -> `Test run with 14 tests in 1 suite failed after 0.089 seconds with 2 issues` — `Expectation failed: restored == ["on disk"]` (:83) and `Expectation failed: turnCount == 1` (:106).
+
+**Fix.** `start()` now sets `started` before the replay — so two concurrent `start()`s still cannot replay twice — and rolls it back if the replay throws, rethrowing. The replay can only throw at its first line (`journal.replay()`, before any snapshot is applied), so an engine that restored nothing is now one that reports itself unstarted and can be started again. Sibling sweep: the only other `guard !started` is the server's own lifecycle flag, which is set after its load succeeds; no other site in `sources/` sets a completion flag before the call that can throw; `shutDown()` clearing `started` is deliberate. One candidate found and *not* filed: `MemoryService+Workspaces.swift:34-52` caches an engine whose `start()` failed, which is the same shape — real by reading, but not deterministically reachable from a test (the journal opens `O_RDWR` with a permissive replay, and there is no seam to fail only the first start), so it is reported here rather than fixed blind.
+
+**Evidence after.** Same filter: `Test run with 14 tests in 1 suite passed after 0.090 seconds`. Full serial suite exit 0 — seven runs, 1,724 tests in 253 suites (799/403/148/181/35/62/96), 0 issues; that is the prior 1,723 plus this row's one new test. `swift build -c release` exit 0, `PATH="$HOME/.local/bin:$PATH" ./tools/lint.sh all` exit 0 over all 18 gates. Mutation: deleting the `started = false` rollback reproduces exactly the same 2 issues, so the test is pinned to the rollback and not to the surrounding code.
+
+**Commit.** `f0a62f3`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 

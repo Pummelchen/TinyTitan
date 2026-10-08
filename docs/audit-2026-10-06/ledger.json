@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 99,
-    "done": 98,
+    "total": 100,
+    "done": 99,
     "open": 0,
     "blocked": 1
   },
@@ -1667,6 +1667,22 @@
       "evidence-after": "The two new tests pass and the whole `ContinuityStoreTests` suite is green: `swift test --no-parallel --filter ContinuityStoreTests` -> exit 0, \"Test run with 44 tests in 8 suites passed after 0.344 seconds\" (44 is the suite including the two new tests, which is why the RED run was also 44 -- with 2 issues). Full serial suite exit 0 (1,723 tests in 253 suites across the seven run lines, the baseline plus these two), `swift build -c release` exit 0, `PATH=$HOME/.local/bin:$PATH ./tools/lint.sh all` exit 0 across all 18 gates. Mutation-checked: re-adding `text: query.text,` and `tags: query.tags,` returns exactly the 2 issues the RED run reported, so the tests guard the pushdown and not the seed.",
       "fix-summary": "`search` now pushes into the engine only what the ranker cannot redo -- the namespace prefix and the importance floor, which both layers apply the same way -- and lets `MemoryRanking.rank` do the text and tag matching, which is the memory layer's own policy and already shared with the reference store; a comment records why `text` and `tags` are not pushed down, so the next reader does not \"optimise\" the scan back into a behaviour change. Sibling sweep: the three other `ContinuityCore.MemoryQuery(` constructions in the file (`list` at :130, `sessionInit`'s lookup at :220, and the `get`-side mapping) push a prefix, an exact key or a namespace only, none of them `text` or `tags`, so `search` was the only site that routed a user's words through the engine's meaning of them. Not eliminated: the durable scan is still bounded at `maximumScan` (2,000) most-recent records before ranking, so a term carried only by an older fact in a very large task can still be missed -- that is now a capacity limit stated in the code rather than a matching rule, and the reference store has no such bound.",
       "commit": "18269db"
+    },
+    {
+      "id": "AUD-200",
+      "severity": "S2",
+      "tier": "A",
+      "project": "memory",
+      "file_line": "sources/ContinuityCore/ContinuityEngine.swift:46-50 (`start()`); sources/ContinuityCore/ContinuityEngine.swift:439-441 (`journalFailure`, the only failure channel); sources/TinyTitanMemory/MemoryService+Maintenance.swift:90-115 (`journalFailed(in:)`, the reader of that channel)",
+      "title": "A journal replay that throws leaves the engine marked started, so the retry the error message tells you to make restores nothing and journals nothing",
+      "category": "a success flag set before the work it certifies and never rolled back on the throw: the guarded path becomes the failure path",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "Phase D sweep of `ContinuityEngine` lifetime against the journal-failure tests: reading what a second `start()` does after a failed first one, which no test covered.",
+      "evidence-before": "`start()` set `started = true` and then `try await restoreFromJournal()` (pre-fix :48-49). With the journal unreadable (`chmod 000` on the file the engine opens `O_RDWR`, so it fails at open), the throw escaped with `started` still set. A retry returned at `guard !started else { return }`: no snapshot restored, `installObservers()` never ran, so from then on no session event was journaled at all and nothing was recorded on `journalFailure` to say so — while the error text tells the operator to retry once the journal is readable. Measured RED: `swift test --no-parallel --filter ContinuityEngineTests` -> `Test run with 14 tests in 1 suite failed after 0.089 seconds with 2 issues` — `Expectation failed: restored == [\"on disk\"]` (:83) and `Expectation failed: turnCount == 1` (:106).",
+      "evidence-after": "Same filter: `Test run with 14 tests in 1 suite passed after 0.090 seconds`. Full serial suite exit 0 — seven runs, 1,724 tests in 253 suites (799/403/148/181/35/62/96), 0 issues; that is the prior 1,723 plus this row's one new test. `swift build -c release` exit 0, `PATH=\"$HOME/.local/bin:$PATH\" ./tools/lint.sh all` exit 0 over all 18 gates. Mutation: deleting the `started = false` rollback reproduces exactly the same 2 issues, so the test is pinned to the rollback and not to the surrounding code.",
+      "fix-summary": "`start()` now sets `started` before the replay — so two concurrent `start()`s still cannot replay twice — and rolls it back if the replay throws, rethrowing. The replay can only throw at its first line (`journal.replay()`, before any snapshot is applied), so an engine that restored nothing is now one that reports itself unstarted and can be started again. Sibling sweep: the only other `guard !started` is the server's own lifecycle flag, which is set after its load succeeds; no other site in `sources/` sets a completion flag before the call that can throw; `shutDown()` clearing `started` is deliberate. One candidate found and *not* filed: `MemoryService+Workspaces.swift:34-52` caches an engine whose `start()` failed, which is the same shape — real by reading, but not deterministically reachable from a test (the journal opens `O_RDWR` with a permissive replay, and there is no seam to fail only the first start), so it is reported here rather than fixed blind.",
+      "commit": "f0a62f3"
     }
   ]
 }
