@@ -6,9 +6,12 @@
 // while correctness is still being established -- and because a dense 2B
 // spends nearly all of a token in exactly this loop.
 //
-// The two kernels are deliberately parallel in structure. A change to the
-// accumulation order in one belongs in the other, or the 4-bit and 8-bit
-// builds of the same model stop agreeing at group boundaries.
+// The two kernels are deliberately parallel in structure, and both factor one
+// group as `scale * sum(q*x) + bias * sum(x)`. That factoring is the contract;
+// the reduction inside a group is not shared, so reordering one kernel moves
+// the last bits of its own width rather than breaking an exact agreement
+// between the 4-bit and 8-bit builds. Keep them parallel anyway: a reader
+// comparing the two should be looking at the factoring, not at an accident.
 //
 // Bandwidth, not arithmetic, is the ceiling here: at 8-bit a 2B model reads
 // about 2.4 GB per token, and an M3 sustains well under its headline figure
@@ -104,9 +107,12 @@ void tinytitan_int8_affine_gemv(const uint8_t *weights,
                     xs = vaddq_f32(xs, x3);
                 }
             }
-            // Summed in this order so the 4-bit kernel's single accumulator
-            // and this one's four reduce to the same value for the same
-            // inputs; both then round once per group.
+            // (d0+d1)+(d2+d3) is this kernel's own grouping, and it is not the
+            // 4-bit kernel's: there every lane chains all sixteen of its
+            // products into one accumulator. Same products, different
+            // association, so the two widths disagree in the last bit on most
+            // rows -- measured in Int8AffineGEMVTests, and asserted nowhere as
+            // an equality. What the widths share is the *factoring* below.
             const float32x4_t dot = vaddq_f32(vaddq_f32(d0, d1), vaddq_f32(d2, d3));
             const float xsum = have_xsum ? group_xsum[g] : vaddvq_f32(xs);
             acc += tinytitan_bf16_8(s_row[g]) * vaddvq_f32(dot)

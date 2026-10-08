@@ -107,6 +107,102 @@ import Testing
         #expect(abs(got[0] - want) <= 1e-3 * max(1, abs(want)))
     }
 
+    /// One row block at one width, laid out exactly as a snapshot lays it,
+    /// through `CPUOps.gemv` — the wrapper the engine itself calls.
+    ///
+    /// Scale is BF16 1.0 and bias BF16 0.0, and every lane is 0...15, so both
+    /// widths multiply exactly the same products: any difference between the
+    /// two results can only have come from the order they were summed in.
+    private static func gemvAtWidth(
+        bits: Int,
+        lanes: [UInt8],
+        x: [Float],
+        rows: Int,
+        columns: Int
+    ) -> [Float] {
+        let groups = columns / Quantization.groupSize
+        let bytesPerRow = columns * bits / 8
+        var weights = [UInt8](repeating: 0, count: rows * bytesPerRow)
+        if bits == 4 {
+            for row in 0..<rows {
+                for index in 0..<columns {
+                    let value = lanes[row * columns + index]
+                    let byte = row * bytesPerRow + index / 2
+                    weights[byte] = index % 2 == 0 ? value : weights[byte] | (value << 4)
+                }
+            }
+        } else {
+            weights = Array(lanes)
+        }
+        let scales = [UInt16](repeating: 0x3F80, count: rows * groups)
+        let biases = [UInt16](repeating: 0, count: rows * groups)
+        var out = [Float](repeating: .nan, count: rows)
+        weights.withUnsafeBytes { raw in
+            scales.withUnsafeBufferPointer { s in
+                biases.withUnsafeBufferPointer { b in
+                    x.withUnsafeBufferPointer { xp in
+                        out.withUnsafeMutableBufferPointer { o in
+                            guard let sBase = s.baseAddress, let bBase = b.baseAddress,
+                                let xpBase = xp.baseAddress, let oBase = o.baseAddress
+                            else { return }
+                            let matrix = AffineSnapshot.Matrix(
+                                weights: raw, scales: sBase, biases: bBase,
+                                rows: rows, columns: columns, bits: bits,
+                                groupSize: Quantization.groupSize)
+                            do {
+                                try CPUOps.gemv(
+                                    matrix, x: xpBase, out: oBase, threads: 1)
+                            } catch {
+                                Issue.record("gemv at \(bits)-bit failed: \(error)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// Same products, both widths, same wrapper: the two agree to within a
+    /// rounding error of the row's total magnitude, and *not* bit for bit.
+    ///
+    /// The kernels say otherwise. `tinytitan_kernels.h` claims both "round
+    /// alike at group boundaries", and `int8_affine_gemv.c` that "the 4-bit
+    /// kernel's single accumulator and this one's four reduce to the same
+    /// value for the same inputs". Same factoring is not the same reduction
+    /// order -- the 4-bit path chains sixteen adds per lane, the 8-bit path
+    /// keeps four accumulators and combines them as a tree -- so the last bit
+    /// goes different ways. Measured here: 955.4322 against 955.43225; three
+    /// randomized probes over 560k rows found 64.2%, 64.5% and 68.9% of them
+    /// differing in the last bits, while both stayed inside 2.6e-3 relative of
+    /// a double-precision reference, so neither is wrong -- only differently
+    /// ordered.
+    ///
+    /// Nothing depends on the stronger claim: the side-engine is validated
+    /// against the numpy oracle (`tools/qwen35_reference.py`), never
+    /// bit-for-bit against the GPU or against the other width.
+    @Test func bothWidthsAgreeToWithinARoundingErrorNotBitForBit() {
+        let columns = 256
+        let rows = 3
+        let lanes: [UInt8] = (0..<(rows * columns)).map { UInt8($0 % 16) }
+        let x = Self.pseudorandom(columns, seed: 5)
+        let four = Self.gemvAtWidth(bits: 4, lanes: lanes, x: x, rows: rows, columns: columns)
+        let eight = Self.gemvAtWidth(bits: 8, lanes: lanes, x: x, rows: rows, columns: columns)
+        // fp32 roundings cannot be bounded against a result that cancels, so
+        // each row is bounded by its own total absolute magnitude.
+        for index in 0..<rows {
+            var total = 0.0
+            for column in 0..<columns {
+                total += Double(lanes[index * columns + column]) * abs(Double(x[column]))
+            }
+            let tolerance = Float(1e-6 * total)
+            let gap = abs(four[index] - eight[index])
+            #expect(
+                gap <= tolerance,
+                "row \(index): gap \(gap) over \(tolerance) (\(four[index]) vs \(eight[index]))")
+        }
+    }
+
     /// Rows are independent, so a caller may thread over row ranges by
     /// advancing every pointer together. This pins that contract: the same
     /// weights split into two calls give the same answer as one call.
@@ -122,11 +218,14 @@ import Testing
         }
     }
 
-    /// Values that survive both quantisers exactly must give the same answer
-    /// at both widths. This is what stops the 4-bit and 8-bit builds of one
-    /// model from drifting apart, and it is why the two kernels factor the
-    /// accumulation identically.
-    @Test func agreesWithTheFourBitPathOnRepresentableValues() {
+    /// The 8-bit kernel against the 4-bit *reference*: values a 4-bit lane
+    /// holds exactly, dequantised at 4 bits and multiplied in Swift, which the
+    /// 8-bit kernel must reproduce to within a rounding error. This is a
+    /// kernel-versus-oracle check; the kernel-versus-kernel one is
+    /// ``bothWidthsAgreeToWithinARoundingErrorNotBitForBit``, and it passes at
+    /// tolerance rather than bitwise, because the two widths sum a group in
+    /// different orders.
+    @Test func matchesTheFourBitReferenceOnRepresentableValues() {
         let n = 64
         let row = (0..<n).map { Float($0 % 16) }  // exact 4-bit levels
         let x = Self.pseudorandom(n, seed: 5)

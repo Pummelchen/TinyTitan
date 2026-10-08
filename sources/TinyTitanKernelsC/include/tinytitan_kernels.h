@@ -17,8 +17,11 @@
 /// `n` must be a multiple of 64. `out` is written, not accumulated.
 ///
 /// Accumulation is factored as `scale * sum(q*x) + bias * sum(x)` per group,
-/// matching how moe.metal factors the same product, so the two implementations
-/// round alike at group boundaries.
+/// the same factoring `moe.metal` uses, so each group rounds once. That is an
+/// algebraic claim, not a bitwise one: which element each lane owns, how many
+/// accumulators it has, and how the row is reduced horizontally all differ
+/// between the CPU and the GPU, so a CPU row and a Metal row agree to a
+/// rounding error rather than bit for bit.
 void tinytitan_int4_affine_gemv(const uint8_t *weights,
                             const uint16_t *scales,
                             const uint16_t *biases,
@@ -37,8 +40,10 @@ void tinytitan_int4_affine_gemv(const uint8_t *weights,
 /// independent, so a caller threading over row ranges advances `weights`,
 /// `scales`, `biases` and `out` together and passes its own `rows`.
 ///
-/// Factored as `scale * sum(q*x) + bias * sum(x)` per group, identically to
-/// the 4-bit kernel, so the two widths of one model round alike.
+/// Factored as `scale * sum(q*x) + bias * sum(x)` per group, as in the 4-bit
+/// kernel. The reduction *inside* a group is not the same -- four accumulators
+/// here against one chain there -- so the two widths of one model agree to a
+/// rounding error, not bit for bit.
 void tinytitan_int8_affine_gemv(const uint8_t *weights,
                             const uint16_t *scales,
                             const uint16_t *biases,
