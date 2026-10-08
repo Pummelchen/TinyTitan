@@ -270,7 +270,7 @@ is the authority. On 2026-10-04 it holds one Open row:
    for the ~360 GB bf16 reference), so the M1–M6 claim stays a design intent and
    Qwen 3.8 long-context stays verified only at a lowered budget.
 3. **Three audit follow-ups that measurement could not close.**
-   (a) `try? await flush()` at `ContinuityEngine.swift:106` and `:125`, and the
+   (a) `try? await flush()` at `ContinuityEngine.swift:128` and `:147`, and the
    deferred barrier at `Journal.swift:145`, swallow a failure of the durability
    barrier without recording it in `journalFailure` — so a workspace whose `fsync`
    fails goes on reporting itself durable, which is the one promise the memory
@@ -278,8 +278,18 @@ is the authority. On 2026-10-04 it holds one Open row:
    reproduced here rather than because it looks fine: `flush()` casts its journal to
    `FileJournal` and returns for anything else, so no injected journal can fail a
    barrier through any seam, and nothing on this Mac makes `fsync` fail on a file
-   whose `write` calls all succeeded. A next attempt needs a real `FileJournal` on a
-   volume that can be made to refuse it.
+   whose `write` calls all succeeded. **Measured 2026-10-08, and it still cannot be
+   produced** — see `docs/audit-2026-10-06/AUD-204-barrier-probe.c` for the run and
+   its numbers. A descriptor opened on a mounted 16 MB APFS disk image, then the
+   image force-ejected underneath it: `fcntl(fd, F_FULLFSYNC)` returns -1 with
+   `EBADF`, `fsync(fd)` returns **0**, and the next `write(2)` returns -1 with
+   `EIO`. So the barrier's only failure signal is an errno the kernel does not set
+   for a dead volume, while the append does fail — through `writeFully`, into the
+   observer, onto `journalFailure`, where `isDurable` already reads it. The two
+   `try?` remain an error with no caller and no trace in the source, and no machine
+   here turns them into a lost record. Do not spend another session trying `hdiutil`
+   variants; the next thing that could answer it is a volume that answers `fsync`
+   with `EIO`, which is a failing drive rather than an experiment.
    (b) AUD-189's fix repairs a dangling journal line when the file is next *opened*;
    an append that fails partway inside a running process leaves the same line until
    then, and its next record would fuse onto it. The writer there already has an
