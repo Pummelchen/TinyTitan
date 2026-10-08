@@ -165,7 +165,7 @@ class ArgumentTests(unittest.TestCase):
             def kill(self):
                 self.terminate()
 
-        def fake_health(proc, **kwargs):
+        def fake_health(proc, *args, **kwargs):
             return healthy
 
         def fake_request(*args, **kwargs):
@@ -236,11 +236,11 @@ class ArgumentTests(unittest.TestCase):
 
     def test_the_default_length_is_the_one_the_payload_asks_for(self):
         _, _, sent, _ = self.run_main([])
-        self.assertEqual(sent, [(512,)])
+        self.assertEqual(sent, [(om.PROMPT, 512, om.PORT)])
 
     def test_an_explicit_length_reaches_the_payload(self):
         _, _, sent, _ = self.run_main(["1024"])
-        self.assertEqual(sent, [(1024,)])
+        self.assertEqual(sent, [(om.PROMPT, 1024, om.PORT)])
 
     def test_a_server_that_died_is_still_refused(self):
         """The pre-existing early-exit guard, pinned so the new verdict does not

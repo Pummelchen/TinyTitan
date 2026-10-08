@@ -249,7 +249,7 @@ jobs:
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
         # gates a release. Every one of them is stdlib-only, measured on this host
-        # 2026-10-08 as 20 suites and 184 tests with no model, no server, no Xcode and
+        # 2026-10-08 as 21 suites and 208 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -261,7 +261,10 @@ jobs:
         # starting a server, and test_tinytitan_overlap_measure drives the real
         # main() with subprocess.Popen, the /health wait and the request loop all
         # faked, so the overlap driver's verdict is gated without a model and without
-        # ever opening a port); wall time was 17.1 s at load average 3, against 16 s on a
+        # ever opening a port; test_tinytitan_rdadvise_ab does the same for the rdadvise
+        # A/B, which until it existed started a model server per arm *at import*),
+        # wall time was 18.8 s at load average 3 with the operator's own server still
+        # listening on 8080, against 16 s on a
         # quiet machine and 32-58 s while the host sat at load average 16, so the
         # count is the claim and the timing is not. The
         # registration of this list is now itself a gate:
@@ -279,7 +282,8 @@ jobs:
             test_quant_quality_ab_exit test_docs_facts_suites test_memory_mini_report \
             test_tsan_storm_exit test_memory_command_names \
             test_driver_documented_commands test_capital_of_paris_report \
-            test_tinytitan_determinism_ab test_tinytitan_overlap_measure
+            test_tinytitan_determinism_ab test_tinytitan_overlap_measure \
+            test_tinytitan_rdadvise_ab
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

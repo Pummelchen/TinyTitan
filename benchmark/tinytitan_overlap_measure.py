@@ -22,19 +22,17 @@ header carries the number of lines under it, because two requests were sent and
 a section of one is a partial run.
 """
 
-import http.client
-import json
 import os
 import subprocess
 import sys
-import time
 
 from tinytitan_profile import (
     DEFAULT_MODEL_PATH,
     benchmark_log_path,
     parse_max_tokens,
-    resolve_api_model,
+    request_twice,
     server_command,
+    wait_for_health,
 )
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -89,54 +87,6 @@ def verdict(gen, runner, kernels):
     return lines, 1 if missing else 0
 
 
-def wait_for_health(proc, port=PORT, timeout=120):
-    """Poll /health until the server answers, or return whether it never did."""
-    start = time.time()
-    while time.time() - start < timeout:
-        if proc.poll() is not None:
-            return False
-        try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
-            conn.request("GET", "/health")
-            if "ok" in conn.getresponse().read().decode():
-                conn.close()
-                return True
-            conn.close()
-        except OSError:
-            pass
-        time.sleep(0.05)
-    return True
-
-
-def request_twice(max_tokens, port=PORT):
-    """Two streamed greedy requests; the content is discarded, the log is the product."""
-    payload = json.dumps(
-        {
-            "model": resolve_api_model(port),
-            "messages": [{"role": "user", "content": PROMPT}],
-            "temperature": 0,
-            "top_p": 0.95,
-            "top_k": 20,
-            "presence_penalty": 0.0,
-            "max_completion_tokens": max_tokens,
-            "stream": True,
-        }
-    ).encode()
-    for i in range(2):
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1800)
-        conn.request(
-            "POST",
-            "/v1/chat/completions",
-            body=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        resp = conn.getresponse()
-        while resp.read(8192):
-            pass
-        conn.close()
-        print(f"request {i + 1} done")
-
-
 def main() -> int:
     max_tokens, error = parse_max_tokens(sys.argv)
     if error:
@@ -151,11 +101,11 @@ def main() -> int:
         proc = subprocess.Popen(
             server_command(BIN, PORT, model=MODEL), env=env, stdout=log, stderr=subprocess.STDOUT
         )
-        if not wait_for_health(proc):
+        if not wait_for_health(proc, PORT):
             print("server exited early", file=sys.stderr)
             return 1
         try:
-            request_twice(max_tokens)
+            request_twice(PROMPT, max_tokens, PORT)
         finally:
             proc.terminate()
             try:

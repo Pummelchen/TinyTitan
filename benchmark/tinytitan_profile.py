@@ -212,6 +212,70 @@ def resolve_api_model(port, *, timeout=5):
     return DEFAULT_API_MODEL
 
 
+def wait_for_health(proc, port, *, timeout: float = 120) -> bool:
+    """Poll `/health` until the server answers.
+
+    `False` means exactly one thing: the process exited, so nothing will ever
+    answer. A timeout with the process still alive returns `True` — a large MoE
+    streams its experts, and slow is not dead. Every driver that used to inline
+    this loop disagreed about that, which is why it lives here now.
+    """
+    import http.client
+    import time
+
+    start = time.time()
+    while time.time() - start < timeout:
+        if proc.poll() is not None:
+            return False
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1)
+            conn.request("GET", "/health")
+            if "ok" in conn.getresponse().read().decode():
+                conn.close()
+                return True
+            conn.close()
+        except OSError:
+            pass
+        time.sleep(0.05)
+    return True
+
+
+def request_twice(prompt: str, max_tokens: int, port) -> None:
+    """Two streamed greedy requests, content discarded — the server log is the
+    product, and the second one is the warm measurement.
+
+    The model id is asked of the running server rather than hardcoded, because a
+    pinned id restricts every harness to the one install it names.
+    """
+    import http.client
+
+    payload = json.dumps(
+        {
+            "model": resolve_api_model(port),
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "top_p": 0.95,
+            "top_k": 20,
+            "presence_penalty": 0.0,
+            "max_completion_tokens": max_tokens,
+            "stream": True,
+        }
+    ).encode()
+    for i in range(2):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=1800)
+        conn.request(
+            "POST",
+            "/v1/chat/completions",
+            body=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        while resp.read(8192):
+            pass
+        conn.close()
+        print(f"request {i + 1} done")
+
+
 def request_model(*, fast: bool = DEFAULT_FAST_ALIAS, base: str | None = None) -> str:
     """Return the base API model unless an experiment explicitly asks for fast."""
     return (base or DEFAULT_API_MODEL) + ("-fast" if fast else "")
