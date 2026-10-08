@@ -279,3 +279,49 @@ def request_twice(prompt: str, max_tokens: int, port) -> None:
 def request_model(*, fast: bool = DEFAULT_FAST_ALIAS, base: str | None = None) -> str:
     """Return the base API model unless an experiment explicitly asks for fast."""
     return (base or DEFAULT_API_MODEL) + ("-fast" if fast else "")
+
+
+BENCH_MODEL_ENV = "TINYTITAN_BENCH_MODEL"
+
+
+def bench_model() -> str:
+    """The install a harness runs against.
+
+    `TINYTITAN_BENCH_MODEL` is how the sweeps name their model. A driver that
+    hardcodes `DEFAULT_MODEL_PATH` instead launches the shipped install whatever
+    the operator exported, and prints a page that names neither.
+    """
+    return os.environ.get(BENCH_MODEL_ENV, str(DEFAULT_MODEL_PATH))
+
+
+def _channel_count(noun: str, rows) -> str:
+    return f"{noun} {len(rows)} {'line' if len(rows) == 1 else 'lines'}"
+
+
+def channel_verdict(arms, channels):
+    """(lines, exit status) for arms given as `(name, capture-or-None)`.
+
+    A driver's product is the log it captures, so an arm whose capture is None
+    (nothing to read) and an arm whose section is empty (a server that never
+    printed the counter that channel exists to measure) are both runs that
+    measured nothing, and neither may exit 0. The header carries each channel's
+    own line count, because a section header over an empty body asserts a section
+    that is not there -- which is how AUD-225's and AUD-227's drivers read as
+    clean results.
+    """
+    lines, status = [], 0
+    for name, sections in arms:
+        if sections is None:
+            lines.append(f"ARM FAILED: {name} -- the server never answered /health")
+            status = 1
+            continue
+        columns = list(zip(channels, sections, strict=True))
+        header = ", ".join(_channel_count(label, part) for (label, _), part in columns)
+        lines.append(f"--- {name} ({header}) ---")
+        for _, part in columns:
+            lines.extend(part)
+        for (_label, wanted), part in columns:
+            if not part:
+                lines.append(f"NOT MEASURED: {name} -- no log line contained {wanted!r}")
+                status = 1
+    return lines, status

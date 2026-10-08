@@ -35,8 +35,9 @@ import sys
 import time
 
 from tinytitan_profile import (
-    DEFAULT_MODEL_PATH,
+    bench_model,
     benchmark_log_path,
+    channel_verdict,
     request_twice,
     server_command,
     server_environment,
@@ -59,16 +60,6 @@ CHANNELS = (
     ("runner", "cb1_ms="),
     ("gpu", "TinyTitan kernel total_gpu_ms="),
 )
-
-
-def bench_model() -> str:
-    """The install this A/B runs against.
-
-    `TINYTITAN_BENCH_MODEL` is how the other sweeps name their model; hardcoding
-    the default here meant an operator pointing the benchmark tree at their own
-    checkpoint got the shipped one under a label that named nothing.
-    """
-    return os.environ.get("TINYTITAN_BENCH_MODEL", str(DEFAULT_MODEL_PATH))
 
 
 def arm_environment(mode: str, base=None) -> dict[str, str]:
@@ -102,34 +93,17 @@ def capture(lines):
     return gen, runner, gpu
 
 
-def _count(noun: str, rows) -> str:
-    return f"{noun} {len(rows)} {'line' if len(rows) == 1 else 'lines'}"
-
-
 def verdict(arms):
     """(lines, exit status) for arms given as `(mode, capture-or-None)`.
 
     An arm whose capture is None never produced a log worth reading, and an arm
     whose capture is a triple with an empty list in it produced a server that did
     not report the channel the arm exists to measure. Neither is a measurement, so
-    neither may exit 0.
+    neither may exit 0. The page and status are `channel_verdict()`'s, shared with
+    the length sweep so the two drivers cannot drift apart on what an empty arm
+    means.
     """
-    lines, status = [], 0
-    for mode, sections in arms:
-        if sections is None:
-            lines.append(f"ARM FAILED: {mode} -- the server never answered /health")
-            status = 1
-            continue
-        columns = list(zip(CHANNELS, sections, strict=True))
-        header = ", ".join(_count(name, part) for (name, _), part in columns)
-        lines.append(f"--- {mode} ({header}) ---")
-        for _, part in columns:
-            lines.extend(part)
-        for (_name, wanted), part in columns:
-            if not part:
-                lines.append(f"NOT MEASURED: {mode} -- no log line contained {wanted!r}")
-                status = 1
-    return lines, status
+    return channel_verdict(arms, CHANNELS)
 
 
 def run(mode: str, port: int = PORT, max_tokens: int = MAX_TOKENS):

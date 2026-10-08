@@ -41,6 +41,8 @@ import sys
 import unittest
 from unittest import mock
 
+import tinytitan_profile
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 _spec = importlib.util.spec_from_file_location(
@@ -124,7 +126,7 @@ class ArmEnvironmentTests(unittest.TestCase):
 
     def test_with_no_override_the_default_install_is_named(self):
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(ra.bench_model(), str(ra.DEFAULT_MODEL_PATH))
+            self.assertEqual(ra.bench_model(), str(tinytitan_profile.DEFAULT_MODEL_PATH))
 
 
 class VerdictTests(unittest.TestCase):
@@ -226,7 +228,7 @@ class DriverTests(unittest.TestCase):
                 return None
 
             def fake_command(*args, **kwargs):
-                return ["fake-server"]
+                return ["fake-server", kwargs.get("model")]
 
             def fake_model():
                 return "/models/fake"
@@ -286,6 +288,15 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(status, 0, output)
         self.assertIn("/models/fake", output)
         self.assertIn("512", output)
+
+    def test_the_named_model_is_the_one_handed_to_the_launcher(self):
+        """`bench_model()` only fixes anything if it reaches `server_command`: a
+        driver that reads the override and then passes the shipped path prints the
+        operator's model while launching someone else's."""
+        status, output, spawned, _ = self.run_main(log_lines=FULL_LOG)
+        self.assertEqual(status, 0, output)
+        for command, _env in spawned:
+            self.assertEqual(command, ["fake-server", "/models/fake"])
 
     def test_an_argument_is_refused_rather_than_ignored(self):
         status, output, spawned, events = self.run_main(argv=["1024"])
