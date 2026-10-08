@@ -9,16 +9,17 @@ decided. A model with no memory has to invent the field size, the win score
 and the paddle strategy again; a model with memory can carry them. That gap
 is the measurement.
 
-Two arms, identical prompts:
+Four arms, identical prompts:
 
     control   memory off
+    auto      memory on, no tools -- the bootstrap fragment alone
     minimal   memory on, two tools (set, get), journal on
     full      memory on, all six tools, journal on
 
-The third arm exists because the tool schemas, not the memory fragment, are
-what memory actually costs: measured on this model the six definitions are
-about 1,120 prompt tokens against roughly 210 for the fragment. If two tools
-carry the same decisions, most of the tax was avoidable.
+`auto` and `minimal` exist to separate what memory actually costs: measured on
+this model the six tool definitions are about 1,120 prompt tokens against
+roughly 210 for the fragment. If two tools carry the same decisions, most of the
+tax was avoidable.
 
 What is measured, and why it differs by store:
 
@@ -31,7 +32,7 @@ What is measured, and why it differs by store:
   answered from it.
 
     python3 benchmark/memory_value.py control
-    python3 benchmark/memory_value.py memory
+    python3 benchmark/memory_value.py full
     python3 benchmark/memory_value.py report
 """
 
@@ -365,5 +366,9 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "report"
     if command in ARMS:
         run_arm(command)
-    else:
+    elif command == "report":
         report()
+    else:
+        raise SystemExit(
+            f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"
+        )

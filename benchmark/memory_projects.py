@@ -579,5 +579,9 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "report"
     if command in ARMS:
         run_arm(command)
-    else:
+    elif command == "report":
         report()
+    else:
+        raise SystemExit(
+            f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"
+        )

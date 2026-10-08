@@ -68,10 +68,12 @@ if __name__ == "__main__":
         import memory_book as bench
 
         arm = "summary"
-    else:
+    elif which == "value":
         import memory_value as bench
 
         arm = "control"
+    else:
+        raise SystemExit(f"unknown command {which!r}; expected book or value")
     patch(bench)
     Path(os.environ["TINYTITAN_MEMVAL_RESULTS"]).mkdir(parents=True, exist_ok=True)
     print(

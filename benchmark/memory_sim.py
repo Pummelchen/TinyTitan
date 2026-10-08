@@ -685,5 +685,9 @@ if __name__ == "__main__":
         tail()
     elif command == "detail":
         detail(sys.argv[2] if len(sys.argv) > 2 else "inn_status")
-    else:
+    elif command == "compare":
         compare()
+    else:
+        raise SystemExit(
+            f"unknown command {command!r}; expected validate, tail, detail, or compare"
+        )

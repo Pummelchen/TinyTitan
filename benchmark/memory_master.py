@@ -493,9 +493,14 @@ if __name__ == "__main__":
     command = sys.argv[1] if len(sys.argv) > 1 else "report"
     if command in ARMS:
         run_arm(command)
+    elif command == "report":
+        report()
     elif command == "report-all":
         report_all(OUT.parent)
     elif command == "stats":
         aggregate(OUT.parent, sys.argv[2:] or None)
     else:
-        report()
+        raise SystemExit(
+            f"unknown command {command!r}; expected one of {', '.join(ARMS)}, "
+            "report, report-all, or stats"
+        )

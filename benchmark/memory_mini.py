@@ -469,5 +469,7 @@ if __name__ == "__main__":
         run_model(sys.argv[2], limit, jobs)
     elif command == "verify":
         verify(int(sys.argv[sys.argv.index("--runs") + 1]) if "--runs" in sys.argv else 6)
-    else:
+    elif command == "report":
         raise SystemExit(report())
+    else:
+        raise SystemExit(f"unknown command {command!r}; expected serve, run, verify, or report")
