@@ -222,6 +222,13 @@ def run_model(name: str, limit: int, jobs: tuple[str, ...]) -> None:
                 try:
                     text, usage, seconds = complete(system, session_input(run, session, job))
                 except (urllib.error.URLError, TimeoutError) as error:
+                    per_session[session] = {
+                        "error": f"{type(error).__name__}: {error}",
+                        "facts": {},
+                        "seconds": 0.0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                    }
                     print(f"  {run['name']} s{session}: {error}")
                     continue
                 facts = parse_facts(text)
@@ -270,20 +277,32 @@ def store_from(per_session: dict, upto: int) -> dict[str, dict]:
     return store
 
 
-def report() -> None:
+def report() -> int:
+    """Print the fidelity table, and return 1 if any request refused.
+
+    A refusal is not a model that kept nothing: the session's facts were never
+    written, so every quiz cell from that session onward reads a store the run
+    did not build. Those cells leave the denominator, the refusals are counted
+    on the row, and a run whose every request refused prints no score.
+    """
     runs = {run["name"]: run for run in sim.load_runs()}
     rows = []
     for path in sorted(RESULTS.glob("*.json")):
         if path.name.startswith("server-"):
             continue
         record = json.loads(path.read_text())
-        right = seen = 0
+        right = seen = refused = 0
         seconds = prompt = completion = calls = 0.0
         empty = 0
         for name, per_session in record["runs"].items():
             if name not in runs:
                 continue
+            failures = [int(key) for key, value in per_session.items() if value.get("error")]
+            refused += len(failures)
+            cutoff = min(failures, default=None)
             for value in per_session.values():
+                if value.get("error"):
+                    continue
                 seconds += value["seconds"]
                 prompt += value["prompt_tokens"]
                 completion += value["completion_tokens"]
@@ -291,24 +310,27 @@ def report() -> None:
                 if not value["facts"]:
                     empty += 1
             for session in range(2, 11):
+                if cutoff is not None and session >= cutoff:
+                    continue
                 store = store_from(per_session, session)
                 truth = book.truth(session)
                 for key in book.QUIZ_KEYS:
                     seen += 1
                     if sim.read(store, key, session) == truth[key]:
                         right += 1
-        if seen:
-            rows.append(
-                (
-                    record["model"],
-                    record["job"],
-                    100 * right / seen,
-                    seconds / calls if calls else 0,
-                    (prompt + completion) / calls if calls else 0,
-                    100 * empty / calls if calls else 0,
-                    len(record["runs"]),
-                )
+        rows.append(
+            (
+                record["model"],
+                record["job"],
+                100 * right / seen if seen else None,
+                seconds / calls if calls else None,
+                (prompt + completion) / calls if calls else None,
+                100 * empty / calls if calls else None,
+                len(record["runs"]),
+                refused,
+                seen,
             )
+        )
     print(
         "small resident model as the memory keeper -- store fidelity read by\n"
         "the same reader as the 35B's own extraction (v3 = 89%, and the\n"
@@ -318,12 +340,28 @@ def report() -> None:
         f"  {'model':14s} {'job':8s} {'fidelity':>9s} {'s/session':>10s} "
         f"{'tok/session':>12s} {'no JSON':>8s} {'runs':>5s}"
     )
-    for model, job, fidelity, seconds, tokens, empty, count in rows:
-        print(
-            f"  {model:14s} {job:8s} {fidelity:8.0f}% {seconds:9.1f}s "
-            f"{tokens:11.0f} {empty:7.0f}% {count:5d}"
+    for model, job, fidelity, seconds, tokens, empty, count, refused, seen in rows:
+        score = f"{fidelity:8.0f}%" if fidelity is not None else "        -"
+        pace = f"{seconds:9.1f}s" if seconds is not None else "        -"
+        per_call = f"{tokens:11.0f}" if tokens is not None else "           -"
+        no_json = f"{empty:7.0f}%" if empty is not None else "      -"
+        note = (
+            f"   {refused} refused, {seen} cells scored" if refused else f"   {seen} cells scored"
         )
+        print(f"  {model:14s} {job:8s} {score} {pace} {per_call} {no_json} {count:5d}{note}")
+    total_refused = sum(row[7] for row in rows)
+    if total_refused:
+        print(
+            f"\n  {total_refused} request(s) refused; every percentage above covers only the "
+            "sessions whose capture answered"
+        )
+    for model, job, _, _, _, _, _, refused, seen in rows:
+        if not seen:
+            print(
+                f"  {model}/{job} measured nothing: {refused} request(s) refused, no quiz cell was scoreable"
+            )
     print("\n  the 35B spends 45-55 s and about 1.8k tokens per session on this.")
+    return 1 if total_refused else 0
 
 
 # --------------------------------------------------------------------------
@@ -432,4 +470,4 @@ if __name__ == "__main__":
     elif command == "verify":
         verify(int(sys.argv[sys.argv.index("--runs") + 1]) if "--runs" in sys.argv else 6)
     else:
-        report()
+        raise SystemExit(report())
