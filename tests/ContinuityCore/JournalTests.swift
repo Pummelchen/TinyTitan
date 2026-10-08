@@ -206,6 +206,34 @@ import Testing
         try await reopened.shutDown()
     }
 
+    /// A killed process leaves a partial line with no terminator, and the next
+    /// append lands on the end of it. The cost of the torn write is then not
+    /// one record but two: the fused line decodes as neither, and the record
+    /// whose writer got a successful `append` is gone with no failure
+    /// recorded, because the failure happened in the previous process.
+    @Test func anUnterminatedTailDoesNotCostTheRecordAfterIt() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("journal.ndjson")
+        let journal = try FileJournal(url: url)
+        try await journal.append(.task(ContinuityTask(title: "first")))
+        try await journal.shutDown()
+
+        var raw = try Data(contentsOf: url)
+        raw.append(contentsOf: Array(#"{"task":{"_0":{"broken"#.utf8))
+        try raw.write(to: url)
+
+        let reopened = try FileJournal(url: url)
+        try await reopened.append(.task(ContinuityTask(title: "second")))
+        let records = try await reopened.replay()
+        let titles = records.compactMap { record -> String? in
+            guard case .task(let task) = record else { return nil }
+            return task.title
+        }
+        #expect(titles == ["first", "second"], "a torn tail cost \(2 - titles.count) more records")
+        try await reopened.shutDown()
+    }
+
     @Test func theJournalAndItsLockAreOwnerOnly() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -591,8 +591,16 @@ the tool. One widening, `loadMetadataJSON` from `private` to internal, because
 the moved loader calls it; the new file needs `import TinyTitanFormat` for
 `SSDAISubTensorV1` and the alignment constant.
 
-## Generated and local files
+`ContinuityCore/Persistence/FileJournal+Opening.swift` (131) took the journal's
+opening cluster — `prepareDirectory`, `acquireLock`, `openForAppend` — out of
+`Journal.swift` (487 → 427) as pure code motion, for the 500-line rule and
+because AUD-189 added a fourth member there: the tail scan that cuts a dangling
+partial line off before anything is appended. The three moved helpers widened
+from `private` to internal, since the initializer that calls them stays behind;
+`openForAppend` also gained `O_RDWR`, because the scan reads through the same
+descriptor whose bytes it truncates.
 
+## Generated and local files
 `models/`, `.build/`, `.swiftpm/`, `benchmark/mock/`,
 `benchmark/benchmark-results/`, `.qwen/` (the wiki clone), `.claude/` and
 `memory/` are ignored. `benchmark/__pycache__` and `tools/__pycache__` are

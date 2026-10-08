@@ -79,7 +79,13 @@ public actor FileJournal: ContinuityJournal {
         self.lockDescriptor = try Self.acquireLock(at: lockURL, journal: url)
         do {
             self.descriptor = try Self.openForAppend(url)
+            try Self.dropDanglingTail(descriptor: self.descriptor, url: url)
         } catch {
+            // A thrown initializer never runs `deinit`, so both descriptors
+            // this call opened have to go back here or the workspace leaks an
+            // open file and a lock the process no longer owns.
+            if descriptor >= 0 { close(descriptor) }
+            descriptor = -1
             close(lockDescriptor)
             lockDescriptor = -1
             throw error
@@ -92,72 +98,6 @@ public actor FileJournal: ContinuityJournal {
         // on process exit means a journal dropped mid-run frees its workspace
         // for another server immediately.
         if lockDescriptor >= 0 { close(lockDescriptor) }
-    }
-
-    // MARK: - Opening
-
-    /// Every opener below passes `O_NOFOLLOW`.
-    ///
-    /// The journal, its lock and the compaction temp all live at paths this
-    /// type derives from the store directory rather than paths it was handed,
-    /// so anything that can create a file there can plant a link at one of
-    /// them. Without the flag that turns a memory-store write into a write
-    /// somewhere else entirely -- and at the two `O_TRUNC` sites, into a
-    /// destructive one. `O_NOFOLLOW` applies to the final component only, so
-    /// the operator symlinking the store *directory* onto another disk still
-    /// works; only a link standing where a journal file is expected is
-    /// refused, and it is refused rather than followed. Same rule the
-    /// installer's `Posix.openCreateRW` enforces.
-    private static func prepareDirectory(for url: URL) throws {
-        let manager = FileManager.default
-        let directory = url.deletingLastPathComponent()
-        if !manager.fileExists(atPath: directory.path) {
-            try manager.createDirectory(
-                at: directory, withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700])
-        }
-        var isDirectory: ObjCBool = false
-        if manager.fileExists(atPath: url.path, isDirectory: &isDirectory),
-            isDirectory.boolValue
-        {
-            throw JournalError.notAFile(url)
-        }
-    }
-
-    private static func acquireLock(at lockURL: URL, journal: URL) throws -> Int32 {
-        // Refusing a link here is what makes the lock guard the *path* the
-        // journal is written under. Following one would put the flock on an
-        // arbitrary inode, so two journals at two paths could both believe
-        // they owned the same one -- which is the exact failure the lock
-        // exists to prevent, and it would be silent.
-        let descriptor = open(
-            lockURL.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else {
-            throw JournalError.cannotOpen(
-                lockURL,
-                underlying: String(cString: strerror(errno)))
-        }
-        // flock is per open-file-description, so a second FileJournal on the
-        // same path inside this process conflicts too. fcntl locks would not,
-        // which is exactly why they are the wrong tool here.
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            let code = errno
-            close(descriptor)
-            if code == EWOULDBLOCK { throw JournalError.locked(journal) }
-            throw JournalError.cannotOpen(lockURL, underlying: String(cString: strerror(code)))
-        }
-        return descriptor
-    }
-
-    /// `O_APPEND` so every write lands at the end without a seek, which is
-    /// what keeps a record from being written into the middle of another.
-    private static func openForAppend(_ url: URL) throws -> Int32 {
-        let descriptor = open(
-            url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else {
-            throw JournalError.cannotOpen(url, underlying: String(cString: strerror(errno)))
-        }
-        return descriptor
     }
 
     // MARK: - Writing
