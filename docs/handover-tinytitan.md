@@ -121,11 +121,11 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-09, **199 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 199 before the commit that edits this row lands, so it reads 200 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `111332c` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-09, **201 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 201 before the commit that edits this row lands, so it reads 202 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `b3a926e` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **130 rows / 129 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **131 rows / 130 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -494,9 +494,41 @@ is the authority. On 2026-10-04 it holds one Open row:
    live with `Popen` and `HTTPConnection` both guarded), joins footers by
    `rates[k*step + step - 1]` under an exact-count guard, closes the log handle `launch_server`
    leaked, and writes `avg_decode_tok_s: null` for a cell that did not measure instead of the
-   client-side average under the server's key.)
+   client-side average under the server's key.), and
+   **AUD-234** (`tinytitan_longctx.py` -- the drift headline measured the wrong quarter and named it
+   in a unit the file guessed. `rate_at(times[: max(2, len(times) // 2)], 0.5)` at :191 takes the last
+   half *of the first half*, which is the second quarter of the generation, and prints it as
+   `first-half`; and both rates are characters per second divided by the hardcoded
+   `4.0 # ~4 chars/token` at :162 and printed as `tok/s`, while the same request's `usage` chunk carries
+   the `completion_tokens` that make the conversion measured. Re-running the pre-fix function on a
+   constructed 40 -> 10 tok/s decay prints `first-half=15.17 last-half=10.00`, a 5.17 tok/s drift where
+   the two halves differ by 30.00. Below the headline, nothing reported: `if len(times) >= 4:` at :190
+   has no else, so a short capture printed no drift line and no failure; `ttft` is `None` until the first
+   content delta, so a stream that produced none raised TypeError in the row print at :139 instead of
+   naming itself, and `rss_mb` returning `None` did the same to the RSS print at :185; `main()` at :165
+   returns no status anywhere and the guard calls bare `main()` at :212, so the exit was 0 whatever was
+   measured; the decode footers printed at :205 are never counted against the three requests sent;
+   `proc.terminate()` at :199 sits after the requests, so any raise left a model server holding port
+   8091; the load wait is an inline `for _ in range(240)` at :56 that never calls `proc.poll()`, so an
+   exited server and a cold-but-loading one both ended in `RuntimeError("server not ready")` at :68 after
+   120 s; `MODEL = str(DEFAULT_MODEL_PATH)` at :30 ignores `TINYTITAN_BENCH_MODEL`; and a 9,795-character
+   prompt is called `~10k tokens` in the docstring and in the cell labels (`A:10k+128`), with no header
+   line naming what the run is about to measure. The fix gives each kind of report its own function
+   returning `(lines, status)` -- `row_report`, `drift_report`, `rss_report`, `footer_report` -- so a
+   stream with no content delta is `NOT MEASURED: ... no first token to time` rather than a traceback, a
+   capture under `MIN_DRIFT_SAMPLES` is a `NOT MEASURED` line rather than silence, a failed `ps` sample
+   prints `unknown` and a failed baseline prints `NOT MEASURED`; `segment_rate(times, lo, hi, ct)`
+   brackets the halves of the run's own character axis and converts with the request's
+   `completion_tokens`; `run()` wraps the requests in `try/finally: stop_server(proc)` and returns the
+   worst status, `main()` returns 2 for a refused configuration and the guard is `sys.exit(main())`; the
+   load wait is `wait_for_health(proc, port, timeout=SERVER_LOAD_TIMEOUT)` at 2400 s and nothing is sent
+   unless it answers; the install comes from `bench_model()`; the header and cell labels speak characters
+   and take the token counts from the server's `usage`; and the docstring's character count is a number
+   the suite reads back out and compares against `len(LONG_PROMPT)` -- which is how a prose defect I wrote
+   into the fix itself got caught. 36 tests, 16/16 mutants killed, the refusals verified live with
+   `Popen` and `HTTPConnection` both guarded; no live-model run, because the operator's server holds 8080.)
    **The next sweep along this seam is the entry points that throw their status away, five of the
-   original nine remain, and the grep that closed AUD-233 found a tenth.** Measured by reading every
+   original ten remain.** Measured by reading every
    non-test driver's `__main__` body in `benchmark/`: nine call `main()` and discard what it returns
    -- `memory_smoke.py:153`, `tinytitan_3bit_probe.py:195`,
    `tinytitan_ane_attention_probe.py:359`,
@@ -506,11 +538,13 @@ is the authority. On 2026-10-04 it holds one Open row:
    `raise SystemExit(main())`, which is the same thing done right. (Those line numbers are the
    `main()` call itself; the paragraph that first listed them pointed one line higher, at the
    `if __name__ == "__main__":` guard above each, and was corrected by re-running the grep rather
-   than by remembering.) Four are now closed: AUD-230 found `tinytitan_maxthroughput.py` returning no
+   than by remembering.) Five are now closed: AUD-230 found `tinytitan_maxthroughput.py` returning no
    status anywhere in the file, AUD-231 `tinytitan_slots_ab.py` keeping its only `sys.exit` inside the
    per-arm function, AUD-232 `tinytitan_longgen.py` averaging its warm-up into the headline mean and
    printing `mean=0.00 tok/s` for an arm whose log held no footer, AUD-233 `tinytitan_benchmark.py`
-   measuring its own denominator out of its survivors. Re-running that grep for AUD-233 turned up a
+   measuring its own denominator out of its survivors, and AUD-234 `tinytitan_longctx.py` printing the
+   second quarter of a generation as its `first-half` in a guessed unit. The five line numbers above were
+   re-run for AUD-234 and still hold. Re-running that grep for AUD-233 turned up a
    **tenth** site the nine never named: `tinytitan_m5_sweep.py:280` ends in a bare `main()` too. It
    was in the original list for no reason recorded anywhere -- `memory_smoke.py` and
    `tinytitan_longctx.py` were named there while returning nothing at all, so the omission was not a
@@ -520,8 +554,8 @@ is the authority. On 2026-10-04 it holds one Open row:
    `def main() -> int` and end on `return 0`, so the question there is whether a failed probe returns
    anything *other* than 0, not how the guard exits; `memory_smoke.py` keeps its only
    `raise SystemExit(1)` inside `main()` at :145, the AUD-231 shape where one failure ends the run
-   rather than the sweep; and `tinytitan_longctx.py:165` and `tinytitan_m5_sweep.py:137` return no
-   status anywhere.
+   rather than the sweep; and `tinytitan_m5_sweep.py:137` returns no status anywhere, which is the
+   AUD-234 shape `tinytitan_longctx.py:165` had until it was closed.
    Each needs the same three questions read against it -- what does the file run at import, does its
    prose match what runs, and can the verdict it prints be passed by a run that measured nothing. The
    suspect this paragraph carried for `tinytitan_benchmark.py` is measured and closed as AUD-233 (it
