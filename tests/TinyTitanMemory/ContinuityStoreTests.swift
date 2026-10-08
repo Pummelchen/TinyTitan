@@ -347,6 +347,41 @@ import Testing
         #expect(loaded.tags == ["architecture"])
     }
 
+    /// The other half of the label map: after a restart it is rebuilt by
+    /// walking the sessions the journal replayed.
+    ///
+    /// A regression pin rather than a failing test — it asserts behavior AUD-207
+    /// did not change, and the point of asserting it is that the map has two
+    /// writers and only the open-time one had a test.
+    @Test func aRestartedWorkspaceStillKnowsWhichSessionWroteWhat() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("memory.ndjson")
+        let scope = try scope()
+
+        do {
+            let engine = ContinuityEngine(journal: try FileJournal(url: url))
+            try await engine.start()
+            let store = ContinuityStore(engine: engine)
+            _ = try await store.sessionInit(MemorySession(id: "session-1"), in: scope)
+            _ = try await store.sessionInit(MemorySession(id: "session-2"), in: scope)
+            try await store.set(
+                MemoryRecord(
+                    key: try key("decisions/storage"),
+                    value: "native swift, same process",
+                    importance: 0.95,
+                    sourceSession: "session-2"),
+                in: scope)
+            await engine.shutDown()
+        }
+
+        let engine = ContinuityEngine(journal: try FileJournal(url: url))
+        try await engine.start()
+        let store = ContinuityStore(engine: engine)
+        let loaded = try #require(try await store.get(try key("decisions/storage"), in: scope))
+        #expect(loaded.sourceSession == "session-2")
+    }
+
     /// A delete has to be a delete from the model's point of view even though
     /// the engine keeps the chain, or a "forget that" leaves the fact in every
     /// later prompt.
