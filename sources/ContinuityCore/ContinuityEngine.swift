@@ -25,6 +25,15 @@ public actor ContinuityEngine {
     /// bring back the one that did not, so RAM and the file disagree until
     /// the engine is next replayed from it.
     public private(set) var journalFailure: String?
+    /// The most recent automatic compaction the journal refused, or nil while
+    /// every collapse has landed.
+    ///
+    /// Not sticky, unlike `journalFailure`: a refused checkpoint loses no
+    /// record, because every append that tripped it is already in the file. All
+    /// it means is that the journal is still growing, and a warning that
+    /// outlived a later successful collapse would report an unbounded file
+    /// where there is none.
+    public internal(set) var compactionFailure: String?
 
     public init(
         configuration: ContinuityConfiguration = ContinuityConfiguration(),
@@ -419,11 +428,15 @@ public actor ContinuityEngine {
     }
 
     /// Collapse the journal to a single checkpoint of current state.
+    ///
+    /// A collapse that lands is also the proof that the file stopped growing,
+    /// so it clears `compactionFailure`.
     public func compactJournal() async throws {
         let log = await sessionLog.snapshot()
         let store = await memory.snapshot()
         try await journal.compact(sessionLog: log, memory: store)
         journaledRecords = 1
+        compactionFailure = nil
     }
 
     /// Delete a task, its sessions, its log and its memory.

@@ -426,6 +426,15 @@ public actor ContinuityStore: MemoryStore {
         get async { await engine.journalFailure }
     }
 
+    /// The last automatic compaction the engine could not make, or nil while
+    /// the journal has been collapsing. Read by the service, and read
+    /// separately from `journalFailure` on purpose: a refused checkpoint loses
+    /// no record, so it says nothing about whether writes reach the file. It
+    /// says the file is growing, which is a different thing to tell someone.
+    public var compactionFailure: String? {
+        get async { await engine.compactionFailure }
+    }
+
     // MARK: - Internals
 
     private func record(from item: ContinuityCore.MemoryItem) throws -> MemoryRecord {

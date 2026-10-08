@@ -64,14 +64,21 @@ private actor RefusingJournal: ContinuityJournal {
         let context: MemorySessionContext
     }
 
-    private func harness(journalingTurns: Bool = false) async throws -> Harness {
+    private func harness(
+        journalingTurns: Bool = false,
+        compactionThreshold: Int? = nil
+    ) async throws -> Harness {
         var configuration = MemoryConfiguration()
         configuration.isEnabled = true
         configuration.workspace = "repo-a"
         configuration.user = "local"
         configuration.toolSurface = .full
         let journal = RefusingJournal()
-        let engine = ContinuityEngine(journal: journal)
+        let engine = ContinuityEngine(
+            configuration: compactionThreshold.map {
+                ContinuityConfiguration(compactionThreshold: $0)
+            } ?? ContinuityConfiguration(),
+            journal: journal)
         try await engine.start()
         let store = ContinuityStore(engine: engine)
         let events = LogCollector()
@@ -95,6 +102,10 @@ private actor RefusingJournal: ContinuityJournal {
 
     private func journalFailureLines(_ harness: Harness) -> Int {
         harness.events.messages().filter { $0.contains("degraded during journal") }.count
+    }
+
+    private func compactionFailureLines(_ harness: Harness) -> Int {
+        harness.events.messages().filter { $0.contains("degraded during compaction") }.count
     }
 
     private struct JournalCase {
@@ -270,6 +281,59 @@ private actor RefusingJournal: ContinuityJournal {
                 session: "s-never-opened", limit: 10, in: testCase.scope
             )
             .isEmpty)
+    }
+
+    /// The one write nobody asked for. Compaction fires from the engine's own
+    /// record counter, so there is no caller to fail and, before this, no
+    /// trace to read: a journal that could append but no longer collapse kept
+    /// every prompt and reply on the disk while the workspace went on
+    /// reporting itself healthy. Refusing only the checkpoint kind is what
+    /// separates that from a full disk — here every write still lands, so the
+    /// answer is a log line, not a durability flip.
+    @Test func aStalledCompactionIsSaidOnceAndDoesNotUndoDurability() async throws {
+        let harness = try await harness(journalingTurns: true, compactionThreshold: 2)
+        await harness.journal.refuse(true, kinds: ["checkpoint"])
+
+        for index in 0..<5 {
+            let result = await set("decisions/k\(index)", "v\(index)", in: harness)
+            #expect(result.jsonString().contains("\"stored\":true"))
+        }
+        #expect(
+            compactionFailureLines(harness) == 1,
+            "a stalled journal went unreported at a memory tool call")
+        await harness.service.recordTurn(
+            session: harness.context, index: 0,
+            prompt: "prompt", reply: "reply",
+            model: nil, promptTokens: 1, completionTokens: 1,
+            latencyMilliseconds: 1, stopReason: "stop")
+
+        // Once per workspace, on the precedent of the journal failure line.
+        #expect(compactionFailureLines(harness) == 1, "the turn boundary repeated the line")
+        // Distinct from a refused write: nothing was lost, so the workspace
+        // still persists, and the log line is the whole of the report.
+        #expect(journalFailureLines(harness) == 0)
+        #expect(await harness.service.isDurable)
+    }
+
+    /// The path a server actually takes: a model that never calls a memory
+    /// tool still grows the journal with every turn's prompt and reply, so the
+    /// turn boundary has to be a reporting point on its own. Without it the
+    /// warning would depend on someone writing a fact.
+    @Test func aStalledCompactionIsSaidOnATurnThatUsesNoMemoryTool() async throws {
+        let harness = try await harness(journalingTurns: true, compactionThreshold: 2)
+        await harness.journal.refuse(true, kinds: ["checkpoint"])
+
+        for index in 0..<3 {
+            await harness.service.recordTurn(
+                session: harness.context, index: index,
+                prompt: "prompt \(index)", reply: "reply \(index)",
+                model: nil, promptTokens: 1, completionTokens: 1,
+                latencyMilliseconds: 1, stopReason: "stop")
+        }
+
+        #expect(compactionFailureLines(harness) == 1, "a turn-only stall went unreported")
+        #expect(journalFailureLines(harness) == 0)
+        #expect(await harness.service.isDurable)
     }
 }
 

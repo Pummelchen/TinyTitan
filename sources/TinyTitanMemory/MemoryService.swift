@@ -61,6 +61,10 @@ public actor MemoryService {
     /// Workspaces whose journal failure has been logged, so a disk that stays
     /// full produces one line rather than one per tool call.
     var reportedJournalFailures: Set<MemoryScope> = []
+    /// Workspaces whose stalled compaction has been logged, for the same
+    /// reason, and with the same reach: the journal keeps every byte until it
+    /// collapses again, so one line per workspace is the whole report.
+    var reportedCompactionStalls: Set<MemoryScope> = []
     /// Project files whose failed expiry has been logged, for the same reason:
     /// retention offers an unexpirable file again on every sweep.
     var reportedExpiries: Set<String> = []
@@ -140,6 +144,7 @@ public actor MemoryService {
         // Never fails the turn: the reply has already been given. A journal
         // that refused it stops the workspace reporting itself durable.
         _ = await journalFailed(in: session.scope)
+        _ = await compactionStalled(in: session.scope)
         log(.journaled(session: session.session.id, index: index, bytes: turn.byteCount))
         await enforceResidencyBudget(keeping: session.scope)
     }

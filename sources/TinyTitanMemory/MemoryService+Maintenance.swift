@@ -122,6 +122,7 @@ extension MemoryService {
         workspaces.removeAll()
         lastUsed.removeAll()
         reportedJournalFailures.removeAll()
+        reportedCompactionStalls.removeAll()
         reportedExpiries.removeAll()
         reportedSweeps.removeAll()
         reportedReadFailures.removeAll()
@@ -161,6 +162,33 @@ extension MemoryService {
         else { return false }
         if reportedJournalFailures.insert(scope).inserted {
             log(.degraded(operation: "journal", detail: failure))
+        }
+        return true
+    }
+
+    /// Whether a workspace's journal has stopped collapsing, logged the first
+    /// time it is seen.
+    ///
+    /// Automatic compaction is the one write the engine makes that no caller
+    /// asked for, so its error has no caller to fail: until it had a trace of
+    /// its own the only way to learn a journal had stopped collapsing was to
+    /// notice the file.
+    ///
+    /// Deliberately does not set `isDegraded` and does not touch
+    /// `journalFailure`'s durability answer. Every append that tripped the
+    /// compaction had already landed, so writes are reaching storage and the
+    /// prompt must not say otherwise; what is failing is the file's size, not
+    /// its durability.
+    func compactionStalled(in scope: MemoryScope) async -> Bool {
+        guard let store = workspaces[scope]?.store as? ContinuityStore else { return false }
+        guard let detail = await store.compactionFailure else {
+            // The collapse landed, so a later stall is a new event and owes
+            // its own line rather than the silence this one bought.
+            reportedCompactionStalls.remove(scope)
+            return false
+        }
+        if reportedCompactionStalls.insert(scope).inserted {
+            log(.degraded(operation: "compaction", detail: detail))
         }
         return true
     }

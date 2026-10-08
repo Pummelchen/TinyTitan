@@ -121,6 +121,7 @@ extension MemoryService {
         // Checked whatever the outcome: a call whose own write landed can
         // still have had a session event refused.
         let journalLost = await journalFailed(in: context.scope)
+        _ = await compactionStalled(in: context.scope)
         if case .failure(let message) = result {
             log(.toolFailed(tool: name, detail: message))
             // A durable backend that failed sends later work to the local

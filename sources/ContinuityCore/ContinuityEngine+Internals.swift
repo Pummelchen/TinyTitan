@@ -67,7 +67,17 @@ extension ContinuityEngine {
         guard configuration.compactionThreshold > 0,
             journaledRecords > configuration.compactionThreshold
         else { return }
-        try? await compactJournal()
+        // Every other journal call is wrapped and reported; this one went
+        // through `try?`, so a journal that can no longer rewrite itself kept
+        // every prompt and reply on the disk forever while the engine's only
+        // failure channel stayed nil and the workspace went on reporting
+        // itself healthy. The records landed, so this is not a durability
+        // failure — it is a growth failure, and it gets its own trace.
+        do {
+            try await compactJournal()
+        } catch {
+            compactionFailure = String(describing: error)
+        }
     }
 
     func record(_ entry: JournalRecord) async throws {

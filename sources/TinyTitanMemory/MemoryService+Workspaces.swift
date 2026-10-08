@@ -81,6 +81,7 @@ extension MemoryService {
             // Reopening replays the file into a fresh engine, so a failure
             // there later is a new one and worth its own line.
             reportedJournalFailures.remove(oldest)
+            reportedCompactionStalls.remove(oldest)
             log(
                 .degraded(
                     operation: "residency",
