@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 94,
-    "done": 93,
+    "total": 95,
+    "done": 94,
     "open": 0,
     "blocked": 1
   },
@@ -1587,6 +1587,22 @@
       "evidence-after": "GREEN: swift test --no-parallel --filter 'HTTPServerTests/aRefusedFinishFrame|HTTPServerTests/aFinishWithRoomToSpare' gave \"Test run with 2 tests in 1 suite passed after 0.003 seconds\" -- the refused case now delivers exactly one terminator, preceded by the stream_overflow error, and the healthy case still delivers finish_reason, usage and one terminator. Full serial suite: 1720 tests in 253 suites across seven runs, exit 0, no failures (1718 before the two new tests). All eighteen gates: ./tools/lint.sh all exit 0. Mutation checks: restoring the direct-enqueue shape made the refused-case test fail again while the healthy-case test passed, proving the first pins the guard and the second is not hollow; dropping the usage frame made the healthy-case test fail on \"completion_tokens\":2.",
       "fix-summary": "finishStream now sends both terminal frames through enqueueStreamChunk, the same checkpoint every other frame passes: a refused frame calls failStream, which queues the error, closes the outbox, and cancels the generation's own task, which makes the finish's own [DONE] the no-op a closed outbox makes it. No new API and no test-only knob -- it is the shape the two sibling surfaces already had.",
       "commit": "76fc110"
+    },
+    {
+      "id": "AUD-195",
+      "severity": "S3",
+      "tier": "B",
+      "project": "plugins",
+      "file_line": "plugins/dsh-tinytitan/src/handoff.js:654-668 (the dispose hook), with the eleven reporting catches beside it",
+      "title": "A tracked run or child whose dispose() threw was torn down in silence, so the one teardown path that can fail on a stale socket left no line",
+      "category": "an error handler that discards the error: the catch exists to keep teardown going, and it also deletes the only record that teardown failed",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "discovered-by": "Phase D convergence, reading every catch in the plugin for whether it names what it caught. handoff.js has thirteen; eleven report through log(), one at :353 swallows into a sentinel the caller tests for on purpose, and only these two discarded the error outright.",
+      "evidence-before": "RED, measured by reverting the fix in place: node --test test/handoff.test.js gave \"tests 31, pass 29, fail 2\", with AssertionError [ERR_ASSERTION]: nothing reported the failed teardown: [...four handoff lines, none of them a failure...] on the run loop and AssertionError [ERR_ASSERTION]: the child loop swallowed its throw: [...six lines, none a failure...] on the child loop. The log the operator sees ends at \"armed ... in the child session\" while a subagent run was left undisposed.",
+      "evidence-after": "GREEN: node --test test/handoff.test.js -> \"tests 31, pass 31, fail 0\"; full plugin suite node --test test/ -> \"tests 156, pass 156, fail 0\" (154 before the two). ./tools/lint.sh javascript exit 0 (eslint 10.11.0 + prettier 3.9.9 over both packages); all eighteen gates ./tools/lint.sh all exit 0. Mutation checks, one per branch: swallowing only the child loop fails only \"a tracked child's failed disposal is reported too\" and swallowing only the runs loop fails only \"a disposal that throws is reported, not swallowed\" -- which is why the two messages differ; a shared \"...disposal failed\" tail would let either test pass on the other branch's line.",
+      "fix-summary": "Each catch now logs through the file's own describe() the way its eleven siblings do, with the child line carrying entry.key so the operator can tell which handoff child went undisposed. Control flow is untouched: teardown still visits every run, still clears the maps, and a throwing dispose still cannot stop the ones after it.",
+      "commit": "c392236"
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:93  Blocked:1  Total:94**
+**Open:0  Done:94  Blocked:1  Total:95**
 
 ## Table
 
@@ -102,6 +102,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-188 | S3 | B | memory | `sources/TinyTitanMemory/ContinuityJournalStore.swift:36-41 (`record`'s `guard let taskID = try? await store.taskID(for: scope), let sessionID = … else { return }`), its `session(for:)` at :156-161 (`try? await engine.beginSession`), sources/TinyTitanMemory/MemoryService.swift:136-141 (`recordTurn` asking the engine after every turn), sources/ContinuityCore/ContinuityEngine+Internals.swift:73-81 (`record(_:)`, the write both guards depend on)` | A turn lost before any content is written was reported by a mechanism nothing tested: of the three journal writes that can lose one, only the content path had a test, so a `record` rewritten to catch locally passed the whole suite | test gap on a deliberate swallow: a `try?` that is honest only because a side channel records the failure and a caller reads it back, with one of its three paths unguarded | DONE | Mac (primary) |
 | AUD-191 | S3 | A | engine | `sources/TinyTitanKernelsC/include/tinytitan_kernels.h:17-24 and :37-44 (the two entry-point docs that said the widths 'round alike'), sources/TinyTitanKernelsC/int8_affine_gemv.c:9-13 (the 'deliberately parallel' header) and :104-115 (the reduction comment above `(d0+d1)+(d2+d3)`, now :116)` | The C kernels document a bitwise agreement between the 4-bit and 8-bit widths that they do not have, and no test measured the claim | documentation claim stronger than the code, in a file with zero ledger coverage -- the class this audit kept finding, now in the kernels rather than the Swift | DONE | Mac (primary) |
 | AUD-193 | S3 | A | server | `sources/TinyTitanServer/Core/HTTPServerHandler+Chat.swift:129-135 and its four siblings (+Anthropic.swift:205 and :260, +Responses.swift:179, +Compact.swift:103) -- every generic `catch` that fabricates `malformed JSON request` / `invalid_json` from nothing but the fact that a decode threw` | A wrong-typed field in a well-formed JSON body was answered "malformed JSON request" with no parameter, throwing away the name the decoder had already computed | an error that names the wrong cause: the client is sent to its serializer for a payload whose syntax was never the problem | DONE | Mac (primary) |
+| AUD-195 | S3 | B | plugins | `plugins/dsh-tinytitan/src/handoff.js:654-668 (the dispose hook), with the eleven reporting catches beside it` | A tracked run or child whose dispose() threw was torn down in silence, so the one teardown path that can fail on a stale socket left no line | an error handler that discards the error: the catch exists to keep teardown going, and it also deletes the only record that teardown failed | DONE | Mac (primary) |
 
 ## Detail
 
@@ -1891,3 +1892,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** GREEN: the four wire tests pass -- swift test --no-parallel --filter on HTTPServerTests gave "Test run with 3 tests in 1 suite passed after 0.041 seconds", and the 600-level-nesting body gave "Test run with 1 test in 1 suite passed after 0.043 seconds". max_tokens now arrives as param "max_tokens" with code invalid_value; {not json still gives invalid_json; the Anthropic route names max_tokens in its message and no longer says "malformed JSON request". Full serial suite exit 0: 1718 tests in 253 suites across seven test runs, 0 failures (1714 at b5e0c4e, plus exactly these four). PATH=$HOME/.local/bin:$PATH ./tools/lint.sh all exit 0, all 18 gates. Mutation check that the syntax pin is not vacuous: replacing the re-parse guard with `if false` so every decode failure takes the named-parameter branch made the non-JSON tests fail observably -- body was {"error":{"type":"invalid_request_error","code":"invalid_value","message":"request body does not match this endpoint"}}, 2 issues recorded -- and the file was restored afterwards (grep -c "if false" returns 0, swift-format and swiftlint --strict clean).
 
 **Commit.** `6911ba1`
+
+### AUD-195 — A tracked run or child whose dispose() threw was torn down in silence, so the one teardown path that can fail on a stale socket left no line
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** plugins
+- **Location:** `plugins/dsh-tinytitan/src/handoff.js:654-668 (the dispose hook), with the eleven reporting catches beside it`
+- **Category:** an error handler that discards the error: the catch exists to keep teardown going, and it also deletes the only record that teardown failed
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D convergence, reading every catch in the plugin for whether it names what it caught. handoff.js has thirteen; eleven report through log(), one at :353 swallows into a sentinel the caller tests for on purpose, and only these two discarded the error outright.
+
+**Evidence before.** RED, measured by reverting the fix in place: node --test test/handoff.test.js gave "tests 31, pass 29, fail 2", with AssertionError [ERR_ASSERTION]: nothing reported the failed teardown: [...four handoff lines, none of them a failure...] on the run loop and AssertionError [ERR_ASSERTION]: the child loop swallowed its throw: [...six lines, none a failure...] on the child loop. The log the operator sees ends at "armed ... in the child session" while a subagent run was left undisposed.
+
+**Fix.** Each catch now logs through the file's own describe() the way its eleven siblings do, with the child line carrying entry.key so the operator can tell which handoff child went undisposed. Control flow is untouched: teardown still visits every run, still clears the maps, and a throwing dispose still cannot stop the ones after it.
+
+**Evidence after.** GREEN: node --test test/handoff.test.js -> "tests 31, pass 31, fail 0"; full plugin suite node --test test/ -> "tests 156, pass 156, fail 0" (154 before the two). ./tools/lint.sh javascript exit 0 (eslint 10.11.0 + prettier 3.9.9 over both packages); all eighteen gates ./tools/lint.sh all exit 0. Mutation checks, one per branch: swallowing only the child loop fails only "a tracked child's failed disposal is reported too" and swallowing only the runs loop fails only "a disposal that throws is reported, not swallowed" -- which is why the two messages differ; a shared "...disposal failed" tail would let either test pass on the other branch's line.
+
+**Commit.** `c392236`
