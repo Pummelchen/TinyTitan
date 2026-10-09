@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:150  Blocked:1  Total:151**
+**Open:0  Done:152  Blocked:1  Total:153**
 
 ## Table
 
@@ -159,6 +159,8 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-222 | S3 | B | tooling | `benchmark/memory_book.py:16-25 (the arm block) against `ARMS` at :44 and its floors at :237; benchmark/memory_value.py:265-306 in `622c6e5^` (`code_block`, `compiles`) and the `report()` path at :265 onward that never called them; the suite in benchmark/test_driver_documented_commands.py:82-146; registration in .github/workflows/ci.yml:241-268` | a memory driver documented three arms while running four, and another shipped a compile check that scores a missing toolchain as the model's failure | documentation that contradicts the code, plus the §6 unused-code hunt with a latent defect inside the unused part — both halves mislead the same person: the operator choosing which arm to run against a live model | DONE | Mac (primary) |
 | AUD-223 | S3 | B | tooling | `benchmark/capital_of_paris_report.py:194 (the `/tmp/smartness_v2.jsonl` default), :208-211 (the fixed archive sentence), :220-223 (the product printed as an equation), :306-312 (the `No run failed` sentence) and :321 (`main()` at import), all in `98e7d3d^`; the seam now at benchmark/capital_of_paris_report.py:93-111 (`shortfalls`), :269-281 (the plan and the named cells) and :377-386 (the summary); the suite in benchmark/test_capital_of_paris_report.py:113-190; registration in .github/workflows/ci.yml:241-271` | the smartness report printed a false equation over the runs that never returned, then certified that every request was served | a measurement page whose completeness claim is computed only from the rows it has, when the defect is the rows that are missing -- the number the reader cannot see, corrupted | DONE | Mac (primary) |
 | AUD-255 | S3 | B | server | `sources/TinyTitanServer/Core/ServerArguments+Usage.swift:38-41` | --max-context says "Native: 4096...262144" and refuses 100000; its launcher repeats the promise | interface text: the flag's own help and refusals described a set as a range and named no choices | DONE | Mac (primary) |
+| AUD-256 | S3 | B | memory | `sources/TinyTitanMemory/MemoryService+Consolidation.swift:172` | A consolidation that held the person's fact over model rewrites logged no count: `held` was summed and dropped | observability: a counter was accumulated and never read | DONE | Mac (primary) |
+| AUD-257 | S3 | B | fleet | `sources/TinyTitanFleet/Core/FleetScanner.swift:103-127` | `FleetScanner.stop()` cleared the in-flight guard, so a scan kicked by the dashboard's action task could dial the LAN after the terminal was restored | lifetime: a stop() that does not survive the caller's own background task | DONE | Mac (primary) |
 
 ## Detail
 
@@ -2954,3 +2956,35 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** The help line and both refusals are spelled from the lists that enforce them and the test asserts against the same source: `swift test --no-parallel --filter ServerArgumentTests` -- 20 tests in 1 suite, exit 0 (/tmp/aud255-green3.log). Full package suite serially: 7 target runs, 1735 tests in 253 suites, exit 0 (/tmp/aud255-full2.log) -- the count is up by the one new test. Gates as `bash tools/lint.sh <mode>`, each exit 0: swift-format, swiftlint, func-length, file-length, test-skip, test-hollow, docs, shell, shellcheck. No test or document elsewhere asserted the old strings (`rg "is not supported"` over tests/ benchmark/ tools/ finds only the new doc comment), and no document copies the old help line. No model run -- the operator's TinyTitanServer holds the only live model process; nothing fetched; nothing pushed.
 
 **Commit.** `1f2e0c5`
+
+### AUD-256 — A consolidation that held the person's fact over model rewrites logged no count: `held` was summed and dropped
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** memory
+- **Location:** `sources/TinyTitanMemory/MemoryService+Consolidation.swift:172`
+- **Category:** observability: a counter was accumulated and never read
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Queue lead carried in from the previous session (`held` written and never read in MemoryService+Consolidation), re-verified against the current tree before filing rather than trusted.
+
+**Evidence before.** `storeConsolidation` declares `var held = 0`, does `held += 1` under `case .held:` (:172) and passes it to `logConsolidationSummary` -- and the parameter was never in the signature. The summary function's own doc comment says "One line per counter that fired", and it covered `unchanged`, `duplicates`, `dropped` (not-durable), `ruleConflicts` and `conflicts`, but had no branch for the guard. The per-key `guardHeld(key:)` line does fire, so the refusal is not silent; what is lost is the aggregate: a consolidation that refused four of five model rewrites logged one disputed line per key and a summary that read like a quiet one, so nothing in the session's log told the operator the guard was carrying the write. Measured before the repair (/tmp/aud256-red.log, exit 1, 1 issue at MemoryGuardTests.swift:333): the log dump for a consolidation of three records, two of them protected user facts, contained only `memory guard kept the user's fact, marked disputed: <key>` twice and `consolidated 1 records` -- no count line. There was also no consolidation-level test for the guard anywhere in the suite: the guard was tested only through `store.set(..., guarding: true)`, one write at a time.
+
+**Evidence after.** `held` reaches the summary and a new exhaustive-enum case carries it: `logConsolidationSummary(session:written:unchanged:held:duplicates:dropped:ruleConflicts:conflicts:)` now has `if held > 0 { log(.guardHeldsStopped(session: session, count: held)) }`, and `MemoryServiceLogEvent.guardHeldsStopped(session:count:)` renders "memory session=<id> consolidation kept the person's fact over <n> model change(s)". The case name follows the existing count-case convention (`notDurablesStopped`, `ruleConflictsStopped`, `nearDuplicatesStopped`), and being a new enum case -- not an `if` on a string -- means the next counter added to the summary has to be placed in the same exhaustive switch. Verified: `swift test --no-parallel --filter MemoryGuardTests` -- 17 tests in 1 suite, exit 0 (/tmp/aud256-green2.log); memory target 189 tests in 23 suites, exit 0 (/tmp/aud256-memory.log); full package suite serially: 7 target runs, 1736 tests in 253 suites, exit 0 (/tmp/aud256-full.log). Gates as `bash tools/lint.sh <mode>`, each exit 0: force-cast, unbounded-read, func-length, file-length, sendable, test-skip, test-hollow, stdout-clean, library-facade, arch-path, docs, swift-format, swiftlint. No model run -- the operator's TinyTitanServer holds the only live model process; nothing fetched; nothing pushed.
+
+**Commit.** `bb26c9f`
+
+### AUD-257 — `FleetScanner.stop()` cleared the in-flight guard, so a scan kicked by the dashboard's action task could dial the LAN after the terminal was restored
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** fleet
+- **Location:** `sources/TinyTitanFleet/Core/FleetScanner.swift:103-127`
+- **Category:** lifetime: a stop() that does not survive the caller's own background task
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Queue lead carried in from the previous session, where it was filed as a doc-comment defect ("stop()'s doc promises it waits for a scan in flight; the body only cancels"). Reading the caller before writing showed the doc was the smaller half of it.
+
+**Evidence before.** `stop()` cancelled `task` and `inFlight` and set both to nil. `requestScan()` guards on `inFlight == nil` only, so after a stop the guard passes again. The reachable path is in the dashboard: `sources/TinyTitanFleet/Command/main.swift:230` runs a mutating action on an untracked `Task { runner.perform(action...); notes.put(...); scanner.requestScan() }` -- nobody holds that task, so teardown does not wait for it -- and `main.swift:236-237` then does `await scanner.stop(); terminal.restore()`. An action that finished after the restore therefore called `requestScan()` on a stopped scanner and started a fresh scan of every peer while the user's shell was back on screen: the process was still alive long enough to open the connections, and the output went to a terminal it no longer owned. Measured before the repair (/tmp/aud257-red.log, exit 1, 1 issue at ScannerTests.swift:294: `await transport.count() == before` -- the count had gone up after the stop).
+
+**Evidence after.** `stop()` sets a sticky `private var stopped = false` (:58) that only `requestScan()` honours (`guard !stopped, inFlight == nil else { return }`, :123); `start()` is deliberately not refused, because that is the owner asking to poll again and the flag's doc says so. `stop()` stays synchronous: the header now records that it cancels rather than waits, why a synchronous actor method could not wait (a scan that asked a dead peer sits out the full timeout, so waiting would hold the terminal before `restore()`), and what that costs (an in-flight scan can still publish a snapshot afterwards, which nothing reads at that point) -- the original doc claim of "wait for any scan in flight to finish" is gone rather than left as a promise nothing implements. Verified: `swift test --no-parallel --filter FleetScannerScheduleTests` -- 4 tests in 1 suite, exit 0 (/tmp/aud257-green.log); fleet target 63 tests in 14 suites, exit 0 (/tmp/aud257-fleet.log); full package suite serially: 7 target runs, 1737 tests in 253 suites, exit 0 (/tmp/aud257-full.log). Gates as `bash tools/lint.sh <mode>`, each exit 0: force-cast, unbounded-read, func-length, file-length, sendable, test-skip, test-hollow, stdout-clean, library-facade, arch-path, docs, swift-format, swiftlint. The test drives the in-process `HostTransport` fake -- no socket is opened and no peer is dialled, so the proof does not touch the network.
+
+**Commit.** `9f7f5a6`
