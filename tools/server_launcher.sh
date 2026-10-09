@@ -62,7 +62,10 @@
 #              runtime. 4 GB is the floor (the weights plus a minimum cache are
 #              ~4.7 GB on the 125B install); over 50% of this Mac's physical
 #              memory is warned about, not refused
-#   --context <n|native|max> native 262144, or 524288/1048576 with --yarn
+#   --context <rung|native|max> a native rung: 4096, 8192, 16384, 32768,
+#              65536, 131072 or 262144 (native and max are both 262144), or
+#              524288/1048576 with --yarn. The server refuses a count between
+#              the rungs, so a value off the ladder fails at startup
 #   --kv <4|8|16>   KV-cache precision (default 8)
 #   --yarn          enable YaRN context scaling
 #   --port <n>      default 8080 (TINYTITAN_PORT overrides)
@@ -1079,7 +1082,7 @@ if (( YARN )); then
 elif [[ -n "$CONTEXT_ARG" ]]; then
   case "$CONTEXT_ARG" in
     native|max) max_context=262144 ;;
-    *[!0-9]*) echo "unknown --context: $CONTEXT_ARG (a token count, native, or max)" >&2; exit 2 ;;
+    *[!0-9]*) echo "unknown --context: $CONTEXT_ARG (a native rung, native, or max)" >&2; exit 2 ;;
     *) max_context="$CONTEXT_ARG" ;;
   esac
 fi

@@ -695,6 +695,63 @@ struct ServerArgumentTests {
         }
     }
 
+    /// The native window is one of seven rungs, not any token count in a range,
+    /// and the test above pins that 100000 is refused. The operator cannot learn
+    /// any of that from the tool: `--help` printed "4096...262144", an ellipsis
+    /// over a set, and the refusal said "is not supported" without naming the
+    /// choices -- while the YaRN sibling right above it names both of its two.
+    /// The three causes (not an integer, above the ceiling, between rungs) also
+    /// shared one string, so a typo read as a policy refusal.
+    @Test func theContextRefusalNamesTheChoicesTheHelpPromises() throws {
+        let rungs = RuntimeConfiguration.supportedContextTokens
+            .map(String.init).joined(separator: ", ")
+
+        func message(_ value: String) -> String {
+            var caught = ""
+            do {
+                _ = try ServerArguments.parse([
+                    "--model", "model.ssdai", "--max-context", value,
+                ])
+            } catch let error as ServerArgumentError {
+                caught = error.description
+            } catch {
+                caught = "unexpected error: \(error)"
+            }
+            return caught
+        }
+
+        let betweenRungs = message("100000")
+        #expect(betweenRungs.contains(rungs))
+        // Not a token count at all: a different cause, so a different sentence,
+        // and one that states the ceiling it actually checked.
+        for value in ["abc", "2000000"] {
+            let refusal = message(value)
+            #expect(refusal.contains("1048576"))
+            #expect(!refusal.contains(rungs))
+        }
+        // The help may not promise a range the gate refuses inside of. It is
+        // generated against the same list so the two cannot drift apart.
+        #expect(ServerArguments.usage.contains(rungs))
+
+        // Its sibling in the same file has the same shape: a membership test
+        // against an allowed list whose refusal named nothing, while
+        // --expert-cache-slots spells its choices out.
+        let chunks = RuntimeConfiguration.allowedPrefillChunkTokens
+            .map(String.init).joined(separator: ", ")
+        var chunkRefusal = ""
+        do {
+            _ = try ServerArguments.parse([
+                "--model", "model.ssdai", "--prefill-chunk", "100",
+            ])
+        } catch let error as ServerArgumentError {
+            chunkRefusal = error.description
+        } catch {
+            chunkRefusal = "unexpected error: \(error)"
+        }
+        #expect(chunkRefusal.contains(chunks))
+        #expect(ServerArguments.usage.contains(chunks))
+    }
+
     private static func effortRequest(_ effort: String) throws -> OpenAIChatRequest {
         try JSONDecoder().decode(
             OpenAIChatRequest.self,

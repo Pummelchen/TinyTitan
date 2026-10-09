@@ -35,8 +35,10 @@ extension ServerArguments {
           --port <1...65535>     Loopback port (default 8080).
           --model-id <id>        API model identifier (default derived from the
                                  installed model manifest).
-          --max-context <tokens> Native: 4096...262144 (default 262144).
-                                 With YaRN: 524288 or 1048576 (default 1048576).
+          --max-context <tokens> One of the native rungs:
+                                 \(ServerArguments.supportedContextRungsHelp).
+                                 Default 262144. With YaRN: 524288 or 1048576
+                                 (default 1048576).
           --rope-scaling <mode>  Context scaling: none or yarn (default none).
           --queue-limit <count>  Maximum queued requests (default 4).
           --max-concurrent-sequences <count>
@@ -59,9 +61,10 @@ extension ServerArguments {
           --prompt-cache-disk-mib <MiB>
                                  SSD snapshot budget, 0...65536 (default 8192).
           --prefill-chunk <tokens>
-                                 Prefill chunk size: 32, 64, 128, 256, 512,
-                                 1024, 2048, or 4096 (default 4096 for supported
-                                 35B-A3B text models).
+                                 Prefill chunk size, one of
+                                 \(ServerArguments.prefillChunkTokensHelp)
+                                 (default 4096 for supported 35B-A3B text
+                                 models).
           --kv-bits <4|8|16>     KV-cache storage precision (default 8).
           --thinking <off|on>    Ornith/Qwen reasoning mode (default off, or
                                  TINYTITAN_THINKING_MODE). The model does not expose

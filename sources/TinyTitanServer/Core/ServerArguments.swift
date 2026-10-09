@@ -102,6 +102,22 @@ public struct ServerArguments: Equatable, Sendable {
             .map(String.init).joined(separator: ", ")
     }
 
+    /// The accepted native context windows, spelled from the gate that enforces
+    /// them. `--max-context` takes one of these rungs, not any token count
+    /// between the first and the last, and the help used to write it as a range.
+    static var supportedContextRungsHelp: String {
+        RuntimeConfiguration.supportedContextTokens
+            .map(String.init).joined(separator: ", ")
+    }
+
+    /// The accepted prefill chunk sizes, spelled from the gate that enforces
+    /// them -- the hand-written list in the help text is how
+    /// `expertCacheSlotsHelp` above came to be derived instead of typed.
+    static var prefillChunkTokensHelp: String {
+        RuntimeConfiguration.allowedPrefillChunkTokens
+            .map(String.init).joined(separator: ", ")
+    }
+
     /// lint:allow-long a flag table: one `case` per option plus its
     /// validation. Splitting it into per-group parsers would hide the
     /// exhaustive switch that makes an unhandled flag a compile-visible gap.
@@ -207,7 +223,11 @@ public struct ServerArguments: Equatable, Sendable {
                 guard let parsed = Int(value),
                     (1...RuntimeConfiguration.maximumContextTokens).contains(parsed)
                 else {
-                    throw ServerArgumentError.invalid("--max-context is not supported")
+                    // Not "is not supported": that sentence belongs to the rung
+                    // gate below, and a typo read as a policy refusal.
+                    throw ServerArgumentError.invalid(
+                        "--max-context must be a token count between 1 and "
+                            + "\(RuntimeConfiguration.maximumContextTokens)")
                 }
                 maxContext = parsed
                 maxContextWasSet = true
@@ -272,7 +292,9 @@ public struct ServerArguments: Equatable, Sendable {
                 guard let parsed = Int(value),
                     RuntimeConfiguration.allowedPrefillChunkTokens.contains(parsed)
                 else {
-                    throw ServerArgumentError.invalid("--prefill-chunk is not supported")
+                    throw ServerArgumentError.invalid(
+                        "--prefill-chunk must be one of "
+                            + Self.prefillChunkTokensHelp)
                 }
                 prefillChunkTokens = parsed
             case "--kv-bits":
@@ -381,7 +403,8 @@ public struct ServerArguments: Equatable, Sendable {
             }
         } else {
             guard RuntimeConfiguration.supportedContextTokens.contains(maxContext) else {
-                throw ServerArgumentError.invalid("--max-context is not supported")
+                throw ServerArgumentError.invalid(
+                    "--max-context must be one of \(Self.supportedContextRungsHelp)")
             }
         }
         if ropeScalingMode == .yarn, mtpModel != nil {
