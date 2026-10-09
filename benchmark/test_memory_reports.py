@@ -341,6 +341,62 @@ class TestABlankResultsTreeRefuses(unittest.TestCase):
         self.assertIn("memory-small", env[self.ENV])
 
 
+class TestABlankRunTokenRefuses(unittest.TestCase):
+    """AUD-245: `TINYTITAN_MEMVAL_RUN=` is how a day of repeats becomes one run.
+
+    Result files are named `{arm}-r{RUN}.json` so repeats can be averaged --
+    `memory_book.py`'s own comment says results are kept per run for exactly that
+    -- and every report walks the tree with the glob `*-r*.json`. A blank token
+    keeps the glob matching but drops the distinguishing part, so the second
+    repeat overwrites the first into the same file, and the report's run count is
+    the number of files it found. Three measured repeats therefore print as one
+    run, and the reader has no way to see which it was.
+    """
+
+    ENV = "TINYTITAN_MEMVAL_RUN"
+
+    def load(self, name, env):
+        with mock.patch.dict(os.environ, env, clear=True):
+            spec = importlib.util.spec_from_file_location(
+                f"aud245_{name}", ROOT / "benchmark" / f"{name}.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(module)
+            except SystemExit as error:
+                return "REFUSED", error
+            except OSError as error:
+                self.fail(f"could not import {name}: {error}")
+            return "BOUND", module
+
+    def bound(self, name, env):
+        outcome, value = self.load(name, env)
+        self.assertEqual(outcome, "BOUND", f"{name} did not bind: {value}")
+        return value.RUN
+
+    def test_a_blank_run_token_is_refused_by_name(self):
+        for name in MODULES:
+            with self.subTest(module=name):
+                outcome, error = self.load(name, {self.ENV: ""})
+                self.assertEqual(
+                    outcome, "REFUSED", f"{name} bound a blank run token, so repeats share one file"
+                )
+                self.assertIn(self.ENV, str(error))
+
+    def test_a_whitespace_run_token_is_refused_too(self):
+        for name in MODULES:
+            with self.subTest(module=name):
+                outcome, error = self.load(name, {self.ENV: "  "})
+                self.assertEqual(outcome, "REFUSED")
+                self.assertIn(self.ENV, str(error))
+
+    def test_an_unset_token_still_binds_the_default_run(self):
+        self.assertEqual(self.bound("memory_book", {}), "1")
+
+    def test_a_named_token_still_binds_as_it_did(self):
+        self.assertEqual(self.bound("memory_volume", {self.ENV: "3"}), "3")
+
+
 class TestImportIsClean(unittest.TestCase):
     def test_importing_a_driver_touches_no_network(self):
         child = """

@@ -56,7 +56,7 @@ BASE = f"http://127.0.0.1:{PORT}/v1"
 # Which run of the arm this is; results are kept per run so repeats can be
 # compared and averaged. Repeats only mean something with sampling on:
 # at temperature 0 a repeat is the same output.
-RUN = os.environ.get("TINYTITAN_MEMVAL_RUN", "1")
+RUN = memval_env.run_token()
 TEMPERATURE = os.environ.get("TINYTITAN_MEMVAL_TEMPERATURE")  # unset: the server's default
 SERVER_LOG = os.environ.get("TINYTITAN_MEMVAL_SERVER_LOG")
 # The arm's memory directory. One .ndjson per workspace, so its filenames are
