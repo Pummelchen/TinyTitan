@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 147,
-    "done": 146,
+    "total": 148,
+    "done": 147,
     "open": 0,
     "blocked": 1
   },
@@ -2437,6 +2437,23 @@
       "fix-evidence": "`memval_master.sh` now names the tree it aggregates (`TINYTITAN_MEMVAL_RESULTS=\"$ROOT/.build/benchmark-logs/memory-master\"`), the same default `memory_master.py` binds when the variable is unset, so the sweep can only be judged on records it wrote; the leaf is a handle because `report_all` walks its parent, where every `memory-<scenario>-<install>` directory lands. In the suite, driver imports go through one `import_driver()` door that reloads under `mock.patch.dict(os.environ)`, so reading a driver cannot retarget the process; reloading is what keeps the door honest, since `sys.modules` would otherwise answer from the cache and hide the publish from whichever test came second.",
       "sibling-note": "Swept, not assumed. Every model-free python suite (27 of them, `.build/aud250/siblings.py`, `/tmp/aud250-siblings.log`) was run in its own process and diffed for environment changes: all 27 now report `leaks=none`, and `memory_small_model.py` was the only import-time publisher of `TINYTITAN_MEMVAL_RESULTS`. `memval_matrix.sh` reads no results tree (only `TINYTITAN_MEMVAL_MODEL/QUANT/ARMS` at :34), so it has no victim side; `memval_run.sh:244,252` already names `$LOGS` on both its run and its report, which is the shape `memval_master.sh` was missing. Two hazards are deliberately left: moving the publish out of `memory_small_model.py`'s module scope into its `__main__` guard would remove the mechanism for every future in-process importer, but `test_memory_reports.py:572` `test_small_model_names_its_own_default_when_unset` asserts the publish happens *at import*, so that change needs a decision on a test this audit wrote, not a silent rewrite; and `test_driver_documented_commands.py:45` inserts `REPO / \"benchmark\"` on `sys.path`, which resolves to `benchmark/benchmark` because `REPO` is already the benchmark directory -- inert while CI runs `cd benchmark` first, and a wrong path rather than a wrong verdict.",
       "commit": "cc12144"
+    },
+    {
+      "id": "AUD-252",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "category": "two verdicts in one harness: the branch an operator runs drops the controls",
+      "status": "DONE",
+      "host": "this Mac (M3, 24 GB); no model run, no server binary, loopback stub only, nothing fetched",
+      "file_line": "`benchmark/test_concurrent_sessions.py:695` -- `return 0 if TOTALS[\"foreign\"] == 0 and TOTALS[\"http_error\"] == 0 else 1` in `main()`'s `BASE=` branch, against `:632` in `run_one_model` -- `separation_bad = leaked or TOTALS[\"http_error\"] > 0 or not canary_ok or not cancel_ok` (both lines are pre-fix; the shared `print_verdict()` is what they became, and the BASE return is `:729`)",
+      "title": "the external-server mode of the concurrent-session leak harness exits 0 over a blind detector, and prints nothing that would show it",
+      "discovered-by": "Re-measuring the four rows in `tools/python-suites-unrun.txt` after AUD-251's path sweep came back clean: the gate prints `59/63 python suites registered`, so the exemptions were the next unverified list. The first three premises were checked by running their suites; the fourth's file was read instead of run, because it starts a server per model.",
+      "evidence-before": "`timeout 300 python3 -m unittest test_concurrent_sessions_verdict` -> exit 1, 2 failures (`/tmp/aud252-red.log`, reproduced by restoring the old predicate in place and re-running, then restoring from the commit): against a loopback stub answering every `/v1/chat/completions` with empty content, the run printed `detector flagged: NOTHING -- the detector is blind` and `abandoned r1 wave3 user1; survivors intact: False; server answers afterwards: False`, then returned **0**. The same totals through the launched path's predicate return FAIL.",
+      "evidence-after": "`benchmark/test_concurrent_sessions_verdict.py` (3 tests OK): the blind backend now exits 1, the run prints `canary=BLIND` so a reader sees the detector state, and an `echo` stub -- each session answered from its own prompt, the canary the only row that sees a second marker -- still exits 0. The echo case passes against HEAD too and is labelled in the class docstring as the shape the repair must keep, not claimed as a guard.",
+      "fix-evidence": "`reset_state()`, `separation_state()` and `print_verdict()` are now the one predicate and the one summary, called by both entry points; `main()`'s `BASE=` branch also resets, which is what lets two modes run in one process without inheriting each other's totals. The scope the original comment defended is kept: `own_missed`, `task_wrong` and `attribution_unproven` remain reported beside the verdict and out of it. Mutation `return 0 if TOTALS['foreign'] == 0 and TOTALS['http_error'] == 0 else 1` restored is killed by exactly the two discriminating tests.",
+      "sibling-note": "Swept, not assumed. `grep -l 'environ.get(\"BASE\")'` over `benchmark/*.py` and `tools/*.py` names this one file, so there is no second external-server harness with its own narrower predicate. The launched path's `if not present: raise SystemExit(\"no installed model to test\")` was checked rather than trusted, because `all(results.values())` over an empty dict is True and is the AUD-212 shape -- it is unreachable here. The other three exemptions were re-measured today and still hold: `test_ane_gather_probe` 5 skipped, `test_export_ane_prefill` 22, `test_verify_ane_sidecar` 6, and `benchmark/requirements.txt` carries only numpy, safetensors and ml_dtypes, so CI really has no coremltools. The suite list is 60/64 registered now, the new one tracked before its workflow line.",
+      "commit": "730d1d1"
     }
   ]
 }
