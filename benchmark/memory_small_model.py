@@ -25,6 +25,8 @@ import os
 import sys
 from pathlib import Path
 
+import memval_env
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "benchmark"))
 
@@ -34,13 +36,8 @@ TOP_P = float(os.environ.get("TINYTITAN_SMALL_TOP_P", "0.95"))
 THINK = os.environ.get("TINYTITAN_SMALL_THINK") == "1"
 
 os.environ.setdefault("TINYTITAN_PORT", PORT)
-os.environ.setdefault(
-    "TINYTITAN_MEMVAL_RESULTS",
-    str(
-        ROOT
-        / f".build/benchmark-logs/memory-small-{os.environ.get('TINYTITAN_SMALL_LABEL', 'qwen2b')}"
-    ),
-)
+LABEL = os.environ.get("TINYTITAN_SMALL_LABEL", "qwen2b")
+RESULTS = memval_env.publish_results_tree(ROOT / f".build/benchmark-logs/memory-small-{LABEL}")
 
 
 def patch(module):
@@ -75,7 +72,7 @@ if __name__ == "__main__":
     else:
         raise SystemExit(f"unknown command {which!r}; expected book or value")
     patch(bench)
-    Path(os.environ["TINYTITAN_MEMVAL_RESULTS"]).mkdir(parents=True, exist_ok=True)
+    RESULTS.mkdir(parents=True, exist_ok=True)
     print(
         f"{which} / {arm} against port {PORT}, temp={TEMPERATURE} top_p={TOP_P} "
         f"thinking={'on' if THINK else 'off'}"

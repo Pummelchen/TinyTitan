@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import importlib.util
 import io
 import json
 import os
@@ -44,6 +45,8 @@ import pathlib
 import tempfile
 import unittest
 from unittest import mock
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 MODULES = (
     "memory_book",
@@ -262,6 +265,80 @@ class TestEveryReportCommandPropagates(ReportHarness):
                     r"return \d|return status|return report_status",
                     f"{name}.report() has no status to propagate",
                 )
+
+
+class TestABlankResultsTreeRefuses(unittest.TestCase):
+    """AUD-243: `TINYTITAN_MEMVAL_RESULTS=` is not "unset", and it names no directory.
+
+    `Path(os.environ.get(ENV, default))` accepts the empty string, so a driver
+    sets its results tree to `Path('')`, which is the directory the command
+    happens to be run in. Measured from an unrelated cwd:
+
+        cd /tmp && TINYTITAN_MEMVAL_RESULTS= python3 .../memory_book.py report
+        NOT MEASURED: no results in .
+
+    The reader is shown a directory that identifies nothing, and a writer given
+    the same shell slip drops its run records into the cwd of wherever it was
+    launched. A value that was typed but came out empty is a mistake, so it is
+    refused by name; unset still means the driver's own default tree.
+    """
+
+    ENV = "TINYTITAN_MEMVAL_RESULTS"
+
+    def load(self, name, env):
+        """A fresh import under `env`, so the driver's binding line runs.
+
+        Returns the outcome, the bound module or the refusal, and the
+        environment the import left behind — read inside the patch, because
+        `memory_small_model` publishes its tree there rather than returning it.
+        """
+        with mock.patch.dict(os.environ, env, clear=True):
+            spec = importlib.util.spec_from_file_location(
+                f"aud243_{name}", ROOT / "benchmark" / f"{name}.py"
+            )
+            module = importlib.util.module_from_spec(spec)
+            try:
+                spec.loader.exec_module(module)
+            except SystemExit as error:
+                return "REFUSED", error, dict(os.environ)
+            except OSError as error:  # a spec that does not resolve is a broken test, not a finding
+                self.fail(f"could not import {name}: {error}")
+            return "BOUND", module, dict(os.environ)
+
+    def bound_tree(self, name, env):
+        outcome, value, _ = self.load(name, env)
+        self.assertEqual(outcome, "BOUND", f"{name} did not bind: {value}")
+        return getattr(value, DIR_ATTR[name])
+
+    def test_a_blank_tree_is_refused_instead_of_becoming_the_cwd(self):
+        for name in MODULES + ("memory_mini", "memory_small_model"):
+            with self.subTest(module=name):
+                outcome, error, _ = self.load(name, {self.ENV: ""})
+                self.assertEqual(
+                    outcome, "REFUSED", f"{name} bound a blank tree to the current directory"
+                )
+                self.assertIn(self.ENV, str(error))
+
+    def test_a_whitespace_only_tree_is_refused_too(self):
+        for name in MODULES + ("memory_mini",):
+            with self.subTest(module=name):
+                outcome, error, _ = self.load(name, {self.ENV: "   "})
+                self.assertEqual(outcome, "REFUSED")
+                self.assertIn(self.ENV, str(error))
+
+    def test_an_unset_tree_still_binds_the_drivers_own_default(self):
+        tree = self.bound_tree("memory_book", {})
+        self.assertEqual(tree, ROOT / ".build/benchmark-logs/memory-book")
+
+    def test_a_named_tree_still_binds_as_it_did(self):
+        named = str(ROOT / ".build/benchmark-logs/two")
+        self.assertEqual(self.bound_tree("memory_volume", {self.ENV: named}), pathlib.Path(named))
+
+    def test_small_model_names_its_own_default_when_unset(self):
+        """It publishes the tree for the drivers it imports, so it must set one."""
+        outcome, _, env = self.load("memory_small_model", {})
+        self.assertEqual(outcome, "BOUND")
+        self.assertIn("memory-small", env[self.ENV])
 
 
 class TestImportIsClean(unittest.TestCase):

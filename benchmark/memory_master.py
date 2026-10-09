@@ -32,6 +32,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import memval_env
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -46,7 +48,7 @@ scenarios = _load("master_scenarios", "benchmark/master_scenarios.py")
 
 PORT = int(os.environ.get("TINYTITAN_PORT", "8096"))
 BASE = f"http://127.0.0.1:{PORT}/v1"
-OUT = Path(os.environ.get("TINYTITAN_MEMVAL_RESULTS", ROOT / ".build/benchmark-logs/memory-master"))
+OUT = memval_env.results_tree(ROOT / ".build/benchmark-logs/memory-master")
 RUN = os.environ.get("TINYTITAN_MEMVAL_RUN", "1")
 SERVER_LOG = os.environ.get("TINYTITAN_MEMVAL_SERVER_LOG")
 NAME = os.environ.get("TINYTITAN_MASTER_SCENARIO", "photograph")

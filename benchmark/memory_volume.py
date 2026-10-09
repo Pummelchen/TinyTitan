@@ -67,13 +67,15 @@ import time
 import urllib.request
 from pathlib import Path
 
+import memval_env
+
 ROOT = Path(__file__).resolve().parents[1]
 # control: memory off. auto: bootstrap, no tools. full: bootstrap plus all six.
 # No "minimal" arm: memory_set and memory_get without memory_search cannot
 # find a key the fragment did not name, and the fragment is exactly what the
 # cap has truncated. That arm would be a slower "auto".
 ARMS = ("control", "auto", "full")
-OUT = Path(os.environ.get("TINYTITAN_MEMVAL_RESULTS", ROOT / ".build/benchmark-logs/memory-volume"))
+OUT = memval_env.results_tree(ROOT / ".build/benchmark-logs/memory-volume")
 PORT = int(os.environ.get("TINYTITAN_PORT", "8096"))
 BASE = f"http://127.0.0.1:{PORT}/v1"
 # Which run of the arm this is; results are kept per run so repeats can be

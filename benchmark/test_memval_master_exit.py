@@ -30,10 +30,11 @@ import unittest
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 DRIVER = REPO / "benchmark" / "memval_master.sh"
-# The two python files the aggregate report needs: `memory_master.py` loads
-# `master_scenarios` by path, so a checkout without both dies in the report rather
-# than running it, and the report's own exit status is half of what is under test.
-REPORT_SOURCES = ("memory_master.py", "master_scenarios.py")
+# The python files the aggregate report needs: `memory_master.py` loads
+# `master_scenarios` by path and imports `memval_env` for its results tree, so a
+# checkout without all three dies in the report rather than running it, and the
+# report's own exit status is half of what is under test.
+REPORT_SOURCES = ("memory_master.py", "master_scenarios.py", "memval_env.py")
 SCENARIOS = [
     "photograph",
     "pong",

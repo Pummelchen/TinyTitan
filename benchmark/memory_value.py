@@ -46,11 +46,13 @@ import time
 import urllib.request
 from pathlib import Path
 
+import memval_env
+
 ROOT = Path(__file__).resolve().parents[1]
 # control: memory off. minimal: bootstrap plus memory_set/memory_get.
 # full: bootstrap plus all six tools.
 ARMS = ("control", "auto", "minimal", "full")
-OUT = Path(os.environ.get("TINYTITAN_MEMVAL_RESULTS", ROOT / ".build/benchmark-logs/memory-value"))
+OUT = memval_env.results_tree(ROOT / ".build/benchmark-logs/memory-value")
 PORT = int(os.environ.get("TINYTITAN_PORT", "8096"))
 BASE = f"http://127.0.0.1:{PORT}/v1"
 # Which run of the arm this is; results are kept per run so repeats can be

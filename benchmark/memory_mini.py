@@ -37,15 +37,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import memval_env
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "benchmark"))
 import memory_book as book  # noqa: E402
 import memory_sim as sim  # noqa: E402
 
 GGUF = ROOT / "models/gguf"
-RESULTS = Path(
-    os.environ.get("TINYTITAN_MEMVAL_RESULTS", ROOT / ".build/benchmark-logs/memory-mini")
-)
+RESULTS = memval_env.results_tree(ROOT / ".build/benchmark-logs/memory-mini")
 PORT = int(os.environ.get("TINYTITAN_MINI_PORT", "8098"))
 
 MODELS = {
