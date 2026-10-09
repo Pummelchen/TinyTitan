@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 141,
-    "done": 139,
+    "total": 142,
+    "done": 140,
     "open": 1,
     "blocked": 1
   },
@@ -2337,6 +2337,21 @@
       "evidence-before": "Measured through the registered fixture with every scenario stubbed to exit 0, so the results tree is empty -- the same shape AUD-240 gated inside `report-all`: stdout after the report header reads `NOT MEASURED: no run of any scenario under .../.build/benchmark-logs` and then `##### MASTER DONE Fri Oct  9 06:26:58 CEST 2026: all 10 scenarios exited 0`, with rc 0 and empty stderr. A day-long sweep that produced no record at all therefore reports the run as complete, and the status AUD-240 added to `memory_master.py report-all` is unreachable from the script that calls it.",
       "evidence-after": "Not yet fixed -- it needs a decision, not a patch. Propagating the report's status makes `test_a_clean_run_exits_zero` fail, because its stub `memval_run.sh` writes no result JSON, so a clean fixture run genuinely is not measured; the honest fix is to teach the stub to write one record per scenario and then propagate, which edits the very file carrying two open operator decisions (the `report_all` header-above-refusal placement, and its now-false docstring line about `report-all` returning None). Held open until those are settled rather than rewriting the fixture a third time unprompted.",
       "commit": ""
+    },
+    {
+      "id": "AUD-245",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "category": "mislabeled-measurement",
+      "status": "DONE",
+      "host": "this Mac (M3, 24 GB), no model run, no server; every test is a fresh import under a patched environment",
+      "file_line": "benchmark/memval_env.py (`run_token`) with the six former bindings: memory_book.py:53, memory_correct.py:63, memory_master.py:52, memory_projects.py:59, memory_value.py:61, memory_volume.py:84; the naming rule is memory_book.py:352 and the glob that still matches its output is :357",
+      "title": "an empty TINYTITAN_MEMVAL_RUN collapsed a day of interleaved repeats into one counted run",
+      "discovered-by": "Step 5 of the AUD-243 close, taken as a sweep rather than a guess: every `os.environ` read of a `TINYTITAN_*` name in the production python, classified by what a set-but-blank value does -- path-shaped (AUD-243), parsed (`TINYTITAN_MEMVAL_TEMPERATURE` -> `float(\"\")`, which dies loudly and was not filed), truthiness-guarded (`TINYTITAN_MEMVAL_SERVER_LOG`, `TINYTITAN_MEMVAL_MEMDIR`, and `tinytitan_3bit_probe.py:109`'s `.strip() or None`, all three already reading blank as unset and reporting it -- not filed), or interpolated into a result file's name (this row)",
+      "evidence-before": "Three launches of the real writer's naming rule (`{arm}-r{RUN}.json`) into a scratch tree, then the real `memory_book.py report()` over it: with `TINYTITAN_MEMVAL_RUN` 1, 2, 3 the tree keeps 3 records and the report prints 3 rows; blank on all three it keeps 1 file and prints 1 row -- exit 0 in both cases, and the run column empty. RED in benchmark/test_memory_reports.py `TestABlankRunTokenRefuses` was 12 failures (six drivers accepting the blank token, six the whitespace-only one) with the unset-default and named-token controls passing.",
+      "evidence-after": "benchmark/test_memory_reports.py `TestABlankRunTokenRefuses` (4 tests): the blank token refused by name in all six drivers, the whitespace one too, unset still `1`, a named token binding unchanged. GREEN, then the CI model-free python group at 711 tests OK. Mutant in a copy: the guard removed reproduces the same 12 failures and leaves both controls green, so the tests fail on the guard. Live refusal: `TINYTITAN_MEMVAL_RUN= python3 benchmark/memory_book.py report` -> `ABORT: TINYTITAN_MEMVAL_RUN is set to '', which names no run ...`, exit 1. `tools/lint.sh python` run over the whole tree this time (ruff 0.16.7, check and format clean), which is the correction AUD-243's close recorded.",
+      "commit": "785158e"
     }
   ]
 }
