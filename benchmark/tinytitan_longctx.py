@@ -43,6 +43,7 @@ from tinytitan_profile import (
     bench_model,
     benchmark_log_path,
     resolve_api_model,
+    run_stamp,
     server_command,
     server_environment,
     wait_for_health,
@@ -440,7 +441,7 @@ def run(model, port):
     }
     outdir = results_directory()
     os.makedirs(outdir, exist_ok=True)
-    stamp = time.strftime("%Y%m%dT%H%M%S")
+    stamp = run_stamp()
     summary_path = os.path.join(outdir, f"longctx-{stamp}.json")
     with open(summary_path, "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)

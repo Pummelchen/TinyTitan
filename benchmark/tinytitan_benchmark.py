@@ -53,6 +53,7 @@ from tinytitan_profile import (
     bench_model,
     benchmark_log_path,
     resolve_api_model,
+    run_stamp,
     server_command,
     server_environment,
     wait_for_health,
@@ -601,7 +602,7 @@ def run_config(cache_mode, mtp_config, config_label, port, model_id, verify=True
         flush=True,
     )
 
-    ts = time.strftime("%Y%m%dT%H%M%S")
+    ts = run_stamp()
     outdir = os.path.join(results_directory(), f"bench-{config_label}-{ts}")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "aggregate.json"), "w", encoding="utf-8") as f:

@@ -292,7 +292,7 @@ fi
 # --- --write: replace the section, after a backup ---------------------------
 
 [[ -e "$SETTINGS" ]] || die "no DSH settings file at $SETTINGS (pass --settings)"
-backup="${SETTINGS}.bak-$(date +%Y%m%dT%H%M%S)"
+backup="${SETTINGS}.bak-$(date -u +%Y%m%dT%H%M%S)"
 cp "$SETTINGS" "$backup"
 
 # Line-based surgery, not a YAML round-trip: the file is the person's, with

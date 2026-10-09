@@ -7,6 +7,7 @@ the user-facing launcher profile.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -65,6 +66,18 @@ def benchmark_log_path(name: str) -> str:
     directory = ROOT / ".build/benchmark-logs"
     directory.mkdir(parents=True, exist_ok=True)
     return str(directory / name)
+
+
+def run_stamp(epoch: float | None = None) -> str:
+    """`%Y%m%dT%H%M%S` in UTC for `epoch`, or for now -- local time repeats an hour on
+    this zone's fall-back, and two runs that share a name share and overwrite a record.
+    """
+    moment = (
+        datetime.datetime.now(datetime.timezone.utc)
+        if epoch is None
+        else datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
+    )
+    return moment.strftime("%Y%m%dT%H%M%S")
 
 
 def parse_max_tokens(argv, default: int = 512) -> tuple[int | None, str | None]:
