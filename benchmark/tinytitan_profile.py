@@ -205,11 +205,18 @@ def resolve_api_model(port, *, timeout=5):
         data = json.loads(conn.getresponse().read().decode())
         conn.close()
         ids = [row["id"] for row in data.get("data", []) if not row["id"].endswith("-fast")]
-        if ids:
-            return ids[0]
-    except (OSError, ValueError, KeyError):
-        pass
-    return DEFAULT_API_MODEL
+    except (OSError, ValueError, KeyError) as error:
+        raise RuntimeError(
+            f"asked 127.0.0.1:{port} which model it serves and could not read the answer "
+            f"({type(error).__name__}: {error}); no measurement runs against a model id this "
+            f"process guessed"
+        ) from error
+    if not ids:
+        raise RuntimeError(
+            f"127.0.0.1:{port} answered /v1/models with no model id, so which checkpoint this "
+            f"server loaded is unknown; {DEFAULT_API_MODEL!r} is a default, not a measurement"
+        )
+    return ids[0]
 
 
 def wait_for_health(proc, port, *, timeout: float = 120) -> bool:

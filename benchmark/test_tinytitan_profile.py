@@ -1,7 +1,10 @@
+import http.client
+import json
 import os
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import coder_cli_benchmark
@@ -9,6 +12,7 @@ import launcher_fixture
 import tinytitan_benchmark
 from tinytitan_profile import (
     DEFAULT_API_MODEL,
+    resolve_api_model,
     DEFAULT_CONTEXT_TOKENS,
     DEFAULT_CONCISE,
     DEFAULT_EXPERT_CACHE_BUDGET,
@@ -154,3 +158,52 @@ class BenchmarkProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResolveApiModelTests(unittest.TestCase):
+    """`resolve_api_model` is how a driver learns which model its server loaded,
+    because the id names the quantization and differs per install. Every failure
+    path used to answer `DEFAULT_API_MODEL` anyway, so a server that advertised
+    nothing, answered non-JSON, or refused the connection produced a run whose
+    requests carry a model id this repository only guessed at."""
+
+    class Socket:
+        def __init__(self, payload=None, error=None):
+            self.payload, self.error = payload, error
+
+        def __call__(self, host, port, timeout=None):
+            if self.error:
+                raise self.error
+            body = self.payload
+            if not isinstance(body, (str, bytes)):
+                body = json.dumps(body)
+            return SimpleNamespace(
+                request=lambda *a, **k: None,
+                getresponse=lambda: SimpleNamespace(read=lambda: body.encode()),
+                close=lambda: None,
+            )
+
+    def ask(self, payload=None, error=None, port=8091):
+        with patch.object(http.client, "HTTPConnection", self.Socket(payload, error)):
+            return resolve_api_model(port)
+
+    def test_the_advertised_id_is_the_one_it_returns(self):
+        self.assertEqual(
+            self.ask({"data": [{"id": "qwen-3.6-35b-a3b"}, {"id": "qwen-3.6-35b-a3b-fast"}]}),
+            "qwen-3.6-35b-a3b",
+        )
+
+    def test_an_empty_model_list_refuses_instead_of_guessing(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.ask({"data": []})
+        self.assertIn("8091", str(caught.exception))
+
+    def test_an_answer_that_is_not_json_refuses_instead_of_guessing(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.ask("<html>not the server you meant</html>", port=8092)
+        self.assertIn("8092", str(caught.exception))
+
+    def test_a_refused_connection_refuses_instead_of_guessing(self):
+        with self.assertRaises(RuntimeError) as caught:
+            self.ask(error=ConnectionRefusedError("refused"), port=8093)
+        self.assertIn("8093", str(caught.exception))
