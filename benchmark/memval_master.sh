@@ -37,7 +37,16 @@ done
 echo
 echo "=== all master scenarios"
 report_status=0
-TINYTITAN_MASTER_SCENARIO=photograph python3 "$ROOT/benchmark/memory_master.py" report-all || report_status="$?"
+# The tree is named rather than inherited. `report-all` reads whatever
+# TINYTITAN_MEMVAL_RESULTS says, and an ambient value -- exported by an operator
+# who runs the drivers by hand, or left in the environment of a test process that
+# imported a driver -- points the aggregate at records this sweep never wrote, so
+# the verdict would be another tree's while this run's emptiness went unnoticed
+# (AUD-250). The leaf named here is only a handle: `report_all` walks its parent,
+# which is where every scenario's `memory-<scenario>-<install>` directory lands.
+TINYTITAN_MASTER_SCENARIO=photograph \
+  TINYTITAN_MEMVAL_RESULTS="$ROOT/.build/benchmark-logs/memory-master" \
+  python3 "$ROOT/benchmark/memory_master.py" report-all || report_status="$?"
 
 # The report runs whether or not the scenarios did: it is the record, and the
 # summary below is the verdict. Exit with the verdict, because a run whose every

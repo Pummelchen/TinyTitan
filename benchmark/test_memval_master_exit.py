@@ -29,12 +29,14 @@ them away again.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 DRIVER = REPO / "benchmark" / "memval_master.sh"
@@ -191,6 +193,58 @@ class MasterExitTests(unittest.TestCase):
         self.assertIn(" 1 of 2 scenarios failed", failed[0])
         self.assertNotIn("of 10", failed[0])
         self.assertEqual(proc.returncode, 1)
+
+    def plant_decoy_tree(self) -> str:
+        """A populated results tree the run under test never wrote to.
+
+        Returns the leaf path to name in `TINYTITAN_MEMVAL_RESULTS`: the report
+        walks that path's parent, so the decoy leaves below it are all in scope.
+        Records carry one session each -- the shape the stub writes -- so the
+        pool is non-empty and `report-all` returns 0.
+        """
+        root = self.tmp / "decoy"
+        for name in SCENARIOS:
+            leaf = root / f"memory-{name}-other-install"
+            leaf.mkdir(parents=True)
+            for arm in ("summary", "auto"):
+                row = {
+                    "session": 1,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "seconds": 1.0,
+                    "summary_seconds": 0.0,
+                    "consolidation_wait": 0.0,
+                    "finish_reason": "stop",
+                    "answers": {},
+                }
+                (leaf / f"{name}-{arm}-r1.json").write_text(json.dumps([row]))
+        return str(root / "memory-photograph-other-install")
+
+    def test_an_ambient_results_tree_does_not_move_the_report_off_this_runs_tree(self):
+        """AUD-250. `TINYTITAN_MEMVAL_RESULTS` is a documented knob, and the driver
+        inherits it: so does this fixture, because `run_driver` starts from
+        `os.environ`. With a tree named that is not the temporary checkout's,
+        `report-all` answered from records the stub never wrote -- measured with
+        the repository's own recorded runs, which printed photograph's 116/135
+        carryable and 2743 s and `MASTER DONE ... all 10 scenarios exited 0` at
+        exit 0 over a run that wrote nothing.
+
+        The same slip from an operator's shell does the real thing: a day-long
+        sweep would be gated by a report over a tree it never wrote. Either way
+        the refusal this suite exists for is disarmed. The fix is in the driver,
+        which names the tree it aggregates, so this fixture deliberately does not
+        pin the variable itself -- pinning it here would make the test answer for
+        the script's own behaviour.
+        """
+        decoy = self.plant_decoy_tree()
+        with mock.patch.dict(os.environ, {"TINYTITAN_MEMVAL_RESULTS": decoy}):
+            proc = self.run_driver(records="0")
+        output = proc.stdout + proc.stderr
+        self.assertIn("NOT MEASURED", output, output)
+        self.assertEqual(proc.returncode, 1, output)
+        # The precise tree, not merely a path: the decoy sits under `self.tmp` too,
+        # so any shorter assertion would read as satisfied by the wrong tree.
+        self.assertIn(str(self.tmp / ".build/benchmark-logs"), output, output)
 
     def test_the_report_still_runs_after_a_failure(self):
         """A non-zero verdict must not swallow the record: the aggregate is what an

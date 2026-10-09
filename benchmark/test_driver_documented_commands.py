@@ -35,11 +35,13 @@ import contextlib
 import importlib
 import io
 import json
+import os
 import pathlib
 import re
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(REPO / "benchmark"))
@@ -69,11 +71,24 @@ def accepted_words(module) -> set[str]:
     return words
 
 
+def import_driver(name: str):
+    """The one door this suite uses to import a driver: a hermetic one.
+
+    Reloading rather than importing is what makes the door worth having --
+    `importlib.import_module` answers from `sys.modules` after the first call, so
+    a driver's module-level code runs once per process and a leak would hide
+    behind the cache from whichever test came second.
+    """
+    with mock.patch.dict(os.environ):
+        module = importlib.import_module(name)
+        return importlib.reload(module)
+
+
 class DocumentedCommandTests(unittest.TestCase):
     def test_every_documented_command_is_one_the_driver_accepts(self):
         for name in DRIVERS:
             with self.subTest(driver=name):
-                module = importlib.import_module(name)
+                module = import_driver(name)
                 known = accepted_words(module)
                 for driver, word in WORDS.findall(module.__doc__ or ""):
                     self.assertEqual(driver, name, f"{name} documents another driver")
@@ -85,7 +100,7 @@ class DocumentedCommandTests(unittest.TestCase):
 
     def test_the_arms_the_prose_lists_are_the_arms_the_code_has(self):
         for name in DRIVERS:
-            module = importlib.import_module(name)
+            module = import_driver(name)
             arms = set(getattr(module, "ARMS", ()))
             doc = module.__doc__ or ""
             prose = COUNT.search(doc)
@@ -106,9 +121,53 @@ class DocumentedCommandTests(unittest.TestCase):
                 )
 
 
+class ImportHygieneTests(unittest.TestCase):
+    def test_reading_a_driver_does_not_change_the_process_environment(self):
+        """AUD-250: importing a driver to read it must not retarget the run.
+
+        `memory_small_model.py` publishes its results tree and its port into
+        `os.environ` at import, because the harness it then imports has to write
+        where it does. That is right for a run and wrong for an inspection: this
+        suite imports nine drivers in-process, so the process leaves the suite
+        with `TINYTITAN_MEMVAL_RESULTS` set to
+        `.build/benchmark-logs/memory-small-qwen2b`. Measured over
+        `python3 -m unittest test_driver_documented_commands test_memval_master_exit`:
+        the stubbed master run wrote nothing, its report walked the tree the
+        *leaked* variable named -- the repository's real recorded runs -- and
+        printed `MASTER DONE ... all 10 scenarios exited 0` over photograph's
+        116/135 carryable and 2743 s of someone else's model time, exit 0.
+        AUD-244's refusal guard is the test that failed, so the leak does not
+        merely reorder a suite: it silently disarms the gate that catches a run
+        which measured nothing.
+
+        The two knobs are named and cleared first because a leaked value already
+        in the environment would make the comparison pass without anything being
+        proven: the first draft of this test ran last in the module's own order,
+        after the drivers had been imported, and reported ok over a process that
+        was already retargeted.
+        """
+        with mock.patch.dict(os.environ):
+            for key in ("TINYTITAN_MEMVAL_RESULTS", "TINYTITAN_PORT"):
+                os.environ.pop(key, None)
+            before = dict(os.environ)
+            for name in DRIVERS:
+                import_driver(name)
+            changed = {
+                key: (before.get(key), os.environ.get(key))
+                for key in set(before) | set(os.environ)
+                if before.get(key) != os.environ.get(key)
+            }
+            self.assertEqual(
+                changed,
+                {},
+                "importing a driver for inspection changed environment variables "
+                "every later test in this process inherits: (before, after) per key",
+            )
+
+
 class DeadHelperTests(unittest.TestCase):
     def test_memory_value_ships_no_helper_it_never_calls(self):
-        module = importlib.import_module("memory_value")
+        module = import_driver("memory_value")
         for name in ("compiles", "code_block"):
             self.assertFalse(
                 hasattr(module, name),
@@ -118,7 +177,7 @@ class DeadHelperTests(unittest.TestCase):
 
     def test_deleting_them_leaves_the_report_the_same(self):
         """The removal is pure: the printed measurement does not change shape."""
-        module = importlib.import_module("memory_value")
+        module = import_driver("memory_value")
         with tempfile.TemporaryDirectory() as temp:
             results = pathlib.Path(temp)
             module.OUT = results
