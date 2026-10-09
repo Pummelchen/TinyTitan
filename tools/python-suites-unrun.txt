@@ -7,6 +7,11 @@
 #
 # Measured on this host 2026-10-08, one `python3 -m unittest` per suite, no model run and
 # nothing fetched.
+#
+# test_concurrent_sessions is exempt for the launched-server harness only: its BASE= branch
+# is a verdict over HTTP, and benchmark/test_concurrent_sessions_verdict.py drives that
+# branch against a loopback stub in the CI group (AUD-252). The row below stays, because the
+# part that needs an install still cannot run on a runner.
 test_concurrent_sessions	starts one TinyTitanServer per model at --max-concurrent-sequences 4 and skips any model that is not installed; a CI runner has no install, and no gate here may fetch a model to give it one
 test_ane_gather_probe	its module imports coremltools, which the CI python does not carry — measured here as 5 tests, 5 skipped, so it asserts on a machine that has coremltools and nowhere else
 test_export_ane_prefill	its module imports coremltools via the exporter — measured here as 22 tests, 22 skipped, the same asymmetry as test_ane_gather_probe
