@@ -341,6 +341,29 @@ jobs:
         # the weights through the repository's own `tools/ssdai_reader.py`, and is
         # the one suite in this list that imports a third-party module: numpy,
         # which the pinned converter requirements above already install.
+        # test_tinytitan_ane_attention_probe drives the ANE full-attention probe's
+        # real main() with `build_block` and `cpu_model_for` patched and
+        # coremltools faked in `sys.modules` -- it exists because that probe quoted
+        # a GPU reference of 4,215 ms per layer-chunk and never divided anything by
+        # it, so the go/no-go it was written for was never computed and a 512-token
+        # row printed `7.55 ms` directly under that number; because the reference is
+        # an average over 20 layer-chunks of two *unequal* shapes (4096:0 then
+        # 2007:4096), so both sides are now given in ms per 1k layer-tokens where
+        # the reference is 1,381.3; because its numerics "sanity check" had no
+        # criterion, so the default list exited 0 at a mean relative error of 0.0998
+        # and a non-finite gap printed `nan`, wrote a literal NaN into the JSON
+        # artifact (not RFC 8259) and still exited 0; because the CPU_ONLY arm sat
+        # behind `if t <= 2048:` with no else, so the 4096 row printed no comparison
+        # at all and its artifact line was indistinguishable from an errored arm, and
+        # `round(cpu_ms, 2) if cpu_ms else None` turned a 0 ms measurement into the
+        # same null; because `--repeats 0` died with IndexError after the model was
+        # built and a malformed `--configs` was a bare ValueError; because one config
+        # raising lost the whole artifact; because the artifact path resolved against
+        # the working directory with no mkdir, so a run from /tmp printed every row
+        # and then died with FileNotFoundError; and because `return 0` was the only
+        # return in main() while the guard discarded it. Like the 3-bit probe it
+        # imports numpy, and nothing else: coremltools is faked, so the real probe --
+        # which needs the ANE and minutes per config -- is not what CI runs.
         # wall time was 22.5 s at load average 4.3 with the operator's own server still
         # listening on 8080, 19.1 s of it reported by the runner — the 22-suite list
         # measured 24.9 s at load 6.5 and 18.8 s at load 3 an hour earlier, so the
@@ -364,7 +387,11 @@ jobs:
         # untouched. Adding the suite was itself caught by the registration gate
         # below: the first measurement run failed `test_this_repository_is_registered`
         # because `benchmark/test_tinytitan_3bit_probe.py` was named here and not yet
-        # tracked, which is that gate working rather than misfiring.
+        # tracked, which is that gate working rather than misfiring. The 31-suite
+        # list — this one plus the ANE attention probe, 595 tests — measured 21.3 s
+        # wall and 21.1 s reported at load average 3.6, then 20.5 s and 20.4 s at
+        # load 3.6, and 21.1 s a third time, all clean, with the operator's server
+        # on 8080 and untouched.
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -385,7 +412,7 @@ jobs:
             test_capital_of_paris_smartness test_tinytitan_maxthroughput \
             test_tinytitan_slots_ab test_tinytitan_longgen \
             test_tinytitan_benchmark test_tinytitan_longctx test_memory_smoke \
-            test_tinytitan_3bit_probe
+            test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

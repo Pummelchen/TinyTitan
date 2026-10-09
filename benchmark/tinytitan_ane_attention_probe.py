@@ -12,10 +12,32 @@ TINYTITAN_KERNEL_STATS): the 10 full-attention layers cost 84.3 s of the 133.2 s
 prefill — 4.21 s per layer-chunk. The go/no-go: the ANE must beat that per
 layer-chunk by enough to survive integration overheads.
 
+That mean is an average over 20 layer-chunks of two *unequal* shapes (4096:0 then
+2007:4096), so it is not the cost of any one chunk and cannot be compared against
+a row measured at a different one. Both sides are therefore reported in ms per 1k
+layer-tokens (84.3 s / (6,103 x 10) = 1,381 ms per 1k layer-tokens) and the ratio
+is printed per row. A row's attention cost per token grows with its history (the
+quadratic term), so a history-bearing row reads a *smaller* gain than the same ANE
+shows on a cold chunk — measured at chunk 512 on this M3, 95.9x with no history
+against 62.6x with 1,024 — while the reference average mixes both shapes. The run
+says so rather than leaving the mismatch to the reader.
+
 Weights are random fp16 at the real shapes (throughput does not depend on
 values). Numerics are sanity-checked against a float32 NumPy reference of the
-same math; exact parity with the Metal kernels' conventions is integration
-work, not probe work.
+same math against `MAX_MEAN_REL_ERROR`, and a non-finite gap — the failure mode
+the fused SDPA showed on this machine — fails the run. Measured on this M3 with
+the default list: 0.0141 at 1024:0, 0.0204 at 2048:0, 0.0292 at 4096:0 and 0.0998
+at 2048:4096; that growth is uniform-random scores at total length 6,144, which
+`docs/v4.4-decode-width-plan.md` records collapsing to 0.0002 on realistic ones.
+Exact parity with the Metal kernels' conventions is integration work, not probe
+work.
+
+The CPU_ONLY arm is a wall-clock cross-check, not the decision, and it is only run
+up to `CPU_ONLY_MAX_CHUNK`; its absence is printed and recorded with the reason.
+
+Exit is 2 for a refused `--configs` or `--repeats`, 1 when any config errored,
+timed nothing, failed the numerics ceiling, or could not be written, and 0 only
+when every config measured and passed.
 
   ~/.venvs/coreml-py311/bin/python benchmark/tinytitan_ane_attention_probe.py
 """
@@ -24,11 +46,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
+import pathlib
+import sys
 import time
 
 import numpy as np
 import coremltools as ct
 from coremltools.converters.mil import Builder as mb
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Qwen3.5-MoE 35B-A3B full-attention geometry (ArchConfig.qwen36_35B_A3B).
 D = 2048
@@ -42,6 +70,31 @@ ROTARY = 64  # headDim * partialRotaryFactor(0.25)
 THETA = 10_000_000.0
 SCALE = 0.0625  # 256^-0.5
 EPS = 1e-6
+
+# The recorded GPU measurement this probe is judged against, and the shapes it
+# averages: 84.3 s over the 10 full-attention layers of a 6,103-token prefill
+# chunked 4096 then 2007, which is 20 layer-chunks.
+GPU_LAYER_SECONDS = 84.3
+GPU_PREFILL_TOKENS = 6103
+FULL_ATTENTION_LAYERS = 10
+GPU_CHUNK_SHAPES = "4096:0 then 2007:4096"
+GPU_MS_PER_LAYER_CHUNK = GPU_LAYER_SECONDS * 1000 / (FULL_ATTENTION_LAYERS * 2)
+
+WARM_UPS = 2
+CPU_WARM_UPS = 1
+CPU_REPEATS = 3
+# Above this chunk the CPU_ONLY arm is not run. It is a cross-check that the ANE
+# number is not simply CPU time, and a 4,096-token CPU pass costs minutes for no
+# extra assurance. Measured here: 102.74 ms at 2048:0, 1.95x-2.37x at 1024-2048.
+CPU_ONLY_MAX_CHUNK = 2048
+# A garbage-detection bar, not a precision promise: the measured errors in the
+# docstring sit under it, and the plan's realistic-distribution error is two
+# orders lower.
+MAX_MEAN_REL_ERROR = 0.15
+
+ARTIFACT = "ane-attention-probe.json"
+OUT_ENV = "TINYTITAN_ANE_PROBE_OUT"
+DEFAULT_OUT = ROOT / ".build" / "benchmark-results" / ARTIFACT
 
 
 def rope_tables(start: int, count: int) -> tuple[np.ndarray, np.ndarray]:
@@ -260,6 +313,271 @@ def reference(hidden, k_hist, v_hist, cos_t, sin_t, mask, w):
     return out @ w["wo"].T.astype(np.float32)
 
 
+class ConfigError(ValueError):
+    """A configuration the reader can fix without reading a traceback."""
+
+
+def parse_configs(spec: str) -> list[tuple[int, int]]:
+    """`(chunk, history)` pairs, or a refusal naming the flag and the entry."""
+    if not spec.strip():
+        raise ConfigError(f"--configs {spec!r} is empty; it takes CHUNK:HISTORY pairs")
+    configs = []
+    for entry in spec.split(","):
+        parts = entry.split(":")
+        if len(parts) != 2:
+            raise ConfigError(f"--configs {spec!r}: entry {entry!r} is not CHUNK:HISTORY")
+        try:
+            chunk, history = (int(value) for value in parts)
+        except ValueError:
+            raise ConfigError(
+                f"--configs {spec!r}: entry {entry!r} holds a token count that is not a number"
+            ) from None
+        if chunk < 1:
+            raise ConfigError(
+                f"--configs {spec!r}: entry {entry!r} has a chunk of {chunk}; a chunk is at least one token"
+            )
+        if history < 0:
+            raise ConfigError(
+                f"--configs {spec!r}: entry {entry!r} has history of {history}; the first chunk is 0"
+            )
+        configs.append((chunk, history))
+    return configs
+
+
+def parse_repeats(value: int) -> int:
+    if value < 1:
+        raise ConfigError(
+            f"--repeats {value} times nothing; the median needs at least one timed run"
+        )
+    return value
+
+
+def timed_samples(samples: list[float], warm_ups: int) -> list[float]:
+    """The timed tail of a run, with its warm-ups dropped."""
+    return samples[warm_ups:]
+
+
+def median_ms(samples: list[float]) -> float:
+    """The upper middle, which is what the shipped numbers were read from."""
+    return sorted(samples)[len(samples) // 2]
+
+
+def ms_per_1k_tokens(ms: float, tokens: int) -> float:
+    return ms * 1000 / tokens
+
+
+def ms_per_1k_layer_tokens() -> float:
+    """The GPU reference in the same unit every row is given in."""
+    layer_tokens = GPU_PREFILL_TOKENS * FULL_ATTENTION_LAYERS
+    return ms_per_1k_tokens(GPU_LAYER_SECONDS * 1000, layer_tokens)
+
+
+def speedup_over_gpu(ms: float, tokens: int) -> float:
+    return ms_per_1k_layer_tokens() / ms_per_1k_tokens(ms, tokens)
+
+
+def error_within_ceiling(rel) -> bool:
+    """A non-finite gap is never within the ceiling, whatever the ceiling is."""
+    return rel is not None and math.isfinite(rel) and rel <= MAX_MEAN_REL_ERROR
+
+
+def cpu_model_for(spec, weights_dir):
+    return ct.models.MLModel(spec, weights_dir=weights_dir, compute_units=ct.ComputeUnit.CPU_ONLY)
+
+
+def block_output_name(model, chunk: int) -> str:
+    """The block output, found by shape rather than by the name the converter chose.
+
+    The generated names are positional, so the shape is the only stable handle on
+    the tensor the timing and the numerics are about; the k/v cache outputs are the
+    same program's other two.
+    """
+    wanted = (chunk, D)
+    outputs = model.get_spec().description.output
+    for entry in outputs:
+        if tuple(entry.type.multiArrayType.shape) == wanted:
+            return entry.name
+    names = [entry.name for entry in outputs]
+    raise ValueError(f"no output of shape {wanted} among {names}")
+
+
+def timed_predictions(model, feed, repeats: int, warm_ups: int):
+    samples = []
+    out = None
+    for _ in range(repeats + warm_ups):
+        start = time.perf_counter()
+        out = model.predict(feed)
+        samples.append((time.perf_counter() - start) * 1000.0)
+    return samples, out
+
+
+def measure_config(chunk, history, repeats, weights, rng, build, cpu_build) -> dict:
+    """One `(chunk, history)` config: the row of what was actually measured.
+
+    Everything the run cannot report is written into the row rather than raised,
+    because the artifact is what the go/no-go is read from and a row that says
+    `null` cannot tell a skipped arm from an errored one.
+    """
+    row = {
+        "chunk": chunk,
+        "history": history,
+        "cpu_and_ne_ms": None,
+        "cpu_only_ms": None,
+        "cpu_only_status": "skipped",
+        "cpu_only_note": "",
+        "mean_rel_error": None,
+        "error": None,
+    }
+    try:
+        model = build(chunk, history, weights)
+        hidden = (rng.standard_normal((chunk, D)) * 0.5).astype(np.float16)
+        k_hist = (rng.standard_normal((1, N_KV_HEADS, history, HEAD_DIM)) * 0.5).astype(np.float16)
+        v_hist = (rng.standard_normal((1, N_KV_HEADS, history, HEAD_DIM)) * 0.5).astype(np.float16)
+        cos_t, sin_t = rope_tables(history, chunk)
+        mask = causal_mask(chunk, history)
+        feed = {"hidden": hidden, "cos_t": cos_t, "sin_t": sin_t, "mask": mask}
+        if history > 0:
+            feed.update(k_hist=k_hist, v_hist=v_hist)
+
+        name = block_output_name(model, chunk)
+        samples, out = timed_predictions(model, feed, repeats, WARM_UPS)
+        row["cpu_and_ne_ms"] = median_ms(timed_samples(samples, WARM_UPS))
+
+        got = np.asarray(out[name], dtype=np.float32)
+        ref = reference(hidden, k_hist, v_hist, cos_t, sin_t, mask, weights)
+        denom = np.abs(ref).mean()
+        row["mean_rel_error"] = float(np.abs(got - ref).mean() / max(denom, 1e-9))
+
+        if chunk > CPU_ONLY_MAX_CHUNK:
+            row["cpu_only_note"] = f"chunk {chunk} is over CPU_ONLY_MAX_CHUNK={CPU_ONLY_MAX_CHUNK}"
+        else:
+            try:
+                cpu = cpu_build(model.get_spec(), model.weights_dir)
+                cpu_samples, _ = timed_predictions(cpu, feed, CPU_REPEATS, CPU_WARM_UPS)
+                row["cpu_only_ms"] = median_ms(timed_samples(cpu_samples, CPU_WARM_UPS))
+                row["cpu_only_status"] = "measured"
+            except Exception as error:  # the cross-check failing is the row's to say
+                row["cpu_only_status"] = "errored"
+                row["cpu_only_note"] = f"{type(error).__name__}: {error}"
+    except Exception as error:  # one config failing does not end the sweep
+        row["error"] = f"{type(error).__name__}: {error}"
+    return row
+
+
+def row_status(row: dict) -> int:
+    if row.get("error"):
+        return 1
+    if not error_within_ceiling(row.get("mean_rel_error")):
+        return 1
+    if row.get("cpu_only_status") == "errored":
+        return 1
+    return 0
+
+
+def row_report(row: dict) -> tuple[list[str], int]:
+    """The lines one config prints, and whether it costs the run."""
+    status = row_status(row)
+    if row.get("error"):
+        return (
+            [f"  NOT RUN: chunk {row['chunk']}, history {row['history']} -- {row['error']}"],
+            status,
+        )
+
+    lines = []
+    ms = row["cpu_and_ne_ms"]
+    rate = ms_per_1k_tokens(ms, row["chunk"])
+    gain = speedup_over_gpu(ms, row["chunk"])
+    lines.append(
+        f"  CPU_AND_NE {ms:9.2f} ms/chunk-layer   {rate:.1f} ms per 1k tokens"
+        f"   {gain:.1f}x the GPU reference"
+    )
+
+    if row.get("cpu_only_ms") is not None:
+        cpu_ms = row["cpu_only_ms"]
+        lines.append(
+            f"  CPU_ONLY     {cpu_ms:9.2f} ms   ratio {cpu_ms / ms:.2f}x against CPU_AND_NE"
+        )
+    elif row.get("cpu_only_status") == "errored":
+        lines.append(
+            f"  CPU_ONLY errored -- {row.get('cpu_only_note')}; "
+            "the wall-clock cross-check did not run"
+        )
+    else:
+        reason = (
+            row.get("cpu_only_note")
+            or f"chunk {row['chunk']} is over CPU_ONLY_MAX_CHUNK={CPU_ONLY_MAX_CHUNK}"
+        )
+        lines.append(
+            f"  CPU_ONLY     not run: {reason} -- the arm is a wall-clock cross-check, not the go/no-go"
+        )
+
+    rel = row.get("mean_rel_error")
+    if rel is None or not math.isfinite(rel):
+        lines.append(
+            "  mean rel err NOT MEASURED: the gap to the float32 reference is not a finite number"
+            " -- the block output holds a non-finite value, the failure mode the fused SDPA showed"
+        )
+    elif rel > MAX_MEAN_REL_ERROR:
+        lines.append(
+            f"  mean rel err NOT MEASURED: {rel:.4f} is over the {MAX_MEAN_REL_ERROR} ceiling"
+        )
+    else:
+        lines.append(f"  mean rel err {rel:.4f}   within the {MAX_MEAN_REL_ERROR} ceiling")
+    return lines, status
+
+
+def header_lines(configs, repeats: int) -> list[str]:
+    return [
+        f"ANE full-attention probe -- configs: {', '.join(f'{t}:{h}' for t, h in configs)}, "
+        f"repeats: {repeats} timed run(s) after {WARM_UPS} warm-up(s)",
+        f"weights: random fp16 at the real shapes; numpy {np.__version__}, "
+        f"coremltools {getattr(ct, '__version__', 'unknown')}",
+        f"CPU_ONLY arm runs for chunks up to {CPU_ONLY_MAX_CHUNK}; "
+        f"numerics ceiling {MAX_MEAN_REL_ERROR}",
+    ]
+
+
+def reference_lines() -> list[str]:
+    return [
+        "",
+        f"GPU reference (measured, 4-bit, this machine): the {FULL_ATTENTION_LAYERS} "
+        f"full-attention layers cost {GPU_LAYER_SECONDS} s of a {GPU_PREFILL_TOKENS:,}-token "
+        f"prefill chunked {GPU_CHUNK_SHAPES} = {GPU_MS_PER_LAYER_CHUNK:,.0f} ms per layer-chunk "
+        f"averaged over {FULL_ATTENTION_LAYERS * 2} layer-chunks.",
+        f"That mean spans two unequal chunk shapes, so no row above is comparable to it as "
+        f"printed; both sides are given in ms per 1k layer-tokens, where the reference is "
+        f"{ms_per_1k_layer_tokens():,.1f}.",
+        "A row's attention cost per token grows with its history (the quadratic term), so a "
+        "history-bearing row reads a smaller gain than the same ANE shows on a cold chunk, while "
+        "the reference average mixes both shapes -- no row above is a like-for-like comparison "
+        "of it.",
+    ]
+
+
+def out_path(env=None) -> pathlib.Path:
+    """Where the artifact goes: the variable names a file, or a directory to fill."""
+    mapping = os.environ if env is None else env
+    value = str(mapping.get(OUT_ENV, "")).strip()
+    if not value:
+        return DEFAULT_OUT
+    path = pathlib.Path(value)
+    return path / ARTIFACT if path.is_dir() else path
+
+
+def write_artifact(rows, path: pathlib.Path) -> None:
+    """Strict JSON: a non-finite measurement is recorded as null, never as NaN."""
+    clean = []
+    for row in rows:
+        item = dict(row)
+        rel = item.get("mean_rel_error")
+        if rel is not None and not math.isfinite(rel):
+            item["mean_rel_error"] = None
+            item["mean_rel_error_note"] = "the gap to the reference is not a finite number"
+        clean.append(item)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(clean, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -268,92 +586,53 @@ def main() -> int:
     parser.add_argument("--repeats", type=int, default=5)
     args = parser.parse_args()
 
+    try:
+        configs = parse_configs(args.configs)
+        repeats = parse_repeats(args.repeats)
+    except ConfigError as error:
+        print(f"REFUSED: {error}")
+        return 2
+
     rng = np.random.default_rng(41)
     weights = make_weights(rng)
-    results = []
-    for spec in args.configs.split(","):
-        t, hist = (int(x) for x in spec.split(":"))
-        print(f"== chunk {t}, history {hist} ==", flush=True)
-        model = build_block(t, hist, weights)
-        cpu_model = None
-        hidden = (rng.standard_normal((t, D)) * 0.5).astype(np.float16)
-        k_hist = (rng.standard_normal((1, N_KV_HEADS, hist, HEAD_DIM)) * 0.5).astype(np.float16)
-        v_hist = (rng.standard_normal((1, N_KV_HEADS, hist, HEAD_DIM)) * 0.5).astype(np.float16)
-        cos_t, sin_t = rope_tables(hist, t)
-        mask = causal_mask(t, hist)
-        feed = {"hidden": hidden, "cos_t": cos_t, "sin_t": sin_t, "mask": mask}
-        if hist > 0:
-            feed.update(k_hist=k_hist, v_hist=v_hist)
+    for line in header_lines(configs, repeats):
+        print(line, flush=True)
 
-        # Outputs are (block output [t, D], k_new, v_new) with generated
-        # names; identify the block output by shape, not position.
-        out_name = next(
-            name
-            for name in model.output_description
-            if tuple(
-                model.get_spec()
-                .description.output[
-                    [o.name for o in model.get_spec().description.output].index(name)
-                ]
-                .type.multiArrayType.shape
-            )
-            == (t, D)
-        )
-        ane_times = []
-        for i in range(args.repeats + 2):
-            start = time.perf_counter()
-            out = model.predict(feed)
-            elapsed = time.perf_counter() - start
-            if i >= 2:
-                ane_times.append(elapsed)
-        ane_ms = sorted(ane_times)[len(ane_times) // 2] * 1000
+    rows, statuses = [], []
+    for chunk, history in configs:
+        print(f"== chunk {chunk}, history {history} ==", flush=True)
+        row = measure_config(chunk, history, repeats, weights, rng, build_block, cpu_model_for)
+        lines, status = row_report(row)
+        rows.append(row)
+        statuses.append(status)
+        for line in lines:
+            print(line, flush=True)
 
-        ref = reference(hidden, k_hist, v_hist, cos_t, sin_t, mask, weights)
-        got = np.asarray(out[out_name], dtype=np.float32)
-        denom = np.abs(ref).mean()
-        rel = np.abs(got - ref).mean() / max(denom, 1e-9)
+    for line in reference_lines():
+        print(line, flush=True)
 
-        cpu_ms = None
-        if t <= 2048:
-            cpu_model = ct.models.MLModel(
-                model.get_spec(),
-                weights_dir=model.weights_dir,
-                compute_units=ct.ComputeUnit.CPU_ONLY,
-            )
-            times = []
-            for i in range(3 + 1):
-                start = time.perf_counter()
-                cpu_model.predict(feed)
-                elapsed = time.perf_counter() - start
-                if i >= 1:
-                    times.append(elapsed)
-            cpu_ms = sorted(times)[len(times) // 2] * 1000
+    path = out_path()
+    try:
+        write_artifact(rows, path)
+    except OSError as error:
+        print(f"NOT WRITTEN: {path} -- {type(error).__name__}: {error}")
+        statuses.append(1)
+    else:
+        print(f"wrote {path}")
 
-        row = {
-            "chunk": t,
-            "history": hist,
-            "cpu_and_ne_ms": round(ane_ms, 2),
-            "cpu_only_ms": round(cpu_ms, 2) if cpu_ms else None,
-            "mean_rel_error": float(f"{rel:.5f}"),
-        }
-        results.append(row)
+    failed = sum(1 for value in statuses if value)
+    if failed:
         print(
-            f"  CPU_AND_NE {ane_ms:9.2f} ms/chunk-layer"
-            + (f"   CPU_ONLY {cpu_ms:9.2f} ms  (ratio {cpu_ms / ane_ms:.2f}x)" if cpu_ms else "")
-            + f"   mean rel err {rel:.4f}",
-            flush=True,
+            f"PROBE INCOMPLETE: {failed} of {len(statuses)} check(s) failed -- "
+            "the go/no-go cannot be read off this run."
         )
-
+        return 1
     print(
-        "\nGPU reference (measured, 4-bit, this machine): full-attention "
-        "block = 4,215 ms per layer-chunk averaged over a 6,103-token "
-        "prefill (84.3 s / 20 layer-chunks)."
+        f"PROBE COMPLETE: {len(configs)} config(s) measured and within the "
+        f"{MAX_MEAN_REL_ERROR} numerics ceiling."
     )
-    with open(".build/benchmark-results/ane-attention-probe.json", "w", encoding="utf-8") as fh:
-        json.dump(results, fh, indent=2)
-    print("wrote .build/benchmark-results/ane-attention-probe.json")
     return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
