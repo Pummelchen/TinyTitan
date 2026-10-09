@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 138,
-    "done": 137,
+    "total": 139,
+    "done": 138,
     "open": 0,
     "blocked": 1
   },
@@ -2291,6 +2291,22 @@
       "evidence-after": "benchmark/test_memory_mini_report.py ResultsTreeTests (5 tests): the env binds RESULTS; a record in the named tree reports (exit 0); the refusal names the tree the reader chose; a foreign .json is named (`NOT A MINI RECORD: <path> holds no `runs`, so it left the table`) and the run exits 1 when nothing else is there; a shared tree still reports mini's own row with the foreign file named. RED first: 4 failures before the fix (test_the_env_names... AssertionError comparing the repo default against the scratch path). GREEN: 9 tests OK; the real command re-measured over /tmp/aud241/tree -> exit 0, foreign file named, mini row printed (/tmp/aud241/after.log). 3/3 mutants caught on a re-measured clean baseline (revert the env binding -> 5 failures; revert the shape guard -> 2; revert the named print -> 2). CI model-free gate list: 703 tests, the only error being a prose name my own extractor mistook for a module. ruff 0.16.7 clean on both files.",
       "fix-summary": "RESULTS takes TINYTITAN_MEMVAL_RESULTS with mini's own default, exactly as its seven siblings do; report() validates the record shape before using it (a dict with a `runs` dict) and names what it leaves out instead of crashing on it or skipping it silently. `path.read_text()` gained the encoding the siblings use. No shell caller changes: memval_run.sh:213/:221 sets the env around `$SCRIPT report` and never invokes mini, which is why the hardcode survived; the reader-facing path was the docs' own comparison recipe. The mixed-tree verdict (name it, keep reporting, exit 0) is pinned by a test so it is a decision and not a default.",
       "commit": "de8ade2"
+    },
+    {
+      "id": "AUD-242",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "status": "DONE",
+      "host": "this Mac (M3, 24 GB), no model run, no server; the tests patch http.client.HTTPConnection",
+      "file_line": "benchmark/tinytitan_profile.py:202-212 (`resolve_api_model`, the swallowed handler and the `return DEFAULT_API_MODEL` that replaced it) with the default at :18 and the reasoning it contradicts at :196-198; the nine callers are tinytitan_ane_prefill_ab.py:95, tinytitan_benchmark.py:753, tinytitan_determinism_ab.py:107, tinytitan_gate0_profile.py:405, tinytitan_hit_fixup_ab.py:110, tinytitan_longctx.py:380, tinytitan_longgen.py:205, tinytitan_mtp_phases.py:127, tinytitan_profile.py:254",
+      "title": "every driver that asks the server which model it loaded got the hardcoded default back whenever asking failed",
+      "category": "mislabeled-measurement",
+      "discovered-by": "Phase D convergence: an AST sweep of the production python for handlers whose body is only pass/continue (32 hits over 86 files, recorded in the handover so the sweep is not repeated) left two worth following; this is the one whose fallback is a measurement claim",
+      "evidence-before": "resolve_api_model returned `ornith-1.5-35b-a3b` -- the module default -- on three paths with no trace: the connection refused (OSError), the body was not JSON (ValueError), the row list had no id (KeyError), plus a fourth that needed no exception at all: `data: []` fell out of the `if ids:` and returned the same string. The tests in benchmark/test_tinytitan_profile.py ResolveApiModelTests reproduce all four by patching http.client.HTTPConnection; against the pre-fix module 3 of them assert-fail with `RuntimeError not raised` while the advertised-id path passes, which is the shape of the defect: the good path was never the problem.",
+      "evidence-after": "benchmark/test_tinytitan_profile.py ResolveApiModelTests (4 tests): the advertised non-`-fast` id still returned; an empty model list, a non-JSON body and a refused connection each raise with the port and the cause in the message. RED first (3 failures), GREEN after (11 tests OK in the suite). Mutant: restoring the silent default fails those same 3, restored-and-verified OK. CI model-free gate list re-run: 703 tests, the single error being a prose name my own extractor mistook for a module (twice now -- the harness, not the tree). No driver broke on the raise, because every caller already treats a dying arm as a failed arm. ruff 0.16.7 clean on both files.",
+      "fix-summary": "The asking either answers or refuses; it no longer answers with a guess. `DEFAULT_API_MODEL` remains for the two callers that want a default rather than a measurement (claude_openai_adapter.py:330's --model flag, catalog_id_for at :281), and it appears in the new message as the string that must not be accepted. The AST sweep's other survivor, tools/internal-speeds.py:435 `except Exception: pass` around the `hw.memsize` sysctl, is not filed: it degrades a record's environment block, not a metric, and AUD-210 already gates the comparison that would read it.",
+      "commit": "ee86d32"
     }
   ]
 }
