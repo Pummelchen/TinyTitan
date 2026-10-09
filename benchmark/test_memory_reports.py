@@ -366,6 +366,117 @@ class TestTheAggregateTableScoresEveryScenario(ReportHarness):
         )
 
 
+class TestTheAggregatePoolsEveryLeaf(ReportHarness):
+    """`aggregate()` pools one leaf per scenario, and the leaf it picks is the one that sorts first.
+
+    The results directory is `memory-<scenario>-<model>-<quant>bit` (`memval_run.sh:33`),
+    so a tree that saw two installs holds two leaves for every scenario. `aggregate()`
+    takes `next(sorted(...))` and reads the first. Measured over one tree holding
+    `memory-photograph-aaa-model-4bit` (every key answered right) and
+    `memory-photograph-zzz-model-8bit` (every key answered wrong),
+    `/tmp/aud249-measure.log`:
+
+        aggregate:   worlds: 1 | pooled ... summary carryable 45/45 100.0% | invalid 0   exit 0
+        report-all:  photograph summary 2 ... 45/45 ... invalid 10                        exit 0
+
+    So the sweep that exists to compare installs reports whichever leaf sorts first under
+    the heading "pooled (every scored key-instance, all runs)", the second install
+    contributes nothing to any figure it prints, and nothing in the output names a
+    directory -- while `report_all()`, whose glob has no such first-pick, reads both and
+    disagrees with it over the same tree. Exit 0 either way.
+
+    The two tests that would pass before the fix are marked as such: they pin the *shape*
+    the fix must keep -- one world per scenario, and the `-firstpass` exclusion -- because
+    the easy repair (make each leaf a world, or read every matching directory) would
+    change the unweighted mean or the deliberate exclusion without saying so.
+    """
+
+    def leaf(self, root, name, label, right):
+        """One install's results for `name`, every key answered right or every key wrong."""
+        spec = importlib.import_module("master_scenarios").SCENARIOS[name]
+        rows = []
+        for session in range(1, spec["sessions"] + 1):
+            truth = spec["truth"](session)
+            answers = dict(truth) if right else {key: "no-such-value" for key in truth}
+            rows.append(
+                {
+                    "session": session,
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "seconds": 1.0,
+                    "summary_seconds": 0.5,
+                    "consolidation_wait": 0.2,
+                    "finish_reason": "stop",
+                    "self_truth": None,
+                    "answers": answers,
+                }
+            )
+        directory = root / f"memory-{name}-{label}"
+        directory.mkdir(parents=True, exist_ok=True)
+        for arm in ("summary", "auto"):
+            (directory / f"{name}-{arm}-r1.json").write_text(json.dumps(rows))
+        return directory
+
+    def pooled(self, printed, arm):
+        lines = [
+            line
+            for line in printed.splitlines()
+            if line.strip().startswith(arm) and "carryable" in line
+        ]
+        self.assertEqual(len(lines), 1, printed)
+        return lines[0]
+
+    def test_the_pool_covers_every_leaf_of_a_scenario(self):
+        root = self.scratch("memory_master")
+        self.leaf(root, "photograph", "aaa-model-4bit", right=True)
+        self.leaf(root, "photograph", "zzz-model-8bit", right=False)
+        status, printed = self.call("memory_master", "aggregate", root)
+        self.assertEqual(status, 0, printed)
+        # photograph: 5 carryable keys over 9 scored sessions = 45 per leaf, so two leaves
+        # pool 45 of 90 -- and a 100% claim over one install is not the tree's verdict.
+        self.assertIn("45/90", self.pooled(printed, "summary"), printed)
+        self.assertIn("50.0%", self.pooled(printed, "summary"), printed)
+
+    def test_the_pool_names_the_leaves_it_read(self):
+        root = self.scratch("memory_master")
+        self.leaf(root, "photograph", "aaa-model-4bit", right=True)
+        self.leaf(root, "photograph", "zzz-model-8bit", right=False)
+        _status, printed = self.call("memory_master", "aggregate", root)
+        self.assertIn(
+            "2 leaves",
+            printed,
+            "the pooled heading claims every run, so the row has to say how many "
+            "result leaves it actually read",
+        )
+
+    def test_two_installs_of_one_scenario_are_still_one_world(self):
+        """Passes before the fix, and must survive it.
+
+        The unweighted mean treats worlds equally, so a world is a scenario. Pooling an
+        install's extra leaf into the same world keeps that meaning; promoting each leaf
+        to a world would weight a scenario by how many installs ran it.
+        """
+        root = self.scratch("memory_master")
+        self.leaf(root, "photograph", "aaa-model-4bit", right=True)
+        self.leaf(root, "photograph", "zzz-model-8bit", right=False)
+        _status, printed = self.call("memory_master", "aggregate", root)
+        self.assertIn("worlds: 1", printed, printed)
+
+    def test_a_firstpass_leaf_stays_out_of_the_pool(self):
+        """Passes before the fix, and must survive it: the exclusion is deliberate.
+
+        `report_all()` has no such filter, which is the other half of the disagreement
+        measured above; a first-pass leaf is lower-effort work and pooling it with the
+        settled runs would report both as one verdict.
+        """
+        root = self.scratch("memory_master")
+        self.leaf(root, "photograph", "aaa-model-4bit", right=True)
+        self.leaf(root, "photograph", "zzz-firstpass", right=False)
+        _status, printed = self.call("memory_master", "aggregate", root)
+        self.assertIn("45/45", self.pooled(printed, "summary"), printed)
+        self.assertIn("100.0%", self.pooled(printed, "summary"), printed)
+
+
 class TestEveryReportCommandPropagates(ReportHarness):
     def test_the_guard_raises_with_the_report_status(self):
         for name in MODULES + ("memory_mini",):

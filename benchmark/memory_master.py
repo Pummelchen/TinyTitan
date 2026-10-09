@@ -434,6 +434,14 @@ def aggregate(root: Path, names=None) -> int:
     world by how many key-instances it scored, so one large world can dominate,
     while the unweighted mean treats worlds equally. A verdict should quote both
     and name the dominant world rather than pick the flattering one.
+
+    A world is a scenario, and a scenario can have several result leaves: the
+    directory is named `memory-<scenario>-<model>-<quant>bit` by `memval_run.sh`,
+    so a tree that saw two installs holds two leaves for every scenario. Both are
+    pooled, and the world line says how many it read, because the heading below
+    promises every run and a reader has to be able to check it. A `-firstpass`
+    leaf stays out of the pool: it is lower-effort work, and mixing it into the
+    settled runs would report the two as one verdict.
     """
     global NAME, SPEC, OUT
     saved = (NAME, SPEC, OUT)
@@ -444,48 +452,45 @@ def aggregate(root: Path, names=None) -> int:
     }
     try:
         for name in names or list(scenarios.SCENARIOS):
-            directory = next(
-                (
-                    d
-                    for d in sorted(root.glob(f"memory-{name}-*"))
-                    if d.is_dir() and not d.name.endswith("-firstpass")
-                ),
-                None,
-            )
-            if directory is None:
+            directories = [
+                d
+                for d in sorted(root.glob(f"memory-{name}-*"))
+                if d.is_dir() and not d.name.endswith("-firstpass")
+            ]
+            if not directories:
                 continue
             NAME = name
             SPEC = scenarios.SCENARIOS[name]
-            OUT = directory
-            runs = load_runs()
-            entry = {}
-            for arm in ARMS:
-                c = [0, 0]
-                f = [0, 0]
-                stale = invalid = 0
-                cost = 0.0
-                for run in runs.get(arm, []):
-                    for row in run["sessions"]:
-                        for index in (0, 1):
-                            c[index] += row["carryable"][index]
-                            f[index] += row["foundation"][index]
-                        stale += row["stale"]
-                        invalid += 1 if row.get("invalid") else 0
-                        cost += row["seconds"] + row["wait"] + row["summary_seconds"]
-                entry[arm] = {
-                    "carryable": c,
-                    "foundation": f,
-                    "stale": stale,
-                    "cost": cost,
-                    "invalid": invalid,
+            entry = {
+                arm: {
+                    "carryable": [0, 0],
+                    "foundation": [0, 0],
+                    "stale": 0,
+                    "cost": 0.0,
+                    "invalid": 0,
                 }
-                for index in (0, 1):
-                    pooled[arm]["carryable"][index] += c[index]
-                    pooled[arm]["foundation"][index] += f[index]
-                pooled[arm]["stale"] += stale
-                pooled[arm]["cost"] += cost
-                pooled[arm]["invalid"] += invalid
-            worlds.append((name, entry))
+                for arm in ARMS
+            }
+            for directory in directories:
+                OUT = directory
+                runs = load_runs()
+                for arm in ARMS:
+                    bucket = entry[arm]
+                    for run in runs.get(arm, []):
+                        for row in run["sessions"]:
+                            for index in (0, 1):
+                                bucket["carryable"][index] += row["carryable"][index]
+                                bucket["foundation"][index] += row["foundation"][index]
+                            bucket["stale"] += row["stale"]
+                            bucket["invalid"] += 1 if row.get("invalid") else 0
+                            bucket["cost"] += row["seconds"] + row["wait"] + row["summary_seconds"]
+            for arm in ARMS:
+                for metric in ("carryable", "foundation"):
+                    for index in (0, 1):
+                        pooled[arm][metric][index] += entry[arm][metric][index]
+                for field in ("stale", "invalid", "cost"):
+                    pooled[arm][field] += entry[arm][field]
+            worlds.append((name, entry, len(directories)))
     finally:
         NAME, SPEC, OUT = saved
 
@@ -496,10 +501,11 @@ def aggregate(root: Path, names=None) -> int:
         )
         return 1
     print(f"\nworlds: {len(worlds)}")
-    for name, entry in worlds:
+    for name, entry, leaves in worlds:
         a, s = entry["auto"], entry["summary"]
+        units = f"{leaves} leaf" if leaves == 1 else f"{leaves} leaves"
         print(
-            f"  {name:12s} memory {_pct(a['carryable']):>6s} carry / "
+            f"  {name:12s} {units:>9s} | memory {_pct(a['carryable']):>6s} carry / "
             f"{_pct(a['foundation']):>6s} fnd | summary {_pct(s['carryable']):>6s} / "
             f"{_pct(s['foundation']):>6s} | stale {a['stale']:2d}/{s['stale']:<2d} | "
             f"cost {a['cost'] / 60:4.1f}/{s['cost'] / 60:4.1f} min"
@@ -519,7 +525,9 @@ def aggregate(root: Path, names=None) -> int:
         means = {}
         for arm in ARMS:
             values = [
-                100 * e[arm][metric][0] / e[arm][metric][1] for _, e in worlds if e[arm][metric][1]
+                100 * e[arm][metric][0] / e[arm][metric][1]
+                for _name, e, _leaves in worlds
+                if e[arm][metric][1]
             ]
             means[arm] = (
                 statistics.mean(values),
