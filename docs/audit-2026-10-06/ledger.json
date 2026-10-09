@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 144,
-    "done": 143,
+    "total": 145,
+    "done": 144,
     "open": 0,
     "blocked": 1
   },
@@ -2386,6 +2386,23 @@
       "fix-evidence": "`report_all()` now does what `aggregate()` does: `global NAME, SPEC`, `saved = (NAME, SPEC)`, and inside `try:` the loop sets `NAME = name` / `SPEC = scenarios.SCENARIOS[name]` before scoring that scenario's paths, with `finally: NAME, SPEC = saved`. The docstring says why: a row scored against another scenario's key set prints that scenario's denominators and calls every key missed, which reads as a failed run rather than an unmeasured one.",
       "sibling-note": "No sibling on this shape, checked rather than assumed: `aggregate()` already swapped; `memory_scenarios.py:331` iterates `SCENARIOS.items()` into a local `world` and never calls a global-bound scorer; `t6_prose_cases.py:429` names `photograph` in its own record paths, so its hardcoded lookup is its declared scope, not a leaked global; and the other five `memory_*` drivers bind their own quiz constants (`QUIZ_KEYS`, `FIELDS`) with no scenario table to walk. Two callers of the fixed command exist -- `memory_master.py:544` (`raise SystemExit(report_all(OUT.parent))`) and `memval_master.sh:40` -- and both benefit; the shell's `TINYTITAN_MASTER_SCENARIO=photograph` is now only what satisfies the import-time lookup, which the default already does.",
       "commit": "b725158"
+    },
+    {
+      "id": "AUD-248",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "category": "run identity: a name built from local clock time is not one-to-one",
+      "status": "DONE",
+      "host": "this Mac (M3, 24 GB), zone Europe/Berlin (CEST+0200 now, CET+0100 in winter); no model run, no server, nothing fetched",
+      "file_line": "benchmark/tinytitan_benchmark.py:604 (`ts = time.strftime(\"%Y%m%dT%H%M%S\")`) feeding the directory at :605-606 and the `aggregate.json` write at :608; benchmark/tinytitan_longctx.py:443 feeding `longctx-{stamp}.json` at :444; tools/dsh_route.sh:295's settings backup `${SETTINGS}.bak-$(date +%Y%m%dT%H%M%S)`",
+      "title": "two drivers named their results in local time, so on the autumn fall-back two runs share a name and the later write erases the earlier record",
+      "discovered-by": "Task list item carried from the L5/L6 pass and re-measured before filing, as the rule requires: an earlier note said 'two run stamps read local time, five read UTC'. Measured now, the split is 2 local against 8 UTC, and the machine's zone is Europe/Berlin rather than the fixed-offset zone the earlier note assumed -- which is what turns a stylistic inconsistency into data loss.",
+      "evidence-before": "Probe `.build/aud248/probe.py`, run as `TZ=Europe/Berlin python3 .build/aud248/probe.py`: the instants 2026-10-25T00:15:00Z and 2026-10-25T01:15:00Z, one hour of real run time apart, both format to local `20261025T021500` while UTC gives `20261025T001500` and `20261025T011500`. The probe then replays the two write sites: `os.makedirs(outdir, exist_ok=True)` at benchmark:606 reused `bench-35b8-20261025T021500` for both runs and the second `aggregate.json` replaced the first, printing `directories after two runs: ['bench-35b8-20261025T021500']`, `aggregate.json now reads: {\"measured_by\": \"run B\"}`, `records lost: True`. longctx's shape is the same with a file instead of a directory: `open(summary_path, \"w\")` truncates the earlier `longctx-*.json`. The first fixture run of the new suite collected zero tests because the shared base class did not derive from `unittest.TestCase`; that was the test's own bug and is recorded here rather than smoothed over.",
+      "evidence-after": "`run_stamp(FIRST.timestamp()) != run_stamp(SECOND.timestamp())` and each equals the UTC rendering; 7 tests in `benchmark/test_run_stamp_is_utc.py`, which runs under `TZ=Europe/Berlin` with `time.tzset()` so the zone is the one that has the repeated hour. Mutation check in a copy (`/tmp/aud248-mut.log`): putting `run_stamp` back on `datetime.datetime.now()`/`fromtimestamp(epoch)` and `dsh_route.sh` back on local `date` fails 4 tests -- the collision test, the UTC-equality test, the present-instant test, and the tree-wide guard. Neighbours `test_tinytitan_profile test_tinytitan_benchmark test_tinytitan_longctx` 92 OK with the new suite; CI model-free python group 723 OK (was 716); `lint.sh shell` (27 scripts, system bash 3.2.57) `shellcheck` 0.11.0 `python` (ruff 0.16.7) `docs` `test-skip` `test-hollow` all ok. Kept honest: `test_the_stamp_follows_the_instant_not_the_machine_zone` passes under that mutant -- it pins determinism across instants, not the offset -- so it is recorded as a shape test, not as a guard.",
+      "fix-evidence": "One helper in the shared module both drivers already import: `tinytitan_profile.run_stamp(epoch=None)` renders `%Y%m%dT%H%M%S` from `datetime.now(timezone.utc)` or `datetime.fromtimestamp(epoch, timezone.utc)`; both call sites now say `run_stamp()`/`stamp = run_stamp()`, and the shell backup uses `date -u`. The suite's last test walks every name-shaped timestamp in `benchmark/` and `tools/`, in python and in shell, and requires `timezone.utc` or `date -u` on it -- a fix at three sites is only durable if a fourth cannot appear. `date +%s` is exempt as an epoch, and a bare `$(date)` as a log line, which is why the guard keys on `%Y`.",
+      "sibling-note": "Swept rather than assumed. `strftime` appears at ten name-building sites: eight already UTC (`ane_prefill_ab_matrix.py:322`, `ane_prefill_correctness.py:247`, `ane_prefill_layer_diff.py:209`, `ane_steady_state_decode.py:305`, `coder_cli_benchmark.py:1314`, `expert_cache_slots.py:241`, `ornith_concise_tool_ab.py:679`, `ornith_four_program_matrix.py:826`) and the two filed here. `datetime.now()` and `datetime.utcnow()` with no timezone occur nowhere in production python, so the naive-clock shape existed only in those two `time.strftime` calls. In shell, every other `date` use is `+%s` (readiness deadlines in `memval_run.sh`, warm timing in `server_launcher.sh`) or a bare `$(date)` in a log line, none of which is a name.",
+      "commit": "85cdee2"
     }
   ]
 }
