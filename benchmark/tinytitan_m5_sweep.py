@@ -19,11 +19,18 @@ Usage:
   python3 benchmark/tinytitan_m5_sweep.py --model ... --slots 32,64,128 --chunks 512,4096
 
 Requires a release build: swift build -c release
+
+The exit status is part of the result: 0 only when every planned run measured and
+the CSV was written, 1 when a run errored or the sweep was interrupted or the file
+could not be written, and 2 for a refusal that costs no run at all. Set
+TINYTITAN_M5_SWEEP_OUT to a directory, or to a path ending in .csv, to move the
+results; the default is benchmark/benchmark-results/.
 """
 
 import argparse
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -34,6 +41,14 @@ from tinytitan_profile import DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL_PATH
 
 DEFAULT_SLOTS = [16, 24, 32, 64, 96, 128]
 DEFAULT_CHUNKS = [256, 512, 1024, 2048, 4096]
+
+OUT_ENV = "TINYTITAN_M5_SWEEP_OUT"
+ARTIFACT = "m5_sweep_results.csv"
+
+# Each sweep varies one control and pins the other, so the two headers can name
+# the pinned value rather than leaving the reader to infer it from the rows.
+SLOT_SWEEP_CHUNK = 4096
+CHUNK_SWEEP_SLOTS = 64
 
 # Mirrors RuntimeConfiguration.supportedContextTokens. The CLI rejects any
 # other value, so the sweep picks from this list rather than passing an
@@ -67,11 +82,42 @@ def make_prompt(target_tokens: int) -> str:
     return (PARAGRAPH * blocks).strip()
 
 
+class ConfigError(ValueError):
+    """A refusal the operator gets before any of the minute-long runs starts."""
+
+
+def parse_sizes(value: str, flag: str) -> list:
+    """A comma-separated list of positive sizes, or a refusal naming the flag."""
+    try:
+        values = [int(v) for v in value.split(",")]
+    except ValueError as error:
+        raise ConfigError(
+            "%s wants comma-separated positive integers, got %r" % (flag, value)
+        ) from error
+    if min(values) < 1:
+        raise ConfigError("%s wants positive integers, got %r" % (flag, value))
+    return values
+
+
+def plan_runs(sweep: str, slots: list, chunks: list) -> list:
+    """Every run the sweep will execute, before any of them has run.
+
+    The count is what the status and the footer are measured against; deriving it
+    from the rows that survived would let a sweep that ran nothing report 0 of 0.
+    """
+    planned = []
+    if sweep in ("slots", "both"):
+        planned += [("slot", s, SLOT_SWEEP_CHUNK) for s in slots]
+    if sweep in ("chunk", "both"):
+        planned += [("chunk", CHUNK_SWEEP_SLOTS, c) for c in chunks]
+    return planned
+
+
 def validate_context(prompt_tokens: int, max_new: int, max_context: int) -> int:
     """Reject a selected context that cannot hold the estimated request."""
     need = prompt_tokens + max_new + CONTEXT_HEADROOM_TOKENS
     if max_context < need:
-        raise SystemExit(
+        raise ConfigError(
             "--prompt-tokens %d + --max-new %d needs ~%d tokens of context, "
             "above --max-context %d" % (prompt_tokens, max_new, need, max_context)
         )
@@ -134,7 +180,73 @@ def run_once(
     }
 
 
-def main():
+def repository_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def results_path(env=None) -> pathlib.Path:
+    """Where the CSV goes: TINYTITAN_M5_SWEEP_OUT, else the repository's results dir.
+
+    A relative value resolves against the repository, not the working directory, so
+    a sweep launched from elsewhere still lands where the operator said and not in
+    whatever directory happened to be current.
+    """
+    mapping = os.environ if env is None else env
+    value = str(mapping.get(OUT_ENV, "")).strip()
+    root = repository_root()
+    if not value:
+        return pathlib.Path(root, "benchmark", "benchmark-results", ARTIFACT)
+    path = pathlib.Path(value).expanduser()
+    if not path.is_absolute():
+        path = pathlib.Path(root, path)
+    if path.suffix.lower() != ".csv":
+        path = path / ARTIFACT
+    return path
+
+
+def results_csv(results: list) -> str:
+    header = "slots,chunk,prefill_s,prefill_tokens,tok_per_s,new_tokens,decode_s,wall_s,error\n"
+    rows = []
+    for r in results:
+        if "error" in r:
+            rows.append(
+                ",".join(
+                    [
+                        str(r.get("slots", "")),
+                        str(r.get("chunk", "")),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        r["error"],
+                    ]
+                )
+            )
+        else:
+            rows.append(
+                "%d,%d,%.2f,%d,%.2f,%d,%.2f,%.1f,"
+                % (
+                    r["slots"],
+                    r["chunk"],
+                    r["prefill_s"],
+                    r["prefill_tokens"],
+                    r["tok_per_s"],
+                    r["new_tokens"],
+                    r["decode_s"],
+                    r["wall_s"],
+                )
+            )
+    return header + "".join(row + "\n" for row in rows)
+
+
+def write_results(results: list, path: pathlib.Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(results_csv(results), encoding="utf-8")
+
+
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=str(DEFAULT_MODEL_PATH))
     ap.add_argument(
@@ -150,15 +262,21 @@ def main():
     )
     args = ap.parse_args()
 
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    cli = args.cli or os.path.join(base, ".build", "release", "TinyTitanCLI")
+    cli = args.cli or os.path.join(repository_root(), ".build", "release", "TinyTitanCLI")
     if not os.path.isfile(cli):
-        sys.exit("TinyTitanCLI not found at %s — run `swift build -c release` first" % cli)
+        print("REFUSED: TinyTitanCLI not found at %s — run `swift build -c release` first" % cli)
+        return 2
 
-    slots = [int(v) for v in args.slots.split(",")]
-    chunks = [int(v) for v in args.chunks.split(",")]
-    max_context = validate_context(args.prompt_tokens, args.max_new, args.max_context)
-    prompt_directory = os.path.join(base, ".build", "benchmark-prompts")
+    try:
+        slots = parse_sizes(args.slots, "--slots")
+        chunks = parse_sizes(args.chunks, "--chunks")
+        max_context = validate_context(args.prompt_tokens, args.max_new, args.max_context)
+    except ConfigError as error:
+        print("REFUSED: %s" % error)
+        return 2
+
+    planned = plan_runs(args.sweep, slots, chunks)
+    prompt_directory = os.path.join(repository_root(), ".build", "benchmark-prompts")
     os.makedirs(prompt_directory, exist_ok=True)
     prompt_file = tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", suffix=".json", delete=False, dir=prompt_directory
@@ -172,53 +290,44 @@ def main():
         "  prompt: ~%d tokens | max-new: %d | context: %d | first run is cold"
         % (args.prompt_tokens, args.max_new, max_context)
     )
+    print("  planned runs: %d" % len(planned))
     print()
 
     results = []
+    interrupted = False
+    shown = None
     try:
-        if args.sweep in ("slots", "both"):
-            print("== slot sweep (chunk 4096) ==")
-            for s in slots:
-                r = run_once(cli, args.model, s, 4096, prompt_file, args.max_new, max_context)
-                results.append(r)
-                if "error" in r:
-                    print("  slots=%3d  ERROR: %s" % (s, r["error"]))
+        for kind, s, c in planned:
+            if kind != shown:
+                if shown is not None:
+                    print()
+                if kind == "slot":
+                    print("== slot sweep (chunk %d) ==" % SLOT_SWEEP_CHUNK)
                 else:
-                    print(
-                        "  slots=%3d  prefill %6.1fs (%4d tok)  decode %6.2f tok/s (%3d tok)  wall %5.1fs"
-                        % (
-                            s,
-                            r["prefill_s"],
-                            r["prefill_tokens"],
-                            r["tok_per_s"],
-                            r["new_tokens"],
-                            r["wall_s"],
-                        )
+                    print("== chunk sweep (slots %d) ==" % CHUNK_SWEEP_SLOTS)
+                shown = kind
+            r = run_once(cli, args.model, s, c, prompt_file, args.max_new, max_context)
+            results.append(r)
+            label = "slots=%3d" % s if kind == "slot" else "chunk=%4d" % c
+            if "error" in r:
+                print("  %s  ERROR: %s" % (label, r["error"]))
+            else:
+                print(
+                    "  %s  prefill %6.1fs (%4d tok)  decode %6.2f tok/s (%3d tok)  wall %5.1fs"
+                    % (
+                        label,
+                        r["prefill_s"],
+                        r["prefill_tokens"],
+                        r["tok_per_s"],
+                        r["new_tokens"],
+                        r["wall_s"],
                     )
-            print()
-        if args.sweep in ("chunk", "both"):
-            print("== chunk sweep (slots 64) ==")
-            for c in chunks:
-                r = run_once(cli, args.model, 64, c, prompt_file, args.max_new, max_context)
-                results.append(r)
-                if "error" in r:
-                    print("  chunk=%4d  ERROR: %s" % (c, r["error"]))
-                else:
-                    print(
-                        "  chunk=%4d  prefill %6.1fs (%4d tok)  decode %6.2f tok/s (%3d tok)  wall %5.1fs"
-                        % (
-                            c,
-                            r["prefill_s"],
-                            r["prefill_tokens"],
-                            r["tok_per_s"],
-                            r["new_tokens"],
-                            r["wall_s"],
-                        )
-                    )
-            print()
+                )
+        print()
     except KeyboardInterrupt:
         # A full sweep is 11 cold runs. Keep whatever completed rather than
         # discarding an hour of measurements on Ctrl-C.
+        interrupted = True
         print("\ninterrupted — writing partial results")
     finally:
         try:
@@ -229,9 +338,9 @@ def main():
     # make_prompt sizes the prompt by a words-to-tokens estimate; the footer
     # reports what the tokenizer actually produced. Surface the gap so a sweep
     # is never silently run at a different length than requested.
-    measured = [r["prefill_tokens"] for r in results if "prefill_tokens" in r]
+    measured = [r for r in results if "prefill_tokens" in r]
     if measured:
-        actual = measured[0]
+        actual = measured[0]["prefill_tokens"]
         drift = abs(actual - args.prompt_tokens) / max(args.prompt_tokens, 1)
         note = "  (estimate off by %.0f%%)" % (drift * 100) if drift > 0.05 else ""
         print(
@@ -239,42 +348,33 @@ def main():
             % (args.prompt_tokens, actual, note)
         )
 
-    csv = "slots,chunk,prefill_s,prefill_tokens,tok_per_s,new_tokens,decode_s,wall_s,error\n"
-    for r in results:
-        if "error" in r:
-            csv += "%s\n" % ",".join(
-                [
-                    str(r.get("slots", "")),
-                    str(r.get("chunk", "")),
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    r["error"],
-                ]
-            )
-        else:
-            csv += "%d,%d,%.2f,%d,%.2f,%d,%.2f,%.1f,\n" % (
-                r["slots"],
-                r["chunk"],
-                r["prefill_s"],
-                r["prefill_tokens"],
-                r["tok_per_s"],
-                r["new_tokens"],
-                r["decode_s"],
-                r["wall_s"],
-            )
-    # Alongside the other harnesses, in the git-ignored results directory —
-    # the repo root is tracked, so writing there leaves the tree dirty.
-    out_dir = os.path.join(base, "benchmark", "benchmark-results")
-    os.makedirs(out_dir, exist_ok=True)
-    out = os.path.join(out_dir, "m5_sweep_results.csv")
-    with open(out, "w", encoding="utf-8") as f:
-        f.write(csv)
-    print("results written to %s" % out)
+    path = results_path()
+    write_error = None
+    try:
+        write_results(results, path)
+    except OSError as error:
+        write_error = str(error)
+
+    status = 0
+    missing = len(planned) - len(measured)
+    if interrupted:
+        print("interrupted: %d run(s) never attempted" % (len(planned) - len(results)))
+        status = 1
+    if missing or write_error is not None:
+        status = 1
+    verdict = "SWEEP COMPLETE" if status == 0 else "NOT MEASURED"
+    if write_error is None:
+        print(
+            "%s: %d of %d run(s) measured, written to %s"
+            % (verdict, len(measured), len(planned), path)
+        )
+    else:
+        print(
+            "%s: %d of %d run(s) measured, results NOT WRITTEN: %s"
+            % (verdict, len(measured), len(planned), write_error)
+        )
+    return status
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
