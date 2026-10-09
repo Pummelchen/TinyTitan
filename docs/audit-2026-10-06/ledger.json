@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 148,
-    "done": 147,
+    "total": 149,
+    "done": 148,
     "open": 0,
     "blocked": 1
   },
@@ -2454,6 +2454,24 @@
       "fix-evidence": "`reset_state()`, `separation_state()` and `print_verdict()` are now the one predicate and the one summary, called by both entry points; `main()`'s `BASE=` branch also resets, which is what lets two modes run in one process without inheriting each other's totals. The scope the original comment defended is kept: `own_missed`, `task_wrong` and `attribution_unproven` remain reported beside the verdict and out of it. Mutation `return 0 if TOTALS['foreign'] == 0 and TOTALS['http_error'] == 0 else 1` restored is killed by exactly the two discriminating tests.",
       "sibling-note": "Swept, not assumed. `grep -l 'environ.get(\"BASE\")'` over `benchmark/*.py` and `tools/*.py` names this one file, so there is no second external-server harness with its own narrower predicate. The launched path's `if not present: raise SystemExit(\"no installed model to test\")` was checked rather than trusted, because `all(results.values())` over an empty dict is True and is the AUD-212 shape -- it is unreachable here. The other three exemptions were re-measured today and still hold: `test_ane_gather_probe` 5 skipped, `test_export_ane_prefill` 22, `test_verify_ane_sidecar` 6, and `benchmark/requirements.txt` carries only numpy, safetensors and ml_dtypes, so CI really has no coremltools. The suite list is 60/64 registered now, the new one tracked before its workflow line.",
       "commit": "730d1d1"
+    },
+    {
+      "id": "AUD-253",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "category": "batch verdict: the loop's status was its last row's width test, not the installs it ran",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "tools/install_models.sh:809-812",
+      "title": "install_models.sh --all-8bit exits 0 with a model it refused, and --all-4bit exits 1 with nothing missing",
+      "discovered-by": "Phase D sweep of the verdict-propagation family along the 26 tracked shell scripts: the AUD-212/AUD-244 shape (a completion verdict structurally unrelated to the work) looked for on the shell side.",
+      "evidence-before": "Both batch branches looped CATALOGUE with a body whose last statement was `[[ \"$w\" == 4|8 ]] && install_one \"$n\"`, so the for-loop's status -- and, the dispatcher case being the file's final statement, the script's -- was the *last catalogue row's width test*. The last row is `qwen35-9b-8bit`, so the two modes failed in opposite directions. Measured on this machine's /bin/bash 3.2.57 by replaying the dispatcher's own branch text (extracted verbatim from the file) with `install_one` replaced by a stub, so no download, build or model process could run (/tmp/aud253-red.log, exit 1, 2 failures): --all-8bit with qwen38flash-8bit refusing installed 7 of 8 and EXITED 0; --all-8bit with nothing refusing installed 8 of 8 and exited 0; --all-4bit with ornith15 refusing installed 10 of 11 and exited 1; --all-4bit with nothing refusing installed 11 of 11 and STILL exited 1. The silent half is --all-8bit: a gated checkpoint that refuses without an HF_TOKEN is a per-row failure, so one missing model left the verdict reading as success. Both spellings are documented for users in the wiki's Installation-and-Configuration.md:65.",
+      "evidence-after": "New `install_width` collects every row's status, prints `installed N of M <width>-bit model(s)` and returns 1 when a row was missed. All five tests pass (/tmp/aud253-green.log); the Installer gates CI step as recorded runs 192 tests OK (187 before this suite); the CI model-free group runs 732 OK, unchanged; `bash tools/lint.sh shell` ok (27 scripts, system bash 3.2.57), `shellcheck` ok (0.11.0, no warnings), `python` ok (ruff 0.16.7), `docs` ok (61/65 python suites registered). `bash tools/install_models.sh --help` still exits 0 and still lists both modes. No model run, nothing downloaded.",
+      "fix-evidence": "benchmark/test_install_models_batch_status.py drives the extracted branch text inside a shell that has sourced the real script and then replaced `install_one` with a stub -- the same idiom benchmark/test_install_models_menu.py already uses for the menu. Two of its five tests fail before the repair and name the two directions of the wrong verdict; the other three pin the shape the repair had to keep (the width filter selects exactly the 11 4-bit and 8 8-bit rows, counted from the CATALOGUE the test parses rather than from a golden; a clean sweep stays clean). Mutation: replacing the missed-branch `return 1` with `return 0` fails exactly the two discriminating tests (/tmp/aud253-mutant.log, exit 1).",
+      "sibling-note": "The same shape swept across all 26 tracked shell scripts: 40 `[[ ... ]] && cmd` sites, and every one of them assigns, echoes or `continue`s rather than performing side-effecting work whose verdict leaves the scope -- the batch branches were the only place a guarded call's status became a command's return value. The five other scripts that act on many things at once each collect and test their own failures and were read to confirm it: benchmark/memval_master.sh and benchmark/memval_matrix.sh (`failed`/`failed_count`, and their FAILED lines print `N of M`), tools/ane_sidecars.sh (`failed` array, `exit 1` before the final `exit 0`), tools/assert-arch.sh (dies on the first wrong artifact and refuses an empty directory rather than passing by vacuity), tools/verify_cpu_models.sh (`status=0`, `grep -q ... || status=1` per model, `exit \"$status\"`). tools/tsan-storm.sh's same-family defect was AUD-218. Not filed, and recorded so a re-sweep does not redo the reading: tools/repack_dense.sh:91-96 `continue`s past a model whose snapshot is gone and its closing line prints `all checks passed` over the pairs it did verify, so a partial run says `all` about an incomplete set. Its skips are each named on stdout, an all-skipped run does exit 1 via the `nothing to verify` guard, the script is a one-time migration runbook whose header reports the migration as done, and no branch of it can be reached without a model install, so there is no hermetic instrument to pin it with. The operator's call if they want the closing line to name skips.",
+      "commit": "0d7e872",
+      "blocked-reason": null
     }
   ]
 }
