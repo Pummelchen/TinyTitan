@@ -231,8 +231,10 @@ mapping recorded as a deviation if it cannot be exact.
 
 There is also **no `generation_config.json`**, so the sampling defaults come
 from the card: temperature 1.0, top_p 0.95 or 1.0, max_tokens ≥ 256K,
-context 1M. TinyTitan supports presence penalty `0.0` only; nothing here asks
-for otherwise, which is one of the few things that goes smoothly.
+context 1M. Nothing in the card asks for a presence penalty, so this port needs
+none; the sentence here claimed the runtime supports `0.0` only, a limitation the
+v5.10 release notes (2026-09-24) had already removed, and
+`docs/adding-a-model.md` is what fed it.
 
 ### 3.2 Compressed Sparse Attention 2 (CSA2)
 
@@ -889,7 +891,9 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
   template is a TinyTitan artifact and must be versioned and tested accordingly.
 - **No `generation_config.json`**; sampling comes from the card (temperature
   1.0, top_p 0.95) and is a documented choice, not the checkpoint's.
-- **Presence penalty 0.0 only**, as everywhere in this runtime.
+- **Presence penalty 0.0**, because the card asks for none — not because the
+  runtime cannot do otherwise; since v5.10 it applies a non-zero penalty across
+  OpenAI's `-2…2`.
 - **Thinking levels map onto `reasoning_effort` 1–100** with aliases
   low→50 / high→75 / max→100; any lossy mapping is stated.
 - **`bias_vl` is unused in a text-only build**; which bias the reference applies

@@ -45,9 +45,15 @@ Record, because each one has burned a release or a conversion before:
   stop tokens by *string* (`<|endoftext|>`, `<|im_end|>`) rather than by number,
   because the numbers move between releases.
 - **Recommended sampling**, including `presence_penalty` and any extra template
-  kwargs (`preserve_thinking`). Note which of them this runtime cannot do — it
-  supports presence penalty `0.0` only — and say so in the docs rather than
-  quietly dropping it.
+  kwargs (`preserve_thinking`). Note which of them this runtime cannot do, and
+  say so in the docs rather than quietly dropping it. Do not state a limitation
+  the code no longer has: this file said "presence penalty `0.0` only" until
+  v5.10 implemented the non-zero values, and a port written after that copied the
+  sentence into its own deviations. Presence penalty is supported across OpenAI's
+  `-2…2` on the wire and the same range on `--presence-penalty`, so what a card
+  outside that range asks for is the deviation worth naming; what this runtime
+  still cannot do is `frequency_penalty` (refused unless zero) and `min_p`
+  (no filter implemented).
 
 ## 1. Decide: wiring job or runtime job
 

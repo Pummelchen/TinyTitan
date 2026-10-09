@@ -467,6 +467,53 @@ struct OpenAIValidationTests {
         try accepted.generationConfig.validate()
         #expect(accepted.generationConfig.repetitionPenalty == 1)
     }
+
+    /// OpenAI documents `presence_penalty` as -2.0 to 2.0 and this repository's
+    /// own `--presence-penalty` refuses anything outside that, but the wire
+    /// bounded the other four knobs and left this one alone, so HTTP accepted a
+    /// value the flag rejects. It is not ignored either: the penalty is
+    /// subtracted once per distinct id already in the history, so 100 takes
+    /// every token the model has used out of contention outright and it answers
+    /// from the rest of the vocabulary -- a different completion, no error.
+    @Test func aPresencePenaltyOutsideTheOpenAIRangeIsRefusedAsBadRequest() throws {
+        func request(_ penalty: String) throws -> OpenAIChatRequest {
+            try JSONDecoder().decode(
+                OpenAIChatRequest.self,
+                from: Data(
+                    #"{"model":"m","messages":[{"role":"user","content":"x"}],"presence_penalty":\#(penalty)}"#
+                        .utf8))
+        }
+
+        for penalty in ["2.5", "-2.5", "100"] {
+            var failure: ServerRequestError?
+            do {
+                _ = try OpenAIRequestValidator.validate(request(penalty), modelID: "m")
+            } catch let error as ServerRequestError {
+                failure = error
+            }
+            let envelope = try #require(failure?.envelope).error
+            #expect(envelope.type == "invalid_request_error")
+            #expect(envelope.param == "presence_penalty")
+            #expect(envelope.message.contains("between -2 and 2"))
+        }
+
+        // The boundary must leave the published rows standing: Qwen3.8's
+        // instruct row is 1.5, and both ends of OpenAI's range are real requests.
+        for penalty in ["-2", "1.5", "2"] {
+            let accepted = try OpenAIRequestValidator.validate(request(penalty), modelID: "m")
+            try accepted.generationConfig.validate()
+            #expect(accepted.generationConfig.presencePenalty == Float(penalty))
+        }
+
+        // The cap is the wire's, not the library's: `Session` validates with
+        // `.local`, and an embedder names its own penalty through the public
+        // `GenerationOptions`, where -2...2 has never been a promise. This
+        // assertion is the seam -- if the cap moves onto the local path, this
+        // is where the widened contract has to be decided, not discovered.
+        let local = try OpenAIRequestValidator.validate(
+            request("100"), modelID: "m", rules: .local)
+        #expect(local.generationConfig.presencePenalty == 100)
+    }
 }
 
 @Suite("Streaming stop matcher")

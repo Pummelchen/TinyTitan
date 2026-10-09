@@ -204,6 +204,22 @@ package enum OpenAIRequestValidator {
                 "repetition_penalty must be at least 1; below one it rewards repetition",
                 "repetition_penalty", "invalid_value")
         }
+        let presencePenalty = request.presencePenalty ?? effectiveSampling.presencePenalty
+        // OpenAI's documented range, and the range this project's own
+        // `--presence-penalty` applies. Outside it the value is not a stronger
+        // penalty but a different request: the sampler subtracts it once per
+        // distinct id already in the history, so 100 takes every token the model
+        // has used out of contention and it answers from the rest of the
+        // vocabulary. The cap is the wire's, like the stop-string ones: it
+        // protects the engine from a third party's request, and an embedder
+        // naming its own value was never held to it.
+        if rules == .wire {
+            guard (-2...2).contains(presencePenalty) else {
+                throw invalid(
+                    "presence_penalty must be between -2 and 2", "presence_penalty",
+                    "invalid_value")
+            }
+        }
         // No artificial output cap: when the client omits max_tokens /
         // max_completion_tokens, generation is bounded only by the session's
         // configured context window (further clamped to the available context
@@ -280,8 +296,7 @@ package enum OpenAIRequestValidator {
             temperature: temperature,
             topK: topK,
             topP: topP,
-            presencePenalty: request.presencePenalty
-                ?? effectiveSampling.presencePenalty,
+            presencePenalty: presencePenalty,
             minP: effectiveSampling.minP,
             repetitionPenalty: repetitionPenalty,
             seed: request.seed,
