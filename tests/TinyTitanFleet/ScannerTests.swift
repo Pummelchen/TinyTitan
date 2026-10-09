@@ -273,6 +273,28 @@ private func makeScanner(_ transport: HostTransport, interval: Int = 30) -> Flee
         #expect(await transport.count() >= 2, "the requested scan ran in the background")
         #expect(await scanner.current().scannedAt != nil)
     }
+
+    /// `stop()` is the owner's last word. The dashboard runs a mutating action
+    /// on its own untracked task so a slow peer cannot freeze a frame, and that
+    /// task asks for a refresh when it finishes -- so pressing `q` while an
+    /// action is in flight lands a `requestScan()` after the scanner has been
+    /// stopped. Before this, `stop()` cleared the in-flight slot, the guard
+    /// passed, and the manager dialled the fleet again after the terminal had
+    /// already been restored.
+    @Test func aScanRequestedAfterStopDoesNotDialTheFleetAgain() async throws {
+        let transport = HostTransport(inventories: hosts())
+        let scanner = makeScanner(transport)
+        await scanner.requestScan()
+        try await Task.sleep(for: .milliseconds(150))
+        let before = await transport.count()
+        await scanner.stop()
+
+        await scanner.requestScan()
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(
+            await transport.count() == before,
+            "a stopped scanner must not start another scan")
+    }
 }
 
 @Suite struct FleetBrandTests {

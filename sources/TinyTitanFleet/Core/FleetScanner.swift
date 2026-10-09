@@ -52,6 +52,10 @@ public actor FleetScanner {
     private var state: FleetSnapshot
     private var task: Task<Void, Never>?
     private var inFlight: Task<Void, Never>?
+    /// Set by `stop()` and never cleared. It refuses `requestScan()`, which is
+    /// the one entry point something other than the owner can reach after the
+    /// teardown; `start()` is the owner speaking again and is not refused.
+    private var stopped = false
 
     public init(
         runner: FleetRunner,
@@ -82,15 +86,33 @@ public actor FleetScanner {
         }
     }
 
-    /// Stop polling and wait for any scan in flight to finish.
+    /// Stop polling and cancel any scan in flight.
+    ///
+    /// Cancels rather than waits, and a synchronous actor method could not wait
+    /// if it meant to: the one caller is the dashboard's teardown, and a scan
+    /// that asked a dead peer sits out the full timeout, so waiting here would
+    /// hold the terminal before `restore()`. What that costs is that an
+    /// in-flight scan can still publish a snapshot afterwards, which nothing
+    /// reads at that point.
+    ///
+    /// Stopping is the last word for work the owner did not ask for. `start()`
+    /// after it polls again, because that is the owner asking; `requestScan()`
+    /// does not, because the dashboard runs a mutating action on its own task
+    /// and refreshes when it finishes, so one can land after the teardown and
+    /// dial the fleet behind a restored terminal.
     public func stop() {
+        stopped = true
         task?.cancel()
         task = nil
         inFlight?.cancel()
         inFlight = nil
     }
 
-    /// Scan now and wait — used by a one-shot caller.
+    /// Scan now and wait, on the caller's task.
+    ///
+    /// No production caller: the dashboard either polls or kicks, and
+    /// `top --once` renders a file rather than dialling. This is the
+    /// synchronous seam the scanner's own tests drive.
     public func scanNow() async {
         await scan()
     }
@@ -98,7 +120,7 @@ public actor FleetScanner {
     /// Kick a scan without waiting: after a mutation, the next frame picks up the
     /// result instead of the UI sitting on a spinner.
     public func requestScan() {
-        guard inFlight == nil else { return }
+        guard !stopped, inFlight == nil else { return }
         inFlight = Task { [weak self] in
             await self?.scan()
             await self?.clearInFlight()
