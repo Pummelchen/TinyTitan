@@ -171,6 +171,12 @@ jobs:
         # so `--all-8bit` exited 0 with a model it had refused and `--all-4bit`
         # exited 1 with nothing missing (AUD-253). It drives the dispatcher's own
         # branch text with `install_one` stubbed, so it installs nothing.
+        # `test_repack_dense_gate_verdict` pins the other installer gate's verdict:
+        # `tools/repack_dense.sh` step 5 is the only step that proves the `.ssdai`
+        # reader interprets the bytes, and `swift test` exits 0 both when a `--filter`
+        # matches no test and when every test of a model-gated suite skipped (AUD-261).
+        # It feeds the script's own verdict function canned logs, so it starts no model
+        # and runs no test target.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -199,7 +205,7 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
-            test_install_models_batch_status \
+            test_install_models_batch_status test_repack_dense_gate_verdict \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

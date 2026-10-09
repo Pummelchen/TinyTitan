@@ -47,6 +47,24 @@ usage() {
   exit 2
 }
 
+# Decide what counts as a passing equivalence run. swift test's own exit status
+# does not: see the two measured gaps where it exits 0 having proved nothing.
+gate_verdict() {
+  local log
+  log=$(cat)
+  # Keep the transcript. A refusal that swallowed the log is worse to read than
+  # the warning it replaced.
+  printf '%s\n' "$log"
+  if ! printf '%s\n' "$log" | grep -q "Test run with"; then
+    echo "  the equivalence gate ran no tests: no suite matched the filter" >&2
+    exit 1
+  fi
+  if printf '%s\n' "$log" | grep -qE "Test .* skipped\."; then
+    echo "  the equivalence gate skipped tests, and the summary counts a skip as a pass" >&2
+    exit 1
+  fi
+}
+
 [[ -n "$which" ]] || usage
 
 case "$widths" in
@@ -123,8 +141,15 @@ fi
 joined=$(IFS=,; echo "${pairs[*]+"${pairs[*]}"}")
 echo
 echo "logit equivalence gate over ${#pairs[@]} model(s)"
+# The gate's exit status alone cannot carry this verdict, and both gaps were
+# measured on Swift 6.4: a --filter matching no test exits 0 having written only
+# `warning: No matching test cases were run`, and the summary line counts
+# skipped tests as passed -- `Test run with 4 tests in 1 suite passed` is what a
+# fully skipped model-gated suite prints. TINYTITAN_DENSE_EQUIV is exactly such a
+# condition, so a gate that never loaded a model would otherwise report as one
+# that did. Require the gate's own test to have run and to have skipped nothing.
 TINYTITAN_DENSE_EQUIV=1 TINYTITAN_DENSE_EQUIV_PAIRS="$joined" \
-    swift test --no-parallel --filter DenseSSDAIEquivalenceTests
+  swift test --no-parallel --filter DenseSSDAIEquivalenceTests 2>&1 | gate_verdict
 
 echo
 echo "all checks passed. The snapshots are kept in .build/ so the equivalence"
