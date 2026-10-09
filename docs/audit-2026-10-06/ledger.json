@@ -4,9 +4,9 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 139,
-    "done": 138,
-    "open": 0,
+    "total": 141,
+    "done": 139,
+    "open": 1,
     "blocked": 1
   },
   "tasks": [
@@ -2307,6 +2307,36 @@
       "evidence-after": "benchmark/test_tinytitan_profile.py ResolveApiModelTests (4 tests): the advertised non-`-fast` id still returned; an empty model list, a non-JSON body and a refused connection each raise with the port and the cause in the message. RED first (3 failures), GREEN after (11 tests OK in the suite). Mutant: restoring the silent default fails those same 3, restored-and-verified OK. CI model-free gate list re-run: 703 tests, the single error being a prose name my own extractor mistook for a module (twice now -- the harness, not the tree). No driver broke on the raise, because every caller already treats a dying arm as a failed arm. ruff 0.16.7 clean on both files.",
       "fix-summary": "The asking either answers or refuses; it no longer answers with a guess. `DEFAULT_API_MODEL` remains for the two callers that want a default rather than a measurement (claude_openai_adapter.py:330's --model flag, catalog_id_for at :281), and it appears in the new message as the string that must not be accepted. The AST sweep's other survivor, tools/internal-speeds.py:435 `except Exception: pass` around the `hw.memsize` sysctl, is not filed: it degrades a record's environment block, not a metric, and AUD-210 already gates the comparison that would read it.",
       "commit": "ee86d32"
+    },
+    {
+      "project": "tooling",
+      "tier": "B",
+      "severity": "S2",
+      "host": "this Mac (M3, 24 GB), no model run, no server; every test is a fresh import under a patched environment",
+      "id": "AUD-243",
+      "category": "mislabeled-measurement",
+      "status": "DONE",
+      "file_line": "benchmark/memval_env.py (new) with the nine former binding sites: memory_book.py:45, memory_correct.py:55-57, memory_master.py:49, memory_mini.py:46-48, memory_projects.py:51-53, memory_value.py:53, memory_volume.py:76, memory_small_model.py:37-43 (`os.environ.setdefault`) and its re-read at :78",
+      "title": "a results tree set to empty bound a day of memory records to whatever directory the command ran in",
+      "discovered-by": "Phase D convergence, following AUD-241's asymmetry: the seven drivers that read `TINYTITAN_MEMVAL_RESULTS` and the one that only `setdefault`s it cannot both be right, so the value itself was probed",
+      "evidence-before": "`Path(os.environ.get(ENV, default))` accepts the empty string, so the tree becomes `Path('')`. Measured from /tmp: `TINYTITAN_MEMVAL_RESULTS= python3 benchmark/memory_book.py report` printed `NOT MEASURED: no results in .` and exited 1 -- a refusal that names a directory identifying nothing, when the reader's own tree is a path they chose. `memory_small_model.py` was worse: `setdefault` does not replace a present-but-empty value, and `Path('').mkdir(parents=True, exist_ok=True)` succeeds against `.`, so the run wrote its records into its cwd, where no report looks. The RED run in benchmark/test_memory_reports.py `TestABlankResultsTreeRefuses` bound all eight blank trees and the seven whitespace ones without a single refusal; the three control tests passed, as they should.",
+      "evidence-after": "benchmark/test_memory_reports.py `TestABlankResultsTreeRefuses` (5 tests): the blank value is refused with the variable named by all 8 drivers, a whitespace-only value by all 7 with a tree, unset still binds the driver's own default, a named value binds exactly as before, and `memory_small_model` publishes a default tree when the variable is unset. GREEN 5/5, then the CI model-free python group: 707 tests OK. Mutants in a copy, one at a time: the guard removed reproduces the same 15 failures; `return default` always fails the named-tree control; a publish that does not write the environment fails the small-model control. Live after-state from /tmp: `ABORT: TINYTITAN_MEMVAL_RESULTS is set to '', which names no directory ... Unset TINYTITAN_MEMVAL_RESULTS to use /Users/.../memory-book, or name a directory.` exit 1. ruff 0.16.7 clean, format clean. `bash tools/lint.sh python` then failed on a file this session did not touch: `test_memory_mini_report.py`, which AUD-241 committed without running the format half of the gate -- its own verification command was a glob that does not match `test_*`. Reformatted with ruff 0.16.7 (whitespace and two wrapped calls, no assertion changed), its 9 tests re-run OK, gate ok. One non-assertion test edit is disclosed in the fix commit: `test_memval_master_exit.py`'s `REPORT_SOURCES` gained `memval_env.py`, because the copied driver died with `ModuleNotFoundError` and printed only its section header.",
+      "commit": "6de540e"
+    },
+    {
+      "project": "tooling",
+      "tier": "B",
+      "severity": "S2",
+      "host": "this Mac (M3, 24 GB), no model run, no server; every test is a fresh import under a patched environment",
+      "id": "AUD-244",
+      "category": "status discarded at the last hop",
+      "status": "OPEN",
+      "file_line": "benchmark/memval_master.sh:247-252 (`report-all` runs for its record and its status is never read; the exit comes only from `$failed`) with the design comment at :244-246; the gate that would have caught it is benchmark/test_memval_master_exit.py:97 `test_a_clean_run_exits_zero`",
+      "title": "the master sweep prints MASTER DONE over a report that says NOT MEASURED, because AUD-240's status has no listener",
+      "discovered-by": "Step 5 of the AUD-243 close: the sibling-defect hunt for `memval_env.py` being missing from a temporary checkout. The crash itself was AUD-243's own fixture breakage, but what it exposed is independent of it and still true on main.",
+      "evidence-before": "Measured through the registered fixture with every scenario stubbed to exit 0, so the results tree is empty -- the same shape AUD-240 gated inside `report-all`: stdout after the report header reads `NOT MEASURED: no run of any scenario under .../.build/benchmark-logs` and then `##### MASTER DONE Fri Oct  9 06:26:58 CEST 2026: all 10 scenarios exited 0`, with rc 0 and empty stderr. A day-long sweep that produced no record at all therefore reports the run as complete, and the status AUD-240 added to `memory_master.py report-all` is unreachable from the script that calls it.",
+      "evidence-after": "Not yet fixed -- it needs a decision, not a patch. Propagating the report's status makes `test_a_clean_run_exits_zero` fail, because its stub `memval_run.sh` writes no result JSON, so a clean fixture run genuinely is not measured; the honest fix is to teach the stub to write one record per scenario and then propagate, which edits the very file carrying two open operator decisions (the `report_all` header-above-refusal placement, and its now-false docstring line about `report-all` returning None). Held open until those are settled rather than rewriting the fixture a third time unprompted.",
+      "commit": ""
     }
   ]
 }

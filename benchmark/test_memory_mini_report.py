@@ -211,12 +211,13 @@ class ResultsTreeTests(unittest.TestCase):
         module = self.import_with_env(results)
         # The shape a sibling report writes: a list of per-session rows, not a
         # mini record. `record["runs"]` over it is a TypeError.
-        (results / "pong-4bit-r1.json").write_text(json.dumps([{"self_truth": 1}]), encoding="utf-8")
+        (results / "pong-4bit-r1.json").write_text(
+            json.dumps([{"self_truth": 1}]), encoding="utf-8"
+        )
         code, printed = self.draw(module)
         self.assertNotIsInstance(code, str, printed)
         self.assertEqual(code, 1, printed)
         self.assertIn("pong-4bit-r1.json", printed)
-
 
     def test_a_shared_tree_names_the_foreign_file_and_still_reports(self):
         """A named tree may hold both tools' records. The foreign file is named and
@@ -225,7 +226,9 @@ class ResultsTreeTests(unittest.TestCase):
         results = self.temp()
         record = {"model": "350m-extract", "job": "full", "runs": {"r1": {"1": answered(1)}}}
         (results / "350m-extract-full.json").write_text(json.dumps(record), encoding="utf-8")
-        (results / "pong-4bit-r1.json").write_text(json.dumps([{"self_truth": 1}]), encoding="utf-8")
+        (results / "pong-4bit-r1.json").write_text(
+            json.dumps([{"self_truth": 1}]), encoding="utf-8"
+        )
         code, printed = self.draw(self.import_with_env(results))
         self.assertEqual(code, 0, printed)
         self.assertIn("pong-4bit-r1.json", printed)
