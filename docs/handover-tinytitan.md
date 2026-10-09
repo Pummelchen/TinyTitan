@@ -121,11 +121,11 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-09, **211 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 211 before the commit that edits this row lands, so it reads 212 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it, and it was one behind again when AUD-237's fix commit landed on top of the count the AUD-236 close had measured: the close row predicts its own landing correctly and then the *next* fix commit moves the number before anyone re-reads it, which is exactly what AUD-238's fix commit did to this count on the way to here); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `231b8a0` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-09, **213 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 213 before the commit that edits this row lands, so it reads 214 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it, and it was one behind again when AUD-237's fix commit landed on top of the count the AUD-236 close had measured: the close row predicts its own landing correctly and then the *next* fix commit moves the number before anyone re-reads it, which is exactly what AUD-238's fix commit did to this count on the way to here); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `2677edc` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **136 rows / 135 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **137 rows / 136 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -635,7 +635,8 @@ is the authority. On 2026-10-04 it holds one Open row:
    server (PID 17514, port 8080) holding the preflight `pgrep` check, and the GPU half of the comparison is the
    already-measured 84.3 s rather than a fresh number on this host.)
    **This seam -- the entry points that throw their status away -- has drained: the last of the
-   original ten closed as AUD-239.** Measured at the time by reading every
+   original ten closed as AUD-239, and the nine non-`main()` guards it left behind are the report
+   seam AUD-240 then measured and closed.** Measured at the time by reading every
    non-test driver's `__main__` body in `benchmark/`: nine called `main()` and discarded
    what it returned
    -- `memory_smoke.py:153` (a line AUD-235 rewrote; the guard is `sys.exit(main())` at :408 now),
@@ -677,20 +678,39 @@ is the authority. On 2026-10-04 it holds one Open row:
    :380 -- maxthroughput, slots_ab, longgen, longctx, benchmark, memory_smoke, the 3-bit probe, the
    attention probe, the rehearsal and the sweep). The ten guard bodies that still do not match are not
    the same shape: `launcher_fixture.py:179` is `unittest.main()` and is a fixture, and the nine
-   `memory_*` dispatchers (`memory_book.py:422`, `memory_correct.py:604`, `memory_master.py:492`,
-   `memory_mini.py:460`, `memory_projects.py:578`, `memory_sim.py:680`, `memory_small_model.py:65`,
-   `memory_value.py:320`, `memory_volume.py:775`) dispatch a `sys.argv[1]` command and never define or
-   call a `main()` at all. Six of the nine are the `run_arm(command)`/`report()` shape, a seventh call
+   `memory_*` dispatchers (`memory_book.py:431`, `memory_correct.py:606`, `memory_master.py:523`,
+   `memory_mini.py:467`, `memory_projects.py:587`, `memory_sim.py:680`, `memory_small_model.py:65`,
+   `memory_value.py:328`, `memory_volume.py:783` -- re-measured after AUD-240, which added lines
+   above every guard but `memory_sim`'s and `memory_small_model`'s) dispatch a `sys.argv[1]` command
+   and never define or call a `main()` at all.
+   Six of the nine are the `run_arm(command)`/`report()` shape, a seventh call
    site is `memory_small_model.py:83` running `bench.run_arm(arm)` against an imported sibling, and the
    odd two are `memory_mini` (`serve`/`run`/`verify`/`report`) and `memory_sim`
    (`validate`/`tail`/`detail`/`compare`). Measured while listing them: `run_arm` has no `return` in any
    of the six files that define it, so there is no status there for a guard to discard -- the shape is
-   the opposite one, an arm that can only fail by raising -- and the `report()`s in `memory_correct`,
-   `memory_master` and `memory_volume` return a formatted percentage string, not a status, while
-   `memory_mini.py:473` is the one dispatcher that propagates what it gets (`raise SystemExit(report())`,
+   the opposite one, an arm that can only fail by raising -- and re-checked per file for the swallow
+   that would make that wrong: the only `raise`/`except` lines inside any `run_arm` body are
+   `memory_projects.py`'s two `raise SystemExit("ABORT: the projects share a workspace id: ...")`
+   guards, which abort loudly, so `memory_small_model.py:83`'s discarded `bench.run_arm(arm)` cannot
+   exit 0 over an arm that failed. This row used to say the `report()`s in `memory_correct`,
+   `memory_master` and `memory_volume` "return a formatted percentage string, not a status", and that
+   was read off the wrong `return`: those strings come from the `percent()` and `_pct()` helpers
+   defined *inside or beside* `report()` (`memory_correct.py:569`, `memory_master.py:328` nested in the
+   run loop and `:412` at module scope, `memory_volume.py:737`), while the report functions themselves
+   returned nothing -- `memory_correct`'s pre-fix refusal ended on a bare `return`, which is `None`.
+   Re-read for AUD-240, all three returned `None`.
+   `memory_mini.py:480` was already the one dispatcher that propagated what it got (`raise SystemExit(report())`,
    and that `report()` returns `1 if total_refused else 0`). Whether those nine can print a clean verdict
-   over arms that all failed is the three seam questions aimed at a different seam, and it is *not*
-   measured here.
+   over arms that all failed **was** the open question, and AUD-240 measured it: seven of the nine
+   dispatch a `report`, and every one of those seven printed its column header and exited 0 over an
+   empty `TINYTITAN_MEMVAL_RESULTS` -- `memory_projects` answering its `Leaks, one line each:` section
+   with the single word `none`, and `memory_mini` printing the 89%/100% fidelity preamble and "the 35B
+   spends 45-55 s" over rows that had never been computed, while
+   `memory_master.aggregate()` printed both arms' `carryable 0/0 n/a` pooled rows and then died in
+   `statistics.mean([])`. The two that were *not* in that set are `memory_sim`, which has no `report`
+   command at all, and `memory_small_model`, which runs an arm and never reports. All seven report
+   guards are now `raise SystemExit(report())`, and `memval_run.sh` -- whose last command is `report` --
+   exits on the report's verdict.
    Read what each of the ten was by kind, because they were not one shape. `tinytitan_ane_realweight_rehearsal.py` (:105)
    declared `def main() -> int` and ended on `return 0` (:197), so the handover's question there -- does a
    failed probe return anything *other* than 0 -- was answerable by grep and was answered for it: `return 0` was
