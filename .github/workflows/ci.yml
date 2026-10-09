@@ -486,6 +486,15 @@ jobs:
         # `benchmark/test_*.py` named neither here nor in
         # `tools/python-suites-unrun.txt`, which is the file where a suite that
         # genuinely cannot run on a runner says why.
+        # `test_concurrent_sessions_verdict` is here although its subject,
+        # `test_concurrent_sessions.py`, is exempt: the harness needs a model
+        # install and starts a server per model, but its `BASE=` branch -- the one
+        # an operator runs against a server they already have -- is a verdict over
+        # HTTP alone, and these tests drive that branch against a loopback stub.
+        # It is the shape AUD-252 was: the launched path gated the separation
+        # verdict on the canary and cancellation controls and the BASE path did
+        # not, so a backend answering empty completions exited 0 as "no leaks".
+        # No model, no server binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -504,7 +513,7 @@ jobs:
             test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe \
             test_tinytitan_ane_realweight_rehearsal \
             test_tinytitan_m5_sweep test_memory_reports \
-            test_run_stamp_is_utc
+            test_run_stamp_is_utc test_concurrent_sessions_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

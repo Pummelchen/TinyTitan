@@ -28,6 +28,12 @@ This is a model run: it starts one server at a time, at `--max-concurrent-sequen
 (above 1 the session-wide prompt cache is off by design), and stops it before the next
 model starts. Models that are not installed are skipped rather than fetched.
 
+Exit status covers the safety properties and the controls that make them mean
+something: a foreign marker, an HTTP failure, a canary the detector did not
+catch, or survivors the cancellation did not leave intact. Answer quality
+(own_missed, task_wrong, attribution_unproven) is printed beside the verdict
+and does not move it, because an incoherent answer is not a mixed session.
+
     python3 benchmark/test_concurrent_sessions.py
     python3 benchmark/test_concurrent_sessions.py models/qwen3.5_2B_4Bit
     SEED=12345 python3 benchmark/test_concurrent_sessions.py --context 32768
@@ -293,6 +299,63 @@ TOTALS = {
     "cache_on": 0,
     "attribution_unproven": 0,
 }
+
+
+def reset_state() -> None:
+    """Begin a run with no ledger and no totals, so a later run cannot inherit them.
+
+    Both entry points need this: the launched path clears them per model, and the
+    `BASE=` path used not to, so an in-process second run judged its own rounds on
+    totals the first one left behind.
+    """
+    LEDGER.clear()
+    for key in list(TOTALS):
+        TOTALS[key] = 0
+
+
+def separation_state() -> tuple[int, bool, bool, bool]:
+    """(leaked, canary_ok, cancel_ok, separation_bad) for the totals as they stand.
+
+    Separation is gated on the safety properties only: a leak (with the canary
+    proving the detector fires), the HTTP boundary, and the other slots surviving a
+    cancelled neighbour. Answer quality is the model's, reported beside it -- an
+    incoherent answer is not a mixed session. The two entry points must agree, or the
+    one an operator runs against their own server is the one that can report a blind
+    detector as a clean result (AUD-252).
+    """
+    leaked = TOTALS["foreign"] > 0
+    canary_ok = TOTALS.get("canary_detected", 0) == 1
+    cancel_ok = (
+        TOTALS.get("cancel_survivors_intact", 0) == 1 and TOTALS.get("post_cancel_alive", 0) == 1
+    )
+    separation_bad = leaked or TOTALS["http_error"] > 0 or not canary_ok or not cancel_ok
+    return TOTALS["foreign"], canary_ok, cancel_ok, separation_bad
+
+
+def print_verdict(label: str) -> bool:
+    """Print the totals, the controls and the verdict; return whether it passed."""
+    foreign, canary_ok, cancel_ok, separation_bad = separation_state()
+    unproven = TOTALS.get("attribution_unproven", 0)
+    print("\n================ summary ================")
+    for key, value in TOTALS.items():
+        print(f"  {key:18} {value}")
+    print(f"  markers issued     {len(LEDGER)}")
+    print(
+        f"  controls: canary={'caught' if canary_ok else 'BLIND'} "
+        f"cancel={'intact' if cancel_ok else 'BROKEN'} "
+        f"identical_greedy_answers={TOTALS.get('det_distinct')}"
+    )
+    print(
+        f"VERDICT {label} separation={'FAIL' if separation_bad else 'PASS'} "
+        f"(leaks={foreign}, http_error={TOTALS['http_error']}, "
+        f"canary={'caught' if canary_ok else 'BLIND'})"
+    )
+    print(
+        f"  not separation: own_missed={TOTALS['own_missed']} "
+        f"task_wrong={TOTALS['task_wrong']} attribution_unproven={unproven} "
+        f"cached_tokens_nonzero={TOTALS['cache_on']}"
+    )
+    return not separation_bad
 
 
 def report(users: list[dict], results: list[dict], phase: str) -> None:
@@ -603,9 +666,7 @@ def run_one_model(
     try:
         BASE, PORT = f"http://127.0.0.1:{port}", port
         MODEL = served_model()
-        LEDGER.clear()
-        for key in list(TOTALS):
-            TOTALS[key] = 0
+        reset_state()
         print(f"model={MODEL} seed={SEED} base={BASE}")
 
         run_round("round 1: echo+math", round_echo_math)
@@ -615,38 +676,7 @@ def run_one_model(
         run_canary_control()
         run_cancellation_control()
 
-        print("\n================ summary ================")
-        for key, value in TOTALS.items():
-            print(f"  {key:18} {value}")
-        leaked = TOTALS["foreign"] > 0
-        canary_ok = TOTALS.get("canary_detected", 0) == 1
-        cancel_ok = (
-            TOTALS.get("cancel_survivors_intact", 0) == 1
-            and TOTALS.get("post_cancel_alive", 0) == 1
-        )
-        unproven = TOTALS.get("attribution_unproven", 0)
-        # Separation is gated on the safety properties only: a leak (with the
-        # canary proving the detector fires), the HTTP boundary, and the other
-        # slots surviving a cancelled neighbour. Answer quality is the model's,
-        # reported beside it -- an incoherent answer is not a mixed session.
-        separation_bad = leaked or TOTALS["http_error"] > 0 or not canary_ok or not cancel_ok
-        print(f"  markers issued     {len(LEDGER)}")
-        print(
-            f"  controls: canary={'caught' if canary_ok else 'BLIND'} "
-            f"cancel={'intact' if cancel_ok else 'BROKEN'} "
-            f"identical_greedy_answers={TOTALS.get('det_distinct')}"
-        )
-        print(
-            f"VERDICT {MODEL} separation={'FAIL' if separation_bad else 'PASS'} "
-            f"(leaks={TOTALS['foreign']}, http_error={TOTALS['http_error']}, "
-            f"canary={'caught' if canary_ok else 'BLIND'})"
-        )
-        print(
-            f"  not separation: own_missed={TOTALS['own_missed']} "
-            f"task_wrong={TOTALS['task_wrong']} attribution_unproven={unproven} "
-            f"cached_tokens_nonzero={TOTALS['cache_on']}"
-        )
-        return not separation_bad
+        return print_verdict(MODEL)
     finally:
         log = stop_server(process)
         for line in log.splitlines():
@@ -684,6 +714,7 @@ def main() -> int:
     # A server the caller started: check it and launch nothing.
     if BASE:
         global MODEL
+        reset_state()
         MODEL = served_model()
         print(f"model={MODEL} seed={SEED} base={BASE} (external server)")
         run_round("round 1: echo+math", round_echo_math)
@@ -692,7 +723,10 @@ def main() -> int:
         run_determinism_control()
         run_canary_control()
         run_cancellation_control()
-        return 0 if TOTALS["foreign"] == 0 and TOTALS["http_error"] == 0 else 1
+        # The same predicate the launched path uses: this branch is the one the
+        # docstring tells an operator to run, so it may not drop the two controls
+        # that make "no foreign marker" mean something.
+        return 0 if print_verdict(MODEL) else 1
 
     if not BINARY.is_file():
         raise SystemExit(f"no server built at {BINARY}; run: swift build -c release")
