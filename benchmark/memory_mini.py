@@ -331,6 +331,13 @@ def report() -> int:
                 seen,
             )
         )
+    if not rows:
+        print(
+            f"NOT MEASURED: no results in {RESULTS}. Expected arms: "
+            f"{', '.join(sorted(MODELS))}. Run one first: "
+            "python3 benchmark/memory_mini.py run <model>"
+        )
+        return 1
     print(
         "small resident model as the memory keeper -- store fidelity read by\n"
         "the same reader as the 35B's own extraction (v3 = 89%, and the\n"

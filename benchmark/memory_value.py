@@ -269,6 +269,13 @@ def report():
         if arm in ARMS:
             runs.setdefault(arm, {})[run] = json.loads(path.read_text())
 
+    if not runs:
+        print(
+            f"NOT MEASURED: no results in {OUT}. Expected arms: {', '.join(ARMS)}. "
+            f"Run one first: python3 benchmark/memory_value.py {ARMS[0]}"
+        )
+        return 1
+
     print(
         f"\n{'arm':8s} {'run':>3s} {'stage':8s} {'prompt':>7s} {'completion':>11s} "
         f"{'seconds':>8s} {'wait':>5s}  parameters"
@@ -301,6 +308,7 @@ def report():
     for arm in ARMS:
         per_run = carry.get(arm, {})
         if not per_run:
+            print(f"  {arm:8s} NOT MEASURED (no run wrote any result)")
             continue
         cells = [f"r{run} {a}/{s}" for run, (a, s) in sorted(per_run.items())]
         total_a = sum(a for a, _ in per_run.values())
@@ -322,7 +330,7 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"

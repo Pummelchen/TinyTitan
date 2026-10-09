@@ -677,6 +677,12 @@ def report():
         arm, run = path.stem.rsplit("-r", 1)
         if arm in ARMS:
             runs.setdefault(arm, {})[run] = json.loads(path.read_text())
+    if not runs:
+        print(
+            f"NOT MEASURED: no results in {OUT}. Expected arms: {', '.join(ARMS)}. "
+            f"Run one first: python3 benchmark/memory_volume.py {ARMS[0]}"
+        )
+        return 1
 
     print(
         f"\n{'arm':8s} {'run':>3s} {'session':>7s} {'boot':>4s} {'keys':>4s} "
@@ -751,6 +757,7 @@ def report():
     for arm in ARMS:
         rows = [row for row in totals if row[0] == arm]
         if not rows:
+            print(f"  {arm:8s} NOT MEASURED (no run wrote any result)")
             continue
         pooled = [sum(row[2][i] for row in rows) for i in range(6)]
         calls = sum(row[3] for row in rows)
@@ -770,6 +777,7 @@ def report():
     print("\nCost per run (prompt + completion tokens, seconds incl. waits):")
     for arm, run, _, _, _, prompt, completion, seconds in totals:
         print(f"  {arm:8s} r{run}: {prompt} + {completion}, {seconds:.0f}s")
+    return 0
 
 
 if __name__ == "__main__":
@@ -777,7 +785,7 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"

@@ -217,7 +217,7 @@ def history(session: int, self_truth, key: str):
 
 def score_run(results: list) -> dict:
     """Per-session scores, recomputed from the stored answers."""
-    self_truth = results[0].get("self_truth")
+    self_truth = results[0].get("self_truth") if results else None
     scored = []
     for result in results:
         session = result["session"]
@@ -287,8 +287,14 @@ def load_runs() -> dict:
     return runs
 
 
-def report() -> None:
+def report() -> int:
     runs = load_runs()
+    if not runs:
+        print(
+            f"NOT MEASURED: no results in {OUT} for scenario {NAME}. Expected arms: "
+            f"{', '.join(ARMS)}. Run one first: python3 benchmark/memory_master.py {ARMS[0]}"
+        )
+        return 1
     print(
         f"\n=== {NAME} ({SPEC['domain']}, {SPEC['sessions']} sessions) "
         f"foundation={len(SPEC['foundation'])} carryable={len(SPEC['carryable'])}"
@@ -299,6 +305,8 @@ def report() -> None:
         f"{'summ s':>7s} {'cost s':>7s}"
     )
     for arm in ARMS:
+        if not runs.get(arm):
+            print(f"{arm:8s} NOT MEASURED (no run wrote any result)")
         for run in runs.get(arm, []):
             foundation = [0, 0]
             carryable = [0, 0]
@@ -339,6 +347,8 @@ def report() -> None:
     # The one line a suite-level reader needs: carryable carried, and stale.
     print("carryable carried (sessions 2+), and stale old values:")
     for arm in ARMS:
+        if not runs.get(arm):
+            print(f"{arm:8s} NOT MEASURED (no run wrote any result)")
         for run in runs.get(arm, []):
             carried = sum(r["carryable"][0] for r in run["sessions"])
             total = sum(r["carryable"][1] for r in run["sessions"])
@@ -347,22 +357,35 @@ def report() -> None:
             misses = [f"{r['session']}:{key}" for r in run["sessions"] for key in r["wrong"]]
             if misses:
                 print(f"    misses: {' '.join(misses)}")
+    return 0
 
 
-def report_all(root: Path) -> None:
+def report_all(root: Path) -> int:
     """Every master scenario that has results under `root`, one line each.
 
     Aggregates every stored run of a scenario and arm, so repeats show as a
     larger denominator rather than being averaged away; `invalid` counts the
     sessions the instrument excluded, and `cost` is model time only.
     """
+    paths_by_arm = {
+        (name, arm): sorted(root.glob(f"memory-{name}-*/{name}-{arm}-r*.json"))
+        for name in scenarios.SCENARIOS
+        for arm in ARMS
+    }
     print(
         f"\n{'scenario':12s} {'arm':8s} {'runs':>4s} {'carryable':>13s} "
         f"{'stale':>5s} {'foundation':>13s} {'invalid':>7s} {'cost s':>8s}"
     )
+    if not any(paths_by_arm.values()):
+        print(
+            f"NOT MEASURED: no run of any scenario under {root}. Expected shape "
+            f"memory-<scenario>-*/<scenario>-<arm>-r*.json, one of arms "
+            f"{', '.join(ARMS)}."
+        )
+        return 1
     for name in scenarios.SCENARIOS:
         for arm in ARMS:
-            paths = sorted(root.glob(f"memory-{name}-*/{name}-{arm}-r*.json"))
+            paths = paths_by_arm[name, arm]
             if not paths:
                 continue
             carried = total = stale = foundation = foundation_total = 0
@@ -383,13 +406,14 @@ def report_all(root: Path) -> None:
                 f"{stale:5d} {foundation:6d}/{foundation_total:<6d} "
                 f"{invalid:7d} {cost:8.0f}"
             )
+    return 0
 
 
 def _pct(pair) -> str:
     return f"{100 * pair[0] / pair[1]:.1f}%" if pair[1] else "n/a"
 
 
-def aggregate(root: Path, names=None) -> None:
+def aggregate(root: Path, names=None) -> int:
     """Pooled and per-world statistics over every stored run.
 
     Both averages are reported because they can disagree: pooling weights each
@@ -451,6 +475,12 @@ def aggregate(root: Path, names=None) -> None:
     finally:
         NAME, SPEC, OUT = saved
 
+    if not worlds:
+        print(
+            f"NOT MEASURED: no run directory holding a {', '.join(ARMS)} run for any "
+            f"scenario under {root}."
+        )
+        return 1
     print(f"\nworlds: {len(worlds)}")
     for name, entry in worlds:
         a, s = entry["auto"], entry["summary"]
@@ -487,6 +517,7 @@ def aggregate(root: Path, names=None) -> None:
             f"(sd {means['auto'][1]:4.1f})  summary {means['summary'][0]:5.1f}% "
             f"(sd {means['summary'][1]:4.1f})  delta {delta:+.1f} pp"
         )
+    return 0
 
 
 if __name__ == "__main__":
@@ -494,11 +525,11 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     elif command == "report-all":
-        report_all(OUT.parent)
+        raise SystemExit(report_all(OUT.parent))
     elif command == "stats":
-        aggregate(OUT.parent, sys.argv[2:] or None)
+        raise SystemExit(aggregate(OUT.parent, sys.argv[2:] or None))
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, "

@@ -500,9 +500,10 @@ def report():
                 runs.setdefault(arm, {})[run] = json.loads(path.read_text())
     if not runs:
         print(
-            f"No results in {OUT}. Run an arm first: python3 benchmark/memory_correct.py {ARMS[0]}"
+            f"NOT MEASURED: no results in {OUT}. Expected arms: {', '.join(ARMS)}. "
+            f"Run one first: python3 benchmark/memory_correct.py {ARMS[0]}"
         )
-        return
+        return 1
 
     print(
         f"\n{'arm':8s} {'run':>3s} {'session':>7s} {'prompt':>7s} {'completion':>11s} "
@@ -588,6 +589,7 @@ def report():
     for arm in ARMS:
         rows = [r for r in summary_rows if r[0] == arm]
         if not rows:
+            print(f"  {arm:8s} NOT MEASURED (no run wrote any result)")
             continue
         pooled = {k: sum(r[2][k] for r in rows) for k in rows[0][2]}
         print(
@@ -606,7 +608,7 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"

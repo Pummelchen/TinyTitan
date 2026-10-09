@@ -248,9 +248,10 @@ jobs:
       - name: Benchmark and memory tooling gates (model-free)
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
-        # gates a release. Except the 3-bit probe named at the end of this list,
+        # gates a release. Except the 3-bit probe, whose fixture reads real tensor
+        # bytes through numpy,
         # every one of them is stdlib-only, measured on this host
-        # 2026-10-09 as 29 suites and 500 tests with no model, no server, no Xcode and
+        # 2026-10-09 as 34 suites and 697 tests with no model, no server, no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -463,6 +464,19 @@ jobs:
         # lands where it says), mkdirs behind the artifact, prints "N of M run(s)
         # measured" with a SWEEP COMPLETE or NOT MEASURED verdict, and returns its
         # status through `sys.exit(main())`.
+        # test_memory_reports runs the seven `memory_*.py report` commands against
+        # an empty results directory in-process -- no model, no server, no GGUF --
+        # it exists because every one of them printed its table headers and exited 0
+        # over a directory holding no run: `memory_projects` answered "Leaks, one line
+        # each: none", which reads as two projects proven separate; `memory_mini`
+        # printed its cost claim and the 89%/100% fidelity preamble; six drivers skipped
+        # an arm that wrote nothing with `if not rows: continue`, so a report showing one
+        # arm looked like the other had scored zero rather than never run;
+        # `memory_master.aggregate()` printed pooled `carryable 0/0 n/a` rows for both
+        # arms and then raised StatisticsError in `statistics.mean([])` over zero worlds;
+        # `score_run([])` read `results[0]` and raised IndexError, so one empty run file
+        # ended the report; and every guard called `report()` as a statement, so the
+        # status the report now returns had nothing to reach.
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -485,7 +499,7 @@ jobs:
             test_tinytitan_benchmark test_tinytitan_longctx test_memory_smoke \
             test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe \
             test_tinytitan_ane_realweight_rehearsal \
-            test_tinytitan_m5_sweep
+            test_tinytitan_m5_sweep test_memory_reports
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

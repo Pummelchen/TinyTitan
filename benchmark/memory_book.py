@@ -357,6 +357,13 @@ def report():
         if arm in ARMS:
             runs.setdefault(arm, {})[run] = json.loads(path.read_text())
 
+    if not runs:
+        print(
+            f"NOT MEASURED: no results in {OUT}. Expected arms: {', '.join(ARMS)}. "
+            f"Run one first: python3 benchmark/memory_book.py {ARMS[0]}"
+        )
+        return 1
+
     print(
         f"\n{'arm':8s} {'run':>3s} {'session':>7s} {'prompt':>7s} {'completion':>11s} "
         f"{'seconds':>8s} {'wait':>5s} {'quiz':>6s}  wrong"
@@ -408,6 +415,7 @@ def report():
     for arm in ARMS:
         rows = [r for r in summary_rows if r[0] == arm]
         if not rows:
+            print(f"  {arm:8s} NOT MEASURED (no run wrote any result)")
             continue
         cells = [f"r{run} {c}/{t}" for _, run, c, t, *_ in rows]
         total_c = sum(r[2] for r in rows)
@@ -417,6 +425,7 @@ def report():
     print("\nCost per run (prompt + completion tokens, seconds incl. summaries and waits):")
     for arm, run, _, _, prompt, completion, seconds in summary_rows:
         print(f"  {arm:8s} r{run}: {prompt} + {completion}, {seconds:.0f}s")
+    return 0
 
 
 if __name__ == "__main__":
@@ -424,7 +433,7 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"

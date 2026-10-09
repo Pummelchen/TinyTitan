@@ -501,6 +501,12 @@ def report():
         arm, run = path.stem.rsplit("-r", 1)
         if arm in ARMS:
             runs.setdefault(arm, {})[run] = json.loads(path.read_text())
+    if not runs:
+        print(
+            f"NOT MEASURED: no results in {OUT}. Expected arms: {', '.join(ARMS)}. "
+            f"Run one first: python3 benchmark/memory_projects.py {ARMS[0]}"
+        )
+        return 1
 
     print(
         f"\n{'arm':8s} {'run':>3s} {'session':>7s} {'project':7s} {'prompt':>7s} "
@@ -545,6 +551,7 @@ def report():
     for arm in ARMS:
         row = totals.get(arm)
         if not row:
+            print(f"  {arm:8s} NOT MEASURED (no run wrote any result)")
             continue
         overall = f"{100 * row['correct'] / row['total']:.0f}%" if row["total"] else "n/a"
         carried = (
@@ -572,7 +579,9 @@ def report():
                 f"{PROJECTS[other]['name']}={leak['theirs']}"
             )
     if not any_leak:
-        print("  none")
+        checked = sum(len(v) for per_run in runs.values() for v in per_run.values())
+        print(f"  none ({checked} result(s) checked)")
+    return 0
 
 
 if __name__ == "__main__":
@@ -580,7 +589,7 @@ if __name__ == "__main__":
     if command in ARMS:
         run_arm(command)
     elif command == "report":
-        report()
+        raise SystemExit(report())
     else:
         raise SystemExit(
             f"unknown command {command!r}; expected one of {', '.join(ARMS)}, or report"
