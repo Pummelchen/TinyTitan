@@ -166,7 +166,12 @@ jobs:
         # the XDG caches redirected into it. These tests pin that contract —
         # static checks plus a dry run that must write nothing — and the model
         # menu's answer handling (an EOF must not start the recommended
-        # download). `test_launcher_install` pins the launcher's own fetch path:
+        # download). `test_install_models_batch_status` pins what the batch modes'
+        # exit status means: both loops used to end on the row filter's own test,
+        # so `--all-8bit` exited 0 with a model it had refused and `--all-4bit`
+        # exited 1 with nothing missing (AUD-253). It drives the dispatcher's own
+        # branch text with `install_one` stubbed, so it installs nothing.
+        # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
         # draw. The two verification suites are the fail-closed half of the same
@@ -194,6 +199,7 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
+            test_install_models_batch_status \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

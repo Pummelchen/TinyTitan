@@ -749,6 +749,37 @@ install_both() {
   return 2
 }
 
+# Install every model at one width, and report on all of them.
+#
+# The batch used to be the dispatcher's own loop, whose body ended in
+# `[[ "$w" == 4 ]] && install_one "$n"`. A loop's status is its last body
+# statement's, so the verdict was the *final catalogue row's width test*: with an
+# 8-bit row last, `--all-4bit` exited 1 after installing everything and
+# `--all-8bit` exited 0 whenever the last 8-bit model happened to work, however
+# many before it had been refused (AUD-253). One refused model is enough to make
+# the run incomplete, so every row's status is collected and the count of what
+# was missed is what leaves the script.
+install_width() {
+  local want="$1" row name _ width
+  local ran=() missed=()
+  for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
+    IFS='|' read -r name _ width _ <<<"$row"
+    [[ "$width" == "$want" ]] || continue
+    if install_one "$name"; then
+      ran+=("$name")
+    else
+      missed+=("$name")
+    fi
+  done
+  echo
+  echo "installed ${#ran[@]} of $(( ${#ran[@]} + ${#missed[@]} )) ${want}-bit model(s)"
+  if [[ "${#missed[@]}" -gt 0 ]]; then
+    printf 'NOT INSTALLED: %s\n' "${missed[@]+"${missed[@]}"}" >&2
+    return 1
+  fi
+  return 0
+}
+
 # The one question an install has to ask.
 #
 # The model is the only real choice a person makes — everything else about
@@ -806,10 +837,8 @@ case "${1:-}" in
                    exit 2
                  fi
                  choose_model ;;
-  --all-4bit)    for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do IFS='|' read -r n _ w _ <<<"$row"
-                   [[ "$w" == 4 ]] && install_one "$n"; done ;;
-  --all-8bit)    for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do IFS='|' read -r n _ w _ <<<"$row"
-                   [[ "$w" == 8 ]] && install_one "$n"; done ;;
+  --all-4bit)    install_width 4 ;;
+  --all-8bit)    install_width 8 ;;
   # `both` installs a model's 4-bit and 8-bit builds from ONE download. The
   # MoE checkpoints convert both widths in a single pass, so asking for them
   # one at a time would fetch the same ~70 GB twice; this is the cheap way and
