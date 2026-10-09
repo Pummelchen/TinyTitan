@@ -71,6 +71,37 @@ RUNS="${TINYTITAN_MEMVAL_RUNS:-3}"
 # invoking this script once per run, which would otherwise overwrite run 1
 # every time.
 FIRST_RUN="${TINYTITAN_MEMVAL_FIRST_RUN:-1}"
+# Both counts are read with a default, which accepts a value nobody means. Bash
+# expands a set-but-blank name to 0 inside $(( )), and the list that produces is
+# not empty -- it counts down. Measured on /bin/bash 3.2.57 with /usr/bin/seq:
+# a blank RUNS gives `seq 1 0`, which emits "1" and "0", so three repeats become
+# two and the second is written as {arm}-r0.json; a blank FIRST_RUN gives
+# `seq 0 2`, which renumbers the interleaved repeats to 0, 1 and 2 and overwrites
+# what the previous launch wrote. Either way the script exits 0 over the rows it
+# did write, so the count an operator reads in the report is not the count they
+# asked for. Refuse before anything is started or numbered.
+memval_count() {  # <name> <value> -- echo the count, or refuse it by name
+  local name="$1" value="$2"
+  case "$value" in
+    '' | *[!0-9]*)
+      printf 'ERROR: %s is set to %q, which is not a whole number. Unset %s to use\n' \
+        "$name" "$value" "$name" >&2
+      printf '       the default, or name the count as digits; this script will not guess.\n' >&2
+      return 2
+      ;;
+  esac
+  # 0 parses, and it is the value the blank already turned into: a list that runs
+  # down from one, or a numbering that starts at a run no report was asked for.
+  if [[ "$value" == 0 ]]; then
+    printf 'ERROR: %s is 0, which measures no run. Unset %s to use the default, or\n' \
+      "$name" "$name" >&2
+    printf '       name a count of at least 1; the run numbering starts at 1 too.\n' >&2
+    return 2
+  fi
+  printf '%s\n' "$value"
+}
+RUNS="$(memval_count TINYTITAN_MEMVAL_RUNS "$RUNS")" || exit 2
+FIRST_RUN="$(memval_count TINYTITAN_MEMVAL_FIRST_RUN "$FIRST_RUN")" || exit 2
 [[ "$BENCH" == smoke ]] && RUNS=1
 # The server distils a session after this much quiet. Two minutes in
 # production; here the harness waits for the log line, so keep it short.

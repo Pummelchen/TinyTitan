@@ -242,9 +242,13 @@ jobs:
         # exited 0 however many arms failed. These tests drive a copy of it with a
         # stub `memval_run.sh` — no model, no server, no GPU — and pin that one
         # failed arm, every failed arm, the named summary, and the per-arm log line.
+        # `test_memval_run_repeats` is the same shape one layer down: it drives a
+        # copy of `memval_run.sh` with a stub launcher and no release binary, so a
+        # count it refuses (AUD-246: `RUNS=0` made `seq 1 0` count *down* through
+        # run 0 and still exit 0) cannot reach a server even if the guard slipped.
         run: |
           cd benchmark
-          python3 -m unittest test_memval_matrix_exit
+          python3 -m unittest test_memval_matrix_exit test_memval_run_repeats
       - name: Benchmark and memory tooling gates (model-free)
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
