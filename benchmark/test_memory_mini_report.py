@@ -17,9 +17,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -153,6 +155,81 @@ class RunModelTests(unittest.TestCase):
         self.assertEqual(set(sessions), {"1", "2"})
         for value in sessions.values():
             self.assertIn("URLError", value["error"])
+
+
+class ResultsTreeTests(unittest.TestCase):
+    """AUD-241: seven of the eight memory reports take their results tree from
+    `TINYTITAN_MEMVAL_RESULTS`; `memory_mini` hardcoded it, so a reader who named
+    a tree got a verdict computed over a tree they never chose -- and the report
+    globbed every `.json` in the directory it did read, so a file another tool
+    wrote there ended the run on a traceback instead of a named refusal."""
+
+    def temp(self) -> pathlib.Path:
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        results = pathlib.Path(holder.name) / "mini"
+        results.mkdir()
+        return results
+
+    def import_with_env(self, results: pathlib.Path):
+        env = {"TINYTITAN_MEMVAL_RESULTS": str(results)}
+        with mock.patch.dict(os.environ, env, clear=True):
+            module = _load(f"memory_mini_at_{results.name}", "benchmark/memory_mini.py")
+        module.sim.load_runs = lambda: [{"name": "r1"}]
+        return module
+
+    def draw(self, module) -> tuple[object, str]:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            try:
+                code = module.report()
+            except Exception as error:
+                code = f"RAISED {type(error).__name__}: {error}"
+        return code, buffer.getvalue()
+
+    def test_the_env_names_the_tree_the_module_reads(self):
+        results = self.temp()
+        self.assertEqual(self.import_with_env(results).RESULTS, results)
+
+    def test_a_record_in_the_named_tree_is_reported(self):
+        results = self.temp()
+        record = {"model": "350m-extract", "job": "full", "runs": {"r1": {"1": answered(1)}}}
+        (results / "350m-extract-full.json").write_text(json.dumps(record), encoding="utf-8")
+        code, printed = self.draw(self.import_with_env(results))
+        self.assertEqual(code, 0, printed)
+        self.assertIn("350m-extract", printed)
+
+    def test_the_refusal_names_the_tree_the_reader_named(self):
+        results = self.temp()
+        code, printed = self.draw(self.import_with_env(results))
+        self.assertEqual(code, 1, printed)
+        self.assertIn("NOT MEASURED", printed)
+        self.assertIn(str(results), printed)
+
+    def test_a_foreign_json_is_named_and_refused_not_a_crash(self):
+        results = self.temp()
+        module = self.import_with_env(results)
+        # The shape a sibling report writes: a list of per-session rows, not a
+        # mini record. `record["runs"]` over it is a TypeError.
+        (results / "pong-4bit-r1.json").write_text(json.dumps([{"self_truth": 1}]), encoding="utf-8")
+        code, printed = self.draw(module)
+        self.assertNotIsInstance(code, str, printed)
+        self.assertEqual(code, 1, printed)
+        self.assertIn("pong-4bit-r1.json", printed)
+
+
+    def test_a_shared_tree_names_the_foreign_file_and_still_reports(self):
+        """A named tree may hold both tools' records. The foreign file is named and
+        left out; the mini row that is there still counts, so a reader who shares a
+        directory is told about it rather than denied their own result."""
+        results = self.temp()
+        record = {"model": "350m-extract", "job": "full", "runs": {"r1": {"1": answered(1)}}}
+        (results / "350m-extract-full.json").write_text(json.dumps(record), encoding="utf-8")
+        (results / "pong-4bit-r1.json").write_text(json.dumps([{"self_truth": 1}]), encoding="utf-8")
+        code, printed = self.draw(self.import_with_env(results))
+        self.assertEqual(code, 0, printed)
+        self.assertIn("pong-4bit-r1.json", printed)
+        self.assertIn("350m-extract", printed)
 
 
 if __name__ == "__main__":

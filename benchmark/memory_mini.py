@@ -43,7 +43,9 @@ import memory_book as book  # noqa: E402
 import memory_sim as sim  # noqa: E402
 
 GGUF = ROOT / "models/gguf"
-RESULTS = ROOT / ".build/benchmark-logs/memory-mini"
+RESULTS = Path(
+    os.environ.get("TINYTITAN_MEMVAL_RESULTS", ROOT / ".build/benchmark-logs/memory-mini")
+)
 PORT = int(os.environ.get("TINYTITAN_MINI_PORT", "8098"))
 
 MODELS = {
@@ -287,10 +289,14 @@ def report() -> int:
     """
     runs = {run["name"]: run for run in sim.load_runs()}
     rows = []
+    foreign = []
     for path in sorted(RESULTS.glob("*.json")):
         if path.name.startswith("server-"):
             continue
-        record = json.loads(path.read_text())
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict) or not isinstance(record.get("runs"), dict):
+            foreign.append(path.name)
+            continue
         right = seen = refused = 0
         seconds = prompt = completion = calls = 0.0
         empty = 0
@@ -331,6 +337,8 @@ def report() -> int:
                 seen,
             )
         )
+    for name in foreign:
+        print(f"  NOT A MINI RECORD: {RESULTS / name} holds no `runs`, so it left the table")
     if not rows:
         print(
             f"NOT MEASURED: no results in {RESULTS}. Expected arms: "
