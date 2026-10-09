@@ -242,6 +242,130 @@ class TestTheMasterSweepCommandsRefuse(ReportHarness):
         self.assertIn("NOT MEASURED", printed)
 
 
+class TestTheAggregateTableScoresEveryScenario(ReportHarness):
+    """`report-all` reads all ten scenarios, so it may not read one scenario's spec.
+
+    `score_run()` takes no spec: it uses the module globals `NAME`/`SPEC`, which are
+    bound once at import from `TINYTITAN_MASTER_SCENARIO` -- and that is exactly how
+    `memval_master.sh` invokes the aggregate (`TINYTITAN_MASTER_SCENARIO=photograph
+    ... report-all`). `aggregate()` saves and swaps those globals per scenario;
+    `report_all()` did not, so every row but the named one was scored against the
+    wrong key set. Measured over one tree holding a full-mark record for each arm of
+    `photograph` and `ledger` (`/tmp/aud247-red.log`): with photograph named the table
+    read `photograph 45/45 81/81` and `ledger 0/35 0/63`; with ledger named the same
+    tree read `photograph 0/27 0/27` and `ledger 21/21 21/21` -- exit 0 either way.
+
+    The zeroes are the finding, and they are not honest zeroes. `score_run` counts a
+    denominator per key the *named* spec expects, so ledger's row divides by
+    photograph's key counts (5 carryable and 9 foundation x ledger's 7 scored
+    sessions = 35 and 63) and answers every one of them "missed" because the stored
+    keys are ledger's names. A row of that shape reads as a scenario that ran and
+    scored nothing, which is the opposite of the `0/0` that would say "not measured".
+    A day-long sweep therefore printed a table of plausible failures for nine
+    scenarios and one real result, for whichever name the shell happened to set.
+
+    The expected denominators are arithmetic, not a golden: a scenario with `k` keys,
+    `c` of them carryable and `n` sessions scores `c * (n - 1)` carryable and
+    `(k - c) * (n - 1)` foundation over one record, because `score_run` only counts
+    sessions after the first.
+    """
+
+    def full_mark_records(self, name, root):
+        """One record per arm under `root`, every key answered with that scenario's own truth.
+
+        `root` is passed in rather than drawn from `scratch()` because a tree holds
+        every scenario's directory: `scratch()` clears a reused directory by
+        unlinking its entries, which cannot remove the `memory-<scenario>-*`
+        directory that belongs inside the tree `report_all` globs.
+        """
+        spec = importlib.import_module("master_scenarios").SCENARIOS[name]
+        rows = [
+            {
+                "session": session,
+                "prompt_tokens": 1000,
+                "completion_tokens": 50,
+                "seconds": 1.0,
+                "summary_seconds": 0.5,
+                "consolidation_wait": 0.2,
+                "finish_reason": "stop",
+                "self_truth": None,
+                "answers": spec["truth"](session),
+            }
+            for session in range(1, spec["sessions"] + 1)
+        ]
+        for arm in ("summary", "auto"):
+            directory = root / f"memory-{name}-measure"
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / f"{name}-{arm}-r1.json").write_text(json.dumps(rows))
+        return root
+
+    def denominators(self, printed, name):
+        row = [line for line in printed.splitlines() if line.split()[:2] == [name, "summary"]]
+        self.assertEqual(len(row), 1, printed)
+        # Columns are scenario, arm, runs, carryable, stale, foundation, invalid, cost.
+        parts = row[0].split()
+        return [parts[3], parts[5]]
+
+    def name_the_scenario(self, name):
+        mod = self.mods["memory_master"]
+        spec = importlib.import_module("master_scenarios").SCENARIOS[name]
+        saved = (mod.NAME, mod.SPEC)
+        self.addCleanup(setattr, mod, "NAME", saved[0])
+        self.addCleanup(setattr, mod, "SPEC", saved[1])
+        mod.NAME, mod.SPEC = name, spec
+
+    def tree(self):
+        """One results tree holding a full-mark run of both scenarios, both arms."""
+        root = self.scratch("memory_master")
+        self.full_mark_records("photograph", root)
+        self.full_mark_records("ledger", root)
+        return root
+
+    def test_every_row_is_scored_against_its_own_scenario(self):
+        root = self.tree()
+        self.name_the_scenario("photograph")
+        status, printed = self.call("memory_master", "report_all", root)
+        self.assertEqual(status, 0, printed)
+        # photograph, 14 keys / 5 carryable / 10 sessions -> 5*9 and 9*9
+        self.assertEqual(self.denominators(printed, "photograph"), ["45/45", "81/81"], printed)
+        # ledger, 6 keys / 3 carryable / 8 sessions -> 3*7 and 3*7
+        self.assertEqual(
+            self.denominators(printed, "ledger"),
+            ["21/21", "21/21"],
+            "ledger's row was scored against photograph's key set, so it printed "
+            "photograph's denominators and called every ledger key missed",
+        )
+
+    def test_the_named_scenario_survives_the_table(self):
+        """The fix mutates module state, so the restore is part of it.
+
+        `report_all()` now writes `NAME`/`SPEC` for every row it prints. A caller that
+        prints the table and then does something scenario-scoped -- which is what
+        `aggregate()` in the same module does -- would otherwise inherit the last
+        scenario alphabetically rather than the one it was told.
+        """
+        root = self.tree()
+        mod = self.mods["memory_master"]
+        self.name_the_scenario("photograph")
+        status, printed = self.call("memory_master", "report_all", root)
+        self.assertEqual(status, 0, printed)
+        self.assertEqual(mod.NAME, "photograph")
+        self.assertIs(mod.SPEC, importlib.import_module("master_scenarios").SCENARIOS["photograph"])
+
+    def test_the_table_does_not_depend_on_which_scenario_is_named(self):
+        root = self.tree()
+        self.name_the_scenario("photograph")
+        _status, named_photograph = self.call("memory_master", "report_all", root)
+        self.name_the_scenario("ledger")
+        _status, named_ledger = self.call("memory_master", "report_all", root)
+        self.assertEqual(
+            [line for line in named_photograph.splitlines() if line.strip()],
+            [line for line in named_ledger.splitlines() if line.strip()],
+            "the aggregate over one tree changed because the environment named a "
+            "different scenario -- the rows describe the run, not the shell",
+        )
+
+
 class TestEveryReportCommandPropagates(ReportHarness):
     def test_the_guard_raises_with_the_report_status(self):
         for name in MODULES + ("memory_mini",):

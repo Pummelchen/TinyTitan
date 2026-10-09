@@ -368,7 +368,13 @@ def report_all(root: Path) -> int:
     Aggregates every stored run of a scenario and arm, so repeats show as a
     larger denominator rather than being averaged away; `invalid` counts the
     sessions the instrument excluded, and `cost` is model time only.
+
+    `NAME`/`SPEC` are swapped per scenario the way `aggregate()` does it, because
+    `score_run()` reads them: without the swap every row is scored against whichever
+    scenario the shell happened to name, and the rest print that scenario's
+    denominators over keys it never asked for.
     """
+    global NAME, SPEC
     paths_by_arm = {
         (name, arm): sorted(root.glob(f"memory-{name}-*/{name}-{arm}-r*.json"))
         for name in scenarios.SCENARIOS
@@ -385,29 +391,35 @@ def report_all(root: Path) -> int:
             f"{', '.join(ARMS)}."
         )
         return 1
-    for name in scenarios.SCENARIOS:
-        for arm in ARMS:
-            paths = paths_by_arm[name, arm]
-            if not paths:
-                continue
-            carried = total = stale = foundation = foundation_total = 0
-            invalid = 0
-            cost = 0.0
-            for path in paths:
-                run = score_run(json.loads(path.read_text()))
-                for row in run["sessions"]:
-                    carried += row["carryable"][0]
-                    total += row["carryable"][1]
-                    foundation += row["foundation"][0]
-                    foundation_total += row["foundation"][1]
-                    stale += row["stale"]
-                    invalid += 1 if row.get("invalid") else 0
-                    cost += row["seconds"] + row["wait"] + row["summary_seconds"]
-            print(
-                f"{name:12s} {arm:8s} {len(paths):4d} {carried:6d}/{total:<6d} "
-                f"{stale:5d} {foundation:6d}/{foundation_total:<6d} "
-                f"{invalid:7d} {cost:8.0f}"
-            )
+    saved = (NAME, SPEC)
+    try:
+        for name in scenarios.SCENARIOS:
+            NAME = name
+            SPEC = scenarios.SCENARIOS[name]
+            for arm in ARMS:
+                paths = paths_by_arm[name, arm]
+                if not paths:
+                    continue
+                carried = total = stale = foundation = foundation_total = 0
+                invalid = 0
+                cost = 0.0
+                for path in paths:
+                    run = score_run(json.loads(path.read_text()))
+                    for row in run["sessions"]:
+                        carried += row["carryable"][0]
+                        total += row["carryable"][1]
+                        foundation += row["foundation"][0]
+                        foundation_total += row["foundation"][1]
+                        stale += row["stale"]
+                        invalid += 1 if row.get("invalid") else 0
+                        cost += row["seconds"] + row["wait"] + row["summary_seconds"]
+                print(
+                    f"{name:12s} {arm:8s} {len(paths):4d} {carried:6d}/{total:<6d} "
+                    f"{stale:5d} {foundation:6d}/{foundation_total:<6d} "
+                    f"{invalid:7d} {cost:8.0f}"
+                )
+    finally:
+        NAME, SPEC = saved
     return 0
 
 
