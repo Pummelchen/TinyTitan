@@ -82,40 +82,6 @@ public final class RemoteStreamingRepacker {
         }
     }
 
-    public static func inspectPersistentInstall(
-        outputDirectory: String,
-        repoID: String,
-        requestedRevision: String
-    ) throws -> RemoteInstallCheckpoint? {
-        let lock = try InstallLock.acquire(outputDirectory: outputDirectory)
-        defer { withExtendedLifetime(lock) {} }
-        let paths = lock.paths
-        let partial = try Posix.entryKind(paths.partialDirectory)
-        let checkpoint = try Posix.entryKind(paths.checkpointFile)
-        if partial == .absent, checkpoint == .absent { return nil }
-        if partial == .absent, checkpoint == .regular,
-            try Posix.entryKind(paths.finalDirectory) == .directory
-        {
-            // Crash window: the previous run renamed partial → final but
-            // crashed before deleting the checkpoint. Nothing is resumable;
-            // drop the stale checkpoint and report no saved state.
-            try? FileManager.default.removeItem(atPath: paths.checkpointFile)
-            try Posix.fsyncDirectory(paths.parentDirectory)
-            return nil
-        }
-        guard partial == .directory, checkpoint == .regular else {
-            throw RepackError.installStateCorrupt(
-                path: paths.partialDirectory,
-                detail: "partial directory and checkpoint must exist together")
-        }
-        let value = try RemoteInstallCheckpoint.load(from: paths.checkpointFile)
-        guard value.repoID == repoID, value.requestedRevision == requestedRevision else {
-            throw RepackError.installStateIncompatible(
-                detail: "saved download belongs to a different source")
-        }
-        return value
-    }
-
     public static func discardPartial(outputDirectory: String) throws {
         let lock = try InstallLock.acquire(outputDirectory: outputDirectory)
         defer { withExtendedLifetime(lock) {} }
