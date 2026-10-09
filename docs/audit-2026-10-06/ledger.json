@@ -4,9 +4,9 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 156,
-    "done": 154,
-    "open": 1,
+    "total": 158,
+    "done": 155,
+    "open": 2,
     "blocked": 1
   },
   "tasks": [
@@ -2592,6 +2592,42 @@
       "fix-evidence": "Four mutants, production file untouched at HEAD of this close (`git status` after every run listed only the new test file). Each killed exactly the tests whose branch it removed, and nothing else: (A) the crash-window repair deleted, with `var hasCheckpoint` corrected to `let` so the mutant compiles -> 3 issues across `resumeAfterTheCrashWindowClearsTheStaleCheckpoint` and `resumeIntoAnUnverifiedFinalDirectoryRefusesAndKeepsTheCheckpoint` (/tmp/aud260-mutantA2.log); (B) only the manifest/receipt re-verification deleted, i.e. the repair keeps the weaker rule the removed `inspectPersistentInstall()` had -> exactly 1 issue, `resumeIntoAnUnverifiedFinalDirectoryRefusesAndKeepsTheCheckpoint`, which is the test that distinguishes the two rules; (C) the pairing guard deleted -> exactly `checkpointWithoutPartialRefusesAsCorrupt` and `partialWithoutCheckpointRefusesAsCorrupt`; (D) the `!overwrite` refusal and the resume/saved-download refusals deleted -> `freshRunIntoAnExistingInstallWithoutOverwriteRefuses`, `freshRunOverASavedDownloadAsksForResumeOrDiscard`, `resumeAfterTheCrashWindowClearsTheStaleCheckpoint` and `resumeWithNothingSavedRefuses`. Union: all seven tests are killed by at least one mutant. One mutant is recorded as a failed instrument rather than a result: the first A deleted the repair without fixing `var hasCheckpoint`, `-warnings-as-errors` failed the build, and exit 1 with no issues reported is a compile failure, not a kill -- diagnosed from the log (`#VariableNeverMutated`) and re-run as A2. Restores between mutants came from /tmp/aud260-fixed.swift, copied after the last real edit, never `git checkout --`.",
       "sibling-note": "The first run of this suite reported a pass while executing nothing: `swift test --no-parallel --filter RemotePayloadCopyTests/preflight` matched no test (my function names do not contain \"preflight\"), printed `warning: No matching test cases were run` on stderr, and exited 0. That is the silent-skip shape this audit already gates inside test bodies (`test-skip`, `test-hollow`), and it is reachable from a shell script that runs a named suite: `tools/repack_dense.sh:127` issues `swift test --no-parallel --filter DenseSSDAIEquivalenceTests` and its next line prints `all checks passed` -- so a rename of that suite, which several closes in this audit have performed, would turn the logit-equivalence gate into a warning and a pass. The same shape in `tools/tsan-storm.sh` is already pinned (`benchmark/test_tsan_storm_exit.py` names `--filter NoSuchSuiteZZZ` as a case), so the sibling that is *not* covered is `repack_dense.sh`. Filed separately rather than folded in here: this close's scope is the installer table, and the script needs its own instrument.",
       "commit": "f95bc1c"
+    },
+    {
+      "id": "AUD-261",
+      "severity": "S3",
+      "tier": "B",
+      "project": "tooling",
+      "category": "tests: the one step that proves the reader has no verdict that can fail",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "tools/repack_dense.sh:127-137",
+      "title": "tools/repack_dense.sh prints `all checks passed` over an equivalence gate that ran no test or skipped every one of them",
+      "discovered-by": "AUD-260's own close. The first run of the new preflight suite was `swift test --no-parallel --filter RemotePayloadCopyTests/preflight`, which matched nothing, printed only `warning: No matching test cases were run`, and exited 0 -- the reason the suite was re-run without the suffix, and the reason the shape was looked for in the scripts that call `swift test` rather than left as a mistake in a transcript.",
+      "evidence-before": "Step 5 is the script's own claim to matter -- its header says steps 3 and 4 prove the bytes and the receipt and only step 5 proves the reader interprets them -- and it was one statement whose status `set -e` propagated: `TINYTITAN_DENSE_EQUIV=1 ... swift test --no-parallel --filter DenseSSDAIEquivalenceTests`, then `echo \"all checks passed\"`. Both of the shapes that break it were run on Swift 6.4 and are quoted in the suite's docstring: a filter matching no test exits **0** (transcript /tmp/aud261-vacuous.log), and the summary line counts skips as passes -- `swift test --no-parallel --filter LibraryContractTests` with no model installed printed five `skipped.` lines and then `Test run with 4 tests in 1 suite passed after 0.001 seconds.` at exit **0** (/tmp/aud261-skipped.log). The gate is switched on by an environment variable, which is the skip shape by construction, so a suite renamed by a later close, or a run in a shell that lost `TINYTITAN_DENSE_EQUIV`, would print `all checks passed` having compared no logits at all.",
+      "evidence-after": "`benchmark/test_repack_dense_gate_verdict.py` (6 tests) extracts `gate_verdict` from the script by regex and drives the extracted text under /bin/bash 3.2.57 with canned logs, so the instrument cannot drift from what the script runs and the extraction itself refuses if the function is moved -- the idiom `test_install_models_batch_status.py` (AUD-253) established. Three logs are verbatim from the transcripts above; the fourth (one pair passed, one skipped) is the same shape at partial scale. The script now pipes the gate into the verdict on the same line, so the refusal sits on the statement that runs it.",
+      "fix-evidence": "Three mutants, each killed by exactly the tests that depend on it and nothing else: (A) delete the summary-line guard -> 1 failure (`test_a_run_that_matched_no_test_is_not_a_pass`); (B) delete the skip guard -> 2 failures (`test_a_run_where_everything_skipped_is_not_a_pass`, `test_a_partial_skip_is_not_a_pass`); (C) delete the transcript echo -> 1 failure (`test_a_run_that_actually_compared_logits_passes_and_is_shown`, which pins that refusing does not cost the operator the evidence). Script restored from `/tmp/aud261-fixed.sh`, a copy taken after the last edit, and re-diffed clean. A fourth guard -- refuse unless some test line reads `passed after` -- was written, then **removed before committing**: it had no failing test, and the failed-run shape it would have caught exits non-zero, which `set -o pipefail` carries. That was measured rather than assumed, with a stub `swift` on PATH driving the script's own extracted invocation over four cases: vacuous -> exit 1, all-skipped -> exit 1, passed -> exit 0 and the closing line reached, failed -> exit 1 and the closing line not reached.",
+      "sibling-note": "Every tracked script that runs `swift test`: three. `tsan-storm.sh` does not call it at all (it launches `swiftpm-testing-helper` directly), and its verdict is the helper's exit status -- which for an unmatched filter is **69**, measured in AUD-218 and pinned by `test_tsan_storm_exit.py`, so the vacuous shape cannot reach its `Clean` line. Its skip shape is a different question and was not filed: `Clean: no report in N instrumented runs` counts runs, not tests, and stays true when a gated suite in the server bundle (`ClientCLITests.swift:176`, `SideEngineServiceTests.swift:189`) skips -- a loss of coverage the line does not claim, so it reads as out of scope rather than as this defect. `release.sh:143-146` turned up the same family and is **AUD-262**: its verdict is `grep -q 'Test run with .* passed'` over a log that /tmp/aud260-full.log shows carries **seven** summary lines, one per test target, with the run's own status swallowed by `|| true`. The docs gate was re-measured after the registration: 62/66 python suites registered in CI, and the installer gate group is 198 OK in the recorded CI order (was 192).",
+      "commit": "2cb809a"
+    },
+    {
+      "id": "AUD-262",
+      "severity": "S2",
+      "tier": "A",
+      "project": "release",
+      "category": "gates: a release step whose verdict is one grep over a multi-line log",
+      "status": "OPEN",
+      "owner": "operator: a release-path gate, and its repair changes what tools/release.sh refuses to tag",
+      "host": "Mac (primary)",
+      "file_line": "tools/release.sh:143-146",
+      "title": "The release's test gate passes if any one of the seven per-target summary lines says passed, and the run's own exit status is discarded",
+      "discovered-by": "AUD-261's sibling sweep over every tracked script that runs `swift test` (three: repack_dense.sh, tsan-storm.sh, release.sh).",
+      "evidence-before": "`swift test --no-parallel 2>&1 | tee \"$STAGE_ROOT.testlog\" | grep -E 'Test run with' || true`, then `grep -q 'Test run with .* passed' \"$STAGE_ROOT.testlog\" || die`. Two parts of that are measured: the `|| true` throws away the only status that knows whether the suite failed, and the log holds one summary line **per test target** -- /tmp/aud260-full.log, a real unfiltered `swift test --no-parallel`, carries seven `Test run with` lines (799/127, 406/47, 157/22, 189/23, 35/10, 63/14, 97/10), and the passing run this audit has re-measured many times is exactly that shape. `grep -q` asks whether *some* line matches, so six `failed` lines and one `passed` line satisfy the gate and the release proceeds to the build, the archive and the tag check. The mixed shape itself is **constructed** from those seven real lines with six rewritten, not a run this host produced: to measure it would mean breaking a test in six targets and running the whole suite, which changes nothing about what the grep does and is not worth the tree edit. The inference is narrow -- seven lines, one per target, each printed independently -- and the `|| true` is plain in the source.",
+      "evidence-after": "",
+      "fix-summary": "Not yet fixed. The repair the shape calls for is the one AUD-261 landed: take the run's own exit status, require at least one summary line, and require every `Test run with` line to say passed -- then pin it with a suite that drives the extracted verdict function over the seven real lines and the constructed mixed log, the way `benchmark/test_repack_dense_gate_verdict.py` does. `test_release_installer_verification.py` already exists for the download-verification scripts and is the file's neighbour, not this gate's cover.",
+      "fix-evidence": "",
+      "sibling-note": "AUD-261 closed the same seam in `tools/repack_dense.sh`; `tools/tsan-storm.sh` was checked and cleared there (its helper exits 69 on an unmatched filter, measured in AUD-218, so the vacuous shape cannot reach its `Clean` line).",
+      "commit": ""
     }
   ]
 }
