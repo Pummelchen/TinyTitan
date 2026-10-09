@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:148  Blocked:1  Total:149**
+**Open:0  Done:149  Blocked:1  Total:150**
 
 ## Table
 
@@ -125,6 +125,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-250 | S2 | B | tooling | ``benchmark/memval_master.sh:40` -- `TINYTITAN_MASTER_SCENARIO=photograph python3 "$ROOT/benchmark/memory_master.py" report-all`, with no tree named, against `memory_master.py:51` `OUT = memval_env.results_tree(...)` and `:552` `raise SystemExit(report_all(OUT.parent))`; the reaching mechanism is `benchmark/memory_small_model.py:38,40` (`os.environ.setdefault("TINYTITAN_PORT", PORT)` and `RESULTS = memval_env.publish_results_tree(...)`, both at module scope) read by `benchmark/test_driver_documented_commands.py:76,88,111,121` and inherited at `benchmark/test_memval_master_exit.py:114` `env = dict(os.environ, ...)`` | the master sweep aggregates whatever tree the environment names, so an ambient `TINYTITAN_MEMVAL_RESULTS` gates a run on another tree's records -- reached in CI by a driver that publishes its own tree at import | verdict taken from a results tree the run never wrote | DONE | this Mac (M3, 24 GB); no model run, no server, nothing fetched |
 | AUD-252 | S2 | B | tooling | ``benchmark/test_concurrent_sessions.py:695` -- `return 0 if TOTALS["foreign"] == 0 and TOTALS["http_error"] == 0 else 1` in `main()`'s `BASE=` branch, against `:632` in `run_one_model` -- `separation_bad = leaked or TOTALS["http_error"] > 0 or not canary_ok or not cancel_ok` (both lines are pre-fix; the shared `print_verdict()` is what they became, and the BASE return is `:729`)` | the external-server mode of the concurrent-session leak harness exits 0 over a blind detector, and prints nothing that would show it | two verdicts in one harness: the branch an operator runs drops the controls | DONE | this Mac (M3, 24 GB); no model run, no server binary, loopback stub only, nothing fetched |
 | AUD-253 | S2 | B | tooling | `tools/install_models.sh:809-812` | install_models.sh --all-8bit exits 0 with a model it refused, and --all-4bit exits 1 with nothing missing | batch verdict: the loop's status was its last row's width test, not the installs it ran | DONE | Mac (primary) |
+| AUD-254 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:207-222` | HTTP accepts a presence_penalty the CLI refuses, and applies it -- a different completion, no error | validation: the wire bounded four sampling knobs and passed the fifth straight through | DONE | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -2298,6 +2299,22 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 **Evidence after.** New `install_width` collects every row's status, prints `installed N of M <width>-bit model(s)` and returns 1 when a row was missed. All five tests pass (/tmp/aud253-green.log); the Installer gates CI step as recorded runs 192 tests OK (187 before this suite); the CI model-free group runs 732 OK, unchanged; `bash tools/lint.sh shell` ok (27 scripts, system bash 3.2.57), `shellcheck` ok (0.11.0, no warnings), `python` ok (ruff 0.16.7), `docs` ok (61/65 python suites registered). `bash tools/install_models.sh --help` still exits 0 and still lists both modes. No model run, nothing downloaded.
 
 **Commit.** `0d7e872`
+
+### AUD-254 — HTTP accepts a presence_penalty the CLI refuses, and applies it -- a different completion, no error
+
+- **Severity / tier:** S2 / Tier B
+- **Project:** server
+- **Location:** `sources/TinyTitanLib/OpenAIRequestValidator.swift:207-222`
+- **Category:** validation: the wire bounded four sampling knobs and passed the fifth straight through
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D sweep back onto the Swift side, along the sampling-parameter path (wire -> facade -> engine validation) after a dozen closes in shell and python: every generation knob the wire touches, checked at each of the three layers rather than at the one the report named.
+
+**Evidence before.** `OpenAIRequestValidator.validate` bounds temperature (0...2), top_p (>0, <=1), top_k (1...256) and repetition_penalty (>=1) and then assigns `presencePenalty: request.presencePenalty ?? effectiveSampling.presencePenalty` with no check. The engine's `GenerationConfig.validate()` asks only `presencePenalty.isFinite`, so nothing downstream refused either; and the CLI's `--presence-penalty` has refused anything outside OpenAI's -2...2 since v5.10, so the wire accepted a request the flag rejects. It is not an ignored field: `Sampler.applyPenaltiesInPlace` subtracts the value once per distinct id already in the history, so 100 takes every token the model has used out of contention and the answer comes from the rest of the vocabulary. Measured by the test before the repair (/tmp/aud254-red.log, exit 1, 38 tests 1 issue at OpenAIValidationTests.swift:494:32): `failure.envelope` -> nil for presence_penalty 2.5, ie validate() returned a config carrying 2.5 instead of throwing. The three published rows all sit inside the range (house 0, thinking 0, Qwen3.8 instruct 1.5), so no shipped default can be refused by the new cap.
+
+**Evidence after.** The guard is in, and the whole test passes: `swift test --no-parallel --filter OpenAIValidationTests` -- 38 tests in 3 suites, exit 0 (/tmp/aud254-gated.log), covering 2.5 / -2.5 / 100 refused with param `presence_penalty` and the boundary values -2 / 1.5 / 2 accepted and still passing `generationConfig.validate()`. Full package suite serially: 7 target runs, 1734 tests in 253 suites, exit 0 (/tmp/aud254-full2.log). Gates as `bash tools/lint.sh <mode>`, each exit 0: swift-format, swiftlint, func-length, file-length, test-skip, test-hollow, docs (83 documents against 18 gates, 155 ledger commit references resolved). No model run -- the operator's TinyTitanServer holds the only live model process and the preflight forbids a second; nothing fetched; nothing pushed.
+
+**Commit.** `d3c3841`
 
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
