@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 142,
-    "done": 140,
+    "total": 143,
+    "done": 141,
     "open": 1,
     "blocked": 1
   },
@@ -2352,6 +2352,21 @@
       "evidence-before": "Three launches of the real writer's naming rule (`{arm}-r{RUN}.json`) into a scratch tree, then the real `memory_book.py report()` over it: with `TINYTITAN_MEMVAL_RUN` 1, 2, 3 the tree keeps 3 records and the report prints 3 rows; blank on all three it keeps 1 file and prints 1 row -- exit 0 in both cases, and the run column empty. RED in benchmark/test_memory_reports.py `TestABlankRunTokenRefuses` was 12 failures (six drivers accepting the blank token, six the whitespace-only one) with the unset-default and named-token controls passing.",
       "evidence-after": "benchmark/test_memory_reports.py `TestABlankRunTokenRefuses` (4 tests): the blank token refused by name in all six drivers, the whitespace one too, unset still `1`, a named token binding unchanged. GREEN, then the CI model-free python group at 711 tests OK. Mutant in a copy: the guard removed reproduces the same 12 failures and leaves both controls green, so the tests fail on the guard. Live refusal: `TINYTITAN_MEMVAL_RUN= python3 benchmark/memory_book.py report` -> `ABORT: TINYTITAN_MEMVAL_RUN is set to '', which names no run ...`, exit 1. `tools/lint.sh python` run over the whole tree this time (ruff 0.16.7, check and format clean), which is the correction AUD-243's close recorded.",
       "commit": "785158e"
+    },
+    {
+      "id": "AUD-246",
+      "severity": "S2",
+      "tier": "B",
+      "project": "tooling",
+      "category": "mislabeled-measurement",
+      "status": "DONE",
+      "host": "this Mac (M3, 24 GB), no model run, no server; every test drives a copy of the script in a temp checkout with a stub launcher and no release binary",
+      "file_line": "benchmark/memval_run.sh:67 and :73 (`RUNS=` / `FIRST_RUN=`) feeding the loop bound at :175 (`for RUN in $(seq \"$FIRST_RUN\" $(( FIRST_RUN + RUNS - 1 )))`), with the record name it writes at :212 and the report it ends on at :221",
+      "title": "a zero or negative repeat count made memval_run.sh count its runs *down* through run 0 and still exit 0",
+      "discovered-by": "task #62, the re-measurement of a candidate whose first probe was withdrawn as unsound. The withdrawn instrument turned out to have been right about the number and wrong about the cause, so it was rebuilt to fail observably: the arithmetic and `seq` were run in isolation over the script's own expression, capturing stdout, stderr and status separately, and the loop was counted rather than inferred.",
+      "evidence-before": "/bin/bash 3.2.57 with /usr/bin/seq over the script's expression: `RUNS=0` -> upper=0 -> `seq 1 0` emits \"1\" then \"0\", 2 iterations, the second record written as `{arm}-r0.json`; `RUNS=-1` -> upper=-1 -> `seq 1 -1` emits \"1\", \"0\", \"-1\", 3 iterations numbered down to -1; `FIRST_RUN=0` -> `seq 0 2` emits \"0\", \"1\", \"2\", which renumbers the interleaved repeats the recipe at docs/master-benchmark-results.md:216 exists to keep apart and overwrites what an earlier launch wrote. A non-numeric value did die, but from inside the arithmetic (`1.5: syntax error`, `abc: unbound variable`) after :45 had already made the directories. Exit status over all of it was the script's own, which is 0 when the rows it did write report cleanly. One premise of the withdrawn probe was falsified by this measurement and is recorded as not filed: `RUNS=\"${TINYTITAN_MEMVAL_RUNS:-3}\"` uses `:-`, which substitutes for null as well as unset, so a *blank* count never reaches the arithmetic -- it runs the documented three repeats and the report shows three repeats.",
+      "evidence-after": "benchmark/test_memval_run_repeats.py (7 tests, new suite): RUNS=0, RUNS=-1, RUNS=1.5 and FIRST_RUN=0 each refused by name with exit 2 before the script looks for a binary, the two documented count pairs and the unset defaults still reaching the run, and a blank count asserted to take its default rather than refused. RED was 5 failures on the pre-fix script; GREEN, then the CI model-free python group at 711 tests OK and this suite's own CI step (`test_memval_matrix_exit test_memval_run_repeats`) at 12 OK. Mutant in a copy with the guard reverted: the same 4 refusal tests fail and all 3 acceptance controls stay green. Live refusal from the real tree: `TINYTITAN_MEMVAL_RUNS=0 bash benchmark/memval_run.sh book` -> `ERROR: TINYTITAN_MEMVAL_RUNS is 0, which measures no run. ...`, exit 2; `TINYTITAN_MEMVAL_RUNS=\"\"` proceeds to the pre-existing staleness guard, as a blank should. `tools/lint.sh shell` (27 scripts, system bash 3.2.57), `shellcheck` 0.11.0 and `python` (ruff 0.16.7, whole tree) all ok -- the python gate caught this suite's own formatting before it shipped.",
+      "commit": "564402d"
     }
   ]
 }
