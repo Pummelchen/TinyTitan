@@ -281,3 +281,30 @@ is a `Path`. Measured on this tree: `memory_smoke.py:22` is the only `Path(os.en
 ..., ""))`, and `memory_projects.py` already does both right (`:364` guards on the string
 before it globs, `:449` aborts naming the two variables it needs), which is how the fix
 knew what the correct shape looked like rather than inventing one.
+
+AUD-236 closed a third python shape no gate here can see, and it is the arithmetic
+one. `e3 / max(e4, 1e-12)` is not a division by zero — `max` makes it legal, ruff
+sees a well-formed expression, and the run prints a number. The number is meaningless
+because of *what `e4` is*: the denominator was the error of the stored 4-bit weights
+against themselves requantized to 4 bits, which is exactly 0.0 for every tensor in
+every 4-bit install, so the floor was the divisor on every input the probe could be
+given, and its headline measured 205600894987.58x at exit 0. The rule to apply by
+hand is: before dividing by a measured error, name the input that makes it zero, and
+check whether the code can be reached with it. Its sibling in the same file is the
+sample itself — a verdict about 3-bit needs the weights a 3-bit repacker would carry,
+and on this repository's own MoE format those are the routed experts, which are not in
+the file the driver read (measured on an installed 125B-A6B build: `model_weights.bin`
+51,681,440 bytes and 30 entries, against 1,417,674,752 bytes in
+`packed_experts/layer_00.bin`). A hardcoded list of tensor names is a claim about the
+checkpoint; the checkpoint's own index and layout are the authority, and sampling by
+role pattern is what makes a stale list impossible rather than merely unlikely.
+
+What made these visible was the mutation check, so it is worth recording that a
+rewritten driver with a 34-test suite and no mutant run would have shipped five more
+defects: the first version of the fix reported a reference tensor stored at 4 bits as
+*twin absent* rather than *twin not finer*, printed `PROBE OK` while returning 1, had
+no assertion at all behind its dense-install `NOT MEASURED` line (the always-declared
+router row satisfied it), never tested a sample of zero tensors, and named
+`TINYTITAN_BENCH_MODEL` in the refusal for a bad `TINYTITAN_BENCH_REFERENCE`. All five
+were found by putting the fixed lines back one at a time and watching which tests stayed
+green; 22 of 22 mutants are now killed.
