@@ -364,6 +364,40 @@ jobs:
         # return in main() while the guard discarded it. Like the 3-bit probe it
         # imports numpy, and nothing else: coremltools is faked, so the real probe --
         # which needs the ANE and minutes per config -- is not what CI runs.
+        # test_tinytitan_ane_realweight_rehearsal drives the real-weight ANE
+        # rehearsal's real main() against synthetic `.ssdai` installs it writes in
+        # a temp directory, with `build_block`, `reference`, `rope_tables`,
+        # `causal_mask` and the probe's geometry constants patched and coremltools
+        # faked in `sys.modules`. It exists because that rehearsal had no verdict
+        # to fail: `return 0` was the only return in `main()`, the guard discarded
+        # even that, and no line in the file compared the per-layer error to
+        # anything, so a gap of NaN was a clean run. It hardcoded the
+        # full-attention layers as `range(3, 40, 4)` where the manifest's
+        # `fullAttentionLayerMask` on the installed 125B declares twelve; it froze
+        # the install path at import, so `TINYTITAN_BENCH_MODEL` was a no-op and
+        # the default named an install no one had pointed it at; it built
+        # `language_model.model.layers.N` stems, which is the other family's
+        # spelling, and died on a bare KeyError when the norm tensors it asks for
+        # (`q_norm`, `k_norm`) turned out to be 0 of 1,079 entries in the install
+        # measured here; it took every tensor as 4-bit where 98 of those 1,079 are
+        # 8-bit by payload size, which raises on the layer router before a single
+        # number is timed; there was no `try` anywhere in it, so the first raise
+        # ended the sweep and nothing was written; the block output was picked by
+        # `next()` over the model's outputs through a `names.index(n)` round-trip
+        # rather than by shape; the artifact had no mkdir behind it and `json.dump`
+        # wrote a NaN gap as a literal `NaN`, which is not RFC 8259; and it restated
+        # the GPU reference instead of importing it, then multiplied the projection
+        # by a layer count that is only true for the family it had hardcoded and
+        # printed the result as a projected end-to-end prefill with no integration
+        # overhead in it. It now reads the mask, the stem and the widths from the
+        # install through `tools/ssdai_reader.py`, imports every geometry and
+        # reference constant from the attention probe above, keeps a row that fails
+        # in the row rather than the run, and returns its status through
+        # `sys.exit(main())`. The real
+        # rehearsal needs an ANE, a converted block and a model install, so CI runs
+        # none of that: no model is loaded here, and the suite that proves the
+        # driver's verdict cannot be reached by a run that measured nothing is what
+        # is registered.
         # wall time was 22.5 s at load average 4.3 with the operator's own server still
         # listening on 8080, 19.1 s of it reported by the runner — the 22-suite list
         # measured 24.9 s at load 6.5 and 18.8 s at load 3 an hour earlier, so the
@@ -391,7 +425,13 @@ jobs:
         # list — this one plus the ANE attention probe, 595 tests — measured 21.3 s
         # wall and 21.1 s reported at load average 3.6, then 20.5 s and 20.4 s at
         # load 3.6, and 21.1 s a third time, all clean, with the operator's server
-        # on 8080 and untouched.
+        # on 8080 and untouched. The 32-suite list — this one plus the real-weight
+        # ANE rehearsal, 659 tests — measured 22.1 s wall and 21.8 s reported at load
+        # average 3.1, then 21.7 s and 21.6 s at load 3.2, both clean, with the
+        # operator's server on 8080 and untouched. Naming the suite before staging
+        # its file was itself caught: `test_this_repository_is_registered` refuses a
+        # CI name with no tracked `benchmark/test_*.py` behind it, which is that gate
+        # working in the direction the first measurement run tested.
         # registration of this list is now itself a gate:
         # `tools/docs-facts.py`'s `python_suite_registration()` refuses a tracked
         # `benchmark/test_*.py` named neither here nor in
@@ -412,7 +452,8 @@ jobs:
             test_capital_of_paris_smartness test_tinytitan_maxthroughput \
             test_tinytitan_slots_ab test_tinytitan_longgen \
             test_tinytitan_benchmark test_tinytitan_longctx test_memory_smoke \
-            test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe
+            test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe \
+            test_tinytitan_ane_realweight_rehearsal
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
