@@ -48,6 +48,10 @@ public enum MemoryLogEvent: Sendable, Equatable {
     /// The guard refused a model-derived write over what the person asserted.
     /// The person's value stays active and the address is disputed.
     case guardHeld(key: String)
+    /// How many model changes one consolidation refused on that rule. The
+    /// per-key line above names them; this is the count the summary keeps, so
+    /// a consolidation that refused four of five does not read as a quiet one.
+    case guardHeldsStopped(session: String, count: Int)
     /// Facts a consolidation returned that already held the same value.
     case unchangedSkipped(session: String, count: Int)
     /// A fact the side-engine judged not worth keeping. It is not stored at
@@ -110,6 +114,9 @@ public enum MemoryLogEvent: Sendable, Equatable {
             return "memory reversion flagged as disputed: \(key)"
         case .guardHeld(let key):
             return "memory guard kept the user's fact, marked disputed: \(key)"
+        case .guardHeldsStopped(let session, let count):
+            return "memory session=\(session) consolidation kept the person's fact "
+                + "over \(count) model change(s)"
         case .sharedFactWritten(let key):
             return "memory shared fact written for every project: \(key)"
         case .retrievalHints(let judged, let answered):

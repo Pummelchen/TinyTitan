@@ -299,4 +299,59 @@ import Testing
             in: scope, guarding: true, flaggingReversions: true)
         #expect(outcome == .heldByGuard(existing: "Sundays only"))
     }
+
+    /// The guard's refusal is an outcome of a consolidation, and a counted
+    /// one: `storeConsolidation` already adds it up, and every other refusal
+    /// reason -- unchanged, near-duplicate, not worth keeping, a rule fixes
+    /// it, possible conflict -- logs its count for the session. This is the
+    /// reason that was counted and then dropped, so a consolidation that
+    /// refused four of five model changes reported only "consolidated 1
+    /// fact(s)" and the operator could not tell refusal from absence.
+    @Test func aConsolidationTheGuardHeldSaysSoInTheSummary() async throws {
+        let (store, _) = try await store()
+        var configuration = MemoryConfiguration()
+        configuration.isEnabled = true
+        configuration.workspace = "repo-a"
+        configuration.user = "local"
+        let log = LogCollector()
+        let service = MemoryService(
+            configuration: configuration,
+            durableStore: store,
+            log: { log.append($0) })
+        let context = try #require(await service.beginSession(id: "s-guarded"))
+        _ = try await store.set(
+            try record("characters/marcus/eyes", "grey", user: true),
+            in: context.scope, guarding: true, flaggingReversions: true)
+        _ = try await store.set(
+            try record("rules/ferry", "Sundays only", user: true),
+            in: context.scope, guarding: true, flaggingReversions: true)
+
+        let written = await service.storeConsolidation(
+            [
+                try record("characters/marcus/eyes", "hazel", user: false),
+                try record("rules/ferry", "runs daily", user: false),
+                try record("state/chapter3", "the inn burned", user: false),
+            ], in: context)
+
+        #expect(written == 1)
+        #expect(
+            log.messages().contains { $0.contains("kept the person's fact over 2") },
+            "two held writes, counted: \(log.messages())")
+    }
+}
+
+/// Collects the service's log events.
+///
+/// unchecked-invariant: `events` is only ever touched under `lock`.
+private final class LogCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [MemoryLogEvent] = []
+
+    func append(_ event: MemoryLogEvent) {
+        lock.withLock { events.append(event) }
+    }
+
+    func messages() -> [String] {
+        lock.withLock { events.map(\.message) }
+    }
 }

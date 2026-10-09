@@ -176,7 +176,7 @@ extension MemoryService {
         }
         logConsolidationSummary(
             session: context.session.id, written: written,
-            unchanged: unchanged, duplicates: duplicates,
+            unchanged: unchanged, held: held, duplicates: duplicates,
             dropped: dropped, ruleConflicts: ruleConflicts,
             conflicts: conflicts)
         return written
@@ -184,11 +184,12 @@ extension MemoryService {
 
     /// One line per counter that fired, then the total.
     func logConsolidationSummary(
-        session: String, written: Int, unchanged: Int,
+        session: String, written: Int, unchanged: Int, held: Int,
         duplicates: Int, dropped: Int,
         ruleConflicts: Int, conflicts: Int
     ) {
         if unchanged > 0 { log(.unchangedSkipped(session: session, count: unchanged)) }
+        if held > 0 { log(.guardHeldsStopped(session: session, count: held)) }
         if duplicates > 0 { log(.nearDuplicatesStopped(session: session, count: duplicates)) }
         if dropped > 0 { log(.notDurablesStopped(session: session, count: dropped)) }
         if ruleConflicts > 0 {
