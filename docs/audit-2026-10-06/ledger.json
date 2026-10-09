@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 143,
-    "done": 141,
-    "open": 1,
+    "done": 142,
+    "open": 0,
     "blocked": 1
   },
   "tasks": [
@@ -2330,13 +2330,15 @@
       "host": "this Mac (M3, 24 GB), no model run, no server; every test is a fresh import under a patched environment",
       "id": "AUD-244",
       "category": "status discarded at the last hop",
-      "status": "OPEN",
+      "status": "DONE",
       "file_line": "benchmark/memval_master.sh:247-252 (`report-all` runs for its record and its status is never read; the exit comes only from `$failed`) with the design comment at :244-246; the gate that would have caught it is benchmark/test_memval_master_exit.py:97 `test_a_clean_run_exits_zero`",
       "title": "the master sweep prints MASTER DONE over a report that says NOT MEASURED, because AUD-240's status has no listener",
       "discovered-by": "Step 5 of the AUD-243 close: the sibling-defect hunt for `memval_env.py` being missing from a temporary checkout. The crash itself was AUD-243's own fixture breakage, but what it exposed is independent of it and still true on main.",
-      "evidence-before": "Measured through the registered fixture with every scenario stubbed to exit 0, so the results tree is empty -- the same shape AUD-240 gated inside `report-all`: stdout after the report header reads `NOT MEASURED: no run of any scenario under .../.build/benchmark-logs` and then `##### MASTER DONE Fri Oct  9 06:26:58 CEST 2026: all 10 scenarios exited 0`, with rc 0 and empty stderr. A day-long sweep that produced no record at all therefore reports the run as complete, and the status AUD-240 added to `memory_master.py report-all` is unreachable from the script that calls it.",
-      "evidence-after": "Not yet fixed -- it needs a decision, not a patch. Propagating the report's status makes `test_a_clean_run_exits_zero` fail, because its stub `memval_run.sh` writes no result JSON, so a clean fixture run genuinely is not measured; the honest fix is to teach the stub to write one record per scenario and then propagate, which edits the very file carrying two open operator decisions (the `report_all` header-above-refusal placement, and its now-false docstring line about `report-all` returning None). Held open until those are settled rather than rewriting the fixture a third time unprompted.",
-      "commit": ""
+      "evidence-before": "Registered fixture run (a copy of the driver in a temp checkout with a stub `memval_run.sh`): `NOT MEASURED: no run of any scenario under ...` printed, then `##### MASTER DONE ...: all 10 scenarios exited 0`, exit 0, stderr empty. The status AUD-240 gave the reports was unreachable from the script that calls them, because the driver ran `report-all` as a statement.",
+      "evidence-after": "RED first: 2 new tests in benchmark/test_memval_master_exit.py failed with the 7 existing tests passing; GREEN: 9 OK. Mutant with the propagation reverted in a copy: the same 2 failures, 7 controls green. Live, one scenario exiting 0 and writing no record -> driver status 1 with the reason named. The CI model-free python group at 713 tests OK (exit 0); `tools/lint.sh shell` (27 scripts, system bash 3.2.57), `shellcheck` 0.11.0 and `python` (ruff 0.16.7, whole tree) ok. Step 5 over the sibling shape: the scripts ending in a bare `exit 0` (tools/ane_sidecars.sh, tools/tsan-storm.sh) only reach it after an explicit failure branch, and benchmark/memval_matrix.sh's trailing `echo ... | tee` sits behind AUD-212's FAILED exit, so none discards a status; the seam is closed end to end because memval_run.sh:221's report is the script's last command, so a NOT MEASURED report already fails the arm the matrix and this driver both capture.",
+      "commit": "961891c",
+      "fix-evidence": "benchmark/memval_master.sh now reads report-all's status: `... || report_status=\"$?\"`, and the verdict has two branches -- a scenario that failed, or every scenario exiting 0 over a tree the report cannot pool, both exit 1, with the summary naming `report-all exited $report_status` and \"no result record to pool\".",
+      "fixture-note": "The stub `memval_run.sh` in the suite wrote no result record at all, which made `test_a_clean_run_exits_zero` pin the defect as expected behaviour -- a clean run there was a run that measured nothing. It now leaves one record per arm (RECORDS=1 default, RECORDS=0 removes them); the assertion is unchanged and now describes a run that earns it. The file's docstring claim that report-all 'returns None, so its exit status is 0' was falsified by AUD-240 and is corrected in the fix commit, along with its numbered test reference."
     },
     {
       "id": "AUD-245",
