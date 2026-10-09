@@ -121,11 +121,11 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-09, **203 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 203 before the commit that edits this row lands, so it reads 204 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `209de21` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-09, **205 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..HEAD`, measured at 205 before the commit that edits this row lands, so it reads 206 once it has; `tools/lint.sh docs` does not check this number, so it drifts -- it was two behind here when AUD-233 landed the follow-up commit without moving it); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `6c26259` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
-| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **132 rows / 131 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
+| Audit | **this audit**: `docs/audit-2026-10-06/` — as of 2026-10-09, `counts` in `ledger.json` is **133 rows / 132 closed / 0 open / 1 blocked** (`python3 -c "import json;print(json.load(open('docs/audit-2026-10-06/ledger.json'))['counts'])"`), and the eighteen gates in `tools/lint.sh` are partly what it left behind. That command is not a suggestion here: `tools/lint.sh docs` compares this very string against `ledger.json` and fails, so any ledger close that moves a count edits this line in the same commit — which is the point, because a restated count is how AUD-122 shipped a commit message its own file contradicted. **the 2026-09 audit**: 28 findings, all closed. The wiki's archive page was removed on 2026-09-29 when the wiki became user-only — the record is in the wiki repository's history at `6acaa8f` |
 | `.build` | release build of current `main` (`swift build -c release`, 2026-10-06); a clean scratch release build is part of each dry run |
 | Wiki | `.qwen/wiki`, remote `TinyTitan.wiki.git`, **1 commit ahead of `origin/master`** as of 2026-10-06 (`git -C .qwen/wiki status -sb`) — the wiki half of the last change is unpushed, exactly as the code half is; publishing is **two pushes**. User-facing only since 2026-09-29 |
 | DeepSeek Harness | pinned `0.2.0-rc.2` and **enforced**; both plugins refuse any other version; the global harness runs the gate, the private one is refreshed but idle until its next start. The private bundle is isolated down to the caches: npm's cache/logs/user config, pnpm's home and the XDG cache/state all live under `~/.tinytitan/dsh`, so a run adds nothing to `~/.npm`, `~/Library/pnpm`, `~/.cache` or `~/.local/state` (`benchmark/test_dsh_isolation.py` pins it; verified in a simulated factory-new HOME). Since 5.11 the bundle is the delivery — the installer's source archive carries `plugins/`, and the route writer and the launcher both resolve the installed layout (`../bin`, `../models`) instead of a checkout's. 0.2.0 removed `settings.yaml` and the preset files: the harness imports a legacy `settings.yaml` into the profile patch at boot (and renames it `.imported`), the plugin writes the route through the `settings` service and registers its preset with the preset registry, and the default preset is set only while the profile names none |
@@ -560,11 +560,47 @@ is the authority. On 2026-10-04 it holds one Open row:
    `NOT RUN` line at exit 1 where the pre-fix driver raised. NOT evidenced: no live-model run -- this check
    needs a memory-enabled server on 8096 and the operator's server holds 8080, so the end-to-end verdict is
    reported as not checked rather than fetched for.)
-   **The next sweep along this seam is the entry points that throw their status away, four of the
+   **AUD-236** (`tinytitan_3bit_probe.py` -- the headline number is a division by an error that is zero by
+   construction. `e4 = rel_error(w, requantize(w, 4))` where `w` *is* the stored 4-bit tensor, so requantizing
+   it to 4 bits is exact, `e4` is `0.0` on every input the file can reach, and `ratio = e3 / max(e4, 1e-12)` is
+   `e3 x 1e12`: run on a synthetic install the pre-fix file prints a `4-bit` column of `0.0000`, per-tensor
+   ratios of 193,958,893,418.31x to 211,191,222,071.65x, `median 3-bit/4-bit error ratio: 205600894987.58x`
+   and exits 0, so the docstring's decision rule ("an error several times 4-bit's is a strong signal") can
+   never fire against anything. Below that, the sample contained none of the weights the decision is about: the
+   docstring says it quantizes "the real routed-expert and attention tensors" and the comment at :132-134 says
+   "Attention + shared-expert tensors ... plus the router", while the six-name list holds neither a routed
+   expert nor a router -- measured on an installed 125B-A6B MTP build, `model_weights.bin` is 51,681,440 bytes
+   with 30 entries whose only `expert` names are the four `mlp.shared_expert*` projections, and 512 routed
+   experts per layer sit in `packed_experts/layer_00.bin` at 1,417,674,752 bytes. `dequant4` at :68 assumed
+   two nibbles per byte for every entry while the manifest declares the router 8-bit; `crosses_word` at :114
+   was computed and then used only to print a yes/NO column, so the file's own second question ("how much extra
+   unpack work each weight costs") was never measured; `MODEL` was read at import (:35) so
+   `TINYTITAN_BENCH_MODEL` was a no-op; and `def main() -> int` at :128 with `return 0` at :191 as its only
+   return, discarded by the bare `main()` at :195. The fix is `benchmark/test_tinytitan_3bit_probe.py`
+   (34 tests, model-free) first, then the driver: `ratio_against()` returns `None` when the reference grid is
+   no finer than the tensor's own, so the ratio is `NOT MEASURED` naming `TINYTITAN_BENCH_REFERENCE` instead of
+   a division by the floor; the sample is built from role patterns against the resident index plus the routed
+   experts read through `PackedExperts`/`layout.json`; widths come from the repository's own reader; the
+   crossing count and added loads per weight are printed; `bench_model()`/`reference_dir()` read the environment
+   at call time; `open_weights(directory, env)` names the variable that named the install it is refusing -- a
+   sibling of the AUD-193 wrong-cause class, and it was a mutation-check survivor; `open_experts` returns `None`
+   for a dense checkpoint and refuses when a layout describes a `layer_NN.bin` that is not there; a declared
+   role the sample did not reach costs the run its status rather than printing a dash row; and the guard is
+   `sys.exit(main())`. 34 tests, 22/22 mutants killed -- five survived the first run and became tests (a
+   same-width twin reported as "no twin at all", the unasserted `PROBE INCOMPLETE`, the dense assertion
+   satisfied by the always-declared router row, no test for a zero-tensor sample, and the wrong variable named
+   in a reference refusal), and two survived the second run because the tests asserted only the word "finer",
+   which the fixed trailing sentence also contains. Verified against the real installed 4-bit build: no
+   reference prints `PROBE INCOMPLETE` and exits 1; the same-width build as the reference reports 2 tensors
+   with no twin and 14 stored no finer than their own 4-bit grid, and yields exactly one legitimate ratio --
+   the router at 2.15x, the only sampled role stored at 8 bits -- and still exits 1. NOT evidenced: a ratio
+   against a wider reference, because there is no 8-bit install under `models/` and none may be fetched for a
+   gate, so that path is proven only on synthetic installs; and no model run, the operator's server holding 8080.)
+   **The next sweep along this seam is the entry points that throw their status away, three of the
    original ten remain.** Measured by reading every
    non-test driver's `__main__` body in `benchmark/`: nine call `main()` and discard what it returns
    -- `memory_smoke.py:153` (a line AUD-235 rewrote; the guard is `sys.exit(main())` at :408 now),
-   `tinytitan_3bit_probe.py:195`,
+   `tinytitan_3bit_probe.py:195` (a line AUD-236 rewrote; the guard is `sys.exit(main())` at :476 now),
    `tinytitan_ane_attention_probe.py:359`,
    `tinytitan_ane_realweight_rehearsal.py:201`, `tinytitan_longctx.py:212`,
    `tinytitan_longgen.py:136`, `tinytitan_maxthroughput.py:176`, `tinytitan_slots_ab.py:125` (and
@@ -572,24 +608,28 @@ is the authority. On 2026-10-04 it holds one Open row:
    `raise SystemExit(main())`, which is the same thing done right. (Those line numbers are the
    `main()` call itself; the paragraph that first listed them pointed one line higher, at the
    `if __name__ == "__main__":` guard above each, and was corrected by re-running the grep rather
-   than by remembering.) Six are now closed: AUD-230 found `tinytitan_maxthroughput.py` returning no
+   than by remembering.) Seven are now closed: AUD-230 found `tinytitan_maxthroughput.py` returning no
    status anywhere in the file, AUD-231 `tinytitan_slots_ab.py` keeping its only `sys.exit` inside the
    per-arm function, AUD-232 `tinytitan_longgen.py` averaging its warm-up into the headline mean and
    printing `mean=0.00 tok/s` for an arm whose log held no footer, AUD-233 `tinytitan_benchmark.py`
    measuring its own denominator out of its survivors, AUD-234 `tinytitan_longctx.py` printing the
-   second quarter of a generation as its `first-half` in a guessed unit, and AUD-235 `memory_smoke.py`
+   second quarter of a generation as its `first-half` in a guessed unit, AUD-235 `memory_smoke.py`
    reading one status out of three requests and printing `SMOKE OK` over an isolation probe that answered
-   500. The four line numbers still open were re-run for AUD-235 and still hold. Re-running that grep for AUD-233 turned up a
+   500, and AUD-236 `tinytitan_3bit_probe.py` dividing its headline ratio by an error that is 0.0 by
+   construction while sampling none of the routed experts the verdict is about. The three line numbers
+   still open were re-run for AUD-236 and still hold. Re-running that grep for AUD-233 turned up a
    **tenth** site the nine never named: `tinytitan_m5_sweep.py:280` ends in a bare `main()` too. It
    was in the original list for no reason recorded anywhere -- `memory_smoke.py` and
    `tinytitan_longctx.py` were named there while returning nothing at all, so the omission was not a
    rule about what the list counted, and a remembered list is no substitute for re-running the grep.
-   Read what remains by kind, because they are not one shape. `tinytitan_3bit_probe.py` (:128),
-   `tinytitan_ane_attention_probe.py` (:263) and `tinytitan_ane_realweight_rehearsal.py` (:105) declare
-   `def main() -> int` and end on `return 0` (:191, :355, :197), so the handover's question there -- does a
+   Read what remains by kind, because they are not one shape. `tinytitan_ane_attention_probe.py` (:263) and
+   `tinytitan_ane_realweight_rehearsal.py` (:105) declare `def main() -> int` and end on `return 0` (:355,
+   :197), so the handover's question there -- does a
    failed probe return anything *other* than 0 -- was answerable by grep and is now answered: `return 0` is
-   the only `return` inside each `main()`, and none of the three contains a `sys.exit` or a
-   `raise SystemExit` anywhere, so all three return 0 whatever they measure. `tinytitan_m5_sweep.py:137`
+   the only `return` inside each `main()`, and neither contains a `sys.exit` or a
+   `raise SystemExit` anywhere, so both return 0 whatever they measure. `tinytitan_3bit_probe.py` had that
+   same shape (:128 and :191 before AUD-236) and its `return 0` was the least of it: the verdict it returned
+   0 for was a ratio divided by a denominator that is 0.0 by construction. `tinytitan_m5_sweep.py:137`
    returns no status anywhere, which is the AUD-234 shape `tinytitan_longctx.py:165` had until it was closed,
    and its one `sys.exit` at :156 is the missing-CLI message. The characterization this paragraph carried for
    `memory_smoke.py` -- that its only `raise SystemExit(1)` at :145 was "the AUD-231 shape where one failure
