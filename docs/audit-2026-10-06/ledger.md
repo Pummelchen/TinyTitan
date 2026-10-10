@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:1  Done:156  Blocked:1  Total:158**
+**Open:1  Done:158  Blocked:1  Total:160**
 
 ## Table
 
@@ -127,6 +127,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-253 | S2 | B | tooling | `tools/install_models.sh:809-812` | install_models.sh --all-8bit exits 0 with a model it refused, and --all-4bit exits 1 with nothing missing | batch verdict: the loop's status was its last row's width test, not the installs it ran | DONE | Mac (primary) |
 | AUD-254 | S2 | B | server | `sources/TinyTitanLib/OpenAIRequestValidator.swift:207-222` | HTTP accepts a presence_penalty the CLI refuses, and applies it -- a different completion, no error | validation: the wire bounded four sampling knobs and passed the fifth straight through | DONE | Mac (primary) |
 | AUD-262 | S2 | A | release | `tools/release.sh:36-47 (verdict), 160-162 (the gate)` | The release's test gate passes if any one of the seven per-target summary lines says passed, and the run's own exit status is discarded | gates: a release step whose verdict is one grep over a multi-line log | DONE | Mac (primary) |
+| AUD-263 | S2 | A | release | `tools/compact-release-notes.py:183-199 (the fold), 201-241 (the blocks), 274-280 (list items)` | compact-release-notes.py merges fenced examples, tables, blockquotes, numbered items and nested bullets into single bullets, and no test named the script | gates: the one publisher of the Release notes re-laid out markdown whose line breaks are its content | DONE | Mac (primary) |
 | AUD-259 | S3 | B | server | `sources/TinyTitanServer/Core/CPUModelBackend.swift:175` | `CPUModelBackend.setContention` promises the caller sets the served CPU model's thread width from GPU activity; no caller does, so in a mixed GPU+CPU catalog the CPU model holds full width while a GPU generation runs | decision: a public setter whose documented caller does not exist, and wiring it changes measured performance | OPEN | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
@@ -166,6 +167,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-258 | S3 | B | repack | `sources/TinyTitanRepack/Core/Remote/RemoteStreamingRepacker+Remote.swift:26-33` | `--resume` refused a foreign source and a drifted copy plan correctly, with no test for either, while a dead validator checked two of the four fields the real rule compares | tests: a live safety refusal no test pins, plus a dead weaker duplicate of it | DONE | Mac (primary) |
 | AUD-260 | S3 | B | repack | `sources/TinyTitanRepack/Core/Remote/RemoteStreamingRepacker.swift:29-72` | The installer's preflight refuses a stale, orphaned or already-present install correctly, and no test asserted any branch of it | tests: a seven-branch state machine on the path to a 168 GiB download, none of it pinned | DONE | Mac (primary) |
 | AUD-261 | S3 | B | tooling | `tools/repack_dense.sh:127-137` | tools/repack_dense.sh prints `all checks passed` over an equivalence gate that ran no test or skipped every one of them | tests: the one step that proves the reader has no verdict that can fail | DONE | Mac (primary) |
+| AUD-264 | S3 | A | docs-gates | `tools/docs-facts.py:358-369 (ledger_commit_evidence)` | A blank ledger commit field is tolerated on a DONE row, so a close can report a fix pointer it never wrote | gates: an evidence check whose exception is wider than the case it was written for | DONE | Mac (primary) |
 
 ## Detail
 
@@ -2340,6 +2342,26 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 
 **Evidence after.** `benchmark/test_release_test_gate.py` (7 tests) extracts `die` and `test_gate_verdict` from the script by regex and drives the extracted text under /bin/bash 3.2.57, so the instrument cannot drift and the extraction refuses if either function moves. Two wiring tests pin the statement itself: the verdict is called exactly once and its second argument is `${PIPESTATUS[0]}`, and no `|| true` remains anywhere inside the `gates` step. The seven-line fixtures are the real counts from /tmp/aud260-full.log; the mixed and all-failed logs are those lines rewritten to the measured failure shape, and the suite says so in its docstring. The whole gates statement, extracted by line index and run over a stub `swift` on bash 3.2.57, was then re-measured on all four shapes: clean seven passed -> exit 0 and the release proceeds; one target passing of seven -> exit 1, `6 of 7 test-target runs reported failure`; every target failed -> exit 1, `7 of 7`; build error with no summary -> exit 1, `reported no test-target run at all`. Gate group: 205 tests OK in the recorded CI order (was 198 before this suite joined it), `tools/lint.sh python`, `shell` (27 scripts, system bash 3.2.57) and `shellcheck` all exit 0.
 
+**Commit.** `15808fe, ba0ddaf`
+
+### AUD-263 — compact-release-notes.py merges fenced examples, tables, blockquotes, numbered items and nested bullets into single bullets, and no test named the script
+
+- **Severity / tier:** S2 / Tier A
+- **Project:** release
+- **Location:** `tools/compact-release-notes.py:183-199 (the fold), 201-241 (the blocks), 274-280 (list items)`
+- **Category:** gates: the one publisher of the Release notes re-laid out markdown whose line breaks are its content
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** The AUD-262 sibling sweep's coverage pass: the set of tracked scripts that no test file names, measured rather than recalled.
+
+**Evidence before.** The script's docstring promises "nothing is reworded, only re-laid-out", and six shapes were measured against the committed script before it changed. `docs/release-notes-v5.18.md` published one bullet: `- ``` converting 38.7/91.6 GB 42% 4/13 shards eta 12m installing 12.3/38.1 GB 32% eta 4m10s ``` ` -- a two-line example of the installer's progress-line format, whose whole content is the line break. `docs/release-notes-v5.1.md` published `- | Model | 4-bit | 8-bit | | --- | ---: | ---: | | Qwen 3.6 35B-A3B | +1.8% | ...` (a four-row table as a sentence; that file has two such tables), two blockquotes with their `>` markers glued inside the sentence, and one fence collapsed the same way -- five destroyed blocks in one file. The lower-case fragment fold failed in both of its cases: unwrapped it published `- - The reader coalesces adjacent ranges. e.g. ...` (it re-wrapped a line that already carried its marker), and wrapped it gave the fragment its own bullet (the bullet's head is not `out[-1]` once the bullet wrapped, which is the usual case at the 100-column default) -- /tmp/aud263-probe.md, /tmp/aud263b.md. The list-item branch did the same to two more shapes: `1. Verify / 2. Clear / 3. Run` arrived as six bullets with each number stranded on a line of its own, and an indented `- child` item was appended to its parent's sentence. None of this is visible to `release.sh`'s `--require`, which greps tokens: every token survived the merge.
+
+**Fix.** Fences, `|` rows and `>` quotes are blocks now: `open_block(marker)` / `close_block()` carry each line verbatim and blank-delimit the run, so a table stays a table and an example keeps its line breaks (the per-line blanking an earlier attempt emitted a table with a blank between rows -- caught by reading the real output, not by the tests, which is why the instrument asserts contiguity rather than line presence). The fold walks back over wrapped continuation lines to the bullet's head and takes its text, not its marker, and folds only a lower-case fragment. A line whose first token is `- ` or `N. ` starts a list item whatever its indentation, and an enumerator stays inside its bullet's text.
+
+**Evidence after.** `benchmark/test_release_notes_compact.py` (16 tests) runs the real script: four fixture tests that assert each block travels as one contiguous, blank-delimited run with its markers, a corpus test over every `docs/release-notes-v*.md` that fails if its own probe found no blocks, the idempotency promise on all ten shapes, and the `### Checksum` byte-for-byte, `--require` and `--max-chars` refusals the release path relies on. Mutation sweep of eleven mutants -- fence passthrough, the block marker set minus `>`, open_block's blank condition, close_block as a no-op, the fold's walk-back, its marker strip, folding a capitalised sentence, a fence opening without flushing its paragraph, ordered items as prose, a dropped enumerator, nested items as continuation -- every one killed. CI gate group re-measured in its recorded order: 219 tests OK (205 before this suite joined it). `tools/lint.sh python` (ruff 0.16.7), `docs` (163 ledger commit references resolved), `shell` and `shellcheck` exit 0.
+
+**Commit.** `cb08776, 05bb0f5`
+
 ### AUD-259 — `CPUModelBackend.setContention` promises the caller sets the served CPU model's thread width from GPU activity; no caller does, so in a mixed GPU+CPU catalog the CPU model holds full width while a GPU generation runs
 
 - **Severity / tier:** S3 / Tier B
@@ -3071,3 +3093,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** `benchmark/test_repack_dense_gate_verdict.py` (6 tests) extracts `gate_verdict` from the script by regex and drives the extracted text under /bin/bash 3.2.57 with canned logs, so the instrument cannot drift from what the script runs and the extraction itself refuses if the function is moved -- the idiom `test_install_models_batch_status.py` (AUD-253) established. Three logs are verbatim from the transcripts above; the fourth (one pair passed, one skipped) is the same shape at partial scale. The script now pipes the gate into the verdict on the same line, so the refusal sits on the statement that runs it.
 
 **Commit.** `2cb809a`
+
+### AUD-264 — A blank ledger commit field is tolerated on a DONE row, so a close can report a fix pointer it never wrote
+
+- **Severity / tier:** S3 / Tier A
+- **Project:** docs-gates
+- **Location:** `tools/docs-facts.py:358-369 (ledger_commit_evidence)`
+- **Category:** gates: an evidence check whose exception is wider than the case it was written for
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Writing AUD-263's own close row: filling in its `commit` field meant reading how that field is checked, and AUD-262's was empty.
+
+**Evidence before.** `ledger_commit_evidence` skips any row whose field is blank (`if not field.strip(): continue`) for the reason in its own docstring -- a row that refuted its finding (AUD-132) or is blocked (AUD-139) has no commit to name. True of those statuses, false of DONE, and the check never looked at status. Measured on this repository: 156 DONE rows, exactly one with an empty field -- AUD-262, written by this audit's own close commit `bb60a41`, whose fix commits `15808fe` and `ba0ddaf` exist and were named only in prose fields the gate does not read. The turn's report said the pointer had been kept.
+
+**Fix.** One status test inside the blank exception, plus the row it was supposed to catch.
+
+**Evidence after.** The gate now requires a non-blank, resolvable commit on a DONE row and still allows the blank on BLOCKED and OPEN. `benchmark/test_docs_facts_ledger.py` is 12 tests: the new DONE case fails as named, the honest non-DONE blank stays allowed, and the real-ledger test runs the gate over this repository. Three mutants killed -- tolerate every blank, fail every blank, and a lower-case status comparison (the last pinned because `render_ledger.py`'s STATUS_ORDER is the only vocabulary a row can carry, which is also why the redundant `.upper()` this began with is gone). AUD-262's field now reads `15808fe, ba0ddaf`, and `tools/lint.sh docs` resolves 163 ledger commit references at exit 0.
+
+**Commit.** `ab39375`
