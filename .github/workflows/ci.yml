@@ -569,6 +569,10 @@ jobs:
         # the operator's server on 8080 and untouched. The 40-suite list — this one
         # plus the sampler A/B verdict, 824 tests — measured 37.0 s, 35.9 s and
         # 35.2 s reported at load average 5.6, 5.1 and 5.4, all clean and all exit 0,
+        # with the operator's server on 8080 and untouched. The 41-suite list — this
+        # one plus the printed metric cells, 845 tests — measured 31.0 s wall and
+        # 30.8 s reported at load average 2.9, then 32.0 s and 31.8 s wall against
+        # 31.8 s and 31.6 s reported at load 2.5 and 2.8, all clean and all exit 0,
         # with the operator's server on 8080 and untouched.
         # test_tinytitan_m5_sweep drives the M5 tuning sweep's real main() with
         # `subprocess.run` patched, one reply per planned run, into a temp
@@ -669,6 +673,18 @@ jobs:
         # YES". It drives the real `main()` with `one_run` stubbed, so no server,
         # no model binary and nothing is fetched: 0 the sweep measured what it
         # claims, 1 a claim failed, 2 a headline its runs never measured.
+        # `test_logged_metric_cells` is AUD-276, the printed half of the same rule.
+        # Five benchmark sites formatted an absent metric with `row.get(key, 0)`, so
+        # the line a reader sees published a figure no run logged: an absent MTP
+        # acceptance printed `acc 0.0%`, which reads as a draft path that engaged and
+        # saved nothing, an absent prefill time printed `0.00 s`, the fastest number
+        # the tool can report, and `ane_prefill_ab_matrix.py`'s published table put
+        # `0.000` in a speedup column whose other refusals print `-` -- a row where
+        # the tool computed no ratio at all reads as a measured speedup of zero, the
+        # one number that settles the gate it failed. gate0 and the sampler already
+        # refused an unlogged metric in their verdicts; this pins the cell. It runs
+        # the real progress lines, tables and `format_row()` with the run functions
+        # stubbed, so no model, no server binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -690,7 +706,7 @@ jobs:
             test_tinytitan_m5_sweep test_memory_reports \
             test_run_stamp_is_utc test_concurrent_sessions_verdict \
             test_mtp_phases_verdict test_sweep_driver_verdicts \
-            test_sampler_ab_verdict
+            test_sampler_ab_verdict test_logged_metric_cells
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
