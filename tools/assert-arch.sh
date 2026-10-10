@@ -22,22 +22,48 @@
 # keying on names would have made the module this gate's first false positive.
 # Measured on the 5.18 stage tree: 162 files, 6 candidates — 4 executables, the
 # dylib and `libTinyTitanLib.a` (`!<arch>`, which `lipo -archs` does read).
+#
+# That exemption is for a file carrying no Mach-O header, and for nothing else:
+# a file this gate cannot open, and a file whose bytes are the first bytes of a
+# Mach-O header and stop there, are refused. AUD-265 is the story of both being
+# skipped, and of the 64-bit fat magic — the universal binary this file exists to
+# catch — not being in the set at all while the line above it said "fat 32/64".
 set -uo pipefail
 
 tt_die() { echo "error: $*" >&2; exit 1; }
 
 # thin 32/64 in either byte order, fat 32/64, and a static archive.
-MACHO_MAGICS=" cffaedfe cefaedfe feedfacf feedface cafebabe bebafeca cafeabaf afabfeca 213c6172 "
+MACHO_MAGICS=" cffaedfe cefaedfe feedfacf feedface cafebabe bebafeca feedfacb cbfaedfe cafeabaf afabfeca 213c6172 "
+
+# The magic read is the one step that must not be silent. Piping `od` into `tr`
+# makes the assignment report `tr`'s status, so a file the gate may not open
+# answers with an empty magic and takes the same branch as a README: it passed
+# over an artifact with no read permission printing "each exactly arm64", and a
+# 3-byte header (what a `cp` that filled the disk leaves) went the same way.
+# "This is not an artifact" and "I cannot read this artifact" are different
+# verdicts, and only one of them may be a skip.
+macho_candidate() {  # <file> <label> -> 0 when this is a Mach-O, 1 when it is not
+  local raw magic m
+  raw="$(od -An -tx1 -N4 "$1" 2>/dev/null)" \
+    || tt_die "$2: cannot read $1 — a file this gate cannot open is not a file it has checked"
+  magic="${raw// /}"
+  [ -n "$magic" ] || return 1
+  case "$MACHO_MAGICS" in *" $magic "*) return 0 ;; esac
+  for m in $MACHO_MAGICS; do
+    case "$m" in
+      "$magic"*)
+        tt_die "$2: $(basename "$1") holds a $(( ${#magic} / 2 ))-byte Mach-O header of $m — a truncated artifact, not a non-artifact"
+        ;;
+    esac
+  done
+  return 1
+}
 
 assert_arm64_dir() {  # <dir> <label>
-  local dir="$1" label="$2" checked=0 f magic arches
+  local dir="$1" label="$2" checked=0 f arches
   [ -d "$dir" ] || tt_die "$label: no directory $dir to check"
   while IFS= read -r f; do
-    magic="$(od -An -tx1 -N4 "$f" 2>/dev/null | tr -d ' \n')"
-    case "$MACHO_MAGICS" in
-      *" $magic "*) ;;
-      *) continue ;;
-    esac
+    macho_candidate "$f" "$label" || continue
     checked=$((checked + 1))
     arches="$(lipo -archs "$f" 2>&1)" \
       || tt_die "$label: lipo cannot read $f ($arches)"
@@ -77,12 +103,11 @@ main() {
     elif [ -f "$target" ] && tar tzf "$target" >/dev/null 2>&1; then
       assert_arm64_archive "$target" "$(basename "$target")"
     else
-      local magic arches
-      magic="$(od -An -tx1 -N4 "$target" 2>/dev/null | tr -d ' \n')"
-      case "$MACHO_MAGICS" in
-        *" $magic "*) ;;
-        *) tt_die "$(basename "$target"): not a Mach-O, an archive or a directory" ;;
-      esac
+      local arches
+      # Named on the command line, so "not a Mach-O" is a refusal rather than the
+      # skip the directory scan gives a README.
+      macho_candidate "$target" "$(basename "$target")" \
+        || tt_die "$(basename "$target"): not a Mach-O, an archive or a directory"
       arches="$(lipo -archs "$target" 2>&1)" \
         || tt_die "$(basename "$target"): lipo cannot read it ($arches)"
       [ "$arches" = "arm64" ] \
