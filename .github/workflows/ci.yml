@@ -729,6 +729,32 @@ jobs:
         # `memory_sim`'s ground truth are the shipped ones: 0 everything was scored
         # and nothing is flagged, 1 it measured and facts wearing the person's label
         # are named, 2 the gate could not be judged, with the reason.
+        # `test_composite_split_verdict` is AUD-279, the same seam in the two drivers
+        # that ask whether the side-engine can split a composite fact. Neither had a
+        # status table: `composite_split.py --score` put a row it could not compare --
+        # no words to overlap -- in a `dropped` bucket that was never counted, never
+        # printed and never reached the status, so a run where 40 of 47 rows were
+        # never compared printed the same table and the same 0 or 1 as one where all
+        # 47 were, and an empty or header-only file exited 1 having compared nothing,
+        # which reads as a measured negative. `--threshold` took any float, and
+        # outside `0 < t <= 1` the page describes its argument rather than an answer.
+        # This driver compares with `<`, so a bar at or below 0 counts even a zero
+        # overlap as grounded and makes "repaired" unreachable whatever the model
+        # answered, and a bar above the 1.0 an overlap can reach puts every fact in the
+        # invented half. `--prepare` skipped a `--labels` name whose journal was absent
+        # and wrote the shrunken fact set with no note; `side_engine_tasks.py` did the
+        # same and left T1 with zero cases while the page still advertised five tasks,
+        # which is live rather than historical here because the `guard-step0*` and
+        # `guard-confirm` journals are absent from this tree -- pre-fix its `--prepare`
+        # wrote 60 cases, T1 among them none, and exited 0. That file's scorer also
+        # built T1's ground labels from the same grounding check it then measures; the
+        # page now publishes that as a hand-vs-check split instead of silently
+        # re-labelling, because re-labelling is the operator's measurement and not a
+        # gate's. Rows with no task or no label are counted and named, a run where no
+        # variant answered refuses rather than printing a 0% arm beside two real ones,
+        # and a missing arm contests the three-way comparison. It drives the real
+        # `main()` with only the journal reader, the simulator and the grounding check
+        # patched, so no model, no binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -751,7 +777,8 @@ jobs:
             test_run_stamp_is_utc test_concurrent_sessions_verdict \
             test_mtp_phases_verdict test_sweep_driver_verdicts \
             test_sampler_ab_verdict test_logged_metric_cells \
-            test_knob_sweep_verdict test_guard_source_rate_verdict
+            test_knob_sweep_verdict test_guard_source_rate_verdict \
+            test_composite_split_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

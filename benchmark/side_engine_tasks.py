@@ -19,6 +19,22 @@ Cases come from the book benchmark's own world -- its bible, its plot events
 and the stores recorded from real runs -- because those have ground truth
 that nobody wrote for this file. Where a case had to be authored, the task
 says so, and authored cases are marked in the output.
+
+**The status table** (AUD-279, shared with `composite_split.py`): `0` the page
+measured what it was asked and every task is good on both halves; `1` it
+measured and the answer is the negative one, or it is the good answer over
+rows it never scored -- an unreadable row, an unlabelled one, or a row the run
+left unanswered -- which are counted and named; `2` the question could not
+be answered from the file handed to it -- no such file, no cases, no row
+answered at all, or a T1 journal that is not there -- with the reason printed.
+`--prepare` writes nothing when it refuses, because a pruned journal set
+otherwise becomes a smaller case list that is reported as if it were the whole
+one.
+
+T1's ground truth is the same word-overlap check the guard's gate uses except
+where `HAND_LABELS` carries the clause, and that check is the thing AUD-278 put
+under a control, so a prepared file states how many of its T1 labels are
+hand-made and how many the check derived.
 """
 
 from __future__ import annotations
@@ -153,6 +169,16 @@ def truth_of(row: dict) -> str:
     return row["truth"]
 
 
+def labelled(row: dict) -> str | None:
+    """`truth_of` on a row that may not carry the fields it reads: None means
+    this row cannot be scored either way, which the page has to count rather
+    than crash over or drop from its denominator."""
+    try:
+        return truth_of(row)
+    except KeyError:
+        return None
+
+
 def job(
     task: str, prompt: str, truth: str, note: str, authored: bool = False, system: str | None = None
 ):
@@ -168,17 +194,46 @@ def job(
     }
 
 
+T1_LABELS = ("guard-step0", "guard-step0-ornith", "guard-confirm")
+
+
+def journals() -> tuple[list[tuple[str, Path]], list[str]]:
+    """The recorded runs T1 reads its clauses from, and the labels that have no
+    journal. A missing label is returned rather than skipped: `--prepare` over
+    two of the three is a smaller case set printed as if it were the whole one,
+    and T1 is the task this file's headline number comes from."""
+    paths: list[tuple[str, Path]] = []
+    missing: list[str] = []
+    for label in T1_LABELS:
+        journal = guard.journal_for(label)
+        if journal is None:
+            missing.append(label)
+            continue
+        paths.append((label, journal))
+    return paths, missing
+
+
+def refuse(reason: str) -> int:
+    print(f"\nNOT MEASURED: {reason}")
+    return 2
+
+
 def cases() -> list[dict]:
+    jobs, _ = jobs_and_missing()
+    return jobs
+
+
+def jobs_and_missing() -> tuple[list[dict], list[str]]:
     jobs: list[dict] = []
     sim.user_text(10)
 
     # T1: every clause of every composite the recorded runs produced, with
     # the person's own words as the reference. Ground truth comes from the
-    # same grounding check the guard's gate uses.
-    for label in ("guard-step0", "guard-step0-ornith", "guard-confirm"):
-        journal = guard.journal_for(label)
-        if journal is None:
-            continue
+    # same grounding check the guard's gate uses, except where HAND_LABELS
+    # carries the clause, and the prepared file says which is which -- the
+    # check is the thing AUD-278 put under a control.
+    paths, missing = journals()
+    for label, journal in paths:
         for fact in guard.facts(journal):
             if not fact["user_asserted"] or ";" not in fact["value"]:
                 continue
@@ -188,18 +243,17 @@ def cases() -> list[dict]:
                     continue
                 stems = guard.stems(guard.significant(sim.user_text(fact["session"])))
                 truth = len({w for w in words if guard.stem(w) in stems}) / len(words)
-                jobs.append(
-                    job(
-                        "T1",
-                        f"WHAT THE PERSON WROTE:\n{sim.user_text(fact['session'])}\n\n"
-                        f"STATEMENT: {fact['address']} = {clause}\n"
-                        f"Did the person state this?",
-                        HAND_LABELS.get(
-                            f"{fact['address']} = {clause}", "YES" if truth >= 0.5 else "NO"
-                        ),
-                        f"{fact['address']} / {label}",
-                    )
+                key = f"{fact['address']} = {clause}"
+                case = job(
+                    "T1",
+                    f"WHAT THE PERSON WROTE:\n{sim.user_text(fact['session'])}\n\n"
+                    f"STATEMENT: {fact['address']} = {clause}\n"
+                    f"Did the person state this?",
+                    HAND_LABELS.get(key, "YES" if truth >= 0.5 else "NO"),
+                    f"{fact['address']} / {label}",
                 )
+                case["label_source"] = "hand" if key in HAND_LABELS else "check"
+                jobs.append(case)
 
     # T2: durable against not. The positives are the bible's own facts; the
     # negatives are lines of the novel the model wrote, which are exactly
@@ -367,7 +421,7 @@ def cases() -> list[dict]:
                 f"{key} vs {other}",
             )
         )
-    return jobs
+    return jobs, missing
 
 
 # Two things people believe about prompting, neither of them measured here
@@ -492,17 +546,30 @@ def confidence_cases() -> list[dict]:
 
 
 def score_variants(path: Path) -> int:
+    if not path.exists():
+        return refuse(f"no such file: {path}")
     rows = [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+    if not rows:
+        return refuse(f"{path} holds no variant cases, so the three are not compared")
+    answered = [row for row in rows if (row.get("completion") or "").strip()]
+    if not answered:
+        return refuse(
+            f"no completion in any of the {len(rows)} row(s): a 0% arm is not an answer, "
+            "and the comparison is between answers"
+        )
     groups: dict[str, list] = {}
     for row in rows:
         groups.setdefault(row.get("variant", "plain"), []).append(row)
 
     print(f"{'variant':12s} {'n':>3s} {'correct':>8s}   {'YES cases':>12s} {'NO cases':>10s}")
+    absent: list[str] = []
     for name in VARIANTS:
         group = groups.get(name) or []
         if not group:
+            absent.append(name)
+            print(f"{name:12s} {0:3d} {'--':>8s}   {'--':>12s} {'--':>10s}")
             continue
         halves: dict[str, list[int]] = {}
         for row in group:
@@ -542,6 +609,7 @@ def score_variants(path: Path) -> int:
         entry = buckets.setdefault(band, [0, 0])
         entry[0] += hit
         entry[1] += 1
+    decoration = False
     if buckets:
         print("\ncalibration -- is being sure the same as being right?")
         print(f"  {'stated':10s} {'n':>3s} {'actually right':>15s}")
@@ -554,27 +622,81 @@ def score_variants(path: Path) -> int:
         spread = [100 * v[0] / v[1] for v in buckets.values() if v[1] >= 3]
         if len(spread) >= 2 and max(spread) - min(spread) < 10:
             print("  the bands do not separate: the number is a decoration.")
+            decoration = True
+    print(f"\nvariants scored {len(VARIANTS) - len(absent)}/{len(VARIANTS)}")
+    if absent:
+        print(
+            f"CONTESTED: {', '.join(absent)} answer(ed) nothing, so the arms above are not "
+            "the comparison of three the page claims"
+        )
+        return 1
+    return 1 if decoration else 0
+
+
+def publish(path: Path, jobs: list[dict]) -> int:
+    """Write a jobs file, or refuse and write nothing. A label whose journal is
+    gone shrinks T1 silently, and the operator then scores the shrunken set."""
+    _, missing = journals()
+    if missing:
+        return refuse(
+            f"no journal for {', '.join(missing)}, so T1 is built from fewer runs than the "
+            "page describes"
+        )
+    t1 = [case for case in jobs if case["task"] == "T1"]
+    if not t1:
+        return refuse("the journals that were read hold no composite fact, so T1 has no cases")
+    path.write_text("\n".join(json.dumps(case) for case in jobs) + "\n", encoding="utf-8")
+    counts: dict[str, int] = {}
+    for case in jobs:
+        counts[case["task"]] = counts.get(case["task"], 0) + 1
+    print(f"{len(jobs)} cases -> {path}")
+    print("  " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+    hand = sum(1 for case in t1 if case.get("label_source") == "hand")
+    print(f"  T1 ground labels: {hand} hand-labelled, {len(t1) - hand} from the grounding check")
     return 0
 
 
 def prepare(path: Path) -> int:
-    jobs = cases()
-    path.write_text("\n".join(json.dumps(j) for j in jobs) + "\n", encoding="utf-8")
-    counts: dict[str, int] = {}
-    for j in jobs:
-        counts[j["task"]] = counts.get(j["task"], 0) + 1
-    print(f"{len(jobs)} cases -> {path}")
-    print("  " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
-    return 0
+    return publish(path, cases())
 
 
 def score(path: Path) -> int:
+    if not path.exists():
+        return refuse(f"no such file: {path}")
     rows = [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+    if not rows:
+        return refuse(f"{path} holds no cases, so no task was answered")
     tasks: dict[str, list] = {}
+    unread: list[dict] = []
+    unlabelled: list[dict] = []
+    unanswered: list[dict] = []
     for row in rows:
+        if "task" not in row:
+            unread.append(row)
+            continue
+        if labelled(row) is None:
+            unlabelled.append(row)
+            continue
+        if not (row.get("completion") or "").strip():
+            unanswered.append(row)
+            continue
         tasks.setdefault(row["task"], []).append(row)
+
+    scored = sum(len(group) for group in tasks.values())
+    print(f"{scored} of {len(rows)} rows scored")
+    if not scored:
+        if unanswered:
+            return refuse(
+                f"no completion in any of the {len(rows)} row(s): a 0% task is not an "
+                "answer, and this table is about answers"
+            )
+        if unlabelled:
+            return refuse(
+                f"no row carried a ground label ({len(unlabelled)} row(s) could not be read)"
+            )
+        return refuse(f"no row carried a task ({len(unread)} row(s) could not be read)")
 
     print(f"{'task':5s} {'n':>3s} {'correct':>8s}   per-answer accuracy      unparseable")
     failures = 0
@@ -607,6 +729,9 @@ def score(path: Path) -> int:
             f"{task:5s} {total:3d} {100 * correct / total:7.0f}%{mark}  {halves:28s} "
             f"{unparseable:>3d}"
         )
+    print(f"  {'unread':28s} {len(unread):4d}  (no task on the row)")
+    print(f"  {'unlabelled':28s} {len(unlabelled):4d}  (no ground label to score against)")
+    print(f"  {'unanswered':28s} {len(unanswered):4d}  (the run gave no answer for the row)")
     print(
         "\n* one half below 70%: the model is not reading the question, "
         "whatever the overall figure says."
@@ -615,7 +740,20 @@ def score(path: Path) -> int:
         print(f"{failures} task(s) not ready.")
     else:
         print("every task good on both halves.")
-    return 0 if not failures else 2
+    if unanswered:
+        print(
+            f"CONTESTED: {len(unanswered)} of {len(rows)} rows never answered, so the table "
+            "above is over the rows that did"
+        )
+        return 1
+    remainder = len(unread) + len(unlabelled)
+    if remainder:
+        print(
+            f"CONTESTED: {remainder} of {len(rows)} rows were never scored, so the table "
+            "describes the rest"
+        )
+        return 1
+    return 1 if failures else 0
 
 
 def main() -> int:
@@ -639,15 +777,9 @@ def main() -> int:
     if args.prepare:
         return prepare(args.prepare)
     if args.prepare_v2:
-        jobs = v2_cases()
-        args.prepare_v2.write_text("\n".join(json.dumps(j) for j in jobs) + "\n")
-        print(f"{len(jobs)} cases -> {args.prepare_v2}")
-        return 0
+        return publish(args.prepare_v2, v2_cases())
     if args.prepare_variants:
-        jobs = confidence_cases()
-        args.prepare_variants.write_text("\n".join(json.dumps(j) for j in jobs) + "\n")
-        print(f"{len(jobs)} cases -> {args.prepare_variants}")
-        return 0
+        return publish(args.prepare_variants, confidence_cases())
     if args.score_variants:
         return score_variants(args.score_variants)
     if args.score:
