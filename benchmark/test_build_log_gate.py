@@ -18,13 +18,23 @@ neighbouring script: a verdict taken from a command whose failure status the cal
 cannot see. `grep`'s own "Permission denied" goes to stderr two lines above a
 `== staged ==` header, which is how a skip like this reads as a pass.
 
+The same line was in the workflow a third time, in a shape that fails open the same
+way: `.github/workflows/ci.yml` had `if grep -qE ... /tmp/build.log; then exit 1; fi`,
+and an `if` condition treats "found none" and "cannot read" identically. Measured by
+extracting that step's own text and running it under `bash -e`, which is the shell a
+`run:` block with no `shell:` key gets: a missing, empty, truncated or unreadable
+build log each ran the step to completion with rc 0. That step is also where the
+build's own status disappears -- `swift build ... | tee log` has no pipefail there, so
+a build that dies leaves a log and a zero exit, which is exactly what the completion
+marker is for. `BuildLogCiStepTests` runs the workflow's text, not a copy of it.
+
 The second hole is vacuity, and it needs no fault at all: a truncated log -- what a
 `tee` onto a full disk leaves -- is a file that records no build, and "no warning
-line in it" is not evidence about warnings. Every one of the eleven real build logs
-still on this disk (`.build/releases/*.buildlog`, `.build/*/*.buildlog`,
-`.build/library-dist.buildlog`) is plain ASCII and carries at least one line
-starting `Build complete!`, so that marker is what separates a log that holds a
-finished build from one that holds a fragment.
+line in it" is not evidence about warnings. The completion marker is measured, not
+invented: `find .build -name '*.buildlog'` still returns eleven real logs on this
+disk (the six release logs, the three library logs under their release directories,
+and the two library-dist logs), every one of them UTF-8 text carrying at least one
+line that starts `Build complete!`, and all eleven pass the gate these tests pin.
 
 These tests drive the extracted function over constructed logs, so they build
 nothing and run no compiler. The warning *pattern* is deliberately not widened
@@ -33,19 +43,44 @@ no `.cpp`, `.cc`, `.cxx` or `.S` under `sources/`), and a broader net would chan
 what a release refuses to ship, which is the operator's call rather than a test's.
 """
 
+import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
 import unittest
 
-HELPER = pathlib.Path(__file__).resolve().parent.parent / "tools" / "assert-build-log.sh"
+REPO = pathlib.Path(__file__).resolve().parent.parent
+HELPER = REPO / "tools" / "assert-build-log.sh"
+CI = REPO / ".github" / "workflows" / "ci.yml"
+CI_STEP = "- name: Build release products (0 warnings gate)"
 
 CLEAN_TAIL = "Build complete! (118.85 sec)\n"
 COMPILER_WARNING = (
     "/Users/x/TinyTitan/sources/TinyTitan/Foo.swift:12:5: warning: "
     "variable 'bar' was never used; consider replacing with '_' or removing it\n"
 )
+
+
+def ci_step_body() -> str:
+    """The workflow's own build-step script text, dedented, with no re-typing here."""
+    lines = CI.read_text().splitlines()
+    start = [i for i, line in enumerate(lines) if line.strip() == CI_STEP]
+    if not start:
+        raise AssertionError(f"{CI} no longer has the step {CI_STEP!r}")
+    run_at = start[0] + 1
+    while run_at < len(lines) and lines[run_at].lstrip().startswith("#"):
+        run_at += 1
+    if not lines[run_at].strip() == "run: |":
+        raise AssertionError(f"{CI}:{run_at + 1} is not `run: |`")
+    body_at = run_at + 1
+    indent = len(lines[body_at]) - len(lines[body_at].lstrip())
+    body = []
+    for line in lines[body_at:]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:] if line.strip() else "")
+    return "\n".join(body) + "\n"
 
 
 def drive(log: pathlib.Path) -> subprocess.CompletedProcess:
@@ -193,18 +228,22 @@ class BuildLogGateTests(unittest.TestCase):
 
 
 class BuildLogCallerTests(unittest.TestCase):
-    """The gate only protects the release if the two callers actually call it."""
+    """The gate only protects the release if every caller actually calls it."""
 
     def callers(self):
         tools = HELPER.parent
-        return [tools / "build_library.sh", tools / "release.sh"]
+        return [tools / "build_library.sh", tools / "release.sh", CI]
 
     def test_the_pattern_lives_in_one_file(self) -> None:
         # Both callers carried the same grep verbatim, which is how a fix to one
-        # leaves the other exactly as broken. Single-source it or it drifts back.
+        # leaves the other exactly as broken. The workflow is in this set because it
+        # carried the same line a third time (`if grep -qE ...; then exit 1`), which
+        # can only act on the status that found a warning: measured under the step's
+        # own errexit shell, a missing, empty, truncated or unreadable /tmp/build.log
+        # each printed the gate's pass and exited 0. Single-source it or it drifts back.
         holders = [
             path.name
-            for path in sorted(HELPER.parent.glob("*.sh"))
+            for path in sorted(list(HELPER.parent.glob("*.sh")) + [CI])
             if "metal|c|h|m|mm" in path.read_text()
         ]
         self.assertEqual(["assert-build-log.sh"], holders)
@@ -214,6 +253,54 @@ class BuildLogCallerTests(unittest.TestCase):
             text = path.read_text()
             self.assertIn("assert-build-log.sh", text, f"{path.name} does not source the gate")
             self.assertIn("assert_clean_build_log", text, f"{path.name} does not call the gate")
+
+
+class BuildLogCiStepTests(unittest.TestCase):
+    """The workflow's build step, run as its own text rather than re-typed here."""
+
+    def run_step(self, build_output: str, build_status: int = 0) -> subprocess.CompletedProcess:
+        body = ci_step_body().replace("/tmp/build.log", str(self.log))
+        script = self.dir / "ci-step.sh"
+        script.write_text(body)
+        out = self.dir / "swift-output.txt"
+        out.write_text(build_output)
+        stub = self.dir / "swift"
+        stub.write_text(f'#!/bin/bash\ncat "{out}"\nexit {build_status}\n')
+        stub.chmod(0o755)
+        env = dict(os.environ, PATH=f"{self.dir}{os.pathsep}{os.environ['PATH']}")
+        # `-e` and no pipefail: the step declares no `shell:`, so GitHub runs it as
+        # `bash -e {0}`, which is why the build's own exit status never reaches the
+        # gate and only the log it left behind does.
+        return subprocess.run(
+            ["/bin/bash", "-e", str(script)],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(REPO),
+            env=env,
+        )
+
+    def setUp(self) -> None:
+        self.dir = pathlib.Path(tempfile.mkdtemp(prefix="tt-ci-"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.log = self.dir / "build.log"
+
+    def test_a_warning_free_completed_build_passes_the_step(self) -> None:
+        result = self.run_step(f"[448 / 930] Compiling TinyTitan Engine.swift\n{CLEAN_TAIL}")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("no compiler warnings", result.stdout + result.stderr)
+
+    def test_a_build_that_never_finished_is_not_read_as_a_clean_build(self) -> None:
+        # What the step actually faces when `swift build` dies: tee still exits 0, so
+        # the log exists and holds no warning line -- and no build.
+        result = self.run_step("[448 / 930] Compiling TinyTitan Engine.swift\n", 1)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Build complete!", result.stderr)
+
+    def test_a_warning_in_the_log_still_refuses(self) -> None:
+        result = self.run_step(COMPILER_WARNING + CLEAN_TAIL)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("::error::", result.stdout)
 
 
 if __name__ == "__main__":

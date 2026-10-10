@@ -95,15 +95,23 @@ jobs:
             echo "::endgroup::"
           done
       - name: Build release products (0 warnings gate)
+        # The same decision `tools/release.sh` makes about the log it publishes from,
+        # and now the same function. This step used to carry its own copy of the
+        # grep: `if grep -qE ...; then exit 1; fi` can only act on the status that
+        # *found* a warning, so a build log that was missing, empty, unreadable or
+        # truncated printed this step's pass and exited 0 -- measured by driving this
+        # step's own text under `bash -e`, which is the shell a `run:` block with no
+        # `shell:` key gets (AUD-266). The gate also requires the log to record a
+        # finished build, which is what catches the case this step could not see
+        # before: `swift build` is on the left of a pipe with no pipefail, so its
+        # exit status never reaches the gate and only the log it left behind does.
+        # The warnings themselves are not listed again here because `tee` has
+        # already streamed the whole build output into this step's log.
         run: |
           swift build -c release 2>&1 | tee /tmp/build.log
-          # Match compiler diagnostics only (file:line:col: warning:). A bare
-          # `grep warning:` also catches SwiftPM dependency-resolution notices
-          # such as "warning: 'swift-system': skipping cache due to an error",
-          # which would fail the gate with a misleading message.
-          if grep -qE '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' /tmp/build.log; then
-            echo "::error::build emitted warnings; CI requires a warning-free release build"
-            grep -E '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' /tmp/build.log
+          . tools/assert-build-log.sh
+          if ! ( assert_clean_build_log /tmp/build.log "ci build" ); then
+            echo "::error::the release build failed its warning gate — see the build output above"
             exit 1
           fi
       - name: The arm64 promise (RELEASE.md rule 2)
@@ -196,12 +204,15 @@ jobs:
         # leaves, went the same way (AUD-265). It builds its fixtures from a Mach-O already
         # on the runner and from `/bin/ls`, so it compiles nothing and fetches nothing.
         # `test_build_log_gate` pins `tools/assert-build-log.sh`, the compiler-warning gate
-        # both `tools/release.sh` and `tools/build_library.sh` used to run as their own copy
-        # of one grep: `grep -qE ... && die` can only act on the status that *found* a
+        # that `tools/release.sh`, `tools/build_library.sh` and this workflow's own build
+        # step each used to run as their own copy of one grep: `grep -qE ... && die` and
+        # `if grep -qE ...; then exit 1; fi` can only act on the status that *found* a
         # warning, so a build log that was missing, empty, unreadable or truncated left the
-        # `die` unreached and the script went on to stage and publish -- measured in the
-        # callers' own `set -euo pipefail` and `set -uo pipefail` shapes (AUD-266). It drives
-        # the function over constructed logs, so it builds nothing and runs no compiler.
+        # refusal unreached and the caller carried on -- measured in the two scripts' own
+        # `set -euo pipefail` and `set -uo pipefail` shapes, and by extracting this step's
+        # own text and running it under the `bash -e` a `run:` block gets (AUD-266). It
+        # drives the function over constructed logs, so it builds nothing and runs no
+        # compiler.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads

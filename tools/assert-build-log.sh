@@ -10,14 +10,19 @@
 # with three different statuses -- 0 found a warning, 1 found none, 2 could not
 # read the file -- and that shape can only act on 0, so a log that was missing,
 # empty, unreadable or truncated left `die` unreached and the script carried on to
-# stage and publish. AUD-266.
+# stage and publish. AUD-266. The workflow ran the same line a third time as
+# `if grep -qE ...; then exit 1; fi`, which fails open the same way, so its build
+# step sources this file too.
 #
-# Three verdicts, three answers. "This log holds no warning", "this log records no
-# finished build" and "I cannot read this log" are different findings, and only the
-# first may be a pass. The completion marker is what separates a log that holds a
-# build from one that holds a fragment: every real build log on the machine this was
-# measured on (the six release logs and the library logs beside them, eleven files)
-# is plain text carrying at least one line that starts `Build complete!`.
+# Four refusals, four answers. "This log holds no warning", "this log records no
+# finished build", "I cannot read this log" and "the pattern did not run against
+# this log" are different findings, and only the first may be a pass. The
+# completion marker is what separates a log that holds a build from one that holds
+# a fragment: every real build log on the machine this was measured on -- `find
+# .build -name '*.buildlog'`, eleven files: the six release logs, the three library
+# logs under their release directories, and the two library-dist logs -- is UTF-8
+# text carrying at least one line that starts `Build complete!`, and all eleven
+# pass this gate.
 #
 # Deliberately not changed here: the pattern's extension set, which is exactly the
 # set this package compiles (no `.cpp`, `.cc`, `.cxx` or `.S` under `sources/`).
