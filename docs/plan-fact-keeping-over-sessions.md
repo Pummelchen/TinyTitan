@@ -31,9 +31,10 @@ noise. Three separate failure modes hide in those numbers.
 ## The three failure modes
 
 1. **Missing facts (recall).** Ranking is lexical. On the authored recall set,
-   token match scores **recall@1 1/4** against the side-engine hint's **4/4**
-   (`docs/side-engine-tasks.md`) — the misses are "no term in common", which no
-   amount of ranking polish fixes.
+   token match scores **recall@1 3/4** against the side-engine hint's **4/4**
+   (`docs/side-engine-tasks.md`, whose token row was re-measured with
+   `--baseline` on 2026-10-10) — the one miss shares no term with the fact,
+   which no amount of ranking polish fixes.
 2. **Stale facts (time).** A later state coexists with, or loses to, an earlier
    one. Key reuse is supposed to make the newer value win, but the bootstrap's
    documented tie-break prefers the *older* fact "so a foundation outranks last

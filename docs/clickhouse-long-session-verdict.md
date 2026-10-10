@@ -43,14 +43,16 @@ A faster store does not turn a stale hit into a fresh one, and it has no opinion
 about which of two conflicting facts is current.
 
 **The one real retrieval defect is semantic, and its fix is a model.** On the
-authored recall set (`docs/side-engine-tasks.md`, `benchmark/side_engine_recall.py`):
+authored recall set (`docs/side-engine-tasks.md`, `benchmark/side_engine_recall.py`),
+token-match figures re-measured with `--baseline` on 2026-10-10 — the token ranking runs
+no model, so its row is one figure shown for both installs):
 
 | ranking | 4B recall@1 | 4B recall@3 | 9B recall@1 | 9B recall@3 |
 | --- | ---: | ---: | ---: | ---: |
-| token match | 1/4 | 3/4 | 1/4 | 3/4 |
+| token match | 3/4 | 3/4 | 3/4 | 3/4 |
 | side-engine hint | **4/4** | **4/4** | **4/4** | **4/4** |
 
-The lexical misses are the "no term in common" case. What fixes them is an
+The lexical miss is the "no term in common" case. What fixes it is an
 embedding or a model judgement about relevance — a representation and compute
 problem. `docs/agent-memory.md` ("A future semantic layer") already prices this
 correctly: *an embedding model resident alongside the LLM*, worth measuring

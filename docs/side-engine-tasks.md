@@ -300,8 +300,18 @@ python3.13 benchmark/side_engine_recall.py --score /tmp/done.jsonl
 
 | ranking | 4B recall@1 | 4B recall@3 | 9B recall@1 | 9B recall@3 |
 | --- | --- | --- | --- | --- |
-| token match | 1/4 | 3/4 | 1/4 | 3/4 |
+| token match | 3/4 | 3/4 | 3/4 | 3/4 |
 | side-engine | **4/4** | **4/4** | **4/4** | **4/4** |
+
+The token-match row was restated on 2026-10-10: `878cea6` weighted the search
+terms by rarity and `--baseline` has measured `recall@1 3/4` since, while all
+three tables that carry this row kept publishing 1/4. It is one figure, not two —
+the token ranking is deterministic and runs no model, so both installs show the
+same cell, and only the side-engine column is a measured run (2026-09-18). The
+gap this table is about is therefore one question at rank 1 — `--baseline` prints
+it as the single MISS, "How often does the boat cross the water?" for
+`rules/ferry`, with `lexical=no` so no term list reaches it — and the side-engine
+column still answers it.
 
 The gain is real and the two installs agree on it. It is also the cheapest kind
 of result to fake — an engine that always answers YES scores 1 of 4 — so the
