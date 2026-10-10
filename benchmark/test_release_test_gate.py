@@ -65,6 +65,11 @@ FAILED = [
     "  Test run with 63 tests in 14 suites failed after 1.150 seconds with 1 issue.",
 ]
 
+# All seven, the shape a suite where nothing passes has.
+ALL_FAILED = FAILED + [
+    "  Test run with 97 tests in 10 suites failed after 0.898 seconds with 1 issue.",
+]
+
 
 def _function(name: str, pattern: str) -> str:
     """One function from the script, text and all."""
@@ -126,6 +131,18 @@ class ReleaseTestGateVerdictTests(unittest.TestCase):
         status, _, err = run_verdict(log, 1)
         self.assertNotEqual(status, 0, f"the release accepted a run that reported nothing: {err}")
         self.assertIn("no", err.lower(), err)
+
+    def test_a_run_where_every_target_failed_is_refused_as_a_failure(self) -> None:
+        """Seven failed lines are a failing suite, not a suite that ran nothing.
+
+        The count that decides "nothing ran" has to be the count of summary lines,
+        not of passing ones: counting only the passes reads an all-failed run as an
+        empty one and tells the operator the wrong cause.
+        """
+        status, _, err = run_verdict("\n".join(ALL_FAILED) + "\n", 1)
+        self.assertNotEqual(status, 0, f"the release accepted a run every target failed: {err}")
+        self.assertIn("7", err, f"the refusal should count the failures it saw: {err}")
+        self.assertNotIn("no test-target run", err.lower(), f"misread as an empty run: {err}")
 
     def test_a_clean_run_over_seven_targets_passes_and_says_how_many(self) -> None:
         """The refusal must not cost the operator the count when the run is real."""

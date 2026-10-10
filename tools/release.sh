@@ -35,7 +35,6 @@ step() { printf '\n== %s\n' "$*"; }
 # own status knows more than any grep does.
 test_gate_verdict() {
   local log="$1" status="$2" summaries failures
-  [ -s "$log" ] || die "swift test wrote no log at $log: nothing was run"
   summaries=$(grep -c 'Test run with' "$log")
   failures=$(grep -c 'Test run with .* failed' "$log")
   [ "$summaries" -gt 0 ] \
