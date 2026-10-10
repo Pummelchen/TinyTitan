@@ -19,8 +19,11 @@ What it does, per section:
     bullet above it, because the sentence rule splits "e.g. the author" apart;
   * a bullet's wrapped continuation lines stay part of that bullet -- a
     2-space-indented line is not a new item;
-  * `### Checksum` is emitted byte-for-byte, because release.sh substitutes
-    placeholders in it and greps the result.
+  * fences, table rows and blockquotes travel line for line, like `###
+    Checksum`. Their line breaks ARE their content: an example of a line format
+    that arrives as one sentence, or a table that arrives as a paragraph, is not
+    the same claim re-laid-out -- it is the claim destroyed. release.sh's
+    `--require` cannot see this, because every token survives the merge.
 
 `--require TOKEN` (repeatable) makes the script fail when TOKEN is absent from
 its own output. release.sh passes every string `--publish` greps the notes for,
@@ -150,11 +153,7 @@ def main() -> int:
         for sentence in split_sentences(text):
             # Fold a fragment back into the bullet above rather than give it a
             # bullet of its own.
-            if out and out[-1].startswith("- ") and sentence[:1].islower():
-                merged_head = out.pop()
-                while out and out[-1].startswith("  "):
-                    out.pop()
-                out.extend(wrap_bullet(merged_head + " " + sentence, args.width))
+            if sentence[:1].islower() and fold_into_previous_bullet(sentence):
                 continue
             out.extend(wrap_bullet(sentence, args.width))
 
@@ -175,10 +174,66 @@ def main() -> int:
         flush_bullet()
         flush_prose()
 
+    def fold_into_previous_bullet(sentence: str) -> bool:
+        """Append a lower-case fragment to the bullet above it, marker included once.
+
+        The bullet's own head is not the last line whenever the bullet wrapped,
+        which is the usual case at the default width -- so walk back over the
+        continuation lines first, then take the head's text, not its marker.
+        """
+        head = len(out) - 1
+        while head >= 0 and out[head].startswith("  "):
+            head -= 1
+        if head < 0 or not out[head].startswith("- "):
+            return False
+        lines = out[head:]
+        del out[head:]
+        text = " ".join([lines[0][2:]] + [line.strip() for line in lines[1:]])
+        out.extend(wrap_bullet(f"{text} {sentence}", args.width))
+        return True
+
+    def open_block(marker: str) -> None:
+        """Start or continue a block whose line breaks are its content."""
+        nonlocal verbatim
+        flush_lead() if mode == "lead" else flush_all()
+        if not (verbatim and out and out[-1].startswith(marker)):
+            blank()
+        verbatim = True
+
+    def close_block() -> None:
+        nonlocal verbatim
+        if verbatim:
+            blank()
+            verbatim = False
+
+    in_fence = False
+    verbatim = False
     for raw in lines:
         line = raw.rstrip()
         stripped = line.strip()
+
+        if in_fence:
+            out.append(stripped)
+            if stripped.startswith("```"):
+                in_fence = False
+                close_block()
+            continue
+
+        if stripped.startswith("```"):
+            flush_lead() if mode == "lead" else flush_all()
+            blank()
+            out.append(stripped)
+            in_fence = True
+            verbatim = True
+            continue
+
+        if stripped.startswith(("|", ">")):
+            open_block(stripped[0])
+            out.append(stripped)
+            continue
+
         indented = line[:1] in (" ", "\t")
+        close_block()
 
         if stripped.startswith("### "):
             flush_lead() if mode == "lead" else flush_all()
