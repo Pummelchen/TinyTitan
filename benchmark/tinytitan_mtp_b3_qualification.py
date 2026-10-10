@@ -103,16 +103,20 @@ def verdict(rows):
     on_rate = got[("on", "decode_tok_s")][0]
     accept = got[("on", "acceptance")][0]
     emitted = got[("on", "emitted_per_pass")][0]
-    if None in (off_rate, on_rate, accept, emitted, delta) or not off_rate:
-        reasons.append("NOT MEASURED: an arm carried no rate, so no delta is computable")
-    else:
+    if off_rate is not None and on_rate is not None:
         lines.append(
-            f"  scalar   median {off_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in off]}"
+            f"  scalar   median {off_rate:7.3f} tok/s  runs {[r.get('decode_tok_s') for r in off]}"
         )
         lines.append(
-            f"  MTP      median {on_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in on]}"
+            f"  MTP      median {on_rate:7.3f} tok/s  runs {[r.get('decode_tok_s') for r in on]}"
         )
+    if accept is not None and emitted is not None:
         lines.append(f"  acceptance {accept:.1f}%   emitted/pass {emitted:.3f}")
+    if None in (off_rate, on_rate, accept, emitted):
+        reasons.append("NOT MEASURED: an arm carried no rate, so no delta is computable")
+    elif not off_rate:
+        reasons.append("NOT MEASURED: the off arm's median is 0 tok/s, so no delta is computable")
+    else:
         if accept < 65:
             word = f"OUT OF DOMAIN (acceptance {accept:.1f}% < 65%)"
             reasons.append(

@@ -43,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 
-from tinytitan_profile import arm_metric, metric_count, pgrep_answer
+from tinytitan_profile import arm_metric, logged, metric_count, pgrep_answer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
@@ -224,10 +224,19 @@ def verdict(rows: list[dict], small: int, big: int, label: str):
         f"greedy, differenced over [{small}, {big}] generated tokens"
     )
     lines.append("=" * 72)
-    if prefill["gpu"] and prefill["ane"]:
+    if prefill["gpu"] is not None or prefill["ane"] is not None:
+        if prefill["gpu"] is not None and prefill["ane"]:
+            ratio = f"speedup {prefill['gpu'] / prefill['ane']:.2f}x"
+        else:
+            ratio = "no ratio"
+            if prefill["ane"] is not None:
+                reasons.append(
+                    "NOT MEASURED: the ANE arm's prefill median is 0 s, "
+                    "so the speedup would divide by zero"
+                )
         lines.append(
-            f"  prefill   GPU {prefill['gpu']:7.2f} s   ANE {prefill['ane']:7.2f} s   "
-            f"speedup {prefill['gpu'] / prefill['ane']:.2f}x"
+            f"  prefill   GPU {logged(prefill['gpu'], '7.2f', ' s')}   "
+            f"ANE {logged(prefill['ane'], '7.2f', ' s')}   speedup {ratio}"
         )
     for name, arm in (("GPU", "gpu"), ("ANE", "ane")):
         value = steady[arm]
@@ -259,12 +268,20 @@ def verdict(rows: list[dict], small: int, big: int, label: str):
             note = metric_count("ANE", f"{length}tok decode_tok_s", ane[1], ane[2])
             if note:
                 reasons.append(note)
-            if gpu[0] and ane[0]:
-                lines.append(
-                    f"    window up to {length:>4} tokens: "
-                    f"ANE vs GPU {(ane[0] - gpu[0]) / gpu[0] * 100.0:+.1f}% "
-                    f"({ane[0]:.2f} vs {gpu[0]:.2f} tok/s) — contains the transient"
+            if gpu[0] is None or ane[0] is None:
+                continue
+            if gpu[0]:
+                cell = f"ANE vs GPU {(ane[0] - gpu[0]) / gpu[0] * 100.0:+.1f}%"
+            else:
+                cell = "no ratio"
+                reasons.append(
+                    f"NOT MEASURED: the GPU arm's {length}-token window is 0 tok/s, "
+                    "so the ratio would divide by zero"
                 )
+            lines.append(
+                f"    window up to {length:>4} tokens: {cell} "
+                f"({ane[0]:.2f} vs {gpu[0]:.2f} tok/s) — contains the transient"
+            )
     status = (
         2 if any(reason.startswith("NOT MEASURED") for reason in reasons) else 1 if reasons else 0
     )

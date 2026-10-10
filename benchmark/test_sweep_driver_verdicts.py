@@ -160,8 +160,13 @@ def ss_table(**arms):
     return table
 
 
+def rows_of(table: dict) -> list[dict]:
+    """A `{(arm, length): [rows]}` table as the flat list a finished sweep leaves."""
+    return [row for rows in table.values() for row in rows]
+
+
 def ss_pairs(**arms):
-    return [row for rows in ss_table(**arms).values() for row in rows]
+    return rows_of(ss_table(**arms))
 
 
 def drive_ss(table: dict, argv: list[str] | None = None):
@@ -751,6 +756,65 @@ class ArmMetricCountsUnknownValues(unittest.TestCase):
         value, counted, total = prof.arm_metric(rows, "decode_tok_s")
         self.assertEqual(value, statistics.median([9.0, 11.0, 13.0]))
         self.assertEqual((counted, total), (3, 3))
+
+
+class SteadyStateMeasuredZero(unittest.TestCase):
+    """AUD-283: a figure the footer logged as 0 is a measurement, not an absence.
+
+    Measured pre-fix by handing `ss.verdict` rows whose `prefill_s` is 0.0: the
+    whole `prefill` line vanished -- both arms' medians, not just the ratio --
+    and the page still read `sweep status 0` with no reason, because the line sat
+    behind `if prefill["gpu"] and prefill["ane"]` and `metric_count` had counted
+    the zero as measured. A window's `decode_tok_s` of 0.0 did the same to its
+    comparison line at :262, and an ANE window rate of 0.0 -- a real result, the
+    arm being 100% slower over that window -- was dropped rather than published,
+    because the guard tested both rates for truthiness when only the GPU one is a
+    divisor. The steady-state rates themselves are not a defect: `arm_steady_state`
+    returns a reason with every `None` and cannot return 0.0, so :241's truthiness
+    test only ever fires on a value the page already refuses over.
+    """
+
+    def test_a_prefill_median_logged_as_zero_names_the_zero_not_a_missing_value(self):
+        table = ss_table()
+        for length in (SMALL, BIG):
+            table[("ane", length)] = [{**ss_row("ane", length), "prefill_s": 0.0} for _ in range(2)]
+        lines, status = ss.verdict(rows_of(table), SMALL, BIG, "model")
+        out = "\n".join(lines)
+        self.assertEqual(status, 2)
+        self.assertIn("the ANE arm's prefill median is 0 s", out)
+        self.assertNotIn("a prefill time is missing", out)
+
+    def test_the_arm_that_read_its_prefill_normally_is_still_shown(self):
+        table = ss_table()
+        for length in (SMALL, BIG):
+            table[("ane", length)] = [{**ss_row("ane", length), "prefill_s": 0.0} for _ in range(2)]
+        lines, _status = ss.verdict(rows_of(table), SMALL, BIG, "model")
+        out = "\n".join(lines)
+        self.assertIn("GPU    2.00 s", out)
+        self.assertIn("ANE    0.00 s", out)
+
+    def test_a_window_rate_of_zero_on_the_divisor_side_costs_the_ratio_and_says_why(self):
+        table = ss_table()
+        table[("gpu", SMALL)] = [{**ss_row("gpu", SMALL), "decode_tok_s": 0.0} for _ in range(2)]
+        lines, status = ss.verdict(rows_of(table), SMALL, BIG, "model")
+        out = "\n".join(lines)
+        self.assertEqual(status, 2)
+        self.assertIn(f"the GPU arm's {SMALL}-token window is 0 tok/s", out)
+        self.assertIn("no ratio", out)
+
+    def test_a_window_that_measured_zero_on_the_ane_side_is_published_not_dropped(self):
+        table = ss_table()
+        table[("ane", SMALL)] = [{**ss_row("ane", SMALL), "decode_tok_s": 0.0} for _ in range(2)]
+        lines, status = ss.verdict(rows_of(table), SMALL, BIG, "model")
+        out = "\n".join(lines)
+        self.assertIn("-100.0%", out)
+        self.assertEqual(status, 0)
+
+    def test_a_measured_sweep_still_prints_its_prefill_line(self):
+        lines, status = ss.verdict(ss_pairs(), SMALL, BIG, "model")
+        out = "\n".join(lines)
+        self.assertEqual(status, 0)
+        self.assertIn("speedup 2.00x", out)
 
 
 if __name__ == "__main__":

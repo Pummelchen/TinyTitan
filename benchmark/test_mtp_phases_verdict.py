@@ -573,5 +573,95 @@ class StatusReachesTheCaller(unittest.TestCase):
         self.assertEqual(status, 1)
 
 
+class MeasuredZeroIsNotAbsence(unittest.TestCase):
+    """AUD-283: a footer that logged 0 is read as a missing figure.
+
+    Measured pre-fix: `tinytitan_mtp_b3_qualification.verdict` answered `an arm
+    carried no rate` for a scalar arm that logged `tok/s=0.00` and hid both arms'
+    medians, while `tinytitan_mtp_phases.verdict:267` already does this right,
+    naming the measured zero -- so the tests here pin that the sibling agrees
+    rather than restating a rule from one of them.
+
+    The same shape in `tinytitan_ane_prefill_ab.py:211` is measured but NOT
+    fixed here: over an ANE arm whose runs logged `prefill=.../0.0s` it answers
+    `NOT MEASURED: a prefill time is missing` at status 2 -- a refusal whose
+    stated cause did not happen, with neither arm's median printed -- and a GPU
+    arm logging 0.00 s sails through the same guard to publish `SPEEDUP: 0.00x`,
+    because only one of the two is a divisor. Changing that line would break
+    `test_a_zero_prefill_time_is_a_refusal_not_a_division` above, which is the
+    AUD-273 test that pins the absence wording for a measured zero, so it waits
+    on the operator rather than on this file.
+    """
+
+    def test_a_control_arm_that_measured_zero_is_named_not_silenced(self):
+        rows = [
+            mtp_row("off", "aaaa", 0.0),
+            mtp_row("off", "aaaa", 0.0),
+            mtp_row("on", "aaaa", 12.0),
+            mtp_row("on", "aaaa", 12.0),
+        ]
+        lines, status = b3.verdict(rows)
+        out = joined(lines)
+        self.assertEqual(status, 2)
+        self.assertIn("the off arm's median is 0 tok/s", out)
+        self.assertIn("scalar   median   0.000 tok/s", out)
+        self.assertIn("MTP      median  12.000 tok/s", out)
+
+    def test_a_run_that_logged_no_rate_costs_the_figure_not_the_page(self):
+        # The runs list is a raw per-run listing beside the median it feeds, so a
+        # row with no `decode_tok_s` must show up in it rather than raise: the
+        # arm's median is measured over its surviving rows and `metric_count`
+        # already reports that denominator. Measured pre-fix as
+        # `KeyError: 'decode_tok_s'` -- the driver dying after its header, in the
+        # sibling that lists its runs with `r.get(...)` (ane_prefill_ab:216).
+        def no_rate(row):
+            return {k: v for k, v in row.items() if k != "decode_tok_s"}
+
+        rows = [
+            mtp_row("off", "aaaa", 8.0),
+            no_rate(mtp_row("off", "aaaa", 9.0)),
+            mtp_row("on", "aaaa", 12.0),
+            no_rate(mtp_row("on", "aaaa", 13.0)),
+        ]
+        lines, status = b3.verdict(rows)
+        out = joined(lines)
+        self.assertIn("scalar   median   8.000 tok/s", out)
+        self.assertIn("MTP      median  12.000 tok/s", out)
+        self.assertIn("over 1 of 2", out)
+        self.assertEqual(status, 1)
+
+    def test_an_acceptance_that_measured_zero_is_printed_and_refused_on_its_own(self):
+        # A draft path that accepted nothing reports `mtp accept=0.0%`, which is a
+        # reading, not a missing footer: the page must show it and refuse the gate
+        # because 0% is below the 65% the +10% margin is conditioned on.
+        thin = mtp_row("on", "aaaa", 12.0)
+        rows = [
+            mtp_row("off", "aaaa", 8.0),
+            mtp_row("off", "aaaa", 8.0),
+            {**thin, "acceptance": 0.0},
+            {**thin, "acceptance": 0.0},
+        ]
+        lines, status = b3.verdict(rows)
+        out = joined(lines)
+        self.assertIn("acceptance 0.0%   emitted/pass 1.800", out)
+        self.assertIn("OUT OF DOMAIN", out)
+        self.assertEqual(status, 2)
+
+    def test_a_zero_numerator_is_still_a_computable_speedup(self):
+        # The guard refuses a zero *divisor*, not a zero figure: a GPU arm that
+        # logged 0.00 s of prefill gives a ratio of 0.00x, which fails the gate.
+        rows = [ane_row("gpu", "aaaa", 0.0), ane_row("ane", "aaaa", 5.0)]
+        lines, status = ane.verdict(rows)
+        out = joined(lines)
+        self.assertEqual(status, 1)
+        self.assertIn("SPEEDUP: 0.00x", out)
+
+    def test_the_sibling_driver_already_names_the_zero_it_refuses(self):
+        rows = [mtp_row("off", "aaaa", 0.0), mtp_row("on", "aaaa", 12.0)]
+        lines, status = ph.verdict(rows)
+        self.assertEqual(status, 2)
+        self.assertIn("the off arm's median is 0 tok/s", joined(lines))
+
+
 if __name__ == "__main__":
     unittest.main()

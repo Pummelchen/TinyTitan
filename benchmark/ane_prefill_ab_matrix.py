@@ -197,14 +197,22 @@ def summarize(record: dict, chunk: int = PREFILL_CHUNK) -> dict:
     # does not reach 4,096 tokens measures two GPU arms. Say so rather than
     # report "no speedup", which reads like a finding about the ANE.
     tokens = out.get("off", {}).get("prefill_tokens")
-    if tokens and tokens < chunk:
+    if tokens is not None and tokens < chunk:
         out["prompt_too_short"] = (
             f"{tokens} prompt tokens is under one {chunk}-token chunk; "
             f"the ANE cannot engage, so these are two GPU arms"
         )
-    if off and on and out.get("on", {}).get("used_ane") and "prompt_too_short" not in out:
-        out["speedup"] = off / on
-        out["saved_seconds"] = off - on
+    if (
+        off is not None
+        and on is not None
+        and out.get("on", {}).get("used_ane")
+        and "prompt_too_short" not in out
+    ):
+        if on:
+            out["speedup"] = off / on
+            out["saved_seconds"] = off - on
+        else:
+            out["no_speedup"] = "the ANE arm's prefill median is 0 s, so no speedup is computable"
     return out
 
 
@@ -222,6 +230,8 @@ def format_row(r: dict) -> str:
         note = "ANE arm fell back to the GPU"
     elif not r["off"].get("used_ane", True):
         note = "OFF arm reported an ANE fallback (unexpected)"
+    elif "no_speedup" in r:
+        note = r["no_speedup"]
     speedup = f"{r['speedup']:.3f}" if "speedup" in r else "-"
     return (
         f"{r['model']:<44} "

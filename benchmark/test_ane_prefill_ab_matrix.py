@@ -154,5 +154,36 @@ class RecordTests(unittest.TestCase):
         self.assertEqual([r["model"] for r in record["results"]], ["a", "b"])
 
 
+class MeasuredZeroTests(unittest.TestCase):
+    """AUD-283: a footer that logged 0 is a measurement, not an absence.
+
+    Measured pre-fix: `summarize` tested both medians for truthiness, so an ANE
+    arm whose runs logged `prefill=6027tok/0.00s` lost its `speedup` and its
+    row printed `-` with an empty note -- the same blank cell the fallback row
+    prints, so a timer that never started read as an arm that fell back. The
+    prompt-length guard had the same shape on `prefill_tokens`: a run logging
+    `0tok` skipped the `prompt_too_short` note the driver exists to give, and
+    still published a speedup for a prompt the ANE cannot serve.
+    """
+
+    def test_a_zero_divisor_median_names_the_zero_instead_of_printing_a_blank(self):
+        summary = ab.summarize(record([arm(74.0)], [arm(0.0)]))
+        self.assertNotIn("speedup", summary)
+        self.assertIn("median is 0 s", summary["no_speedup"])
+        self.assertIn("median is 0 s", ab.format_row(summary))
+
+    def test_a_zero_off_median_is_still_a_computable_speedup(self):
+        # The divisor is the ANE arm; a GPU arm that logged 0.00 s gives 0.00x,
+        # which is a figure the page should show rather than hide.
+        summary = ab.summarize(record([arm(0.0)], [arm(47.0)]))
+        self.assertAlmostEqual(summary["speedup"], 0.0)
+
+    def test_a_prompt_that_logged_zero_tokens_is_still_under_one_chunk(self):
+        short = [dict(arm(50.0), prefill_tokens=0), dict(arm(20.0), prefill_tokens=0)]
+        summary = ab.summarize(record(short, short))
+        self.assertIn("prompt_too_short", summary)
+        self.assertNotIn("speedup", summary)
+
+
 if __name__ == "__main__":
     unittest.main()
