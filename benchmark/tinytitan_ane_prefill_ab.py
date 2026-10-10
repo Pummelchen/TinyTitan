@@ -34,6 +34,7 @@ from tinytitan_profile import (
     arm_answered,
     arm_metric,
     benchmark_log_path,
+    logged,
     metric_count,
     server_command,
     server_environment,
@@ -303,8 +304,8 @@ def main() -> int:
                 rows.append(row)
                 print(
                     f"[{args.quant}] {row['arm']:<3} "
-                    f"prefill {row.get('prefill_s', 0):7.2f} s  "
-                    f"decode {row.get('decode_tok_s', 0):6.3f} tok/s  "
+                    f"prefill {logged(row.get('prefill_s'), '7.2f', ' s')}  "
+                    f"decode {logged(row.get('decode_tok_s'), '6.3f', ' tok/s')}  "
                     f"sha {row['sha256']}" + ("  [FALLBACK]" if row.get("fallback") else ""),
                     flush=True,
                 )

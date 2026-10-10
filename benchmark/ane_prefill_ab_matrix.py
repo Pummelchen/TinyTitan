@@ -222,11 +222,12 @@ def format_row(r: dict) -> str:
         note = "ANE arm fell back to the GPU"
     elif not r["off"].get("used_ane", True):
         note = "OFF arm reported an ANE fallback (unexpected)"
+    speedup = f"{r['speedup']:.3f}" if "speedup" in r else "-"
     return (
         f"{r['model']:<44} "
         f"{f'{off:.2f}' if off is not None else '-':>9} "
         f"{f'{on:.2f}' if on is not None else '-':>9} "
-        f"{r.get('speedup', 0):>8.3f} "
+        f"{speedup:>8} "
         f"{str(r.get('on', {}).get('used_ane')):>9}  {note}"
     )
 

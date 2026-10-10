@@ -414,6 +414,21 @@ def metric_count(name: str, key: str, counted: int, total: int):
     return f"PARTIAL: the {name} arm's {key} median is over {counted} of {total} runs"
 
 
+def logged(value, spec: str, suffix: str = "") -> str:
+    """One printed figure, or the words that say no run logged it.
+
+    `metric_count` refuses an unlogged metric in a page's verdict; this is the
+    same rule for the cell that prints it. A driver that writes
+    `row.get(key, 0)` publishes a measurement that was never made: an absent MTP
+    acceptance prints as `0.0%`, which reads as a draft path that engaged and
+    saved nothing, and an absent prefill time prints as `0.00 s`, the fastest
+    number the tool can report.
+    """
+    if value is None:
+        return "not logged"
+    return f"{value:{spec}}{suffix}"
+
+
 def byte_claim(
     rows: Sequence[Mapping], off: str = "off", on: str = "on", digest_key: str = "sha256"
 ):

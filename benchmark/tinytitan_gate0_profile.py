@@ -46,6 +46,7 @@ import time
 from tinytitan_profile import (
     DEFAULT_API_MODEL,
     arm_metric,
+    logged,
     metric_count,
     resolve_api_model,
     ROOT,
@@ -427,8 +428,8 @@ def run_quant(quant: str, runs: int) -> dict:
         record.update(result)
         print(
             f"[{quant}] {label}: {record['decode_tok_s']:.3f} tok/s, "
-            f"busy_per_token={record.get('busy_per_token_ms', 0):.3f} ms, "
-            f"occupancy={record.get('occupancy_pct', 0):.1f}%",
+            f"busy_per_token={logged(record.get('busy_per_token_ms'), '.3f', ' ms')}, "
+            f"occupancy={logged(record.get('occupancy_pct'), '.1f', '%')}",
             flush=True,
         )
         if index > 0:
@@ -521,13 +522,6 @@ def summarize(quant: str, rows: list[dict]) -> dict:
     return summary
 
 
-def _cell(value, spec: str) -> str:
-    """One printed figure, or the words that say it was never logged."""
-    if value is None:
-        return "not logged"
-    return f"{value:{spec}}"
-
-
 def report(summaries: list[dict]):
     """The published page and the status the run must exit with.
 
@@ -564,32 +558,32 @@ def report(summaries: list[dict]):
         busy = m.get("busy_per_token_ms")
         token_ms = 1000 / decode if decode else None
         lines.append(
-            f"  decode            {_cell(decode, '.3f')} tok/s"
+            f"  decode            {logged(decode, '.3f')} tok/s"
             + (f"  = {token_ms:.2f} ms/token" if token_ms else "")
         )
         lines.append(f"  spread            {s['spread']['decode_tok_s']}")
         idle = token_ms - busy if token_ms and busy is not None else None
         lines.append(
-            f"  GPU busy/token    {_cell(busy, '.3f')} ms"
+            f"  GPU busy/token    {logged(busy, '.3f')} ms"
             + (f" ({busy / token_ms * 100:.1f}% of token)" if idle is not None else "")
         )
         lines.append(
-            f"  NOT GPU busy      {_cell(idle, '.3f')} ms"
+            f"  NOT GPU busy      {logged(idle, '.3f')} ms"
             + (f" ({idle / token_ms * 100:.1f}%)" if idle is not None else "")
         )
-        lines.append(f"  queue occupancy   {_cell(m.get('occupancy_pct'), '.1f')}%")
+        lines.append(f"  queue occupancy   {logged(m.get('occupancy_pct'), '.1f')}%")
         hit = m.get("expert_hit_rate")
         lines.append(
-            f"  expert hit rate   {_cell(hit * 100 if hit is not None else None, '.2f')}%"
-            f"   I/O hidden {_cell(m.get('io_hidden_pct'), '.2f')}%"
+            f"  expert hit rate   {logged(hit * 100 if hit is not None else None, '.2f')}%"
+            f"   I/O hidden {logged(m.get('io_hidden_pct'), '.2f')}%"
         )
         lines.append(
-            f"  host wait/token   {_cell(m.get('wait_ms'), '.3f')} ms"
-            f"   expert io {_cell(m.get('io_ms'), '.3f')} ms"
+            f"  host wait/token   {logged(m.get('wait_ms'), '.3f')} ms"
+            f"   expert io {logged(m.get('io_ms'), '.3f')} ms"
         )
         lines.append(
-            f"  router readback   {_cell(m.get('router_readback_ms'), '.4f')} ms"
-            f"   cache plan {_cell(m.get('cache_plan_ms'), '.4f')} ms"
+            f"  router readback   {logged(m.get('router_readback_ms'), '.4f')} ms"
+            f"   cache plan {logged(m.get('cache_plan_ms'), '.4f')} ms"
         )
         lines.append("  top GPU roles (ms/token):")
         if not s["roles_per_token_ms"]:

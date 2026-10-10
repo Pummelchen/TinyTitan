@@ -37,6 +37,7 @@ from tinytitan_profile import (
     arm_answered,
     arm_metric,
     byte_claim,
+    logged,
     metric_count,
 )
 
@@ -67,7 +68,7 @@ def one_run(quant: str, arm: str, tag: str) -> dict:
     return record
 
 
-def _logged(row: dict, key: str):
+def _row_metric(row: dict, key: str):
     """The run's value for a published metric, or None when it never logged it.
 
     `busy_per_token_ms` arrives on the occupancy line and the sampler gap on a
@@ -83,7 +84,7 @@ def summarize(rows: list[dict]) -> dict:
     """Per-arm medians over the runs that logged each metric, plus the counts."""
     out: dict = {"arms": {}}
     for arm in ARMS:
-        sel = [{**r, GAP_KEY: _logged(r, GAP_KEY)} for r in rows if r.get("arm") == arm]
+        sel = [{**r, GAP_KEY: _row_metric(r, GAP_KEY)} for r in rows if r.get("arm") == arm]
         medians = {}
         counts = {}
         for key in PAGE_METRICS:
@@ -112,12 +113,6 @@ def summarize(rows: list[dict]) -> dict:
     out["identity_earned"] = earned
     out["digest_sets"] = [left, right]
     return out
-
-
-def _metric(value, spec: str, unit: str) -> str:
-    if value is None:
-        return "not logged"
-    return f"{value:{spec}} {unit}"
 
 
 def verdict(summary: dict, quant: str, gate_percent: float = 10.0):
@@ -163,8 +158,8 @@ def verdict(summary: dict, quant: str, gate_percent: float = 10.0):
         lines.append(f"  {arm:<8} median {rate:>14}   runs {d['rates']}")
         lines.append(
             f"           busy/token "
-            f"{_metric(d['median_busy_per_token_ms'], '.2f', 'ms')}   "
-            f"sampler gap {_metric(d['median_sample_gap_ms'], '.2f', 'ms')}"
+            f"{logged(d['median_busy_per_token_ms'], '.2f', ' ms')}   "
+            f"sampler gap {logged(d['median_sample_gap_ms'], '.2f', ' ms')}"
         )
 
     delta = summary["delta_percent"]
@@ -241,9 +236,9 @@ def main() -> int:
                         f"[{args.quant}] {arm:<7} "
                         f"{row['decode_tok_s']:.3f} tok/s  "
                         f"busy/token "
-                        f"{_metric(row.get('busy_per_token_ms'), '.2f', 'ms')}  "
+                        f"{logged(row.get('busy_per_token_ms'), '.2f', ' ms')}  "
                         f"sample_gap "
-                        f"{_metric(_logged(row, GAP_KEY), '.2f', 'ms')}  "
+                        f"{logged(_row_metric(row, GAP_KEY), '.2f', ' ms')}  "
                         f"sha {row['completion_sha256']}",
                         flush=True,
                     )

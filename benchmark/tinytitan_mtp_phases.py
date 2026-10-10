@@ -43,6 +43,7 @@ from tinytitan_profile import (
     arm_metric,
     benchmark_log_path,
     byte_claim,
+    logged,
     metric_count,
     server_environment,
     resolve_api_model,
@@ -418,13 +419,14 @@ def main() -> int:
                 row = one_run(target, sidecar, mtp, f"b{block}_{len(rows)}", args.ram_budget)
                 rows.append(row)
                 extra = (
-                    f"acc {row.get('acceptance', 0):.1f}% passes {row.get('passes', 0)}"
+                    f"acc {logged(row.get('acceptance'), '.1f', '%')}"
+                    f" passes {logged(row.get('passes'), 'd')}"
                     if row["arm"] == "on"
                     else ""
                 )
                 print(
                     f"[{label}] mtp={row['arm']:<3} "
-                    f"{row.get('decode_tok_s', 0):7.3f} tok/s  "
+                    f"{logged(row.get('decode_tok_s'), '7.3f')} tok/s  "
                     f"sha {row['sha256']}  {extra}",
                     flush=True,
                 )

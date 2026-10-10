@@ -24,7 +24,7 @@ import sys
 
 import tinytitan_gate0_profile as g0
 import tinytitan_mtp_phases as ph
-from tinytitan_profile import ROOT, arm_answered, arm_metric, byte_claim, metric_count
+from tinytitan_profile import ROOT, arm_answered, arm_metric, byte_claim, logged, metric_count
 
 SCENARIOS = {
     "table": ph.PROMPT,
@@ -201,10 +201,12 @@ def main() -> int:
                     target, sidecar, mtp, f"{tag_prefix}_b{block}_{len(rows)}", args.ram_budget
                 )
                 rows.append(row)
-                extra = f"acc {row.get('acceptance', 0):.1f}%" if row["arm"] == "on" else ""
+                extra = (
+                    f"acc {logged(row.get('acceptance'), '.1f', '%')}" if row["arm"] == "on" else ""
+                )
                 print(
                     f"[{args.quant}/{args.scenario}] mtp={row['arm']:<3} "
-                    f"{row.get('decode_tok_s', 0):7.3f} tok/s  "
+                    f"{logged(row.get('decode_tok_s'), '7.3f')} tok/s  "
                     f"sha {row['sha256']}  {extra}",
                     flush=True,
                 )
