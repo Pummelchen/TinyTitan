@@ -74,6 +74,25 @@ class MatchingTests(unittest.TestCase):
         self.assertTrue(scenarios.hit("point in time", "recognised point in time"))
         self.assertFalse(scenarios.hit("england", "singapore"))
 
+    def test_an_empty_answer_is_not_a_hit(self):
+        self.assertFalse(scenarios.hit("postgres", ""))
+        self.assertFalse(scenarios.hit("postgres", "   "))
+
+    def test_a_truncated_answer_is_not_a_hit(self):
+        self.assertFalse(scenarios.hit("point in time", "point"))
+
+    def test_an_empty_expected_value_is_not_a_hit(self):
+        self.assertFalse(scenarios.hit("", "Postgres 16"))
+
+    def test_an_absent_answer_is_not_a_hit(self):
+        """A control: memory_master asks for a key the model never wrote, so the
+        answer that reaches the scorer is None, not a string."""
+        self.assertFalse(scenarios.hit("postgres", None))
+        # Without the None guard the absent answer becomes the text str(None)
+        # produces, so any expected value inside that word is scored as recalled.
+        self.assertFalse(scenarios.hit("on", None))
+        self.assertFalse(scenarios.hit("ne", None))
+
 
 class ScoreTests(unittest.TestCase):
     def _photograph_run(self):

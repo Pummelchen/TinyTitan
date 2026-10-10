@@ -580,7 +580,9 @@ def hit(expected, answer) -> bool:
         numbers = re.findall(r"-?\d+(?:\.\d+)?", str(got))
         return any(abs(float(n) - float(expected)) < 1e-9 for n in numbers)
     want = str(expected).lower()
-    return want in str(got) or str(got) in want
+    if not want:
+        return False
+    return want in str(got)
 
 
 def check() -> int:
