@@ -35,6 +35,27 @@ is small -- two to nine per run -- which is what makes that practical.
 The gate itself, from `docs/plan-memory-guard-and-shadow.md`: under 5%
 mislabelled, and no invented fact labelled `user` at all.
 
+The answer is three statuses, the ones this tree's other drivers use (AUD-273
+through AUD-277), because the page has three trust conditions of its own and a
+run that fails one must not read as a pass:
+
+    0  every fact carrying authority was scored, the control discriminated, and
+       nothing is flagged
+    1  it measured, and facts wearing the person's label are flagged -- or a
+       fact carrying authority could not be compared at all
+    2  the gate cannot be judged, with the reason named: no recorded run, no
+       journal, no facts, nothing scoreable, a `--threshold` outside the domain
+       where the comparison means something, or a control that does not
+       discriminate
+
+`3` is not used: this driver starts no process, so it has no guard to answer 3.
+
+One exception is worth naming, because the control rule looks like it should
+catch it: a run where *nothing* grounds -- every fact flagged, the control at
+zero against the person's zero -- is a `1` with a caveat, not a `2`. That is the
+worst answer the gate can get and every fact on it is named; reporting it as
+"this run proved nothing" would turn a scandal into an inconclusive run.
+
 The scoring is deliberately generous to the model. A fact counts as
 grounded if its *distinctive* words -- the ones carrying the claim, not the
 scaffolding -- appear in the user's text. Paraphrase passes; only a value
@@ -54,6 +75,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / ".build/benchmark-logs"
+
+# The bar the plan's own hand-checked numbers were taken at. Read per run, and
+# refused outside the domain where the comparison can be failed: AUD-278.
+DEFAULT_THRESHOLD = 0.5
 
 _spec = importlib.util.spec_from_file_location("memory_sim", ROOT / "benchmark/memory_sim.py")
 sim = importlib.util.module_from_spec(_spec)
@@ -223,6 +248,98 @@ def facts(journal: Path) -> list[dict]:
     return written
 
 
+def threshold_refusal(value: float) -> str | None:
+    """Why this grounding bar cannot produce an answer, or None if it can.
+
+    AUD-278. The comparison is `overlap >= threshold`, so a threshold at or
+    below zero is cleared by a fact that shares no word with anything the person
+    wrote, and one above 1 is unreachable by a fact that shares every word.
+    Either way the run answers a question about its own argument, and the flag
+    list the procedure is built around reading is either empty or total.
+    """
+    if value <= 0:
+        return (
+            f"--threshold {value:g} grounds every fact, since an overlap of 0 "
+            "already clears it; this run cannot report a mislabel whatever the "
+            "model wrote"
+        )
+    if value > 1:
+        return (
+            f"--threshold {value:g} is above the 1.0 an overlap can reach, so "
+            "every fact is flagged and no flag means anything"
+        )
+    return None
+
+
+def gate_verdict(
+    claimed: int,
+    scored: int,
+    flagged: int,
+    control_total: int,
+    control_grounded: int,
+) -> tuple[list[str], int]:
+    """The page's answer, on the three statuses its trust conditions imply.
+
+    A rate is only a rate over the facts that were compared, and the control is
+    what says the scorer can tell the person's words from the model's: the
+    docstring's own rule is that if the two rates are close, "this measurement
+    is not measuring anything". Saying that in a line and returning 0 anyway is
+    AUD-278, so the rule is what decides the status here.
+    """
+    lines: list[str] = []
+    if scored == 0:
+        lines.append(
+            f"NOT MEASURED: nothing the scorer could compare -- all {claimed} "
+            "fact(s) carrying authority have no distinctive words, so no "
+            "comparison was made and none is being certified"
+        )
+        return lines, 2
+    if control_total == 0:
+        lines.append(
+            "NOT MEASURED: no model-labelled fact to control against, so the "
+            "scorer's ability to tell the person's words from the model's is "
+            "unproven on this run"
+        )
+        return lines, 2
+    user_grounded = (scored - flagged) / scored
+    control_rate = control_grounded / control_total
+    # The control discriminates when fewer of the model's facts ground than of the
+    # person's. A higher rate means the grounded bit is inverted or noise; an equal
+    # one means it is not carrying the label. Zero against zero is the exception, and
+    # the reason it has to be: that is a run where every authority-carrying fact was
+    # flagged, the worst answer this gate can get. Downgrading it to "nothing proved"
+    # would turn a scandal into an inconclusive run, and every fact is named, so the
+    # operator can read it.
+    if control_rate > user_grounded or (control_rate == user_grounded and user_grounded > 0):
+        lines.append(
+            f"NOT MEASURED: the control does not discriminate -- {control_grounded}/"
+            f"{control_total} of the model's own facts ({control_rate:.0%}) ground as "
+            f"the person's against {user_grounded:.0%} of the facts labelled user, so "
+            "the grounded bit is not carrying the label and neither number means anything"
+        )
+        return lines, 2
+    if flagged:
+        lines.append(
+            f"CONTESTED: {flagged} fact(s) wearing the person's label that the "
+            "person never said -- read each one; the gate is the list, not this number"
+        )
+        if user_grounded == 0:
+            lines.append(
+                "  no fact grounded at all in this run, so the other reading is that "
+                "the journal's vocabulary does not match the book's -- read the list "
+                "before treating the rate as the model inventing"
+            )
+    if scored != claimed:
+        lines.append(
+            f"CONTESTED: {claimed - scored} of the {claimed} facts carrying "
+            "authority were never compared to the person's words, so the clean "
+            "answer covers the rest"
+        )
+    if flagged or scored != claimed:
+        return lines, 1
+    return lines, 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", default=None)
@@ -230,24 +347,29 @@ def main() -> int:
     ap.add_argument(
         "--threshold",
         type=float,
-        default=0.5,
+        default=DEFAULT_THRESHOLD,
         help="fraction of a value's distinctive words that must appear in the user's own text",
     )
     args = ap.parse_args()
 
+    reason = threshold_refusal(args.threshold)
+    if reason is not None:
+        print(f"NOT MEASURED: {reason}")
+        return 2
+
     label = args.label or newest_label()
     if label is None:
-        print(f"no recorded book runs under {LOGS}")
-        return 1
+        print(f"NOT MEASURED: no recorded book runs under {LOGS}")
+        return 2
     journal = journal_for(label)
     if journal is None:
-        print(f"no journal for label {label}")
-        return 1
+        print(f"NOT MEASURED: no journal for label {label} under {LOGS}")
+        return 2
 
     written = facts(journal)
     if not written:
-        print(f"{journal} holds no facts")
-        return 1
+        print(f"NOT MEASURED: {journal} holds no facts")
+        return 2
 
     def score(fact: dict) -> float | None:
         """How much of a fact is traceable to the person's own words.
@@ -299,24 +421,40 @@ def main() -> int:
     print(f"  labelled model               {len(written) - len(labelled):5d}")
     print(f"  demoted, value not atomic    {demoted:5d}  (a composite cannot have one source)")
     print(f"  carrying authority           {len(claimed):5d}")
-    if claimed:
-        rate = len(mislabelled) / len(claimed)
-        print(f"  of those, mislabelled        {len(mislabelled):5d}  ({rate:.1%})")
-        if derived_scores:
-            print(
-                f"\n  control: model-labelled facts that would also score as "
-                f"the user's: {derived_grounded}/{len(derived_scores)} "
-                f"({derived_grounded / len(derived_scores):.0%})"
-            )
-            print("  (a rate near the user rate would mean the test does not discriminate)")
-        print(
-            f"\n  {len(mislabelled)} candidate(s) below the grounding "
-            f"threshold -- read them; the count is not the verdict"
-        )
-    else:
+    if not claimed:
         print(
             "\n  nothing was labelled user; the guard would never fire, "
             "and the gate cannot be judged from this run"
+        )
+        return 2
+
+    scored = len(grounded) + len(mislabelled)
+    print(
+        f"  of those, scored {scored} of {len(claimed)}  "
+        f"({len(claimed) - scored} carried no distinctive words)"
+    )
+    if scored:
+        print(
+            f"  of those, mislabelled        {len(mislabelled):5d}  "
+            f"({len(mislabelled) / scored:.1%})"
+        )
+    if derived_scores:
+        print(
+            f"\n  control: model-labelled facts that would also score as "
+            f"the user's: {derived_grounded}/{len(derived_scores)} "
+            f"({derived_grounded / len(derived_scores):.0%})"
+        )
+        print("  (a rate near the user rate would mean the test does not discriminate)")
+
+    lines, status = gate_verdict(
+        len(claimed), scored, len(mislabelled), len(derived_scores), derived_grounded
+    )
+    for line in lines:
+        print(f"  {line}")
+    if scored:
+        print(
+            f"\n  {len(mislabelled)} candidate(s) below the grounding "
+            f"threshold -- read them; the count is not the verdict"
         )
 
     if mislabelled:
@@ -333,7 +471,7 @@ def main() -> int:
                 f"  s{fact['session']:<2d} {fact['address']:38s} "
                 f"overlap={fact['overlap']:.0%}  {fact['value'][:70]}"
             )
-    return 0 if claimed and not mislabelled else 2
+    return status
 
 
 if __name__ == "__main__":

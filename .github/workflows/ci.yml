@@ -577,7 +577,11 @@ jobs:
         # one plus the knob sweep's verdict, 882 tests — measured 36.4 s wall and
         # 36.1 s reported at load 4.7, then 36.9 s against 36.6 s and 36.3 s against
         # 35.9 s at load 4.9 and 5.2, all clean and all exit 0, with the operator's
-        # server on 8080 and untouched.
+        # server on 8080 and untouched. The 43-suite list — this one plus the guard's
+        # source-rate verdict, 909 tests — measured 33 s wall and 33.1 s reported at
+        # load average 1.70, then 31 s against 30.3 s and 30 s against 29.8 s reported
+        # at load 2.22 and 2.36, all clean and all exit 0, with the operator's server
+        # on 8080 and untouched.
         # test_tinytitan_m5_sweep drives the M5 tuning sweep's real main() with
         # `subprocess.run` patched, one reply per planned run, into a temp
         # directory. The sweep itself is minutes of cold CLI processes against a
@@ -704,6 +708,27 @@ jobs:
         # the process guard answered and before any refusal line. It drives the
         # real `main()`, `table()` and `verdict()` with `run_arm` stubbed and the
         # guard replaced, so no model, no server binary and nothing fetched.
+        # `test_guard_source_rate_verdict` is AUD-278, the same seam in the driver
+        # that measures whether the memory guard's source labels can be trusted at
+        # all. Its own docstring says the count is not the verdict and every flag
+        # has to be read, so the page has three trust conditions: the scorer must be
+        # able to fail, every authority-carrying fact must actually be compared, and
+        # the control -- the model's own facts through the same test -- must
+        # discriminate. Pre-fix none of the three reached the status: `--threshold 0`
+        # made `overlap >= threshold` true by construction and printed
+        # `mislabelled 0 (0.0%)` over a journal holding a real invented fact,
+        # `--threshold 2` put a fact with `overlap=100%` in the "the user never said"
+        # list, a journal whose authority facts carried no distinctive words exited 0
+        # having compared nothing while another published `1 (16.7%)` over a
+        # denominator of facts of which only 2 were scored, the control printing
+        # `2/2 (100%)` beside its own "does not discriminate" note left the status at
+        # 0, a journal with no model-labelled fact skipped the control silently, and
+        # `1` meant both "no journal" (a refusal) and "these facts are inventions" (a
+        # measured answer). It drives the real `main()` with only `LOGS` redirected at
+        # a fixture journal in a temp tree, so the scorer, the journal reader and
+        # `memory_sim`'s ground truth are the shipped ones: 0 everything was scored
+        # and nothing is flagged, 1 it measured and facts wearing the person's label
+        # are named, 2 the gate could not be judged, with the reason.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -726,7 +751,7 @@ jobs:
             test_run_stamp_is_utc test_concurrent_sessions_verdict \
             test_mtp_phases_verdict test_sweep_driver_verdicts \
             test_sampler_ab_verdict test_logged_metric_cells \
-            test_knob_sweep_verdict
+            test_knob_sweep_verdict test_guard_source_rate_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
