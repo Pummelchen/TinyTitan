@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 182,
-    "done": 179,
+    "total": 183,
+    "done": 180,
     "open": 2,
     "blocked": 1
   },
@@ -3051,6 +3051,24 @@
       "evidence-after": "14 model-free tests in `benchmark/test_v42_control_plane_ab_verdict.py`: the real `main()` with the neighbour's `preflight`, `run_case` and `ROOT` patched, and a fake `run_case` that matches the configuration tuple the driver actually sends and raises if none matches, so a dropped knob cannot be attributed to the wrong case. 11 were RED at HEAD -- 8 assertion failures and 3 tracebacks where the driver escaped -- and 3 are controls that held before the fix and must not change (a clean sweep at 0, the artifact's 36 rows and 18 logs, the reference re-rooting under `--case`). Two assertions I authored were wrong and are recorded rather than hidden: the page test first read the *first* `short cold` line, which belongs to the reference's first pair rather than the case it named, so the test -- not the driver -- was changed to read that pair's own page beneath its header; and the text-disagreement test asserted a concatenated `event-pread short/cold` string the page never emits, so it now asserts the pair header and the parent's detail line. Anchored mutation sweep: 16 single-hit mutants, 0 survivors -- 11 killed by an assertion, 5 by an exception escaping, recorded as reachability rather than assertion coverage -- and both files restored byte-identical by md5. The CI verdict step runs the new suite: 48 suites / 1049 tests OK in 33.6s on python3.13. `ruff` 0.16.7 clean and formatted.",
       "sibling-note": "the grep that found this row -- a raw `content` inequality over `benchmark/*.py` -- now returns exactly one line, `tinytitan_hit_fixup_ab.py:324`, which is the classifier inside the tested gate. The three drivers that each wrote their own copy (hit/fixup, io-backend, control-plane) are all on it, so the AUD-280 family is drained at this shape; the drivers still unreads from that sweep are `master_scenarios.py`, `side_engine_recall.py` and `watchdog_calibrate.py`.",
       "commit": "4daccf7"
+    },
+    {
+      "id": "AUD-287",
+      "severity": "S2",
+      "tier": "A",
+      "project": "benchmark",
+      "category": "the scenario scorer matched the answer inside the expected value, so a blank or truncated quiz field was scored as a recalled fact and inflated the memory matrix's recall rate",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/master_scenarios.py:570-586 (post-fix), benchmark/memory_master.py:261, 271",
+      "title": "hit() read the answer inside the expected value, so an empty field was a right answer",
+      "discovered-by": "the three drivers AUD-286's sweep left unread -- master_scenarios.py, side_engine_recall.py, watchdog_calibrate.py. Measured by calling hit() directly with fixture answers, so no model, no server, nothing fetched.",
+      "evidence-before": "a probe table against HEAD, model-free: hit('crimson', '') was True, hit('crimson', '   ') was True, hit('crimson-blue', 'crimson') was True and hit('', 'Postgres 16') was True, because the last line of the scorer tested both directions of containment. memory_master.py:261 feeds exactly this function with result['answers'].get(key) and sums the result into the per-session recall score, and :271 uses it to decide whether an answer changed, so a session whose quiz field was present but blank counted as a retrieval and a blank-then-blank pair counted as unchanged. The docstring above it claims a right answer is the expected value, not a phrase containing it, which is the direction the code kept and the direction the tests pin by name.",
+      "owner": "",
+      "fix-summary": "the answer-inside-the-expected-value half is deleted; the expected-inside-the-answer half is untouched because MatchingTests.test_strings_match_as_a_phrase pins it as intended leniency and renaming it would be a scoring change. An empty expected value now refuses rather than matching every answer, which also makes the structural check able to report a scenario whose ground truth is blank instead of passing it.",
+      "evidence-after": "five tests added to MatchingTests in the owner suite benchmark/test_memory_master.py: three RED at HEAD (a blank answer, a truncated answer, an empty expected value) and two controls that already held (an absent answer reaching the None guard, and the collision needles for it). The guard's first test was wrong and is recorded rather than hidden: it used hit('none', None), which cannot collide because str(None) is capitalised, so the mutant survived until the test was rewritten as hit('on', None) and hit('ne', None). Sweep: 5 single-hit mutants, 0 survivors, source restored byte-identical by md5. 22 tests OK in the owner suite; the CI verdict group is 48 suites and 1053 tests OK in 34s on python3.13; master_scenarios --check still answers 0 over 10 scenarios, 70 sessions and 41 carryable keys, which is also the evidence that no scenario's truth was a blank string. ruff 0.16.7 clean and formatted.",
+      "sibling-note": "the other memory scorers were probed for the same hole and are clear: memory_volume.matches returns False for an empty value on every attribute branch, memory_sim has no empty needle in TOPICS or REFINE, and the normalise helpers compare nothing. Two questions this row does not answer are the operator's, because both change what a score means rather than fixing a false one: whether hit('crimson', 'crimson-blue') should remain a phrase match at all -- tightening to word boundaries would move a pinned test -- and whether the numeric branch's tolerance of any number inside a sentence is wanted for arithmetic answers.",
+      "commit": "19383bf"
     }
   ]
 }
