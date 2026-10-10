@@ -488,9 +488,7 @@ class VariantScorer(unittest.TestCase):
         rows = [self.variant("plain", "YES") for _ in range(4)]
         status, out = self.drive(rows)
         self.assertEqual(status, 1)
-        self.assertIn("CONTESTED", out)
-        self.assertIn("stakes", out)
-        self.assertIn("confidence", out)
+        self.assertIn("CONTESTED: stakes, confidence answered nothing", out)
         self.assertIn("variants scored 1/3", out)
 
     def test_a_decoration_verdict_reaches_the_status(self):

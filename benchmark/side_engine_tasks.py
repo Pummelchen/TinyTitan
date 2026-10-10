@@ -626,7 +626,7 @@ def score_variants(path: Path) -> int:
     print(f"\nvariants scored {len(VARIANTS) - len(absent)}/{len(VARIANTS)}")
     if absent:
         print(
-            f"CONTESTED: {', '.join(absent)} answer(ed) nothing, so the arms above are not "
+            f"CONTESTED: {', '.join(absent)} answered nothing, so the arms above are not "
             "the comparison of three the page claims"
         )
         return 1
