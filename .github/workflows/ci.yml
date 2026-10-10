@@ -759,6 +759,11 @@ jobs:
         # caller: the pread-vs-Metal I/O A/B compared raw text, parsed no footer,
         # wrote its artifact whatever happened and escaped a dead server as a
         # traceback at exit 1. It drives that driver's real `main()` the same way.
+        # `test_v42_control_plane_ab_verdict` is AUD-286, the classifier's third
+        # caller: the v4.2 expert control-plane matrix compared every case's raw text
+        # against the first selected case, so a sweep where nothing answered was a
+        # promotion, a footer reading decode_tok_s=nan was a promotion, a single
+        # selected case was a promotion, and a dead case was a traceback at exit 1.
         # `test_hit_fixup_ab_verdict` is AUD-280, the same seam in the A/B that
         # decides whether hit/fixup decode agrees with the barrier. Its only verdict
         # was text equality between the two arms, and it required a server footer by
@@ -817,7 +822,7 @@ jobs:
             test_knob_sweep_verdict test_guard_source_rate_verdict \
             test_composite_split_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
-            test_vs_competitors_verdict
+            test_v42_control_plane_ab_verdict test_vs_competitors_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
