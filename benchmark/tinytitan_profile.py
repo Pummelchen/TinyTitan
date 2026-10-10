@@ -383,11 +383,12 @@ def arm_metric(rows: Sequence[Mapping], key: str):
     server logged no MTP footer measured the plain scalar decode, so it entered
     the arm's rate median beside the runs that engaged while the acceptance
     median quietly used the one survivor, and nothing printed either count.
-    A key no row carries answers `None` with a count of zero instead of raising
+    A key no row carries, or one every row carries as an unknown value, answers
+    `None` with a count of zero instead of raising
     `statistics.StatisticsError`, so a caller can refuse with the metric named
     rather than die after its headline lines have already printed.
     """
-    values = [r[key] for r in rows if key in r]
+    values = [r[key] for r in rows if r.get(key) is not None]
     if not values:
         return None, 0, len(rows)
     return statistics.median(values), len(values), len(rows)

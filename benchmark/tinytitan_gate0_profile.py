@@ -45,6 +45,8 @@ import time
 
 from tinytitan_profile import (
     DEFAULT_API_MODEL,
+    arm_metric,
+    metric_count,
     resolve_api_model,
     ROOT,
     benchmark_log_path,
@@ -434,6 +436,19 @@ def run_quant(quant: str, runs: int) -> dict:
     return summarize(quant, measured)
 
 
+PAGE_METRICS = (
+    "decode_tok_s",
+    "busy_per_token_ms",
+    "occupancy_pct",
+    "expert_hit_rate",
+    "io_hidden_pct",
+    "wait_ms",
+    "io_ms",
+    "router_readback_ms",
+    "cache_plan_ms",
+)
+
+
 def _median(rows: list[dict], key: str) -> float | None:
     values = [r[key] for r in rows if isinstance(r.get(key), (int, float))]
     return round(statistics.median(values), 4) if values else None
@@ -483,6 +498,7 @@ def summarize(quant: str, rows: list[dict]) -> dict:
         "spread": {
             k: _spread(rows, k) for k in ("decode_tok_s", "busy_per_token_ms", "occupancy_pct")
         },
+        "counts": {k: arm_metric(rows, k)[1:] for k in PAGE_METRICS},
     }
     roles: dict[str, list[float]] = {}
     for row in rows:
@@ -505,52 +521,120 @@ def summarize(quant: str, rows: list[dict]) -> dict:
     return summary
 
 
-def report(summaries: list[dict]) -> None:
-    print("\n" + "=" * 72)
-    print("GATE 0 — decode token decomposition, published v4.1 profile")
-    print("=" * 72)
+def _cell(value, spec: str) -> str:
+    """One printed figure, or the words that say it was never logged."""
+    if value is None:
+        return "not logged"
+    return f"{value:{spec}}"
+
+
+def report(summaries: list[dict]):
+    """The published page and the status the run must exit with.
+
+    0 every figure came from a measured run, 1 it measured and a claim on the
+    page is contested, 2 a figure the page prints was never logged. Before this
+    `busy = m["busy_per_token_ms"] or 0` fed an absent metric to the track rule,
+    so a profile that logged no GPU busy time printed `DEPENDENCY-STALLED (ceiling
+    ~1.9-2.1x; Track B is the game)` -- the funding decision the whole gate exists
+    to inform -- and `main()` returned 0 over it, while the other printed metrics
+    raised `TypeError` mid-page after the header had gone out.
+    """
+    reasons: list[str] = []
+    lines: list[str] = [
+        "",
+        "=" * 72,
+        "GATE 0 — decode token decomposition, published v4.1 profile",
+        "=" * 72,
+    ]
     for s in summaries:
+        quant = s["quant"]
         m = s["median"]
-        tok_s = m["decode_tok_s"] or 0
-        token_ms = 1000 / tok_s if tok_s else 0
-        busy = m["busy_per_token_ms"] or 0
-        print(f"\n## {s['quant']}  ({s['runs']} measured runs)")
-        print(f"  decode            {tok_s:.3f} tok/s  = {token_ms:.2f} ms/token")
-        print(f"  spread            {s['spread']['decode_tok_s']}")
-        print(
-            f"  GPU busy/token    {busy:.3f} ms "
-            f"({(busy / token_ms * 100) if token_ms else 0:.1f}% of token)"
+        counts = s.get("counts", {})
+        lines.append(f"\n## {quant}  ({s['runs']} measured runs)")
+        if not s["runs"]:
+            reasons.append(
+                f"NOT MEASURED: the {quant} section has no measured run -- nothing was profiled"
+            )
+        for key in PAGE_METRICS:
+            counted, total = counts.get(key, (0, s["runs"]))
+            note = metric_count(quant, key, counted, total)
+            if note:
+                reasons.append(note)
+        decode = m.get("decode_tok_s")
+        busy = m.get("busy_per_token_ms")
+        token_ms = 1000 / decode if decode else None
+        lines.append(
+            f"  decode            {_cell(decode, '.3f')} tok/s"
+            + (f"  = {token_ms:.2f} ms/token" if token_ms else "")
         )
-        print(
-            f"  NOT GPU busy      {token_ms - busy:.3f} ms "
-            f"({((token_ms - busy) / token_ms * 100) if token_ms else 0:.1f}%)"
+        lines.append(f"  spread            {s['spread']['decode_tok_s']}")
+        idle = token_ms - busy if token_ms and busy is not None else None
+        lines.append(
+            f"  GPU busy/token    {_cell(busy, '.3f')} ms"
+            + (f" ({busy / token_ms * 100:.1f}% of token)" if idle is not None else "")
         )
-        print(f"  queue occupancy   {m['occupancy_pct']:.1f}%")
-        print(
-            f"  expert hit rate   {(m['expert_hit_rate'] or 0) * 100:.2f}%"
-            f"   I/O hidden {m['io_hidden_pct']:.2f}%"
+        lines.append(
+            f"  NOT GPU busy      {_cell(idle, '.3f')} ms"
+            + (f" ({idle / token_ms * 100:.1f}%)" if idle is not None else "")
         )
-        print(f"  host wait/token   {m['wait_ms']:.3f} ms   expert io {m['io_ms']:.3f} ms")
-        print(
-            f"  router readback   {m['router_readback_ms']:.4f} ms"
-            f"   cache plan {m['cache_plan_ms']:.4f} ms"
+        lines.append(f"  queue occupancy   {_cell(m.get('occupancy_pct'), '.1f')}%")
+        hit = m.get("expert_hit_rate")
+        lines.append(
+            f"  expert hit rate   {_cell(hit * 100 if hit is not None else None, '.2f')}%"
+            f"   I/O hidden {_cell(m.get('io_hidden_pct'), '.2f')}%"
         )
-        print("  top GPU roles (ms/token):")
+        lines.append(
+            f"  host wait/token   {_cell(m.get('wait_ms'), '.3f')} ms"
+            f"   expert io {_cell(m.get('io_ms'), '.3f')} ms"
+        )
+        lines.append(
+            f"  router readback   {_cell(m.get('router_readback_ms'), '.4f')} ms"
+            f"   cache plan {_cell(m.get('cache_plan_ms'), '.4f')} ms"
+        )
+        lines.append("  top GPU roles (ms/token):")
+        if not s["roles_per_token_ms"]:
+            reasons.append(f"NOT MEASURED: the {quant} runs logged no per-role GPU timings")
         for name, value in list(s["roles_per_token_ms"].items())[:8]:
-            print(f"      {name:<28} {value:.4f}")
-        print("  top inter-command gaps (ms/token):")
+            lines.append(f"      {name:<28} {value:.4f}")
+        lines.append("  top inter-command gaps (ms/token):")
+        if not s["gaps_per_token_ms"]:
+            reasons.append(f"NOT MEASURED: the {quant} runs logged no inter-command gaps")
         for name, value in list(s["gaps_per_token_ms"].items())[:6]:
-            print(f"      {name:<28} {value:.4f}")
-        verdict = (
-            "BANDWIDTH-BOUND (ceiling ~1.35x; only Track C moves it)"
-            if busy >= 45
-            else "DEPENDENCY-STALLED (ceiling ~1.9-2.1x; Track B is the game)"
-            if busy <= 35
-            else "MIXED — neither branch of the Gate 0 rule fires cleanly"
-        )
-        print(f"  VERDICT: {verdict}")
+            lines.append(f"      {name:<28} {value:.4f}")
+        if busy is None:
+            lines.append(
+                "  VERDICT: NOT MEASURED -- the track rule needs busy_per_token_ms, "
+                "which no run logged"
+            )
+        else:
+            verdict = (
+                "BANDWIDTH-BOUND (ceiling ~1.35x; only Track C moves it)"
+                if busy >= 45
+                else "DEPENDENCY-STALLED (ceiling ~1.9-2.1x; Track B is the game)"
+                if busy <= 35
+                else "MIXED — neither branch of the Gate 0 rule fires cleanly"
+            )
+            lines.append(f"  VERDICT: {verdict}")
         digests = s.get("completion_sha256") or []
-        print(f"  output digest    {digests}{'  (RUNS DISAGREE)' if len(digests) > 1 else ''}")
+        lines.append(
+            f"  output digest    {digests}{'  (RUNS DISAGREE)' if len(digests) > 1 else ''}"
+        )
+        if not digests:
+            reasons.append(
+                f"NOT MEASURED: the {quant} runs logged no output digest, "
+                f"so the profile certifies no bytes"
+            )
+        elif len(digests) > 1:
+            reasons.append(
+                f"REFUSED: the {quant} runs produced {len(digests)} different output digests, "
+                f"so the profile is not one run's result"
+            )
+    status = (
+        2 if any(reason.startswith("NOT MEASURED") for reason in reasons) else 1 if reasons else 0
+    )
+    lines.extend(f"  {reason}" for reason in reasons)
+    lines.append(f"  report status {status}")
+    return lines, status
 
 
 def main() -> int:
@@ -590,13 +674,14 @@ def main() -> int:
     finally:
         _terminate_all()
 
-    report(summaries)
+    lines, status = report(summaries)
+    print("\n".join(lines))
     out = args.out or str(ROOT / ".build/benchmark-results/gate0-profile.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as handle:
-        json.dump({"summaries": summaries}, handle, indent=2)
+        json.dump({"summaries": summaries, "status": status}, handle, indent=2)
     print(f"\nwrote {out}")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

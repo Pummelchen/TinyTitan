@@ -29,11 +29,10 @@ import json
 import os
 import pathlib
 import re
-import statistics
 import subprocess
 import sys
 
-from tinytitan_profile import pgrep_answer
+from tinytitan_profile import arm_metric, metric_count, pgrep_answer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
@@ -138,6 +137,89 @@ def run_once(model: pathlib.Path, messages: pathlib.Path, slots: int, max_new: i
     return row
 
 
+TABLE = (
+    ("hit_pct", "7.1f", 7),
+    ("decode_tok_s", "7.2f", 7),
+    ("mib_per_token", "10.1f", 10),
+    ("max_rss_gib", "8.2f", 8),
+    ("swap_delta_gib", "+7.2f", 7),
+)
+
+
+def _num(value, spec: str, width: int) -> str:
+    """One right-justified table cell, or the same width of `no data`."""
+    if value is None:
+        return "no data".rjust(width)
+    return f"{value:{spec}}"
+
+
+def verdict(rows: list[dict], slot_list: list[int], footprint: dict, max_new: int, label: str):
+    """The published table and the status the sweep must exit with.
+
+    0 every cell came from a run that logged it, 1 a cell is a median over part
+    of the runs the sweep asked for, 2 a slot the table exists to report logged
+    nothing at all. Before this, a slot whose every run failed left no row in
+    the table, an absent metric raised `StatisticsError` after the header had
+    already printed, and `main()` returned 0 over either.
+    """
+    reasons: list[str] = []
+    lines: list[str] = []
+    if not rows:
+        reasons.append(
+            "NOT MEASURED: no run at all -- the sweep ran no round, so no slot has a row to mediate"
+        )
+    prompt_tokens = next(
+        (r["prompt_tokens"] for r in rows if r.get("prompt_tokens") is not None), None
+    )
+    lines.append("=" * 78)
+    lines.append(
+        f"EXPERT-CACHE SLOT SWEEP — {label}, "
+        f"{prompt_tokens if prompt_tokens is not None else 'not logged'} prompt tokens, "
+        f"{max_new} new tokens, greedy"
+    )
+    lines.append("=" * 78)
+    lines.append(
+        f"  {'slots':>5} {'cache GiB':>9} {'hit %':>7} {'tok/s':>7} "
+        f"{'MiB/token':>10} {'max RSS':>8} {'swap Δ':>7}"
+    )
+
+    medians: dict[int, dict[str, float | None]] = {}
+    for slot_count in slot_list:
+        group = [r for r in rows if r["slots"] == slot_count]
+        row_medians: dict[str, float | None] = {}
+        cells: list[str] = []
+        for key, spec, width in TABLE:
+            value, counted, total = arm_metric(group, key)
+            row_medians[key] = value
+            note = metric_count(f"{slot_count}-slot", key, counted, total)
+            if note:
+                reasons.append(note)
+            cells.append(_num(value, spec, width))
+        medians[slot_count] = row_medians
+        lines.append(f"  {slot_count:>5} {footprint[slot_count]:>9.2f} " + " ".join(cells))
+
+    for lower, higher in zip(slot_list, slot_list[1:], strict=False):
+        pair = [medians.get(s, {}) for s in (lower, higher)]
+        if any(m.get("hit_pct") is None or m.get("decode_tok_s") is None for m in pair):
+            reasons.append(
+                f"NOT MEASURED: no {higher}-vs-{lower} comparison -- "
+                f"one side logged neither hit_pct nor decode_tok_s"
+            )
+            continue
+        lines.append(
+            f"  {higher} slots vs {lower}: hit "
+            f"{pair[1]['hit_pct'] - pair[0]['hit_pct']:+.1f} points, "
+            f"tok/s {pair[1]['decode_tok_s'] - pair[0]['decode_tok_s']:+.2f}"
+        )
+
+    status = (
+        2 if any(reason.startswith("NOT MEASURED") for reason in reasons) else 1 if reasons else 0
+    )
+    lines.extend(f"  {reason}" for reason in reasons)
+    lines.append(f"  sweep status {status}")
+    return lines, status
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="models/qwen3.8-flash-next_125B_A6B_4Bit")
@@ -160,14 +242,14 @@ def main() -> int:
     model = (ROOT / args.model).resolve()
     if not (model / "verified-install.json").exists():
         raise SystemExit(f"not an installed model: {model}")
-    verdict, lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer"])
-    if verdict != "clear":
+    guard, busy_lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer"])
+    if guard != "clear":
         reason = (
             "a model process is already running"
-            if verdict == "busy"
+            if guard == "busy"
             else "the model-process guard could not answer what is running"
         )
-        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in lines))
+        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in busy_lines))
 
     slots = [int(s) for s in args.slots.split(",")]
     manifest = json.loads((model / "manifest.json").read_text())
@@ -195,48 +277,16 @@ def main() -> int:
                 continue
             print(
                 f"[{slot_count:>3} slots] cache {footprint[slot_count]:5.2f} GiB  "
-                f"hit {row.get('hit_pct', 0):5.1f}%  "
-                f"{row.get('decode_tok_s', 0):5.2f} tok/s  "
-                f"io {row.get('mib_per_token', 0):6.1f} MiB/tok  "
-                f"rss {row.get('max_rss_gib', 0):5.2f} GiB  "
-                f"swap {row.get('swap_delta_gib', 0):+5.2f} GiB",
+                f"hit {_num(row.get('hit_pct'), '5.1f', 5)}%  "
+                f"{_num(row.get('decode_tok_s'), '5.2f', 5)} tok/s  "
+                f"io {_num(row.get('mib_per_token'), '6.1f', 6)} MiB/tok  "
+                f"rss {_num(row.get('max_rss_gib'), '5.2f', 5)} GiB  "
+                f"swap {_num(row.get('swap_delta_gib'), '+6.2f', 6)} GiB",
                 flush=True,
             )
 
-    ok = [r for r in rows if not r.get("failed")]
-    print("\n" + "=" * 78)
-    print(
-        f"EXPERT-CACHE SLOT SWEEP — {model.name}, {ok[0]['prompt_tokens'] if ok else '?'} "
-        f"prompt tokens, {args.max_new} new tokens, greedy"
-    )
-    print("=" * 78)
-    print(
-        f"  {'slots':>5} {'cache GiB':>9} {'hit %':>7} {'tok/s':>7} "
-        f"{'MiB/token':>10} {'max RSS':>8} {'swap Δ':>7}"
-    )
-    for slot_count in slots:
-        group = [r for r in ok if r["slots"] == slot_count]
-        if not group:
-            continue
-
-        def med(key, group=group):
-            return statistics.median([r[key] for r in group if r.get(key) is not None])
-
-        print(
-            f"  {slot_count:>5} {footprint[slot_count]:>9.2f} {med('hit_pct'):>7.1f} "
-            f"{med('decode_tok_s'):>7.2f} {med('mib_per_token'):>10.1f} "
-            f"{med('max_rss_gib'):>8.2f} {med('swap_delta_gib'):>+7.2f}"
-        )
-    by_slot = {s: [r for r in ok if r["slots"] == s] for s in slots}
-    for lower, higher in zip(slots, slots[1:], strict=False):
-        lo = [r["hit_pct"] for r in by_slot[lower] if "hit_pct" in r]
-        hi = [r["hit_pct"] for r in by_slot[higher] if "hit_pct" in r]
-        if lo and hi:
-            print(
-                f"  {higher} slots vs {lower}: hit "
-                f"{statistics.median(hi) - statistics.median(lo):+.1f} points, "
-                f"tok/s {statistics.median([r['decode_tok_s'] for r in by_slot[higher]]) - statistics.median([r['decode_tok_s'] for r in by_slot[lower]]):+.2f}"
-            )
+    lines, status = verdict(rows, slots, footprint, args.max_new, model.name)
+    print("\n" + "\n".join(lines))
 
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
@@ -251,6 +301,7 @@ def main() -> int:
                     "characters": args.characters,
                     "max_new": args.max_new,
                     "slots": slots,
+                    "status": status,
                     "rows": rows,
                 },
                 indent=2,
@@ -261,7 +312,7 @@ def main() -> int:
         messages.unlink()
     except OSError:
         pass
-    return 0
+    return status
 
 
 if __name__ == "__main__":

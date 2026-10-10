@@ -46,6 +46,8 @@ import numpy as np
 import coremltools as ct
 from coremltools.converters.mil import Builder as mb
 
+from tinytitan_profile import arm_metric, metric_count
+
 try:
     from coremltools.models.compute_plan import MLComputePlan
 except Exception:  # noqa: BLE001 — optional
@@ -244,6 +246,69 @@ def measure(name: str, geom: Geometry, repeats: int, seed: int) -> dict:
     return row
 
 
+ARM_KEYS = ("ane_predict_seconds", "ane_load_seconds", "cpu_predict_seconds")
+ARM_NAMES = ("dense", "gather")
+
+
+def verdict(results: list[dict], repeats: int = 1):
+    """The two ratios the probe exists to quote, and the status to exit with.
+
+    0 both arms measured every figure the page prints, 1 a ratio printed beside
+    an error one arm recorded, 2 a figure the ratios are made of is missing.
+    Before this the whole block sat behind four truthy lookups, so a run whose
+    arms both errored printed no ratio line at all and exited 0 -- the same page
+    shape as a probe that had answered the question.
+    """
+    reasons: list[str] = []
+    lines: list[str] = []
+    if repeats < 1:
+        reasons.append(
+            f"NOT MEASURED: --repeats {repeats} asks for no timed call, so no arm was measured"
+        )
+    if len(results) != len(ARM_NAMES):
+        reasons.append(f"NOT MEASURED: the probe has {len(results)} arm rows, not one per arm")
+    by_arm = {name: row for name, row in zip(ARM_NAMES, results, strict=False)}
+    for name, row in by_arm.items():
+        for key in ARM_KEYS:
+            _, counted, total = arm_metric([row], key)
+            note = metric_count(name, key, counted, total)
+            if note:
+                reasons.append(note)
+        for key in ("plan_error", "ane_error", "cpu_error"):
+            if row.get(key):
+                reasons.append(f"REFUSED: the {name} arm recorded {key}: {row[key]}")
+
+    dense, gather = by_arm.get("dense", {}), by_arm.get("gather", {})
+    ratio_keys = ARM_KEYS[:2]
+    if not all(dense.get(key) is not None and gather.get(key) is not None for key in ratio_keys):
+        reasons.append(
+            "NOT MEASURED: no gather/dense ratio -- an arm logged neither "
+            "ane_predict_seconds nor ane_load_seconds"
+        )
+    elif not all(dense.get(key) for key in ratio_keys):
+        reasons.append(
+            "REFUSED: the dense arm logged a 0 s ANE figure, so the gather/dense "
+            "ratio would divide by zero"
+        )
+    else:
+        lines.append("verdict inputs:")
+        lines.append(
+            f"   gather/dense prediction  "
+            f"{gather['ane_predict_seconds'] / dense['ane_predict_seconds']:.2f}x"
+        )
+        lines.append(
+            f"   gather/dense load        "
+            f"{gather['ane_load_seconds'] / dense['ane_load_seconds']:.2f}x"
+        )
+
+    status = (
+        2 if any(reason.startswith("NOT MEASURED") for reason in reasons) else 1 if reasons else 0
+    )
+    lines.extend(f"  {reason}" for reason in reasons)
+    lines.append(f"  probe status {status}")
+    return lines, status
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -278,6 +343,10 @@ def main() -> int:
         f"against {geom.at_chunk(4096).dense_values * 2 / 1e6:.0f} MB dense"
     )
     print()
+    if args.repeats < 1:
+        lines, status = verdict([], args.repeats)
+        print("\n".join(lines))
+        return status
     results = []
     for name in ("dense", "gather"):
         row = measure(name, geom, args.repeats, args.seed)
@@ -299,30 +368,21 @@ def main() -> int:
             if row.get(key) is not None:
                 print(f"   {key:<22} {row[key]}")
         print()
-    dense, gather = results
-    if (
-        dense.get("ane_predict_seconds")
-        and gather.get("ane_predict_seconds")
-        and dense.get("ane_load_seconds")
-        and gather.get("ane_load_seconds")
-    ):
-        print("verdict inputs:")
-        print(
-            f"   gather/dense prediction  "
-            f"{gather['ane_predict_seconds'] / dense['ane_predict_seconds']:.2f}x"
-        )
-        print(
-            f"   gather/dense load        "
-            f"{gather['ane_load_seconds'] / dense['ane_load_seconds']:.2f}x"
-        )
+    lines, status = verdict(results, args.repeats)
+    print("\n".join(lines))
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
         label = args.label or "unlabelled"
         path = RESULTS / f"ane-gather-probe-{label}.json"
-        record = {"geometry": dataclasses.asdict(geom), "repeats": args.repeats, "results": results}
+        record = {
+            "geometry": dataclasses.asdict(geom),
+            "repeats": args.repeats,
+            "status": status,
+            "results": results,
+        }
         path.write_text(json.dumps(record, indent=2) + "\n")
         print(f"\nwrote {path.relative_to(ROOT)}")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

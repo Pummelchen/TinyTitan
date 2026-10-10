@@ -43,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 
-from tinytitan_profile import pgrep_answer
+from tinytitan_profile import arm_metric, metric_count, pgrep_answer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
@@ -150,22 +150,127 @@ def run_cli(
 
 
 def median(rows: list[dict], key: str) -> float | None:
-    values = [r[key] for r in rows if key in r and not r.get("failed")]
-    return statistics.median(values) if values else None
+    return arm_metric(rows, key)[0]
 
 
 def steady_state(rows: list[dict], arm: str, small: int, big: int) -> float | None:
     """Marginal tok/s over [small, big] for one arm, pairing each big run with
     the nearest complete small run of the same arm."""
-    smalls = [r for r in rows if r["arm"] == arm and r["max_new"] == small and r.get("complete")]
-    bigs = [r for r in rows if r["arm"] == arm and r["max_new"] == big and r.get("complete")]
+    return arm_steady_state(rows, arm, small, big)[0]
+
+
+def arm_steady_state(rows: list[dict], arm: str, small: int, big: int):
+    """(rate, reason) for one arm's differenced decode.
+
+    A missing pair and a pair that did not grow are different answers: the first
+    says nothing was measured, the second says the measurement contradicts the
+    page. Before this the function returned `None` for both and `main()` printed
+    `unavailable` over one of them and exited 0 over either.
+    """
+    if not rows:
+        return None, "NOT MEASURED: no run at all -- the sweep asked for none"
+    complete = [r for r in rows if r["arm"] == arm and r.get("complete")]
+    smalls = [r for r in complete if r["max_new"] == small]
+    bigs = [r for r in complete if r["max_new"] == big]
     if not smalls or not bigs:
-        return None
+        return None, (
+            f"NOT MEASURED: the {arm} arm has no complete run pair over "
+            f"[{small}, {big}] -- a run that stopped early or never printed "
+            f"a footer cannot be differenced"
+        )
     small_med = statistics.median([r["decode_s"] for r in smalls])
     big_med = statistics.median([r["decode_s"] for r in bigs])
     if big_med <= small_med:
-        return None
-    return (big - small) / (big_med - small_med)
+        return None, (
+            f"REFUSED: the {arm} arm's {big}-token run did not outlast its "
+            f"{small}-token run, so the differenced rate is not a rate"
+        )
+    return (big - small) / (big_med - small_med), None
+
+
+def verdict(rows: list[dict], small: int, big: int, label: str):
+    """The published page and the status it must exit with.
+
+    0 every figure came from a run that measured it, 1 it measured and a claim on
+    the page is contested, 2 a figure the page exists to report could not be
+    computed. The reason travels in the page, because a line reading
+    `unavailable` tells an operator nothing about which run was missing.
+    """
+    reasons: list[str] = []
+    lines: list[str] = []
+    prefill: dict[str, float | None] = {}
+    for name, arm in (("GPU", "gpu"), ("ANE", "ane")):
+        arm_rows = [r for r in rows if r["arm"] == arm]
+        value, counted, total = arm_metric(arm_rows, "prefill_s")
+        prefill[arm] = value
+        note = metric_count(name, "prefill_s", counted, total)
+        if note:
+            reasons.append(note)
+    steady: dict[str, float | None] = {}
+    refused: set[str] = set()
+    for arm in ("gpu", "ane"):
+        value, reason = arm_steady_state(rows, arm, small, big)
+        steady[arm] = value
+        if reason:
+            reasons.append(reason)
+        if (reason or "").startswith("REFUSED"):
+            refused.add(arm)
+
+    prompt_tokens = next((r["prompt_tokens"] for r in rows if "prompt_tokens" in r), None)
+    lines.append("=" * 72)
+    lines.append(f"STEADY-STATE DECODE PAST THE ANE HANDOVER — {label}")
+    lines.append(
+        f"  prompt {prompt_tokens if prompt_tokens is not None else 'not logged'} tokens, "
+        f"greedy, differenced over [{small}, {big}] generated tokens"
+    )
+    lines.append("=" * 72)
+    if prefill["gpu"] and prefill["ane"]:
+        lines.append(
+            f"  prefill   GPU {prefill['gpu']:7.2f} s   ANE {prefill['ane']:7.2f} s   "
+            f"speedup {prefill['gpu'] / prefill['ane']:.2f}x"
+        )
+    for name, arm in (("GPU", "gpu"), ("ANE", "ane")):
+        value = steady[arm]
+        if value is not None:
+            cell = f"{value:6.2f} tok/s"
+        elif arm in refused:
+            cell = "  no rate -- contested"
+        else:
+            cell = "NOT MEASURED"
+        lines.append(f"  decode    {name} steady state {cell}")
+    if steady["gpu"] and steady["ane"]:
+        gap = (steady["ane"] - steady["gpu"]) / steady["gpu"] * 100.0
+        lines.append(
+            f"  ANE vs GPU steady state: {gap:+.1f}% "
+            f"({steady['ane']:.2f} vs {steady['gpu']:.2f} tok/s)"
+        )
+        for length in (small, big):
+            gpu = arm_metric(
+                [r for r in rows if r["arm"] == "gpu" and r["max_new"] == length],
+                "decode_tok_s",
+            )
+            ane = arm_metric(
+                [r for r in rows if r["arm"] == "ane" and r["max_new"] == length],
+                "decode_tok_s",
+            )
+            note = metric_count("GPU", f"{length}tok decode_tok_s", gpu[1], gpu[2])
+            if note:
+                reasons.append(note)
+            note = metric_count("ANE", f"{length}tok decode_tok_s", ane[1], ane[2])
+            if note:
+                reasons.append(note)
+            if gpu[0] and ane[0]:
+                lines.append(
+                    f"    window up to {length:>4} tokens: "
+                    f"ANE vs GPU {(ane[0] - gpu[0]) / gpu[0] * 100.0:+.1f}% "
+                    f"({ane[0]:.2f} vs {gpu[0]:.2f} tok/s) — contains the transient"
+                )
+    status = (
+        2 if any(reason.startswith("NOT MEASURED") for reason in reasons) else 1 if reasons else 0
+    )
+    lines.extend(f"  {reason}" for reason in reasons)
+    lines.append(f"  sweep status {status}")
+    return lines, status
 
 
 def main() -> int:
@@ -207,14 +312,14 @@ def main() -> int:
         raise SystemExit(f"not an installed model: {model}")
     if not (model / "ane_prefill").is_dir():
         raise SystemExit(f"no ANE sidecar under {model}")
-    verdict, lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer|mlx_lm|mlx-lm"])
-    if verdict != "clear":
+    guard, busy_lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer|mlx_lm|mlx-lm"])
+    if guard != "clear":
         reason = (
             "a model process is already running"
-            if verdict == "busy"
+            if guard == "busy"
             else "the model-process guard could not answer what is running"
         )
-        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in lines))
+        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in busy_lines))
 
     prompt = build_prompt(args.paragraphs)
     # `--messages-file` rather than `--prompt`: the chat template is what turns
@@ -263,44 +368,8 @@ def main() -> int:
     finally:
         messages_file.unlink(missing_ok=True)
 
-    gpu_ss = steady_state(rows, "gpu", args.small, args.big)
-    ane_ss = steady_state(rows, "ane", args.small, args.big)
-    gpu_prefill = median([r for r in rows if r["arm"] == "gpu"], "prefill_s")
-    ane_prefill = median([r for r in rows if r["arm"] == "ane"], "prefill_s")
-
-    print("\n" + "=" * 72)
-    print(f"STEADY-STATE DECODE PAST THE ANE HANDOVER — {model.name}")
-    print(
-        f"  prompt {rows[0].get('prompt_tokens', '?')} tokens, greedy, "
-        f"differenced over [{args.small}, {args.big}] generated tokens"
-    )
-    print("=" * 72)
-    if gpu_prefill and ane_prefill:
-        print(
-            f"  prefill   GPU {gpu_prefill:7.2f} s   ANE {ane_prefill:7.2f} s   "
-            f"speedup {gpu_prefill / ane_prefill:.2f}x"
-        )
-    for label, value in (("GPU", gpu_ss), ("ANE", ane_ss)):
-        print(
-            f"  decode    {label} steady state "
-            + (f"{value:6.2f} tok/s" if value else "unavailable")
-        )
-    if gpu_ss and ane_ss:
-        gap = (ane_ss - gpu_ss) / gpu_ss * 100.0
-        print(f"  ANE vs GPU steady state: {gap:+.1f}% ({ane_ss:.2f} vs {gpu_ss:.2f} tok/s)")
-        for length in (args.small, args.big):
-            g = median(
-                [r for r in rows if r["arm"] == "gpu" and r["max_new"] == length], "decode_tok_s"
-            )
-            a = median(
-                [r for r in rows if r["arm"] == "ane" and r["max_new"] == length], "decode_tok_s"
-            )
-            if g and a:
-                print(
-                    f"    window up to {length:>4} tokens: "
-                    f"ANE vs GPU {(a - g) / g * 100.0:+.1f}% "
-                    f"({a:.2f} vs {g:.2f} tok/s) — contains the transient"
-                )
+    lines, status = verdict(rows, args.small, args.big, model.name)
+    print("\n" + "\n".join(lines))
 
     if args.record:
         RESULTS.mkdir(parents=True, exist_ok=True)
@@ -314,17 +383,18 @@ def main() -> int:
                     "big": args.big,
                     "paragraphs": args.paragraphs,
                     "wire_trace": args.wire_trace,
-                    "gpu_steady_tok_s": gpu_ss,
-                    "ane_steady_tok_s": ane_ss,
-                    "gpu_prefill_s": gpu_prefill,
-                    "ane_prefill_s": ane_prefill,
+                    "gpu_steady_tok_s": steady_state(rows, "gpu", args.small, args.big),
+                    "ane_steady_tok_s": steady_state(rows, "ane", args.small, args.big),
+                    "gpu_prefill_s": median([r for r in rows if r["arm"] == "gpu"], "prefill_s"),
+                    "ane_prefill_s": median([r for r in rows if r["arm"] == "ane"], "prefill_s"),
+                    "status": status,
                     "rows": rows,
                 },
                 indent=2,
             )
         )
         print(f"\nwrote {out.relative_to(ROOT)}")
-    return 0
+    return status
 
 
 if __name__ == "__main__":
