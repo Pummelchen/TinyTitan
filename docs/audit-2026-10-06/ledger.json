@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 186,
-    "done": 181,
+    "total": 187,
+    "done": 182,
     "open": 4,
     "blocked": 1
   },
@@ -3094,17 +3094,17 @@
       "tier": "A",
       "project": "benchmark",
       "category": "a verdict seam with no refusal path: the wired-case scorer exits 0 over an empty judgement file and dies in a traceback at exit 1 over an unreadable one",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
-      "file_line": "benchmark/side_engine_wired_cases.py:147-168",
+      "file_line": "benchmark/side_engine_wired_cases.py:162-258 (post-fix), benchmark/side_engine_wired_cases.py:30-35, 147-168",
       "title": "`--score` prints a bare header and answers 0 over an empty file, and escapes a missing or foreign file as a traceback at exit 1",
       "discovered-by": "AUD-288's sibling sweep: the other side-engine scorer with a `--score` seam, measured against HEAD.",
       "evidence-before": "measured model-free. `python3.13 benchmark/side_engine_wired_cases.py --score <empty file>` prints the `task truth answer note` header, no rows and no per-task totals, and exits 0 -- `failures = 0` over an empty `by_task` is the pass status, so a run in which nothing was judged reports the wired cases as clean. The same command on a path that does not exist exits 1 with `FileNotFoundError: [Errno 2] No such file or directory` raised out of `read_text`; a row written by another driver raises `KeyError` on `row['truth']` or `row['task']`, both indexed rather than fetched. Neither is a refusal, and exit 1 is the status this tree reserves for a run that failed, not for a comparison that never existed.",
-      "owner": "auditor -- queued next; it is a fix, not a decision, and needs no model, no install and no gate change",
-      "fix-summary": "",
-      "evidence-after": "Not changed. The repair is AUD-288's shape, written once already: read and parse inside a guard so a missing or unparseable file prints `NOT MEASURED: <reason>` and answers 2; answer 2 when no row is readable; answer 1 when a task named by `cases()` ran no rows, so 0 means every wired case ran and every answer matched; and keep the per-task print only over the matrix that was actually measured.",
-      "sibling-note": "This is the third `--score` in the side-engine family; the other two are AUD-288 (fixed) and the pair AUD-288's row clears (`side_engine_tasks.py`, `side_engine_judges.py`). `benchmark/watchdog_calibrate.py` is unread and is the last driver from that sweep, so it is checked for the same seam before this row closes.",
-      "commit": ""
+      "owner": "",
+      "fix-summary": "`--score` answers from the 12 cases the driver prepares, not from the rows that happened to arrive, and the status table is printed in the module docstring: 0 every authored case ran and every answer matched the truth; 1 measured and contested -- a named case ran no rows or carried no judgement, a row was repeated, a row came from another case set, or a judgement disagreed with the truth; 2 the comparison does not exist -- no rows, an unreadable file, or no row that belongs to this case set, with the reason printed and no totals. A `refuse()` helper is the only way out of `score()`, so the missing file, a half-written line, a row that is not a dict and a row missing `task`/`truth`/`prompt`/`note` all print a cause instead of raising. A `judgement()` helper returns the first word, or nothing when there is no answer, and silence is excluded from the denominators rather than read as a MISS; a repeated row is judged once and counted as `repeated`. A genuine disagreement moved from 2 to 1, which contradicts no documented promise: `docs/side-engine-tasks.md` records 4B `T5 7/8` and 9B `8/8` and names no exit code, and it aligns the driver with its two siblings.",
+      "evidence-after": "17 tests in the new owner suite `benchmark/test_side_engine_wired_verdict.py`, `git add`ed before CI named it (AUD-211): 15 RED at HEAD, 2 controls written to pin what the fix deliberately preserves -- the first-word reading with `strip().upper()` and `strip('.,:;\\\"\\'')`, byte-identical to the shipped judgement, and a clean run over the driver's own `prepare()` output. Sweep: 25 single-hit anchored mutants over the pristine copy, 0 survivors, both files restored byte-identical by md5; the two survivors that appeared mid-sweep became tests rather than deleted mutants, and one equivalent mutant was dropped for not being a mutant. CLI statuses measured end to end on fixtures: a full honest run 0, a case dropped 1, all-silent rows 1, one wrong answer 1, an empty file 2, an absent path 2 -- refusals print a cause and no totals, and no shape leaves a traceback. The CI verdict group is 50 suites and 1087 tests OK on python3.13. `bash tools/lint.sh all` rc=0, docs gate reporting 85/89 python suites registered in CI; ruff 0.16.7 clean and formatted. Fix commit 1ba59a1.",
+      "sibling-note": "This is the third `--score` in the side-engine family. `t6_prose_score.py` came out clear. AUD-288's row called `side_engine_tasks.py` and `side_engine_judges.py` clear for refusal on no-file/no-rows/no-completions, and that call holds for the first and needed narrowing for the second: reading `side_engine_judges.py` more closely for this sweep found that it refuses on refusals but not on absence -- an empty done file answers 0 -- and never compares the rows it scored against the jobs it was handed. That is filed as AUD-291 rather than folded into this row. `benchmark/watchdog_calibrate.py` is the last driver AUD-286's sweep left unread and is checked next.",
+      "commit": "1ba59a1"
     },
     {
       "id": "AUD-290",
@@ -3122,6 +3122,24 @@
       "fix-summary": "",
       "evidence-after": "Not changed. The correction is three cells and one sentence, and the 4B token-match column is re-measurable here because it is model-free. The side-engine columns are not: `models/` holds only the two 125B-A6B installs, no qwen3.5 4B or 9B, so those cells can only be marked as recorded on 2026-09-18 rather than re-measured, and AGENTS.md forbids installing a model to satisfy a document. The open question for the operator is whether `tools/docs-facts.py` should pin the pair -- a model-free check that the documented token-match figure equals what `--baseline` prints costs milliseconds -- because that puts a benchmark harness inside a gate, which is the standing question the parity harness already raised.",
       "sibling-note": "The class is the one AUD-240 and AUD-223 filed: a document restating a measured count drifts the moment the count moves, and the docs gate only checks counts it already knows how to find. Nothing else in docs/ restates this particular figure; the wiki is a separate repository and was not read for this row, so its copy is unchecked.",
+      "commit": ""
+    },
+    {
+      "id": "AUD-291",
+      "severity": "S2",
+      "tier": "A",
+      "project": "benchmark",
+      "category": "a verdict that is the negation of a coverage check: the judges driver answers 0 for a done file that holds no rows, prints a refusal message over a run that refused nothing, and never compares the rows it scored against the jobs it was given",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/side_engine_judges.py:201-206 (verdict), benchmark/side_engine_judges.py:108-131 (summarize), benchmark/side_engine_judges.py:133-156 (line), benchmark/side_engine_tasks.py:167",
+      "title": "a judge that wrote no rows answers 0, `measured nothing: every request refused` prints over a file with no requests, and 2 rows of a 60-case run pass",
+      "discovered-by": "AUD-289's sibling sweep: the last driver in the side-engine `--score` family, read for the hole AUD-288 and AUD-289 closed. Measured against HEAD at 1ba59a1, model-free -- `summarize()` and `line()` were called on fixture done files, so no model, no server, nothing fetched.",
+      "evidence-before": "five shapes measured. (1) `summarize()` over a done file with no rows returns `{}`, and the verdict is `1 if any(entry['refused'] for entry in per_task.values()) else 0`, which is False over an empty map: a judge whose done file holds nothing answers 0. (2) The same run prints, from `line()`, `measured nothing: every request refused, so none of the above is a score` -- the wording names refusals when zero requests ran, so the message and the status disagree about what happened. (3) Coverage: over the authored 60 cases, a done file holding 2 answered rows gives `{'T2': {'correct': 2, 'total': 2, 'refused': 0}}` and answers 0; `len(jobs)` is passed to `line()` for the s/judgement rate and never reaches the verdict, so a run that died after 2 of 60 judgements is a clean pass. (4) `summarize(<missing path>)` raises `FileNotFoundError`, a half-written line raises `JSONDecodeError`, a row with no `task` raises `KeyError`, and a row with a `task` but no `prompt` raises `KeyError` out of `side_engine_tasks.truth_of:167`; `main()` reads `args.jobs` unguarded too. A traceback leaves exit 1, the status this tree reserves for a contested comparison. (5) For contrast, the case the guard does cover: every row carrying an error gives `refused: 3` and answers 1, which is correct and honestly worded.",
+      "owner": "auditor -- queued next; it is a fix, not a decision, and needs no model, no install and no gate change",
+      "fix-summary": "",
+      "evidence-after": "Not changed. The repair is the status table AUD-288 and AUD-289 both print in their docstrings: 0 every job ran and was judged; 1 a named task ran no rows, or the rows scored do not cover the jobs the driver was handed, naming how many are missing; 2 NOT MEASURED -- no done file, no rows in it, or a row that names no task or no prompt, with the reason printed and no percentages. `measured nothing` is printed only over a run that actually refused, and the s/judgement rate only over a run that has judgements.",
+      "sibling-note": "AUD-289's sweep cleared `t6_prose_score.py` and produced this row from `side_engine_judges.py`, the third driver in that family. `side_engine_tasks.py` stays cleared for the refusal shapes AUD-288's row recorded, and this row narrows what that earlier sweep claimed about this one. The class to sweep next is the coverage half: no `--score` or summarising driver in the tree that was read for AUD-286 through AUD-289 compares the rows it scored against the jobs or cases it was handed. `benchmark/watchdog_calibrate.py` is the last driver AUD-286's sweep left unread.",
       "commit": ""
     }
   ]
