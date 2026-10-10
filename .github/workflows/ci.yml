@@ -860,11 +860,25 @@ jobs:
         # with the reason, because those were asked about. The interpreter is a stub that
         # reads a manifest and writes a marker file: no coremltools, no model, no export
         # and nothing fetched.
+        # `test_python_resolver_gate` is AUD-295, the interpreter choice in
+        # `tools/lib/python.sh`. The library tests every candidate it searches for --
+        # version floor and the numpy/ml_dtypes/safetensors import -- and returns the
+        # first that passes, but an operator's `TINYTITAN_PYTHON` came back at status 0
+        # without being asked anything: a path that does not exist, an interpreter below
+        # the floor, one with no analysis stack, and a plain directory all resolved. That
+        # is the one value chosen without a check, and `tools/install_models.sh` hands it
+        # straight to `"$python" tools/prepare_*.py`, so a typo arrived as a raw
+        # "command not found" mid-install. It is now held to the same test, refused with
+        # the value and the reason named, and the search's refusal lists every candidate
+        # it tried -- the line used to omit `python`, which the loop does try and can
+        # select. Stubs in a temp directory run the library's own probe; no install,
+        # nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
             test_side_engine_judges test_side_engine_judges_verdict \
             test_watchdog_calibrate_verdict test_ane_sidecars_gate \
+            test_python_resolver_gate \
             test_tinytitan_prefetch_trace_analysis \
             test_memory_master test_memory_scenarios test_memval_master_exit \
             test_ornith_concise_tool_ab test_ornith_four_program_matrix \
