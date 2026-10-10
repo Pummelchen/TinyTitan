@@ -61,7 +61,7 @@
 #   TINYTITAN_DSH_NODE_VERSION    pinned Node, used only when the Mac has none
 #   TINYTITAN_DSH_PNPM_VERSION    pinned pnpm, installed into the private prefix
 #   TINYTITAN_DSH_PLAYWRIGHT_VERSION  pinned Playwright, used by `smoke` only
-#   TINYTITAN_DSH_PORT            browser UI port (default 7788)
+#   TINYTITAN_DSH_PORT            browser UI port, a number 1-65535 (default 7788)
 #   TINYTITAN_DSH_DRY_RUN=1       print what would happen, change nothing
 set -euo pipefail
 
@@ -674,6 +674,14 @@ stop_ours_on_port() {
 # resolve_port <preferred> -> the port to use, on stdout.
 resolve_port() {
   local base="$1" candidate
+  # The shape has to be checked before the arithmetic is. `base` goes straight
+  # into `(( ))` below, so a word reads as an unset variable name, `08080` reads
+  # as octal, and a base outside the port space never enters the loop yet still
+  # reports the whole hundred-port range it never scanned as occupied. This is
+  # the bar `tools/server_launcher.sh` already holds `--port` to.
+  if [[ ! "$base" =~ ^[1-9][0-9]{0,4}$ ]] || (( base > 65535 )); then
+    die "unknown port: $base (a number 1-65535)"
+  fi
   for (( candidate = base; candidate <= base + 100 && candidate <= 65535; candidate++ )); do
     if ! port_listening "$candidate"; then
       (( candidate == base )) || printf '  \033[33m!\033[0m Port %s is taken; using %s instead.\n' "$base" "$candidate" >&2
