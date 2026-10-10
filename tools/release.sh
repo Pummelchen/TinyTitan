@@ -29,6 +29,24 @@ PRODUCTS=(TinyTitanServer TinyTitanCLI TinyTitanRepack TinyTitanBench)
 die() { echo "error: $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }
 
+# What counts as a passing suite. `swift test --no-parallel` prints one summary
+# line per test target -- seven on this tree -- so a verdict that asks whether
+# *some* line says passed is a verdict on one target out of seven, and the run's
+# own status knows more than any grep does.
+test_gate_verdict() {
+  local log="$1" status="$2" summaries failures
+  [ -s "$log" ] || die "swift test wrote no log at $log: nothing was run"
+  summaries=$(grep -c 'Test run with' "$log")
+  failures=$(grep -c 'Test run with .* failed' "$log")
+  [ "$summaries" -gt 0 ] \
+    || die "swift test exited $status and reported no test-target run at all; $log holds no 'Test run with' line"
+  [ "$failures" -eq 0 ] \
+    || die "$failures of $summaries test-target runs reported failure in $log; every one must pass"
+  [ "$status" = 0 ] \
+    || die "swift test exited $status over $summaries passing test-target run(s): see $log"
+  echo "  $summaries test-target run(s) passed, swift test exited 0"
+}
+
 # RELEASE.md rule 2 is a promise about bytes — `lipo -archs <binary>` must report
 # exactly `arm64` — and until now nothing in the release path ran lipo, so the only
 # arm64 claim in a shipped artifact was its filename. Every name-based assertion
@@ -140,10 +158,9 @@ mkdir -p "$STAGE_ROOT"
 # --- gates ------------------------------------------------------------------
 step "gates"
 "$SCRIPT_DIR/lint.sh" || die "tools/lint.sh failed"
-swift test --no-parallel 2>&1 | tee "$STAGE_ROOT.testlog" 2>/dev/null | grep -E 'Test run with' \
-  || true
-grep -q 'Test run with .* passed' "$STAGE_ROOT.testlog" 2>/dev/null \
-  || die "swift test did not report a passing run"
+test_log="$STAGE_ROOT.testlog"
+swift test --no-parallel 2>&1 | tee "$test_log" 2>/dev/null | grep -E 'Test run with'
+test_gate_verdict "$test_log" "${PIPESTATUS[0]}"
 
 # The golden baseline is the only check that exercises real inference.
 #
