@@ -4,9 +4,9 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 180,
-    "done": 177,
-    "open": 2,
+    "total": 182,
+    "done": 178,
+    "open": 3,
     "blocked": 1
   },
   "tasks": [
@@ -3015,6 +3015,41 @@
       "fix-summary": "",
       "evidence-after": "Proposed, not applied. Two edits and one of them is the test. Driver: split the guard the way AUD-283 split its three siblings -- `if None in (gpu_prefill, ane_prefill, gpu_decode, ane_decode):` keeps the missing-prefill sentence, `elif not ane_prefill:` appends `NOT MEASURED: the ANE prefill median is 0 s, so no speedup is computable`, and the else prints both medians and the SPEEDUP line as it does today. Test: line 497's `assertIn('prefill time is missing', text)` becomes `assertIn('prefill median is 0 s', text)`. Nothing else in that test moves -- its `status 2` and its `assertNotIn('SPEEDUP')` are both preserved by the fix, because refusing is still correct, only the named cause changes. If the operator prefers to keep the wording, the alternative is to leave the driver and retitle the test, which keeps a refusal that states a cause no run produced. AUD-283 wrote the two behaviour tests for this and removed them rather than commit a red suite; they are in the git history of that row's measurement and go back in with whichever side is chosen.",
       "sibling-note": "This is the only copy of the shape left in benchmark/ outside the four AUD-283 fixed: the grep for `None in (...) or not X` and for truthiness tests on `arm_metric` medians over non-test scripts returns this line and the three sites AUD-283's sibling note clears.",
+      "commit": ""
+    },
+    {
+      "id": "AUD-285",
+      "severity": "S2",
+      "tier": "A",
+      "project": "benchmark",
+      "category": "a second caller of the hit/fixup classifier left on a raw text comparison: it passed a sweep where nothing answered, parsed no footer, wrote its artifact over a refusal and escaped a dead server as a traceback at the status a disagreement carries",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/tinytitan_io_backend_ab.py:30-56 (pre-fix), benchmark/tinytitan_hit_fixup_ab.py:334, 356, 262",
+      "title": "the pread-vs-Metal I/O A/B was left behind by AUD-280: raw text equality was its only verdict, and the driver AUD-280's sibling note called that comparison unique to the hit/fixup A/B",
+      "discovered-by": "a sweep of the six `benchmark/` drivers the ledger had never named -- read by diffing the driver list against `ledger.json` rather than by following the notes -- then measured before filing. Driven the way AUD-280 was: the real `main()` with the neighbour module's own leaves patched, so no model, no server, no socket, nothing fetched.",
+      "evidence-before": "measured model-free against HEAD. (a) Every arm answering nothing (`content=\"\"`, `decode_tok_s=0.0`, `completion_tokens=0`) produced an artifact reading `\"response_mismatches\": []`, `\"passed\": true` and exit 0 -- two backends that answered nothing were an agreement about nothing. (b) Both backends printing the same words while logging 128 and 96 completion tokens: `passed: true`, exit 0. (c) Footers reading `decode_tok_s=nan` and `expert_hit_rate=nan` on every metal row: `passed: true`, exit 0, because the driver reads `content` and nothing else -- the rows carry the generation and runner footers `run_case` attached and no value is ever taken out of them, which is the half of AUD-280 this sibling never got. (d) A page printed nothing at all but `results: <path>`, so an operator watching the sweep had no state per case. (e) A refused preflight or a case whose log had no footers escaped as a `RuntimeError` traceback at exit 1 -- the status a measured disagreement carries -- and the cases that had already run were lost without a line naming them. The commit that closed AUD-280 states the raw two-arm text comparison is unique to that driver; against this file that claim is false, and this row corrects it.",
+      "fix-summary": "the sibling runs the classifier the audit already tested, rather than a second one written beside it. `tinytitan_hit_fixup_ab._cases` and `.verdict` take the arm identity -- `arm_key` names the record field that carries the arm and `arms` its two names -- with the parent's own `mode`/`MODES` as defaults, so the barrier-vs-hit/fixup page is unchanged and the I/O A/B keys its cases on `io_backend` over `(\"pread\", \"metal\")`. That gives this driver the five states the parent publishes (compared, differ, empty-arm, empty-case, unlogged, unusable), the per-case line with each arm's measured rate and hit rate and claimed tokens, the three-status answer, and `refuse()` for a preflight that refuses or a case that dies mid-sweep: reason printed, the cases that ran named, no artifact written. `passed` is now derived from the status instead of from the absence of a text disagreement, and the artifact gains `status` so a consumer reads the same answer the exit code gives. No new vocabulary, no new status numbers.",
+      "fix-evidence": "tests first: `benchmark/test_io_backend_ab_verdict.py`, 11 tests, driven through the sibling's real `main()` with `preflight`, `run_case` and `ROOT` patched. 9 were RED against HEAD (6 assertion failures -- `0 != 2` over a dead sweep, `0 != 1` over a length disagreement, an artifact written over a refusal, `True is not false`, and two `not found in 'results: <path>'` -- and 2 errors: the preflight `RuntimeError` escaping as a traceback, and no verdict line to find), and 2 controls were green: a live sweep passing, and the artifact keeping its 12 rows and 6 logs. Two harness defects were found and fixed while getting there, and both are recorded rather than quietly repaired: `parse_args()` read unittest's argv until `sys.argv` was pinned the way the parent suite pins it, and `sweep(content=\"\")` silently overrode nothing because its keyword name is an arm -- it now raises on an unknown key instead of handing the driver the unaltered sweep. The anchored sweep (/tmp/aud285/mutate.py, PYTHONDONTWRITEBYTECODE=1, pristine copies re-taken after `ruff format`) is 13 mutants over both files: 5 killed by assertions and 8 crash-kills, 0 survivors, both drivers restored byte-identical (md5 a1a06f0ec1a83989cfab739c70414dab, bdc4ad27f392858db40338bdee4084a7). The first sweep left 1 survivor and 3 anchors that no longer matched the formatted file; the survivor was `a dead arm escapes as a traceback`, and it survived because no test drove a case that died after others had run -- so `test_a_case_that_died_mid_sweep_names_the_cases_that_ran` went in and the mutant stayed, and the 3 anchors were re-taken against the formatted text. Two mutants of the parent's arm identity (`the case ignores its own arm names`, `the sweep is built over the default modes`) are killed by the parent's own 29 tests, which is the evidence that parameterising it did not loosen it. `python3 -m unittest test_io_backend_ab_verdict test_hit_fixup_ab_verdict` is 40 tests OK. The CI verdict group, read from the workflow's own list rather than typed, is 47 suites and 1035 tests OK in 32.6 s; it first failed on `test_docs_facts_suites` with `ci.yml names test_io_backend_ab_verdict and no benchmark/test_io_backend_ab_verdict.py is tracked` -- AUD-211's rule catching this row doing exactly what AUD-211 was filed for, fixed by tracking the file before naming it. `tools/lint.sh python` is clean at pinned ruff 0.16.7 and `tools/lint.sh all` exits 0; the docs gate now reads 82/86 suites registered.",
+      "sibling-note": "grep for a raw `arms[...][\"content\"] !=` comparison outside the classifier returns one other driver, `tinytitan_v42_control_plane_ab.py:74`, which imports the same neighbour, compares every case's text against the first case's, parses no footer, writes its artifact unconditionally and has no refusal path -- measured here at `passed: true` and exit 0 over 36 rows whose footers read `decode_tok_s=nan`. It is a six-way matrix against a reference rather than a two-arm A/B, so it needs the pairwise shape as well as the arm key; filed as AUD-286. Cleared on the way: `benchmark/tinytitan_io_backend_ab.py`'s direct `by_case[...]` index is not the KeyError it looks like, because `run_case` refuses a log whose footer count differs from its row count, so a case that ran always contributes both of its rows -- the parent indexes the same way at `:342` and is not wrong either. Of the six drivers this sweep opened on, three are now accounted for (this one, the v4.2 matrix, and `side_engine_wired_cases.py`, which the ledger already covers under AUD-279's name); `master_scenarios.py`, `side_engine_recall.py` and `watchdog_calibrate.py` remain unread.",
+      "commit": "36e27a1"
+    },
+    {
+      "id": "AUD-286",
+      "severity": "S2",
+      "tier": "A",
+      "project": "benchmark",
+      "category": "the same AUD-285 shape in the v4.2 control-plane matrix: raw text equality against a reference case, no footer parsed, no refusal path",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/tinytitan_v42_control_plane_ab.py:67-105",
+      "title": "the v4.2 control-plane matrix passes a sweep whose every footer reads nan, because its verdict is the text of six cases compared to the first one",
+      "discovered-by": "AUD-285's sibling sweep.",
+      "evidence-before": "measured model-free against HEAD by driving the real `main()` with the neighbour's `preflight` and `run_case` patched: six cases x three prompts x two warmths = 36 rows, every row answering the same paragraph and every footer reading `decode_tok_s=nan` / `expert_hit_rate=nan`, produced `\"response_mismatches\": []`, `\"passed\": true` and exit 0 with the artifact written. The comparison at `:73-77` reads only `content`; `preflight()` and `run_case()` are called outside any `try`, so a refused preflight or a footer-less log escapes as a traceback at exit 1, the status a measured disagreement carries.",
+      "owner": "next session -- this is a bug, not a decision; it is filed open only because AUD-285's close was reached first and the turn budget ended. The fix is the shape AUD-285 just landed: run the parent classifier once per (reference, case) pair through `arm_key=\"case\"`, pool the statuses, and refuse through `benchmark.refuse`.",
+      "fix-summary": "",
+      "evidence-after": "",
+      "sibling-note": "the grep that found it is the one in AUD-285's note; no third copy of the raw comparison exists in `benchmark/`.",
       "commit": ""
     }
   ]
