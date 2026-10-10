@@ -770,6 +770,24 @@ jobs:
         # does not exist. A refusal writes no record, and one that arrives after some
         # cases ran names them. It drives the real `main()` with only the leaves
         # patched, so no model, no server binary and nothing fetched.
+        # `test_vs_competitors_verdict` is AUD-281, the same seam in the driver
+        # that publishes the head-to-head claim. It read none of its figures as
+        # numbers: the TinyTitan footer came back through `"" if rate else "no decode
+        # footer"`, a truthiness test on a float, so `decode_tok_s=nan` was returned
+        # as a measurement and printed in the table, `decode_tok_s=0.00` was reported
+        # as a footer that never existed, and a token that is not a number (or an
+        # Ollama `eval_duration` of zero, or LM Studio's string rate) raised straight
+        # out of the sweep with no table and no status. Every runner now passes one
+        # figure rule, ours included -- a rate only when the token parses to a finite
+        # number, and the refusal quotes it exactly as printed -- because one engine
+        # refusing a figure and another publishing it as a rate is the asymmetry that
+        # file's own header warns about. `main()` ended on `return 0` whatever it
+        # measured, so a sweep where every cell failed and a sweep where every
+        # selected engine was skipped both printed a table of dashes and exited 0
+        # beside the claim; it now answers 0 every cell measured, 1 a named cell has
+        # no rate, 2 NOT MEASURED. It drives the real `main()` and the real runners
+        # with only the process, the socket and the log patched, so no model, no
+        # engine binary, no third-party server and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -794,7 +812,7 @@ jobs:
             test_sampler_ab_verdict test_logged_metric_cells \
             test_knob_sweep_verdict test_guard_source_rate_verdict \
             test_composite_split_verdict \
-            test_hit_fixup_ab_verdict
+            test_hit_fixup_ab_verdict test_vs_competitors_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

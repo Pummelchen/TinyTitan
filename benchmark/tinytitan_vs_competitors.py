@@ -40,12 +40,19 @@ TWO REGIMES, AND WE SHOULD PUBLISH BOTH
 TinyTitan is built for the second: it streams experts from SSD inside a budget you
 set. Reporting only the regime we win is the same dishonesty as the original
 claim. Peak RSS is recorded on every run so both regimes are derivable.
+
+THE EXIT CODE IS PART OF THE RESULT
+  0  every selected engine reported a finite decode rate for every prompt
+  1  the sweep ran and a named cell has no rate -- the table has dashes
+  2  NOT MEASURED: nothing in the sweep reported a finite rate
+  3  another inference process is running, so every number would be noise
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -177,6 +184,43 @@ def perf_cores() -> int:
         return 8
 
 
+def reported_rate(value: object, source: str) -> tuple[float | None, str]:
+    """An engine's own decode figure as a rate, or the reason it is not one.
+
+    AUD-281: every runner parsed its figure with `float(...)` on whatever token
+    it found, and the TinyTitan footer came back through `"" if rate else "no
+    decode footer"` -- a truthiness test on a float. So a footer printing nan
+    was published as a measurement, one printing 0.00 was reported as a missing
+    footer, and a token that is not a number (or an Ollama duration of zero)
+    raised straight out of the sweep. One engine refusing a figure and another
+    printing it as a rate is the asymmetry this file's header is about, so the
+    rule is one rule for all five: a figure is a rate only when it parses to a
+    finite number, and the refusal quotes it exactly as printed.
+    """
+    shown = str(value) if str(value) else "(nothing)"
+    try:
+        rate = float(value)
+    except (TypeError, ValueError):
+        return None, f"{source} logged {shown}, which is not a number"
+    if not math.isfinite(rate):
+        return None, f"{source} logged {shown}, which is not a finite rate"
+    return rate, ""
+
+
+def decode_footer(text: str) -> tuple[float | None, str]:
+    """The rate TinyTitan's own footer last printed, or the reason it has none."""
+    line = None
+    for candidate in text.splitlines():
+        if "decode_tok_s=" in candidate and (
+            "TinyTitan generation" in candidate or "TinyTitan mtp " in candidate
+        ):
+            line = candidate
+    if line is None:
+        return None, "no decode footer"
+    token = line.split("decode_tok_s=", 1)[1].split(maxsplit=1)
+    return reported_rate(token[0] if token else "", "TinyTitan decode footer")
+
+
 def run_llamacpp(prompt: str) -> tuple[float | None, float | None, str]:
     # -ngl 999      every layer on Metal
     # -fa on        flash attention, the recommended default on Apple silicon
@@ -221,7 +265,8 @@ def run_llamacpp(prompt: str) -> tuple[float | None, float | None, str]:
                 break
     if not m:
         return None, rss, f"no decode rate in output (rc={rc})"
-    return float(m.group(1)), rss, ""
+    rate, reason = reported_rate(m.group(1), "llama.cpp")
+    return rate, rss, reason
 
 
 def run_ollama(prompt: str) -> tuple[float | None, float | None, str]:
@@ -253,9 +298,14 @@ def run_ollama(prompt: str) -> tuple[float | None, float | None, str]:
         conn.close()
     except OSError as exc:
         return None, None, f"ollama not reachable: {exc}"
-    if "eval_count" not in data:
+    count, duration = data.get("eval_count"), data.get("eval_duration")
+    if not isinstance(count, (int, float)) or not isinstance(duration, (int, float)):
         return None, None, f"no eval stats: {str(data)[:120]}"
-    rate = data["eval_count"] / (data["eval_duration"] / 1e9)
+    if duration <= 0:
+        return None, None, f"ollama eval_duration={duration} cannot give a rate"
+    rate, reason = reported_rate(count / (duration / 1e9), "ollama")
+    if reason:
+        return None, None, reason
     # An unanswered pgrep is not "ollama is not running": reporting no RSS for a
     # process that is running mislabels the comparison (AUD-268).
     verdict, lines = pgrep_answer(["-n", "ollama"])
@@ -285,7 +335,8 @@ def run_mlx(prompt: str) -> tuple[float | None, float | None, str]:
     m = re.search(r"Generation:.*?([\d.]+) tokens-per-sec", out)
     if not m:
         return None, rss, f"no generation rate in output (rc={rc})"
-    return float(m.group(1)), rss, ""
+    rate, reason = reported_rate(m.group(1), "MLX-LM")
+    return rate, rss, reason
 
 
 def run_lmstudio(prompt: str) -> tuple[float | None, float | None, str]:
@@ -315,17 +366,16 @@ def run_lmstudio(prompt: str) -> tuple[float | None, float | None, str]:
     except OSError as exc:
         return None, None, f"LM Studio server not reachable: {exc}"
     stats = data.get("stats") or {}
-    rate = stats.get("tokens_per_second")
-    if rate is None:
+    figure = stats.get("tokens_per_second")
+    if figure is None:
         return None, None, "no stats.tokens_per_second (start with `lms server start`)"
+    rate, reason = reported_rate(figure, "LM Studio")
+    if reason:
+        return None, None, reason
     verdict, lines = pgrep_answer(["-n", "LM Studio"])
     if verdict == "unknown":
         return None, None, "cannot ask for the LM Studio pid: " + " ".join(lines)[:90]
-    return (
-        float(rate),
-        sample_rss(int(lines[0])) if verdict == "busy" and lines else None,
-        "",
-    )
+    return rate, sample_rss(int(lines[0])) if verdict == "busy" and lines else None, ""
 
 
 def run_mlc(prompt: str) -> tuple[float | None, float | None, str]:
@@ -348,7 +398,8 @@ def run_mlc(prompt: str) -> tuple[float | None, float | None, str]:
     m = re.search(r"decode:\s*([\d.]+) tok/s", out)
     if not m:
         return None, rss, f"no decode rate in output (rc={rc})"
-    return float(m.group(1)), rss, ""
+    rate, reason = reported_rate(m.group(1), "MLC-LLM")
+    return rate, rss, reason
 
 
 def run_tinytitan(prompt: str) -> tuple[float | None, float | None, str]:
@@ -428,11 +479,8 @@ def run_tinytitan(prompt: str) -> tuple[float | None, float | None, str]:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
-    rate = None
-    for line in log.read_text().splitlines():
-        if "decode_tok_s=" in line and ("TinyTitan generation" in line or "TinyTitan mtp " in line):
-            rate = float(line.split("decode_tok_s=")[1].split()[0])
-    return rate, rss, "" if rate else "no decode footer"
+    rate, note = decode_footer(log.read_text(encoding="utf-8"))
+    return rate, rss, note
 
 
 ENGINES: dict[str, tuple[Engine, object]] = {
@@ -541,6 +589,36 @@ def check(selected: list[str]) -> int:
     return 0 if not missing else 1
 
 
+def sweep_verdict(results: list[Result], skipped: list[tuple[str, str]]) -> tuple[list[str], int]:
+    """0 every cell measured clean, 1 a named cell has no rate, 2 nothing was measured.
+
+    AUD-281: `main()` ended on `return 0` whatever it measured, so a sweep where
+    every cell failed and a sweep where every selected engine was skipped both
+    printed a table of dashes and exited 0 beside the claim the file exists to
+    test. A selected engine that was skipped is a contest, not a pass: one
+    engine's column cannot support a head-to-head.
+    """
+    if not any(r.ok for r in results):
+        attempted = sorted({r.engine for r in results})
+        unrun = sorted(name for name, _ in skipped)
+        reasons = []
+        if attempted:
+            reasons.append("every cell failed: " + ", ".join(attempted))
+        if unrun:
+            reasons.append("no selected engine was ready: " + ", ".join(unrun))
+        if not reasons:
+            reasons.append("no engine was selected")
+        return [f"\nNOT MEASURED: {'; '.join(reasons)}"], 2
+    lines = [
+        f"CONTESTED: {r.engine} {r.prompt} has no rate ({r.note})" for r in results if not r.ok
+    ]
+    lines += [
+        f"CONTESTED: {name} was skipped ({reason}), so its column is empty"
+        for name, reason in skipped
+    ]
+    return lines, 1 if lines else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="report engine/model readiness and exit")
@@ -573,10 +651,13 @@ def main() -> int:
         return 3
 
     results: list[Result] = []
+    skipped: list[tuple[str, str]] = []
     for key in selected:
         eng, runner = ENGINES[key]
         if not eng.installed() or not eng.model_ready():
-            print(f"== {eng.name}: SKIPPED (not ready; run --check) ==", flush=True)
+            reason = "engine missing" if not eng.installed() else f"model {eng.model_path} missing"
+            print(f"== {eng.name}: SKIPPED ({reason}; run --check) ==", flush=True)
+            skipped.append((eng.name, reason))
             continue
         print(f"== {eng.name} ==", flush=True)
         for pname, prompt in PROMPTS:
@@ -613,7 +694,10 @@ def main() -> int:
         "\nPeak RSS is the other half of the story: TinyTitan is built to stay "
         "inside a RAM budget while the rest load what they need."
     )
-    return 0
+    lines, status = sweep_verdict(results, skipped)
+    for line in lines:
+        print(line, flush=True)
+    return status
 
 
 if __name__ == "__main__":
