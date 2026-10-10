@@ -12,7 +12,18 @@ io_hidden_pct or the hit rate is a number you cannot act on.
 The baseline is re-run last. This machine has +/-15% run-to-run spread and a
 sweep takes hours, so a drifting baseline is the difference between a real 8%
 win and a machine that got quieter. If the two baselines disagree by more than
-the smallest win claimed, the sweep is inconclusive and says so.
+the smallest win claimed, the sweep is inconclusive and says so -- in the exit
+status as well as on the page. AUD-277.
+
+    0  every arm ran, every published cell came from a run that logged it, and
+       the drift control bounds the wins the page claims
+    1  it measured, and something the page claims is contested -- the claim named
+    2  the headline could not be computed, with the reason named
+    3  another model process is running (the guard's own answer, pre-existing)
+
+A counter no run logged is published as `--` in the table and `not logged` in
+the live line, never as `0.0`: a hit rate that was never measured and prints as
+zero reads as a cache that never hit.
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tinytitan_profile import (  # noqa: E402
     benchmark_log_path,
+    logged,
     pgrep_answer,
     server_command,
     server_environment,
@@ -41,7 +53,11 @@ MODEL = os.environ.get(
     "TINYTITAN_BENCH_MODEL", str(ROOT / "models/qwen3.8-flash-next_125B_A6B_4Bit")
 )
 PORT = 8131
-MAX_TOKENS = int(os.environ.get("SWEEP_TOKENS", "256"))
+# Read per run, not at import: an unparseable SWEEP_TOKENS used to raise out of
+# the module before the guard answered or a refusal line printed.
+DEFAULT_TOKENS = 256
+BASELINE = "base"
+DRIFT_CONTROL = "base_again"
 PROMPT = "Write a detailed essay about the history of computing."
 
 # Every arm is one env delta from the shipped defaults, so a win is
@@ -161,6 +177,68 @@ COUNTERS = (
     "rdadvise_ms",
 )
 
+# The five counters the published table prints, in the order a reader needs them
+# rather than the order of the columns: this file's own rule is that "a rate
+# without io_hidden_pct or the hit rate is a number you cannot act on", so those
+# two are the first the verdict looks for. `wait_ms`, `body_ms`, `cache_plan_ms`
+# and `rdadvise_ms` are parsed but never printed, so no cell claims them.
+PRINTED_CELLS = (
+    "io_hidden_pct",
+    "expert_hit_rate",
+    "io_ms",
+    "expert_evictions",
+    "io_host_waits",
+)
+
+
+def measured_tokens(environ: dict[str, str]) -> tuple[int | None, str | None]:
+    """The length of the measured request, or the reason this one refuses.
+
+    A count of 0 asks the server for no tokens at all, so every arm "measures"
+    the same nothing; an unparseable value used to die at import.
+    """
+    raw = environ.get("SWEEP_TOKENS")
+    if raw is None:
+        return DEFAULT_TOKENS, None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None, f"SWEEP_TOKENS={raw} is not an integer"
+    if value <= 0:
+        return None, f"SWEEP_TOKENS={raw} measures no tokens"
+    return value, None
+
+
+def selected_arms(wanted: str) -> tuple[list[tuple[str, dict[str, str], str]], list[str]]:
+    """The arms to run, in sweep order, and the names that matched no arm.
+
+    A typo in `--arms` used to select nothing and the sweep printed no row at
+    all, then exited 0 as if it had run an empty sweep it was reporting.
+    """
+    names = [a.strip() for a in wanted.split(",") if a.strip()]
+    if not names:
+        return list(ARMS), []
+    known = {a[0] for a in ARMS}
+    chosen = [a for a in ARMS if a[0] in set(names)]
+    return chosen, [n for n in names if n not in known]
+
+
+def cell(
+    row: dict,
+    key: str,
+    scale: float = 1.0,
+    spec: str = ".1f",
+    suffix: str = "",
+    refusal: str = "not logged",
+) -> str:
+    """One published counter, or the token that says no run logged it.
+
+    The table passes `--`, the token the column already uses for a cell it
+    cannot answer; the live line keeps the words.
+    """
+    value = row.get(key)
+    return logged(None if value is None else value * scale, spec, suffix, refusal)
+
 
 def wait_ready(proc, timeout=2400) -> str | None:
     start = time.time()
@@ -200,7 +278,7 @@ def request(model_id: str, tokens: int) -> None:
     conn.close()
 
 
-def run_arm(name: str, env_delta: dict[str, str]) -> dict:
+def run_arm(name: str, env_delta: dict[str, str], tokens: int) -> dict:
     log_path = benchmark_log_path(f"sweep_{name}.log")
     env = server_environment()
     # TINYTITAN_RUNNER_STATS is what makes a result explainable rather than just
@@ -221,7 +299,7 @@ def run_arm(name: str, env_delta: dict[str, str]) -> dict:
         # configuration is worse than losing the arm.
         try:
             request(model_id, 32)  # warm shaders and the cache
-            request(model_id, MAX_TOKENS)  # measured
+            request(model_id, tokens)  # measured
         except Exception as exc:
             alive = proc.poll() is None
             return {
@@ -264,27 +342,107 @@ def table(results: list[dict], baseline: float | None) -> str:
         delta = f"{(r['tok_s'] / baseline - 1) * 100:+.1f}%" if baseline else "--"
         lines.append(
             f"{r['arm']:<15}{r['tok_s']:>8.2f}{delta:>9}"
-            f"{r.get('expert_hit_rate', 0) * 100:>7.1f}"
-            f"{r.get('io_hidden_pct', 0):>9.1f}"
-            f"{r.get('io_ms', 0):>8.1f}"
-            f"{r.get('expert_evictions', 0):>8.0f}"
-            f"{r.get('io_host_waits', 0):>8.0f}"
+            f"{cell(r, 'expert_hit_rate', 100, refusal='--'):>7}"
+            f"{cell(r, 'io_hidden_pct', refusal='--'):>9}"
+            f"{cell(r, 'io_ms', refusal='--'):>8}"
+            f"{cell(r, 'expert_evictions', spec='.0f', refusal='--'):>8}"
+            f"{cell(r, 'io_host_waits', spec='.0f', refusal='--'):>8}"
         )
     return "\n".join(lines)
+
+
+def verdict(results: list[dict], selected: list[str]) -> tuple[list[str], int]:
+    """What the sweep may claim, and the status the page is judged by. AUD-277.
+
+    Every arm used to be compared and then discarded: `main()` ended on
+    `return 0` whatever it measured, and the sentence it printed after the drift
+    compared that drift to nothing. The statuses are the ones this tree's other
+    drivers use (AUD-273, AUD-274, AUD-275); the drift rule is the one this
+    sweep's own header has always stated.
+    """
+    lines: list[str] = []
+    measured = {r["arm"]: r for r in results if r.get("ok")}
+    if not measured:
+        return ["NOT MEASURED: no arm of this sweep measured anything"], 2
+    if BASELINE not in selected:
+        return ["NOT MEASURED: the selection has no baseline arm to compare to"], 2
+    if BASELINE not in measured:
+        return ["NOT MEASURED: no baseline arm measured"], 2
+    for row in results:
+        if not row.get("ok"):
+            continue
+        for key in PRINTED_CELLS:
+            if key not in row:
+                lines.append(f"NOT MEASURED: the {row['arm']} arm logged no {key}")
+                return lines, 2
+    if DRIFT_CONTROL in selected and DRIFT_CONTROL not in measured:
+        lines.append(
+            f"NOT MEASURED: {DRIFT_CONTROL}, the drift control, did not measure, "
+            "so the sweep has no noise floor to bound its wins"
+        )
+        return lines, 2
+
+    status = 0
+    for row in results:
+        if not row.get("ok"):
+            lines.append(f"CONTESTED: {row['arm']} did not measure ({row.get('note', '')})")
+            status = 1
+
+    first = measured[BASELINE]["tok_s"]
+    # The drift control is the baseline's own configuration, so its delta is the
+    # drift and never a win the page claims.
+    wins = [
+        (row["arm"], (row["tok_s"] / first - 1) * 100)
+        for row in results
+        if row.get("ok") and row["arm"] not in (BASELINE, DRIFT_CONTROL) and row["tok_s"] > first
+    ]
+    if DRIFT_CONTROL not in measured:
+        lines.append(
+            f"CONTESTED: {DRIFT_CONTROL} was not run, so the noise floor is unknown "
+            "and no win on this page is bounded by it"
+        )
+        return lines, 1
+
+    last = measured[DRIFT_CONTROL]["tok_s"]
+    drift = abs(last / first - 1) * 100
+    lines.append(f"baseline drift over the sweep: {drift:.1f}% ({first:.2f} -> {last:.2f})")
+    if not wins:
+        lines.append(f"{drift:.1f}% of drift swallows nothing: no arm claims a win")
+        return lines, status
+    arm, smallest = min(wins, key=lambda w: w[1])
+    if drift > smallest:
+        lines.append(
+            f"INCONCLUSIVE: baseline drift {drift:.1f}% is larger than the smallest "
+            f"win claimed, {smallest:+.1f}% on {arm}"
+        )
+        return lines, 1
+    lines.append(f"smallest win claimed {smallest:+.1f}% on {arm}, against {drift:.1f}% of drift")
+    return lines, status
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arms", default="")
     args = ap.parse_args()
-    wanted = [a.strip() for a in args.arms.split(",") if a.strip()]
-    arms = [a for a in ARMS if not wanted or a[0] in wanted]
+    arms, unknown = selected_arms(args.arms)
+    if unknown:
+        print(
+            f"NOT MEASURED: --arms names no arm of this sweep: {', '.join(unknown)}",
+            file=sys.stderr,
+        )
+        print(f"  known arms: {', '.join(a[0] for a in ARMS)}", file=sys.stderr)
+        return 2
 
-    verdict, lines = pgrep_answer(["-f", "TinyTitanServer|TinyTitanCLI"])
-    if verdict != "clear":
+    tokens, reason = measured_tokens(os.environ)
+    if tokens is None:
+        print(f"NOT MEASURED: {reason}", file=sys.stderr)
+        return 2
+
+    answer, lines = pgrep_answer(["-f", "TinyTitanServer|TinyTitanCLI"])
+    if answer != "clear":
         reason = (
             "another model process is running; stop it first"
-            if verdict == "busy"
+            if answer == "busy"
             else "the model-process guard could not answer what is running"
         )
         print(reason, file=sys.stderr)
@@ -296,31 +454,25 @@ def main() -> int:
     baseline: float | None = None
     for name, delta, why in arms:
         print(f"\n== {name} == {why}", flush=True)
-        r = run_arm(name, delta)
+        r = run_arm(name, delta, tokens)
         results.append(r)
         if r.get("ok"):
-            if name == "base":
+            if name == BASELINE:
                 baseline = r["tok_s"]
             print(
-                f"   {r['tok_s']:.2f} tok/s  hit={r.get('expert_hit_rate', 0) * 100:.1f}%"
-                f"  io_hidden={r.get('io_hidden_pct', 0):.1f}%"
-                f"  io_ms={r.get('io_ms', 0):.1f}",
+                f"   {r['tok_s']:.2f} tok/s"
+                f"  hit={cell(r, 'expert_hit_rate', 100, suffix='%')}"
+                f"  io_hidden={cell(r, 'io_hidden_pct', suffix='%')}"
+                f"  io_ms={cell(r, 'io_ms')}",
                 flush=True,
             )
         else:
             print(f"   FAILED: {r.get('note')}", flush=True)
         print("\n" + table(results, baseline), flush=True)
 
-    first = next((r for r in results if r["arm"] == "base" and r.get("ok")), None)
-    last = next((r for r in results if r["arm"] == "base_again" and r.get("ok")), None)
-    if first and last:
-        drift = abs(last["tok_s"] / first["tok_s"] - 1) * 100
-        print(
-            f"\nbaseline drift over the sweep: {drift:.1f}% "
-            f"({first['tok_s']:.2f} -> {last['tok_s']:.2f})"
-        )
-        print("Any win smaller than this is inside the noise and is not a win.")
-    return 0
+    lines, status = verdict(results, [a[0] for a in arms])
+    print("\n" + "\n".join(lines), flush=True)
+    return status
 
 
 if __name__ == "__main__":

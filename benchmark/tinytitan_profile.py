@@ -414,8 +414,9 @@ def metric_count(name: str, key: str, counted: int, total: int):
     return f"PARTIAL: the {name} arm's {key} median is over {counted} of {total} runs"
 
 
-def logged(value, spec: str, suffix: str = "") -> str:
+def logged(value, spec: str, suffix: str = "", refusal: str = "not logged") -> str:
     """One printed figure, or the words that say no run logged it.
+    AUD-276, and the `refusal` keyword is AUD-277.
 
     `metric_count` refuses an unlogged metric in a page's verdict; this is the
     same rule for the cell that prints it. A driver that writes
@@ -423,9 +424,14 @@ def logged(value, spec: str, suffix: str = "") -> str:
     acceptance prints as `0.0%`, which reads as a draft path that engaged and
     saved nothing, and an absent prefill time prints as `0.00 s`, the fastest
     number the tool can report.
+
+    `refusal` is the token a particular table already uses for a cell it cannot
+    answer, because a cell must match the column it is in: `tinytitan_knob_sweep.py`
+    prints `--` for a delta with no baseline, so its counters refuse with `--` too,
+    and a `not logged` in a 7-wide column would break the row it is in.
     """
     if value is None:
-        return "not logged"
+        return refusal
     return f"{value:{spec}}{suffix}"
 
 

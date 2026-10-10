@@ -168,6 +168,13 @@ class LoggedPrimitive(unittest.TestCase):
         self.assertEqual(prof.logged(40, "d"), "40")
         self.assertEqual(prof.logged(None, "d"), "not logged")
 
+    def test_a_table_can_refuse_with_the_token_that_table_already_uses(self):
+        # AUD-277: `tinytitan_knob_sweep.py` prints `--` for a delta it has no
+        # baseline for, so a counter no run logged refuses with the same token --
+        # and a `not logged` in a 7-wide column would wreck the row it is in.
+        self.assertEqual(prof.logged(18.9, ".1f", refusal="--"), "18.9")
+        self.assertEqual(prof.logged(None, ".1f", refusal="--"), "--")
+
 
 class MtpPhasesProgressLine(unittest.TestCase):
     def test_a_run_with_no_footer_prints_no_acceptance_of_zero(self):
