@@ -797,6 +797,17 @@ jobs:
         # no rate, 2 NOT MEASURED. It drives the real `main()` and the real runners
         # with only the process, the socket and the log patched, so no model, no
         # engine binary, no third-party server and nothing fetched.
+        # `test_side_engine_recall_verdict` is AUD-288, the same shape in the driver
+        # that decides whether a T7 judgement is worth 15.2 s. Its side-engine column
+        # was built from `(completion or "").upper().startswith("YES")`, so a run whose
+        # engine answered nothing scored as one that answered NO to everything -- a dead
+        # engine read as a wrong one -- and a group that left facts out ranked them the
+        # same way; the rates divided by however many questions survived, so an empty
+        # file printed `recall@1 0/0` twice and exited 0, and an unreadable file exited 1,
+        # the status a contested comparison carries. It now answers 0 every fair question
+        # answered in full, 1 a named question ran nothing / left facts unanswered / carried
+        # silent rows, 2 NOT MEASURED. Fixture `done.jsonl` files only: no model, no
+        # server, no engine binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -820,7 +831,7 @@ jobs:
             test_mtp_phases_verdict test_sweep_driver_verdicts \
             test_sampler_ab_verdict test_logged_metric_cells \
             test_knob_sweep_verdict test_guard_source_rate_verdict \
-            test_composite_split_verdict \
+            test_composite_split_verdict test_side_engine_recall_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict
       - name: T6 reply-check labels and the gate scorer
