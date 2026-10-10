@@ -10,10 +10,17 @@ them.
 It is also the check worth running before a repack: `--check` reports drift
 without touching anything, and a clean report means the snapshot matches the
 policy tensor for tensor, which is a stronger statement than "the repack did
-not error".
+not error" -- every tensor, including the norm fold, which is the one check
+that has to fetch from the checkpoint to say anything.
 
     tools/reconcile_snapshot.py --snapshot DIR --check
     tools/reconcile_snapshot.py --snapshot DIR --bits 4
+
+Three statuses, the same convention as `tools/model-guard.sh`:
+
+    0  every tensor was compared and matched (or the repair ran to the end)
+    1  a tensor was compared and drifted, and the report names which
+    2  something could not be compared, so nothing is claimed about it
 """
 
 from __future__ import annotations
@@ -135,8 +142,11 @@ def main() -> int:
     # multiplies by the stored value, so the converter folds the +1 in. Nothing
     # about a name, a width or a dtype records whether that happened: an
     # unfolded snapshot is structurally perfect and produces fluent nonsense.
-    # Sample the affected tensors against the checkpoint and say so.
+    # Every tensor the fold concerns is compared against the checkpoint, because
+    # the verdict below is about all of them and a sample cannot speak for the
+    # rest.
     unfolded: list[str] = []
+    incomparable: list[str] = []
     fold_names = [
         n
         for n in want
@@ -145,24 +155,27 @@ def main() -> int:
         )
         and n in have
     ]
-    for name in fold_names[:6]:
+    for name in fold_names:
         src = want[name][0]
         shard = snap_index["weight_map"][name]
         with safe_open(args.snapshot / shard, framework="np") as f:
             stored = np.asarray(f.get_tensor(name), np.float32).ravel()
         original = patcher.fetch_bf16(src, ck_index).astype(np.float32).ravel()
         if stored.size != original.size:
+            incomparable.append(name)
             continue
         if np.allclose(stored - original, 0.0, atol=1e-6):
             unfolded.append(name)
 
+    if unfolded:
+        fold_line = f"UNFOLDED -- rebuild or repair ({len(unfolded)} of {len(fold_names)})"
+    elif incomparable:
+        fold_line = f"{len(incomparable)} of {len(fold_names)} could not be compared"
+    else:
+        fold_line = f"folded ({len(fold_names)} of {len(fold_names)} compared)"
     print(f"snapshot : {args.snapshot}")
     print(f"policy   : {args.bits}-bit build, {len(want)} tensors expected")
-    print(
-        f"norm fold: {len(fold_names)} tensors need the +1; "
-        f"{'UNFOLDED -- rebuild or repair' if unfolded else 'folded'} "
-        f"(sampled {min(len(fold_names), 6)})"
-    )
+    print(f"norm fold: {len(fold_names)} tensors need the +1; {fold_line}")
     print(f"missing  : {len(missing)}")
     print(f"extra    : {len(extra)}")
     print(f"wrong bits: {len(wrong)}")
@@ -180,15 +193,17 @@ def main() -> int:
     for name, wantd, gotd in dtypes[:8]:
         print(f"   dtype    {name.split('language_model.')[-1]}: have {gotd}, want {wantd}")
 
+    drifted = bool(missing or extra or wrong or dtypes or unfolded)
     if args.check:
-        ok = not (missing or extra or wrong or dtypes or unfolded)
-        print(
-            "\nsnapshot matches the converter policy"
-            if ok
-            else "\nsnapshot has drifted from the converter policy"
-        )
-        return 0 if ok else 1
-    if not (missing or extra or wrong or dtypes or unfolded):
+        if drifted:
+            print("\nsnapshot has drifted from the converter policy")
+            return 1
+        if incomparable:
+            print("\nevery check that could run passed; the fold is not proven on this snapshot")
+            return 2
+        print("\nsnapshot matches the converter policy")
+        return 0
+    if not (drifted or incomparable):
         print("\nnothing to do")
         return 0
 
@@ -211,7 +226,7 @@ def main() -> int:
         touched.setdefault(snap_index["weight_map"][name], []).append(name)
     for name in extra:
         touched.setdefault(snap_index["weight_map"][name], []).append(name)
-    for name in fold_names if unfolded else []:
+    for name in unfolded + incomparable:
         touched.setdefault(snap_index["weight_map"][name], []).append(name)
 
     for shard, names in sorted(touched.items()):

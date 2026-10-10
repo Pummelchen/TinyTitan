@@ -158,7 +158,16 @@ jobs:
         # it imports numpy, which only this venv carries. Its own tests fake
         # `fetch()` with in-memory arrays, so no checkpoint and no model is ever
         # read, and no shard is downloaded.
-        # Measured on this Mac with the four suites together: 100 tests, 36.6 s.
+        # The fifth is `test_reconcile_snapshot_verdict.py`, the pre-repack check's
+        # verdict. `tools/reconcile_snapshot.py --check` samples six of the tensors
+        # that need the RMSNorm `+1` folded in and called the rest folded, so a
+        # snapshot whose norms 7..N were never fetched printed "snapshot matches the
+        # converter policy" and returned 0 (AUD-270). It builds a synthetic
+        # checkpoint with 24 of them, serves it from 127.0.0.1 the way the two
+        # converter suites do, and pins the three statuses apart: 0 every tensor
+        # compared and matched, 1 one drifted and the report names which, 2 one
+        # could not be compared. No model, no install, no real shard.
+        # Measured on this Mac with the five suites together: 115 tests, 42.7 s.
         # A venv because the runner does not carry the converter's three
         # dependencies. No real shard is ever fetched.
         run: |
@@ -167,7 +176,8 @@ jobs:
             -r benchmark/requirements.txt
           cd benchmark
           /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
-            test_prepare_agentworld test_tinytitan_quant_fidelity
+            test_prepare_agentworld test_tinytitan_quant_fidelity \
+            test_reconcile_snapshot_verdict
       - name: Installer and launcher gates (private DSH isolation, model-menu and launcher choices)
         # The installer and `tools/dsh_local.sh` promise a factory-new Mac stays
         # untouched: one private root, no PATH or shell-rc edit, and npm, pnpm and
