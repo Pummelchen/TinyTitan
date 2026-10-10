@@ -213,6 +213,18 @@ jobs:
         # own text and running it under the `bash -e` a `run:` block gets (AUD-266). It
         # drives the function over constructed logs, so it builds nothing and runs no
         # compiler.
+        # `test_release_precondition_gate` pins the release's two external preconditions.
+        # `gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && die` could only act on
+        # the status that *found* a release, and an invisible repository, a revoked token,
+        # an unreachable API and a missing `gh` each answered with a non-zero status that
+        # read as "no release exists, publish on" -- gh gives an unseen repository the very
+        # same `release not found` a missing release gets, so no reading of that one call can
+        # tell absent from unaskable. The fix asks twice: `gh api repos/$REPO` proves the
+        # credentials and the repository, and only a 404 from the release query means absent.
+        # Its sibling in the same block discarded git's reason with `2>/dev/null` and put the
+        # tag into a regex, so `v5.18` matched a remote holding `v5X18` (AUD-267). It drives
+        # the script's extracted verdict functions against stub `gh` and `git` replaying the
+        # measured answers, so it opens no socket and needs no token.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -243,7 +255,7 @@ jobs:
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
             test_release_test_gate test_release_notes_compact test_assert_arch \
-            test_build_log_gate \
+            test_build_log_gate test_release_precondition_gate \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

@@ -46,6 +46,60 @@ test_gate_verdict() {
   echo "  $summaries test-target run(s) passed, swift test exited 0"
 }
 
+# The two questions the preconditions ask outside this repository, and the one
+# thing that must never be inferred from a failed command. `gh` answers with exit
+# status 1 for every outcome it dislikes, and an invisible repository answers
+# `release not found` identically to a missing release (measured on gh 2.102.0),
+# so "is there a Release for this tag yet?" has to be two queries where the first
+# proves the second is worth reading: `gh api repos/$REPO` establishes that the
+# credentials work and the repository can be seen, and only a 404 from the release
+# query means absent. `gh api` rather than `gh release view` because it labels its
+# failures with the HTTP status and `gh release view` does not. The six answers
+# these refusals are written against, and the stub that replays them:
+# benchmark/test_release_precondition_gate.py.
+release_exists_verdict() {
+  local repo="$1" tag="$2" body status code
+  command -v gh >/dev/null 2>&1 \
+    || die "gh is not installed; nothing is known about a Release for $tag on $repo. Install it, then check: gh auth status"
+  if ! body="$(gh api "repos/$repo" --jq .full_name 2>&1)"; then
+    die "cannot ask whether a Release for $tag exists on $repo: the repository query itself failed, so nothing about its releases is known. gh said: $body"
+  fi
+  status=0
+  body="$(gh api "repos/$repo/releases/tags/$tag" --jq .tag_name 2>&1)" || status=$?
+  if [ "$status" -eq 0 ]; then
+    die "a Release for $tag already exists on $repo"
+  fi
+  # Absent has to be an answer, not the absence of one.
+  code="$(printf '%s' "$body" | sed -n 's/.*(HTTP \([0-9][0-9][0-9]\)).*/\1/p' | tail -1)"
+  [ "$code" = "404" ] \
+    || die "cannot tell whether a Release for $tag exists on $repo: gh exited $status${code:+ with HTTP $code} instead of answering 404. gh said: $body"
+  echo "  no Release for $tag on $repo (repository readable, release query answered 404)"
+}
+
+# Whether the tag is on origin. This was
+# `git ls-remote --tags origin 2>/dev/null | grep -q "refs/tags/$TAG$"`, which
+# fails closed but reports the wrong cause: git's own failure -- a remote that
+# cannot be read, rc 128 with `fatal: 'origin' does not appear to be a git
+# repository` -- arrives as an empty list and is announced as "not pushed", which
+# sends the operator to `git push` when the push is not the problem. The pattern
+# was the second defect: the tag is interpolated into a regex, so `v5.18` matches
+# a remote carrying only `v5X18` (measured). The match is on the whole ref field
+# now, tab-delimited, quoted so a dot is a dot.
+git_tag_pushed_verdict() {
+  local tag="$1" refs status=0 line found=0
+  refs="$(git ls-remote --tags origin 2>&1)" || status=$?
+  [ "$status" -eq 0 ] \
+    || die "$tag is not known to be on origin: git ls-remote exited $status without answering. git said: $refs"
+  while IFS= read -r line; do
+    case "$line" in
+      *$'\t'refs/tags/"$tag"|*$'\t'refs/tags/"$tag"^{}) found=1 ;;
+    esac
+  done <<< "$refs"
+  [ "$found" -eq 1 ] \
+    || die "$tag is not pushed to origin; run: git push origin $tag"
+  echo "  $tag is on origin ($(printf '%s\n' "$refs" | grep -c 'refs/tags/') tag ref(s) listed)"
+}
+
 # RELEASE.md rule 2 is a promise about bytes — `lipo -archs <binary>` must report
 # exactly `arm64` — and until now nothing in the release path ran lipo, so the only
 # arm64 claim in a shipped artifact was its filename. Every name-based assertion
@@ -94,10 +148,8 @@ step "preconditions"
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "tag $TAG does not exist locally"
 [ "$(git rev-parse "$TAG^{commit}")" = "$(git rev-parse HEAD)" ] \
   || die "HEAD is not $TAG; check out the tagged commit before releasing"
-git ls-remote --tags origin 2>/dev/null | grep -q "refs/tags/$TAG$" \
-  || die "$TAG is not pushed to origin; run: git push origin $TAG"
-gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
-  && die "a Release for $TAG already exists on $REPO"
+git_tag_pushed_verdict "$TAG"
+release_exists_verdict "$REPO" "$TAG"
 
 # --- CI green on the commit being tagged ------------------------------------
 # tools/ci-green.sh holds the rule and the reasons -- that CI is the only run
