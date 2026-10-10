@@ -343,8 +343,23 @@ for every golden in the list. Verify a real quiet window before spending another
 attempt:
 
 ```bash
-for i in $(seq 1 6); do pgrep -f 'swiftpm-testing-help[e]r' >/dev/null && echo busy || echo quiet; sleep 30; done
+for i in $(seq 1 6); do
+  pgrep -f 'swiftpm-testing-help[e]r' >/dev/null
+  status=$?
+  case "$status" in
+    0) echo busy ;;
+    1) echo quiet ;;
+    *) echo "cannot ask — pgrep exited $status, which is not quiet" ;;
+  esac
+  sleep 30
+done
 ```
+
+Only `1` means nothing matched. `pgrep` exits 2 when it cannot answer (a pattern
+it cannot compile, an unreadable process table), and `&& echo busy || echo quiet`
+prints *quiet* for that too — the same conflation `tools/model-guard.sh` removes
+from the scripts (AUD-268). Treat a `cannot ask` line as a window you did not
+measure, and wait on one you did.
 
 ### Only the installs already in `models/` are verified
 

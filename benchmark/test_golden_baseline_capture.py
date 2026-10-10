@@ -48,9 +48,19 @@ exit "${GOLDEN_FIXTURE_RC:-0}"
 # `test_release_ci_green.py` answers `gh`: a stub earlier on `PATH`. The real
 # `pgrep` is untouched for every other caller, and no production behavior
 # changes; a run against a real install still refuses while a server is up.
+#
+# AUD-268 made the answer choosable so the busy and cannot-ask branches could be
+# tested at all (`test_model_process_guard.py` drives them). The defaults are the
+# answers these seven tests always had: exit 1, print nothing.
 PGREP_STUB = """#!/bin/sh
-exit 1
+if [ -n "${STUB_PGREP_ERR-}" ]; then printf '%s\\n' "$STUB_PGREP_ERR" >&2; fi
+if [ -n "${STUB_PGREP_OUT-}" ]; then printf '%s' "$STUB_PGREP_OUT"; fi
+exit "${STUB_PGREP_RC:-1}"
 """
+
+# The guard is a second file since AUD-268, sourced next to the script, so the
+# copied checkout has to carry it too or the script dies at the source line.
+GUARD = ROOT / "tools" / "model-guard.sh"
 
 
 @contextlib.contextmanager
@@ -68,6 +78,7 @@ def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
         script = root / "tools" / "golden-baseline.sh"
         shutil.copy(SCRIPT, script)
         script.chmod(0o755)
+        shutil.copy(GUARD, root / "tools" / "model-guard.sh")
         build = root / ".build" / "release"
         build.mkdir(parents=True)
         cli = build / "TinyTitanCLI"
@@ -96,6 +107,10 @@ def run(root: pathlib.Path, output: str, *args: str) -> subprocess.CompletedProc
     env = dict(os.environ)
     env["PATH"] = f"{root / 'stubs'}{os.pathsep}{env['PATH']}"
     env["GOLDEN_FIXTURE_OUTPUT"] = output
+    # These seven tests always ran against the guard answering "clear"; now that
+    # the answer is choosable, drop anything a neighbouring test left set.
+    for key in ("STUB_PGREP_RC", "STUB_PGREP_OUT", "STUB_PGREP_ERR"):
+        env.pop(key, None)
     result = subprocess.run(
         ["/bin/bash", str(root / "tools" / "golden-baseline.sh"), *args],
         capture_output=True,

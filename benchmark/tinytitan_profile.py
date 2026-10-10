@@ -11,7 +11,8 @@ import datetime
 import json
 import os
 import pathlib
-from collections.abc import Mapping
+import subprocess
+from collections.abc import Mapping, Sequence
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -33,6 +34,32 @@ DEFAULT_CONCISE = False
 DEFAULT_FAST_ALIAS = False
 DEFAULT_MTP = False
 SUPPORTED_THINKING_MODES = ("off", "on")
+
+
+def pgrep_answer(argv: Sequence[str]) -> tuple[str, list[str]]:
+    """Ask `pgrep` and keep its three answers apart. AUD-268.
+
+    Returns `("busy", the lines it matched)`, `("clear", [])` only when pgrep
+    itself said nothing matches, or `("unknown", why)`. AGENTS.md forbids starting
+    a model process beside one that is already running, and every caller used to
+    read only the answer it could act on — stdout, or the success status — so an
+    erroring pgrep (status 2) or a missing one (127) reported "nothing running"
+    and the run began anyway. Not knowing is not a clear.
+    """
+    try:
+        proc = subprocess.run(["pgrep", *argv], capture_output=True, text=True, check=False)
+    except OSError as exc:
+        return "unknown", [
+            f"pgrep could not be run ({exc}); nothing is known about a model process"
+        ]
+    if proc.returncode == 0:
+        return "busy", [line for line in proc.stdout.splitlines() if line.strip()]
+    if proc.returncode == 1:
+        return "clear", []
+    return "unknown", [
+        f"pgrep exited {proc.returncode} and did not answer "
+        f"{' '.join(argv)}: {proc.stderr.strip() or proc.stdout.strip() or 'no message'}"
+    ]
 
 
 def configured_thinking_mode(

@@ -225,6 +225,19 @@ jobs:
         # tag into a regex, so `v5.18` matched a remote holding `v5X18` (AUD-267). It drives
         # the script's extracted verdict functions against stub `gh` and `git` replaying the
         # measured answers, so it opens no socket and needs no token.
+        # `test_model_process_guard` pins the model-process precondition AGENTS.md states as
+        # `pgrep -fl 'TinyTitanServer|TinyTitanCLI|...'`. Eleven call sites asked pgrep in a
+        # shape that could only act on the answer they were looking for — `if busy=$(pgrep
+        # ... 2>/dev/null)`, `if pgrep ... >/dev/null 2>&1`, a `| wc -l` line count, and six
+        # python drivers that read only stdout — so pgrep's error status (2, and 127 for a
+        # missing binary) read as "nothing running" and the run started beside a live server.
+        # `/usr/bin/pgrep -fl '('` answers 2 on this host, so it is reachable without a race.
+        # One owner per language now keeps the three answers apart: `tools/model-guard.sh`
+        # and `tinytitan_profile.pgrep_answer`. The installer carries the guard as an inline
+        # copy because it arrives through `bash -c "$(curl ...)"` with no repository beside
+        # it, and the suite pins that the two copies are the same text. Shell callers run
+        # against a stub `pgrep` and a stub `swift`; the competitor-pid sites answer from a
+        # faked HTTP reply. Nothing here starts a model or dials a peer.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -256,6 +269,7 @@ jobs:
             test_install_models_batch_status test_repack_dense_gate_verdict \
             test_release_test_gate test_release_notes_compact test_assert_arch \
             test_build_log_gate test_release_precondition_gate \
+            test_model_process_guard \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

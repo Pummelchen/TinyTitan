@@ -28,7 +28,12 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from tinytitan_profile import benchmark_log_path, server_command, server_environment  # noqa: E402
+from tinytitan_profile import (  # noqa: E402
+    benchmark_log_path,
+    pgrep_answer,
+    server_command,
+    server_environment,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / ".build/release/TinyTitanServer"
@@ -275,11 +280,16 @@ def main() -> int:
     wanted = [a.strip() for a in args.arms.split(",") if a.strip()]
     arms = [a for a in ARMS if not wanted or a[0] in wanted]
 
-    busy = subprocess.run(
-        ["pgrep", "-f", "TinyTitanServer|TinyTitanCLI"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    if busy:
-        print("another model process is running; stop it first", file=sys.stderr)
+    verdict, lines = pgrep_answer(["-f", "TinyTitanServer|TinyTitanCLI"])
+    if verdict != "clear":
+        reason = (
+            "another model process is running; stop it first"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running"
+        )
+        print(reason, file=sys.stderr)
+        for line in lines:
+            print(f"  {line}", file=sys.stderr)
         return 3
 
     results: list[dict] = []

@@ -21,6 +21,8 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS="$ROOT/models"
+# shellcheck source=model-guard.sh
+. "$ROOT/tools/model-guard.sh"
 DEFAULT_MODELS=(qwen3.5_2B_4Bit qwen3.5_2B_8Bit qwen3.5_4B_4Bit qwen3.5_4B_8Bit)
 GUARD='TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm'
 
@@ -30,11 +32,27 @@ else
   targets=("${DEFAULT_MODELS[@]+"${DEFAULT_MODELS[@]}"}")
 fi
 
-if pgrep -fl "$GUARD" >/dev/null 2>&1; then
-  echo "a model process is already running; not starting:"
-  pgrep -fl "$GUARD" | sed 's/^/  /'
-  exit 2
-fi
+# Each model is faulted into memory on the performance cores, so the run is
+# refused rather than raced. The guard answers three things and all three but
+# one are a refusal: the old `if pgrep ... >/dev/null 2>&1` could only act on a
+# match, so an erroring pgrep read as "nothing running" and the sweep started
+# beside the live server anyway (AUD-268). It also asked pgrep a second time to
+# print the matches; the guard hands back the lines it already collected.
+model_guard_status=0
+busy="$(model_guard_matches "$GUARD")" || model_guard_status=$?
+case "$model_guard_status" in
+  0)
+    echo "a model process is already running; not starting:" >&2
+    echo "$busy" | sed 's/^/  /' >&2
+    exit 2
+    ;;
+  1) : ;;
+  *)
+    echo "not starting: the model-process guard could not answer, so nothing is" >&2
+    echo "known about what is running. See the model-guard message above." >&2
+    exit 2
+    ;;
+esac
 
 cd "$ROOT" || exit 1
 for model in "${targets[@]+"${targets[@]}"}"; do

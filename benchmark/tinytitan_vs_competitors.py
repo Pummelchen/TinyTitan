@@ -55,6 +55,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from tinytitan_profile import pgrep_answer
+
 ROOT = Path(__file__).resolve().parent.parent
 
 # Same ladder as tinytitan_maxthroughput.py, so results are comparable to the
@@ -254,10 +256,12 @@ def run_ollama(prompt: str) -> tuple[float | None, float | None, str]:
     if "eval_count" not in data:
         return None, None, f"no eval stats: {str(data)[:120]}"
     rate = data["eval_count"] / (data["eval_duration"] / 1e9)
-    pid = subprocess.run(
-        ["pgrep", "-n", "ollama"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    return rate, sample_rss(int(pid)) if pid else None, ""
+    # An unanswered pgrep is not "ollama is not running": reporting no RSS for a
+    # process that is running mislabels the comparison (AUD-268).
+    verdict, lines = pgrep_answer(["-n", "ollama"])
+    if verdict == "unknown":
+        return None, None, "cannot ask for the ollama pid: " + " ".join(lines)[:90]
+    return rate, sample_rss(int(lines[0])) if verdict == "busy" and lines else None, ""
 
 
 def run_mlx(prompt: str) -> tuple[float | None, float | None, str]:
@@ -314,10 +318,14 @@ def run_lmstudio(prompt: str) -> tuple[float | None, float | None, str]:
     rate = stats.get("tokens_per_second")
     if rate is None:
         return None, None, "no stats.tokens_per_second (start with `lms server start`)"
-    pid = subprocess.run(
-        ["pgrep", "-n", "LM Studio"], capture_output=True, text=True, check=False
-    ).stdout.strip()
-    return float(rate), sample_rss(int(pid)) if pid else None, ""
+    verdict, lines = pgrep_answer(["-n", "LM Studio"])
+    if verdict == "unknown":
+        return None, None, "cannot ask for the LM Studio pid: " + " ".join(lines)[:90]
+    return (
+        float(rate),
+        sample_rss(int(lines[0])) if verdict == "busy" and lines else None,
+        "",
+    )
 
 
 def run_mlc(prompt: str) -> tuple[float | None, float | None, str]:
@@ -550,14 +558,18 @@ def main() -> int:
 
     # One model process at a time or every number is noise. Same rule the
     # golden harness enforces.
-    busy = subprocess.run(
-        ["pgrep", "-f", "TinyTitanServer|TinyTitanCLI|ollama|LM Studio|mlx_lm|llama-cli"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    if busy:
-        print("another inference process is running; stop it first", file=sys.stderr)
+    verdict, guard_lines = pgrep_answer(
+        ["-f", "TinyTitanServer|TinyTitanCLI|ollama|LM Studio|mlx_lm|llama-cli"]
+    )
+    if verdict != "clear":
+        print(
+            "another inference process is running; stop it first"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running",
+            file=sys.stderr,
+        )
+        for line in guard_lines:
+            print(f"  {line}", file=sys.stderr)
         return 3
 
     results: list[Result] = []

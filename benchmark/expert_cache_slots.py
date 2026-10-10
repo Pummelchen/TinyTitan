@@ -33,6 +33,8 @@ import statistics
 import subprocess
 import sys
 
+from tinytitan_profile import pgrep_answer
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
 RESULTS = ROOT / "benchmark/expert-cache"
@@ -158,14 +160,14 @@ def main() -> int:
     model = (ROOT / args.model).resolve()
     if not (model / "verified-install.json").exists():
         raise SystemExit(f"not an installed model: {model}")
-    busy = subprocess.run(
-        ["pgrep", "-fl", "TinyTitanCLI|TinyTitanServer"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    if busy:
-        raise SystemExit(f"a model process is already running:\n{busy}")
+    verdict, lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer"])
+    if verdict != "clear":
+        reason = (
+            "a model process is already running"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running"
+        )
+        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in lines))
 
     slots = [int(s) for s in args.slots.split(",")]
     manifest = json.loads((model / "manifest.json").read_text())

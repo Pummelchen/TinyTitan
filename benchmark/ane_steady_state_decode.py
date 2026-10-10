@@ -43,6 +43,8 @@ import subprocess
 import sys
 import tempfile
 
+from tinytitan_profile import pgrep_answer
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
 RESULTS = ROOT / "benchmark/ane-prefill"
@@ -205,14 +207,14 @@ def main() -> int:
         raise SystemExit(f"not an installed model: {model}")
     if not (model / "ane_prefill").is_dir():
         raise SystemExit(f"no ANE sidecar under {model}")
-    busy = subprocess.run(
-        ["pgrep", "-fl", "TinyTitanCLI|TinyTitanServer|mlx_lm|mlx-lm"],
-        capture_output=True,
-        text=True,
-        check=False,
-    ).stdout.strip()
-    if busy:
-        raise SystemExit(f"a model process is already running:\n{busy}")
+    verdict, lines = pgrep_answer(["-fl", "TinyTitanCLI|TinyTitanServer|mlx_lm|mlx-lm"])
+    if verdict != "clear":
+        reason = (
+            "a model process is already running"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running"
+        )
+        raise SystemExit(f"{reason}:\n" + "\n".join(f"  {line}" for line in lines))
 
     prompt = build_prompt(args.paragraphs)
     # `--messages-file` rather than `--prompt`: the chat template is what turns

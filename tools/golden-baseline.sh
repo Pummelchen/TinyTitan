@@ -48,6 +48,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI="$ROOT/.build/release/TinyTitanCLI"
+# shellcheck source=model-guard.sh
+. "$SCRIPT_DIR/model-guard.sh"
 SERVER="$ROOT/.build/release/TinyTitanServer"
 LAUNCHER="$ROOT/tools/server_launcher.sh"
 
@@ -127,12 +129,28 @@ fi
 # "a model process is already running" sent the operator looking for the wrong
 # thing when it was another project's tests. Do not narrow the pattern to fix
 # that: reporting the matches is what lets a human judge.
-if busy=$(pgrep -fl 'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm' 2>/dev/null); then
-  echo "refusing to start: these processes match the model-process guard" >&2
-  echo "$busy" | sed 's/^/  /' >&2
-  echo "stop them yourself, or re-run when they are gone. This script never terminates a process it did not start." >&2
-  exit 3
-fi
+#
+# The guard answers three things (tools/model-guard.sh), and this used to act on
+# one: `if busy=$(pgrep ... 2>/dev/null)` is false on pgrep's error status, so a
+# pgrep that could not read the process table reported no model process and the
+# capture ran beside the operator's server. Not knowing is a refusal too.
+model_guard_status=0
+busy="$(model_guard_matches 'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm')" \
+  || model_guard_status=$?
+case "$model_guard_status" in
+  0)
+    echo "refusing to start: these processes match the model-process guard" >&2
+    echo "$busy" | sed 's/^/  /' >&2
+    echo "stop them yourself, or re-run when they are gone. This script never terminates a process it did not start." >&2
+    exit 3
+    ;;
+  1) : ;;
+  *)
+    echo "refusing to start: the model-process guard could not answer, so nothing is known about what is running." >&2
+    echo "See the model-guard message above. A capture taken beside a live model process measures nothing." >&2
+    exit 3
+    ;;
+esac
 
 # Checked, because this script does not run under `set -e` and a silent failure
 # here turns every later capture into a write to a path that does not exist.

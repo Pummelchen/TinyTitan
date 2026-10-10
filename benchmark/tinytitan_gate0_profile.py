@@ -48,6 +48,7 @@ from tinytitan_profile import (
     resolve_api_model,
     ROOT,
     benchmark_log_path,
+    pgrep_answer,
     server_command,
     server_environment,
 )
@@ -191,13 +192,20 @@ def preflight(max_gpu_percent: int) -> None:
     pattern = (
         "TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm"
     )
-    found = subprocess.run(["pgrep", "-fl", pattern], capture_output=True, text=True, check=False)
-    mine = str(pathlib.Path(__file__).name)
-    lines = [ln for ln in found.stdout.splitlines() if mine not in ln]
-    if lines:
-        raise SystemExit(
-            "refusing to start: model processes already running:\n  " + "\n  ".join(lines)
+    verdict, lines = pgrep_answer(["-fl", pattern])
+    if verdict == "busy":
+        # This driver's own name is not a competing model process.
+        mine = str(pathlib.Path(__file__).name)
+        lines = [ln for ln in lines if mine not in ln]
+        if not lines:
+            verdict = "clear"
+    if verdict != "clear":
+        reason = (
+            "model processes already running"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running"
         )
+        raise SystemExit(f"refusing to start: {reason}:\n  " + "\n  ".join(lines))
 
     used = idle_gpu_utilization()
     if used is None:

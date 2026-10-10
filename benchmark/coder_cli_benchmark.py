@@ -35,6 +35,7 @@ from tinytitan_profile import (
     DEFAULT_KV_BITS,
     DEFAULT_THINKING_MODE,
     catalog_id_for,
+    pgrep_answer,
     server_command,
     server_environment,
 )
@@ -247,12 +248,15 @@ def sha256_text(value: str) -> str:
 def preflight(required_models: Iterable[pathlib.Path]) -> dict[str, Any]:
     if not SERVER.is_file():
         raise RuntimeError(f"release server missing: {SERVER}; run swift build -c release")
-    process_check = subprocess.run(
-        ["pgrep", "-fl", PROCESS_PATTERN], text=True, capture_output=True, check=False
-    )
-    if process_check.returncode == 0 and process_check.stdout.strip():
+    verdict, lines = pgrep_answer(["-fl", PROCESS_PATTERN])
+    if verdict != "clear":
+        reason = (
+            "model process already running"
+            if verdict == "busy"
+            else "the model-process guard could not answer what is running"
+        )
         raise RuntimeError(
-            "model process already running; refusing to benchmark:\n" + process_check.stdout
+            f"{reason}; refusing to benchmark:\n" + "\n".join(f"  {line}" for line in lines)
         )
     for model in required_models:
         for name in ("manifest.json", "verified-install.json"):

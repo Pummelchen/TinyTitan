@@ -87,6 +87,42 @@ ask() {
   [[ "$reply" =~ ^[Yy] ]]
 }
 
+# The model-process guard, copied verbatim from tools/model-guard.sh. Verbatim
+# is the point: this script arrives through `bash -c "$(curl ...)"`, where no
+# tools/ directory exists beside it to source, and the copy answering differently
+# from the original is the defect AUD-268 is about.
+# benchmark/test_model_process_guard.py pins the two texts against each other.
+model_guard_matches() {  # <pattern>
+  local pattern out status=0
+  if [ $# -ne 1 ]; then
+    echo "model-guard: usage: model_guard_matches <pattern>" >&2
+    return 2
+  fi
+  pattern="$1"
+  # Settled once, so the reads below never have to guess whether an empty answer
+  # came from pgrep or from the shell failing to find it.
+  if ! command -v pgrep >/dev/null 2>&1; then
+    echo "model-guard: pgrep is not on PATH, so it is not known whether a process matching '$pattern' is running" >&2
+    return 2
+  fi
+  # pgrep's own error text goes into the same variable as its matches, so the
+  # refusal can quote the reason instead of reporting an empty list.
+  out="$(pgrep -fl "$pattern" 2>&1)" || status=$?
+  case "$status" in
+    0)
+      printf '%s\n' "$out"
+      return 0
+      ;;
+    1)
+      return 1
+      ;;
+    *)
+      echo "model-guard: pgrep exited $status and did not answer for '$pattern': $out" >&2
+      return 2
+      ;;
+  esac
+}
+
 # --- flags -----------------------------------------------------------------
 MODEL="$DEFAULT_MODEL"
 # Set by --model. It decides whether the model step shows the menu (nothing was
@@ -181,9 +217,20 @@ else
   ok "About ${free_gb} GB free"
 fi
 
-if [[ "$(pgrep -fl 'TinyTitanServer|TinyTitanCLI' 2>/dev/null | wc -l | tr -d ' ')" != "0" ]]; then
+# Three answers, and the third is not "nothing running". Counting lines out of
+# `pgrep ... | wc -l` made an erroring pgrep read as zero, so on the one machine
+# where the check could not be made the operator was told nothing at all (AUD-268).
+model_guard_status=0
+busy="$(model_guard_matches 'TinyTitanServer|TinyTitanCLI')" || model_guard_status=$?
+if [ "$model_guard_status" -eq 0 ]; then
   warn "A TinyTitan process is already running. Stop it before starting a server,"
   warn "since one model runs at a time on this Mac."
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then warn "  $line"; fi
+  done <<< "$busy"
+elif [ "$model_guard_status" -ne 1 ]; then
+  warn "Could not check whether a TinyTitan process is already running (the line above says why)."
+  warn "If one is, stop it before starting a server: one model runs at a time on this Mac."
 fi
 
 # --- 2) TinyTitan itself ----------------------------------------------------
