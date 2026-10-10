@@ -849,11 +849,22 @@ jobs:
         # a rule that saw no corpus, naming which -- and 2 it ran and a watchdog fired on a
         # reply that completed, a trip outranking the incomplete note. Corpora are in-memory
         # fixtures: no model, no server, no log tree and nothing fetched.
+        # `test_ane_sidecars_gate` is AUD-294, the sidecar gate `tools/ane_sidecars.sh`
+        # runs over `models/`. It walked the directory, found no install -- an empty
+        # models dir, one whose subdirectories hold no manifest, one that does not exist,
+        # and `--verify-only` over the first -- and printed `verified: 0` with exit 0, the
+        # same answer as every sidecar verified. That is the shape of a fresh clone, and
+        # docs/adding-a-model.md names this script as the step that gates an install. It
+        # now refuses at 2, the code it already answers for a usage refusal, naming the
+        # directory; a directory whose installs are all skipped families still answers 0
+        # with the reason, because those were asked about. The interpreter is a stub that
+        # reads a manifest and writes a marker file: no coremltools, no model, no export
+        # and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
             test_side_engine_judges test_side_engine_judges_verdict \
-            test_watchdog_calibrate_verdict \
+            test_watchdog_calibrate_verdict test_ane_sidecars_gate \
             test_tinytitan_prefetch_trace_analysis \
             test_memory_master test_memory_scenarios test_memval_master_exit \
             test_ornith_concise_tool_ab test_ornith_four_program_matrix \

@@ -20,7 +20,12 @@
 #   tools/ane_sidecars.sh --verify-only   # no export, just check what is there
 #
 # Exits non-zero if any model it was asked about is still without a verified
-# sidecar, so it can gate an install.
+# sidecar, so it can gate an install. Three statuses, the tree's table: 0 every
+# candidate the walk found is verified, 1 one it was asked about is not, 2 it did
+# not get to run -- an option it does not take, a chunk the runtime would not
+# route, an interpreter it cannot use, or a models directory holding no install
+# to ask about. Reporting that last shape as 0 would be a pass over a check that
+# looked at nothing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,7 +41,7 @@ FORCE=0
 VERIFY_ONLY=0
 REQUESTED=()
 
-usage() { sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -82,6 +87,21 @@ else
   done
 fi
 
+# A walk that found no candidate is not a set of installs that all passed: it is
+# the instrument reading nothing. The shapes that get here are a fresh clone with
+# no `models/`, a directory of directories none of which is an install, and a
+# `TINYTITAN_MODELS_DIR` pointing at the wrong place — and `--verify-only` over
+# any of them is exactly how a check comes back green without having checked.
+if [ "${#candidates[@]}" -eq 0 ]; then
+  echo "error: no installed model to give a sidecar: $MODELS_DIR" >&2
+  echo "       a candidate is a subdirectory holding a manifest.json, and a fresh clone" >&2
+  echo "       has no models/ at all. Installing one is the operator's job" >&2
+  echo "       (docs/adding-a-model.md), never this script's." >&2
+  echo "       nothing was exported and nothing was verified: 0 here would be a claim" >&2
+  echo "       about installs this walk never found." >&2
+  exit 2
+fi
+
 skipped=() ; exported=() ; verified=() ; failed=()
 
 for name in "${candidates[@]+"${candidates[@]}"}"; do
@@ -91,9 +111,17 @@ for name in "${candidates[@]+"${candidates[@]}"}"; do
     failed+=("$name: not installed"); continue
   fi
 
+  # The family decides whether this install is exported, skipped or refused, and
+  # it is read through an interpreter that may be present but useless. A failed
+  # substitution under `set -e` used to end the run with status 1 and no word
+  # about which install or which manifest, so the reader could not tell a broken
+  # coremltools venv from a corrupt install.
   family="$("$COREML_PYTHON" -c "
 import json,sys
-print(json.load(open('$model/manifest.json'))['arch']['family'])")"
+print(json.load(open('$model/manifest.json'))['arch']['family'])")" || {
+    echo "!! $name: $COREML_PYTHON could not read the family from $model/manifest.json" >&2
+    failed+=("$name: manifest unreadable"); continue
+  }
 
   # Two kinds of install are reported rather than exported.
   #
