@@ -13,10 +13,11 @@ disagrees with the repository, so the same rule is extended to the commit
 references. It reads a *fixture* git repository here rather than this one, so every
 branch is reachable: a sha that does not exist at all, a sha that exists on a branch
 HEAD cannot reach, prose where a sha belongs, and the one deliberate exception --
-a blank field, which is honest for a row that recorded no fix (AUD-132 refuted its
-finding; AUD-139 is blocked). The two shapes are tested apart, because an
-implementation that only ever ran the ancestry check would pass the first test for
-the wrong reason.
+a blank field on a row that recorded no fix (AUD-132 refuted its finding; AUD-139
+is blocked). A blank on a DONE row is the opposite of that: it claims a fix and
+names no pointer, which is how the row that closed AUD-262 lost its evidence. The
+two shapes are tested apart, because an implementation that only ever ran the
+ancestry check would pass the first test for the wrong reason.
 
 Run from `benchmark/`:
 
@@ -47,7 +48,7 @@ def gate_module():
     return module
 
 
-def row(task_id: str, commit: str) -> dict:
+def row(task_id: str, commit: str, status: str = "DONE") -> dict:
     return {
         "id": task_id,
         "severity": "S2",
@@ -56,7 +57,7 @@ def row(task_id: str, commit: str) -> dict:
         "file_line": "docs/audit-2026-10-06/ledger.json",
         "title": f"fixture row {task_id}",
         "category": "missing gate",
-        "status": "DONE",
+        "status": status,
         "host": "fixture",
         "discovered-by": "fixture",
         "evidence-before": "before",
@@ -127,11 +128,27 @@ class LedgerCommitEvidenceTests(unittest.TestCase):
         self.assertIn("AUD-7", lines[0])
         self.assertIn("names no commit", lines[0])
 
-    def test_a_blank_field_is_the_allowed_exception(self):
-        # A row that recorded no fix has no commit to name; that is the one honest
-        # use of an empty field, and the gate must not push a real sha into it.
-        lines, checked = self.check([row("AUD-6", ""), row("AUD-5", "")])
+    def test_a_blank_field_is_allowed_for_a_row_that_recorded_no_fix(self) -> None:
+        # A row that refuted its finding, was blocked, or is still open has no
+        # commit to name; the gate must not push a real sha into it.
+        lines, checked = self.check(
+            [row("AUD-6", "", status="BLOCKED"), row("AUD-5", "", status="OPEN")]
+        )
         self.assertEqual([], lines)
+        self.assertEqual(0, checked)
+
+    def test_a_done_row_with_a_blank_field_fails(self) -> None:
+        """A blank field is honest for a row that fixed nothing, not for a DONE one.
+
+        The exception above is justified by rows that have no fix to point at, but
+        the gate applied it to every status -- which is how this audit closed
+        AUD-262 with a fix on `main`, an empty `commit` field, and a report that
+        said the pointer had been kept. A reader cannot check what is not named.
+        """
+        lines, checked = self.check([row("AUD-3", "")])
+        self.assertEqual(1, len(lines), lines)
+        self.assertIn("AUD-3", lines[0])
+        self.assertIn("DONE", lines[0])
         self.assertEqual(0, checked)
 
     def test_every_sha_in_a_multi_commit_field_is_checked(self):

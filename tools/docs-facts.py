@@ -329,11 +329,14 @@ def ledger_commit_evidence(ledgers, root=None):
     commit`, which was true at the moment they were written and resolves to nothing
     afterwards. Two more record a fix that is committed and name no commit at all.
 
-    A blank field stays allowed, and is the point of the exception rather than an
-    oversight: a row that refuted its finding (AUD-132) or is blocked (AUD-139) has
-    no fix commit to name, and a gate that demanded one would invent it. What is not
-    allowed is a field that *looks* like a reference and is not one -- prose, or a
-    sha that does not exist, or one that exists on a branch this history cannot
+    A blank field is allowed on a row that recorded no fix, and is the point of the
+    exception rather than an oversight: a row that refuted its finding (AUD-132) or
+    is blocked (AUD-139) has no commit to name, and a gate that demanded one would
+    invent it. It is not allowed on a DONE row, which claims a fix by definition --
+    the status test was added when this audit closed AUD-262 with a fix on `main`,
+    an empty field, and a report that said the pointer had been kept. What is also
+    not allowed is a field that *looks* like a reference and is not one -- prose, or
+    a sha that does not exist, or one that exists on a branch this history cannot
     reach. Returns (finding lines, references resolved); the count is printed by
     main(), because a check that resolved nothing would otherwise read as a pass.
     """
@@ -358,6 +361,14 @@ def ledger_commit_evidence(ledgers, root=None):
         for task in tasks:
             field = str(task.get("commit", ""))
             if not field.strip():
+                # The blank exception belongs to rows that recorded no fix. A DONE
+                # row claims one, and an empty field there is a row that lost its
+                # evidence -- which is what this gate is for.
+                if str(task.get("status", "")) == "DONE":
+                    lines.append(
+                        f"FAIL {task['id']}: DONE row claims a fix and names no commit "
+                        "in its commit field"
+                    )
                 continue
             refs = COMMIT_REF.findall(field)
             if not refs:
