@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 176,
-    "done": 174,
+    "total": 177,
+    "done": 175,
     "open": 1,
     "blocked": 1
   },
@@ -2947,6 +2947,23 @@
       "fix-evidence": "benchmark/test_hit_fixup_ab_verdict.py (29 tests) RED 17 errors -> GREEN OK; 31-mutant anchored sweep /tmp/aud280/mutate.py kills 30 (restore md5-proved byte-identical per mutant); neighbouring driver-verdict group 381 tests OK in CI order; tools/lint.sh all exit 0 on 18 gates; no model run, nothing fetched.",
       "sibling-note": "sibling sweep clean: requiring a footer by line count is unique to this driver (grep for len(generation) / 'missing benchmark footers' over benchmark/), the raw two-arm text-equality comparison is unique here (the rest go through tinytitan_profile.byte_claim/arm_answered, AUD-273/276/279), and both other refuse() sites (composite_split.py:147, side_engine_tasks.py:216) return before writing any record. Accepted survivor: the CONTESTED summary for a disagreement duplicates the per-case line the page already prints, so it is pinned as text, not as a status.",
       "commit": "1b16d7a"
+    },
+    {
+      "id": "AUD-281",
+      "severity": "S2",
+      "tier": "A",
+      "project": "benchmark",
+      "category": "a truthiness test on a float, a figure published without ever being read as a number, a divide that can raise, and a driver that returned 0 whatever it measured",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "benchmark/tinytitan_vs_competitors.py:431-435, 616",
+      "title": "the head-to-head driver published nan as a decode rate, called a measured 0.00 a missing footer, and exited 0 over a sweep that measured nothing",
+      "discovered-by": "named by AUD-280's sibling sweep as the next footer-reading driver not yet swept. Driven the way the eight before it were: the real main() and the real per-engine runners, with only the spawned process, the socket and the log file patched, so no model, no engine binary, no third-party server and nothing fetched.",
+      "evidence-before": "measured model-free (/tmp/aud281 probes, pre-fix driver): run_tinytitan returned (nan, rss, '') for a footer printing decode_tok_s=nan and (inf, rss, '') for inf, both of which main() printed as a rate (a sweep whose repeats all logged nan prints 'nan tok/s' and exits 0, since any real number compares greater than a nan and the nan therefore never wins best-of-N but also never loses the cell); a footer printing decode_tok_s=0.00 returned the note 'no decode footer' beside a rate, which main() then discarded because ok is `rate is not None`; decode_tok_s=abc raised ValueError and decode_tok_s= with nothing after it raised IndexError, both straight out of the sweep with no table and no status; llama.cpp, MLX and MLC each fed a [\\d.]+ token to float(), which raises for '..' and '1.2.3'; Ollama raised ZeroDivisionError on eval_duration=0, raised TypeError on a payload with no eval_duration, and published a nan when the duration was one; LM Studio raised ValueError on a string rate; and main() ended on return 0 whatever it measured, so both an all-failed sweep and an all-skipped sweep printed a table of dashes and exited 0 beside the claim the file exists to test.",
+      "fix-summary": "one figure rule for all five engines, ours included: reported_rate() returns a rate only when the token parses to a finite number and otherwise returns None with a refusal that quotes the figure exactly as printed, with '(nothing)' when the footer carried no token; decode_footer() is the TinyTitan read, last-footer-wins, and the truthiness test is gone so a measured 0.00 is published as the measurement it is and no longer also claims a missing footer; Ollama checks its two stats figures are numbers and that the duration is positive before dividing; LM Studio keeps its absent-stats refusal and then applies the same rule; sweep_verdict(results, skipped) answers the house status table -- 0 every cell measured clean, 1 a named cell has no rate or a selected engine was skipped (naming which half is missing, engine or model), 2 NOT MEASURED with the failed engines, the unready engines and the no-engine-selected case each named -- and main() returns it.",
+      "fix-evidence": "benchmark/test_vs_competitors_verdict.py (31 tests) first: 27 against the pre-fix driver, 16 RED with the failures reading nan is not None, inf is not None, 'no decode footer' != '' and two RAISED shapes, 11 controls and pins green; then refusal-name, table-cell and two missing-branch assertions were added before the sweep, taking it to 31 OK. Mutation sweep /tmp/aud281/mutate.py: 37 anchored single-hit mutants, 37 killed, 0 survivors, driver restored byte-identical (md5 67028ef64f630aa0380accf823dc7e51); 35 are assertion-kills and 2 (M35, M36) are crash-kills, where formatting a refused cell's None with :.2f raises TypeError inside main(), recorded as unreachability rather than as assertion coverage. Post-fix probe: nan, inf, abc, empty and absent each refuse with the token named, 0.00 returns (0.0, ''), a finite footer returns the rate; sweep_verdict answers 2 for all-failed, 0 for clean and 1 for one refusal. bash tools/lint.sh all exit 0 with ruff 0.16.7 clean over 177 scripts (the new suite parses under 3.13) and docs ok; the verdict-suite group is 305 tests OK including the new suite, registered in CI's model-free run and tracked in git before the workflow named it (AUD-211).",
+      "sibling-note": "sibling sweep over the footer-reading drivers named with this one, measured and NOT fixed here because they are separate seams: expert_cache_slots.py:70 uses float('nan') as its absent sentinel while _num at :149 and the :203 guard refuse only None, so an unparseable vm.swapusage publishes a nan at :267 ('swap now nan GiB'), a nan swap_delta_gib in the table and a nan tok/s delta at :212; tinytitan_profile.py:391 arm_metric filters `is not None` without testing finiteness, so a nan in any row survives into a published median; tinytitan_mtp_b3_qualification.py:67 and :106 test off_rate for truthiness, which reads a measured 0.00 tok/s as 'an arm carried no rate' -- the conflation in the opposite direction from this driver's; tinytitan_ane_prefill_ab.py:146-148 and ane_steady_state_decode.py:130-144 each feed a [\\d.]+ capture to float(), and both divide a GPU median by an ANE median (:223 and :230) which a zero ANE median makes a ZeroDivisionError, while ane_steady_state_decode.py:361-362 prints row figures with format specs rather than through logged(). None of those four is claimed as a defect beyond what was read and measured here; each is a candidate row for the next sweep.",
+      "commit": "0ca5387"
     }
   ]
 }
