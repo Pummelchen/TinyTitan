@@ -8,6 +8,9 @@ closed-form algebra and a divergence is unambiguously a bug in one layer's
 math rather than in state threading.
 
 Usage:  python3 tools/qwen38_full_forward.py <model-dir> <dump-dir>
+
+Exit status: 0 every layer entry and the stack output agreed, 1 something
+diverged, 2 a dump file was missing and nothing was compared.
 """
 
 import os
@@ -43,8 +46,21 @@ def hc_write(w, prefix: str, wide: np.ndarray, block_out: np.ndarray) -> np.ndar
     return (wide.reshape(HC, D) + block_out[None, :] * inject[:, None]).reshape(-1)
 
 
-def main():
+def main() -> int:
     model_dir, dump_dir = sys.argv[1], Path(sys.argv[2])
+    required = [f"L{layer}_entry" for layer in range(NUM_LAYERS)] + [
+        "ple_embedding",
+        "stack_out",
+    ]
+    missing = [name for name in required if not (dump_dir / f"{name}.f16").is_file()]
+    if not (dump_dir / "token.txt").is_file():
+        missing.append("token.txt")
+    if missing:
+        print(
+            f"nothing was compared: {len(missing)} of {len(required) + 1} dump file(s) are not in "
+            f"{dump_dir}, e.g. {missing[0]}"
+        )
+        return 2
     w = SSDAIWeights(model_dir)
     experts = PackedExperts(model_dir)
     token = int((dump_dir / "token.txt").read_text().strip())
@@ -84,18 +100,20 @@ def main():
 
     if first_bad is not None:
         print(f"\nfirst divergence at layer {first_bad}")
-        return
+        return 1
 
     dumped = load(dump_dir, "stack_out")
     cos = float(wide @ dumped / (np.linalg.norm(wide) * np.linalg.norm(dumped) + 1e-30))
-    print(f"  stack out   {'ok  ' if cos > 0.999 else 'FAIL'} cos={cos:.5f}")
+    agreed = cos > 0.999
+    print(f"  stack out   {'ok  ' if agreed else 'FAIL'} cos={cos:.5f}")
 
     mixed = hc_read(w, P + "hyper_connection_mixer.", wide)
     logits = w.get("lm_head.weight") @ mixed
     top = np.argsort(-logits)[:5]
     print(f"\n  reference top-5 tokens: {top.tolist()}")
     print(f"  logits: {logits[top].round(3).tolist()}")
+    return 0 if agreed else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

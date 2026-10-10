@@ -6,6 +6,10 @@ implementation (`Rocktalk-Holdings/mlx-qwen4exp`). Both sides use the same
 quantized weights, so any disagreement is in the forward pass.
 
 Usage:  python3 tools/qwen38_parity.py <model-dir> <dump-dir> <token-id>
+
+Exit status: 0 every stage agreed, 1 at least one disagreed, 2 a dump file was
+missing and nothing was compared. Those are three different answers and only the
+first is a pass.
 """
 
 import sys
@@ -24,6 +28,23 @@ EPS = 1e-6
 
 def load(dump: Path, name: str) -> np.ndarray:
     return np.fromfile(dump / f"{name}.f16", dtype=np.float16).astype(np.float32)
+
+
+# Every activation this stage list compares on, so a run that cannot be compared
+# is refused before any arithmetic rather than dying on the first np.fromfile.
+DUMPS = (
+    "embed",
+    "L0_attn_in",
+    "L0_attn_out",
+    "L0_hidden_post_attn",
+    "L0_mlp_in",
+    "L0_mlp_out",
+    "L1_entry",
+    "L1_attn_in",
+    "L3_attn_in",
+    "L3_attn_out",
+    "ple_embedding",
+)
 
 
 def grouped_rms_norm(x_flat: np.ndarray, gamma: np.ndarray) -> np.ndarray:
@@ -58,17 +79,25 @@ def report(label: str, mine: np.ndarray, reference: np.ndarray) -> bool:
     return ok
 
 
-def main():
+def main() -> int:
     model_dir, dump_dir, token = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
+    missing = [name for name in DUMPS if not (dump_dir / f"{name}.f16").is_file()]
+    if missing:
+        print(
+            f"nothing was compared: {len(missing)} of {len(DUMPS)} dump file(s) are not in "
+            f"{dump_dir}, e.g. {missing[0]}.f16"
+        )
+        return 2
     w = SSDAIWeights(model_dir)
     P = "model.language_model."
+    verdicts = []
 
     print(f"token {token}")
     # --- embedding: hc identical copies of the row -----------------------
     embed = load(dump_dir, "embed")
     table = w.get(P + "embed_tokens.weight")
     row = table[token].astype(np.float32)
-    report("embed (wide)", embed, np.tile(row, HC))
+    verdicts.append(report("embed (wide)", embed, np.tile(row, HC)))
 
     # --- layer 0 attention read gate -------------------------------------
     pre = embed  # what the runner had when it encoded the entry
@@ -79,14 +108,16 @@ def main():
     lo = silu(down @ xn / HC)
     gate = sigmoid(up @ lo)
     mixed = (xn * gate).reshape(HC, D).mean(axis=0)
-    report("L0 attn read gate", load(dump_dir, "L0_attn_in"), mixed)
+    verdicts.append(report("L0 attn read gate", load(dump_dir, "L0_attn_in"), mixed))
 
     # --- layer 0 attention write gate ------------------------------------
     inj_w = w.get(P + "layers.0.attn_hyper_connection.block_inject_weight.weight")
     inject = 2.0 * sigmoid((inj_w @ xn) / HC)
     block_out = load(dump_dir, "L0_attn_out")
     combined = pre.reshape(HC, D) + block_out[None, :] * inject[:, None]
-    report("L0 attn write gate", load(dump_dir, "L0_hidden_post_attn"), combined.reshape(-1))
+    verdicts.append(
+        report("L0 attn write gate", load(dump_dir, "L0_hidden_post_attn"), combined.reshape(-1))
+    )
 
     # --- layer 0 mlp read gate -------------------------------------------
     post = load(dump_dir, "L0_hidden_post_attn")
@@ -97,24 +128,28 @@ def main():
     lo_m = silu(down_m @ xn_m / HC)
     gate_m = sigmoid(up_m @ lo_m)
     mixed_m = (xn_m * gate_m).reshape(HC, D).mean(axis=0)
-    report("L0 mlp read gate", load(dump_dir, "L0_mlp_in"), mixed_m)
+    verdicts.append(report("L0 mlp read gate", load(dump_dir, "L0_mlp_in"), mixed_m))
 
     # --- layer 0 gated-delta block, at position 0 -------------------------
     # Position 0 is the whole point of checking here: the conv history and the
     # recurrent state are both zero, so the block reduces to closed-form
     # algebra and a mismatch cannot be blamed on carried state.
-    report(
-        "L0 GDN block",
-        load(dump_dir, "L0_attn_out"),
-        gdn_first_token(w, P + "layers.0.linear_attn.", load(dump_dir, "L0_attn_in")),
+    verdicts.append(
+        report(
+            "L0 GDN block",
+            load(dump_dir, "L0_attn_out"),
+            gdn_first_token(w, P + "layers.0.linear_attn.", load(dump_dir, "L0_attn_in")),
+        )
     )
 
     # --- layer 0 MoE block ------------------------------------------------
     experts = PackedExperts(model_dir)
-    report(
-        "L0 MoE block",
-        load(dump_dir, "L0_mlp_out"),
-        moe_block(w, experts, 0, load(dump_dir, "L0_mlp_in")),
+    verdicts.append(
+        report(
+            "L0 MoE block",
+            load(dump_dir, "L0_mlp_out"),
+            moe_block(w, experts, 0, load(dump_dir, "L0_mlp_in")),
+        )
     )
 
     # --- layer 0 mlp write gate, which is what layer 1 starts from --------
@@ -122,28 +157,36 @@ def main():
     inject_m = 2.0 * sigmoid((inj_m @ xn_m) / HC)
     mlp_out = load(dump_dir, "L0_mlp_out")
     wide = (post.reshape(HC, D) + mlp_out[None, :] * inject_m[:, None]).reshape(-1)
-    report("L0 mlp write gate", load(dump_dir, "L1_entry"), wide)
+    verdicts.append(report("L0 mlp write gate", load(dump_dir, "L1_entry"), wide))
 
     # --- layer 1 PLE block, read through layer 1's gate -------------------
     # The block's own output is never resident on its own -- the next thing
     # that touches it is the attention read gate -- so the check runs through
     # that gate, using the residual the runner actually had.
     after_ple = ple_block(w, 1, load(dump_dir, "L1_entry"), load(dump_dir, "ple_embedding"))
-    report(
-        "L1 PLE + read gate",
-        load(dump_dir, "L1_attn_in"),
-        hc_read(w, P + "layers.1.attn_hyper_connection.", after_ple),
+    verdicts.append(
+        report(
+            "L1 PLE + read gate",
+            load(dump_dir, "L1_attn_in"),
+            hc_read(w, P + "layers.1.attn_hyper_connection.", after_ple),
+        )
     )
 
     # --- layer 3 QSA block, at position 0 ---------------------------------
     # One key: the softmax is a no-op, so this isolates the projections, the
     # q||gate interleave and the per-head sigmoid gate from the mask and the
     # indexer, which only matter once the context is longer.
-    report(
-        "L3 QSA block",
-        load(dump_dir, "L3_attn_out"),
-        qsa_first_token(w, P + "layers.3.self_attn.", load(dump_dir, "L3_attn_in")),
+    verdicts.append(
+        report(
+            "L3 QSA block",
+            load(dump_dir, "L3_attn_out"),
+            qsa_first_token(w, P + "layers.3.self_attn.", load(dump_dir, "L3_attn_in")),
+        )
     )
+
+    agreed = sum(1 for ok in verdicts if ok)
+    print(f"{agreed} of {len(verdicts)} stage(s) agree")
+    return 0 if agreed == len(verdicts) else 1
 
 
 HK, HV, DK, DV, CONV_K = 16, 48, 128, 128, 4
@@ -277,4 +320,4 @@ def qsa_first_token(w, prefix: str, x: np.ndarray) -> np.ndarray:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

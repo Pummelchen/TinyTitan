@@ -4,6 +4,10 @@ Usage:  python3 tools/qwen38_sequence_parity.py <model-dir> <dump-dir>
 
 The dump directory holds one `posN` subdirectory per position, written by a
 run with `TINYTITAN_ACT_DUMP` and `TINYTITAN_ACT_DUMP_POSITIONS`.
+
+Exit status: 0 every position was profiled, 2 the directory held nothing to
+profile. The cosines are a profile, not a verdict -- see the note in the loop --
+so this script never reports that the two implementations disagree.
 """
 
 import sys
@@ -19,9 +23,15 @@ def cosine(a, b):
     return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30))
 
 
-def main():
+def main() -> int:
     model_dir, root = sys.argv[1], Path(sys.argv[2])
+    # Asked before the reference is built: a dump root holding nothing is the one
+    # answer that needs no weights, and printing nothing and exiting 0 was the
+    # report of a comparison that never happened.
     positions = sorted(int(p.name[3:]) for p in root.glob("pos*"))
+    if not positions:
+        print(f"nothing was compared: no posN directories under {root}")
+        return 2
     reference = Reference(model_dir)
     for position in positions:
         directory = root / f"pos{position}"
@@ -39,6 +49,9 @@ def main():
                 continue
             dumped = np.fromfile(path, dtype=np.float16).astype(np.float32)
             line.append((layer, cosine(entries[layer], dumped)))
+        if not line:
+            print(f"  nothing to profile: no L<N>_entry.f16 in {directory}")
+            return 2
         for layer, c in line:
             if layer % 4 == 0 or c < 0.99:
                 print(f"  L{layer:02d} entry  cos={c:.5f}")
@@ -46,10 +59,15 @@ def main():
         if drops:
             worst_layer, worst_drop = max(drops, key=lambda d: d[1])
             print(f"  largest single-layer drop: L{worst_layer:02d} -{worst_drop:.5f}")
-        dumped = np.fromfile(directory / "stack_out.f16", dtype=np.float16).astype(np.float32)
+        stack_path = directory / "stack_out.f16"
+        if not stack_path.is_file():
+            print(f"  nothing to compare: no {stack_path.name} in {directory}")
+            return 2
+        dumped = np.fromfile(stack_path, dtype=np.float16).astype(np.float32)
         top = np.argsort(-logits)[:5]
         print(f"  stack out cos={cosine(stack_out, dumped):.5f}, reference top-5 {top.tolist()}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

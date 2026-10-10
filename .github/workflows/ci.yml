@@ -238,6 +238,19 @@ jobs:
         # it, and the suite pins that the two copies are the same text. Shell callers run
         # against a stub `pgrep` and a stub `swift`; the competitor-pid sites answer from a
         # faked HTTP reply. Nothing here starts a model or dials a peer.
+        # `test_parity_harness_status` pins the exit statuses of the qwen38 parity
+        # harness -- `tools/qwen38_parity.py`, `tools/qwen38_full_forward.py` and
+        # `tools/qwen38_sequence_parity.py`, the three scripts docs/qwen38-flash-next-port.md
+        # lists as comparing a run's activation dumps against the numpy reference.
+        # `report()` returned a verdict for every stage and `main()` dropped all nine,
+        # so eight `FAIL` lines and status 0 went out together and
+        # `... && echo "parity ok"` printed its sentence over a run that agreed with
+        # nothing. The suite runs the real scripts as their own processes against a
+        # synthetic weight table and real `.f16` dumps, and pins the three answers
+        # apart: 0 agreed, 1 disagreed, 2 nothing could be compared. No model, no
+        # install, no socket. It is the group's slowest suite (about three minutes),
+        # because the sequence cases run the whole 48-layer reference before they
+        # reach the guard they are testing.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -270,6 +283,7 @@ jobs:
             test_release_test_gate test_release_notes_compact test_assert_arch \
             test_build_log_gate test_release_precondition_gate \
             test_model_process_guard \
+            test_parity_harness_status \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \
