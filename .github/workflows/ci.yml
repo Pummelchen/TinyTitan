@@ -624,6 +624,7 @@ jobs:
             test_ornith_concise_tool_ab test_ornith_four_program_matrix \
             test_ane_prefill_ab_matrix test_ane_prefill_correctness \
             test_quant_quality_ab_exit test_docs_facts_suites test_memory_mini_report \
+            test_docs_facts_gate_names \
             test_tsan_storm_exit test_memory_command_names \
             test_driver_documented_commands test_capital_of_paris_report \
             test_tinytitan_determinism_ab test_tinytitan_overlap_measure \

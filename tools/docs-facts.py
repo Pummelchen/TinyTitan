@@ -666,6 +666,11 @@ def paragraphs_of(lines):
     note) records what was true on a day, and it stays wrong on purpose for the
     same reason the ledger does. The heading tells the two apart without guessing
     at the prose.
+
+    A GFM table row is a block of its own. Rows carry no blank line between them,
+    so blank-line splitting alone makes an eleven-row table one paragraph, and a
+    rule that reads "a paragraph that lists gates" then judges a row about model
+    goldens by the gate names three rows below it.
     """
     out, buf, start, heading = [], [], None, ""
     for number, line in enumerate(lines, 1):
@@ -674,6 +679,12 @@ def paragraphs_of(lines):
                 out.append((start, "\n".join(buf), heading))
                 buf, start = [], None
             heading = line.lstrip("#").strip()
+            continue
+        if line.strip() and line.lstrip().startswith("|"):
+            if buf:
+                out.append((start, "\n".join(buf), heading))
+                buf, start = [], None
+            out.append((number, line, heading))
             continue
         if line.strip():
             if start is None:
