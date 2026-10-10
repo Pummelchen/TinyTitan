@@ -564,8 +564,9 @@ jobs:
         # 21.8 s at load 3.9, all clean and all exit 0, with the operator's server on
         # 8080 and untouched. The 39-suite list — this one plus the four sweep
         # drivers' verdicts, 802 tests — measured 37.9 s wall and 37.5 s reported at
-        # load average 5.2, then 36.3 s and 38.0 s reported at load 5.5 and 6.7, all
-        # clean and all exit 0, with the operator's server on 8080 and untouched.
+        # load average 5.2, then 36.3 s and 38.0 s reported at load 5.5 and 6.7, and
+        # 34.5 s on the committed tree at load 5.1, all clean and all exit 0, with
+        # the operator's server on 8080 and untouched.
         # test_tinytitan_m5_sweep drives the M5 tuning sweep's real main() with
         # `subprocess.run` patched, one reply per planned run, into a temp
         # directory. The sweep itself is minutes of cold CLI processes against a
