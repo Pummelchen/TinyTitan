@@ -84,10 +84,6 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(per_task["T5"]["halves"]["NO"], [1, 1])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class RefusalTests(unittest.TestCase):
     """A request that never answered has no answer to score.
 
@@ -238,3 +234,7 @@ class RefusalTests(unittest.TestCase):
             contextlib.redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(judges.main(), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

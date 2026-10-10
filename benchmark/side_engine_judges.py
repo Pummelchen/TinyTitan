@@ -21,8 +21,17 @@ writes; scoring is that script's, imported rather than copied.
 
 A request that never answered is not a judgement that answered wrongly. A
 refused case records its reason in the done file's `error` field, is counted
-apart, and stays out of every denominator; a run where every request refused
-prints no score and exits 1.
+apart, and stays out of every denominator; a blank answer with no reason is
+counted the same way, as a judgement that was never written.
+
+`main()` answers a status, and the percentages it prints are only as wide as the
+jobs that earned them:
+
+    0  every job wrote a row, every row carried an answer, and the table covers them
+    1  measured and contested: a row refused, an answer was never written, the run
+       wrote more or fewer rows than there are jobs
+    2  NOT MEASURED -- no jobs file, no done file, no rows in it, or a row that
+       names no task, prompt or truth; the reason prints and no table does
 """
 
 from __future__ import annotations
@@ -105,21 +114,52 @@ def run_server(url: str, model: str, jobs: list[dict], out: Path) -> float:
     return time.time() - started
 
 
-def summarize(path: Path) -> dict:
-    rows = [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
+def refuse(reason: str) -> int:
+    """Say why there is no comparison, print no table, and answer 2."""
+    print(f"\nNOT MEASURED: {reason}")
+    return 2
+
+
+def read_rows(path: Path, jobs: int = 0) -> tuple[list[dict], str]:
+    """Every row of a done file, or the reason no comparison can be read from it."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        return [], f"{path} cannot be read: {type(error).__name__}: {error}"
+    rows: list[dict] = []
+    for number, text in enumerate(lines, start=1):
+        if not text.strip():
+            continue
+        try:
+            row = json.loads(text)
+        except ValueError as error:
+            return [], f"line {number} of {path.name} is not json: {text[:60]!r} ({error})"
+        if not isinstance(row, dict) or not {"task", "prompt", "truth"} <= set(row):
+            return [], (
+                f"line {number} of {path.name} names no task, prompt and truth, so it is "
+                "not one of the jobs this driver was handed"
+            )
+        rows.append(row)
+    if not rows:
+        return [], f"{path} holds no rows, so this judge answered none of the {jobs} jobs"
+    return rows, ""
+
+
+def tally(rows: list[dict]) -> dict:
     per_task: dict[str, dict] = {}
     for row in rows:
         entry = per_task.setdefault(
-            row["task"], {"correct": 0, "total": 0, "refused": 0, "halves": {}}
+            row["task"], {"correct": 0, "total": 0, "refused": 0, "silent": 0, "halves": {}}
         )
         if row.get("error"):
             entry["refused"] += 1
             continue
-        expected = tasks.truth_of(row)
         answer = (row.get("completion") or "").strip().upper()
-        answer = answer.split()[0].strip(".,:;\"'") if answer else ""
+        if not answer:
+            entry["silent"] += 1
+            continue
+        expected = tasks.truth_of(row)
+        answer = answer.split()[0].strip(".,:;\"'")
         legal = {"YES", "NO"} if expected in ("YES", "NO") else {"UPDATE", "CONFLICT"}
         entry["total"] += 1
         half = entry["halves"].setdefault(expected, [0, 0])
@@ -128,6 +168,10 @@ def summarize(path: Path) -> dict:
             entry["correct"] += 1
             half[0] += 1
     return per_task
+
+
+def summarize(path: Path) -> dict:
+    return tally(read_rows(path)[0])
 
 
 def line(label: str, per_task: dict, seconds: float, count: int) -> None:
@@ -153,7 +197,14 @@ def line(label: str, per_task: dict, seconds: float, count: int) -> None:
             f"  judgements refused: {refused}; every percentage covers only the {measured} that answered"
         )
     if not measured:
-        print("  measured nothing: every request refused, so none of the above is a score")
+        silent = sum(entry.get("silent", 0) for entry in per_task.values())
+        if refused:
+            print("  measured nothing: every request refused, so none of the above is a score")
+        else:
+            print(
+                f"  measured nothing: {silent} rows carried no answer, "
+                "so none of the above is a score"
+            )
 
 
 def parse_judge(spec: str) -> tuple[str, str, str | None]:
@@ -180,11 +231,24 @@ def main() -> int:
         "--out", type=Path, help="directory for the done files (default: beside the jobs file)"
     )
     args = ap.parse_args()
-    jobs = [json.loads(line) for line in args.jobs.read_text().splitlines() if line.strip()]
+    try:
+        source = args.jobs.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        return refuse(f"{args.jobs} cannot be read: {type(error).__name__}: {error}")
+    jobs = []
+    for number, text in enumerate(source, start=1):
+        if not text.strip():
+            continue
+        try:
+            jobs.append(json.loads(text))
+        except ValueError as error:
+            return refuse(f"line {number} of {args.jobs.name} is not json ({error})")
+    if not jobs:
+        return refuse(f"{args.jobs} holds no jobs, so there is nothing to judge")
     out_dir = args.out or args.jobs.parent
     # The jobs file's stem is part of the done name: the same judge over two
     # case files must not overwrite the first result with the second.
-    any_refused = False
+    contested = False
     for spec in args.judge:
         kind, target, model = parse_judge(spec)
         if kind == "cpu":
@@ -198,12 +262,27 @@ def main() -> int:
             seconds = run_cpu(target, jobs, done)
         else:
             seconds = run_server(target, str(model), jobs, done)
-        per_task = summarize(done)
+        rows, refusal = read_rows(done, len(jobs))
+        if refusal:
+            return refuse(refusal)
+        per_task = tally(rows)
         line(label, per_task, seconds, len(jobs))
+        judged = sum(entry["total"] for entry in per_task.values())
+        refused = sum(entry["refused"] for entry in per_task.values())
+        silent = sum(entry["silent"] for entry in per_task.values())
+        print(f"  judged {judged} of {len(jobs)} jobs, {refused} refused, {silent} with no answer")
+        if len(rows) != len(jobs):
+            gap = len(jobs) - len(rows)
+            detail = (
+                f"{gap} of the jobs wrote no row"
+                if gap > 0
+                else f"{-gap} row repeats a job, so one verdict is counted twice"
+            )
+            print(f"  the run wrote {len(rows)} rows for {len(jobs)} jobs, so {detail}")
+        if judged != len(jobs):
+            contested = True
         print(f"  done file: {done}")
-        if any(entry["refused"] for entry in per_task.values()):
-            any_refused = True
-    return 1 if any_refused else 0
+    return 1 if contested else 0
 
 
 if __name__ == "__main__":

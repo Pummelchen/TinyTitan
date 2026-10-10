@@ -823,10 +823,26 @@ jobs:
         # / carried no judgement / was answered twice / came from elsewhere / disagreed,
         # 2 NOT MEASURED. Fixtures only: no model, no server, no engine binary and nothing
         # fetched.
+        # `test_side_engine_judges_verdict` is AUD-291, the same shape in the driver that
+        # runs one judge over the 60 authored side-engine cases. Its verdict was the
+        # negation of a coverage check: `1 if any(entry['refused'] ...) else 0` over a done
+        # file that holds no rows is False, so a judge that wrote nothing answered 0 -- and
+        # the same run printed `measured nothing: every request refused`, naming refusals
+        # when zero requests ran, so the message and the status disagreed about what had
+        # happened. Two answered rows of a 60-case run also answered 0: the job count reached
+        # the s/judgement rate but never the verdict. A missing done file raised
+        # `FileNotFoundError`, a half-written line `JSONDecodeError`, and a row with a task
+        # but no prompt `KeyError` out of the shared truth table -- each leaving exit 1, the
+        # status a contested comparison carries. It now answers 0 every job ran and was
+        # judged; 1 a named task ran no rows, or the rows scored do not cover the jobs the
+        # driver was handed, naming how many are missing or repeated; 2 NOT MEASURED, with
+        # the reason printed and no rates. Fixtures only: no model, no server, no engine
+        # binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
-            test_side_engine_judges test_tinytitan_prefetch_trace_analysis \
+            test_side_engine_judges test_side_engine_judges_verdict \
+            test_tinytitan_prefetch_trace_analysis \
             test_memory_master test_memory_scenarios test_memval_master_exit \
             test_ornith_concise_tool_ab test_ornith_four_program_matrix \
             test_ane_prefill_ab_matrix test_ane_prefill_correctness \
