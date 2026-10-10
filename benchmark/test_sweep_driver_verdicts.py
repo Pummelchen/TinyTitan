@@ -478,7 +478,7 @@ class GatherProbeVerdict(unittest.TestCase):
         rows = [dict(self.ANSWERED_PAIR[0]), {"convert_seconds": 1.0, "ane_error": "boom"}]
         status, out, _called = drive_gather(rows)
         self.assertEqual(status, 2)
-        self.assertIn("gather", out)
+        self.assertIn("NOT MEASURED: no gather/dense ratio", out)
         self.assertNotIn("gather/dense prediction", out)
 
     def test_a_zero_second_reference_is_a_named_refusal_not_a_skipped_ratio(self):
