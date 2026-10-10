@@ -50,6 +50,14 @@ The three statuses are the ones `tools/model-guard.sh`,
 
 The counting primitive is `tinytitan_profile.arm_metric` / `metric_count`, added
 for AUD-273 and shared here rather than re-derived per driver.
+
+`SlotSweepSwapSentinel` is AUD-282, a shape in the second driver that the sweep
+above found separately: `swap_used_gib()` answered `float("nan")` for a `sysctl`
+that returned nothing, and every guard that figure passes through tests `is None`,
+so the sweep published `swap now nan GiB`, a `+nan` swap column for every slot, and
+`sweep status 0` -- with `--record` writing `NaN` into the artifact, which is not
+JSON. Measured by driving the real `main()` with `sysctl` and the CLI subprocess
+patched; no model, no CLI binary, nothing fetched.
 """
 
 from __future__ import annotations
@@ -59,6 +67,7 @@ import io
 import json
 import pathlib
 import statistics
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -246,6 +255,67 @@ def drive_slots(by_slot: dict, argv: list[str] | None = None):
     return status, buf.getvalue()
 
 
+# The same sweep driven through its real `run_once`, so the swap reading, the
+# CLI log parse and the table all run. AUD-282: the absent-swap path.
+SLOT_CLI_STDERR = (
+    "[decode expert io] hits 900 misses 100 (90.0% hit) 1.2 GiB = 3.3 MiB/token\n"
+    "[stop=maxTokens prefill=4500tok/3.0s new=256tok decode=16.0s tok/s=16.00]\n"
+    "12884901888 maximum resident set size\n"
+)
+SWAP_ANSWER = "total = 24576.00M used = 1024.00M in use = 1003.00M"
+SWAP_SILENT = ""
+RECORD_DIR = ROOT / ".build/aud282-record"
+
+
+def swap_runner(outputs):
+    """`sysctl` answers `outputs` in order and repeats its last; the CLI answers the log.
+
+    The sweep's only external calls are these two, both through `subprocess.run`,
+    so the driver runs against them with no CLI binary, no model and no download.
+    """
+    pending = list(outputs if isinstance(outputs, list) else [outputs])
+
+    def run(cmd, *args, **kwargs):
+        if cmd[0] == "sysctl":
+            out = pending.pop(0) if len(pending) > 1 else (pending[0] if pending else "")
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+        return subprocess.CompletedProcess(cmd, 0, "", SLOT_CLI_STDERR)
+
+    return run
+
+
+def drive_slot_runs(swap_out, argv=None):
+    if RECORD_DIR.exists():
+        for stale in RECORD_DIR.glob("slots-*.json"):
+            stale.unlink()
+    buf = io.StringIO()
+    with (
+        mock.patch.object(slots.subprocess, "run", swap_runner(swap_out)),
+        mock.patch.object(slots, "pgrep_answer", return_value=("clear", [])),
+        mock.patch.object(slots, "RESULTS", RECORD_DIR),
+        mock.patch.object(
+            sys,
+            "argv",
+            [
+                "expert_cache_slots",
+                "--model",
+                str(SLOT_MODEL),
+                "--rounds",
+                "1",
+                "--characters",
+                "512",
+                "--slots",
+                "64,96",
+            ]
+            + (argv or []),
+        ),
+        contextlib.redirect_stdout(buf),
+    ):
+        status = slots.main()
+    records = sorted(RECORD_DIR.glob("slots-*.json")) if RECORD_DIR.exists() else []
+    return status, buf.getvalue(), records
+
+
 # --------------------------------------------------------------------- gate 0
 GATE_ROW = {
     "prefill_s": 1.2,
@@ -406,6 +476,125 @@ class SlotSweepVerdict(unittest.TestCase):
         )
         self.assertEqual(status, 0)
         self.assertIn("96", out)
+        self.assertIn("sweep status 0", out)
+
+
+class SlotSweepSwapSentinel(unittest.TestCase):
+    """AUD-282: the slot sweep's answer for "sysctl told me nothing" is `nan`.
+
+    Measured pre-fix by driving the real `main()` with `sysctl` answering an
+    empty string -- what `check=False` leaves when the call fails -- and the CLI
+    log well formed: the startup line printed `swap now nan GiB`, every run line
+    printed `swap   +nan GiB`, the published table's swap column read `+nan` for
+    every slot, and the sweep printed no refusal and exited 0, because every
+    guard that figure passes through (`_num`, and `arm_metric` behind it) tests
+    `is None` and nan is not None. `--record` wrote `NaN` into the artifact,
+    which is not JSON. The fix is the absent value the rest of the driver
+    already uses, `None`; the refusals and the status come from the
+    `metric_count` guard that was already wired to this column.
+    """
+
+    def test_sysctl_answering_nothing_is_absent_not_a_number(self):
+        with mock.patch.object(slots.subprocess, "run", swap_runner([""])):
+            self.assertIsNone(slots.swap_used_gib())
+
+    def test_a_readable_sysctl_answer_is_still_mebibytes_divided(self):
+        with mock.patch.object(slots.subprocess, "run", swap_runner([SWAP_ANSWER])):
+            self.assertEqual(slots.swap_used_gib(), 1.0)
+
+    def test_a_run_without_a_swap_reading_records_both_ends_as_absent(self):
+        with mock.patch.object(slots.subprocess, "run", swap_runner([""])):
+            row = slots.run_once(SLOT_MODEL, MESSAGES, 64, 256)
+        self.assertIsNone(row["swap_before_gib"])
+        self.assertIsNone(row["swap_after_gib"])
+        self.assertIsNone(row["swap_delta_gib"])
+
+    def test_a_run_that_read_swap_records_the_delta_it_read(self):
+        runner = swap_runner(
+            [
+                "total = 1024.00M used = 1024.00M in use = 0.00M",
+                "total = 1024.00M used = 2048.00M in use = 0.00M",
+            ]
+        )
+        with mock.patch.object(slots.subprocess, "run", runner):
+            row = slots.run_once(SLOT_MODEL, MESSAGES, 64, 256)
+        self.assertEqual(row["swap_before_gib"], 1.0)
+        self.assertEqual(row["swap_after_gib"], 2.0)
+        self.assertEqual(row["swap_delta_gib"], 1.0)
+
+    def test_a_sweep_that_read_no_swap_refuses_its_own_column(self):
+        _status, out, _records = drive_slot_runs([""])
+        self.assertNotIn("+nan", out)
+        self.assertNotIn("nan GiB", out)
+        self.assertIn("swap_delta_gib", out)
+        self.assertIn("NOT MEASURED", out)
+        # The published cell, not only the refusal line: the mutant that prints
+        # `str(None)` in the table leaves the refusal text intact, so the cell
+        # itself has to be pinned.
+        self.assertIn("     64      0.01    90.0   16.00        3.3    12.00 no data", out)
+
+    def test_the_startup_line_names_the_reading_it_did_not_make(self):
+        _status, out, _records = drive_slot_runs([""])
+        self.assertIn("swap now no data", out.splitlines()[0])
+
+    def test_a_figure_without_the_unit_the_divisor_assumes_is_absent(self):
+        # The divisor is mebibytes, so a figure with no `M` on it is not a
+        # reading in that unit: 1024 would become 1.00 GiB, or 1.00 KiB, with
+        # nothing in the page to say which.
+        with mock.patch.object(slots.subprocess, "run", swap_runner(["total = 1024 used = 1024"])):
+            self.assertIsNone(slots.swap_used_gib())
+
+    def test_a_swap_reading_that_ends_halfway_through_a_run_is_absent_delta(self):
+        with mock.patch.object(slots.subprocess, "run", swap_runner([SWAP_ANSWER, ""])):
+            lost_after = slots.run_once(SLOT_MODEL, MESSAGES, 64, 256)
+        self.assertEqual(lost_after["swap_before_gib"], 1.0)
+        self.assertIsNone(lost_after["swap_after_gib"])
+        self.assertIsNone(lost_after["swap_delta_gib"])
+        with mock.patch.object(slots.subprocess, "run", swap_runner(["", SWAP_ANSWER])):
+            lost_before = slots.run_once(SLOT_MODEL, MESSAGES, 64, 256)
+        self.assertIsNone(lost_before["swap_before_gib"])
+        self.assertEqual(lost_before["swap_after_gib"], 1.0)
+        self.assertIsNone(lost_before["swap_delta_gib"])
+
+    def test_the_swap_figures_are_recorded_to_two_places(self):
+        runner = swap_runner(
+            [
+                "total = 4096.00M used = 1234.56M in use = 0.00M",
+                "total = 4096.00M used = 2345.67M in use = 0.00M",
+            ]
+        )
+        with mock.patch.object(slots.subprocess, "run", runner):
+            row = slots.run_once(SLOT_MODEL, MESSAGES, 64, 256)
+        self.assertEqual(row["swap_before_gib"], 1.21)
+        self.assertEqual(row["swap_after_gib"], 2.29)
+        # The delta is the difference of the readings, not of the printed cells:
+        # 1.205625 -> 2.290693 rounds to 1.09, while 2.29 - 1.21 would be 1.08.
+        self.assertEqual(row["swap_delta_gib"], 1.09)
+
+    def test_the_swap_only_column_costs_the_sweep_its_clean_exit(self):
+        status, _out, _records = drive_slot_runs([""])
+        self.assertEqual(status, 2)
+
+    def test_a_half_read_swap_column_shows_its_denominator(self):
+        rows = [
+            dict(ANSWERED, slots=64, swap_delta_gib=0.1),
+            dict(ANSWERED, slots=64, swap_delta_gib=None),
+        ]
+        lines, status = slots.verdict(rows, [64], {64: 0.01}, 256, "model")
+        self.assertEqual(status, 1)
+        self.assertIn("1 of 2", "\n".join(lines))
+
+    def test_the_recorded_artifact_stays_json_when_swap_is_absent(self):
+        _status, _out, records = drive_slot_runs([""], ["--record"])
+        self.assertEqual(len(records), 1)
+        text = records[0].read_text()
+        self.assertNotIn("NaN", text)
+        self.assertIsNone(json.loads(text)["rows"][0]["swap_delta_gib"])
+
+    def test_a_sweep_that_read_swap_still_exits_clean(self):
+        status, out, _records = drive_slot_runs([SWAP_ANSWER])
+        self.assertEqual(status, 0)
+        self.assertIn("swap now 1.00 GiB", out)
         self.assertIn("sweep status 0", out)
 
 

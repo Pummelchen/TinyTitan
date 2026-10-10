@@ -32,7 +32,7 @@ import re
 import subprocess
 import sys
 
-from tinytitan_profile import arm_metric, metric_count, pgrep_answer
+from tinytitan_profile import arm_metric, logged, metric_count, pgrep_answer
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CLI = ROOT / ".build/release/TinyTitanCLI"
@@ -62,12 +62,20 @@ def build_prompt(source: pathlib.Path, characters: int) -> tuple[str, str]:
     return body + INSTRUCTION, digest
 
 
-def swap_used_gib() -> float:
+def swap_used_gib() -> float | None:
+    """GiB of swap written, or None when `sysctl` answered nothing readable.
+
+    AUD-282: this used to answer `float("nan")`, and every guard the figure
+    passes through -- `_num`, and `arm_metric` behind it -- tests `is None`, so
+    the sentinel was published as a measurement of `+nan` with a clean status.
+    """
     out = subprocess.run(
         ["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, check=False
     ).stdout
     match = re.search(r"used = ([\d.]+)M", out)
-    return float(match.group(1)) / 1024.0 if match else float("nan")
+    if match is None:
+        return None
+    return float(match.group(1)) / 1024.0
 
 
 def run_once(model: pathlib.Path, messages: pathlib.Path, slots: int, max_new: int) -> dict:
@@ -104,9 +112,9 @@ def run_once(model: pathlib.Path, messages: pathlib.Path, slots: int, max_new: i
     err = proc.stderr
     row: dict = {
         "slots": slots,
-        "swap_before_gib": round(before, 2),
-        "swap_after_gib": round(after, 2),
-        "swap_delta_gib": round(after - before, 2),
+        "swap_before_gib": None if before is None else round(before, 2),
+        "swap_after_gib": None if after is None else round(after, 2),
+        "swap_delta_gib": None if before is None or after is None else round(after - before, 2),
     }
     io = IO.search(err)
     if io:
@@ -264,7 +272,8 @@ def main() -> int:
     rows: list[dict] = []
     print(
         f"[tt011] {model.name}: slots {slots}, prompt {len(prompt)} chars "
-        f"(sha {digest}), {args.max_new} new tokens, swap now {swap_used_gib():.2f} GiB",
+        f"(sha {digest}), {args.max_new} new tokens, "
+        f"swap now {logged(swap_used_gib(), '.2f', ' GiB', 'no data')}",
         flush=True,
     )
     for round_index in range(args.rounds):
