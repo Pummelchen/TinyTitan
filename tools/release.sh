@@ -55,6 +55,11 @@ test_gate_verdict() {
 # `tools/assert-arch.sh`, which `tools/build_library.sh` also uses.
 # shellcheck source=assert-arch.sh
 . "$SCRIPT_DIR/assert-arch.sh"
+# The build log's compiler-warning gate, shared with tools/build_library.sh: the
+# two callers each had their own copy of the grep, which is how a fix to one would
+# have left the other exactly as broken (AUD-266).
+# shellcheck source=assert-build-log.sh
+. "$SCRIPT_DIR/assert-build-log.sh"
 
 TAG="${1:-}"
 [ -n "$TAG" ] || die "usage: tools/release.sh <tag> [--publish] [--notes <file>]"
@@ -314,8 +319,10 @@ fi
 step "clean release build"
 rm -rf "$SCRATCH"
 swift build -c release --scratch-path "$SCRATCH" 2>&1 | tee "$STAGE_ROOT.buildlog" | tail -1
-grep -qE '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' "$STAGE_ROOT.buildlog" \
-  && die "release build emitted compiler warnings"
+# The status this replaces could only report a warning it *found*: a build log
+# that was missing, empty, unreadable or truncated left `die` unreached and the
+# release staged anyway. assert_clean_build_log refuses all four.
+assert_clean_build_log "$STAGE_ROOT.buildlog" "release build"
 BIN="$SCRATCH/release"
 [ -x "$BIN/TinyTitanServer" ] || die "build produced no TinyTitanServer"
 # Resolve the products directory physically before anything globs it. SwiftPM's

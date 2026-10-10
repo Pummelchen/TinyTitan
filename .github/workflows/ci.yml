@@ -195,6 +195,13 @@ jobs:
         # read only half of — and a 3-byte header, which is what a `cp` that filled the disk
         # leaves, went the same way (AUD-265). It builds its fixtures from a Mach-O already
         # on the runner and from `/bin/ls`, so it compiles nothing and fetches nothing.
+        # `test_build_log_gate` pins `tools/assert-build-log.sh`, the compiler-warning gate
+        # both `tools/release.sh` and `tools/build_library.sh` used to run as their own copy
+        # of one grep: `grep -qE ... && die` can only act on the status that *found* a
+        # warning, so a build log that was missing, empty, unreadable or truncated left the
+        # `die` unreached and the script went on to stage and publish -- measured in the
+        # callers' own `set -euo pipefail` and `set -uo pipefail` shapes (AUD-266). It drives
+        # the function over constructed logs, so it builds nothing and runs no compiler.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -225,6 +232,7 @@ jobs:
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
             test_release_test_gate test_release_notes_compact test_assert_arch \
+            test_build_log_gate \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

@@ -30,6 +30,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # from a terminal, and a hand-packaged library is still a library we handed out.
 # shellcheck source=assert-arch.sh
 . "$(dirname "$0")/assert-arch.sh"
+# shellcheck source=assert-build-log.sh
+. "$(dirname "$0")/assert-build-log.sh"
 PRODUCT="TinyTitanLib"
 DYNAMIC_PRODUCT="TinyTitanLibDynamic"
 INSTALL_NAME="@rpath/lib$PRODUCT.dylib"
@@ -77,9 +79,11 @@ swift build -c release "${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"}" --product "$PRO
 swift build -c release "${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"}" --product "$DYNAMIC_PRODUCT" \
   -Xlinker -install_name -Xlinker "$INSTALL_NAME" 2>&1 | tee -a "$BUILD_LOG" | tail -1
 # The same rule the engine's release build enforces: a warning in the library is
-# a failure, not a note in a log nobody reads.
-grep -qE '^[^ ]+\.(swift|metal|c|h|m|mm):[0-9]+:[0-9]+: warning:' "$BUILD_LOG" \
-  && die "the library build emitted compiler warnings"
+# a failure, not a note in a log nobody reads. `assert_clean_build_log` refuses a
+# log it cannot read and one that holds no finished build, because the `grep -q`
+# this replaces could only act on a warning it found — a missing, empty, unreadable
+# or truncated log left `die` unreached and the library got staged anyway (AUD-266).
+assert_clean_build_log "$BUILD_LOG" "library build"
 BIN="$(swift build -c release "${SCRATCH_ARGS[@]+"${SCRATCH_ARGS[@]}"}" --show-bin-path)"
 
 step "stage into $OUT"
