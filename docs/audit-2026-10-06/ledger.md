@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:4  Done:182  Blocked:1  Total:187**
+**Open:3  Done:183  Blocked:1  Total:187**
 
 ## Table
 
@@ -155,7 +155,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-288 | S2 | A | benchmark | `benchmark/side_engine_recall.py:171-277 (post-fix), benchmark/side_engine_recall.py:8, 100-131` | the recall scorer read silence as a NO, so a dead engine was scored as a wrong one and an empty answer file printed recall@1 0/0 at exit 0 | a blank judgement read as NO: the side-engine recall scorer scored a dead or silent engine as a wrong one, ranked every unjudged fact last by construction, and divided its rates by however many questions survived, so an empty answer file printed a measured 0/0 and exited 0 | DONE | Mac (primary) |
 | AUD-289 | S2 | A | benchmark | `benchmark/side_engine_wired_cases.py:162-258 (post-fix), benchmark/side_engine_wired_cases.py:30-35, 147-168` | `--score` prints a bare header and answers 0 over an empty file, and escapes a missing or foreign file as a traceback at exit 1 | a verdict seam with no refusal path: the wired-case scorer exits 0 over an empty judgement file and dies in a traceback at exit 1 over an unreadable one | DONE | Mac (primary) |
 | AUD-259 | S3 | B | server | `sources/TinyTitanServer/Core/CPUModelBackend.swift:175` | `CPUModelBackend.setContention` promises the caller sets the served CPU model's thread width from GPU activity; no caller does, so in a mixed GPU+CPU catalog the CPU model holds full width while a GPU generation runs | decision: a public setter whose documented caller does not exist, and wiring it changes measured performance | OPEN | Mac (primary) |
-| AUD-290 | S3 | B | docs | `docs/side-engine-tasks.md:303, docs/clickhouse-long-session-verdict.md:50, docs/plan-fact-keeping-over-sessions.md:34` | three docs publish `token match recall@1 1/4`; `--baseline` on main measures 3/4, and the commit that moved the figure never touched the docs | a measured figure restated in three documents is stale: the token-match recall these docs publish is the pre-IDF scorer's, and the driver on main measures a different one | OPEN | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -195,6 +194,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-260 | S3 | B | repack | `sources/TinyTitanRepack/Core/Remote/RemoteStreamingRepacker.swift:29-72` | The installer's preflight refuses a stale, orphaned or already-present install correctly, and no test asserted any branch of it | tests: a seven-branch state machine on the path to a 168 GiB download, none of it pinned | DONE | Mac (primary) |
 | AUD-261 | S3 | B | tooling | `tools/repack_dense.sh:127-137` | tools/repack_dense.sh prints `all checks passed` over an equivalence gate that ran no test or skipped every one of them | tests: the one step that proves the reader has no verdict that can fail | DONE | Mac (primary) |
 | AUD-264 | S3 | A | docs-gates | `tools/docs-facts.py:358-369 (ledger_commit_evidence)` | A blank ledger commit field is tolerated on a DONE row, so a close can report a fix pointer it never wrote | gates: an evidence check whose exception is wider than the case it was written for | DONE | Mac (primary) |
+| AUD-290 | S3 | B | docs | `docs/side-engine-tasks.md:303-311, docs/clickhouse-long-session-verdict.md:46-56, docs/plan-fact-keeping-over-sessions.md:33-36` | three docs publish `token match recall@1 1/4`; `--baseline` on main measures 3/4, and the commit that moved the figure never touched the docs | a measured figure restated in three documents is stale: the token-match recall these docs publish is the pre-IDF scorer's, and the driver on main measures a different one | DONE | Mac (primary) |
 
 ## Detail
 
@@ -2849,20 +2849,6 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 
 **Evidence after.** Not changed. Two candidate repairs, and they are not equivalent: (1) wire the served CPU backend to a *GPU-only* busy signal, so it narrows while a GPU generation holds the device and not while it is itself decoding; (2) delete `setContention` and reword the doc to the truth -- the width is caller-set for the side engine, which is the only place it is set, and the served CPU model runs at preferred width. Option (1) is the one the doc asks for and it cannot be written with what exists today: `coordinator.generating` (:27, `enter()`/`leave()` at :65-66) counts every generation without regard to kind, so `backend.setContention { coordinator.generating.isBusy }` would clamp the served CPU model to `busyThreads = 1` during its *own* decode -- a naive wiring that reads as correct and is the wrong semantics. A real fix therefore adds a per-kind busy signal to the coordinator or the router, which is engine-scheduling work with a numerics-adjacent cost, and it needs a model run to measure, which the operator's live server currently bars.
 
-### AUD-290 — three docs publish `token match recall@1 1/4`; `--baseline` on main measures 3/4, and the commit that moved the figure never touched the docs
-
-- **Severity / tier:** S3 / Tier B
-- **Project:** docs
-- **Location:** `docs/side-engine-tasks.md:303, docs/clickhouse-long-session-verdict.md:50, docs/plan-fact-keeping-over-sessions.md:34`
-- **Category:** a measured figure restated in three documents is stale: the token-match recall these docs publish is the pre-IDF scorer's, and the driver on main measures a different one
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-288's fix needed the documented figure to check its own baseline against, so `--baseline` was run on HEAD and diffed against the documents.
-
-**Evidence before.** measured. `python3.13 benchmark/side_engine_recall.py --baseline` at 498795a prints `paraphrased n= 4 recall@1 3/4 recall@3 3/4` and `1 of 4 missed at rank 1`, while docs/side-engine-tasks.md:303 and docs/clickhouse-long-session-verdict.md:50 each carry the row `token match  1/4  3/4  1/4  3/4` and docs/plan-fact-keeping-over-sessions.md:34 states that token match scores recall@1 1/4. `878cea6` (memory: weight search terms by rarity) changed the scorer and printed `paraphrased n=4 recall@1 3/4 (was 1/4)` in its own commit message, and `git show 878cea6 -- docs/side-engine-tasks.md` returns an empty diff: the figure is stale, not differently framed. docs/agent-memory.md:174 and docs/release-notes-v5.8.md:57 were corrected in that sweep and carry 3 of 4, so the tree publishes both figures for one measurement. A docs-wide grep for the shape returns these three sites and nothing else -- the other `1/4` hits are cache-precision and per-layer-budget proportions.
-
-**Evidence after.** Not changed. The correction is three cells and one sentence, and the 4B token-match column is re-measurable here because it is model-free. The side-engine columns are not: `models/` holds only the two 125B-A6B installs, no qwen3.5 4B or 9B, so those cells can only be marked as recorded on 2026-09-18 rather than re-measured, and AGENTS.md forbids installing a model to satisfy a document. The open question for the operator is whether `tools/docs-facts.py` should pin the pair -- a model-free check that the documented token-match figure equals what `--baseline` prints costs milliseconds -- because that puts a benchmark harness inside a gate, which is the standing question the parity harness already raised.
-
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
 - **Severity / tier:** S3 / Tier C
@@ -3598,3 +3584,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** The gate now requires a non-blank, resolvable commit on a DONE row and still allows the blank on BLOCKED and OPEN. `benchmark/test_docs_facts_ledger.py` is 12 tests: the new DONE case fails as named, the honest non-DONE blank stays allowed, and the real-ledger test runs the gate over this repository. Three mutants killed -- tolerate every blank, fail every blank, and a lower-case status comparison (the last pinned because `render_ledger.py`'s STATUS_ORDER is the only vocabulary a row can carry, which is also why the redundant `.upper()` this began with is gone). AUD-262's field now reads `15808fe, ba0ddaf`, and `tools/lint.sh docs` resolves 163 ledger commit references at exit 0.
 
 **Commit.** `ab39375`
+
+### AUD-290 — three docs publish `token match recall@1 1/4`; `--baseline` on main measures 3/4, and the commit that moved the figure never touched the docs
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** docs
+- **Location:** `docs/side-engine-tasks.md:303-311, docs/clickhouse-long-session-verdict.md:46-56, docs/plan-fact-keeping-over-sessions.md:33-36`
+- **Category:** a measured figure restated in three documents is stale: the token-match recall these docs publish is the pre-IDF scorer's, and the driver on main measures a different one
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-288's fix needed the documented figure to check its own baseline against, so `--baseline` was run on HEAD and diffed against the documents.
+
+**Evidence before.** measured. `python3.13 benchmark/side_engine_recall.py --baseline` at 498795a prints `paraphrased n= 4 recall@1 3/4 recall@3 3/4` and `1 of 4 missed at rank 1`, while docs/side-engine-tasks.md:303 and docs/clickhouse-long-session-verdict.md:50 each carry the row `token match  1/4  3/4  1/4  3/4` and docs/plan-fact-keeping-over-sessions.md:34 states that token match scores recall@1 1/4. `878cea6` (memory: weight search terms by rarity) changed the scorer and printed `paraphrased n=4 recall@1 3/4 (was 1/4)` in its own commit message, and `git show 878cea6 -- docs/side-engine-tasks.md` returns an empty diff: the figure is stale, not differently framed. docs/agent-memory.md:174 and docs/release-notes-v5.8.md:57 were corrected in that sweep and carry 3 of 4, so the tree publishes both figures for one measurement. A docs-wide grep for the shape returns these three sites and nothing else -- the other `1/4` hits are cache-precision and per-layer-budget proportions.
+
+**Fix.** Three cells and the two sentences that rested on them. `docs/side-engine-tasks.md` now carries `token match | 3/4 | 3/4 | 3/4 | 3/4` plus a note naming the commit that moved the figure, the date it was re-measured, and the fact that the token row is one model-free figure shown for both installs while only the side-engine column is a measured run. `docs/clickhouse-long-session-verdict.md` carries the corrected row, an intro clause naming the re-measurement, and its defect sentence changed from plural misses to the one miss it now describes. `docs/plan-fact-keeping-over-sessions.md` names **recall@1 3/4** and the same single miss. No side-engine column moved, and no number in a table was invented: every figure written down is one `--baseline` prints.
+
+**Evidence after.** Measured on HEAD: `python3.13 benchmark/side_engine_recall.py --baseline` prints `mechanical n= 10 recall@1 10/10 recall@3 10/10` and `paraphrased n= 4 recall@1 3/4 recall@3 3/4`, with `1 of 4 missed at rank 1`, and the miss it prints is `How often does the boat cross the water? -> rules/ferry` carrying `lexical=no`. A docs-wide grep for the stale shapes (`recall@1 1/4`, `token match | 1/4`, `1/4` beside `recall`) returns nothing under `docs/` or in `README.md`, and the two sites that already carried the corrected figure (`docs/agent-memory.md:174`, `docs/release-notes-v5.8.md:57`) now agree with all three. `bash tools/lint.sh docs` rc=0, 192 ledger commit references resolved, and `test_docs_facts_suites test_docs_facts_gate_names` is 17 tests OK. Not re-measured, and the documents now say so: the 4B and 9B side-engine columns are live-model runs, `models/` holds only the two 125B-A6B installs, and AGENTS.md bars fetching a model to satisfy a document, so those cells stand as recorded 2026-09-18. The wiki's copy of the recall table was not read and stays unchecked. Fix commit da8e430.
+
+**Commit.** `da8e430`

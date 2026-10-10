@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 187,
-    "done": 182,
-    "open": 4,
+    "done": 183,
+    "open": 3,
     "blocked": 1
   },
   "tasks": [
@@ -3112,17 +3112,17 @@
       "tier": "B",
       "project": "docs",
       "category": "a measured figure restated in three documents is stale: the token-match recall these docs publish is the pre-IDF scorer's, and the driver on main measures a different one",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
-      "file_line": "docs/side-engine-tasks.md:303, docs/clickhouse-long-session-verdict.md:50, docs/plan-fact-keeping-over-sessions.md:34",
+      "file_line": "docs/side-engine-tasks.md:303-311, docs/clickhouse-long-session-verdict.md:46-56, docs/plan-fact-keeping-over-sessions.md:33-36",
       "title": "three docs publish `token match recall@1 1/4`; `--baseline` on main measures 3/4, and the commit that moved the figure never touched the docs",
       "discovered-by": "AUD-288's fix needed the documented figure to check its own baseline against, so `--baseline` was run on HEAD and diffed against the documents.",
       "evidence-before": "measured. `python3.13 benchmark/side_engine_recall.py --baseline` at 498795a prints `paraphrased n= 4 recall@1 3/4 recall@3 3/4` and `1 of 4 missed at rank 1`, while docs/side-engine-tasks.md:303 and docs/clickhouse-long-session-verdict.md:50 each carry the row `token match  1/4  3/4  1/4  3/4` and docs/plan-fact-keeping-over-sessions.md:34 states that token match scores recall@1 1/4. `878cea6` (memory: weight search terms by rarity) changed the scorer and printed `paraphrased n=4 recall@1 3/4 (was 1/4)` in its own commit message, and `git show 878cea6 -- docs/side-engine-tasks.md` returns an empty diff: the figure is stale, not differently framed. docs/agent-memory.md:174 and docs/release-notes-v5.8.md:57 were corrected in that sweep and carry 3 of 4, so the tree publishes both figures for one measurement. A docs-wide grep for the shape returns these three sites and nothing else -- the other `1/4` hits are cache-precision and per-layer-budget proportions.",
-      "owner": "auditor -- queued; a prose correction with no measurement left to make, plus one operator question it raises",
-      "fix-summary": "",
-      "evidence-after": "Not changed. The correction is three cells and one sentence, and the 4B token-match column is re-measurable here because it is model-free. The side-engine columns are not: `models/` holds only the two 125B-A6B installs, no qwen3.5 4B or 9B, so those cells can only be marked as recorded on 2026-09-18 rather than re-measured, and AGENTS.md forbids installing a model to satisfy a document. The open question for the operator is whether `tools/docs-facts.py` should pin the pair -- a model-free check that the documented token-match figure equals what `--baseline` prints costs milliseconds -- because that puts a benchmark harness inside a gate, which is the standing question the parity harness already raised.",
-      "sibling-note": "The class is the one AUD-240 and AUD-223 filed: a document restating a measured count drifts the moment the count moves, and the docs gate only checks counts it already knows how to find. Nothing else in docs/ restates this particular figure; the wiki is a separate repository and was not read for this row, so its copy is unchecked.",
-      "commit": ""
+      "owner": "",
+      "fix-summary": "Three cells and the two sentences that rested on them. `docs/side-engine-tasks.md` now carries `token match | 3/4 | 3/4 | 3/4 | 3/4` plus a note naming the commit that moved the figure, the date it was re-measured, and the fact that the token row is one model-free figure shown for both installs while only the side-engine column is a measured run. `docs/clickhouse-long-session-verdict.md` carries the corrected row, an intro clause naming the re-measurement, and its defect sentence changed from plural misses to the one miss it now describes. `docs/plan-fact-keeping-over-sessions.md` names **recall@1 3/4** and the same single miss. No side-engine column moved, and no number in a table was invented: every figure written down is one `--baseline` prints.",
+      "evidence-after": "Measured on HEAD: `python3.13 benchmark/side_engine_recall.py --baseline` prints `mechanical n= 10 recall@1 10/10 recall@3 10/10` and `paraphrased n= 4 recall@1 3/4 recall@3 3/4`, with `1 of 4 missed at rank 1`, and the miss it prints is `How often does the boat cross the water? -> rules/ferry` carrying `lexical=no`. A docs-wide grep for the stale shapes (`recall@1 1/4`, `token match | 1/4`, `1/4` beside `recall`) returns nothing under `docs/` or in `README.md`, and the two sites that already carried the corrected figure (`docs/agent-memory.md:174`, `docs/release-notes-v5.8.md:57`) now agree with all three. `bash tools/lint.sh docs` rc=0, 192 ledger commit references resolved, and `test_docs_facts_suites test_docs_facts_gate_names` is 17 tests OK. Not re-measured, and the documents now say so: the 4B and 9B side-engine columns are live-model runs, `models/` holds only the two 125B-A6B installs, and AGENTS.md bars fetching a model to satisfy a document, so those cells stand as recorded 2026-09-18. The wiki's copy of the recall table was not read and stays unchecked. Fix commit da8e430.",
+      "sibling-note": "The class is the one AUD-240 and AUD-223 filed: a document restating a measured count drifts the moment the count moves, and the docs gate only checks counts it already knows how to find. Nothing else in `docs/` restates this figure. What this row leaves with the operator is the gate question it raised: `tools/docs-facts.py` could pin the documented token-match row against `--baseline` for milliseconds, and does not, because that puts a benchmark harness inside a gate -- the standing question the parity harness already raised.",
+      "commit": "da8e430"
     },
     {
       "id": "AUD-291",
