@@ -335,6 +335,27 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_docs_facts_ledger
+      - name: Gate-harness empty-scan guards
+        # `tools/lint.sh` is the harness behind the production gates above, and it was
+        # the one tracked script no test file named. Seven of its checks reported `ok`
+        # over a tree they had opened no file in — force-cast's grep hides its own
+        # failure, arch-path and test-skip glob a directory that may be absent,
+        # shell-portability printed its script count and never tested it,
+        # unchecked-sendable would bless an empty scan by writing an empty baseline,
+        # and swift-format and the python parse floor read a path argument that is
+        # missing or empty without complaint — those last two turned up in this
+        # finding's own sibling sweep, after the first five were fixed.
+        # An unexported ROOT or a wrapper that copies `tools/` elsewhere reaches that
+        # shape for real, and the green this ledger cites would be a scan that never
+        # happened. These tests drive a copy of the harness against a throwaway tree
+        # (no model, no server, no Xcode, stdlib only; `xcrun` and `ruff` are stubbed
+        # for the two gates that would otherwise refuse on their toolchain pin before
+        # reaching the count) and pin both directions: an empty scan is refused by
+        # name, and a tree that satisfies the rule still passes — so a guard that
+        # refused everything could not pass as the fix.
+        run: |
+          cd benchmark
+          python3 -m unittest test_lint_gate_scan_guard
       - name: Memory-matrix exit gates
         # `benchmark/memval_matrix.sh` is a day of twelve `memval_run.sh` arms and
         # its verdict is the exit code an operator or a script reads afterwards.

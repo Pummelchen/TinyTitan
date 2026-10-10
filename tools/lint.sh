@@ -67,7 +67,19 @@ want="${1:-all}"
 # --- force-cast / force-try -------------------------------------------------
 check_force_cast() {
   echo "== force-cast: as! / try! outside tests =="
-  local found=0
+  local found=0 scanned
+  # grep's own failure is invisible here by construction -- the walk is a process
+  # substitution, so its status never reaches the loop, and stderr goes to
+  # /dev/null. The count of what the scan could open is the only thing that tells
+  # "no offender" apart from "no input", and the siblings already insist on it.
+  scanned="$(find "$ROOT/sources" -name '*.swift' -type f 2>/dev/null | grep -c . || true)"
+  if [ "${scanned:-0}" -eq 0 ]; then
+    echo "  FAIL: force-cast read 0 Swift files under $ROOT/sources."
+    echo "        Expected ~370; check ROOT and the directory, and read this as the"
+    echo "        gate not having run rather than as code that has no force casts."
+    status=1
+    return
+  fi
   while IFS= read -r hit; do
     local file line
     file="${hit%%:*}"
@@ -94,7 +106,7 @@ check_force_cast() {
     echo "  FAIL: force cast/try without an audited 'lint:allow-force <reason>' comment above it"
     status=1
   else
-    echo "  ok"
+    echo "  ok ($scanned Swift files scanned, no unexempt force cast/try)"
   fi
 }
 
@@ -450,12 +462,14 @@ SENDABLE_BASELINE="$SCRIPT_DIR/unchecked-sendable-baseline.txt"
 
 check_unchecked_sendable() {
   echo "== unchecked-sendable: new conformances must document their invariant =="
-  local current new stale
-  current="$(ruby -e '
+  local raw current new stale scanned rc
+  raw="$(ruby -e '
     Encoding.default_external = Encoding::UTF_8
     Encoding.default_internal = Encoding::UTF_8
     root = ENV.fetch("ROOT")
+    scanned = 0
     Dir.glob(File.join(root, "sources", "**", "*.swift")).sort.each do |path|
+      scanned += 1
       lines = File.readlines(path, chomp: true)
       rel = path.delete_prefix(root + "/")
       lines.each_with_index do |line, i|
@@ -479,7 +493,26 @@ check_unchecked_sendable() {
         puts "#{rel}:#{name}"
       end
     end
-  ' | sort -u)"
+    puts "SCANNED:#{scanned}"
+  ')"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "  FAIL: the sendable scanner exited $rc; it measured nothing."
+    status=1
+    return
+  fi
+  # Read before the baseline is consulted: an empty scan plus a missing allowlist
+  # used to write an empty baseline and report `ok (baseline created, 0 entries)`,
+  # which blessed whatever the tree actually contains.
+  scanned="$(echo "$raw" | sed -n 's/^SCANNED://p' | tail -1)"
+  if [ -z "$scanned" ] || [ "$scanned" -eq 0 ] 2>/dev/null; then
+    echo "  FAIL: unchecked-sendable read 0 Swift files under $ROOT/sources."
+    echo "        Expected ~375; check ROOT and the glob. An empty scan has not found"
+    echo "        an undocumented conformance, and must not be read as a pass."
+    status=1
+    return
+  fi
+  current="$(echo "$raw" | grep -v '^SCANNED:' | sort -u)"
 
   if [ ! -f "$SENDABLE_BASELINE" ]; then
     echo "$current" > "$SENDABLE_BASELINE"
@@ -502,7 +535,7 @@ check_unchecked_sendable() {
     status=1
     return
   fi
-  echo "  ok ($(echo "$current" | grep -c .) undocumented, 0 new)"
+  echo "  ok ($scanned files scanned, $(echo "$current" | grep -c .) undocumented, 0 new)"
 }
 
 # --- converter: expert placement ---------------------------------------------
@@ -612,10 +645,12 @@ PATTERN = re.compile(r"arm64-apple-macosx")   # lint:allow-arch-path the gate na
 ALLOW = re.compile(r"lint:allow-arch-path\s+\S+")
 SKIP = {".build", ".qwen", ".git", "releases", "__pycache__"}
 bad = []
+scanned = 0
 for ext in ("*.sh", "*.py", "*.swift"):
     for path in pathlib.Path(".").rglob(ext):
         if SKIP & set(path.parts):
             continue
+        scanned += 1
         lines = path.read_text(errors="replace").splitlines()
         for index, line in enumerate(lines):
             if not PATTERN.search(line) or ALLOW.search(line):
@@ -623,12 +658,19 @@ for ext in ("*.sh", "*.py", "*.swift"):
             if index and ALLOW.search(lines[index - 1]):
                 continue          # the reason sits on the line above
             bad.append(f"{path}:{index + 1}: {line.strip()[:90]}")
+# An empty walk and a clean one both leave `bad` empty, so the count is the only
+# thing that separates them; "ok (none)" over 0 files was a pass over a checkout
+# the gate never opened.
+if scanned == 0:
+    print("FAIL: arch-path read 0 script files under the checkout root.")
+    print("      Expected ~810; check ROOT, and that the walk was not filtered away.")
+    sys.exit(1)
 if bad:
     print("FAIL: hardcoded SwiftPM triple in a build path; use .build/release")
     for entry in bad:
         print("  " + entry)
     sys.exit(1)
-print("ok (none)")
+print("ok (%d files scanned, none name the triple)" % scanned)
 PY
 )"
   rc=$?
@@ -783,6 +825,17 @@ check_shell_portability() {
   while IFS= read -r f; do scripts+=("$f"); done < <(
     find "$ROOT/tools" "$ROOT/benchmark" "$ROOT/docs" "$ROOT/examples" -name '*.sh' -not -path '*/.build/*' 2>/dev/null | sort)
 
+  # The count has always been printed and never tested, so the day those four
+  # directories are not there the line reads `ok (0 scripts...)` -- a pass over a
+  # tree this gate did not open. check_shellcheck builds the same list and refuses
+  # it; only this gate had no such branch.
+  if [ "${#scripts[@]}" -eq 0 ]; then
+    echo "  FAIL: shell-portability found 0 shell scripts under tools/, benchmark/, docs/, examples/."
+    echo "        Expected ~29; check ROOT, and that find could read those directories."
+    status=1
+    return 1
+  fi
+
   for f in "${scripts[@]+"${scripts[@]}"}"; do
     if ! "$old_bash" -n "$f" >/dev/null 2>&1; then
       echo "  FAIL: $f does not parse under $old_bash"
@@ -884,7 +937,9 @@ BLOCK_OPEN = re.compile(r"\belse\s*\{\s*$")
 BARE_RETURN = re.compile(r"^\s*return\s*$")
 ALLOW = re.compile(r"lint:allow-silent-skip\s+\S+")
 bad = []
+scanned = 0
 for path in sorted(pathlib.Path("tests").rglob("*.swift")):
+    scanned += 1
     lines = path.read_text(errors="replace").splitlines()
     for index, line in enumerate(lines):
         previous = lines[max(0, index - 3):index]
@@ -901,6 +956,11 @@ for path in sorted(pathlib.Path("tests").rglob("*.swift")):
         if any(ALLOW.search(text) for text in previous + [exit_line]):
             continue
         bad.append(f"{path}:{index + 1}: {exit_line.strip()[:90]}")
+if scanned == 0:
+    print("FAIL: silent-test-skip read 0 Swift files under tests/.")
+    print("      Expected ~230; check ROOT and the glob -- a scan that opened no")
+    print("      test body has not found an early return, and is not a pass.")
+    sys.exit(1)
 if bad:
     print(
         "FAIL: a test that returns early reports green while asserting nothing; "
@@ -908,7 +968,7 @@ if bad:
     for entry in bad:
         print("  " + entry)
     sys.exit(1)
-print("ok (none)")
+print("ok (%d test files scanned, no unreported early exit)" % scanned)
 PY
 )"
   rc=$?
@@ -1158,15 +1218,18 @@ import ast, pathlib, sys
 floor = tuple(int(part) for part in sys.argv[1].split("."))
 roots = [pathlib.Path("benchmark"), pathlib.Path("tools"), pathlib.Path("docs")]
 bad = []
+scanned = 0
 for root in roots:
     for path in sorted(root.rglob("*.py")):
         if ".build" in path.parts:
             continue
+        scanned += 1
         try:
             ast.parse(path.read_text(encoding="utf-8"), filename=str(path),
                       feature_version=floor)
         except SyntaxError as error:
             bad.append(f"{path}:{error.lineno}: {error.msg}")
+print("SCANNED:%d" % scanned)
 if bad:
     print("\n".join(bad))
     sys.exit(1)
@@ -1177,7 +1240,20 @@ PY
     status=1
     return 1
   fi
-  echo "  ok (ruff $version, check and format clean, parses under $PYTHON_FLOOR)"
+  # rglob on a directory that is not there yields nothing and raises nothing, so an
+  # empty walk used to leave the floor unapplied while ruff answered
+  # "All checks passed!" -- measured on an empty tree: `ok`, exit 0. ruff is not the
+  # thing that walks this tree, so its clean line says nothing about this count.
+  local parse_scanned
+  parse_scanned="$(printf '%s\n' "$output" | sed -n 's/^SCANNED://p' | tail -1)"
+  if [ -z "$parse_scanned" ] || [ "$parse_scanned" -eq 0 ] 2>/dev/null; then
+    echo "  FAIL: the parse-floor scan read 0 .py files under benchmark/, tools/, docs/."
+    echo "        Expected ~165; check ROOT -- a scan that opened no script has not"
+    echo "        applied the $PYTHON_FLOOR floor, whatever ruff had to say about it."
+    status=1
+    return 1
+  fi
+  echo "  ok (ruff $version, check and format clean, $parse_scanned scripts parse under $PYTHON_FLOOR)"
   return 0
 }
 
@@ -1284,6 +1360,20 @@ check_swift_format() {
     example_files+=("$path")
   done < <(find "$ROOT/examples" \( -name .build -o -name .swiftpm \) -prune -o \
       -name '*.swift' -print 2>/dev/null | sort)
+  # swift-format reads a path argument that is missing or empty without complaint,
+  # so on a checkout whose ROOT moved this gate certified `--strict clean` over a
+  # tree it had opened no file in — measured on an empty tree: `ok`, exit 0. The
+  # argument list is the gate's whole input, so counting it is what separates a
+  # clean tree from no tree, which is the rule this file already holds elsewhere.
+  local swift_scanned
+  swift_scanned="$(find "$ROOT/sources" "$ROOT/tests" "$ROOT/benchmark" "$ROOT/examples" \
+      \( -name .build -o -name .swiftpm \) -prune -o -name '*.swift' -print 2>/dev/null | grep -c . || true)"
+  if [ "${swift_scanned:-0}" -eq 0 ]; then
+    echo "  FAIL: swift-format found 0 Swift files under sources/, tests/, benchmark/, examples/."
+    echo "        Expected ~610; check ROOT, and that the four directories named below are there."
+    status=1
+    return 1
+  fi
   local output
   if ! output="$(cd "$ROOT" && xcrun swift-format lint --strict --recursive \
       sources tests benchmark Package.swift "${example_files[@]+"${example_files[@]}"}" 2>&1)"; then
@@ -1293,7 +1383,7 @@ check_swift_format() {
     status=1
     return 1
   fi
-  echo "  ok (xcrun swift-format, --strict clean)"
+  echo "  ok ($swift_scanned Swift files in view, --strict clean)"
   return 0
 }
 
