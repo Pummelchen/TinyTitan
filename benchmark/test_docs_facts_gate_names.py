@@ -11,8 +11,9 @@ about model goldens has no idea it is being read as a list of gates.
 Measured on the tree that made it happen: `docs/handover-tinytitan.md:120` reported
 four refusals -- `ornith-8`, `qwen38-4`, `qwen38-8`, `thread-sanitizer` -- none of
 which is a gate, a mode, or mentioned anywhere near one. Each is a real name in this
-repository (three golden targets in the Goldens row, a sanitizer run in another), and
-the row that triggered the check was the Audit row, several rows below.
+repository: three golden targets in the Goldens row, a sanitizer run in the CI row
+four rows below it, and the row that pushed the block over the check's three-mode
+threshold sits between the two.
 
 The other direction is why the threshold matters and why the fix keeps it: a
 paragraph that names fewer than three modes is not read as a gate list at all, so a
