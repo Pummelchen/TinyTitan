@@ -24,7 +24,21 @@ Two watchdogs are not calibrated here, for reasons rather than by omission:
     interval -- and against the prefill it deliberately does not watch (B1).
   * **ping-pong** needs recorded tool-arm conversations with their message
     histories. Those are replayed from the journal files when present, and
-    reported as unavailable when not.
+    reported as unavailable when not. Its trips count against the run like the
+    other two, and a corpus that is not there leaves it unmeasured rather than
+    clean.
+
+`main()` answers 0 the three calibrated rules ran on their corpora and tripped
+nothing, 1 the calibration did not get to run -- no replies, or a rule that saw
+no corpus, with which rule named, 2 it ran and a watchdog fired on a reply that
+completed -- and a trip outranks the incomplete note, because a measured false
+positive is the finding, not an absence to file under.
+
+`--selftest` answers 0 the port agrees with the Swift fixture on every case, 1
+a mismatch or a fixture that is not there. Those codes are this driver's
+own and run the other way round from the 0 / 1 contested / 2 NOT MEASURED table
+the other benchmark drivers answer; AUD-292 records the numbering as an open
+decision rather than settling it here.
 """
 
 from __future__ import annotations
@@ -288,6 +302,7 @@ def main() -> int:
     print(f"  {'loop':10s} {len(loop_hits):16d} {rate:7.1%}")
 
     pairs = exchanges()
+    unmeasured: list[str] = []
     for pair in pairs:
         trip = stub_trip_bytes(
             reply_bytes(pair["text"]),
@@ -306,10 +321,11 @@ def main() -> int:
         )
     else:
         print(f"  {'stub':10s} {'no corpus':>16s}")
+        unmeasured.append("stub")
 
+    pingpong = 0
     conversations = tool_conversations()
     if conversations:
-        pingpong = 0
         for calls in conversations:
             counts: dict[tuple[str, str], int] = {}
             for call in calls:
@@ -319,6 +335,7 @@ def main() -> int:
         print(f"  {'pingpong':10s} {pingpong:16d} {pingpong / len(conversations):7.1%}")
     else:
         print(f"  {'pingpong':10s} {'no corpus':>16s}")
+        unmeasured.append("pingpong")
     print(
         f"  {'stall':10s} {'not applicable':>16s}   (no timings recorded; see the module docstring)"
     )
@@ -342,12 +359,19 @@ def main() -> int:
         print(f"\n--- {reply['source']} {reply['label']} ---")
         print(reply["text"][start : trip["at"] + 80])
 
-    clean = not loop_hits and not stub_hits
-    if clean:
-        print(f"\nzero false positives on {len(corpus)} replies; {len(caught)} true catches")
-    else:
+    clean = not loop_hits and not stub_hits and not pingpong
+    if unmeasured:
+        print(
+            f"\ncalibration incomplete: {' and '.join(unmeasured)} ran on no corpus, "
+            "so a clean count would be a claim about replies it never saw"
+        )
+    if not clean:
         print("\nNOT clean: raise a threshold, or keep the watchdog observing only")
-    return 0 if clean else 2
+        return 2
+    if unmeasured:
+        return 1
+    print(f"\nzero false positives on {len(corpus)} replies; {len(caught)} true catches")
+    return 0
 
 
 def selftest() -> int:
