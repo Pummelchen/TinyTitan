@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 182,
-    "done": 178,
-    "open": 3,
+    "done": 179,
+    "open": 2,
     "blocked": 1
   },
   "tasks": [
@@ -3040,17 +3040,17 @@
       "tier": "A",
       "project": "benchmark",
       "category": "the same AUD-285 shape in the v4.2 control-plane matrix: raw text equality against a reference case, no footer parsed, no refusal path",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
-      "file_line": "benchmark/tinytitan_v42_control_plane_ab.py:67-105",
+      "file_line": "benchmark/tinytitan_v42_control_plane_ab.py:51-151 (post-fix), benchmark/tinytitan_hit_fixup_ab.py:334, 356, 426",
       "title": "the v4.2 control-plane matrix passes a sweep whose every footer reads nan, because its verdict is the text of six cases compared to the first one",
       "discovered-by": "AUD-285's sibling sweep.",
       "evidence-before": "measured model-free against HEAD by driving the real `main()` with the neighbour's `preflight` and `run_case` patched: six cases x three prompts x two warmths = 36 rows, every row answering the same paragraph and every footer reading `decode_tok_s=nan` / `expert_hit_rate=nan`, produced `\"response_mismatches\": []`, `\"passed\": true` and exit 0 with the artifact written. The comparison at `:73-77` reads only `content`; `preflight()` and `run_case()` are called outside any `try`, so a refused preflight or a footer-less log escapes as a traceback at exit 1, the status a measured disagreement carries.",
-      "owner": "next session -- this is a bug, not a decision; it is filed open only because AUD-285's close was reached first and the turn budget ended. The fix is the shape AUD-285 just landed: run the parent classifier once per (reference, case) pair through `arm_key=\"case\"`, pool the statuses, and refuse through `benchmark.refuse`.",
-      "fix-summary": "",
-      "evidence-after": "",
-      "sibling-note": "the grep that found it is the one in AUD-285's note; no third copy of the raw comparison exists in `benchmark/`.",
-      "commit": ""
+      "owner": "",
+      "fix-summary": "the matrix runs the classifier the audit already tested, once per reference-and-case pair, instead of writing a fourth raw comparison. `benchmark.verdict` and `benchmark._cases` are called with `arm_key=\"case\"` and `arms=(reference, name)`, so every experimental case is judged by the same gate as the hit/fixup A/B: answered, footer-readable, equal in text and in completion length. Statuses pool honestly -- 2 only when every pair published nothing, 1 when any pair is contested or measured nothing, 0 when every pair compared -- because one pair reading nan must not erase the comparisons that did measure. A refused preflight, a case that died mid-sweep and a `--case` selection with no second case all answer through `benchmark.refuse`: NOT MEASURED, the cases that ran named, no artifact, instead of a traceback at exit 1. The page now prints `<reference> vs <case>` and one line per prompt and warmth with both cells, of which it printed nothing before. Two details the sweep corrected: a `if pair_status == 2: continue` guard first written was deleted as unobservable (a pair with no usable figure has no `differ` state to skip), and `response_mismatches` entries carry the case name, which the old `name/prompt/warmth` shape already did and the tests pin.",
+      "evidence-after": "14 model-free tests in `benchmark/test_v42_control_plane_ab_verdict.py`: the real `main()` with the neighbour's `preflight`, `run_case` and `ROOT` patched, and a fake `run_case` that matches the configuration tuple the driver actually sends and raises if none matches, so a dropped knob cannot be attributed to the wrong case. 11 were RED at HEAD -- 8 assertion failures and 3 tracebacks where the driver escaped -- and 3 are controls that held before the fix and must not change (a clean sweep at 0, the artifact's 36 rows and 18 logs, the reference re-rooting under `--case`). Two assertions I authored were wrong and are recorded rather than hidden: the page test first read the *first* `short cold` line, which belongs to the reference's first pair rather than the case it named, so the test -- not the driver -- was changed to read that pair's own page beneath its header; and the text-disagreement test asserted a concatenated `event-pread short/cold` string the page never emits, so it now asserts the pair header and the parent's detail line. Anchored mutation sweep: 16 single-hit mutants, 0 survivors -- 11 killed by an assertion, 5 by an exception escaping, recorded as reachability rather than assertion coverage -- and both files restored byte-identical by md5. The CI verdict step runs the new suite: 48 suites / 1049 tests OK in 33.6s on python3.13. `ruff` 0.16.7 clean and formatted.",
+      "sibling-note": "the grep that found this row -- a raw `content` inequality over `benchmark/*.py` -- now returns exactly one line, `tinytitan_hit_fixup_ab.py:324`, which is the classifier inside the tested gate. The three drivers that each wrote their own copy (hit/fixup, io-backend, control-plane) are all on it, so the AUD-280 family is drained at this shape; the drivers still unreads from that sweep are `master_scenarios.py`, `side_engine_recall.py` and `watchdog_calibrate.py`.",
+      "commit": "4daccf7"
     }
   ]
 }
