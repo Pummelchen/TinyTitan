@@ -755,6 +755,21 @@ jobs:
         # and a missing arm contests the three-way comparison. It drives the real
         # `main()` with only the journal reader, the simulator and the grounding check
         # patched, so no model, no binary and nothing fetched.
+        # `test_hit_fixup_ab_verdict` is AUD-280, the same seam in the A/B that
+        # decides whether hit/fixup decode agrees with the barrier. Its only verdict
+        # was text equality between the two arms, and it required a server footer by
+        # line count while parsing no value out of it: five measured shapes passed at
+        # exit 0 -- two arms answering nothing hashed to one agreement, a log that
+        # printed `decode_tok_s=nan` sat beside a rate, 128 completion tokens reported
+        # 0.00 tok/s, an answer printed next to a 0.00 footer, and a response that
+        # claimed no token count left the length control unrun. It now reads the two
+        # footer figures it already demanded, compares the arms' claimed token counts,
+        # prints a cell that refuses (`-- tok/s`) rather than a zero it never measured,
+        # and answers the status table the rest of these drivers use: 0 every case
+        # compared, 1 measured and contested by a named remainder, 2 the measurement
+        # does not exist. A refusal writes no record, and one that arrives after some
+        # cases ran names them. It drives the real `main()` with only the leaves
+        # patched, so no model, no server binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -778,7 +793,8 @@ jobs:
             test_mtp_phases_verdict test_sweep_driver_verdicts \
             test_sampler_ab_verdict test_logged_metric_cells \
             test_knob_sweep_verdict test_guard_source_rate_verdict \
-            test_composite_split_verdict
+            test_composite_split_verdict \
+            test_hit_fixup_ab_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
