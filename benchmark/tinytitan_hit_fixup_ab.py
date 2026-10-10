@@ -268,10 +268,11 @@ def _case_state(case: dict) -> str:
     case["no_claim"] = False
     prompt, warmth = case["prompt"], case["warmth"]
     arms = case["arms"]
+    arm_names = case["arm_names"]
 
     unusable = False
     unlogged = False
-    for mode in MODES:
+    for mode in arm_names:
         row = arms[mode]
         generation = str(row.get("generation_footer") or "")
         runner = str(row.get("runner_footer") or "")
@@ -314,39 +315,45 @@ def _case_state(case: dict) -> str:
     if unlogged:
         return "unlogged"
 
-    empty = [mode for mode in MODES if not case["answered"][mode]]
+    empty = [mode for mode in arm_names if not case["answered"][mode]]
     case["empty"] = empty
-    if len(empty) == len(MODES):
+    if len(empty) == len(arm_names):
         return "empty-case"
     if empty:
         return "empty-arm"
-    if arms[MODES[0]]["content"] != arms[MODES[1]]["content"]:
+    if arms[arm_names[0]]["content"] != arms[arm_names[1]]["content"]:
         case["details"].append(f"{prompt}/{warmth} text differs")
         return "differ"
-    left, right = case["tokens"][MODES[0]], case["tokens"][MODES[1]]
+    left, right = case["tokens"][arm_names[0]], case["tokens"][arm_names[1]]
     if left is not None and right is not None and left != right:
         case["details"].append(f"{prompt}/{warmth} completion length differs: {left} vs {right}")
         return "differ"
     return "compared"
 
 
-def _cases(rows: list[dict], prompts) -> list[dict]:
-    """One record per (prompt, warmth) case, in page order. Pure."""
-    by_case = {(row["prompt"], row["warmth"], row["mode"]): row for row in rows}
+def _cases(rows: list[dict], prompts, arm_key="mode", arms=MODES) -> list[dict]:
+    """One record per (prompt, warmth) case, in page order. Pure.
+
+    `arm_key` names the record field that carries the arm and `arms` the two names
+    it takes, so a sibling A/B over a different pair -- the I/O backends, say --
+    runs the same classifier instead of writing its own. AUD-285.
+    """
+    by_case = {(row["prompt"], row["warmth"], row[arm_key]): row for row in rows}
     cases = []
     for prompt in prompts:
         for warmth in WARMTH:
             case = {
                 "prompt": prompt,
                 "warmth": warmth,
-                "arms": {mode: by_case[(prompt, warmth, mode)] for mode in MODES},
+                "arm_names": list(arms),
+                "arms": {mode: by_case[(prompt, warmth, mode)] for mode in arms},
             }
             case["state"] = _case_state(case)
             cases.append(case)
     return cases
 
 
-def verdict(rows: list[dict], prompts) -> tuple[list[str], int]:
+def verdict(rows: list[dict], prompts, arm_key="mode", arms=MODES) -> tuple[list[str], int]:
     """The page and the status.
 
     AUD-280: text equality between the two arms used to be the whole verdict, so a
@@ -356,12 +363,14 @@ def verdict(rows: list[dict], prompts) -> tuple[list[str], int]:
     """
     if not rows or not prompts:
         return ["\nNOT MEASURED: the sweep produced no case rows to compare"], 2
-    cases = _cases(rows, prompts)
+    cases = _cases(rows, prompts, arm_key=arm_key, arms=arms)
     lines = []
     for case in cases:
         lines.append(
             f"{case['prompt']} {case['warmth']:5s} "
-            + "   ".join(f"{mode:9s} " + " ".join(case["cells"][mode]) for mode in MODES)
+            + "   ".join(
+                f"{mode:9s} " + " ".join(case["cells"][mode]) for mode in case["arm_names"]
+            )
             + f"   {case['state']}"
         )
         lines.extend(case["details"])
