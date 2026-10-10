@@ -24,6 +24,21 @@ the pair rather than the fact: the book's own facts are the substrate, and
 re-filing `characters/marcus/eyes = grey` as `characters/marcus/eye_colour`,
 or setting two characters' eyes against each other, are what a consolidation
 really produces.
+
+`--score` answers a status, and the totals it prints are only as wide as the
+cases that earned them:
+
+    0  every authored case ran, was answered, and every answer matched
+    1  measured and contested: a case ran no rows or carried no judgement, a row
+       from another case set came in, or a judgement disagreed with the truth
+    2  the comparison does not exist: no rows, a file that cannot be read, or no
+       row that belongs to this case set
+
+Silence is not an answer, so a case whose row carries no completion leaves the
+totals and is named rather than scored as a NO, and the ground truth is the
+authored case list, not whatever rows arrived. A judgement is read from the
+first word of the completion, upper-cased and stripped of punctuation, which is
+how the recorded 4B and 9B runs were scored.
 """
 
 from __future__ import annotations
@@ -144,28 +159,102 @@ def prepare(path: Path) -> int:
     return 0
 
 
+def refuse(reason: str) -> int:
+    """Say why there is no comparison, print no totals, and answer 2."""
+    print(f"\nNOT MEASURED: {reason}")
+    return 2
+
+
+def judgement(row: dict) -> str:
+    """The first word of the completion, or nothing when there is no answer."""
+    words = (row.get("completion") or "").strip().upper().split()
+    return words[0].strip(".,:;\"'") if words else ""
+
+
 def score(path: Path) -> int:
-    rows = [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-    by_task: dict[str, list[int]] = {}
-    print(f"{'task':5s} {'truth':6s} {'answer':8s} note")
-    for row in rows:
-        answer = (row.get("completion") or "").strip().upper().split()
-        answer = answer[0].strip(".,:;\"'") if answer else ""
-        hit = answer == row["truth"]
-        entry = by_task.setdefault(row["task"], [0, 0])
-        entry[0] += hit
-        entry[1] += 1
-        print(
-            f"{row['task']:5s} {row['truth']:6s} {answer:8s} {'' if hit else 'MISS '}{row['note']}"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        return refuse(f"{path} could not be read: {error}")
+    rows: list[dict] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError as error:
+            return refuse(f"{line[:60]} is not a judgement row ({error})")
+        if not isinstance(row, dict) or not {"task", "truth", "prompt", "note"} <= set(row):
+            return refuse(f"{line[:60]} holds no task, truth, prompt or note to score it against")
+        rows.append(row)
+    if not rows:
+        return refuse(f"{path} holds no rows, so no case was answered")
+
+    authored = {(row["task"], row["prompt"]): row for row in cases()}
+    if not any((row["task"], row["prompt"]) in authored for row in rows):
+        return refuse(
+            f"none of the {len(rows)} row(s) is one of the {len(authored)} cases this driver "
+            "prepared, so these answers are not this comparison's"
         )
+
+    seen: dict[tuple[str, str], list[dict]] = {}
+    unrecognised = 0
+    for row in rows:
+        key = (row["task"], row["prompt"])
+        if key not in authored:
+            unrecognised += 1
+            continue
+        seen.setdefault(key, []).append(row)
+
+    print(f"{'task':5s} {'truth':6s} {'answer':8s} note")
+    by_task: dict[str, list[int]] = {}
+    missed = silent = unwritten = repeated = 0
+    for key, job in authored.items():
+        group = seen.get(key, [])
+        if len(group) > 1:
+            repeated += 1
+        answer = judgement(group[0]) if group else ""
+        if not group:
+            unwritten += 1
+            print(f"{job['task']:5s} {job['truth']:6s} {'-':8s} did not run  {job['note']}")
+            continue
+        if not answer:
+            silent += 1
+            print(f"{job['task']:5s} {job['truth']:6s} {'-':8s} no judgement  {job['note']}")
+            continue
+        entry = by_task.setdefault(job["task"], [0, 0])
+        entry[1] += 1
+        hit = answer == job["truth"]
+        entry[0] += hit
+        if not hit:
+            missed += 1
+        again = f"  (answered {len(group)} times, the first kept)" if len(group) > 1 else ""
+        print(
+            f"{job['task']:5s} {job['truth']:6s} {answer:8s} {'' if hit else 'MISS '}"
+            f"{job['note']}{again}"
+        )
+
+    judged = sum(v[1] for v in by_task.values())
     print()
-    failures = 0
-    for task, (correct, total) in sorted(by_task.items()):
+    for task in sorted(by_task):
+        correct, total = by_task[task]
         print(f"{task}: {correct}/{total}")
-        failures += correct != total
-    return 0 if not failures else 2
+    print(f"\njudged {judged} of {len(authored)} cases")
+    if unrecognised:
+        print(f"  unrecognised: {unrecognised} row(s) from another case set, never scored")
+    if silent:
+        print(f"  silence: {silent} case(s) carried no judgement, so they are out of the totals")
+    if unwritten:
+        print(f"  missing: {unwritten} case(s) ran no row")
+    if repeated:
+        print(f"  repeated: {repeated} case(s) answered more than once")
+    if missed:
+        print(f"  {missed} case answered differently, which is the wiring's result, not a gap")
+    if not judged:
+        return refuse(
+            f"none of the {len(rows)} row(s) carried a judgement, so nothing was compared"
+        )
+    return 0 if not (missed or silent or unwritten or repeated or unrecognised) else 1
 
 
 def main() -> int:

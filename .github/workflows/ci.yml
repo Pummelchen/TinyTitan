@@ -808,6 +808,21 @@ jobs:
         # answered in full, 1 a named question ran nothing / left facts unanswered / carried
         # silent rows, 2 NOT MEASURED. Fixture `done.jsonl` files only: no model, no
         # server, no engine binary and nothing fetched.
+        # `test_side_engine_wired_verdict` is AUD-289, the same shape in the driver that
+        # scores the 12 wired duplication and contradiction cases. It had no refusal path
+        # at all: `failures = 0` over an empty by-task map *is* its pass status, so a file
+        # with no rows printed a bare header and exited 0; totals were built from whatever
+        # rows arrived, so a task that never ran answered `T5: 8/8` and a group that died
+        # mid-case answered `T5: 5/5`; a blank completion printed MISS and still entered
+        # the denominator, a resumed run's duplicate row was judged twice, and a foreign
+        # jsonl's rows were scored against truths this file never authored. A missing path,
+        # a half-written line and a row with no prompt each escaped as a traceback at exit
+        # 1, the status a contested comparison carries, and a genuine disagreement answered
+        # 2, the code reserved for NOT MEASURED. It now answers from the 12 cases the
+        # driver itself prepared: 0 every case ran and matched, 1 a named case ran nothing
+        # / carried no judgement / was answered twice / came from elsewhere / disagreed,
+        # 2 NOT MEASURED. Fixtures only: no model, no server, no engine binary and nothing
+        # fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -832,6 +847,7 @@ jobs:
             test_sampler_ab_verdict test_logged_metric_cells \
             test_knob_sweep_verdict test_guard_source_rate_verdict \
             test_composite_split_verdict test_side_engine_recall_verdict \
+            test_side_engine_wired_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict
       - name: T6 reply-check labels and the gate scorer
