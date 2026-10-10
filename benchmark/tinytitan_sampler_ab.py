@@ -94,13 +94,11 @@ def summarize(rows: list[dict]) -> dict:
             "runs": len(sel),
             "answered": arm_answered(sel),
             "median_tok_s": medians["decode_tok_s"],
-            "rates": [
-                round(r["decode_tok_s"], 4) for r in sel if r.get("decode_tok_s") is not None
-            ],
+            "rates": [round(r["decode_tok_s"], 4) for r in sel],
             "median_busy_per_token_ms": medians["busy_per_token_ms"],
             "median_sample_gap_ms": medians[GAP_KEY],
             "counts": counts,
-            "digests": sorted({r["completion_sha256"] for r in sel if r.get("completion_sha256")}),
+            "digests": sorted({r["completion_sha256"] for r in sel}),
         }
     generic, tiled = out["arms"]["generic"], out["arms"]["tiled"]
     # A 0 tok/s median is a refusal, not a denominator: dividing by it raises, and
