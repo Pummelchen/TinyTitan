@@ -24,6 +24,11 @@ What it does, per section:
     that arrives as one sentence, or a table that arrives as a paragraph, is not
     the same claim re-laid-out -- it is the claim destroyed. release.sh's
     `--require` cannot see this, because every token survives the merge.
+  * a numbered item keeps its enumerator inside the bullet (`- 1. Verify the
+    checksum ...`): the number IS the order the claim makes, and the sentence
+    rule used to cut right after it, publishing `- 1.` as an item of its own.
+    A nested item is a new bullet rather than more of its parent's sentence --
+    the second level is flattened, the claim stays separate.
 
 `--require TOKEN` (repeatable) makes the script fail when TOKEN is absent from
 its own output. release.sh passes every string `--publish` greps the notes for,
@@ -46,6 +51,7 @@ import textwrap
 WRAP = 100
 CHECKSUM_HEADING = "### Checksum"
 BULLET = re.compile(r"^[-*]\s+")
+ORDERED = re.compile(r"^\d+\.\s+")
 
 # Splitting on (?<=[.!?])\s+ alone breaks these apart. Only abbreviations this
 # repo's notes actually use are listed.
@@ -263,10 +269,14 @@ def main() -> int:
             lead.append(stripped)
             continue
 
-        if BULLET.match(stripped) and not indented:
+        # A marker decides whether this is a new item, whatever its indentation: an
+        # indented `- ` line is a second level, not more of the parent's sentence.
+        if BULLET.match(stripped) or ORDERED.match(stripped):
             flush_prose()
             flush_bullet()
-            bullet.append(BULLET.sub("", stripped))
+            # A numbered item keeps its enumerator in the text: the number IS the
+            # order the claim makes, and the sentence rule cuts right after it.
+            bullet.append(BULLET.sub("", stripped) if BULLET.match(stripped) else stripped)
             continue
 
         if indented:

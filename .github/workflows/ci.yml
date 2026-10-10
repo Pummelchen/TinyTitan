@@ -182,6 +182,12 @@ jobs:
         # was satisfied by one passing target while six reported failures, and the `|| true`
         # threw away the status that knew (AUD-262). It drives the script's extracted verdict
         # function over the seven real lines and a constructed mix, so it runs no test target.
+        # `test_release_notes_compact` pins the sole author of the published Release notes:
+        # `tools/compact-release-notes.py` re-laid fenced examples, tables and blockquotes into
+        # one sentence each, which is the claim destroyed rather than re-wrapped, and
+        # release.sh's `--require` token grep could not see it because every token survived the
+        # merge (AUD-263). It runs the real script over fixtures and every committed
+        # `docs/release-notes-v*.md`, so it publishes nothing and needs no network.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -211,7 +217,7 @@ jobs:
           cd benchmark
           python3 -m unittest test_dsh_isolation test_dsh_route test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
-            test_release_test_gate \
+            test_release_test_gate test_release_notes_compact \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \

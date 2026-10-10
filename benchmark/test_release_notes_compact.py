@@ -31,6 +31,14 @@ did not wrap, the code re-wraps a line that already carries its marker and
 publishes `- - The reader coalesces adjacent ranges. e.g. ...`. Both measured on
 /tmp/aud263-probe.md and /tmp/aud263b.md.
 
+The sibling sweep over the same file turned the same mistake up in two more
+shapes of the list-item branch: an ordered list (`1. Verify the checksum` /
+`2. Clear the quarantine` / `3. Run the launcher`) arrived as six bullets with
+each number stranded on a line of its own, and an indented `- child` item was
+glued onto the end of its parent's sentence -- two claims, one bullet. Both are
+pinned, and both were reproduced on the fixture text before the branch was
+rewritten.
+
 The rest of the suite pins the guards the release path relies on and that were
 equally untested: `### Checksum` emitted byte-for-byte because release.sh
 substitutes placeholders into it and greps the result, `--require` failing when a
@@ -119,6 +127,22 @@ Run this before anything else.
 ```bash
 swift run -c release TinyTitanCLI
 ```
+"""
+
+# A numbered sequence: its numbers are the claim's order, not stray tokens.
+ORDERED_LIST = """### First run
+
+1. Verify the checksum against the published digest.
+2. Clear the quarantine attribute.
+3. Run the launcher.
+"""
+
+# A nested item is a second claim, so it may not be glued onto its parent.
+NESTED_BULLET = """### Progress lines
+
+- **The installer prints one line per 10%.** It used to print nothing between
+  finished shards.
+  - It prints the transfer rate too, which is how a slow disk stays visible.
 """
 
 CHECKSUM_NOTES = """### Checksum
@@ -313,7 +337,7 @@ class FragmentFoldTests(unittest.TestCase):
 
     def test_compacting_its_own_output_changes_nothing(self) -> None:
         """The docstring's idempotency promise, on every shape it must preserve."""
-        for text in BLOCK_SHAPES + FOLD_SHAPES:
+        for text in BLOCK_SHAPES + FOLD_SHAPES + (ORDERED_LIST, NESTED_BULLET):
             first = compact(text)
             self.assertEqual(first.returncode, 0, first.stderr)
             second = compact(first.compact_out)
@@ -343,6 +367,50 @@ class ChecksumAndRefusalTests(unittest.TestCase):
         result = compact(FENCE_IN_A_BULLET, "--max-chars", "10")
         self.assertNotEqual(result.returncode, 0, "over-budget notes were accepted")
         self.assertIn("budget", result.stderr, result.stderr)
+
+
+class ListItemTests(unittest.TestCase):
+    def test_a_numbered_list_keeps_one_item_per_line_with_its_number(self) -> None:
+        """A list item's number is the order it claims, so it travels with its text.
+
+        The sibling of the three block defects above: an unmarked `1. ` line is
+        prose to the compactor, its sentence rule cuts after the period, and the
+        published form was `- 1.` on one line and `- Verify the checksum ...` on
+        the next -- the sequence shredded.
+        """
+        result = compact(ORDERED_LIST)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = result.compact_out
+        bullets = [line for line in out.splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 3, f"the list did not arrive as three items:\n{out}")
+        for index, text in enumerate(
+            ("Verify the checksum", "Clear the quarantine", "Run the launcher"), 1
+        ):
+            self.assertIn(f"{index}. {text}", out, f"item {index} lost its number:\n{out}")
+        orphans = [line for line in bullets if re.fullmatch(r"- \d+\.", line)]
+        self.assertEqual(orphans, [], f"a bare number published as its own item: {orphans}")
+
+    def test_a_nested_item_is_its_own_bullet(self) -> None:
+        """Indentation marks a second level, not more of the parent's sentence.
+
+        An indented `- ` line used to fall into the continuation branch, so the
+        child claim was glued onto the end of its parent's -- the same merge the
+        table and fence fixes are about, one branch over.
+        """
+        result = compact(NESTED_BULLET)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = result.compact_out
+        bullets = [line for line in out.splitlines() if line.startswith("- ")]
+        self.assertEqual(len(bullets), 2, f"the nested item did not become an item:\n{out}")
+        self.assertNotIn(
+            "transfer rate", bullets[0], f"the child was glued onto its parent:\n{out}"
+        )
+        self.assertTrue(
+            " ".join(line.removeprefix("- ") for line in bullets[1:]).startswith(
+                "It prints the transfer rate"
+            ),
+            f"the child claim is not where it should be:\n{out}",
+        )
 
 
 if __name__ == "__main__":
