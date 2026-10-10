@@ -291,7 +291,8 @@ jobs:
           python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_port_gate \
             test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
-            test_release_test_gate test_release_notes_compact test_assert_arch \
+            test_release_test_gate test_release_notes_compact \
+            test_release_notes_budget_gate test_assert_arch \
             test_build_log_gate test_release_precondition_gate \
             test_model_process_guard \
             test_parity_harness_status \

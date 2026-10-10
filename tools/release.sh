@@ -606,6 +606,21 @@ if [ -n "$NOTES" ]; then
   # much. Raise it deliberately with TINYTITAN_RELEASE_NOTES_MAX_CHARS.
   COMPACT_NOTES="$STAGE_ROOT/notes-compact.md"
   NOTES_MAX_CHARS="${TINYTITAN_RELEASE_NOTES_MAX_CHARS:-12000}"
+  # A budget is a size, not a switch. Zero is the compactor's documented
+  # "no limit", so handing one to it would publish the release with the notes
+  # gate removed and say nothing about it -- unlike the other two deliberate
+  # narrowings on this path, each of which dies without its reason and names
+  # itself in the notes. The shapes that are not sizes are refused here rather
+  # than at the compactor, where an argparse failure and an over-long note
+  # would both arrive as the same "the notes did not survive compaction".
+  case "$NOTES_MAX_CHARS" in
+    '' | *[!0-9]*)
+      die "TINYTITAN_RELEASE_NOTES_MAX_CHARS=$NOTES_MAX_CHARS is not a character budget; name a whole number of characters, 1 or more"
+      ;;
+  esac
+  if [ "$NOTES_MAX_CHARS" -lt 1 ]; then
+    die "TINYTITAN_RELEASE_NOTES_MAX_CHARS=0 is the compactor's no-limit, which removes the notes budget; raise it by naming a number of characters"
+  fi
   REQUIRE_ARGS=()
   for required in $GOLDEN_SKIPPED $GOLDEN_ABSENT "$SHA" "$BYTES" "$LIB_SHA" "$LIB_BYTES" \
     "$TOOLS_SHA" "$TOOLS_BYTES"; do

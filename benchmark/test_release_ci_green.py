@@ -213,7 +213,9 @@ PLACEHOLDERS = {
 }
 
 
-def run_notes_block(ci_report: str) -> subprocess.CompletedProcess[str]:
+def run_notes_block(
+    ci_report: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Run the release script's own notes block, under the CI answer it is given.
 
     Two regions are taken verbatim out of `tools/release.sh` — the lines that read
@@ -222,6 +224,9 @@ def run_notes_block(ci_report: str) -> subprocess.CompletedProcess[str]:
     script starts. Nothing is reimplemented here: the only thing the harness adds
     is the variables the earlier part of the script would have set by then, and a
     `python3` that records the arguments the compaction step is handed.
+
+    `extra_env` exists for the caller that wants to know what the *operator's*
+    environment does to this block; absent it, the run is exactly as before.
     """
     text = (ROOT / "tools" / "release.sh").read_text(encoding="utf-8")
     status_start = text.index('CI_STATUS="$(printf')
@@ -257,6 +262,8 @@ def run_notes_block(ci_report: str) -> subprocess.CompletedProcess[str]:
             "TT_ARGV": str(argv_path),
             "LANG": "C",
         }
+        if extra_env:
+            env.update(extra_env)
         script = (
             "\n".join(prelude) + "\n" + text[status_start:status_end] + text[notes_start:notes_end]
         )
