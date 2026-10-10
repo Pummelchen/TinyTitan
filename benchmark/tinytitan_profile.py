@@ -414,7 +414,9 @@ def metric_count(name: str, key: str, counted: int, total: int):
     return f"PARTIAL: the {name} arm's {key} median is over {counted} of {total} runs"
 
 
-def byte_claim(rows: Sequence[Mapping], off: str = "off", on: str = "on"):
+def byte_claim(
+    rows: Sequence[Mapping], off: str = "off", on: str = "on", digest_key: str = "sha256"
+):
     """(earned, identical, off digests, on digests) for a two-arm sweep.
 
     `earned` is False when either arm has no runs, or no run of it streamed
@@ -424,10 +426,14 @@ def byte_claim(rows: Sequence[Mapping], off: str = "off", on: str = "on"):
     digest per arm with both arms at it -- an off arm that is not reproducible is
     a refusal rather than a pass, which is the conservatism the drivers already
     had in `len(off_digests) == 1`.
+
+    `digest_key` is the caller's to name because the two record families differ:
+    the MTP drivers hash into their own `sha256`, while one reading
+    `tinytitan_gate0_profile.generate()` carries `completion_sha256`.
     """
     left = [r for r in rows if r["arm"] == off]
     right = [r for r in rows if r["arm"] == on]
     earned = bool(left) and bool(right) and arm_answered(left) and arm_answered(right)
-    digests_a = sorted({r["sha256"] for r in left})
-    digests_b = sorted({r["sha256"] for r in right})
+    digests_a = sorted({r[digest_key] for r in left})
+    digests_b = sorted({r[digest_key] for r in right})
     return earned, digests_a == digests_b and len(digests_a) == 1, digests_a, digests_b
