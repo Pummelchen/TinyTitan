@@ -376,7 +376,8 @@ jobs:
         # gates a release. Except the 3-bit probe, whose fixture reads real tensor
         # bytes through numpy,
         # every one of them is stdlib-only, measured on this host
-        # 2026-10-09 as 34 suites and 697 tests with no model, no server, no Xcode and
+        # 2026-10-10 as 37 suites and 739 tests in 35.6 s with no model, no server,
+        # no Xcode and
         # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
@@ -616,6 +617,18 @@ jobs:
         # verdict on the canary and cancellation controls and the BASE path did
         # not, so a backend answering empty completions exited 0 as "no leaks".
         # No model, no server binary and nothing fetched.
+        # `test_mtp_phases_verdict` is AUD-273: the three two-arm A/B drivers
+        # (`tinytitan_mtp_phases.py`, `tinytitan_mtp_b3_qualification.py`,
+        # `tinytitan_ane_prefill_ab.py`) each print their own refusal -- `output
+        # identical ... NO`, `gate +10% at p>=0.65: FAIL`, `SPEEDUP: 1.25x (gate is
+        # >=1.5x: FAIL)`, `WARNING: an ANE run logged a GPU fallback` -- and all
+        # three then reached `return 0`, and all three closed with
+        # `median([r[k] for r in sel if k in r])`, a denominator that is its own
+        # survivors and dies on `StatisticsError` when no run carries the key. It
+        # drives the three real `main()`s with `one_run` stubbed and no server, so
+        # the status a caller reads is the status the driver computed: 0 the sweep
+        # holds, 1 a claim failed, 2 it could not be compared.
+        # No model, no server binary and nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -635,7 +648,8 @@ jobs:
             test_tinytitan_3bit_probe test_tinytitan_ane_attention_probe \
             test_tinytitan_ane_realweight_rehearsal \
             test_tinytitan_m5_sweep test_memory_reports \
-            test_run_stamp_is_utc test_concurrent_sessions_verdict
+            test_run_stamp_is_utc test_concurrent_sessions_verdict \
+            test_mtp_phases_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

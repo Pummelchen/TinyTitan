@@ -39,7 +39,11 @@ from tinytitan_profile import (
     DEFAULT_CONTEXT_TOKENS,
     DEFAULT_KV_BITS,
     ROOT,
+    arm_answered,
+    arm_metric,
     benchmark_log_path,
+    byte_claim,
+    metric_count,
     server_environment,
     resolve_api_model,
 )
@@ -215,6 +219,131 @@ def one_run(
     return row
 
 
+def verdict(rows: list[dict]):
+    """(page, exit status) for a finished off/on sweep.
+
+    0  both arms ran, every run of them logged the footer the metrics come
+       from, and the two arms emitted the same bytes;
+    1  it measured and a claim failed -- `output differs` names the two digest
+       sets, `PARTIAL` names the metric and how many of the arm's runs carried
+       it;
+    2  it could not be compared -- an arm with no runs, a metric no run of an
+       arm logged, an arm that streamed no content, or a scalar rate of zero to
+       divide by.
+
+    The empty-content case is the one this driver used to certify: the sha256 of
+    "" is one digest on both sides, so `output identical: YES` and status 0 came
+    out of a sweep that generated nothing. `tinytitan_determinism_ab.py:156-165`
+    refuses that shape for the streams it compares, and `arm_answered()` is that
+    rule shared.
+    """
+    lines: list[str] = []
+    reasons: list[str] = []
+    off = [r for r in rows if r["arm"] == "off"]
+    on = [r for r in rows if r["arm"] == "on"]
+    for name, sel in (("off", off), ("on", on)):
+        if not sel:
+            reasons.append(f"NOT MEASURED: the {name} arm has no runs")
+        elif not arm_answered(sel):
+            reasons.append(
+                f"NOT MEASURED: the {name} arm streamed no content, so its digest is the hash of nothing"
+            )
+
+    off_rate, off_n, off_total = arm_metric(off, "decode_tok_s")
+    on_rate, on_n, on_total = arm_metric(on, "decode_tok_s")
+    accept, acc_n, acc_total = arm_metric(on, "acceptance")
+    emitted, em_n, em_total = arm_metric(on, "emitted_per_pass")
+    for note in (
+        metric_count("off", "decode_tok_s", off_n, off_total),
+        metric_count("on", "decode_tok_s", on_n, on_total),
+        metric_count("on", "acceptance", acc_n, acc_total),
+        metric_count("on", "emitted_per_pass", em_n, em_total),
+    ):
+        if note:
+            reasons.append(note)
+
+    if None not in (off_rate, on_rate, accept, emitted):
+        if not off_rate:
+            reasons.append(
+                "NOT MEASURED: the off arm's median is 0 tok/s, so no multiple is computable"
+            )
+        else:
+            token_ms = 1000 / off_rate
+            lines.append(f"  scalar decode      {off_rate:.3f} tok/s = {token_ms:.2f} ms/token")
+            lines.append(
+                f"  MTP decode         {on_rate:.3f} tok/s  "
+                f"({(on_rate / off_rate - 1) * 100:+.1f}%)"
+            )
+            lines.append(f"  acceptance         {accept:.1f}%   emitted/pass {emitted:.3f}")
+
+            phases = [r["phases"] for r in on if "phases" in r]
+            if phases:
+                if len(phases) < len(on):
+                    reasons.append(
+                        f"PARTIAL: the per-pass table is over {len(phases)} of {len(on)} on-runs"
+                    )
+                keys = phases[0].keys()
+                pass_ms = {k: statistics.median([p[k] for p in phases]) for k in keys}
+                # `verify` already contains backbone+head+argmax; the pass total is
+                # the top-level phases only.
+                total = sum(
+                    pass_ms[k] for k in ("proposal", "checkpoint", "verify", "commit", "rollback")
+                )
+                lines.append(
+                    f"\n  per-pass wall attribution (median across runs; "
+                    f"one pass emits {emitted:.3f} tokens):"
+                )
+                for k in (
+                    "proposal",
+                    "checkpoint",
+                    "verify_backbone",
+                    "verify_head",
+                    "verify_argmax",
+                    "commit",
+                    "rollback",
+                ):
+                    v = pass_ms[k]
+                    lines.append(f"    {k:<18} {v:8.3f} ms   {v / token_ms:6.3f}x tokens")
+                other = (
+                    pass_ms["verify"]
+                    - pass_ms["verify_backbone"]
+                    - pass_ms["verify_head"]
+                    - pass_ms["verify_argmax"]
+                )
+                lines.append(
+                    f"    {'verify_other':<18} {other:8.3f} ms   {other / token_ms:6.3f}x tokens"
+                )
+                lines.append(f"    {'TOTAL':<18} {total:8.3f} ms   {total / token_ms:6.3f}x tokens")
+                lines.append(
+                    f"\n  break-even: pass must cost < {emitted:.3f}x a token; "
+                    f"it costs {total / token_ms:.3f}x"
+                )
+
+    earned, identical, off_digests, on_digests = byte_claim(rows)
+    if earned:
+        lines.append(
+            f"\n  output identical mtp-on vs mtp-off: "
+            f"{'YES' if identical else 'NO'} "
+            f"(off {off_digests}, on {on_digests})"
+        )
+        if not identical:
+            reasons.append(f"output differs: off {off_digests}, on {on_digests}")
+    else:
+        lines.append("\n  output identical mtp-on vs mtp-off: NOT MEASURED (see the verdict)")
+
+    if any(reason.startswith("NOT MEASURED") for reason in reasons):
+        status = 2
+    elif reasons:
+        status = 1
+    else:
+        status = 0
+    if reasons:
+        lines.append("\n  VERDICT")
+        lines.extend(f"    {reason}" for reason in reasons)
+    lines.append(f"\n  sweep status {status}")
+    return lines, status
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -302,74 +431,19 @@ def main() -> int:
     finally:
         g0._terminate_all()
 
-    off = [r for r in rows if r["arm"] == "off"]
-    on = [r for r in rows if r["arm"] == "on"]
-
-    def med(sel, k):
-        return statistics.median([r[k] for r in sel if k in r])
-
     print("\n" + "=" * 70)
     print(f"MTP PHASE ATTRIBUTION — {label}, greedy, cache off, verify={args.verify_arm}")
     print("=" * 70)
-    off_rate = med(off, "decode_tok_s")
-    on_rate = med(on, "decode_tok_s")
-    token_ms = 1000 / off_rate
-    print(f"  scalar decode      {off_rate:.3f} tok/s = {token_ms:.2f} ms/token")
-    print(f"  MTP decode         {on_rate:.3f} tok/s  ({(on_rate / off_rate - 1) * 100:+.1f}%)")
-    accept = med(on, "acceptance")
-    emitted = med(on, "emitted_per_pass")
-    print(f"  acceptance         {accept:.1f}%   emitted/pass {emitted:.3f}")
-
-    phases = [r["phases"] for r in on if "phases" in r]
-    if phases:
-        keys = phases[0].keys()
-        pass_ms = {k: statistics.median([p[k] for p in phases]) for k in keys}
-        # `verify` already contains backbone+head+argmax; the pass total is
-        # the top-level phases only.
-        total = sum(pass_ms[k] for k in ("proposal", "checkpoint", "verify", "commit", "rollback"))
-        print(
-            f"\n  per-pass wall attribution (median across runs; "
-            f"one pass emits {emitted:.3f} tokens):"
-        )
-        for k in (
-            "proposal",
-            "checkpoint",
-            "verify_backbone",
-            "verify_head",
-            "verify_argmax",
-            "commit",
-            "rollback",
-        ):
-            v = pass_ms[k]
-            print(f"    {k:<18} {v:8.3f} ms   {v / token_ms:6.3f}x tokens")
-        other = (
-            pass_ms["verify"]
-            - pass_ms["verify_backbone"]
-            - pass_ms["verify_head"]
-            - pass_ms["verify_argmax"]
-        )
-        print(f"    {'verify_other':<18} {other:8.3f} ms   {other / token_ms:6.3f}x tokens")
-        print(f"    {'TOTAL':<18} {total:8.3f} ms   {total / token_ms:6.3f}x tokens")
-        print(
-            f"\n  break-even: pass must cost < {emitted:.3f}x a token; "
-            f"it costs {total / token_ms:.3f}x"
-        )
-
-    off_digests = sorted({r["sha256"] for r in off})
-    on_digests = sorted({r["sha256"] for r in on})
-    identical = off_digests == on_digests and len(off_digests) == 1
-    print(
-        f"\n  output identical mtp-on vs mtp-off: "
-        f"{'YES' if identical else 'NO'} "
-        f"(off {off_digests}, on {on_digests})"
-    )
+    lines, status = verdict(rows)
+    for line in lines:
+        print(line)
 
     out = ROOT / (f".build/benchmark-results/mtp-phases-{label}-{args.verify_arm}.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as handle:
-        json.dump({"rows": rows}, handle, indent=2)
+        json.dump({"rows": rows, "status": status}, handle, indent=2)
     print(f"\nwrote {out}")
-    return 0
+    return status
 
 
 if __name__ == "__main__":

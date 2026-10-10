@@ -20,12 +20,11 @@ import argparse
 import json
 import os
 import signal
-import statistics
 import sys
 
 import tinytitan_gate0_profile as g0
 import tinytitan_mtp_phases as ph
-from tinytitan_profile import ROOT
+from tinytitan_profile import ROOT, arm_answered, arm_metric, byte_claim, metric_count
 
 SCENARIOS = {
     "table": ph.PROMPT,
@@ -43,6 +42,112 @@ SCENARIOS = {
         "Now write divide, modulo, and power in the identical style."
     ),
 }
+
+
+ARM_METRICS = {
+    "off": ("decode_tok_s",),
+    "on": ("decode_tok_s", "acceptance", "emitted_per_pass"),
+}
+
+
+def medians(rows):
+    """(arms, {(arm, metric): (median, counted, total)}, delta percent).
+
+    The page, the record file and the verdict all read this one table, so a
+    number cannot be computed one way for stdout and another way for the status.
+    """
+    arms = {name: [r for r in rows if r["arm"] == name] for name in ARM_METRICS}
+    got = {
+        (name, key): arm_metric(arms[name], key)
+        for name, keys in ARM_METRICS.items()
+        for key in keys
+    }
+    off_rate = got[("off", "decode_tok_s")][0]
+    on_rate = got[("on", "decode_tok_s")][0]
+    delta = None if not off_rate or on_rate is None else (on_rate / off_rate - 1) * 100
+    return arms, got, delta
+
+
+def verdict(rows):
+    """(page, exit status) for a finished B3 qualification.
+
+    The gate is this file's own docstring: on a scenario with acceptance >= 0.65
+    the MTP arm must beat the scalar control by >= 10% median, with byte-identical
+    greedy output. Three outcomes, three statuses:
+
+    0  in domain, the margin cleared it, and the two arms emitted the same bytes;
+    1  in domain and it did not clear it, or the bytes differ;
+    2  the gate could not be answered -- an arm with no runs, a metric no run
+       logged, arms that streamed no content, or an acceptance below the 0.65
+       the gate is conditioned on. The old code printed OUT OF DOMAIN and, unless
+       the digests happened to differ, returned 0.
+    """
+    lines: list[str] = []
+    reasons: list[str] = []
+    arms, got, delta = medians(rows)
+    off, on = arms["off"], arms["on"]
+    for name, sel in arms.items():
+        if not sel:
+            reasons.append(f"NOT MEASURED: the {name} arm has no runs")
+        elif not arm_answered(sel):
+            reasons.append(
+                f"NOT MEASURED: the {name} arm streamed no content, "
+                "so its digest is the hash of nothing"
+            )
+    for (name, key), (_value, counted, total) in got.items():
+        note = metric_count(name, key, counted, total)
+        if note:
+            reasons.append(note)
+
+    off_rate = got[("off", "decode_tok_s")][0]
+    on_rate = got[("on", "decode_tok_s")][0]
+    accept = got[("on", "acceptance")][0]
+    emitted = got[("on", "emitted_per_pass")][0]
+    if None in (off_rate, on_rate, accept, emitted, delta) or not off_rate:
+        reasons.append("NOT MEASURED: an arm carried no rate, so no delta is computable")
+    else:
+        lines.append(
+            f"  scalar   median {off_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in off]}"
+        )
+        lines.append(
+            f"  MTP      median {on_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in on]}"
+        )
+        lines.append(f"  acceptance {accept:.1f}%   emitted/pass {emitted:.3f}")
+        if accept < 65:
+            word = f"OUT OF DOMAIN (acceptance {accept:.1f}% < 65%)"
+            reasons.append(
+                f"NOT MEASURED: acceptance {accept:.1f}% is below the 65% "
+                "the +10% gate is conditioned on"
+            )
+        elif delta >= 10:
+            word = "PASS"
+        else:
+            word = "FAIL"
+            reasons.append(f"gate failed: median delta {delta:+.2f}% is below the +10% B3 margin")
+        lines.append(f"  DELTA: {delta:+.2f}%   gate +10% at p>=0.65: {word}")
+
+    earned, identical, off_digests, on_digests = byte_claim(rows)
+    if earned:
+        lines.append(
+            f"  output identical: {'YES' if identical else 'NO'} "
+            f"(off {off_digests}, on {on_digests})"
+        )
+        if not identical:
+            reasons.append(f"output differs: off {off_digests}, on {on_digests}")
+    else:
+        lines.append("  output identical: NOT MEASURED (see the verdict)")
+
+    if any(reason.startswith("NOT MEASURED") for reason in reasons):
+        status = 2
+    elif reasons:
+        status = 1
+    else:
+        status = 0
+    if reasons:
+        lines.append("\n  VERDICT")
+        lines.extend(f"    {reason}" for reason in reasons)
+    lines.append(f"\n  qualification status {status}")
+    return lines, status
 
 
 def main() -> int:
@@ -106,58 +211,33 @@ def main() -> int:
     finally:
         g0._terminate_all()
 
-    off = [r for r in rows if r["arm"] == "off"]
-    on = [r for r in rows if r["arm"] == "on"]
-
-    def med(sel, k):
-        return statistics.median([r[k] for r in sel if k in r])
-
-    off_rate = med(off, "decode_tok_s")
-    on_rate = med(on, "decode_tok_s")
-    delta = (on_rate / off_rate - 1) * 100
-    accept = med(on, "acceptance")
-    off_digests = sorted({r["sha256"] for r in off})
-    on_digests = sorted({r["sha256"] for r in on})
-    identical = off_digests == on_digests and len(off_digests) == 1
-
     print("\n" + "=" * 70)
     print(
         f"B3 QUALIFICATION — {args.quant}, scenario={args.scenario}, verify=pair, greedy, cache off"
     )
     print("=" * 70)
-    print(f"  scalar   median {off_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in off]}")
-    print(f"  MTP      median {on_rate:7.3f} tok/s  runs {[r['decode_tok_s'] for r in on]}")
-    print(f"  acceptance {accept:.1f}%   emitted/pass {med(on, 'emitted_per_pass'):.3f}")
-    in_domain = accept >= 65
-    print(
-        f"  DELTA: {delta:+.2f}%   gate +10% at p>=0.65: "
-        + (
-            "PASS"
-            if delta >= 10 and in_domain
-            else "FAIL"
-            if in_domain
-            else f"OUT OF DOMAIN (acceptance {accept:.1f}% < 65%)"
-        )
-    )
-    print(
-        f"  output identical: {'YES' if identical else 'NO'} (off {off_digests}, on {on_digests})"
-    )
+    lines, status = verdict(rows)
+    for line in lines:
+        print(line)
 
+    _arms, got, delta = medians(rows)
+    _earned, identical, _off_digests, _on_digests = byte_claim(rows)
     out = ROOT / (f".build/benchmark-results/mtp-b3-{args.quant}-{args.scenario}.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    record = {
+        "rows": rows,
+        "status": status,
+        "output_identical": identical,
+    }
+    if delta is not None:
+        record["delta_percent"] = round(delta, 2)
+    acceptance = got[("on", "acceptance")][0]
+    if acceptance is not None:
+        record["acceptance"] = acceptance
     with open(out, "w", encoding="utf-8") as handle:
-        json.dump(
-            {
-                "rows": rows,
-                "delta_percent": round(delta, 2),
-                "acceptance": accept,
-                "output_identical": identical,
-            },
-            handle,
-            indent=2,
-        )
+        json.dump(record, handle, indent=2)
     print(f"\nwrote {out}")
-    return 0 if identical else 1
+    return status
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import pathlib
+import statistics
 import subprocess
 from collections.abc import Mapping, Sequence
 
@@ -372,3 +373,60 @@ def channel_verdict(arms, channels):
                 lines.append(f"NOT MEASURED: {name} -- no log line contained {wanted!r}")
                 status = 1
     return lines, status
+
+
+def arm_metric(rows: Sequence[Mapping], key: str):
+    """(median, counted, total) for one metric of one arm.
+
+    The count travels with the value, because a median over only the rows that
+    carry the key has a denominator the report used to hide: an mtp-on run whose
+    server logged no MTP footer measured the plain scalar decode, so it entered
+    the arm's rate median beside the runs that engaged while the acceptance
+    median quietly used the one survivor, and nothing printed either count.
+    A key no row carries answers `None` with a count of zero instead of raising
+    `statistics.StatisticsError`, so a caller can refuse with the metric named
+    rather than die after its headline lines have already printed.
+    """
+    values = [r[key] for r in rows if key in r]
+    if not values:
+        return None, 0, len(rows)
+    return statistics.median(values), len(values), len(rows)
+
+
+def arm_answered(rows: Sequence[Mapping]) -> bool:
+    """Whether any run of an arm streamed content.
+
+    Two arms that streamed nothing hash the same, so "identical" and "stable"
+    both have to be earned by content before they say anything about a model.
+    This is the rule `tinytitan_determinism_ab.py:156-165` applies to the streams
+    it compares; the MTP and ANE A/B drivers compared digests without it.
+    """
+    return any(r.get("completion_tokens") for r in rows)
+
+
+def metric_count(name: str, key: str, counted: int, total: int):
+    """The reason line for an arm whose metric did not reach every run, or None."""
+    if total == 0 or counted == total:
+        return None
+    if counted == 0:
+        return f"NOT MEASURED: the {name} arm -- no run logged {key}"
+    return f"PARTIAL: the {name} arm's {key} median is over {counted} of {total} runs"
+
+
+def byte_claim(rows: Sequence[Mapping], off: str = "off", on: str = "on"):
+    """(earned, identical, off digests, on digests) for a two-arm sweep.
+
+    `earned` is False when either arm has no runs, or no run of it streamed
+    content: two empty answers hash the same, so a sweep that generated nothing
+    looks byte-identical, and `tinytitan_determinism_ab.py:156-165` already
+    refuses that shape for the streams it compares. `identical` then requires one
+    digest per arm with both arms at it -- an off arm that is not reproducible is
+    a refusal rather than a pass, which is the conservatism the drivers already
+    had in `len(off_digests) == 1`.
+    """
+    left = [r for r in rows if r["arm"] == off]
+    right = [r for r in rows if r["arm"] == on]
+    earned = bool(left) and bool(right) and arm_answered(left) and arm_answered(right)
+    digests_a = sorted({r["sha256"] for r in left})
+    digests_b = sorted({r["sha256"] for r in right})
+    return earned, digests_a == digests_b and len(digests_a) == 1, digests_a, digests_b

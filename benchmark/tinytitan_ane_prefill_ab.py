@@ -25,14 +25,16 @@ import http.client
 import json
 import os
 import signal
-import statistics
 import subprocess
 import sys
 
 import tinytitan_gate0_profile as g0
 from tinytitan_profile import (
     ROOT,
+    arm_answered,
+    arm_metric,
     benchmark_log_path,
+    metric_count,
     server_command,
     server_environment,
     resolve_api_model,
@@ -148,6 +150,115 @@ def one_run(quant: str, ane: bool, prompt: str, tag: str) -> dict:
     return row
 
 
+ARM_METRICS = {
+    "gpu": ("prefill_s", "decode_tok_s"),
+    "ane": ("prefill_s", "decode_tok_s"),
+}
+
+
+def medians(rows):
+    """(arms, {(arm, metric): (median, counted, total)}) for a finished sweep.
+
+    The page and the verdict read the same table, so the status cannot be
+    computed on numbers the report never showed.
+    """
+    arms = {name: [r for r in rows if r["arm"] == name] for name in ARM_METRICS}
+    got = {
+        (name, key): arm_metric(arms[name], key)
+        for name, keys in ARM_METRICS.items()
+        for key in keys
+    }
+    return arms, got
+
+
+def verdict(rows):
+    """(page, exit status) for a finished ANE-vs-GPU prefill A/B.
+
+    This driver's claims are the ones its own report states: the ANE arm must
+    clear the published 1.5x gate, each arm's greedy output must be stable
+    within the arm, and an arm that logged the runtime's GPU-fallback line did
+    not run on the ANE at all.
+
+    0  both arms measured, no run fell back, both arms stable, and the gate held;
+    1  it measured and a claim failed -- the gate, an unstable arm, or a fallback;
+    2  it could not be compared -- an arm with no runs, an arm whose runs logged
+       no prefill time, or an arm that streamed no content. A ratio against a
+       zero or missing prefill time is not a speedup, and the old code died on
+       `StatisticsError` or divided by zero instead of saying so.
+    """
+    lines: list[str] = []
+    reasons: list[str] = []
+    arms, got = medians(rows)
+    for name, sel in arms.items():
+        if not sel:
+            reasons.append(f"NOT MEASURED: the {name} arm has no runs")
+        elif not arm_answered(sel):
+            reasons.append(
+                f"NOT MEASURED: the {name} arm streamed no content, "
+                "so its digest is the hash of nothing"
+            )
+    for (name, key), (_value, counted, total) in got.items():
+        note = metric_count(name, key, counted, total)
+        if note:
+            reasons.append(note)
+
+    gpu_prefill = got[("gpu", "prefill_s")][0]
+    ane_prefill = got[("ane", "prefill_s")][0]
+    gpu_decode = got[("gpu", "decode_tok_s")][0]
+    ane_decode = got[("ane", "decode_tok_s")][0]
+    if None in (gpu_prefill, ane_prefill, gpu_decode, ane_decode) or not ane_prefill:
+        reasons.append("NOT MEASURED: a prefill time is missing, so no speedup is computable")
+    else:
+        speedup = gpu_prefill / ane_prefill
+        lines.append(
+            f"  GPU prefill median {gpu_prefill:8.2f} s   "
+            f"runs {[r.get('prefill_s') for r in arms['gpu']]}"
+        )
+        lines.append(
+            f"  ANE prefill median {ane_prefill:8.2f} s   "
+            f"runs {[r.get('prefill_s') for r in arms['ane']]}"
+        )
+        lines.append(
+            f"  SPEEDUP: {speedup:.2f}x   (gate is >=1.5x: {'PASS' if speedup >= 1.5 else 'FAIL'})"
+        )
+        if speedup < 1.5:
+            reasons.append(f"gate failed: {speedup:.2f}x is below the published 1.5x")
+        lines.append(f"  decode after prefill: GPU {gpu_decode:.3f} vs ANE {ane_decode:.3f} tok/s")
+
+    for name in ("gpu", "ane"):
+        sel = arms[name]
+        if not sel:
+            continue
+        digests = sorted({r["sha256"] for r in sel})
+        stable = len(digests) == 1
+        lines.append(f"  {name} digests {digests} ({'stable' if stable else 'UNSTABLE'})")
+        lines.append(f"    continuation: {sel[0].get('first_line')}")
+        if not stable:
+            reasons.append(f"{name} digests differ within the arm: {digests}")
+
+    if any(r.get("fallback") for r in arms["ane"]):
+        lines.append(
+            "  WARNING: an ANE run logged a GPU fallback — the arms did not measure what they claim"
+        )
+        reasons.append(
+            "the ane arm logged a GPU fallback, so its prefill time is a GPU time "
+            "and the ratio above is not the ANE's"
+        )
+
+    hard = [reason for reason in reasons if reason.startswith("NOT MEASURED")]
+    if hard:
+        status = 2
+    elif reasons:
+        status = 1
+    else:
+        status = 0
+    if reasons:
+        lines.append("\n  VERDICT")
+        lines.extend(f"    {reason}" for reason in reasons)
+    lines.append(f"\n  prefill status {status}")
+    return lines, status
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--quant", choices=sorted(MODELS), default="4bit")
@@ -200,48 +311,24 @@ def main() -> int:
     finally:
         g0._terminate_all()
 
-    gpu = [r for r in rows if r["arm"] == "gpu"]
-    ane = [r for r in rows if r["arm"] == "ane"]
-
-    def med(sel, k):
-        return statistics.median([r[k] for r in sel if k in r])
-
-    gpu_prefill = med(gpu, "prefill_s")
-    ane_prefill = med(ane, "prefill_s")
-
+    gpu_prefill_row = next((r for r in rows if r["arm"] == "gpu"), None)
     print("\n" + "=" * 70)
     print(
         f"ANE PREFILL A/B — {args.quant}, "
-        f"{gpu[0].get('prompt_tokens')} prompt tokens, greedy, cache off"
+        f"{gpu_prefill_row.get('prompt_tokens') if gpu_prefill_row else 'no gpu run'} "
+        "prompt tokens, greedy, cache off"
     )
     print("=" * 70)
-    print(f"  GPU prefill median {gpu_prefill:8.2f} s   runs {[r.get('prefill_s') for r in gpu]}")
-    print(f"  ANE prefill median {ane_prefill:8.2f} s   runs {[r.get('prefill_s') for r in ane]}")
-    print(
-        f"  SPEEDUP: {gpu_prefill / ane_prefill:.2f}x   "
-        f"(gate is >=1.5x: "
-        f"{'PASS' if gpu_prefill / ane_prefill >= 1.5 else 'FAIL'})"
-    )
-    print(
-        f"  decode after prefill: GPU {med(gpu, 'decode_tok_s'):.3f} "
-        f"vs ANE {med(ane, 'decode_tok_s'):.3f} tok/s"
-    )
-    for arm_rows, label in ((gpu, "gpu"), (ane, "ane")):
-        digests = sorted({r["sha256"] for r in arm_rows})
-        stable = len(digests) == 1
-        print(f"  {label} digests {digests} ({'stable' if stable else 'UNSTABLE'})")
-        print(f"    continuation: {arm_rows[0]['first_line']}")
-    if any(r.get("fallback") for r in ane):
-        print(
-            "  WARNING: an ANE run logged a GPU fallback — the arms did not measure what they claim"
-        )
+    lines, status = verdict(rows)
+    for line in lines:
+        print(line)
 
     out = ROOT / f".build/benchmark-results/ane-prefill-ab-{args.quant}.json"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
-        json.dump({"rows": rows}, fh, indent=2)
+        json.dump({"rows": rows, "status": status}, fh, indent=2)
     print(f"\nwrote {out}")
-    return 0
+    return status
 
 
 if __name__ == "__main__":
