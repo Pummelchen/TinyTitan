@@ -566,7 +566,10 @@ jobs:
         # drivers' verdicts, 802 tests — measured 37.9 s wall and 37.5 s reported at
         # load average 5.2, then 36.3 s and 38.0 s reported at load 5.5 and 6.7, and
         # 34.5 s on the committed tree at load 5.1, all clean and all exit 0, with
-        # the operator's server on 8080 and untouched.
+        # the operator's server on 8080 and untouched. The 40-suite list — this one
+        # plus the sampler A/B verdict, 824 tests — measured 37.0 s, 35.9 s and
+        # 35.2 s reported at load average 5.6, 5.1 and 5.4, all clean and all exit 0,
+        # with the operator's server on 8080 and untouched.
         # test_tinytitan_m5_sweep drives the M5 tuning sweep's real main() with
         # `subprocess.run` patched, one reply per planned run, into a temp
         # directory. The sweep itself is minutes of cold CLI processes against a
@@ -652,6 +655,20 @@ jobs:
         # It drives the four real verdict functions with their run functions
         # stubbed, so nothing here starts a model, a server, a build or a Core ML
         # program. No model, no server binary and nothing fetched.
+        # `test_sampler_ab_verdict` is AUD-275, the fifth driver along the same
+        # seam. `tinytitan_sampler_ab.py` decides whether the tiled Top-K sampler
+        # path is worth shipping, and pre-fix it returned 0 unless the two arms'
+        # digests differed: a sweep in which the +10% gate printed FAIL exited 0,
+        # `--pairs 0` and `--pairs -1` died in `StatisticsError` before any page,
+        # and every metric line was `row.get('busy_per_token_ms', 0)` -- so an arm
+        # whose runs never logged the busy figure published `busy/token 0.00 ms`,
+        # and an arm where 2 of 4 logged it published the zero-padded median of
+        # both, 25.00 ms over a true 50.00. A run that logged a null busy figure
+        # killed the sweep in the first progress line, and both arms streaming
+        # zero tokens hashed to the same digest and reported "Output identical:
+        # YES". It drives the real `main()` with `one_run` stubbed, so no server,
+        # no model binary and nothing is fetched: 0 the sweep measured what it
+        # claims, 1 a claim failed, 2 a headline its runs never measured.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -672,7 +689,8 @@ jobs:
             test_tinytitan_ane_realweight_rehearsal \
             test_tinytitan_m5_sweep test_memory_reports \
             test_run_stamp_is_utc test_concurrent_sessions_verdict \
-            test_mtp_phases_verdict test_sweep_driver_verdicts
+            test_mtp_phases_verdict test_sweep_driver_verdicts \
+            test_sampler_ab_verdict
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
