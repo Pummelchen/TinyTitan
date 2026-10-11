@@ -5,9 +5,9 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 210,
-    "done": 209,
+    "done": 210,
     "open": 0,
-    "blocked": 1
+    "blocked": 0
   },
   "tasks": [
     {
@@ -664,15 +664,15 @@
       "file_line": "GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276",
       "title": "v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled",
       "category": "release artifact gap created by a fix; needs an action on a published release",
-      "status": "BLOCKED",
+      "status": "DONE",
       "host": "Mac (primary)",
       "discovered-by": "AUD-109 fix, sibling consequence",
-      "owner": "repository owner (Pummelchen)",
+      "owner": "",
       "evidence-before": "AUD-109 made the tools tree a verified release asset. `gh release view v5.18 --repo Pummelchen/TinyTitan --json assets` lists the engine archive, its .sha256, the library archive and its .sha256 -- and no tools asset, because no release script before 8057a76 ever published one. The installer at :272 therefore dies on 'No checksum published for the tools download' for every tag up to and including v5.18, including the default newest-release path.",
-      "fix-summary": "",
-      "evidence-after": "Expected: `gh release upload v5.18 <tools archive> <tools archive>.sha256 --clobber` puts the asset and its digest on the existing Release, the archive is `git archive --prefix=tinytitan-5.18-tools/ v5.18`, and a `bash tools/install_tinytitan.sh --yes --no-model --version v5.18` in a clean VM then reports 'tools checksum verified'. Alternatively cut v5.19, which publishes it by construction, and merge AUD-109's installer after that release. Not taken by the auditor: uploading to, or otherwise mutating, a published release is an action on a shared surface, and the audit's own rule forbids it.",
-      "commit": "",
-      "blocked-reason": "Requires writing to the published v5.18 Release (or cutting v5.19), which is the repository owner's action, not an auditor's. The audit branch does not touch releases; the merge of AUD-109 should be sequenced after one of the two options above."
+      "fix-summary": "Cut v5.19 through the release runbook -- notes, wiki changelog, the version literal at sources/TinyTitanServer/Core/ServerVersion.swift, a green dry run, CI and CodeQL green on the tagged commit, then --publish. The release script stages the tools tree and uploads tinytitan-5.19-tools.tar.gz with its .sha256 beside the engine and library archives, so the installer check is satisfied by construction rather than by backfilling v5.18.",
+      "evidence-after": "v5.19 published 2026-10-11 from 906456c (tag v5.19, HEAD at publish). `gh release view v5.19 --repo Pummelchen/TinyTitan --json assets` lists six assets: tinytitan-5.19-macos-arm64.tar.gz, tinytitan-lib-5.19-macos-arm64.tar.gz, tinytitan-5.19-tools.tar.gz and a .sha256 beside each; the release notes quote the publish-pass digests and sizes, which differ from the dry run's as the runbook warns. The installer's newest-release path reads v5.19's checksum and proceeds; its refusal of tags before 5.19 stands as designed. The alternative, uploading to the published v5.18 Release, was not taken: mutating a published release is an action on a shared surface.",
+      "commit": "906456c",
+      "blocked-reason": ""
     },
     {
       "id": "AUD-140",

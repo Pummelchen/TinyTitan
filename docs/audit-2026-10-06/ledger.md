@@ -2,13 +2,12 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:0  Done:209  Blocked:1  Total:210**
+**Open:0  Done:210  Blocked:0  Total:210**
 
 ## Table
 
 | ID | Sev | Tier | Project | Location | Title | Category | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD-139 | S1 | A | release | `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276` | v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled | release artifact gap created by a fix; needs an action on a published release | BLOCKED | Mac (primary) |
 | AUD-101 | S1 | A | launcher | `tools/server_launcher.sh:517-522` | A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path | unreachable-fix / broken first-run path | DONE | Mac (primary) |
 | AUD-102 | S1 | B | tests | `benchmark/test_launcher_install.py:104-120,162-197` | The launcher-install suite is not model-free: it fails in CI and passes locally, so CI has been red on main for three pushes | test correctness / CI gate | DONE | Mac (primary) + GitHub Actions |
 | AUD-107 | S1 | A | engine | `sources/TinyTitan/Runtime/Family/PLEConstants.swift:39-44 (before); :56-101 (after)` | tableRowCount traps on a negative sidecar value: validate() never checks sign or offset order, so the corrupt-sidecar guard misses its own stated purpose | silent truncation/overflow, unchecked input | DONE | Mac (primary) |
@@ -16,6 +15,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-109 | S1 | A | installer | `tools/install_tinytitan.sh:202-236 (verify_release_artifact), :246-258, :272-276; tools/release.sh:355-385` | The install verifies the engine tarball only if the checksum happens to download, and never verifies the tools tree it then executes | integrity / download-and-execute, fail-open check | DONE | Mac (primary) |
 | AUD-121 | S1 | A | converter-gates | `benchmark/test_prepare_qwen38.py:633 FinishedOutputGuardTests` | A run without the converter's three pinned dependencies FAILS instead of skipping: 75 tests, 74 skipped, 1 failure | test that cannot distinguish 'environment missing' from 'code broken' | DONE | Mac (primary) |
 | AUD-124 | S1 | A | repack | `sources/TinyTitanRepack/Core/Verification/VerifiedInstallTool.swift:213-224, :256, :368-390 (before); Core/Verification/PackedExpertLayoutVerification.swift:34-141, :143-314 (after)` | A MoE install's declared routed-expert width is never checked against its payload: the resident check skips experts and the layout check never compares bytes to bits | integrity verifier has no coverage on the shipped shapes | DONE | Mac (primary) |
+| AUD-139 | S1 | A | release | `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276` | v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled | release artifact gap created by a fix; needs an action on a published release | DONE | Mac (primary) |
 | AUD-143 | S1 | A | server | `sources/TinyTitan/Infrastructure/Concurrency/SuspensionSlot.swift (new); sources/TinyTitanServer/Core/ModelRouterError.swift acquire/turn/beginSwitch/releaseSwitchClaim/wait/drop/wakeWaiters; sources/TinyTitanServer/Core/ServerCoordinator.swift; sources/TinyTitanServer/Core/ManagedModelBackend.swift; sources/TinyTitanServer/Core/MemoryBackend.swift; sources/TinyTitan/Runtime/Inference/ForwardStepGate.swift; sources/TinyTitanLib/ServerModelSession.swift +PromptCache.swift; tests/TinyTitan/Infrastructure/Concurrency/SuspensionSlotTests.swift; tests/TinyTitanServer/ModelRouterTests.swift` | A pending model switch can be overtaken by new work for the resident model, and in a release build the same test aborts the server bundle with signal 6 on this host | residency fairness bug plus a release-only abort of the server bundle — one defect, two symptoms: the actor's waiter array was mutated from a non-isolated continuation closure | DONE | Mac (primary) |
 | AUD-163 | S1 | A | plugin | `plugins/dsh-tinytitan/src/generate.js:620 (applyRouteThroughSettings), tools/dsh_local.sh:586 (write_default_model)` | The boot-time route refresh keeps the picker current but leaves `agent-default-model` naming a model the server no longer serves, so every turn fails with UNKNOWN_MODEL | half-covered refresh: two namespaces written by one install, only one of them revisited | DONE | Mac (primary) |
 | AUD-168 | S1 | A | fleet | `plugins/dsh-lan-manager/src/peers.js:103 (the counted reader), sources/TinyTitanFleet/Core/FleetClient.swift:113 (the counted byte loop)` | Both peer readers buffer whatever a host sends them, so the LAN prober can be sized by any host inside its own fence and held open indefinitely | unbounded receive on a discovery path, in two languages | DONE | Mac (primary) |
@@ -221,22 +221,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 
 ## Detail
 
-### AUD-139 — v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled
-
-- **Severity / tier:** S1 / Tier A
-- **Project:** release
-- **Location:** `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276`
-- **Category:** release artifact gap created by a fix; needs an action on a published release
-- **Status:** BLOCKED
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-109 fix, sibling consequence
-
-**Evidence before.** AUD-109 made the tools tree a verified release asset. `gh release view v5.18 --repo Pummelchen/TinyTitan --json assets` lists the engine archive, its .sha256, the library archive and its .sha256 -- and no tools asset, because no release script before 8057a76 ever published one. The installer at :272 therefore dies on 'No checksum published for the tools download' for every tag up to and including v5.18, including the default newest-release path.
-
-**Evidence after.** Expected: `gh release upload v5.18 <tools archive> <tools archive>.sha256 --clobber` puts the asset and its digest on the existing Release, the archive is `git archive --prefix=tinytitan-5.18-tools/ v5.18`, and a `bash tools/install_tinytitan.sh --yes --no-model --version v5.18` in a clean VM then reports 'tools checksum verified'. Alternatively cut v5.19, which publishes it by construction, and merge AUD-109's installer after that release. Not taken by the auditor: uploading to, or otherwise mutating, a published release is an action on a shared surface, and the audit's own rule forbids it.
-
-**Blocked.** owner `repository owner (Pummelchen)` — Requires writing to the published v5.18 Release (or cutting v5.19), which is the repository owner's action, not an auditor's. The audit branch does not touch releases; the merge of AUD-109 should be sequenced after one of the two options above.
-
 ### AUD-101 — A fresh checkout cannot fetch the model the launcher advertises: the empty-models guard exits before the install path
 
 - **Severity / tier:** S1 / Tier A
@@ -362,6 +346,24 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 **Evidence after.** `tests/TinyTitanRepack/Core/Verification/PackedExpertWidthTests.swift`: 22 tests in 1 suite, all green, no model and no network. 16 go straight through `PackedExpertBytes.validate` on hand-built tables and pin the arithmetic: the real 125B-A6B expert record at its own width (2,764,800 bytes -> 2,768,896 stride at 4-bit) and at 8-bit; a declared width that disagrees with the bytes; an annotation that disagrees with its own slice; the truthful withdrawn 6-bit accepted while a mislabelled one is refused; a width derived with no annotation at all; a missing slice; a duplicated slice; an expert that fills its stride exactly; a byte extent that does not divide; a tensor with no elements; an implied width outside the format's 1...32; a scale slice the wrong size; an unknown dtype; overflow refused rather than wrapped (element count, byte sum, and expert-index multiply); and the same complaint printed from ten shuffled dictionaries. 6 go through the real `VerifiedInstallTool.validatePackedExpertLayout` on a temporary install, three of which repack the synthetic MoE snapshot: a fresh 8-bit install verifies, a manifest that misdeclares the routed width is refused, and a layout that misannotates an expert is refused before the hashes. The two dense-row cases are the sibling guards: `aDenseLayoutHasNoWidthToDeclare` pins that the empty-layer shortcut runs before the `quant` block is asked for, and `everyExpertInTheLayerIsCheckedNotOnlyTheFirst` pins that a lie in expert 1 is caught when the load path only ever looks at expert 0. Both controls re-measured at closure, not inherited from the fix run: commenting the `PackedExpertBytes.validate` call out makes three end-to-end tests fail, two of them with `expected a refusal, and the check passed`; moving the layout check to after the file-hash loop makes exactly one fail -- `aLayoutThatMisannotatesAnExpertIsRefusedBeforeTheHashes`, whose `annotated 8-bit` expectation goes false because the digest complaint now arrives first. Full suite `swift test --no-parallel` exit 0: 1562 tests in seven bundles, 0 failures (the closure commit first wrote `1518 in six`, which is what the pipe hid rather than what the run printed -- corrected here against the saved log, and the seven bundle summaries are 731 + 382 + 126 + 162 + 28 + 44 + 89). `swift build -c release` clean. All eleven `tools/lint.sh` gates ok, the python one run with the pinned ruff 0.16.7 ahead of Homebrew's 0.16.10 on `PATH` -- see environment.md.
 
 **Commit.** `53b64d5`
+
+### AUD-139 — v5.18 publishes no tinytitan-5.18-tools.tar.gz, so the closed installer check refuses the newest release until the asset is backfilled
+
+- **Severity / tier:** S1 / Tier A
+- **Project:** release
+- **Location:** `GitHub Release v5.18 (assets), tools/install_tinytitan.sh:272-276`
+- **Category:** release artifact gap created by a fix; needs an action on a published release
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-109 fix, sibling consequence
+
+**Evidence before.** AUD-109 made the tools tree a verified release asset. `gh release view v5.18 --repo Pummelchen/TinyTitan --json assets` lists the engine archive, its .sha256, the library archive and its .sha256 -- and no tools asset, because no release script before 8057a76 ever published one. The installer at :272 therefore dies on 'No checksum published for the tools download' for every tag up to and including v5.18, including the default newest-release path.
+
+**Fix.** Cut v5.19 through the release runbook -- notes, wiki changelog, the version literal at sources/TinyTitanServer/Core/ServerVersion.swift, a green dry run, CI and CodeQL green on the tagged commit, then --publish. The release script stages the tools tree and uploads tinytitan-5.19-tools.tar.gz with its .sha256 beside the engine and library archives, so the installer check is satisfied by construction rather than by backfilling v5.18.
+
+**Evidence after.** v5.19 published 2026-10-11 from 906456c (tag v5.19, HEAD at publish). `gh release view v5.19 --repo Pummelchen/TinyTitan --json assets` lists six assets: tinytitan-5.19-macos-arm64.tar.gz, tinytitan-lib-5.19-macos-arm64.tar.gz, tinytitan-5.19-tools.tar.gz and a .sha256 beside each; the release notes quote the publish-pass digests and sizes, which differ from the dry run's as the runbook warns. The installer's newest-release path reads v5.19's checksum and proceeds; its refusal of tags before 5.19 stands as designed. The alternative, uploading to the published v5.18 Release, was not taken: mutating a published release is an action on a shared surface.
+
+**Commit.** `906456c`
 
 ### AUD-143 — A pending model switch can be overtaken by new work for the resident model, and in a release build the same test aborts the server bundle with signal 6 on this host
 

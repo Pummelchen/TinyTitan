@@ -58,3 +58,19 @@ python` is the shorter of the two. Clean-up: `rm -rf /tmp/tt-audit` at the end o
    sets the release deployment target to macOS 26.0. Not a defect: the compiler's host
    triple and the product's deployment target are different fields, and `AGENTS.md`
    states the shipped baseline explicitly.
+
+## Phase E close (2026-10-11)
+
+The independent-host requirement closed on CI-as-fresh-clone, the operator's
+decision of 2026-10-11. GitHub Actions checks out a clean clone and builds and
+tests it on the pinned toolchain (Xcode 27 / Swift 6.4) with the eighteen gates
+of `tools/lint.sh`, the serial test suite, the thread-sanitizer job and the
+supply-chain checks, so every push of this audit has been verified the way a
+fresh checkout is verified; the green run on the release head `906456c`
+(CI 38155915391, CodeQL 38155915358) is the closing evidence, as is every green
+run before it. The residual is permanent and named here rather than fixed:
+CI does not run `tools/release.sh` or the installer, so the release build, the
+staged-artifact assertions and the install flow are exercised only by the
+release dry run on this host and by whoever installs a release. No independent
+host was in scope for those paths, and the gap is recorded instead of papered
+over.
