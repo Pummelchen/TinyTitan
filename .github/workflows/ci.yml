@@ -933,8 +933,23 @@ jobs:
       - name: Run serial tests
         # `swift test` implicitly performs its own DEBUG build, which also
         # produces the `.build/debug/TinyTitanRepack` binary that RepackCLITests
-        # spawns — no separate debug build step is needed.
-        run: swift test --no-parallel
+        # spawns — no separate debug build step is needed. `--enable-code-coverage`
+        # rides the same run rather than paying for a second one: this toolchain's
+        # SwiftPM writes the llvm-cov JSON report directly to
+        # `.build/debug/codecov/`, which the step below uploads.
+        run: swift test --no-parallel --enable-code-coverage
+      - name: Upload the coverage report as an artifact (not a gate)
+        # The operator's 2026-10-11 call: coverage is a signal to read, not a
+        # wall to hit, so nothing here asserts a threshold — a threshold with no
+        # baseline is a number invented to be failed. The artifact is what makes
+        # the report fetchable from the run page; `if-no-files-found: error`
+        # keeps a coverage run that wrote no report from reading as a pass, the
+        # same discipline every gate here applies to a scan that read nothing.
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: swift-code-coverage
+          path: .build/debug/codecov/*.json
+          if-no-files-found: error
       - name: Check Markdown links
         run: |
           ruby - <<'RUBY'
@@ -989,3 +1004,57 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Run serial tests under ThreadSanitizer
         run: swift test --no-parallel --sanitize=thread
+
+  # Separate job: the three supply-chain gates are independent of the Swift
+  # build and orthogonal to a functional failure, so they run beside `test`
+  # rather than stretching it — the same reasoning that gave thread-sanitizer
+  # its own job. Nothing here builds Swift, loads a model or starts a server.
+  supply-chain:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history because the secret scan is only as good as the history
+          # it walks: a shallow clone would scan the tip and miss every commit
+          # before it. 1643 commits / 27.7 MB of diff measured 2.5 s locally.
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Secret scan (gitleaks 8.30.1, full history)
+        # Pinned release binary, the same install pattern the shellcheck and
+        # swiftlint steps use. `gitleaks detect` walks every commit this
+        # checkout carries and exits 1 on a finding, so the job is red the day
+        # a secret lands. Verified clean over this history on 2026-10-11
+        # before the job was added: no leaks found.
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --verbose
+      - name: Python dependency audit (pip-audit 2.10.1)
+        # Audits the one requirements file this repository carries — the same
+        # pins the converter gate installs — and `benchmark/requirements.txt`'s
+        # own header names this run and the version. A new CVE against a pin
+        # fails here until the pin moves, which is the point.
+        run: |
+          python3 -m pip install --user --disable-pip-version-check --quiet pip-audit==2.10.1
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
+          pip-audit -r benchmark/requirements.txt
+      - name: Node dependency audit (npm audit over the plugin lockfiles)
+        # Both plugin packages' lockfiles are the pins `npm ci` enforces in the
+        # test job; `npm audit` reads them without an install (verified against
+        # a directory holding only the two files) and fails on any advisory at
+        # or above its default level. Dev-only advisories fail too — a plugin
+        # bundle ships whole, so its whole tree is the surface.
+        run: |
+          for plugin in plugins/dsh-*; do
+            [ -f "$plugin/package-lock.json" ] || continue
+            echo "::group::$plugin"
+            (cd "$plugin" && npm audit)
+            echo "::endgroup::"
+          done

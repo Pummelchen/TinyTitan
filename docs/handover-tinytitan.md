@@ -108,10 +108,22 @@
 > row closing:** the L5/L6 pass (performance + tests) and the L7/§5/§6 pass (ops,
 > facade, unused code) drained into the ledger's rows across Phases C and D, and the
 > operator's call on 2026-10-11 was to close them once AUD-310 closed -- which
-> `92a48c6` and `8837f27` did. What the list carries now is Phase E only, which the
-> operator answered the same day: the close is recorded on CI as the fresh clone once
-> the run on the final head is green, with the residual (the release build and the
-> install flow, which CI does not run) named as a permanent finding in
+> `92a48c6` and `8837f27` did. **The audit's Phase A tooling task is done in the same
+> window:** a third `supply-chain` job now runs beside `test` and `thread-sanitizer`
+> -- gitleaks 8.30.1 over the full history (verified clean before it was wired: 1643
+> commits, no leaks found, 2.5 s), pip-audit 2.10.1 over `benchmark/requirements.txt`
+> (no known vulnerabilities) and npm audit over both plugin lockfiles (0
+> vulnerabilities each, verified to read the lockfile alone) -- and
+> `swift test --enable-code-coverage` rides the existing serial-test run, its llvm-cov
+> JSON uploaded as the `swift-code-coverage` artifact: reported, not gated, per the
+> operator's call, with `if-no-files-found: error` so a coverage run that wrote no
+> report cannot read as a pass. CodeQL was already the SAST half. The supply-chain
+> checkout takes `fetch-depth: 0` because its gitleaks step reads history; the
+> `thread-sanitizer` checkout stays at depth 1 -- measured, it runs no gate that reads history.
+> What the list carries now is Phase E only, which the operator answered the same
+> day: the close is recorded on CI as the fresh clone once the run on the final head
+> is green, with the residual (the release build and the install flow, which CI does
+> not run) named as a permanent finding in
 > `docs/audit-2026-10-06/environment.md`.
 >
 > The closure invariant was re-measured at `92a48c6`: all 209 DONE rows are `owner: ""` with
