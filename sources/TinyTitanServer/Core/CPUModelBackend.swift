@@ -45,6 +45,13 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
     /// The thread width in force, so the startup banner can report what the
     /// engine will actually use without importing the kernel.
     public nonisolated let threads: Int
+    /// The width the *next* token will really use, which is the live
+    /// counterpart to the load-time `threads` above.
+    ///
+    /// The two can only differ if something armed the engine's contention
+    /// signal, and nothing does on this path; `SideEngineModel.threads` is the
+    /// same diagnostic on the side engine, which does narrow.
+    package var threadWidthInUse: Int { model.threads }
     public nonisolated var maximumContext: Int { context }
     public nonisolated var samplingDefaults: GenerationDefaults.Sampling { defaults }
     /// The CPU engine has no prompt cache, and says so rather than borrowing the
@@ -101,6 +108,11 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         }
         _ = family
         residentBytes = resident ? snapshot.makeResident() : 0
+        // No contention signal: this engine runs at its full width, and the
+        // guard that the served path stays that way is
+        // `theServedEngineKeepsTheWidthItsLoadChose`. The coordinator's
+        // `generating` is not the signal to reach for here, because it is
+        // raised by a CPU client generation too.
         let engine = try CPUQwen35(snapshot: snapshot)
         threads = engine.threads
         model = engine
@@ -167,13 +179,6 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
             // The seed the request sent, or nil for the clock -- the same rule
             // the GPU path's `seedFor` applies. Greedy ignores it either way.
             seed: configuration.seed)
-    }
-
-    /// The thread width, which the caller sets from whether anyone is
-    /// waiting on the GPU. One thread costs a concurrent 35B generation 3%
-    /// and four costs 31%, measured, so this is not a detail.
-    public func setContention(_ contention: (@Sendable () -> Bool)?) {
-        model.contention = contention
     }
 
     package func generate(

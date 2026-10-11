@@ -221,6 +221,28 @@ import Testing
             "the field the residency line prints comes from this backend")
     }
 
+    /// The served engine keeps the width its load chose, token after token.
+    ///
+    /// `CPUQwen35` can narrow itself per token when it is given a contention
+    /// signal, and the side engine is: one thread while a person is waiting,
+    /// four in the gaps. The served engine is handed none, and this is the
+    /// guard for that being right rather than accidental. A signal read from
+    /// `ServerCoordinator.generating` looks like the obvious thing to wire
+    /// here and is the wrong one, because that signal is raised by a CPU
+    /// client generation too: the served model would answer at one thread
+    /// while it was the only thing running. (AUD-259: the setter whose doc
+    /// promised the caller arms it had no caller, and no scenario needs one.)
+    @Test func theServedEngineKeepsTheWidthItsLoadChose() async throws {
+        let (backend, directory, _) = try await scriptedBackend(thinking: .off)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let loaded = backend.threads
+        _ = try await backend.generate(request()) { _ in }
+        let after = await backend.threadWidthInUse
+        #expect(
+            after == loaded,
+            "after a whole generation the width is still what the load picked")
+    }
+
     /// Runs the scripted model through the backend: after the prompt it
     /// says "hm", closes its thought, says "ok", and ends the turn.
     private func generate(thinking: ModelThinkingMode, stops: [String] = []) async throws
