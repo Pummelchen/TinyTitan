@@ -191,3 +191,96 @@ pattern; scattered 2.64 MiB reads are the binding constraint.
 with B1 (cache policy dead) and B2 (PLE = 0.0015%), no byte-identical
 lever of material size remains; what is left is §6, gated on an operator
 decision.
+
+## 5e. The ANE/CPU survey — every remaining co-executor closed or bounded (2026-10-11)
+
+The question: with the SSD at its wall and the GPU's per-token busy time
+~103 ms, can the ANE or the CPU cores take enough work off the GPU to move
+tok/s? Re-surveyed against the post-B3 profile (4.286 tok/s ≈ 233 ms/token,
+wait 76 ms, busy ~103 ms, `head_logits` 13.49 ms/call) before building
+anything; what was already measured in `docs/cpu-coexecution-plan.md` stays
+closed, and the two candidates that record never tested at *this* profile
+got measured now.
+
+Closed by earlier measurement (do not reopen):
+
+- **CPU co-execution of experts:** GPU busy +44.9%, tok/s −22.6%; no split
+  ratio won (`cpu-coexecution-plan.md:601`).
+- **ANE concurrent load:** GPU busy +89.3%, tok/s −45.4% — the ANE is a
+  *faster bus consumer* on the same die, and this profile is bus-bound
+  (`cpu-coexecution-plan.md:692`).
+- **ANE expert ops:** the GPU runs them 2.8x faster; the ANE collapses
+  below 1 MiB of weights.
+- **CPU spinning during I/O wait:** −15%.
+- **Fused greedy head:** −3% (benched, not shipped).
+
+Closed by arithmetic against the post-B3 profile:
+
+- **CPU head GEMV:** the head is 606 MiB of 8-bit weights; at the M3's
+  ~17 GiB/s CPU memory bandwidth that is ~35 ms of reads against the GPU's
+  13.49 ms measured. The CPU is 2.6x slower on the one op it could
+  plausibly take, before counting any transfer.
+- **CPU or ANE expert work during the I/O window:** dead after B3, not
+  before it. The early miss fixup already runs phase-1 compute *while* the
+  tail fetch is in flight and `io_hidden_pct` is 99.90 (§5c run 1) — the
+  overlap those co-executors were meant to supply is already banked on the
+  GPU. What remains of the token is GPU-busy compute at 233 ms cadence,
+  and both co-executors measurably make *that* slower (the two closure
+  rows above).
+- **ANE at all, at decode cadence:** the token's ~40 ANE-eligible ops at
+  8–12 ms of per-handoff cost is 320–480 ms of handoff per 233 ms token.
+
+**New measurement — the head's in-engine cost is cadence, not the kernel.**
+The head GEMV is the largest per-call GPU cost in the profile (13.49
+ms/call, 606 MiB stored → 46.6 GB/s) and the only op never probed at the
+qwen38 shape. `TinyTitanBench head_affine8` now has
+`TINYTITAN_BENCH_HEAD_CADENCE_MS` (committed `2c3fc36`): one launch per
+command buffer with a wall-clock gap, mimicking decode's once-per-token
+cadence. The identical kernel, identical buffers, identical PSO:
+
+| arm | per launch |
+| --- | ---: |
+| back-to-back steady state | 9.42 ms (71.7 GB/s) |
+| 50 ms gaps | 12.73 ms |
+| 200 ms gaps | 15.49 ms |
+| in-engine (`head_logits`) | 13.49 ms |
+
+The in-engine 13.49 sits between the 50 and 200 ms cadence arms: the ~4 ms
+delta over steady state is GPU-state (DVFS/power between launches), not
+kernel inefficiency, not memory layout, not the mmap. Recoverable bound if
+the state could somehow be kept warm: ~4 ms/token ≈ +1.8% — and nothing in
+the engine controls GPU clock state, so this is a measured bound, not an
+actionable lever.
+
+**New measurement — the head on CPU and ANE, at the exact shape.** A
+synthetic coremltools probe (8-bit kmeans-palettised `linear` at 248320 x
+2560, batch 1, slope harness N=2 vs N=4, median of 40 predicts) measured
+the head op on every unit pool coremltools can address:
+
+| arm | per op |
+| --- | ---: |
+| ALL / CPU_AND_GPU / CPU_ONLY / CPU_AND_NE (N=2 graph) | 78.4–79.1 ms whole-graph, no arm differs |
+| slope per op (any arm) | 38.95 ms → 16.3 GB/s of stored bytes |
+| GPU in-engine (`head_logits`) | 13.49 ms → 46.6 GB/s |
+
+Two verdicts, one honest caveat. (1) **CPU head: measured dead** — 38.95
+ms/op is 2.9x the GPU's 13.49 ms, confirming the ~35 ms bandwidth
+arithmetic above with a real number. (2) **ANE: no demonstrable
+engagement.** The arm contrast did not discriminate (ALL vs CPU_AND_GPU
+identical at both N), and even with the GPU excluded (`CPU_AND_NE`,
+GPU_ONLY's complement — the only setting that forces an ANE-or-CPU choice)
+the rate is unchanged and matches CPU bandwidth — so the ANE either did
+not take this op (8-bit palettised batch-1 linear not ANE-eligible in this
+form) or fell back silently; `~/.venvs/coreml-py311/bin/python` ran both
+probes. The caveat: a non-engagement is not a measured ANE *rate*, so the
+closing statement leans on the earlier record — ANE batch-1 is bounded at
+the same ~64 GB/s wall (the head alone would then save ~4 ms/token ≈
++1.8% at best, before handoff cost and a mandatory golden re-capture for
+the ANE's different accumulation numerics), and every measured ANE
+co-execution so far made the token slower, not faster.
+
+**The survey is closed.** Every ANE/CPU involvement option is now either
+measured dead at this profile or bounded below 2% by a mechanism nothing
+in the engine controls; decode tok/s at 12 GB remains SSD-bound, and the
+open levers are the operator decisions in §6.
+
