@@ -123,3 +123,39 @@ reads. **B2 is not material; closed with these numbers.**
   would strengthen §5's verdict; the working-set arithmetic above is the
   load-bearing fact and is a property of the routing distribution, not the
   prompt.
+
+## 5c. B3 (split blob reads + early miss fixup) — measured, accepted
+
+Reader split (`fetch_ranges`), streamer `phase1Bytes` from the manifest's
+`down` offset, first-stage publication on `ExpertLoadOperation`, and the
+runner's early miss fixup: phase 1 over the miss slots is encoded and
+committed as soon as the front range (gate+up) is resident and runs on the
+GPU while the tail (down) fetch is still in flight; `routedCB` carries
+phase 2 only. Committed at `87d072c`, `af26fc5`, `c4a431c`, `53d7b8d`.
+
+Golden gate: `tools/golden-baseline.sh --check qwen38-4` — output identical
+to baseline on the full chain (model run, window free). Model-free suites
+and `tools/lint.sh` all green.
+
+A/B, same binary pair, same prompt, `--max-new 384`, `TINYTITAN_RUNNER_STATS=1`
+(two pairs, back to back; base = pre-3b `c4a431c`, treatment = `53d7b8d`):
+
+| arm | tok/s | hit rate | io_hidden_pct | wait_ms/token |
+| --- | ---: | ---: | ---: | ---: |
+| base, run 1 | 4.162 | 74.67% | 14.09 | 86.55 |
+| base, run 2 | 4.197 | 74.97% | 14.31 | 85.90 |
+| B3, run 1 | 4.286 | 74.35% | 99.90 | 76.76 |
+| B3, run 2 | 4.286 | 74.05% | 99.83 | 75.97 |
+
+The plan's falsifier (§5): hit rate held equal (74.8% → 74.2%, inside the
+pair's spread), and tok/s **and** `io_hidden_pct` rose together — satisfied.
+The `io_hidden_pct` jump is the accounting seeing the fixup CB complete
+inside the I/O window; the wall-clock number is the honest one: **+2.5%
+(4.180 → 4.286 mean), ≈ +0.11 tok/s**, with per-layer wait down 11.5%
+(86.2 → 76.4 ms). Below the §5 projection (+0.3–0.5 tok/s) but positive and
+mechanistically explained: the fixup fills only the GPU-idle slice of the
+tail fetch, and the front fetch's window remains unfilled at this hit rate.
+
+Text outputs were not compared across arms: the CLI's default sampling is
+temperature 1.0, so run-to-run text differs inside each arm; the golden
+gate is the numerics verdict and it passed.
