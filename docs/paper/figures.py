@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 # The repository root, from this file's own location: it was written with the
@@ -14,6 +15,21 @@ ROOT = Path(__file__).resolve().parents[2]
 LOGS = ROOT / ".build/benchmark-logs"
 OUT = ROOT / "docs/paper/fig"
 OUT.mkdir(exist_ok=True)
+
+
+def require(path: Path, what: str) -> Path:
+    """Refuse a figure whose input is absent.
+
+    Every caller here averages a fixed grid of runs, so a missing file is not a
+    shorter sample and it is certainly not a zero: it is an input the run never
+    produced. Saying which file, and why, is the whole point -- the alternative
+    is a chart that looks measured, or a ZeroDivisionError far from the cause."""
+    if not path.exists():
+        sys.exit(
+            f"ERROR: {what} is missing: {path}\n"
+            f"       every run the figure grid enumerates has to be on disk"
+        )
+    return path
 
 
 def load_mod(name, results):
@@ -29,9 +45,7 @@ pong = load_mod("memory_value", LOGS / "memory-value-v2")
 
 
 def consolidation(d, arm, run):
-    log = d / f"server-{arm}-r{run}.log"
-    if not log.exists():
-        return 0, 0
+    log = require(d / f"server-{arm}-r{run}.log", "the server log a consolidation count comes from")
     pairs = re.findall(r"memory consolidated .*?prompt=(\d+) completion=(\d+)", log.read_text())
     return sum(int(a) for a, _ in pairs), sum(int(b) for _, b in pairs)
 
@@ -40,9 +54,7 @@ def book_runs(label, arm):
     d = LOGS / f"memory-book-{label}"
     rows = []
     for run in (1, 2, 3):
-        p = d / f"{arm}-r{run}.json"
-        if not p.exists():
-            continue
+        p = require(d / f"{arm}-r{run}.json", "a book run the carry-over mean averages")
         res = json.loads(p.read_text())
         per = {}
         c = t = req_p = req_c = sec = 0
@@ -64,9 +76,7 @@ def pong_runs(label, arm):
     d = LOGS / f"memory-value-{label}"
     rows = []
     for run in (1, 2, 3):
-        p = d / f"{arm}-r{run}.json"
-        if not p.exists():
-            continue
+        p = require(d / f"{arm}-r{run}.json", "a value run the rule-fidelity mean averages")
         base = {}
         a = s = 0
         for r in json.loads(p.read_text()):

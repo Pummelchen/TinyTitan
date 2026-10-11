@@ -371,9 +371,14 @@ jobs:
         # copy of `memval_run.sh` with a stub launcher and no release binary, so a
         # count it refuses (AUD-246: `RUNS=0` made `seq 1 0` count *down* through
         # run 0 and still exit 0) cannot reach a server even if the guard slipped.
+        # `test_paper_figures_inputs` drives the paper's figure builder against a
+        # synthetic results tree: AUD-308 is the same silence one directory out,
+        # where an absent run averaged itself out of a chart and an absent server
+        # log printed as zero consolidated tokens.
         run: |
           cd benchmark
-          python3 -m unittest test_memval_matrix_exit test_memval_run_repeats
+          python3 -m unittest test_memval_matrix_exit test_memval_run_repeats \
+            test_paper_figures_inputs
       - name: Benchmark and memory tooling gates (model-free)
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
