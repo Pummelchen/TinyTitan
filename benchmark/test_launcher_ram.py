@@ -51,6 +51,20 @@ def dry_run(
     )
 
 
+def dry_run_value(
+    installs: launcher_fixture.SyntheticInstalls, *args: str, physical_value: str
+) -> subprocess.CompletedProcess[str]:
+    """`dry_run` with the seam held as the operator wrote it, not as an int."""
+    environment = installs.env(TINYTITAN_PHYSICAL_RAM_BYTES=physical_value)
+    return subprocess.run(
+        ["bash", str(LAUNCHER), "--client", "server", *args, "--dry-run"],
+        text=True,
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+
 def answer_ram(
     installs: launcher_fixture.SyntheticInstalls,
     model: str,
@@ -272,6 +286,102 @@ class RamRuleTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 2, run.stdout)
                 self.assertIn("unknown RAM target", run.stderr)
                 self.assertNotIn("--ram-budget", run.stdout)
+
+
+class TheSeamIsCheckedWhereItIsRead(unittest.TestCase):
+    """A byte count named through the seam is checked before it is used.
+
+    The sanitizer below the read turns a non-digit into 0, which is the documented
+    answer for a machine whose size cannot be read -- and the wrong answer for a
+    value the operator named, because the ceiling rule then switches off while the
+    run still reports a plan. A leading zero escapes the sanitizer entirely: it is
+    all digits, so it reaches three arithmetic expansions, where bash reads it as
+    octal. Measured on the launcher as it stands:
+
+        TINYTITAN_PHYSICAL_RAM_BYTES=08000  -> three lines of
+            `value too great for base` at :931, :935 and :939, then the summary,
+            exit 0, and no ceiling rule
+        TINYTITAN_PHYSICAL_RAM_BYTES=16g,
+        -5, 4000.5                          -> exit 0, sanitized to 0 in silence,
+            so the rule the caller asked to measure never ran
+        TINYTITAN_PHYSICAL_RAM_BYTES=0      -> exit 0, no rule: the shape two of
+            this suite's own tests ask for, and the one that stays accepted
+
+    `0` is a byte count here rather than a switch, because the sysctl read already
+    answers with it for "unreadable"; everything else that is not a whole number of
+    bytes with no leading zero is refused the way the port and `--ram` are.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
+    def setUp(self) -> None:
+        self.model = self.installs.first_gpu()
+
+    def seam(self, value: str) -> subprocess.CompletedProcess[str]:
+        return dry_run_value(self.installs, "--model", self.model, physical_value=value)
+
+    def test_a_zero_padded_byte_count_is_refused_not_read_as_octal(self) -> None:
+        run = self.seam("08000")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("08000", run.stderr)
+        self.assertIn("TINYTITAN_PHYSICAL_RAM_BYTES", run.stderr)
+
+    def test_the_octal_death_is_not_what_the_operator_is_shown(self) -> None:
+        run = self.seam("08000")
+        output = run.stdout + run.stderr
+        self.assertNotIn("value too great for base", output)
+        self.assertNotIn("unbound variable", output)
+
+    def test_the_refusal_comes_before_the_run_plans_anything(self) -> None:
+        self.assertNotIn("Port:", self.seam("08000").stdout)
+
+    def test_a_unit_suffix_is_refused_rather_than_becoming_no_rule(self) -> None:
+        run = self.seam("16g")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("16g", run.stderr)
+        self.assertIn("TINYTITAN_PHYSICAL_RAM_BYTES", run.stderr)
+
+    def test_a_negative_and_a_fractional_size_are_refused_at_the_seam(self) -> None:
+        for value in ("-5", "4000.5"):
+            with self.subTest(value=value):
+                run = self.seam(value)
+                self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+                self.assertIn(value, run.stderr)
+                self.assertNotIn("Port:", run.stdout)
+
+    def test_zero_still_means_an_unreadable_machine(self) -> None:
+        run = self.seam("0")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("Port:", run.stdout)
+
+    def test_a_plain_byte_count_still_reaches_the_rule(self) -> None:
+        run = dry_run_value(
+            self.installs,
+            "--model",
+            self.model,
+            "--ram",
+            "14",
+            physical_value=str(24 * 2**30),
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("over 50% of this Mac's RAM", run.stdout)
+
+    def test_a_run_with_no_seam_set_is_left_to_the_machine(self) -> None:
+        # The guard is on the seam, not on the read: an ordinary launch must not
+        # gain a refusal for a value it never set.
+        environment = self.installs.env()
+        environment.pop("TINYTITAN_PHYSICAL_RAM_BYTES", None)
+        run = subprocess.run(
+            ["bash", str(LAUNCHER), "--client", "server", "--model", self.model, "--dry-run"],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("TINYTITAN_PHYSICAL_RAM_BYTES", run.stdout + run.stderr)
 
 
 if __name__ == "__main__":

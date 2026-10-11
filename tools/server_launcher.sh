@@ -921,8 +921,25 @@ think_word="$(thinking_label "$thinking_level")"
 #
 # `TINYTITAN_PHYSICAL_RAM_BYTES` is the test seam: this mapping has to be checkable
 # on a machine of any size.
+#
+# The seam is refused rather than sanitised, unlike the read below it. The
+# sanitizer's answer to a value it cannot read is 0, which the rule maps to "no
+# ceiling" -- right for a machine whose size cannot be read, wrong for a number the
+# operator named, because the run then plans and warns about nothing while looking
+# like it measured the rule. A leading zero escapes the sanitizer altogether: it is
+# all digits, so it reaches the arithmetic and bash reads it as octal.
 physical_ram_bytes="$(sysctl -n hw.memsize 2>/dev/null || echo 0)"
 if [[ -n "${TINYTITAN_PHYSICAL_RAM_BYTES:-}" ]]; then
+  case "$TINYTITAN_PHYSICAL_RAM_BYTES" in
+    *[!0-9]*)
+      echo "unknown physical RAM: $TINYTITAN_PHYSICAL_RAM_BYTES (TINYTITAN_PHYSICAL_RAM_BYTES takes a whole number of bytes; 0 means a machine whose size cannot be read)" >&2
+      exit 2
+      ;;
+    0[0-9]*)
+      echo "unknown physical RAM: $TINYTITAN_PHYSICAL_RAM_BYTES (TINYTITAN_PHYSICAL_RAM_BYTES takes a whole number of bytes with no leading zero)" >&2
+      exit 2
+      ;;
+  esac
   physical_ram_bytes="$TINYTITAN_PHYSICAL_RAM_BYTES"
 fi
 case "$physical_ram_bytes" in
