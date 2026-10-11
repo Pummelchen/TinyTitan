@@ -23,6 +23,7 @@ const OTHER_VERSIONS = [
   "0.1.6-alpha.3",
   "0.1.6-rc.1",
   "0.1.6",
+  "0.2.0-rc.2",
   "0.0.0-development",
 ];
 

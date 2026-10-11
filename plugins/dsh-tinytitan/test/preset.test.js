@@ -150,7 +150,54 @@ test("autonomy writes the policy and enables the fresh-agent loop", () => {
   assert.equal(ralph.disabled, false, "the loop ships disabled; autonomy is the opt-in");
   assert.equal(ralph.config.maxRounds, 25, "the configured budget reaches the row");
   assert.equal(ralph.config.subagentProvider, "spawn", "the provider selection is preserved");
+  assert.equal(
+    findRow(built, "optional-ralph"),
+    null,
+    "a composition that ships the row is not given a second one",
+  );
   assert.ok(findRow(built, "tool-ask-user"), "the question tool stays unless removal is asked for");
+});
+
+/**
+ * The composition as 0.2.1-alpha.2 ships it: the disabled `tool-ralph` row is
+ * gone from the standard — ralph moved to the experimental `ralph-bundle`.
+ */
+function alphaTwoList() {
+  return standardList().map((row) =>
+    row.id === "delegation"
+      ? { ...row, config: row.config.filter((child) => child.id !== "tool-ralph") }
+      : row,
+  );
+}
+
+test("autonomy injects the ralph bundle when the composition ships no row", () => {
+  const built = buildTinytitanPlugins({
+    plugins: alphaTwoList(),
+    autonomy: true,
+    autonomyRounds: 25,
+  });
+  const group = findRow(built, "optional-ralph");
+  assert.ok(group, "autonomy needs the fresh-agent loop mounted");
+  assert.equal(group.group, true, "the bundle mounts as its own group, as upstream declares it");
+  assert.deepEqual(
+    group.isolate,
+    { workflowEngine: true },
+    "the group carries its own workflow-engine scope, as the bundle declares it",
+  );
+  const workflow = findRow(built, "optional-ralph-workflow");
+  assert.equal(
+    workflow?.name,
+    "@deepseek-ai/dsh-workflow-ptc",
+    "the loop's workflow engine comes with it",
+  );
+  const ralph = findRow(built, "tool-ralph");
+  assert.equal(ralph?.name, "@deepseek-ai/dsh-tool-ralph");
+  assert.equal(ralph.config.maxRounds, 25, "the configured budget reaches the injected row");
+  assert.notEqual(ralph.disabled, true, "the injected row is enabled");
+
+  const off = buildTinytitanPlugins({ plugins: alphaTwoList() });
+  assert.equal(findRow(off, "optional-ralph"), null, "no bundle without autonomy");
+  assert.equal(findRow(off, "tool-ralph"), null);
 });
 
 test("questions are removed only when that is asked for, and only with autonomy", () => {

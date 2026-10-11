@@ -3,11 +3,12 @@
  *
  * A harness upgrade is not cosmetic here. This plugin generates an agent preset
  * from the *shipped* `standard` composition, so its row ids and the way presets
- * are declared move under it — 0.2.0-rc.2 is the release that replaced the
- * harness-home `agent.cordis.yml` presets (and `@deepseek-ai/dsh-agent-presets`)
- * with `@deepseek-ai/dsh-agent-preset` rows registered through the
- * `agentPresets` service — and it mounts a compaction backend that subclasses
- * `dsh-compaction-basic`, so that engine's internals move under it too.
+ * are declared move under it — 0.2.1-alpha.2 is the release that dropped the
+ * disabled `tool-ralph` row from the standard (ralph moved to the experimental
+ * ralph bundle, which {@link module:dsh-tinytitan/preset} now appends when
+ * autonomy asks for the loop) — and it mounts a compaction backend that
+ * subclasses `dsh-compaction-basic`, so that engine's internals move under it
+ * too.
  *
  * The supported range is therefore a single release. Older ones, later ones and
  * a harness built from `main` are out of support deliberately, not assumed to
@@ -28,7 +29,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 
 /** The one DeepSeek Harness release this plugin is written and tested against. */
-export const SUPPORTED_DSH_VERSION = "0.2.0-rc.2";
+export const SUPPORTED_DSH_VERSION = "0.2.1-alpha.2";
 
 /** The package whose version is the harness's. */
 const HARNESS = "@deepseek-ai/dsh";

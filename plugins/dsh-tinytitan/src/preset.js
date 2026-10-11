@@ -48,8 +48,10 @@ export const CHAT_NOISE_ROWS = ["agent-instructions", "skill-filesystem", "tool-
 /**
  * Rounds a `ralph` run may take when autonomy enables the loop.
  *
- * The shipped row is disabled and carries 64; the harness enforces its own
- * ceiling on a call override, so this is only the default this preset writes.
+ * 0.2.0's standard shipped the row disabled at 64; 0.2.1 dropped it from the
+ * standard entirely (the loop now ships only in the experimental ralph bundle,
+ * whose own row carries 64). The harness enforces its own ceiling on a call
+ * override, so this is only the default this preset writes.
  */
 export const AUTONOMY_DEFAULT_ROUNDS = 64;
 
@@ -167,8 +169,10 @@ export function buildTinytitanPlugins({
         config.suffix = [config.suffix, AUTONOMY_INSTRUCTIONS].filter(Boolean).join("\n\n");
         return [{ ...row, config }];
       }
-      // `ralph` ships disabled: a fresh-agent loop is not what most sessions
-      // want. Autonomy is the profile saying that this one does.
+      // `ralph` ships disabled in 0.2.0's standard: a fresh-agent loop is not
+      // what most sessions want. Autonomy is the profile saying that this one
+      // does. (0.2.1 dropped the row from the standard; the append below
+      // covers that shape, and this branch keeps older profiles working.)
       if (autonomy && row.id === "tool-ralph") {
         return [
           { ...row, disabled: false, config: { ...(row.config ?? {}), maxRounds: autonomyRounds } },
@@ -179,7 +183,61 @@ export function buildTinytitanPlugins({
       }
       return [row];
     });
-  return walk(plugins);
+  // Ralph's fresh-agent loop is what autonomy is for, and 0.2.1-alpha.2 dropped
+  // the disabled `tool-ralph` row from the shipped standard: the loop now ships
+  // only in `@deepseek-ai/dsh-experimental-ralph-bundle`, whose cordis patch
+  // mounts the workflow engine and the tool as one isolated group. A
+  // composition that still carries a row (0.2.0 profiles, or one that installed
+  // the bundle itself) is enabled in place by the walk; one that does not gets
+  // the bundle's own declaration appended, carrying this profile's round
+  // budget. Without this, autonomy's policy text would name a tool the session
+  // does not have.
+  const built = walk(plugins);
+  if (autonomy && !compositionHasRow(built, "tool-ralph")) {
+    return [...built, ralphBundleGroup(autonomyRounds)];
+  }
+  return built;
+}
+
+/**
+ * The experimental ralph bundle's rows, as its `cordis.patch.yml` declares them
+ * at 0.2.1-alpha.2: one isolated group holding the PTC workflow engine the loop
+ * runs on and the `ralph` tool itself. Copied rather than resolved at runtime —
+ * the bundle is not a dependency of this package, and the row list is stable
+ * upstream data worth pinning beside the standard composition it complements.
+ *
+ * @param maxRounds - the round budget the enabled row carries.
+ * @returns the `optional-ralph` group row.
+ */
+function ralphBundleGroup(maxRounds) {
+  return {
+    id: "optional-ralph",
+    name: "cordis:group",
+    group: true,
+    isolate: { workflowEngine: true },
+    config: [
+      {
+        id: "optional-ralph-workflow",
+        name: "@deepseek-ai/dsh-workflow-ptc",
+        config: { provider: "spawn" },
+      },
+      {
+        id: "tool-ralph",
+        name: "@deepseek-ai/dsh-tool-ralph",
+        config: { subagentProvider: "spawn", maxRounds },
+      },
+    ],
+  };
+}
+
+/** Whether a row id exists anywhere in a composition, nested groups included. */
+function compositionHasRow(rows, id) {
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    if (row.id === id) return true;
+    if (Array.isArray(row.config) && compositionHasRow(row.config, id)) return true;
+  }
+  return false;
 }
 
 /**
