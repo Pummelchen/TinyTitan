@@ -59,6 +59,13 @@ printf '%%PDF-1.4\\nno pages\\n' > "${TT_STUB_TARGET:?}"
 exit 0
 """
 
+STUB_DELETES = """#!/usr/bin/env bash
+# Exits 0 after removing the artifact that was there when it started: the shape a
+# browser takes when it unlinks its output before rendering and then gives up.
+rm -f "${TT_STUB_TARGET:?}"
+exit 0
+"""
+
 FIGURES_STUB = """#!/usr/bin/env python3
 print("stub figures")
 """
@@ -160,6 +167,20 @@ class PaperBuildTests(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0, f"an empty build was accepted: {output}")
         self.assertIn("ERROR", output, f"no refusal was printed: {output}")
         self.assertIn("pdf", output.lower(), f"the refusal has to name the artifact: {output}")
+
+    def test_a_launch_that_deletes_a_pdf_it_found_is_refused_by_name(self):
+        """The state the before/after comparison cannot catch: the artifact existed
+        when the build started and is gone when it exits 0, so the two stamps
+        differ and only the explicit "wrote no PDF" refusal stands between that
+        and the page count. Without it the count step dies on a missing path and
+        the operator gets a Python traceback instead of a stated refusal."""
+        self.pdf.write_bytes(PDF_MAGIC)
+        proc = self.run_build(chrome=str(self.stub(STUB_DELETES)))
+        output = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, f"a deleted PDF was accepted: {output}")
+        self.assertIn("ERROR", output, f"no refusal was printed: {output}")
+        self.assertIn(str(self.pdf), output, f"the refusal does not name the artifact: {output}")
+        self.assertNotIn("Traceback", output, f"the build crashed instead of refusing: {output}")
 
     def test_a_build_that_renders_is_accepted(self):
         """The guard must not be a refusal of every build: a launch that writes the
