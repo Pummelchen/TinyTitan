@@ -316,6 +316,21 @@ extension TinyTitanBench {
         var rowsVar = rows
         var nVar = n
         let threadgroups = (Int(rows) + 7) / 8
+        let bytes = UInt64(rows) * UInt64(rowBytes + groupCount * 4)
+        // TINYTITAN_BENCH_HEAD_CADENCE_MS: one launch per command buffer with
+        // a wall-clock gap between them, mimicking decode's once-per-token
+        // cadence instead of back-to-back steady state.
+        if let cadenceMs =
+            ProcessInfo.processInfo.environment["TINYTITAN_BENCH_HEAD_CADENCE_MS"]
+            .flatMap(Int.init)
+        {
+            try runHeadCadence(
+                queue: context.queue, pso: pso, w: w, s: s, biases: bb, x: x, y: y,
+                rows: rowsVar, n: nVar, threadgroups: threadgroups,
+                iterations: iterations, cadenceMs: cadenceMs,
+                bytes: bytes, kernel: kernel, bits: bits)
+            return
+        }
         let cb = try requireCommandBuffer(context.queue)
         let enc = try {
             guard let enc = cb.makeComputeCommandEncoder() else {
@@ -341,7 +356,6 @@ extension TinyTitanBench {
         cb.waitUntilCompleted()
         let total = cb.gpuEndTime - cb.gpuStartTime
         let per = total / Double(iterations)
-        let bytes = UInt64(rows) * UInt64(rowBytes + groupCount * 4)
         let yPtr = y.contents().assumingMemoryBound(to: UInt16.self)
         let y0 = Float(Float16(bitPattern: yPtr[0]))
         let yLast = Float(Float16(bitPattern: yPtr[Int(rows) - 1]))
@@ -350,5 +364,60 @@ extension TinyTitanBench {
                 + "per_launch=\(String(format: "%.1f", per * 1_000_000))us "
                 + "achieved=\(String(format: "%.1f", Double(bytes) / per / 1e9)) GB/s "
                 + "y0=\(y0) yLast=\(yLast)")
+    }
+
+    /// Cadence arm for `runHead`: one launch per command buffer with a
+    /// wall-clock gap between them, measuring the GPU-state penalty decode's
+    /// once-per-token cadence pays over back-to-back steady state.
+    private static func runHeadCadence(
+        queue: MTLCommandQueue,
+        pso: MTLComputePipelineState,
+        w: MTLBuffer,
+        s: MTLBuffer,
+        biases: MTLBuffer,
+        x: MTLBuffer,
+        y: MTLBuffer,
+        rows: UInt32,
+        n: UInt32,
+        threadgroups: Int,
+        iterations: Int,
+        cadenceMs: Int,
+        bytes: UInt64,
+        kernel: String,
+        bits: Int
+    ) throws {
+        var rowsVar = rows
+        var nVar = n
+        var gpuSeconds: Double = 0
+        for i in 0..<iterations {
+            let cb = try requireCommandBuffer(queue)
+            guard let enc = cb.makeComputeCommandEncoder() else {
+                throw BenchHarnessError.metalObjectUnavailable("compute encoder")
+            }
+            enc.setComputePipelineState(pso)
+            enc.setBuffer(w, offset: 0, index: 0)
+            enc.setBuffer(s, offset: 0, index: 1)
+            enc.setBuffer(biases, offset: 0, index: 2)
+            enc.setBuffer(x, offset: 0, index: 3)
+            enc.setBuffer(y, offset: 0, index: 4)
+            enc.setBytes(&rowsVar, length: 4, index: 5)
+            enc.setBytes(&nVar, length: 4, index: 6)
+            enc.dispatchThreadgroups(
+                MTLSize(width: threadgroups, height: 1, depth: 1),
+                threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+            enc.endEncoding()
+            cb.commit()
+            cb.waitUntilCompleted()
+            if i > 0 { gpuSeconds += cb.gpuEndTime - cb.gpuStartTime }
+            if i + 1 < iterations {
+                Thread.sleep(forTimeInterval: Double(cadenceMs) / 1000)
+            }
+        }
+        let per = gpuSeconds / Double(iterations - 1)
+        print(
+            "kernel=\(kernel) bits=\(bits) n=\(n) iterations=\(iterations) "
+                + "cadence_ms=\(cadenceMs) "
+                + "per_launch=\(String(format: "%.1f", per * 1_000_000))us "
+                + "achieved=\(String(format: "%.1f", Double(bytes) / per / 1e9)) GB/s")
     }
 }
