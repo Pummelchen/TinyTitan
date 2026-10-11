@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:1  Done:208  Blocked:1  Total:210**
+**Open:0  Done:209  Blocked:1  Total:210**
 
 ## Table
 
@@ -166,7 +166,6 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-312 | S2 | A | TinyTitan | `benchmark/test_launcher_concurrency.py:40-47 (the pin and its comment), :69-72 (run_launcher's env), :95-100 (run_launcher_pty's env), :253 (the blanket assertion)` | the launcher concurrency suite is red on the CI host: `test_enter_keeps_one` forbids any WARNING, and on a 7 GB Mac the launcher's correct RAM warning is the right answer | test: a suite forbade the launcher's correct warning by asserting hardware the code cannot see | DONE | CI (self-hosted runner) and Mac (primary) |
 | AUD-313 | S2 | A | TinyTitan | `benchmark/test_prepare_agentworld.py:179-207 (PrefetchShutdownTests.test_closing_the_generator_leaves_no_fetcher_thread_running)` | the fetcher-shutdown test fails on CI with `8 != 9` -- actual BELOW baseline -- because a foreign thread from the suites before it dies inside its window, which its process-global thread count cannot survive | test: an instrument that measures the whole process asserted a stability the process does not have | DONE | CI (self-hosted runner) and Mac (primary) |
 | AUD-314 | S2 | A | TinyTitan | `benchmark/test_tsan_storm_exit.py:88-120 (setUp's mechanism comment and the two-arch compile), :155-197 (the pin test), :199-241 (the verdict assertions that now carry stderr)` | the tsan-storm fixture is red on CI with every stub helper killed at status 134 before its first test line: its stand-in TSan runtime was first a text file, then a valid thin arm64 dylib, and on the xcode-27 runner the launch chain's /usr/bin/env runs arm64e, whose slice dyld demands of anything inserted | test: the CI fixture handed dyld a stand-in runtime dyld refuses to insert, on the only host where the injection survives at all | DONE | CI (self-hosted runner) and Mac (primary) |
-| AUD-310 | S3 | B | TinyTitan | `sources/ContinuityCore/ContinuityEngine.swift:312 (the setter), :17 and :41-45 (the mutable property and the init parameter that already injects it)` | `ContinuityEngine.setAssembler` is a public setter with no caller, duplicating the `assembler:` init parameter that already defaults it | decision: dead public surface, a setter whose effect is already reachable through init | OPEN | Mac (primary) |
 | AUD-128 | S3 | C | tests | `tests/TinyTitan/Infrastructure/ModelIO/Sha256VerifierTests.swift:32, tests/TinyTitan/Validation/Reference/RMSNormReferenceTests.swift:55, tests/TinyTitan/Kernels/MoE/RouterTopKTests.swift:220/:229 (the three real sites; the other fifteen named here are not defects)` | Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies | tests that assert nothing | DONE | Mac (primary) |
 | AUD-131 | S3 | C | docs | `docs/release-notes-v5.8.md:132` | release-notes-v5.8.md still advertises TINYTITAN_KEEP_WIRED as a live tri-state although the knob was deleted by 3eb11cf and the repo has a Superseded-banner convention for exactly this | stale documentation, documented switch with no consumer (L0/§6) | DONE | Mac (primary) |
 | AUD-137 | S3 | B | server | `sources/TinyTitanLib/ServerInference.swift:101 and OpenAIRequestValidator.swift:32-33` | An unreachable ?? 262_144 fallback on a non-empty constant array | defensive code for a case that cannot happen | DONE | Mac (primary) |
@@ -218,6 +217,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-304 | S3 | A | tools | ``tools/server_launcher.sh:1230-1242` — the digit case-glob, then three arithmetic reads of the same value: the range at :1233, the privileged note at :1238, the default comparison at :1242` | `PORT=08757` passes the launcher's port guard with its range rules never evaluated: `(( ))` reads a leading zero as octal, errors, answers neither branch, and the privileged-port warning is skipped the same way | a guard whose own arithmetic refuses to evaluate the value it is guarding | DONE | Mac (primary) |
 | AUD-308 | S3 | C | docs | ``docs/paper/figures.py:31-58` (the consolidation, book and value loops)` | the paper's figures silently shorten their own run grid, and an absent server log becomes zero consolidated tokens | an absent input averaged out of a chart, and printed as a zero | DONE | Mac (primary) |
 | AUD-309 | S3 | C | docs | ``docs/paper/build.sh:12-16` (the Chrome launch and the page-count line)` | the paper's build certifies a PDF it did not render, and swallows the only message that said why | a build that printed a page count over an artifact it never rendered | DONE | Mac (primary) |
+| AUD-310 | S3 | B | TinyTitan | `sources/ContinuityCore/ContinuityEngine.swift:312 (the setter), :17 and :41-45 (the mutable property and the init parameter that already injects it)` | `ContinuityEngine.setAssembler` is a public setter with no caller, duplicating the `assembler:` init parameter that already defaults it | decision: dead public surface, a setter whose effect is already reachable through init | DONE | Mac (primary) |
 
 ## Detail
 
@@ -3082,18 +3082,6 @@ Sibling sweep, and what it found: the GPU route, the CPU `.ssdai` route, the rep
 
 **Commit.** `d0d688c, a6ffdc2, ec1d546`
 
-### AUD-310 — `ContinuityEngine.setAssembler` is a public setter with no caller, duplicating the `assembler:` init parameter that already defaults it
-
-- **Severity / tier:** S3 / Tier B
-- **Project:** TinyTitan
-- **Location:** `sources/ContinuityCore/ContinuityEngine.swift:312 (the setter), :17 and :41-45 (the mutable property and the init parameter that already injects it)`
-- **Category:** decision: dead public surface, a setter whose effect is already reachable through init
-- **Status:** OPEN
-- **Host:** Mac (primary)
-- **Discovered by:** AUD-259's sibling sweep along the setter-with-no-caller seam
-
-**Evidence before.** Measured at cc7ef48. `git grep -n 'setAssembler(' -- sources tests examples plugins tools` returns exactly one line: the definition at ContinuityEngine.swift:312. The value it writes is `var assembler: ContextAssembler` (:17), which `init` already accepts as `assembler: ContextAssembler = DefaultContextAssembler()` (:41-45) and which is read at :351 by `assembleContext`. So the seam is injectable and the mutator is not the only way in: it is a second, uncalled way to hold the engine's assembler mutable after construction. ContinuityCore is not in `TinyTitanLib`, so the `library-facade` gate does not cover it -- the same gap AUD-259 recorded.
-
 ### AUD-128 — Test bodies that cannot fail: preconditions recorded as expressions, one self-referential digest assertion, and non-throw-only bodies
 
 - **Severity / tier:** S3 / Tier C
@@ -4045,3 +4033,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** Written first: `benchmark/test_paper_build_pdf.py`. The first RED run was invalid and is disclosed as such -- the override knob did not exist yet, so the tests drove real Chrome and every one of them saw `pages: 1 bytes: 863`; the knob was then named to the repo convention and the suite re-run to a real RED. GREEN: 8 tests rc 0. Anchored mutation sweep, anchors re-extracted from the current file, 6/6 killed. One correction lives in this row: an earlier commit (`b287f21`) claimed its no-PDF-on-disk test killed M4 (the `[[ -z "$after" ]]` refusal deleted), and the re-run showed M4 SURVIVED at 5/6. The cause is arithmetic -- with nothing on disk before and after, both stamps are the empty string, so the before/after equality refusal fires anyway and the test could not tell the two guards apart. `6eb050f` adds the state equality genuinely cannot cover, an artifact that existed at start and is gone at exit 0, asserted by refusal message and by the absence of a traceback; M4 is killed by that. Gates rc 0: `shell` (29 scripts, system bash 3.2.57), `shellcheck` (0.11.0, no warnings), `python` (ruff 0.16.7, 191 scripts parse), `docs`.
 
 **Commit.** `9c50d4b`
+
+### AUD-310 — `ContinuityEngine.setAssembler` is a public setter with no caller, duplicating the `assembler:` init parameter that already defaults it
+
+- **Severity / tier:** S3 / Tier B
+- **Project:** TinyTitan
+- **Location:** `sources/ContinuityCore/ContinuityEngine.swift:312 (the setter), :17 and :41-45 (the mutable property and the init parameter that already injects it)`
+- **Category:** decision: dead public surface, a setter whose effect is already reachable through init
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** AUD-259's sibling sweep along the setter-with-no-caller seam
+
+**Evidence before.** Measured at cc7ef48. `git grep -n 'setAssembler(' -- sources tests examples plugins tools` returns exactly one line: the definition at ContinuityEngine.swift:312. The value it writes is `var assembler: ContextAssembler` (:17), which `init` already accepts as `assembler: ContextAssembler = DefaultContextAssembler()` (:41-45) and which is read at :351 by `assembleContext`. So the seam is injectable and the mutator is not the only way in: it is a second, uncalled way to hold the engine's assembler mutable after construction. ContinuityCore is not in `TinyTitanLib`, so the `library-facade` gate does not cover it -- the same gap AUD-259 recorded.
+
+**Fix.** Deleted the uncalled setter. Injection stays where the type puts it -- the `assembler:` init parameter -- and a new pin test proves assembleContext renders exactly what the injected assembler produced, so a second route cannot quietly become the only one the tests ever see.
+
+**Evidence after.** Fixed at 92a48c6. The setter is deleted; the seam is injection through the `assembler:` init parameter (ContinuityEngine.swift:41), which assembleContext (:316) consumes through the stored `var` (:17) -- one way in, as designed. Test-file changes, in full: one new test in ContinuityEngineTests, `theAssemblerInjectedAtInitIsTheOneAssemblyUses`, with a private SentinelAssembler whose rendered string the test asserts assembleContext returns verbatim; nothing existing was edited. Because the setter was uncalled the pin cannot fail on the unmodified tree, so its teeth come from the mutant sweep rather than a pre-deletion RED, disclosed here rather than implied: the init ignoring its injected assembler KILLED, assembleContext bypassing the stored assembler for the default KILLED, the setter resurrected unused SURVIVED -- correctly, since the deletion is guarded by the compiler and the grep, not by a test; named rather than hidden. Gates: swift build -c release clean (79.09s, -warnings-as-errors), ContinuityEngineTests 15/15, swift-format lint --strict clean on both files, engine file 451 lines. No model was run: none of this needs one.
+
+**Commit.** `92a48c6`

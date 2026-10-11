@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 210,
-    "done": 208,
-    "open": 1,
+    "done": 209,
+    "open": 0,
     "blocked": 1
   },
   "tasks": [
@@ -3472,17 +3472,17 @@
       "tier": "B",
       "project": "TinyTitan",
       "category": "decision: dead public surface, a setter whose effect is already reachable through init",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "file_line": "sources/ContinuityCore/ContinuityEngine.swift:312 (the setter), :17 and :41-45 (the mutable property and the init parameter that already injects it)",
       "title": "`ContinuityEngine.setAssembler` is a public setter with no caller, duplicating the `assembler:` init parameter that already defaults it",
       "discovered-by": "AUD-259's sibling sweep along the setter-with-no-caller seam",
       "evidence-before": "Measured at cc7ef48. `git grep -n 'setAssembler(' -- sources tests examples plugins tools` returns exactly one line: the definition at ContinuityEngine.swift:312. The value it writes is `var assembler: ContextAssembler` (:17), which `init` already accepts as `assembler: ContextAssembler = DefaultContextAssembler()` (:41-45) and which is read at :351 by `assembleContext`. So the seam is injectable and the mutator is not the only way in: it is a second, uncalled way to hold the engine's assembler mutable after construction. ContinuityCore is not in `TinyTitanLib`, so the `library-facade` gate does not cover it -- the same gap AUD-259 recorded.",
-      "owner": "audit session -- the deletion needs no operator decision (no caller, no behaviour change), but it lands as its own row rather than inside AUD-259's commit",
-      "fix-summary": "",
-      "evidence-after": "",
-      "sibling-note": "This is the second of the six public setters the sweep checked; the other four have callers (setObserver at ContinuityCore+Internals:21/35, TaskMemory.setStatus at ContinuityCore:298/305, FleetDashboard.setStatus and the two expert-cache setters at RealForwardRunner). AUD-259 cleared the CPU engine's own `threads`, `idleThreads` and `busyThreads`. What is left unfixed on this seam is the rule, not the row: no gate catches an uncalled public method outside the library target.",
-      "commit": ""
+      "owner": "",
+      "fix-summary": "Deleted the uncalled setter. Injection stays where the type puts it -- the `assembler:` init parameter -- and a new pin test proves assembleContext renders exactly what the injected assembler produced, so a second route cannot quietly become the only one the tests ever see.",
+      "evidence-after": "Fixed at 92a48c6. The setter is deleted; the seam is injection through the `assembler:` init parameter (ContinuityEngine.swift:41), which assembleContext (:316) consumes through the stored `var` (:17) -- one way in, as designed. Test-file changes, in full: one new test in ContinuityEngineTests, `theAssemblerInjectedAtInitIsTheOneAssemblyUses`, with a private SentinelAssembler whose rendered string the test asserts assembleContext returns verbatim; nothing existing was edited. Because the setter was uncalled the pin cannot fail on the unmodified tree, so its teeth come from the mutant sweep rather than a pre-deletion RED, disclosed here rather than implied: the init ignoring its injected assembler KILLED, assembleContext bypassing the stored assembler for the default KILLED, the setter resurrected unused SURVIVED -- correctly, since the deletion is guarded by the compiler and the grep, not by a test; named rather than hidden. Gates: swift build -c release clean (79.09s, -warnings-as-errors), ContinuityEngineTests 15/15, swift-format lint --strict clean on both files, engine file 451 lines. No model was run: none of this needs one.",
+      "sibling-note": "This is the second of the six public setters the sweep checked; the other four have callers (setObserver at ContinuityCore+Internals:21/35, TaskMemory.setStatus at ContinuityCore:298/305, FleetDashboard.setStatus and the two expert-cache setters at RealForwardRunner). AUD-259 cleared the CPU engine's own `threads`, `idleThreads` and `busyThreads`. What is left unfixed on this seam is the rule, not the row: no gate catches an uncalled public method outside the library target. This row closes the seam's second and last dead row; the standing gap is unchanged and unchanged in scope: no gate catches an uncalled public method outside the library target.",
+      "commit": "92a48c6"
     },
     {
       "id": "AUD-311",
