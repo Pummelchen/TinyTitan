@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:3  Done:200  Blocked:1  Total:204**
+**Open:3  Done:201  Blocked:1  Total:205**
 
 ## Table
 
@@ -212,6 +212,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-303 | S3 | A | tools | ``tools/golden-baseline.sh:71-76` as shipped — the four `${VAR:-default}` lines — with the only reader of READY_TIMEOUT at :223 and its verdict at :236, the two CLI legs at :195 and :327, the python body builder at :244-252 and the launcher hand-off at :217` | A word in READY_TIMEOUT skips the readiness poll entirely and the gate reports `not ready after 1800s`; MAX_NEW, SEED and PORT reach a minutes-long model load before anything reads them | an operator number read far from where a bad one changes the verdict instead of stopping the run | DONE | Mac (primary) |
 | AUD-304 | S3 | A | tools | ``tools/server_launcher.sh:1230-1242` — the digit case-glob, then three arithmetic reads of the same value: the range at :1233, the privileged note at :1238, the default comparison at :1242` | `PORT=08757` passes the launcher's port guard with its range rules never evaluated: `(( ))` reads a leading zero as octal, errors, answers neither branch, and the privileged-port warning is skipped the same way | a guard whose own arithmetic refuses to evaluate the value it is guarding | DONE | Mac (primary) |
 | AUD-308 | S3 | C | docs | ``docs/paper/figures.py:31-58` (the consolidation, book and value loops)` | the paper's figures silently shorten their own run grid, and an absent server log becomes zero consolidated tokens | an absent input averaged out of a chart, and printed as a zero | DONE | Mac (primary) |
+| AUD-309 | S3 | C | docs | ``docs/paper/build.sh:12-16` (the Chrome launch and the page-count line)` | the paper's build certifies a PDF it did not render, and swallows the only message that said why | a build that printed a page count over an artifact it never rendered | DONE | Mac (primary) |
 
 ## Detail
 
@@ -3925,3 +3926,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** Written first: `benchmark/test_paper_figures_inputs.py`, 5 tests, driving the real script against a synthetic tree. RED: 4 failures -- the four missing-input cases each showed the script certifying a table it had not measured -- while `test_a_complete_tree_still_builds` passed before the fix, which is what keeps the guard from being a refusal of every build. GREEN: 38 tests rc 0 beside `test_memval_matrix_exit`, `test_memval_run_repeats` and `test_python_resolver_gate`. Anchored mutation sweep 6 of 6 killed: each call site back to its skip, `require` neutered (`if False`), the ERROR marker dropped, and the message stripped of the path. Gates rc 0: python (ruff 0.16.7, 190 scripts parse), docs (94/98 suites registered -- the new suite is named in CI beside the two that stub a script rather than load a model). No model, no server, nothing installed.
 
 **Commit.** `4f9ebd7`
+
+### AUD-309 — the paper's build certifies a PDF it did not render, and swallows the only message that said why
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** ``docs/paper/build.sh:12-16` (the Chrome launch and the page-count line)`
+- **Category:** a build that printed a page count over an artifact it never rendered
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D sweep for tracked files no ledger row had ever named, continued from AUD-308: `docs/paper/build.sh` was the one tracked `*.sh` with no row against it, and it is what calls the `figures.py` AUD-308 had just pinned.
+
+**Evidence before.** Measured by copying the script into a temporary repository root and driving its launch through a stub browser. The old last line took the page count from whatever file sat at `continuitycore-paper.pdf` after the launch, with no check that the launch wrote it, and the launch itself carried `2>/dev/null`. A stub that exits 0 and writes nothing left the previous paper on disk and the script printed `pages: 11` for a build that rendered nothing. A binary that cannot be executed was worse: bash prints its own `No such file or directory` on the same redirected stderr, so the operator got a non-zero status and no text at all.
+
+**Fix.** The launch is now checked three ways. Its exit status is tested and its output is allowed to reach the terminal, which is what removes the `2>/dev/null`. `stat -f '%m-%z'` is taken before and after, so a launch that leaves the artifact byte-identical is refused as the previous build's artifact rather than reported as this one's; an empty-string-after case is refused by name; and the page count is only printed when it is non-zero. The browser path becomes `${TINYTITAN_PAPER_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}` -- default unchanged, and the default itself pinned by a test -- so the launch can be driven by a stub without touching a real profile.
+
+**Evidence after.** Written first: `benchmark/test_paper_build_pdf.py`. The first RED run was invalid and is disclosed as such -- the override knob did not exist yet, so the tests drove real Chrome and every one of them saw `pages: 1 bytes: 863`; the knob was then named to the repo convention and the suite re-run to a real RED. GREEN: 8 tests rc 0. Anchored mutation sweep, anchors re-extracted from the current file, 6/6 killed. One correction lives in this row: an earlier commit (`b287f21`) claimed its no-PDF-on-disk test killed M4 (the `[[ -z "$after" ]]` refusal deleted), and the re-run showed M4 SURVIVED at 5/6. The cause is arithmetic -- with nothing on disk before and after, both stamps are the empty string, so the before/after equality refusal fires anyway and the test could not tell the two guards apart. `6eb050f` adds the state equality genuinely cannot cover, an artifact that existed at start and is gone at exit 0, asserted by refusal message and by the absence of a traceback; M4 is killed by that. Gates rc 0: `shell` (29 scripts, system bash 3.2.57), `shellcheck` (0.11.0, no warnings), `python` (ruff 0.16.7, 191 scripts parse), `docs`.
+
+**Commit.** `9c50d4b`
