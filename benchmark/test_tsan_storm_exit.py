@@ -197,9 +197,7 @@ class StormVerdictTests(unittest.TestCase):
 
     def test_a_storm_that_runs_nothing_is_not_a_clean_verdict(self):
         result = self.run_storm("pass", "--runs", "0", "--parallel", "1")
-        self.assertEqual(
-            result.returncode, 2, f"--runs 0 read as: {result.stdout}{result.stderr}"
-        )
+        self.assertEqual(result.returncode, 2, f"--runs 0 read as: {result.stdout}{result.stderr}")
         self.assertNotIn("Clean:", result.stdout)
 
     def test_a_non_numeric_run_count_is_refused_before_anything_launches(self):
@@ -214,9 +212,7 @@ class StormVerdictTests(unittest.TestCase):
 
     def test_the_clean_verdict_counts_the_runs_that_actually_ran(self):
         result = self.run_storm("pass", "--runs", "2", "--parallel", "1")
-        self.assertEqual(
-            result.returncode, 0, result.stdout + result.stderr
-        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Clean: no report in 2 instrumented runs", result.stdout)
 
     def assert_padded_refusal(self, option: str, value: str) -> None:
