@@ -1043,6 +1043,10 @@ jobs:
         # fails here until the pin moves, which is the point.
         run: |
           python3 -m pip install --user --disable-pip-version-check --quiet pip-audit==2.10.1
+          # GITHUB_PATH reaches only later steps, so the binary is called
+          # through the same path it was installed to: the first run failed
+          # with exit 127 "pip-audit: command not found" on the line below.
+          export PATH="$(python3 -m site --user-base)/bin:$PATH"
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
           pip-audit -r benchmark/requirements.txt
       - name: Node dependency audit (npm audit over the plugin lockfiles)
