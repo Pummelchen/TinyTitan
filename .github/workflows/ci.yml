@@ -853,11 +853,14 @@ jobs:
         # exchange corpus can never trip it; a calibration that had applied one of its two
         # rules was indistinguishable from one that applied both. The ping-pong rule was not
         # in the verdict at all, so a recorded conversation that tripped it, or a corpus that
-        # was not there, answered 0 either way. It now answers 0 the three rules ran on their
-        # corpora and tripped nothing, 1 the calibration did not get to run -- no replies, or
-        # a rule that saw no corpus, naming which -- and 2 it ran and a watchdog fired on a
-        # reply that completed, a trip outranking the incomplete note. Corpora are in-memory
-        # fixtures: no model, no server, no log tree and nothing fetched.
+        # was not there, answered 0 either way. It answers 0 the three rules ran on their
+        # corpora and tripped nothing, 1 it ran and a watchdog fired on a reply that
+        # completed, and 2 the calibration did not get to run -- no replies, or a rule that
+        # saw no corpus, naming which -- a trip outranking the incomplete note. Those are the
+        # codes the rest of the directory answers, which is AUD-293: the calibration used to
+        # run them the other way round, so 2 read as a measured disagreement here and as NOT
+        # MEASURED in every driver beside it. Corpora are in-memory fixtures: no model, no
+        # server, no log tree and nothing fetched.
         # `test_ane_sidecars_gate` is AUD-294, the sidecar gate `tools/ane_sidecars.sh`
         # runs over `models/`. It walked the directory, found no install -- an empty
         # models dir, one whose subdirectories hold no manifest, one that does not exist,

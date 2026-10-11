@@ -15,11 +15,11 @@ so beside itself. The pingpong watchdog is not in `clean` even when its corpus
 is there: three identical tool calls in one recorded conversation, which is the
 false positive the threshold exists to avoid, answers 0.
 
-These tests pin the driver's own codes rather than renumbering them -- 0 clean,
-1 the calibration did not get to run, 2 measured and not clean -- because AUD-292
-records the numbering as the operator's decision, not the auditor's. What changes
-is that a rule which saw no corpus can no longer certify the run, and a pingpong
-trip is the false positive it is.
+These tests pin the driver's codes to the table the rest of the tree answers --
+0 clean, 1 it ran and a watchdog fired, 2 the calibration did not get to run --
+which is AUD-293's renumbering, settled with the operator's approval rather than
+by the auditor alone. What AUD-292 found stays found: a rule which saw no corpus
+cannot certify the run, and a pingpong trip is the false positive it is.
 
 No model, no server, no engine binary, no log tree and nothing fetched: the
 corpora are in-memory fixtures and `main()` and `selftest()` are the real ones.
@@ -95,16 +95,17 @@ class CleanCertification(unittest.TestCase):
         self.assertIn("over 1 recorded exchanges", row(text, "stub"))
         self.assertIn("0.0%", row(text, "pingpong"))
 
-    def test_a_measured_trip_still_answers_two(self):
-        """Preservation pin: the codes are not renumbered here.
+    def test_a_measured_trip_answers_one(self):
+        """The renumbering: a run that measured and tripped answers 1.
 
-        AUD-292 records that 2 means a measured disagreement in this driver and
-        NOT MEASURED in the drivers AUD-273 through AUD-291 answer, and leaves
-        which way round is the operator's call; this test holds the first.
+        This was 2, which is the word NOT MEASURED in the drivers AUD-273 through
+        AUD-291 answer -- so a reader, and anything that dispatches on the code,
+        was told the calibration never ran when it ran and found a false
+        positive. AUD-293 moves this driver onto the tree's table.
         """
         short = exchange(text="a stub", finish="stop", request_bytes=4000)
         status, text = run_main([reply()], [short], [conversation()])
-        self.assertEqual(status, 2, text)
+        self.assertEqual(status, 1, text)
         self.assertIn("NOT clean", text)
         self.assertIn("1 100.0% over 1 recorded exchanges", " ".join(row(text, "stub").split()))
 
@@ -112,37 +113,38 @@ class CleanCertification(unittest.TestCase):
         """The incomplete note must not swallow a false positive it also has.
 
         Measured on this machine's own recorded corpus: the loop rule trips once,
-        the pingpong corpus is not there, and a verdict that returns 1 for the
-        missing corpus leaves `NOT clean` unsaid -- trading one honest printout
-        for a status that hides the trip.
+        the pingpong corpus is not there, and a verdict that returns the absence
+        code for the missing corpus leaves `NOT clean` unsaid -- trading one
+        honest printout for a status that hides the trip. The precedence is the
+        driver's own and survives the renumbering: the trip answers 1.
         """
         tripping = "x" * 200 + " the same phrase over and over again " * 8
         tripping += "tail " * 200
         status, text = run_main([reply(text=tripping)], [exchange(text=tripping)], [])
-        self.assertEqual(status, 2, text)
+        self.assertEqual(status, 1, text)
         self.assertIn("NOT clean", text)
         self.assertIn("calibration incomplete", text)
         self.assertIn("no corpus", row(text, "pingpong"))
 
     def test_a_pingpong_trip_is_a_false_positive_and_not_a_clean_run(self):
-        """The tool-call watchdog fires on a recorded conversation and answers 0."""
+        """The tool-call watchdog fires on a recorded conversation, and says so."""
         status, text = run_main([reply()], [exchange()], [conversation(tripped=True)])
-        self.assertEqual(status, 2, text)
+        self.assertEqual(status, 1, text)
         self.assertIn("NOT clean", text)
         self.assertIn("1 100.0%", " ".join(row(text, "pingpong").split()))
 
 
 class RulesThatSawNoCorpus(unittest.TestCase):
-    def test_no_recorded_exchanges_cannot_certify_the_stub_rule(self):
+    def test_no_recorded_exchanges_answers_the_not_measured_code(self):
         status, text = run_main([reply()], [], [conversation()])
-        self.assertEqual(status, 1, text)
+        self.assertEqual(status, 2, text)
         self.assertIn("no corpus", row(text, "stub"))
         self.assertIn("0.0%", row(text, "pingpong"))
         self.assertNotIn("zero false positives", text)
 
-    def test_no_recorded_conversations_cannot_certify_the_pingpong_rule(self):
+    def test_no_recorded_conversations_answers_the_not_measured_code(self):
         status, text = run_main([reply()], [exchange()], [])
-        self.assertEqual(status, 1, text)
+        self.assertEqual(status, 2, text)
         self.assertIn("no corpus", row(text, "pingpong"))
         self.assertIn("over 1 recorded exchanges", row(text, "stub"))
         self.assertNotIn("zero false positives", text)
@@ -160,13 +162,19 @@ class RulesThatSawNoCorpus(unittest.TestCase):
 
 
 class AbsentCorpus(unittest.TestCase):
-    def test_no_replies_at_all_answers_one_and_names_the_directory(self):
-        """The guard that exists stays: a calibration with nothing to read."""
+    def test_no_replies_at_all_answers_two_and_names_the_directory(self):
+        """The guard that exists stays, and now answers the code for `did not run`."""
         status, text = run_main([], [exchange()], [conversation()])
-        self.assertEqual(status, 1, text)
+        self.assertEqual(status, 2, text)
         self.assertIn("no recorded replies", text)
 
-    def test_selftest_without_its_fixture_answers_one_with_the_reason(self):
+    def test_selftest_without_its_fixture_answers_two_with_the_reason(self):
+        """A fixture that is not there is the parity check not running, which is 2.
+
+        The mismatch case below keeps 1: there the check ran and disagreed, which
+        is this table's `it ran and something failed`. AUD-292's note that
+        `--selftest` answers its own codes is retired with the renumbering.
+        """
         missing = pathlib.Path(tempfile.mkdtemp()) / "watchdog-cases.json"
         buffer = io.StringIO()
         with (
@@ -174,7 +182,7 @@ class AbsentCorpus(unittest.TestCase):
             contextlib.redirect_stdout(buffer),
         ):
             status = driver.selftest()
-        self.assertEqual(status, 1, buffer.getvalue() + f" (status {status})")
+        self.assertEqual(status, 2, buffer.getvalue() + f" (status {status})")
         self.assertIn("missing fixture", buffer.getvalue())
 
 

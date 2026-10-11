@@ -29,16 +29,18 @@ Two watchdogs are not calibrated here, for reasons rather than by omission:
     clean.
 
 `main()` answers 0 the three calibrated rules ran on their corpora and tripped
-nothing, 1 the calibration did not get to run -- no replies, or a rule that saw
-no corpus, with which rule named, 2 it ran and a watchdog fired on a reply that
-completed -- and a trip outranks the incomplete note, because a measured false
+nothing, 1 it ran and a watchdog fired on a reply that completed, 2 the
+calibration did not get to run -- no replies, or a rule that saw no corpus, with
+which rule named. A trip outranks the incomplete note, because a measured false
 positive is the finding, not an absence to file under.
 
-`--selftest` answers 0 the port agrees with the Swift fixture on every case, 1
-a mismatch or a fixture that is not there. Those codes are this driver's
-own and run the other way round from the 0 / 1 contested / 2 NOT MEASURED table
-the other benchmark drivers answer; AUD-292 records the numbering as an open
-decision rather than settling it here.
+`--selftest` answers 0 the port agrees with the Swift fixture on every case, 1 a
+case it disagrees on, 2 the fixture that makes the comparison possible is not
+there. Those are the same three codes the other benchmark drivers answer --
+0 clean, 1 it ran and something failed, 2 NOT MEASURED -- which is AUD-293's
+renumbering: this driver used to run the table the other way round, so a CI step
+that read 2 as "no measurement" was being told the calibration never ran on the
+runs where it ran and caught a loop.
 """
 
 from __future__ import annotations
@@ -275,7 +277,7 @@ def main() -> int:
     corpus = replies()
     if not corpus:
         print(f"no recorded replies under {LOGS}")
-        return 1
+        return 2
 
     loop_hits, stub_hits, caught = [], [], []
     total_bytes = 0
@@ -367,9 +369,9 @@ def main() -> int:
         )
     if not clean:
         print("\nNOT clean: raise a threshold, or keep the watchdog observing only")
-        return 2
-    if unmeasured:
         return 1
+    if unmeasured:
+        return 2
     print(f"\nzero false positives on {len(corpus)} replies; {len(caught)} true catches")
     return 0
 
@@ -379,7 +381,7 @@ def selftest() -> int:
     nothing about what will actually ship."""
     if not FIXTURE.exists():
         print(f"missing fixture: {FIXTURE}")
-        return 1
+        return 2
     cases = json.loads(FIXTURE.read_text())["cases"]
     failures = 0
     for case in cases:
