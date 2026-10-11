@@ -491,9 +491,11 @@ tinytitan_catalog_find_dir() {
 
 # --- Persistent memory -------------------------------------------------
 #
-# Off unless TINYTITAN_MEMORY=1. Memory runs inside the server process, so there
-# is no database to install or start, and it takes what it needs: measured,
-# a hundred-chapter novel over ten sessions was about 100 KB. There is no
+# On when TINYTITAN_MEMORY names one of the engine's on-words (1, on, true);
+# anything else is off, exactly as the engine reads it. Memory runs inside the
+# server process, so there is no database to install or start, and it takes what
+# it needs: measured, a hundred-chapter novel over ten sessions was about
+# 100 KB. There is no
 # RAM ceiling by default; TINYTITAN_MEMORY_CACHE_MIB sets one for anyone who
 # wants it. The files live in a dedicated folder under the checkout,
 # <TinyTitan>/memory, beside models/ (override with TINYTITAN_MEMORY_DIR). One file
@@ -506,7 +508,22 @@ tinytitan_catalog_find_dir() {
 tinytitan_export_memory_environment() {
   local workspace_dir="${1:-$PWD}"
   export TINYTITAN_MEMORY="${TINYTITAN_MEMORY:-0}"
-  [[ "$TINYTITAN_MEMORY" == "1" ]] || return 0
+  # The same words the engine reads. MemoryConfiguration.fromEnvironment takes
+  # 1, on and true, case-insensitively, and `on` is pinned by its own test; this
+  # compared the literal "1" alone. So TINYTITAN_MEMORY=on started a server with
+  # memory ON and none of the three exports below, which is the worst of both:
+  # the store fell through to the engine's defaults -- ~/.tinytitan/memory rather
+  # than the <TinyTitan>/memory beside models/, and workspace "default", one file
+  # for every project -- and because the refusal keys off TINYTITAN_WORKSPACE_DIR,
+  # neither side refused. Two readers of one switch must agree on ON and on OFF:
+  # anything the engine reads as off stays off here, rather than gaining a
+  # refusal it does not have.
+  local memory_flag
+  memory_flag="$(printf '%s' "$TINYTITAN_MEMORY" | tr '[:upper:]' '[:lower:]')"
+  case "$memory_flag" in
+    1 | on | true) ;;
+    *) return 0 ;;
+  esac
   # The home directory, its parent and the root are not projects. A server
   # launched from one and used for everything would put a novel and a
   # codebase in one fact store, so this refuses to start rather than mix.

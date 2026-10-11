@@ -298,6 +298,7 @@ jobs:
             test_parity_harness_status \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_launcher_warm_gate \
+            test_models_memory_gate \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \
             launcher_fixture test_progress \
