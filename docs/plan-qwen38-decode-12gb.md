@@ -1,10 +1,19 @@
 # Qwen3.8-Flash-Next 4-bit decode at `--ram 12G` — test plan
 
-**Status: Stage 0 in progress.** Written 2026-10-11, after v5.19. This is a
-plan, not a promise: nothing here is supported until a measurement says so and
-the release notes carry it. The analysis it builds on is §1's measured state;
-every stage is gated on the previous stage's number, and the numerics stages
-(§6) are gated on an explicit operator decision that has not been given yet.
+**Status: Stage 0 complete — B1 dead as modeled (2026-10-11).** The offline
+simulation (`docs/qwen38-decode-12gb-measurements.md`, trace committed at
+`benchmark/expert-cache/route-trace-qwen38-4bit-20261011.txt.gz`) put flat and
+heat within 0.2 points of the uniform control at the fixed 12 GB budget: a
+16-token decode window already touches ~3,234 distinct (layer, expert) pairs
+against a 3,072-slot cache, so the cache is in constant churn and no
+per-pair policy can beat capacity. The plan proceeds to §4/§5 (PLE
+attribution, split reads); the §6 merge decision goes to the operator, and
+§3 stands only as the recorded design that stage 0 rejected. Written
+2026-10-11, after v5.19. This is a plan, not a promise: nothing here is
+supported until a measurement says so and the release notes carry it. The
+analysis it builds on is §1's measured state; every stage is gated on the
+previous stage's number, and the numerics stages (§6) are gated on an
+explicit operator decision that has not been given yet.
 
 **Goal.** Take decode from the measured 4.0–4.7 tok/s (5.8–6.1 warm) at
 `--ram 12G` on a 24 GB M3 to 6–7 tok/s, without raising the RAM target.
