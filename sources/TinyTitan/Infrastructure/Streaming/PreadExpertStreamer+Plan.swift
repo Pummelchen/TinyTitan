@@ -125,7 +125,10 @@ extension PreadExpertStreamer {
             layer: layer)
     }
 
-    public func executeExpertCachePlan(_ plan: ExpertCachePlan) throws
+    public func executeExpertCachePlan(
+        _ plan: ExpertCachePlan,
+        firstStage: (() -> Void)? = nil
+    ) throws
         -> [(buffer: MTLBuffer, offset: UInt64, size: UInt64)]
     {
         precondition(
@@ -151,7 +154,7 @@ extension PreadExpertStreamer {
             if let metalReader {
                 try executeMetalReads(plan, reader: metalReader)
             } else if let boundedReader {
-                try executeBoundedReads(plan, reader: boundedReader)
+                try executeBoundedReads(plan, reader: boundedReader, firstStage: firstStage)
             } else {
                 // Always parallel when there is more than one miss: the
                 // serial alternative (TINYTITAN_PARALLEL_IO=0) measured a wash
@@ -248,7 +251,7 @@ extension PreadExpertStreamer {
         ExpertIOScheduler.shared.submit { [self, operation] in
             operation.markInFlight()
             do {
-                _ = try executeExpertCachePlan(plan)
+                _ = try executeExpertCachePlan(plan, firstStage: operation.publishFirstStage)
                 operation.finish(.success(()))
             } catch {
                 operation.finish(.failure(error))

@@ -32,6 +32,52 @@ import Testing
         #expect(operation.state == .failed)
     }
 
+    // MARK: - First-stage (split-read) signal
+
+    /// The split reader publishes when the gate+up ranges of every miss have
+    /// landed; a waiter must resume at that point, not at full completion.
+    @Test func firstStageWaiterResumesAtPublicationNotCompletion() async throws {
+        let operation = ExpertLoadOperation()
+        operation.markInFlight()
+        let waiter = Task { try await operation.firstStageCompletion() }
+        operation.publishFirstStage()
+        // A resumed waiter returns promptly; an un-resumed one would hang
+        // until the finish below, and this expectation runs before it.
+        try await waiter.value
+        operation.finish(.success(()))
+    }
+
+    /// Completion releases a stage waiter too — an operation without a split
+    /// (whole-region reads) never publishes, and the runner's stage await
+    /// must not hang on it.
+    @Test func firstStageWaiterReleasedByCompletion() async throws {
+        let operation = ExpertLoadOperation()
+        operation.markInFlight()
+        let waiter = Task { try await operation.firstStageCompletion() }
+        operation.finish(.success(()))
+        try await waiter.value
+    }
+
+    /// A failed read releases the stage waiter with the failure: the runner's
+    /// phase-1 fixup must not encode against slots whose bytes never landed.
+    @Test func firstStageWaiterPropagatesFailure() async {
+        struct ExpectedFailure: Error {}
+        let operation = ExpertLoadOperation()
+        operation.markInFlight()
+        let waiter = Task { try await operation.firstStageCompletion() }
+        operation.finish(.failure(ExpectedFailure()))
+        await #expect(throws: ExpectedFailure.self) { try await waiter.value }
+    }
+
+    @Test func firstStagePublicationIsIdempotent() async throws {
+        let operation = ExpertLoadOperation()
+        operation.markInFlight()
+        operation.publishFirstStage()
+        operation.publishFirstStage()
+        try await operation.firstStageCompletion()
+        operation.finish(.success(()))
+    }
+
     @Test func sharedEventDoesNotAdvancePastOutOfOrderBatch() throws {
         let context = try MetalContext()
         let coordinator = try #require(ExpertIOEventCoordinator(device: context.device))

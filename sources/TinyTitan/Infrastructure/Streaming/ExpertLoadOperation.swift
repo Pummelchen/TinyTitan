@@ -18,6 +18,8 @@ public final class ExpertLoadOperation: @unchecked Sendable {
     private var currentState: ExpertLoadOperationState = .submitted
     private var failure: (any Error)?
     private var continuations: [CheckedContinuation<Void, any Error>] = []
+    private var firstStagePublished = false
+    private var firstStageContinuations: [CheckedContinuation<Void, any Error>] = []
 
     public let submittedNanos: UInt64
     public let completionToken: ExpertIOCompletionToken?
@@ -109,6 +111,53 @@ public final class ExpertLoadOperation: @unchecked Sendable {
         }
     }
 
+    /// Signals that the split read's front range (gate+up) has landed in the
+    /// cache slots. Whole-region operations never publish; their stage waiters
+    /// are released by `finish` instead. Idempotent.
+    func publishFirstStage() {
+        condition.lock()
+        guard !firstStagePublished else {
+            condition.unlock()
+            return
+        }
+        firstStagePublished = true
+        let waiting = firstStageContinuations
+        firstStageContinuations.removeAll(keepingCapacity: false)
+        condition.unlock()
+        for continuation in waiting {
+            continuation.resume()
+        }
+    }
+
+    /// Resumes once the operation's first stage is resident: at
+    /// `publishFirstStage` for split reads, or at completion for whole-region
+    /// operations and failures.
+    func firstStageCompletion() async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            condition.lock()
+            if firstStagePublished {
+                condition.unlock()
+                continuation.resume()
+                return
+            }
+            switch currentState {
+            case .completed:
+                condition.unlock()
+                continuation.resume()
+            case .failed:
+                let error =
+                    failure
+                    ?? ModelError.internalInconsistency(
+                        detail: "the expert load failed without recording an error")
+                condition.unlock()
+                continuation.resume(throwing: error)
+            case .submitted, .inFlight:
+                firstStageContinuations.append(continuation)
+                condition.unlock()
+            }
+        }
+    }
+
     func markInFlight() {
         condition.withLock {
             precondition(
@@ -134,6 +183,8 @@ public final class ExpertLoadOperation: @unchecked Sendable {
         }
         let waiting = continuations
         continuations.removeAll(keepingCapacity: false)
+        let waitingForStage = firstStageContinuations
+        firstStageContinuations.removeAll(keepingCapacity: false)
         condition.broadcast()
         condition.unlock()
 
@@ -154,6 +205,14 @@ public final class ExpertLoadOperation: @unchecked Sendable {
         }
 
         for continuation in waiting {
+            switch result {
+            case .success:
+                continuation.resume()
+            case .failure(let error):
+                continuation.resume(throwing: error)
+            }
+        }
+        for continuation in waitingForStage {
             switch result {
             case .success:
                 continuation.resume()

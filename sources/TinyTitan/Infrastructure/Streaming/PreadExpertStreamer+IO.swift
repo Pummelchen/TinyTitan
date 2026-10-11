@@ -145,7 +145,8 @@ extension PreadExpertStreamer {
 
     func executeBoundedReads(
         _ plan: ExpertCachePlan,
-        reader: ParallelExpertReader
+        reader: ParallelExpertReader,
+        firstStage: (() -> Void)? = nil
     ) throws {
         var offsets: [UInt64] = []
         var destinations: [UnsafeMutableRawPointer] = []
@@ -168,6 +169,7 @@ extension PreadExpertStreamer {
                 offsets: offsets,
                 byteCounts: [Int](repeating: frontBytes, count: offsets.count),
                 into: destinations)
+            firstStage?()
             let tails = destinations.map { $0.advanced(by: frontBytes) }
             try reader.fetch(
                 offsets: offsets.map { $0 + phase1 },
