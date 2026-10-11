@@ -378,7 +378,7 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_memval_matrix_exit test_memval_run_repeats \
-            test_paper_figures_inputs
+            test_paper_figures_inputs test_paper_build_pdf
       - name: Benchmark and memory tooling gates (model-free)
         # AUD-211: these suites were committed, cited in commit messages as evidence,
         # and named in no CI step — so they ran on one laptop and on no machine that
