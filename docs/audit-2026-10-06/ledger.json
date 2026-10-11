@@ -5,8 +5,8 @@
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
     "total": 203,
-    "done": 198,
-    "open": 4,
+    "done": 199,
+    "open": 3,
     "blocked": 1
   },
   "tasks": [
@@ -3220,17 +3220,17 @@
       "tier": "C",
       "project": "tools",
       "category": "advice a program prints that its own execution cannot act on: the token has a reader, but not in this language",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Mac (primary)",
       "file_line": "the dependency refusal of `tools/prepare_qwen35.py:88-96`, and the same parenthetical in `tools/prepare_qwen38.py`, `tools/prepare_qwen38_mtp.py`, `tools/prepare_agentworld.py`, `tools/reconcile_snapshot.py` and `tools/patch_snapshot_precision.py`",
       "title": "six `tools/` Python files tell the reader to point `TINYTITAN_PYTHON` at another interpreter, a variable no Python file in the repository reads",
       "discovered-by": "AUD-295's sibling sweep.",
       "evidence-before": "Measured on this commit. `git grep TINYTITAN_PYTHON -- '*.py'` returns six hits, all inside message strings; none of the six files reads the variable, and the only reader in the tree is `tools/lib/python.sh:72`. Run against a stdlib-only interpreter (a 3.14 venv with numpy absent), `tools/prepare_qwen35.py --size qwen35-4b --bits 4` exits 1 with four lines: the missing dependency, `install them for the interpreter running this file: <sys.executable>` -- which is actionable and correct -- `-m pip install safetensors numpy ml_dtypes`, and `or point TINYTITAN_PYTHON at another Python 3.10+`. Re-running the identical command with TINYTITAN_PYTHON exported to `/opt/homebrew/bin/python3.13`, verified to import numpy, ml_dtypes and safetensors, exits 1 with byte-identical output: the variable names nothing the running program consults, so the option it offers cannot change what this program does.",
-      "owner": "operator -- the defect is measured and the repair is known; what is not decided is its scope. The wording change touches six shipped `tools/` files, and the assertion worth keeping is an invariant gate over every message in `tools/` that names an environment variable, which is wider than a sibling sweep and is a new permanent check",
-      "fix-summary": "",
-      "evidence-after": "Not fixed. Proposed: the parenthetical should name a command rather than a variable this program ignores -- run the file with another interpreter, or set TINYTITAN_PYTHON when installing through `tools/install_models.sh`, which does read it. A suite can raise the refusal anywhere by shadowing `numpy` with a stub that fails to import through PYTHONPATH, so it needs no venv and runs in CI; the assertion worth having is the invariant rather than the wording -- a message that names an environment variable either reads it in the same file or says which program does. Left open because the repair is a text change in six shipped tools and the invariant test would be a new rule for every message in `tools/`, which is wider than a sibling sweep.",
-      "sibling-note": "The class is `documented but unread` seen from the other side: the token has a reader, and the reader is a different program. AUD-295 fixed the shell half; these six are the Python half, and the four `tools/` files that resolve an interpreter through the library are not affected because they never print the line. Checked and clear: no `plugins/` JavaScript and no `sources/` Swift reads TINYTITAN_PYTHON, so no third language carries the same advice.",
-      "commit": ""
+      "owner": "",
+      "fix-summary": "All six refusals now read `(or run this file with an interpreter that has them; TINYTITAN_PYTHON selects the interpreter that tools/install_models.sh runs these files with, and this file does not read it)`, replacing the bare pointer to a variable the printing program never consults. The actionable half is untouched: the line naming sys.executable stays, because it is the interpreter that actually lacks the packages. What was NOT done is the wider rule the owner note weighed -- there is still no gate over every message in tools/ that names an environment variable; that stays an operator decision, and the repair here is six text lines plus a per-file pin, not a new permanent check.",
+      "evidence-after": "Written first, in the suite that already governs the variable's reader: benchmark/test_python_resolver_gate.py gained DependencyRefusalMessageTests, 16 to 19 tests. RED: 1 failure, `install_models.sh not found in ... (or point TINYTITAN_PYTHON at another Python 3.10+)`, over all six files in one subTest-free loop so the named file is in the message. GREEN: 19 tests rc 0. The refusal is reached without a venv by putting a numpy stub that raises ImportError at the head of PYTHONPATH, so the import fails and sys.exit prints the real text; nothing was installed or fetched. Two pins beside the repair: the interpreter path still appears (the actionable half, unchanged), and the six files still carry one identical wording. Anchored mutation sweep, 5 of 5 killed: one file reverted to the dead advice, the reader dropped from all six while the variable stays named, the advice deleted outright, the reader named but the wrong program (tools/prepare_qwen38.py), and one file drifting to a second wording. The third is the interesting one and it is kept deliberately: deleting the pointer entirely is a defensible repair, and it fails the uniformity pin, so removing the advice has to be a decision rather than a drift -- the first test is written conditionally (`if the message names the variable, it must name its reader`) precisely so that the only place that rule lives is the one place it can be read as a policy. Gates rc 0: python (ruff 0.16.7, format clean), docs, shellcheck, shell. Neighbours rc 0: test_prepare_qwen38 39, test_qwen38_resume_e2e 36, test_prepare_agentworld 12, test_docs_facts_suites 12.",
+      "sibling-note": "The shell half of AUD-295's class was already fixed; this closes the Python half. Checked and clear on the way: `git grep TINYTITAN_PYTHON` over tracked files now finds the token in tools/lib/python.sh (the reader), the resolver docs paragraph of docs/adding-a-model.md (which says the installer chooses with it), the six message strings that name their reader, the CI comment about an operator's override, and the suites that drive them. The two installer suites that set TINYTITAN_PYTHON=/usr/bin/true were not edited; the exit-status-only usability check AUD-295 recorded as residue still lets /usr/bin/true through, and that is the row's own open note, not a new one.",
+      "commit": "1b4eccc"
     },
     {
       "id": "AUD-297",
