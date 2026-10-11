@@ -365,7 +365,7 @@ class GoldenOperatorNumbers(unittest.TestCase):
         # Model-free, the only observable is order, so the order is asserted
         # against the file itself.
         text = SCRIPT.read_text(encoding="utf-8")
-        guard = text.index('for name in MAX_NEW SEED PORT READY_TIMEOUT')
+        guard = text.index("for name in MAX_NEW SEED PORT READY_TIMEOUT")
         self.assertLess(guard, text.index('"$CLI" --model'))
         self.assertLess(guard, text.index('while [ "$waited" -lt "$READY_TIMEOUT" ]'))
 
