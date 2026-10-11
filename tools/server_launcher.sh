@@ -1227,8 +1227,13 @@ elif (( INTERACTIVE )); then
 else
   PORT="$TINYTITAN_DEFAULT_PORT"
 fi
+# A leading zero cannot be simply stripped: the arithmetic guards below read
+# `(( PORT < 1 || PORT > 65535 ))`, and `(( ))` treats a leading zero as octal, so
+# `08757` errors and answers neither branch — the guard runs and evaluates nothing,
+# and the privileged-port note is skipped the same way. Refuse at the read.
 case "$PORT" in
   ''|*[!0-9]*) echo "unknown port: $PORT (a number 1-65535)" >&2; exit 2 ;;
+  0*) echo "unknown port: $PORT (a number 1-65535, no leading zero)" >&2; exit 2 ;;
 esac
 if (( PORT < 1 || PORT > 65535 )); then
   echo "unknown port: $PORT (a number 1-65535)" >&2; exit 2
