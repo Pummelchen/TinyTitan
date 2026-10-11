@@ -59,6 +59,21 @@ done
 
 case "$runs" in ''|*[!0-9]*|0) die "--runs must be a positive integer, got '$runs'" ;; esac
 case "$parallel" in ''|*[!0-9]*|0) die "--parallel must be a positive integer, got '$parallel'" ;; esac
+# Neither case above matches a leading zero, and the two readers of these counts
+# disagree about what one means: `$((runs * parallel))` takes `010` as octal 8 while
+# `[ "$round" -le "$runs" ]` takes the same digits as decimal 10. Measured through a
+# stub helper: `--runs 010 --parallel 6` announced 48 runs and ran 60, then certified
+# "Clean: no report in 48 instrumented runs"; `--runs 09` answered bash's own "value
+# too great for base" in the arithmetic and went on to certify nine rounds clean with
+# no count at all; and `--runs 00` -- one more than the bare `0` above -- started zero
+# runs and exited 0 over "Clean: no report in 0 instrumented runs", which is the exact
+# verdict this script's status check exists to refuse. The count is the storm's
+# denominator, so a spelling the two readers cannot agree on is refused.
+case "$runs" in 0*) die "--runs must be a positive integer with no leading zero, got '$runs'" ;; esac
+case "$parallel" in 0*)
+  die "--parallel must be a positive integer with no leading zero, got '$parallel'"
+  ;;
+esac
 
 [ -x "$HELPER" ] || die "no swiftpm-testing-helper under $SDK_ROOT; is Xcode installed?"
 [ -d "$FRAMEWORKS/XCTest.framework" ] || die "no XCTest.framework under $FRAMEWORKS"

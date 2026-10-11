@@ -163,6 +163,39 @@ class StormVerdictTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Clean: no report in 2 instrumented runs", result.stdout)
 
+    def assert_padded_refusal(self, option: str, value: str) -> None:
+        """`$((runs * parallel))` reads a leading zero as octal while
+        `[ "$round" -le "$runs" ]` reads the same digits as decimal, so the two
+        halves of one storm disagree. Measured on /bin/bash 3.2.57 through the
+        stub helper: `--runs 010 --parallel 1` printed "Running 8 instrumented
+        runs" and then ran ten rounds, ending "Clean: no report in 8 instrumented
+        runs"; `--runs 09` errored "value too great for base" in the arithmetic and
+        still certified nine rounds clean; `--runs 00` -- which the bare `0` guard
+        does not match -- started nothing and printed "Clean: no report in 0
+        instrumented runs" with exit 0, which is the verdict this suite exists to
+        refuse, reached by another spelling."""
+        result = self.run_storm("pass", "--runs", "1", option, value)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 2, f"{option} {value} read as: {output}")
+        self.assertNotIn("Clean:", result.stdout, f"{option} {value} was not refused")
+        self.assertNotIn("Running", result.stdout, f"{option} {value} still started a storm")
+        self.assertIn(option, output, "a refusal has to name the option it refused")
+        self.assertNotIn("value too great for base", output, f"{option} {value}: {output}")
+
+    def test_a_double_zero_run_count_is_refused(self):
+        self.assert_padded_refusal("--runs", "00")
+
+    def test_a_double_zero_parallel_count_is_refused(self):
+        self.assert_padded_refusal("--parallel", "00")
+
+    def test_a_zero_padded_run_count_is_refused(self):
+        for value in ("010", "09", "08"):
+            self.assert_padded_refusal("--runs", value)
+
+    def test_a_zero_padded_parallel_count_is_refused(self):
+        for value in ("010", "09", "08"):
+            self.assert_padded_refusal("--parallel", value)
+
 
 if __name__ == "__main__":
     unittest.main()
