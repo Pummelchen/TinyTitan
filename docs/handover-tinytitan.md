@@ -54,8 +54,17 @@
 > and exit-table decisions already pinned by tests. What remains is Phase E -- the
 > fresh-clone verification on an independent host -- and the README, wiki and
 > Project-Tracker sync, which is **two pushes**: `main` here and `master` on the wiki
-> remote. Nothing from this audit has been pushed -- 361 commits ahead as measured on
-> `4df0951` -- and a push needs the operator's explicit word, which is also the gate on
+> remote. **That changed on 2026-10-11: the operator gave the word and `main` is pushed.**
+> `origin/main` is `182f770` and the ahead count is 0, re-measured with
+> `git rev-list --count origin/main..HEAD` after the push rather than predicted -- the
+> number in this cell has been read wrong often enough that it is only ever measured. CI
+> therefore now covers every fix in this audit, which is the gate on everything else:
+> `tools/release.sh` refuses to tag until `tools/ci-green.sh` sees a run on the commit,
+> and a push only creates that run, it does not certify it, so reading
+> `gh run list --branch main` on `182f770` is the next session's first action. The wiki
+> sync is still owed: publishing user documentation is two pushes, and `master` on
+> `TinyTitan.wiki.git` has not been touched by this work.
+>
 > The closure invariant was measured on `6634e9d`: all 201 DONE rows are `owner: ""` with a
 > commit, all 3 OPEN rows name an owner with no commit, and **every sha in a DONE row's
 > `commit` field is an ancestor of HEAD** -- that last check is not one `tools/docs-facts.py`
@@ -65,8 +74,6 @@
 > found nothing to file, and a first attempt reported seven false violations by taking the
 > comma out of a two-commit field as part of the sha, which is the reason to strip punctuation
 > before calling `git merge-base`.
-> everything else, because `tools/release.sh` refuses to tag until `tools/ci-green.sh`
-> sees a run on the commit.
 >
 > The product is the engine plus its loopback server — the Mac app is gone — and
 > `tools/install_tinytitan.sh` downloads a built release instead of compiling
@@ -144,7 +151,7 @@ if the date is old.
 | --- | --- |
 | Repository | `Pummelchen/TinyTitan` (renamed 2026-09-14; the old URL redirects) |
 | Checkout folder | `~/Downloads/TinyTitan` — **renamed from `~/Downloads/NVMAI`**, which invalidated every receipt and `.build`'s debug half |
-| `main` | as of 2026-10-11, **363 commits ahead of `origin/main` and nothing pushed** (`git rev-list --count origin/main..main`, measured at 343 at AUD-303's fixes `19e2a23` and `5af9805`, 344 at that close, 345 at AUD-304's fix `954ff87`, 346 at that close and 347 at AUD-305's fix `e60d950` -- 349 at AUD-306's fix `79308fe`, 350 at AUD-307's fix `b1f4260` -- 352 at AUD-296's fix `1b4eccc` -- 353 at that close, 354 at AUD-308's fix `4f9ebd7` -- 354 at AUD-308's fix `4f9ebd7`, 355 at that close, 356 at `e31381d`, 357 at `ef254d5`, 358 at AUD-309's fix `9c50d4b`, 359 at `b287f21` whose M4 claim did not hold, 360 at `6eb050f` which killed M4 for real -- `4df0951` closes AUD-309 as the 361st, this row's pickup paragraph is the 362nd, and `6634e9d`'s successor records the closure invariant as the 363rd; read wrong here four times in a row — the AUD-242 close wrote 216/217 from a count taken before its own fix commit landed, when the truth was 217/218, and AUD-233, AUD-237 and AUD-246 each moved the number without re-reading it. The pattern is that the close row predicts its own landing correctly and then the *next* fix commit moves the count before anyone re-reads it, so this row's successor must measure again rather than add one. `tools/lint.sh docs` does not check this number, so it drifts); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `6eb050f` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
+| `main` | as of 2026-10-11, **pushed to `origin/main` on 2026-10-11 at `182f770`** (363 audit commits plus a merge of four upstream traffic-badge commits that landed while the audit ran; ahead count re-measured after the push: **0**) (`git rev-list --count origin/main..main`, measured at 343 at AUD-303's fixes `19e2a23` and `5af9805`, 344 at that close, 345 at AUD-304's fix `954ff87`, 346 at that close and 347 at AUD-305's fix `e60d950` -- 349 at AUD-306's fix `79308fe`, 350 at AUD-307's fix `b1f4260` -- 352 at AUD-296's fix `1b4eccc` -- 353 at that close, 354 at AUD-308's fix `4f9ebd7` -- 354 at AUD-308's fix `4f9ebd7`, 355 at that close, 356 at `e31381d`, 357 at `ef254d5`, 358 at AUD-309's fix `9c50d4b`, 359 at `b287f21` whose M4 claim did not hold, 360 at `6eb050f` which killed M4 for real -- `4df0951` closes AUD-309 as the 361st, this row's pickup paragraph is the 362nd, `6634e9d`'s successor records the closure invariant as the 363rd, and `182f770` is the merge that landed the stack -- a merge deliberately, because the ledger cites 201 fixes by sha and rebasing 363 commits would rewrite every one of them; read wrong here four times in a row — the AUD-242 close wrote 216/217 from a count taken before its own fix commit landed, when the truth was 217/218, and AUD-233, AUD-237 and AUD-246 each moved the number without re-reading it. The pattern is that the close row predicts its own landing correctly and then the *next* fix commit moves the count before anyone re-reads it, so this row's successor must measure again rather than add one. `tools/lint.sh docs` does not check this number, so it drifts); newest tag `v5.18` (tagged commit `ea5de8c`), HEAD `6eb050f` plus this commit. Consequence, stated plainly because it bites at release time: CI runs on push, so **no CI run covers any of that work** — the local gates and the serial suite are the only evidence, and `tools/release.sh` will refuse to tag until `tools/ci-green.sh` sees a run on the commit |
 | Release | **5.18 published** 2026-10-05 (`gh release list` — it is the latest), assets `tinytitan-5.18-macos-arm64.tar.gz` + `.sha256` and `tinytitan-lib-5.18-macos-arm64.tar.gz` + `.sha256`; **no `tinytitan-5.18-tools.tar.gz`**, which is what blocks AUD-139 on the repository owner. `ServerVersion.current` is `5.18`, and `tools/release.sh:118` refuses a tag that disagrees with it |
 | Models | as of 2026-10-06, **2 installs, 163 GB** (`du -sh models/*`): `qwen3.8-flash-next_125B_A6B_4Bit` (162 GB) and `qwen3.8-flash-next_125B_A6B_MTP_4Bit` (1.4 GB). The rest were pruned for disk and **must not be re-fetched** to satisfy a gate; every receipt here is bound to this path, so both load |
 | Goldens stored | 16 files under `benchmark/golden/`, 16 targets in `tools/golden-baseline.sh`; as of 2026-10-06 **1 is checkable** on this host — `qwen38-4`, the only target whose directory exists under `models/`. The other 15 (`ornith-{4,8}`, `qwen38-8`, `qwen36-{4,8}`, `agentworld-{4,8}`, `katcoder-{4,8}`, `qwen35-{2b,4b,9b}-{4,8}`) are reported *not checked* and named in the notes; the default `ornith-8` is among them. The MTP install maps to no golden target at all |
