@@ -33,11 +33,18 @@ LAUNCHER = ROOT / "tools/server_launcher.sh"
 
 # Flags that answer every other question, so the concurrency question is the only
 # prompt left. `--ram 4` is the smallest target the launcher accepts (1 and 2 GB
-# cannot be honoured: the weights plus the minimum expert cache are ~4.7 GB), and
-# it is under 30% of any Mac this runs on, so it cannot add a red warning to the
-# output these tests read. `--engine gpu` goes with the gpu-backed row these
-# classes ask about: a dense row refuses that engine, and the CPU arm names one
-# explicitly.
+# cannot be honoured: the weights plus the minimum expert cache are ~4.7 GB).
+# `--engine gpu` goes with the gpu-backed row these classes ask about: a dense
+# row refuses that engine, and the CPU arm names one explicitly.
+#
+# The machine's physical memory is pinned through the launcher's own seam at
+# 16 GB, because the host must not decide what these tests read. On the 7 GB
+# CI runner the fixture model plus `--ram 4` cross that machine's 3 GB
+# recommendation, and the launcher's correct RAM warning failed
+# `test_enter_keeps_one`'s blanket "no WARNING" (AUD-312) — the suite's earlier
+# "under 30% of any Mac this runs on" was an assumption about hardware, not a
+# property of the code under test.
+PHYSICAL_RAM_BYTES = 16 * 2**30
 QUIET_ANSWERS = (
     "--answers",
     "default",
@@ -59,7 +66,10 @@ def run_launcher(
     stdin: str = "",
     interactive: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    environment = installs.env(TINYTITAN_LAUNCHER_DRY_RUN="1")
+    environment = installs.env(
+        TINYTITAN_LAUNCHER_DRY_RUN="1",
+        TINYTITAN_PHYSICAL_RAM_BYTES=str(PHYSICAL_RAM_BYTES),
+    )
     if interactive:
         environment["TINYTITAN_LAUNCHER_ASSUME_TTY"] = "1"
     else:
@@ -86,6 +96,7 @@ def run_launcher_pty(
         TINYTITAN_LAUNCHER_DRY_RUN="1",
         TINYTITAN_LAUNCHER_ASSUME_TTY="1",
         TERM="xterm-256color",
+        TINYTITAN_PHYSICAL_RAM_BYTES=str(PHYSICAL_RAM_BYTES),
     )
     environment.pop("NO_COLOR", None)
     if env:
