@@ -104,6 +104,15 @@
 > 0.2.1-alpha.2 pin and the mount-on-missing autonomy section) and `ce5a7aa` (the
 > Project-Tracker paragraph), ahead re-measured **0** after the push -- publishing is
 > two pushes, and both halves of the dsh move are now on their remotes.
+> **The two passes the audit's task list still carried are closed as of the last open
+> row closing:** the L5/L6 pass (performance + tests) and the L7/§5/§6 pass (ops,
+> facade, unused code) drained into the ledger's rows across Phases C and D, and the
+> operator's call on 2026-10-11 was to close them once AUD-310 closed -- which
+> `92a48c6` and `8837f27` did. What the list carries now is Phase E only, which the
+> operator answered the same day: the close is recorded on CI as the fresh clone once
+> the run on the final head is green, with the residual (the release build and the
+> install flow, which CI does not run) named as a permanent finding in
+> `docs/audit-2026-10-06/environment.md`.
 >
 > The closure invariant was re-measured at `92a48c6`: all 209 DONE rows are `owner: ""` with
 > a commit, the blocked AUD-139 is the only row left naming an owner with no commit, and all
