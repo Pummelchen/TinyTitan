@@ -309,10 +309,6 @@ public actor ContinuityEngine {
 
     // MARK: - Context
 
-    public func setAssembler(_ assembler: ContextAssembler) {
-        self.assembler = assembler
-    }
-
     /// Build the block of text to put in front of the model.
     ///
     /// Records a `contextAssembled` event when a session is given, so the log

@@ -10,6 +10,35 @@ import Testing
             .appendingPathComponent("journal.ndjson")
     }
 
+    /// Assembly is injectable through the `assembler:` init parameter and
+    /// through nothing else — the uncalled `setAssembler` setter that
+    /// duplicated it is gone (AUD-310). The pin exercises the surviving path
+    /// end to end: what `assembleContext` returns is what the injected
+    /// assembler produced, so a reintroduced second route cannot quietly
+    /// become the only one the tests ever see.
+    private struct SentinelAssembler: ContextAssembler {
+        func assemble(_ request: ContextRequest) throws -> ContextSnapshot {
+            ContextSnapshot(
+                taskID: request.task.id,
+                memoryItemIDs: [],
+                memoryVersions: [:],
+                renderedContext: "assembled by the injected assembler",
+                estimatedTokenCount: 7,
+                budget: ContextBudgetRecord(request.budget))
+        }
+    }
+
+    @Test func theAssemblerInjectedAtInitIsTheOneAssemblyUses() async throws {
+        let engine = ContinuityEngine(assembler: SentinelAssembler())
+        try await engine.start()
+        let task = try await engine.createTask(title: "wired", objective: "injection")
+        let snapshot = try await engine.assembleContext(taskID: task.id)
+        #expect(
+            snapshot.renderedContext == "assembled by the injected assembler",
+            "assembly did not go through the init-injected assembler")
+        await engine.shutDown()
+    }
+
     /// `start()` is the replay. If an unreadable journal replayed as empty, the
     /// engine would come up believing the workspace was new and its next
     /// compaction would write that belief over the records it could not read.
