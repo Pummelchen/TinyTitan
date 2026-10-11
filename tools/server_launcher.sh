@@ -1224,6 +1224,46 @@ fi
 non_default_port=0
 if (( PORT != TINYTITAN_DEFAULT_PORT )); then non_default_port=1; fi
 
+# The two warm-up numbers are checked here for the same reason the port is: by the
+# time the warm-up runs, the model has already loaded. `TINYTITAN_WARM_TOKENS` is
+# put through an arithmetic expansion where it is used, so a word there is bash's
+# own `unbound variable`, a leading zero is read as octal (`0755` becomes 493, and
+# `08000` is `value too great for base`), and either one ends the run with a
+# message that names neither the variable nor what to do about it.
+# `TINYTITAN_WARM_TIMEOUT` goes to curl's max-time, which documents 0 as "continue
+# forever" — a switch rather than a bound — and answers a malformed value with a
+# failed request, which the warm-up reports the same way it reports a slow model.
+# Checked only for the run that warms: `--web`, and TINYTITAN_WARM not switched
+# off. A value the run never reads is not this run's business.
+if (( WEB )) && [[ "${TINYTITAN_WARM:-1}" != "0" ]]; then
+  WARM_TOKENS="${TINYTITAN_WARM_TOKENS:-4000}"
+  case "$WARM_TOKENS" in
+    "0")
+      echo "TINYTITAN_WARM_TOKENS=0 warms nothing; name a whole number of tokens, 1 or more" >&2
+      exit 2
+      ;;
+    0*)
+      echo "unknown warm-up size: $WARM_TOKENS (a whole number of tokens with no leading zero)" >&2
+      exit 2
+      ;;
+    *[!0-9]*)
+      echo "unknown warm-up size: $WARM_TOKENS (TINYTITAN_WARM_TOKENS takes a whole number of tokens, 1 or more)" >&2
+      exit 2
+      ;;
+  esac
+  WARM_TIMEOUT="${TINYTITAN_WARM_TIMEOUT:-900}"
+  case "$WARM_TIMEOUT" in
+    "0")
+      echo "TINYTITAN_WARM_TIMEOUT=0 is curl's no-timeout, which leaves the warm-up waiting forever; name a whole number of seconds" >&2
+      exit 2
+      ;;
+    0* | *[!0-9]*)
+      echo "unknown warm-up timeout: $WARM_TIMEOUT (TINYTITAN_WARM_TIMEOUT takes a whole number of seconds, 1 or more)" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 # The context, KV and YaRN flags reach the GPU runtime only. Asking for one of
 # them against a CPU model is a misunderstanding worth naming: the CPU engine
 # takes its context from the model's own config (clamped by the backend) and
@@ -1823,7 +1863,11 @@ if (( WEB )); then
   # diving...". Set TINYTITAN_WARM=0 to skip it, or TINYTITAN_WARM_TOKENS to
   # change the size.
   if [[ "${TINYTITAN_WARM:-1}" != "0" ]]; then
-    warm_tokens="${TINYTITAN_WARM_TOKENS:-4000}"
+    # One read, from the value the guard checked. The mutation sweep showed that a
+    # second read of the environment is equivalent today, because the guard refuses
+    # rather than rewrites — so this holds the seam, not the safety: if the check
+    # ever normalises a value, the warm-up must send the normalised one.
+    warm_tokens="$WARM_TOKENS"
     echo
     echo "Warming the expert cache (one throwaway prompt, ~$warm_tokens tokens;"
     echo "this is the slow part of the first answer, moved here)."
@@ -1844,7 +1888,7 @@ if (( WEB )); then
     done
     warm_body="$(printf '{"model":"%s","messages":[{"role":"user","content":"%s\\nReply with the single word: ready"}],"max_tokens":1,"stream":false}' "$MODEL" "$warm_text")"
     warm_started="$(date +%s)"
-    if curl -s --max-time "${TINYTITAN_WARM_TIMEOUT:-900}" \
+    if curl -s --max-time "$WARM_TIMEOUT" \
          "http://127.0.0.1:${PORT}/v1/chat/completions" \
          -H 'Content-Type: application/json' -d "$warm_body" >/dev/null 2>&1; then
       echo "Expert cache warm ($(( $(date +%s) - warm_started ))s)."
