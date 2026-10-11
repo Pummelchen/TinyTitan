@@ -96,6 +96,20 @@ The trace also kills the §3 LFU-warmth sub-hypothesis for this shape: with a
 working set that exceeds the cache within 16 tokens, cross-request warmth
 evicts within a handful of tokens regardless.
 
+## 5b. B2 (PLE decode-time traffic) — closed by arithmetic, no model run
+
+The plan's §4 asked for a capture; the manifest answers it. From
+`models/qwen3.8-flash-next_125B_A6B_4Bit/ple_constants.json`:
+`ple_head_dim=160` → `rowBytes = 160 × 2 = 320`, `ngram_size=3`,
+`ple_n_heads=16` → `gatherPLERows`
+(`sources/TinyTitan/Runtime/Inference/RealForwardRunner+PLE.swift:13-26`)
+reads **16 rows × 320 B = 5,120 B per token** from `ngram_table.bin`
+(102.4 GB). Against 293–368 MB of expert traffic per token that is 0.0015%
+— 1.4 µs at the 3.6 GB/s wall. The comment on the gather already said
+"three orders of magnitude under"; the manifest pins it. The reader uses an
+ordinary `pread` (page-cached), so those 5 KiB are usually not even device
+reads. **B2 is not material; closed with these numbers.**
+
 ## 6. Provenance
 
 - Simulator: `benchmark/flat_pair_cache_sim.py` (22 tests, CI-registered).
