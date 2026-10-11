@@ -167,8 +167,9 @@ which is the direct evidence.
 ### Verification
 
 - `tools/lint.sh` — all eighteen gates clean.
-- `swift test --no-parallel` — measured on the tag during the release dry
-  run; the count lands here when it is seen, not before.
+- `swift test --no-parallel` — 1,748 tests in 253 suites across seven target
+  runs; the release test gate reads every target's summary line and the run
+  status, and all seven read passed.
 - **1 of the 16 stored golden baselines compared byte-identical**
   (`qwen38-4`, the 125B install under `models/`), and the library contract
   suite ran against the same install: 4 tests in 68.9 s — two engines on one
