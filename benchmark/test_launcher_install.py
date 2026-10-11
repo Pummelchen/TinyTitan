@@ -418,5 +418,117 @@ class EmptyModelsDirTests(unittest.TestCase):
         self.assertIn("fetches it first", run.stdout)
 
 
+class MenuRowPaddingTests(unittest.TestCase):
+    """A zero-padded reply names the row its digits spell, not its octal value.
+
+    The pick is guarded with `(( pick >= 1 && pick <= count ))` and indexed with
+    `$((pick - 1))`, and bash 3.2 reads a leading zero as octal in both. Measured
+    on 2026-10-10 against an empty catalogue, where the menu's 16 rows are the
+    catalogue in order, before the fix:
+
+    - `010` picked row 8 -- `katcoder-8bit`, 38.0 GB -- for a person who pointed
+      at row 10, `qwen38flash-8bit` at 220.0 GB. Nothing errors.
+    - `013` picked row 11 (`qwen35-2b`) for row 13 (`qwen35-4b`), and `016`
+      picked row 14 (`qwen35-4b-8bit`) for row 16 (`qwen35-9b-8bit`).
+    - `017` and `020` were *accepted* as rows 15 and 16, where the plain replies
+      `17` and `20` are refused: padding moved a reply past the end of the list.
+    - `08` was refused with `value too great for base` -- the right outcome for
+      the wrong reason, and the neighbour `01`-`07` pass unchanged because their
+      octal reading equals their decimal one.
+
+    The rows run against a temporary empty `models/` rather than this checkout's,
+    so every catalogue row is on the menu in a fixed order on any machine, and the
+    run declines the fetch, so nothing is downloaded here.
+
+        cd benchmark && python3 -m unittest test_launcher_install.MenuRowPaddingTests -v
+    """
+
+    def pick(self, reply: str, models: pathlib.Path) -> subprocess.CompletedProcess[str]:
+        environment = dict(os.environ)
+        environment["TINYTITAN_LAUNCHER_DRY_RUN"] = "1"
+        environment["TINYTITAN_LAUNCHER_ASSUME_TTY"] = "1"
+        environment["TINYTITAN_MODELS_DIR"] = str(models)
+        return subprocess.run(
+            [
+                "bash",
+                str(LAUNCHER),
+                "--dry-run",
+                "--client",
+                "server",
+                "--answers",
+                "default",
+                "--thinking",
+                "off",
+                "--ram",
+                "9",
+                "--engine",
+                "gpu",
+                "--concurrency",
+                "1",
+            ],
+            input=f"{reply}\nn\n",
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+            timeout=120,
+        )
+
+    @staticmethod
+    def named_key(run: subprocess.CompletedProcess[str]) -> str | None:
+        """The catalogue key the pick resolved to, from the command it prints."""
+        match = re.search(r"Install it with:\s+tools/install_models\.sh (\S+)", run.stdout)
+        return match.group(1) if match else None
+
+    @staticmethod
+    def row_label(menu_output: str, number: str) -> str:
+        """The label the menu itself prints for a row number.
+
+        Reading the row back out of the drawn menu is what makes the comparison
+        below independent of which models the catalogue happens to carry: the
+        claim is that the row you pointed at is the row that got picked.
+        """
+        pattern = rf"^\s+{number}\)\s+(.+?)\s+(4|8)-bit\b"
+        match = re.search(pattern, menu_output, re.MULTILINE)
+        if match is None:
+            raise AssertionError(f"row {number} is not on the drawn menu")
+        return f"{match.group(1)} {match.group(2)}-bit"
+
+    def test_a_padded_reply_names_the_row_it_points_at(self) -> None:
+        # Each padded reply must reach the same row as its plain digits, and must
+        # not do it by an arithmetic error the guard happens to swallow.
+        with tempfile.TemporaryDirectory() as empty:
+            models = pathlib.Path(empty)
+            drawn = self.pick("1", models)
+            for plain, padded in (("8", "08"), ("10", "010"), ("13", "013"), ("16", "016")):
+                with self.subTest(row=plain, reply=padded):
+                    bare = self.pick(plain, models)
+                    pad = self.pick(padded, models)
+                    combined = pad.stdout + pad.stderr
+                    self.assertNotIn(
+                        "value too great for base",
+                        combined,
+                        f"reply {padded} reached the arithmetic guard as an error",
+                    )
+                    label = self.row_label(drawn.stdout, plain)
+                    self.assertIn(
+                        f"{label} is not installed",
+                        pad.stdout,
+                        f"reply {padded} did not pick the row the menu draws as {label}",
+                    )
+                    self.assertEqual(self.named_key(bare), self.named_key(pad))
+
+    def test_a_padded_reply_past_the_end_still_refuses(self) -> None:
+        with tempfile.TemporaryDirectory() as empty:
+            models = pathlib.Path(empty)
+            for padded in ("017", "020"):
+                with self.subTest(reply=padded):
+                    pad = self.pick(padded, models)
+                    combined = pad.stdout + pad.stderr
+                    self.assertIsNone(self.named_key(pad), f"{padded} reached a row")
+                    self.assertIn("invalid choice", combined)
+                    self.assertEqual(pad.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

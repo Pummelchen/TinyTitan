@@ -81,6 +81,62 @@ class InstallMenuAnswerTests(unittest.TestCase):
         self.assertIn("not a choice", output)
 
 
+class MenuRowPaddingTests(unittest.TestCase):
+    """A zero-padded row number must mean the row its digits name.
+
+    AUD-305, measured on /bin/bash 3.2.57 with the shipped 16-row catalogue. The
+    guard and the index both read the reply through arithmetic, and `(( ))` takes
+    a leading zero as octal, so three different things go wrong:
+
+    - `010` is octal 8, legitimately in range, and installs row 8 -- a 20.0 GB
+      KAT-Coder 4-bit -- for a person who pointed at row 10, the 5.3 GB Qwen 3.5
+      4B 8-bit. Nothing errors; the wrong model is downloaded.
+    - `08` and `09` make the range test error and answer neither branch. That
+      test asks the question in the negative (`below 1, or above the count`), so
+      "no verdict" reads as ACCEPTED, and the very next line indexes the
+      catalogue with the same unreadable value: the script dies with
+      `09: value too great for base` and installs nothing.
+    - `01` to `07` land on the right row, because octal and decimal agree on a
+      single digit. Those two cases are pinned here as neighbours and they pass
+      before the repair; they are in this file because the repair must not lose
+      them.
+
+    The repair forces the decimal base rather than refusing a leading zero, and
+    that is a measured choice, not a preference: this tree refuses a padded
+    number where the value flows outward to readers it cannot all fix (`PORT`,
+    which reaches curl URLs, the server's argv and the route writer), and reads
+    it in decimal where the value is consumed on the spot (`ram_tier` echoes
+    `10#`-forced GB, `valid_concurrency` forces the base at each read). A menu
+    row has exactly two readers, both inside these three lines. Refusing instead
+    would turn `01` through `07` -- replies that install the right row today --
+    into new refusals, which is a rule no reader of this menu has.
+    """
+
+    def installed(self, stdin: str) -> tuple[str, str]:
+        result = run_menu(stdin)
+        match = re.search(r"INSTALLED (\S+)", result.stdout)
+        return (match.group(1) if match else "", result.stdout + result.stderr)
+
+    def test_a_zero_padded_row_installs_the_row_its_digits_name(self) -> None:
+        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("016", "16")):
+            with self.subTest(reply=padded):
+                want, _ = self.installed(plain + "\n")
+                self.assertTrue(want, f"the plain reply {plain} names no row")
+                got, output = self.installed(padded + "\n")
+                self.assertEqual(got, want, output)
+                self.assertNotIn("value too great for base", output)
+
+    def test_a_padded_row_outside_the_list_still_refuses(self) -> None:
+        # Forcing the base is not a pass: 17 and 20 are still not rows, and 0 is
+        # still not a row, padded or not.
+        for reply in ("00", "017", "020"):
+            with self.subTest(reply=reply):
+                got, output = self.installed(reply + "\n")
+                self.assertEqual(got, "", output)
+                self.assertIn("not a choice", output)
+                self.assertNotIn("value too great for base", output)
+
+
 class StagingPathTests(unittest.TestCase):
     """Downloads stage under one absolute root, whatever the caller's cwd is."""
 

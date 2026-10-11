@@ -817,11 +817,19 @@ choose_model() {
     return 2
   fi
   reply="${reply:-1}"
-  if [[ ! "$reply" =~ ^[0-9]+$ ]] || (( reply < 1 || reply > count )); then
+  # Both reads are forced to decimal. `(( ))` and `$(( ))` take a leading zero as
+  # octal, and this guard asks the range question in the negative, so an
+  # unreadable reply answers "no verdict" and means ACCEPTED: `010` passed as 8
+  # and installed row 8 for a person who pointed at row 10, while `08` passed the
+  # test and then died at the index below. The row a reply names is the row it
+  # installs. Forcing the base is what the launcher does with a number it consumes
+  # on the spot (`ram_tier` and `valid_concurrency` in server_launcher.sh); a port
+  # is refused instead because it flows outward to readers that script cannot fix.
+  if [[ ! "$reply" =~ ^[0-9]+$ ]] || (( 10#$reply < 1 || 10#$reply > count )); then
     echo "not a choice: $reply" >&2
     return 2
   fi
-  key="${TINYTITAN_MODEL_CHOICES[$((reply - 1))]%%|*}"
+  key="${TINYTITAN_MODEL_CHOICES[$((10#$reply - 1))]%%|*}"
   echo
   install_one "$key"
 }

@@ -606,8 +606,16 @@ if [[ -z "$MODEL_ARG" ]]; then
   printf "Choice [1-%d] (default %d): " "$((count + missing_count))" "$((default_idx + 1))"
   read -r pick || exit 1
   pick="${pick:-$((default_idx + 1))}"
-  if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= count + missing_count )); then
-    choice="${offers[$((pick - 1))]}"
+  # Both reads are forced to decimal. `(( ))` and `$(( ))` take a leading zero as
+  # octal, so `010` is a legitimate in-range 8 and picks row 8 -- katcoder-8bit,
+  # 38.0 GB -- for a person who pointed at row 10, while `017` answers as row 15
+  # for a reply that names no row at all. The guard asks the range question
+  # positively, so the shapes bash cannot read (`08`) land in the refusal below:
+  # correct but noisy, and forcing the base is what makes the row pointed at the
+  # row chosen. `ram_tier` and `valid_concurrency` force the base the same way;
+  # a port is refused instead because it flows outward to readers this cannot fix.
+  if [[ "$pick" =~ ^[0-9]+$ ]] && (( 10#$pick >= 1 && 10#$pick <= count + missing_count )); then
+    choice="${offers[$((10#$pick - 1))]}"
   else
     echo "invalid choice: $pick" >&2; exit 2
   fi
