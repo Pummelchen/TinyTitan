@@ -85,20 +85,36 @@ class StormVerdictTests(unittest.TestCase):
         bundle.parent.mkdir(parents=True)
         bundle.write_text("#!/usr/bin/env bash\nexit 0\n")
         bundle.chmod(0o755)
-        # The script looks for the runtime beside the bundle's MacOS directory,
-        # at Contents/Frameworks, so the stub goes exactly where it looks. It
-        # must be a real dylib, not a stand-in file: the storm injects it via
-        # DYLD_INSERT_LIBRARIES, and on the xcode-27 CI runner (SIP disabled,
-        # probe run 38135275281) dyld terminates any helper whose inserted
-        # library is not a Mach-O — CI run 38132374149 lost every stub helper
-        # before its first test line. A SIP-on host strips that variable, which
-        # is why a text file here stayed green locally while failing CI.
+        # The storm injects the runtime through DYLD_INSERT_LIBRARIES on a
+        # launch chain whose arch dyld does not let us pick: the stub helper's
+        # shebang execs /usr/bin/env, and the xcode-27 runner's env runs
+        # arm64e — probe run 38138290817 inserted a valid thin arm64 dylib
+        # there and dyld killed it ("mach-o file, but is an incompatible
+        # architecture (have 'arm64', need 'arm64e')", rc 134) before the
+        # helper ever ran; inserting into /bin/bash answered rc 0. The real
+        # runtime is shaped for that chain: lipo reports Xcode's
+        # libclang_rt.tsan_osx_dynamic.dylib as x86_64 x86_64h arm64 arm64e.
+        # The stub must be at least as fat as the slices the chain executes,
+        # which is the property test_the_injected_tsan_runtime... pins. A
+        # SIP-on host strips the variable instead, so a thin stub stays green
+        # locally while killing every helper on CI (runs 38132374149 with a
+        # text file, 38136569050 with the thin dylib).
         runtime = bundle.parent.parent / "Frameworks/libclang_rt.tsan_osx_dynamic.dylib"
         runtime.parent.mkdir(parents=True)
         stub_source = self.tmp / "stub_tsan_runtime.c"
         stub_source.write_text("int tinytitan_stub_tsan_runtime;\n")
         subprocess.run(
-            ["clang", "-dynamiclib", str(stub_source), "-o", str(runtime)],
+            [
+                "clang",
+                "-dynamiclib",
+                "-arch",
+                "arm64",
+                "-arch",
+                "arm64e",
+                str(stub_source),
+                "-o",
+                str(runtime),
+            ],
             check=True,
             capture_output=True,
         )
@@ -136,39 +152,48 @@ class StormVerdictTests(unittest.TestCase):
             check=False,
         )
 
-    def test_the_injected_tsan_runtime_is_a_real_mach_o_image(self):
-        # The storm injects the runtime through DYLD_INSERT_LIBRARIES, and on
-        # the xcode-27 CI runner (SIP disabled, measured by probe run
-        # 38135275281: csrutil reports disabled) that variable reaches the
-        # helper, where dyld terminates any process whose inserted library is
-        # not a Mach-O ("terminating because inserted dylib ... could not be
-        # loaded: slice is not valid mach-o file", rc 134 on the runner). A
-        # SIP-on host strips the variable instead, so this file's validity is
-        # invisible locally and the CI run is where a text file at this path
-        # fails: run 38132374149 lost every stub helper before its first test
-        # line and three verdict tests read the storm's refusal as 2 != 0/1.
-        # The magic bytes are the host-independent pin: whatever builds this
-        # fixture must produce something dyld can actually insert.
+    def test_the_injected_tsan_runtime_carries_a_slice_for_every_arch_the_chain_runs(self):
+        # The storm injects the runtime through DYLD_INSERT_LIBRARIES on a
+        # launch chain of platform binaries whose slices are not ours to
+        # choose: the stub helper's shebang execs /usr/bin/env, arm64e on the
+        # xcode-27 runner, while the bash it finds runs arm64. dyld refuses
+        # any inserted dylib that lacks the loading process's slice —
+        # measured by probe run 38138290817, which inserted a valid thin
+        # arm64 dylib into that env and got "mach-o file, but is an
+        # incompatible architecture (have 'arm64', need 'arm64e')", rc 134,
+        # while the same dylib into /bin/bash answered rc 0; CI run
+        # 38136569050 lost every fixture helper through exactly that message
+        # even after the runtime had become a real MH_DYLIB. The real
+        # runtime is fat (x86_64 x86_64h arm64 arm64e) for this reason, so
+        # the pin is the arch list, not the magic bytes: whatever builds
+        # this fixture must produce something dyld can insert at every hop.
         runtime = self.tmp / (
             ".build/out/Products/Debug/TinyTitanServerTests.xctest/Contents"
             "/Frameworks/libclang_rt.tsan_osx_dynamic.dylib"
         )
-        header = runtime.read_bytes()[:16]
-        self.assertEqual(
-            len(header),
-            16,
-            f"the injected runtime is {len(header)} bytes — no Mach-O header",
+        probe = subprocess.run(
+            ["lipo", "-archs", str(runtime)],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        self.assertEqual(
-            header[:4],
-            b"\xcf\xfa\xed\xfe",
-            f"first bytes {header[:4]!r} are not a 64-bit little-endian Mach-O image",
+        archs = probe.stdout.split()
+        self.assertTrue(
+            probe.returncode == 0 and archs,
+            f"lipo could not read the injected runtime (rc {probe.returncode}): "
+            f"{probe.stderr.strip()}",
         )
-        self.assertEqual(
-            header[12:16],
-            (6).to_bytes(4, "little"),
-            f"Mach-O filetype {int.from_bytes(header[12:16], 'little')} is not "
-            "MH_DYLIB (6) — dyld inserts dylibs, not objects or text",
+        self.assertIn(
+            "arm64",
+            archs,
+            f"the injected runtime carries {archs} — nothing can load it from the "
+            "arm64 processes in the launch chain",
+        )
+        self.assertIn(
+            "arm64e",
+            archs,
+            f"the injected runtime carries {archs} — the runner's /usr/bin/env "
+            "(arm64e, probe run 38138290817) refuses it and every helper dies at 134",
         )
 
     def test_a_run_that_executed_nothing_is_not_a_clean_verdict(self):
