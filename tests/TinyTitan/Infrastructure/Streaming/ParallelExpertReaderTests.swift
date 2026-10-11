@@ -179,4 +179,113 @@ import Testing
             expertStride: Self.stride, threads: 999)
         #expect(high.threadCount == 16)
     }
+
+    // MARK: - Split fetch (plan §5 / B3)
+
+    /// The blob is gate|up|down contiguous, so the split fetches the front
+    /// `firstBytes` and then the tail. Whatever the split, the assembled slot
+    /// must be byte-identical to a whole-region fetch.
+    @Test func splitFetchMatchesWholeRegionByteForByte() throws {
+        let count = 8
+        let url = try Self.makeFixture(count: count)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try ParallelExpertReader(
+            path: url.path,
+            expertStride: Self.stride,
+            threads: 4)
+        let wanted: [UInt32] = [7, 2, 5, 0]
+        let firstBytes = Self.stride * 2 / 3
+        try Self.withDestinations(wanted.count) { whole in
+            try Self.withDestinations(wanted.count) { split in
+                try reader.fetch(experts: wanted, into: whole)
+                let fronts = split.map { $0 }
+                let tails = split.map { $0.advanced(by: firstBytes) }
+                try reader.fetch(
+                    offsets: wanted.map { UInt64($0) * UInt64(Self.stride) },
+                    byteCounts: [Int](repeating: firstBytes, count: wanted.count),
+                    into: fronts)
+                try reader.fetch(
+                    offsets: wanted.map {
+                        UInt64($0) * UInt64(Self.stride) + UInt64(firstBytes)
+                    },
+                    byteCounts: [Int](repeating: Self.stride - firstBytes, count: wanted.count),
+                    into: tails)
+                for i in 0..<wanted.count {
+                    let expected = Data(
+                        bytes: whole[i],
+                        count: Self.stride)
+                    let actual = Data(bytes: split[i], count: Self.stride)
+                    #expect(expected == actual, "destination \(i) diverged")
+                }
+            }
+        }
+    }
+
+    /// A first range far smaller than the stride (the gate+up share is ~2/3,
+    /// but nothing in the reader should depend on that shape).
+    @Test func splitFetchHandlesAShortFirstRange() throws {
+        let url = try Self.makeFixture(count: 4)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try ParallelExpertReader(
+            path: url.path,
+            expertStride: Self.stride,
+            threads: 2)
+        let firstBytes = Self.stride / 8
+        try Self.withDestinations(2) { bufs in
+            try reader.fetch(
+                offsets: [0, 3 * UInt64(Self.stride)],
+                byteCounts: [firstBytes, firstBytes],
+                into: bufs)
+            for (i, expert) in [0, 3].enumerated() {
+                let bytes = bufs[i].assumingMemoryBound(to: UInt8.self)
+                #expect(bytes[0] == UInt8(expert))
+                #expect(bytes[firstBytes - 1] == UInt8(expert))
+            }
+        }
+    }
+
+    /// Partial progress is the point of the split: the first call must write
+    /// exactly the bytes it was asked for and leave the rest of the slot alone,
+    /// so the phase-1 compute can start while the tail is still in flight.
+    @Test func firstRangeFetchLeavesTheTailUnwritten() throws {
+        let url = try Self.makeFixture(count: 4)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try ParallelExpertReader(
+            path: url.path,
+            expertStride: Self.stride,
+            threads: 2)
+        let firstBytes = Self.stride * 2 / 3
+        try Self.withDestinations(1) { bufs in
+            bufs[0].assumingMemoryBound(to: UInt8.self)
+                .update(repeating: 0xFF, count: Self.stride)
+            try reader.fetch(
+                offsets: [2 * UInt64(Self.stride)],
+                byteCounts: [firstBytes],
+                into: [bufs[0]])
+            let bytes = bufs[0].assumingMemoryBound(to: UInt8.self)
+            #expect(bytes[0] == 2)
+            #expect(bytes[firstBytes - 1] == 2)
+            #expect(
+                bytes[firstBytes] == 0xFF,
+                "the split fetch wrote past the range it was asked for")
+            #expect(bytes[Self.stride - 1] == 0xFF)
+        }
+    }
+
+    @Test func splitReadBeyondEndOfFileFails() throws {
+        let url = try Self.makeFixture(count: 2)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try ParallelExpertReader(
+            path: url.path,
+            expertStride: Self.stride,
+            threads: 2)
+        _ = Self.withDestinations(1) { bufs in
+            #expect(throws: ParallelExpertReader.Failure.self) {
+                try reader.fetch(
+                    offsets: [UInt64(Self.stride)],
+                    byteCounts: [Self.stride + 1],
+                    into: bufs)
+            }
+        }
+    }
 }

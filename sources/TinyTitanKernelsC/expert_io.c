@@ -25,8 +25,9 @@ struct tinytitan_expert_reader {
     pthread_cond_t batch_idle;   // prior submitter cleared the published batch
 
     // Current batch. Valid only while outstanding > 0.
-    const uint32_t *expert_ids;   // one of these two is non-NULL
+    const uint32_t *expert_ids;   // one of these three is non-NULL
     const uint64_t *offsets;
+    const uint32_t *byte_counts;  // present only for range batches
     void *const *destinations;
     size_t count;
     size_t next_index;           // claimed by workers
@@ -84,13 +85,16 @@ static void *worker_main(void *arg) {
             break;
         }
         size_t index = r->next_index++;
+        size_t length = r->byte_counts != NULL
+            ? (size_t)r->byte_counts[index]
+            : r->expert_stride;
         uint64_t offset = r->offsets != NULL
             ? r->offsets[index]
             : (uint64_t)r->expert_ids[index] * (uint64_t)r->expert_stride;
         void *dst = r->destinations[index];
         pthread_mutex_unlock(&r->lock);
 
-        int rc = read_one(fd, dst, r->expert_stride, offset);
+        int rc = read_one(fd, dst, length, offset);
 
         pthread_mutex_lock(&r->lock);
         if (rc != 0 && r->first_errno == 0) {
@@ -237,6 +241,7 @@ void tinytitan_expert_reader_destroy(tinytitan_expert_reader *r) {
 static int submit_batch(tinytitan_expert_reader *r,
                         const uint32_t *expert_ids,
                         const uint64_t *offsets,
+                        const uint32_t *byte_counts,
                         void *const *destinations,
                         size_t count) {
     pthread_mutex_lock(&r->lock);
@@ -254,6 +259,7 @@ static int submit_batch(tinytitan_expert_reader *r,
     }
     r->offsets = offsets;
     r->expert_ids = expert_ids;
+    r->byte_counts = byte_counts;
     r->destinations = destinations;
     r->count = count;
     r->next_index = 0;
@@ -271,6 +277,7 @@ static int submit_batch(tinytitan_expert_reader *r,
     r->next_index = 0;
     r->expert_ids = NULL;
     r->offsets = NULL;
+    r->byte_counts = NULL;
     r->destinations = NULL;
     pthread_cond_broadcast(&r->batch_idle);
     pthread_mutex_unlock(&r->lock);
@@ -285,7 +292,7 @@ int tinytitan_expert_reader_fetch(tinytitan_expert_reader *r,
         return EINVAL;
     }
     if (count == 0) { return 0; }
-    return submit_batch(r, expert_ids, NULL, destinations, count);
+    return submit_batch(r, expert_ids, NULL, NULL, destinations, count);
 }
 
 int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *r,
@@ -296,7 +303,26 @@ int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *r,
         return EINVAL;
     }
     if (count == 0) { return 0; }
-    return submit_batch(r, NULL, offsets, destinations, count);
+    return submit_batch(r, NULL, offsets, NULL, destinations, count);
+}
+
+int tinytitan_expert_reader_fetch_ranges(tinytitan_expert_reader *r,
+                                    const uint64_t *offsets,
+                                    const uint32_t *byte_counts,
+                                    void *const *destinations,
+                                    size_t count) {
+    if (r == NULL
+        || (count > 0
+            && (offsets == NULL || byte_counts == NULL || destinations == NULL))) {
+        return EINVAL;
+    }
+    for (size_t i = 0; i < count; ++i) {
+        if (byte_counts[i] == 0) {
+            return EINVAL;
+        }
+    }
+    if (count == 0) { return 0; }
+    return submit_batch(r, NULL, offsets, byte_counts, destinations, count);
 }
 
 

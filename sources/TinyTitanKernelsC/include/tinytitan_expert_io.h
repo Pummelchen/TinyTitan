@@ -64,6 +64,21 @@ int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *reader,
                                      void *const *destinations,
                                      size_t count);
 
+/// As `tinytitan_expert_reader_fetch_offsets`, but item `i` reads
+/// `byte_counts[i]` bytes from `offsets[i]` into the *front* of
+/// `destinations[i]` instead of a full expert stride.
+///
+/// The expert blob is gate|up|down contiguous, so a caller that wants the
+/// gate+up share to land before `down` fetches the front range, runs its
+/// phase-1 work when this returns, and fetches the tail (at
+/// `offset + byte_count`, into `destination + byte_count`) while that work
+/// runs. Every `byte_counts[i]` must be at least 1.
+int tinytitan_expert_reader_fetch_ranges(tinytitan_expert_reader *reader,
+                                    const uint64_t *offsets,
+                                    const uint32_t *byte_counts,
+                                    void *const *destinations,
+                                    size_t count);
+
 /// Threads actually in use, after clamping.
 int tinytitan_expert_reader_threads(const tinytitan_expert_reader *reader);
 

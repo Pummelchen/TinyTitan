@@ -124,6 +124,48 @@ public final class ParallelExpertReader: @unchecked Sendable {
         }
     }
 
+    /// As `fetch(offsets:into:)` but item `i` reads `byteCounts[i]` bytes from
+    /// `offsets[i]` into the *front* of `destinations[i]`, not a full stride.
+    ///
+    /// The expert blob is gate|up|down contiguous, so a caller that wants
+    /// phase-1 compute to start before `down` lands fetches the front range,
+    /// starts that work when this returns, and fetches the tail (at
+    /// `offset + byteCount`, into `destination + byteCount`) while it runs.
+    /// Bytes past `byteCount[i]` in a destination are untouched, so the two
+    /// calls of a split assemble the same slot a whole-region fetch produces.
+    public func fetch(
+        offsets: [UInt64],
+        byteCounts: [Int],
+        into destinations: [UnsafeMutableRawPointer]
+    ) throws {
+        precondition(
+            offsets.count == byteCounts.count
+                && byteCounts.count == destinations.count,
+            "offsets, byteCounts and destinations must be the same length")
+        guard !offsets.isEmpty else { return }
+        precondition(
+            byteCounts.allSatisfy { $0 > 0 },
+            "byteCounts must all be positive")
+        let counts = byteCounts.map { UInt32($0) }
+        let status = destinations.withUnsafeBufferPointer { dst in
+            dst.withMemoryRebound(to: UnsafeMutableRawPointer?.self) { rebound in
+                offsets.withUnsafeBufferPointer { offs in
+                    counts.withUnsafeBufferPointer { cnt in
+                        tinytitan_expert_reader_fetch_ranges(
+                            handle,
+                            offs.baseAddress,
+                            cnt.baseAddress,
+                            rebound.baseAddress,
+                            offsets.count)
+                    }
+                }
+            }
+        }
+        if status != 0 {
+            throw Failure.readFailed(errno: status)
+        }
+    }
+
     /// As `fetch(experts:into:)` but with absolute byte offsets.
     ///
     /// The streamer's regions carry a per-layer base and a container offset, so an
