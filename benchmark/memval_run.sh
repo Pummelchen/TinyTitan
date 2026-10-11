@@ -98,6 +98,23 @@ memval_count() {  # <name> <value> -- echo the count, or refuse it by name
     printf '       name a count of at least 1; the run numbering starts at 1 too.\n' >&2
     return 2
   fi
+  # A leading zero passes the digit test above and is then read two ways by the one
+  # loop below: $(( )) takes it as octal and seq takes the same digits as decimal.
+  # Measured on /bin/bash 3.2.57: RUNS=00 gives `seq 1 0` and the countdown the arm
+  # above exists to refuse, RUNS=010 runs eight arms beside a count that says ten,
+  # FIRST_RUN=010 with three repeats runs one arm named 10, and RUNS=09 expands to
+  # nothing -- the loop runs zero times, the error names no variable, and the matrix
+  # carries on to its report with exit 0. The port, the RAM size and the warm-up
+  # numbers in tools/server_launcher.sh refuse 0* for the same reason; a count flows
+  # outward the way a port does, into record names, report figures and matrix
+  # labels, so it is refused at the read rather than repaired with a forced base.
+  if [[ "$value" == 0* ]]; then
+    printf 'ERROR: %s is set to %s, which has a leading zero. Unset %s to use the\n' \
+      "$name" "$value" "$name" >&2
+    printf '       default, or name the count with no leading zero: bash reads one\n' >&2
+    printf '       as octal and seq reads the same digits as decimal.\n' >&2
+    return 2
+  fi
   printf '%s\n' "$value"
 }
 RUNS="$(memval_count TINYTITAN_MEMVAL_RUNS "$RUNS")" || exit 2

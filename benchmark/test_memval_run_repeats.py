@@ -9,6 +9,14 @@ with the real /usr/bin/seq, against the script's own expression:
     RUNS=-1   upper=-1   seq 1 -1    -> "1", "0", "-1" (3 iterations, numbered down)
     FIRST_RUN=0           seq 0 2    -> "0", "1", "2"  (renumbers the interleaved repeats)
 
+A leading zero reaches that same arithmetic and is read two ways in one line:
+`$(( ))` takes it as octal, /usr/bin/seq takes it as decimal.
+
+    RUNS=00    -> seq 1 0    -> "r1" "r0"    (2 iterations: the countdown above, by another spelling)
+    RUNS=010   -> seq 1 8    -> r1..r8       (ten digits named, eight arms ran)
+    FIRST_RUN=010 RUNS=3    -> seq 010 10 -> "r10" (three repeats numbered 10,11,12 became one)
+    RUNS=09    -> "value too great for base", 0 iterations, rc 0, run continues past the loop
+
 A set-but-blank value does *not* reach that arithmetic: `:-` substitutes for null as
 well as unset, so `TINYTITAN_MEMVAL_RUNS=""` runs the documented three repeats. That
 is the honest shape and it is asserted below rather than refused -- unlike a results
@@ -107,6 +115,30 @@ class RepeatCountTests(unittest.TestCase):
         `{arm}-r0.json` and renumbers the interleaved repeats the recipe exists for."""
         proc = self.run_script(TINYTITAN_MEMVAL_FIRST_RUN="0")
         self.assert_refused(proc, "TINYTITAN_MEMVAL_FIRST_RUN")
+
+    def test_a_zero_padded_repeat_count_is_refused(self):
+        """`00` is the countdown the guard above already refuses, spelled with two
+        digits: only `== 0` matches, so it survives and `seq 1 $((1+00-1))` runs r1
+        and r0. `010` is read as octal by the arithmetic and as ten by the digits the
+        operator typed, so eight arms run beside a count that says ten. `09` parses
+        for neither reader: the loop expands to nothing, the day's matrix runs zero
+        arms and carries on to the report with exit 0."""
+        for value in ("00", "010", "09"):
+            output = self.assert_refused(
+                self.run_script(TINYTITAN_MEMVAL_RUNS=value), "TINYTITAN_MEMVAL_RUNS"
+            )
+            self.assertNotIn("value too great for base", output, f"{value}: {output}")
+            self.assertIn("leading zero", output, f"{value}: {output}")
+
+    def test_a_zero_padded_first_run_is_refused(self):
+        """Same helper, same arithmetic, and the two readers disagree harder here:
+        `seq` takes `010` as the decimal start and `$(( ))` as the octal 8, so three
+        repeats numbered 10, 11, 12 come back as one run named 10."""
+        for value in ("00", "010", "09"):
+            output = self.assert_refused(
+                self.run_script(TINYTITAN_MEMVAL_FIRST_RUN=value), "TINYTITAN_MEMVAL_FIRST_RUN"
+            )
+            self.assertNotIn("value too great for base", output, f"{value}: {output}")
 
     def test_a_blank_count_takes_its_documented_default(self):
         """`:-` substitutes for null as well as unset, so a blank is the default --
