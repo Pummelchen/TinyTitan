@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -296,6 +297,89 @@ class TheLibraryContractItself(ResolverCase):
 
     def test_the_library_is_sourced_not_executed(self) -> None:
         self.assertIn("Sourced, never executed", LIBRARY.read_text())
+
+
+TOOLS = pathlib.Path(__file__).resolve().parent.parent / "tools"
+REFUSING = [
+    "prepare_qwen35.py",
+    "prepare_qwen38.py",
+    "prepare_qwen38_mtp.py",
+    "prepare_agentworld.py",
+    "reconcile_snapshot.py",
+    "patch_snapshot_precision.py",
+]
+STUB_NUMPY = 'raise ImportError("numpy is not installed (test stub)")\n'
+
+
+class DependencyRefusalMessageTests(unittest.TestCase):
+    """AUD-296: the same token's other half, where it is a message rather than a status.
+
+    Six `tools/` Python files end their missing-dependency refusal with
+    `(or point TINYTITAN_PYTHON at another Python 3.10+)`. The variable has a reader --
+    `tools/lib/python.sh`, tested in the class above -- but it is not this file: run
+    against a stdlib-only interpreter, the refusal is byte-identical with the variable
+    set to a 3.13 that imports the whole stack and with it unset, because the program
+    that prints the advice has already chosen its own interpreter. Measured with a
+    `numpy` stub that fails to import, which is what these tests do: no venv, nothing
+    fetched, no model.
+
+    The assertion is the narrow form of the invariant, per file rather than as a rule
+    over every message in `tools/`: a refusal that names an environment variable has
+    to name the program that reads it, so the reader can act on the advice. Which is
+    left open as an operator decision, along with whether the wider gate exists.
+    """
+
+    def refusal(self, name: str) -> subprocess.CompletedProcess:
+        shadow = pathlib.Path(tempfile.mkdtemp(prefix="aud296-shadow-"))
+        self.addCleanup(shutil.rmtree, shadow, ignore_errors=True)
+        (shadow / "numpy.py").write_text(STUB_NUMPY)
+        env = dict(os.environ, PYTHONPATH=str(shadow))
+        return subprocess.run(
+            [sys.executable, str(TOOLS / name), "--help"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=60,
+        )
+
+    def test_the_refusal_names_the_program_that_reads_the_variable(self) -> None:
+        for name in REFUSING:
+            answer = self.refusal(name)
+            text = answer.stdout + answer.stderr
+            self.assertIn("missing dependency:", text, f"{name}: {text}")
+            if "TINYTITAN_PYTHON" not in text:
+                # Dropping the advice entirely is a repair too: a message with no
+                # dead variable in it cannot mislead anyone. What is not allowed is
+                # naming one and leaving the reader to find its program.
+                continue
+            self.assertIn(
+                "install_models.sh",
+                text,
+                f"{name} tells the reader to set a variable it does not read, and "
+                f"never says which program does: {text}",
+            )
+
+    def test_the_refusal_still_names_the_interpreter_running_the_file(self) -> None:
+        """The actionable half of the message, pinned unchanged: it is the line that
+        says which interpreter lacks the packages, and the repair is only about the
+        parenthetical after it."""
+        for name in REFUSING:
+            answer = self.refusal(name)
+            self.assertIn(
+                sys.executable,
+                answer.stdout + answer.stderr,
+                name,
+            )
+
+    def test_the_six_files_refuse_with_one_wording(self) -> None:
+        lines = set()
+        for name in REFUSING:
+            source = (TOOLS / name).read_text()
+            found = [ln for ln in source.splitlines() if "TINYTITAN_PYTHON" in ln]
+            self.assertEqual(len(found), 1, f"{name}: {found}")
+            lines.add(found[0].strip())
+        self.assertEqual(len(lines), 1, f"six refusals, {len(lines)} wordings: {lines}")
 
 
 if __name__ == "__main__":

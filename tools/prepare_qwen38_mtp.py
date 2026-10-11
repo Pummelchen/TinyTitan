@@ -34,7 +34,9 @@ except ImportError as exc:  # pragma: no cover
         f"missing dependency: {exc}\n"
         f"  install them for the interpreter running this file: {sys.executable}\n"
         "    -m pip install safetensors numpy ml_dtypes\n"
-        "  (or point TINYTITAN_PYTHON at another Python 3.10+)"
+        "  (or run this file with an interpreter that has them; TINYTITAN_PYTHON\n"
+        "   selects the interpreter that tools/install_models.sh runs these\n"
+        "   files with, and this file does not read it)"
     )
 _HERE = Path(__file__).parent
 _spec = importlib.util.spec_from_file_location("prepare_qwen38", _HERE / "prepare_qwen38.py")
