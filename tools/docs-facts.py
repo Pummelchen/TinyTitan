@@ -337,7 +337,10 @@ def ledger_commit_evidence(ledgers, root=None):
     an empty field, and a report that said the pointer had been kept. What is also
     not allowed is a field that *looks* like a reference and is not one -- prose, or
     a sha that does not exist, or one that exists on a branch this history cannot
-    reach. Returns (finding lines, references resolved); the count is printed by
+    reach. A clone that carries no history at all is refused for that reason, and not
+    as one `no such commit` per reference -- CI did exactly that on `fe19203`, naming a
+    cause that had not happened for 211 commits that exist upstream (AUD-311).
+    Returns (finding lines, references resolved); the count is printed by
     main(), because a check that resolved nothing would otherwise read as a pass.
     """
     repo = str(root) if root is not None else ROOT
@@ -348,6 +351,10 @@ def ledger_commit_evidence(ledgers, root=None):
         )
         return lines, 0
     checked = 0
+    # CI ran this on `fe19203` over `actions/checkout`'s default depth of one commit
+    # and printed 211 `no such commit` lines, every one false: the commits exist,
+    # the clone does not carry them. A refusal has to name the cause that happened.
+    shallow = sh_in(repo, "git", "rev-parse", "--is-shallow-repository")[1].strip() == "true"
     for rel in ledgers:
         try:
             with open(os.path.join(repo, rel), encoding="utf-8") as handle:
@@ -375,6 +382,13 @@ def ledger_commit_evidence(ledgers, root=None):
                 lines.append(f"FAIL {task['id']}: commit field “{field}” names no commit")
                 continue
             for sha in refs:
+                if shallow:
+                    lines.append(
+                        f"FAIL {task['id']}: commit {sha} -- this is a shallow clone, "
+                        "which carries no history to resolve a reference against "
+                        "(needs the full history: actions/checkout fetch-depth: 0)"
+                    )
+                    continue
                 checked += 1
                 rc, _, _ = sh_in(repo, "git", "cat-file", "-e", f"{sha}^{{commit}}")
                 if rc != 0:

@@ -24,7 +24,13 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: xcode-27
     steps:
+      # `fetch-depth: 0` because the `docs` gate in the chain below resolves every
+      # commit sha the audit ledger names against this checkout's history. The
+      # default depth of one commit gave it nothing to resolve, so 211 real commits
+      # read as `no such commit` and the job was red on every push (AUD-311).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'

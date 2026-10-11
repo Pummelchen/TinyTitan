@@ -12,7 +12,8 @@ row whose commit field does not resolve is a row that has lost its evidence.
 disagrees with the repository, so the same rule is extended to the commit
 references. It reads a *fixture* git repository here rather than this one, so every
 branch is reachable: a sha that does not exist at all, a sha that exists on a branch
-HEAD cannot reach, prose where a sha belongs, and the one deliberate exception --
+HEAD cannot reach, prose where a sha belongs, a shallow clone that carries no history
+to resolve a sha against, and the one deliberate exception --
 a blank field on a row that recorded no fix (AUD-132 refuted its finding; AUD-139
 is blocked). A blank on a DONE row is the opposite of that: it claims a fix and
 names no pointer, which is how the row that closed AUD-262 lost its evidence. The
@@ -76,6 +77,11 @@ class LedgerCommitEvidenceTests(unittest.TestCase):
         stage = tempfile.TemporaryDirectory(prefix="docs-facts-ledger-")
         self.addCleanup(stage.cleanup)
         self.repo = pathlib.Path(stage.name)
+        # The shallow clone the last test makes goes in its own stage, not beside
+        # the fixture repo: `repo.parent` is the system temp dir, so writing there
+        # would collide with the next run and leave a directory behind.
+        self.dest = tempfile.TemporaryDirectory(prefix="docs-facts-clone-")
+        self.addCleanup(self.dest.cleanup)
         git(self.repo, "init", "-q")
         git(self.repo, "config", "user.email", "fixture@example.invalid")
         git(self.repo, "config", "user.name", "Fixture")
@@ -121,6 +127,37 @@ class LedgerCommitEvidenceTests(unittest.TestCase):
         self.assertIn("AUD-8", lines[0])
         self.assertIn("not reachable from HEAD", lines[0])
         self.assertNotIn("no such commit", lines[0])
+
+    def test_a_shallow_clone_names_the_history_it_does_not_carry(self):
+        # CI ran this gate on `fe19203` and printed 211 `no such commit` lines, one
+        # per ledger reference, every one of them false: the commits exist, the
+        # checkout was `actions/checkout`'s default depth of 1. A refusal whose
+        # stated cause did not happen is the defect this audit keeps finding, so a
+        # clone without history is refused as a clone without history.
+        (self.repo / "c.txt").write_text("three\n", encoding="utf-8")
+        git(self.repo, "add", "c.txt")
+        git(self.repo, "commit", "-q", "-m", "second")
+        clone = pathlib.Path(self.dest.name) / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", f"file://{self.repo}", str(clone)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        ledger = clone / LEDGER_REL
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text(
+            json.dumps({"audit": "fixture", "counts": {}, "tasks": [row("AUD-4", self.on_main)]})
+            + "\n",
+            encoding="utf-8",
+        )
+        self.assertEqual("true", git(clone, "rev-parse", "--is-shallow-repository"))
+        lines, checked = self.module.ledger_commit_evidence([LEDGER_REL], root=clone)
+        self.assertEqual(1, len(lines), lines)
+        self.assertIn("AUD-4", lines[0])
+        self.assertIn("shallow", lines[0])
+        self.assertNotIn("no such commit", lines[0])
+        self.assertEqual(0, checked, "nothing was resolved, so nothing is claimed")
 
     def test_prose_where_a_sha_belongs_fails(self):
         lines, _ = self.check([row("AUD-7", "this commit")])
