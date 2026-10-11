@@ -115,4 +115,68 @@ extension PreadExpertStreamerTests {
         #expect(slot1.allSatisfy { $0 == Self.tagByte(3) })
     }
 
+    // MARK: - Split blob reads (plan §5 / B3)
+
+    /// A layout with a phase-1 boundary reads each miss as gate+up then tail;
+    /// the assembled slot must be byte-identical to a whole-region load, and
+    /// the expert must still end `.resident` (a re-plan is a hit, not a miss).
+    @Test func splitMissesResidentWithIdenticalBytes() throws {
+        let url = try Self.writeSyntheticLayer()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+        let phase1 = 1024
+        let splitLayout = StreamLayout(
+            path: url.path,
+            streamOffset: Self.streamOffset,
+            streamSize: Self.streamSize,
+            expertsPerLayer: Self.numExperts,
+            expertStride: UInt64(Self.expertStride),
+            expertOffsets: nil,
+            phase1Bytes: UInt64(phase1))
+        let whole = try PreadExpertStreamer(
+            layout: Self.makeLayout(path: url.path), device: device, slotCount: 2)
+        let split = try PreadExpertStreamer(
+            layout: splitLayout, device: device, slotCount: 2)
+
+        let wanted = [3, 1]
+        _ = try whole.loadExpertsCached(experts: wanted)
+        _ = try split.loadExpertsCached(experts: wanted)
+        // The two streamers allocate their own slots; compare against the file
+        // tags instead of each other's buffers.
+        for e in wanted {
+            let plan = try split.planExpertsCached(experts: [e])
+            #expect(plan.misses.isEmpty, "expert \(e) did not end resident after a split load")
+            #expect(plan.hits == 1, "expert \(e) should be a hit on re-plan")
+        }
+        let r = try split.loadExpertsCached(experts: wanted)
+        for (i, e) in wanted.enumerated() {
+            let got = Self.bytes(of: r[i].buffer, offset: 0, count: Self.expertStride)
+            #expect(
+                got.allSatisfy { $0 == Self.tagByte(e) },
+                "expert \(e) slot not uniformly tagged after split reads")
+        }
+    }
+
+    /// The split boundary must sit strictly inside the stride: a 0 or
+    /// stride-sized boundary would make one of the two ranges empty and the
+    /// reader refuses zero-length ranges.
+    @Test func aNonInteriorPhase1BoundaryIsRefused() throws {
+        let url = try Self.writeSyntheticLayer()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+        for bad in [UInt64(0), UInt64(Self.expertStride)] {
+            let layout = StreamLayout(
+                path: url.path,
+                streamOffset: Self.streamOffset,
+                streamSize: Self.streamSize,
+                expertsPerLayer: Self.numExperts,
+                expertStride: UInt64(Self.expertStride),
+                expertOffsets: nil,
+                phase1Bytes: bad)
+            #expect(throws: StreamerError.self) {
+                _ = try PreadExpertStreamer(layout: layout, device: device, slotCount: 2)
+            }
+        }
+    }
+
 }

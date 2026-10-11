@@ -139,13 +139,27 @@ extension Model {
                     + "experts of \(packedExpertsLayout.expertStride) bytes, which overflows "
                     + "the stream size")
         }
+        // Phase-1 boundary from the manifest, not a fraction of the stride:
+        // the blob is gate|up|down contiguous and the `down` tensor's offset
+        // within an expert is exactly the gate+up byte count. Only an interior
+        // boundary splits; anything else (a manifest without the tensor, or
+        // padding that pushed `down` to the end) reads whole regions.
+        let downOffset: UInt64? =
+            packedExpertsLayout.layers[L].experts.first?.subTensors["down"]?.offset
+        let phase1Bytes: UInt64?
+        if let downOffset, downOffset > 0, downOffset < packedExpertsLayout.expertStride {
+            phase1Bytes = downOffset
+        } else {
+            phase1Bytes = nil
+        }
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
             streamSize: streamSize,
             expertsPerLayer: packedExpertsLayout.expertsPerLayer,
             expertStride: packedExpertsLayout.expertStride,
-            expertOffsets: packedExpertsLayout.layers[L].experts.map(\.offset))
+            expertOffsets: packedExpertsLayout.layers[L].experts.map(\.offset),
+            phase1Bytes: phase1Bytes)
         let slotCount: Int
         switch streamingMode {
         case .pread(let configuredSlotCount):

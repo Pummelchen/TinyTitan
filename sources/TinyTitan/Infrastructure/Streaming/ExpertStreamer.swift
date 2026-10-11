@@ -37,6 +37,11 @@ public struct StreamLayout: Sendable {
     public let expertsPerLayer: Int
     public let expertStride: UInt64
     public let expertOffsets: [UInt64]?
+    /// Bytes of the expert blob that decode's phase 1 (gate+up) consumes,
+    /// when the manifest records where the `down` tensor starts. `nil` means
+    /// whole-region reads; a split needs a boundary strictly inside the
+    /// stride, which the streamer refuses anything else for.
+    public let phase1Bytes: UInt64?
 
     public init(
         path: String,
@@ -44,7 +49,8 @@ public struct StreamLayout: Sendable {
         streamSize: UInt64,
         expertsPerLayer: Int,
         expertStride: UInt64,
-        expertOffsets: [UInt64]? = nil
+        expertOffsets: [UInt64]? = nil,
+        phase1Bytes: UInt64? = nil
     ) {
         self.path = path
         self.streamOffset = streamOffset
@@ -52,6 +58,7 @@ public struct StreamLayout: Sendable {
         self.expertsPerLayer = expertsPerLayer
         self.expertStride = expertStride
         self.expertOffsets = expertOffsets
+        self.phase1Bytes = phase1Bytes
     }
 
     /// The byte offset of one expert within this layer's file.

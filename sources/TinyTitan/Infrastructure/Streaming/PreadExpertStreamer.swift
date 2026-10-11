@@ -196,6 +196,10 @@ public final class PreadExpertStreamer: @unchecked Sendable {
             close(openedFD)
             throw StreamerError.offsetOutOfRange(layout.streamOffset)
         }
+        if let phase1 = layout.phase1Bytes, !(0 < phase1 && phase1 < layout.expertStride) {
+            close(openedFD)
+            throw StreamerError.offsetOutOfRange(phase1)
+        }
         if UInt64(fileStats.st_size) < required {
             close(openedFD)
             throw StreamerError.sizeMismatch(

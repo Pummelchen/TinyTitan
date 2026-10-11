@@ -155,7 +155,29 @@ extension PreadExpertStreamer {
             offsets.append(try fileOffset(plan: plan, index: index))
             destinations.append(slotPointers[plan.assignedSlots[index]])
         }
-        try reader.fetch(offsets: offsets, into: destinations)
+        // Split blob reads: the blob is gate|up|down contiguous, so the front
+        // range is everything phase 1 consumes and the tail is what phase 2
+        // adds. Residency still publishes only after the tail lands, and the
+        // assembled slot is the same bytes a whole-region fetch writes (pinned
+        // by splitMissesResidentWithIdenticalBytes). The Metal staging path
+        // keeps its whole-region contract -- this split exists for the bounded
+        // pread backend, which is the default one.
+        if let phase1 = layout.phase1Bytes {
+            let frontBytes = Int(phase1)
+            try reader.fetch(
+                offsets: offsets,
+                byteCounts: [Int](repeating: frontBytes, count: offsets.count),
+                into: destinations)
+            let tails = destinations.map { $0.advanced(by: frontBytes) }
+            try reader.fetch(
+                offsets: offsets.map { $0 + phase1 },
+                byteCounts: [Int](
+                    repeating: Int(layout.expertStride) - frontBytes,
+                    count: offsets.count),
+                into: tails)
+        } else {
+            try reader.fetch(offsets: offsets, into: destinations)
+        }
     }
 
     func executeCachedPreads(
