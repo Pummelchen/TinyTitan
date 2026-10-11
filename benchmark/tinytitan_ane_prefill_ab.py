@@ -185,7 +185,10 @@ def verdict(rows):
     2  it could not be compared -- an arm with no runs, an arm whose runs logged
        no prefill time, or an arm that streamed no content. A ratio against a
        zero or missing prefill time is not a speedup, and the old code died on
-       `StatisticsError` or divided by zero instead of saying so.
+       `StatisticsError` or divided by zero instead of saying so. The two are
+       refused in different words, because they are read by different people: a
+       metric no run logged is missing, while a logged zero is a timer that
+       never started (AUD-284).
     """
     lines: list[str] = []
     reasons: list[str] = []
@@ -207,18 +210,22 @@ def verdict(rows):
     ane_prefill = got[("ane", "prefill_s")][0]
     gpu_decode = got[("gpu", "decode_tok_s")][0]
     ane_decode = got[("ane", "decode_tok_s")][0]
-    if None in (gpu_prefill, ane_prefill, gpu_decode, ane_decode) or not ane_prefill:
+    lines.append(
+        f"  GPU prefill median {logged(gpu_prefill, '8.2f', ' s')}   "
+        f"runs {[r.get('prefill_s') for r in arms['gpu']]}"
+    )
+    lines.append(
+        f"  ANE prefill median {logged(ane_prefill, '8.2f', ' s')}   "
+        f"runs {[r.get('prefill_s') for r in arms['ane']]}"
+    )
+    if None in (gpu_prefill, ane_prefill, gpu_decode, ane_decode):
         reasons.append("NOT MEASURED: a prefill time is missing, so no speedup is computable")
+    elif ane_prefill == 0:
+        reasons.append(
+            "NOT MEASURED: the ANE prefill median is 0.00 s, so half its runs never started their timer"
+        )
     else:
         speedup = gpu_prefill / ane_prefill
-        lines.append(
-            f"  GPU prefill median {gpu_prefill:8.2f} s   "
-            f"runs {[r.get('prefill_s') for r in arms['gpu']]}"
-        )
-        lines.append(
-            f"  ANE prefill median {ane_prefill:8.2f} s   "
-            f"runs {[r.get('prefill_s') for r in arms['ane']]}"
-        )
         lines.append(
             f"  SPEEDUP: {speedup:.2f}x   (gate is >=1.5x: {'PASS' if speedup >= 1.5 else 'FAIL'})"
         )

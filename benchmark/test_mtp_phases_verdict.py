@@ -485,6 +485,9 @@ class AnePrefillVerdict(unittest.TestCase):
         # A logged prefill of 0.0 s is not a fast ANE: it is a run whose timer
         # never started. Dividing the GPU's 10 s by it would print a 100.00x
         # speedup, and the gate would PASS, over a sweep that measured no ANE time.
+        # AUD-284: the refusal also has to say which of the two it found, because
+        # "a prefill time is missing" over a page full of logged 0.00 s readings
+        # points the reader at the parser, not at the timer.
         rows = [
             ane_row("gpu", "aaaa", 10.0),
             ane_row("ane", "aaaa", 0.0),
@@ -494,8 +497,27 @@ class AnePrefillVerdict(unittest.TestCase):
         lines, status = ane.verdict(rows)
         self.assertEqual(status, 2)
         text = joined(lines)
-        self.assertIn("prefill time is missing", text)
+        self.assertIn("never started their timer", text)
+        self.assertNotIn("prefill time is missing", text)
         self.assertNotIn("SPEEDUP", text)
+        self.assertIn("ANE prefill median", text)
+
+    def test_an_absent_prefill_time_is_refused_as_missing(self):
+        # The other half of the split: nothing logged the metric at all, which is
+        # the only state allowed to say "missing".
+        rows = [
+            {"arm": "gpu", "sha256": "aaaa", "decode_tok_s": 20.0, "completion_tokens": 1},
+            {"arm": "ane", "sha256": "aaaa", "decode_tok_s": 20.0, "completion_tokens": 1},
+            {"arm": "ane", "sha256": "aaaa", "decode_tok_s": 20.0, "completion_tokens": 1},
+            {"arm": "gpu", "sha256": "aaaa", "decode_tok_s": 20.0, "completion_tokens": 1},
+        ]
+        lines, status = ane.verdict(rows)
+        self.assertEqual(status, 2)
+        text = joined(lines)
+        self.assertIn("prefill time is missing", text)
+        self.assertNotIn("never started their timer", text)
+        self.assertNotIn("SPEEDUP", text)
+        self.assertIn("GPU prefill median", text)
 
     def test_a_missing_arm_is_named(self):
         rows = [ane_row("gpu", "aaaa", 10.0), ane_row("gpu", "aaaa", 10.0)]
