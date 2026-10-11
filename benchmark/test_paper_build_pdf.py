@@ -149,6 +149,18 @@ class PaperBuildTests(unittest.TestCase):
         self.assertIn("pdf", output.lower(), f"the refusal has to name the artifact: {output}")
         self.assertEqual(self.pdf.stat().st_mtime_ns, stale, "the refusal rewrote the file anyway")
 
+    def test_a_launch_that_leaves_no_pdf_anywhere_is_refused(self):
+        """The stale-artifact guard cannot cover this half: with nothing on disk
+        there is no previous paper to compare against, so only the explicit
+        "the print wrote no file" refusal stops the count being taken of a path
+        that does not exist."""
+        self.assertFalse(self.pdf.exists())
+        proc = self.run_build(chrome=str(self.stub(STUB_SILENT)))
+        output = proc.stdout + proc.stderr
+        self.assertNotEqual(proc.returncode, 0, f"an empty build was accepted: {output}")
+        self.assertIn("ERROR", output, f"no refusal was printed: {output}")
+        self.assertIn("pdf", output.lower(), f"the refusal has to name the artifact: {output}")
+
     def test_a_build_that_renders_is_accepted(self):
         """The guard must not be a refusal of every build: a launch that writes the
         PDF still prints its page count and exits 0."""
