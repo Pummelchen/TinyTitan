@@ -2,7 +2,7 @@
 
 Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host. This page is generated from `ledger.json` by `render_ledger.py` in this directory; edit the JSON, not the Markdown.
 
-**Open:3  Done:199  Blocked:1  Total:203**
+**Open:3  Done:200  Blocked:1  Total:204**
 
 ## Table
 
@@ -211,6 +211,7 @@ Branch `audit/2026-10-06` on MacBook Pro (M3, 24 GB, macOS 27.0) — primary and
 | AUD-302 | S3 | A | tools | ``tools/server_launcher.sh:1455` and :1506 as shipped, each `if [[ "$MEMORY" == "1" ]]` around one echo, with the flag-to-environment bridge they lean on at :1301 and the AUD-301 gate at `tools/tinytitan_models.sh:509`; the predicate is now :514-522 there, called from :532 and from both launcher sites` | `TINYTITAN_MEMORY=1 tools/server_launcher.sh`, the spelling docs/agent-memory.md:322 tells the operator to use, turns memory on and exports the repo-scoped store while the plan and the banner say nothing about either | one switch, three readers: the engine and the wrapper's gate agree on the alias set while the wrapper's own reporting reads only the command-line flag, so the documented environment spelling runs the feature and never says so | DONE | Mac (primary) |
 | AUD-303 | S3 | A | tools | ``tools/golden-baseline.sh:71-76` as shipped — the four `${VAR:-default}` lines — with the only reader of READY_TIMEOUT at :223 and its verdict at :236, the two CLI legs at :195 and :327, the python body builder at :244-252 and the launcher hand-off at :217` | A word in READY_TIMEOUT skips the readiness poll entirely and the gate reports `not ready after 1800s`; MAX_NEW, SEED and PORT reach a minutes-long model load before anything reads them | an operator number read far from where a bad one changes the verdict instead of stopping the run | DONE | Mac (primary) |
 | AUD-304 | S3 | A | tools | ``tools/server_launcher.sh:1230-1242` — the digit case-glob, then three arithmetic reads of the same value: the range at :1233, the privileged note at :1238, the default comparison at :1242` | `PORT=08757` passes the launcher's port guard with its range rules never evaluated: `(( ))` reads a leading zero as octal, errors, answers neither branch, and the privileged-port warning is skipped the same way | a guard whose own arithmetic refuses to evaluate the value it is guarding | DONE | Mac (primary) |
+| AUD-308 | S3 | C | docs | ``docs/paper/figures.py:31-58` (the consolidation, book and value loops)` | the paper's figures silently shorten their own run grid, and an absent server log becomes zero consolidated tokens | an absent input averaged out of a chart, and printed as a zero | DONE | Mac (primary) |
 
 ## Detail
 
@@ -3906,3 +3907,21 @@ Other gates re-run on the committed tree: `tools/lint.sh shell` exit 0 (27 scrip
 **Evidence after.** Measured after the change through the launcher's own `--dry-run` on the stub-install fixture: `08757`, `01024`, `00080` and `0008080` each exit 2 with the launcher's sentence on stderr, no `value too great for base` anywhere in the output and no Port line printed; the same through `TINYTITAN_PORT` and through a typed answer at the question. `benchmark/test_launcher_port.py` went 12 to 17 tests and is rc 0 on python3.13 (RED was six failures, all for this finding's reason). Sweep: six of seven anchored mutants killed — arm deleted, arm narrowed to the literal `0`, refusal demoted to a warning, message moved to stdout, `exit 2` changed to `exit 1`, and the arm relocated below the arithmetic it exists to precede. The survivor narrows `0*` to `0[0-9]*`; the only input that diverges is a bare `0`, which the range arm refuses either way and `test_bad_ports_are_refused_before_anything_starts` already pins, so it is an equivalent mutant and not a gap. Gates `shell`, `shellcheck`, `python` and `docs` rc 0, model-free, no install fetched, the operator's running server untouched.
 
 **Commit.** `954ff87`
+
+### AUD-308 — the paper's figures silently shorten their own run grid, and an absent server log becomes zero consolidated tokens
+
+- **Severity / tier:** S3 / Tier C
+- **Project:** docs
+- **Location:** ``docs/paper/figures.py:31-58` (the consolidation, book and value loops)`
+- **Category:** an absent input averaged out of a chart, and printed as a zero
+- **Status:** DONE
+- **Host:** Mac (primary)
+- **Discovered by:** Phase D sweep for the shell/Python files the ledger had never named: `docs/paper/build.sh` was the one `*.sh` no row mentioned, and it calls `figures.py`.
+
+**Evidence before.** Measured on this commit by driving a real copy of the script inside a temporary repository root (ROOT is `Path(__file__).parents[2]`, so the fixture is three directories deep) with synthetic result JSON. With the grid complete the script prints four filled tables and exits 0. Delete one of 96 run files and it still prints four filled tables, writes all eight SVGs and exits 0: the arm's mean is now two repeats, and the paper cannot tell. Delete every input and it dies at line 322 with `ZeroDivisionError: division by zero` -- three functions past the directory it could not read, naming no file. Delete one `server-<arm>-r<run>.log` and `consolidation` answers `0, 0`, so the cost split reports a run that consolidated nothing. **One premise corrected before the fix:** the shape first suspected (exit 0 over a wholly empty tree) is false -- the empty case crashes; the partial cases are the silent ones.
+
+**Fix.** A `require(path, what)` helper refuses at the read: it names the file and says that every run the grid enumerates has to be on disk, then `sys.exit`s. Three call sites take it -- the two `if not p.exists(): continue` skips in `book_runs` and `pong_runs`, and the `return 0, 0` fallback in `consolidation`, which is AUD-276's measured-zero. The figures themselves are untouched, and a complete tree builds exactly as before.
+
+**Evidence after.** Written first: `benchmark/test_paper_figures_inputs.py`, 5 tests, driving the real script against a synthetic tree. RED: 4 failures -- the four missing-input cases each showed the script certifying a table it had not measured -- while `test_a_complete_tree_still_builds` passed before the fix, which is what keeps the guard from being a refusal of every build. GREEN: 38 tests rc 0 beside `test_memval_matrix_exit`, `test_memval_run_repeats` and `test_python_resolver_gate`. Anchored mutation sweep 6 of 6 killed: each call site back to its skip, `require` neutered (`if False`), the ERROR marker dropped, and the message stripped of the path. Gates rc 0: python (ruff 0.16.7, 190 scripts parse), docs (94/98 suites registered -- the new suite is named in CI beside the two that stub a script rather than load a model). No model, no server, nothing installed.
+
+**Commit.** `4f9ebd7`

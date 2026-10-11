@@ -4,8 +4,8 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 203,
-    "done": 199,
+    "total": 204,
+    "done": 200,
     "open": 3,
     "blocked": 1
   },
@@ -3429,6 +3429,24 @@
       "sibling-note": "AUD-218's status check covers a run that exits non-zero and this row covers the storm that launches none; together they close the count both verdicts print. The rest of the class is the AUD-306 sweep: release's notes budget, dsh_route's three numbers and golden-baseline's three are clear by reader, and the launcher's ram_tier, valid_concurrency, port and warm-up numbers were fixed by AUD-297, AUD-299, AUD-304 and AUD-305.",
       "owner": "",
       "commit": "b1f4260"
+    },
+    {
+      "id": "AUD-308",
+      "severity": "S3",
+      "tier": "C",
+      "project": "docs",
+      "category": "an absent input averaged out of a chart, and printed as a zero",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "`docs/paper/figures.py:31-58` (the consolidation, book and value loops)",
+      "title": "the paper's figures silently shorten their own run grid, and an absent server log becomes zero consolidated tokens",
+      "discovered-by": "Phase D sweep for the shell/Python files the ledger had never named: `docs/paper/build.sh` was the one `*.sh` no row mentioned, and it calls `figures.py`.",
+      "evidence-before": "Measured on this commit by driving a real copy of the script inside a temporary repository root (ROOT is `Path(__file__).parents[2]`, so the fixture is three directories deep) with synthetic result JSON. With the grid complete the script prints four filled tables and exits 0. Delete one of 96 run files and it still prints four filled tables, writes all eight SVGs and exits 0: the arm's mean is now two repeats, and the paper cannot tell. Delete every input and it dies at line 322 with `ZeroDivisionError: division by zero` -- three functions past the directory it could not read, naming no file. Delete one `server-<arm>-r<run>.log` and `consolidation` answers `0, 0`, so the cost split reports a run that consolidated nothing. **One premise corrected before the fix:** the shape first suspected (exit 0 over a wholly empty tree) is false -- the empty case crashes; the partial cases are the silent ones.",
+      "owner": "",
+      "fix-summary": "A `require(path, what)` helper refuses at the read: it names the file and says that every run the grid enumerates has to be on disk, then `sys.exit`s. Three call sites take it -- the two `if not p.exists(): continue` skips in `book_runs` and `pong_runs`, and the `return 0, 0` fallback in `consolidation`, which is AUD-276's measured-zero. The figures themselves are untouched, and a complete tree builds exactly as before.",
+      "evidence-after": "Written first: `benchmark/test_paper_figures_inputs.py`, 5 tests, driving the real script against a synthetic tree. RED: 4 failures -- the four missing-input cases each showed the script certifying a table it had not measured -- while `test_a_complete_tree_still_builds` passed before the fix, which is what keeps the guard from being a refusal of every build. GREEN: 38 tests rc 0 beside `test_memval_matrix_exit`, `test_memval_run_repeats` and `test_python_resolver_gate`. Anchored mutation sweep 6 of 6 killed: each call site back to its skip, `require` neutered (`if False`), the ERROR marker dropped, and the message stripped of the path. Gates rc 0: python (ruff 0.16.7, 190 scripts parse), docs (94/98 suites registered -- the new suite is named in CI beside the two that stub a script rather than load a model). No model, no server, nothing installed.",
+      "sibling-note": "Swept every tracked `*.py` for `if not X.exists()` followed by a skip or a zero: 6 sites, 2 are docstring text in this row's own test, 2 (`ornith_concise_tool_ab.py:536`, `ornith_four_program_matrix.py:618`) record `missing <name>` into a `failures` list that reaches the status -- the honest shape. Two are live candidates left for the next session, unfixed and unfiled because no turn budget remains to measure them properly: `tools/qwen38_sequence_parity.py:48` skips a missing shard out of a fixed list and takes the parity over whatever survives, and `benchmark/quant_perplexity_ab.py:59` skips a missing piece inside a loop that came from a glob -- AUD-104's empty-walk shape plus this row's skip. `docs/paper/build.sh` also pipes its Chrome launch to `/dev/null`, so a missing binary exits nonzero with no message at all; measured, but a doc-build convenience worth less than the two above.",
+      "commit": "4f9ebd7"
     }
   ]
 }
