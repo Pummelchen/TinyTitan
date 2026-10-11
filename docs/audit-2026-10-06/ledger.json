@@ -4,9 +4,9 @@
   "host": "MacBook Pro (M3, 24 GB, macOS 27.0) — primary and only Apple-silicon host",
   "id_prefix": "AUD-1xx (the 2026-09 audit used AUD-001..AUD-028; those ids are not reused)",
   "counts": {
-    "total": 198,
-    "done": 193,
-    "open": 4,
+    "total": 200,
+    "done": 194,
+    "open": 5,
     "blocked": 1
   },
   "tasks": [
@@ -3339,6 +3339,42 @@
       "evidence-after": "`cd benchmark && python3.13 -m unittest test_models_memory_gate` -- 22 tests, OK, exit 0, no model: 13 from AUD-301 plus 9 new (the predicate over both readers' word sets, the plan through a real `--dry-run`, and the bridge plus banner blocks lifted verbatim from the launcher and run against the real library under `/bin/bash` 3.2.57). Re-measured after the fix, same six `--dry-run` cases: the flag, `1`, `on` and `TRUE` each print the Memory line, `0` and unset print none. The anchored mutation sweep killed eleven of eleven shapes, including both report sites reverted to `$MEMORY`, the flag bridge deleted, the export gate no longer consulting the predicate, and the ON-set narrowed one arm at a time. One survivor became a test: a predicate that reads the switch without `:-0` still answers OFF for an unset value, so nothing failed until the suite was made to look at stderr, where the launcher's `set -u` would put `TINYTITAN_MEMORY: unbound variable` on every ordinary launch. Gates: python (ruff 0.16.7, check and format clean, 189 scripts parse under 3.13), shell (29 scripts, system bash 3.2.57), shellcheck 0.11.0 no warnings, docs (83 documents, 202 -> 203 ledger commit references resolved, 93/97 python suites registered -- the suite was registered by AUD-301 and grew in place). The four launcher suites and the fixture run with it: 79 tests, OK.",
       "sibling-note": "Swept for every other reader of this switch: `git grep` over the comparisons of `TINYTITAN_MEMORY` in shell, python and JS leaves only the predicate itself, so the class cannot reappear from a fourth reader in this tree; the memory benchmark drivers pass the name through to a server rather than interpreting it. Swept for the wider shape -- a report line gated on a flag variable while an environment spelling also configures it -- and print_setup's only feature-gated echo is the Memory line; the other report lines read resolved values (`$PORT`, `$runtime_note`, `$engine_line`) that both input paths write. Not covered by a test on this host: the banner at :1508 runs only after a model load, so it is pinned through the extracted slice, not through a live launch. Residues left in place, named rather than widened: `tools/golden-baseline.sh:223` reads `READY_TIMEOUT` as a `test` operand, so a word there reports `not ready after 1800s` for a poll that never ran, and `benchmark/memval_run.sh:233` hands its own matrix label straight into `TINYTITAN_MEMORY`, which the engine now reads as a word rather than a number.",
       "commit": "d6b9b7f"
+    },
+    {
+      "id": "AUD-303",
+      "severity": "S3",
+      "tier": "A",
+      "project": "tools",
+      "category": "an operator number read far from where a bad one changes the verdict instead of stopping the run",
+      "status": "DONE",
+      "host": "Mac (primary)",
+      "file_line": "`tools/golden-baseline.sh:71-76` as shipped — the four `${VAR:-default}` lines — with the only reader of READY_TIMEOUT at :223 and its verdict at :236, the two CLI legs at :195 and :327, the python body builder at :244-252 and the launcher hand-off at :217",
+      "title": "A word in READY_TIMEOUT skips the readiness poll entirely and the gate reports `not ready after 1800s`; MAX_NEW, SEED and PORT reach a minutes-long model load before anything reads them",
+      "discovered-by": "Phase D re-sweep of the harness seam AUD-208 and AUD-262 closed — the same script, this time the four numbers the operator sets through the environment. AUD-302's close named this line as a residue.",
+      "evidence-before": "Measured on /bin/bash 3.2.57 and python3 against the shipped file. `[ 0 -lt 1800s ]` prints `integer expression expected` and is false, so the `while` at :223 never iterates, `ready` stays 0, and :236 prints `server: FAILED — not ready after 1800s`: the operator's own typo returned as a model that loaded too slowly, over a run that never waited for anything. `[ 0 -lt 0 ]` is false without erroring, so zero does the same thing in silence. In the body builder `int('96s')` and `int('')` raise while `int('-5')`, `int('+96')`, `int('096')` and `int('1_0')` succeed, so its two reads and the CLI's `Int(value)` bound to 1...maximumContextTokens (sources/TinyTitanCLI/Args.swift:254) accept different sets, and both happen after the model is already loaded. PORT is the worst hand-off: the launcher's guard at `tools/server_launcher.sh:1230-1240` passes `08757` through its digit case-glob, then its `(( ))` range check at :1233 prints `value too great for base` and answers neither branch, so a port arrives at the server with its range rules never evaluated.",
+      "owner": "",
+      "fix-summary": "A guard at `tools/golden-baseline.sh:78-127`, before the argument parse and before either CLI leg: one loop refuses any value holding a non-digit, for all four names, in the file's own `echo ... >&2; exit 2` style; zero is then refused for MAX_NEW and READY_TIMEOUT, where it means `poll or generate for no time at all` and reports a timeout or an empty run instead; PORT is held to 1-65535 and to no leading zero, because the reader it is handed to reads that shape as an octal error and skips its own check. What it deliberately does not refuse: SEED=0, which is a seed, a leading zero on the other three, which `test` and `int()` both read as decimal, and an out-of-range but numeric size, which stays the CLI's named error rather than a second bound stated here.",
+      "evidence-after": "`cd benchmark && PYTHONDONTWRITEBYTECODE=1 python3.13 -m unittest test_golden_baseline_capture` — 20 tests, OK, exit 0, no model: the seven AUD-208 tests, nine refusal methods over fourteen values, the placement test, and four shapes deliberately accepted (SEED=0, and `096`, `01234`, `0900`). It ran RED first: twelve failures, every one `0 == 0` with a baseline captured, because the script had not looked at the number. Anchored mutation sweep: seventeen of seventeen killed — each of the four default lines rewritten to ignore the operator, `-eq` replaced by a string compare on both zeros, the loop's pattern narrowed to letters, SEED and READY_TIMEOUT each dropped from the loop, the refusal sent to stdout, the port ceiling off by one, the leading-zero arm narrowed, the guard widened to refuse SEED=0 and leading zeros, the guard removed, and the guard moved below the first `\"$CLI\" --model`. `tools/lint.sh shell`, `shellcheck` and `python` exit 0 on the pinned tools (ruff 0.16.7).",
+      "sibling-note": "Swept every other shell reader of an operator-set number under `tools/` and `benchmark/`: `tools/lint.sh:61-62` feeds MAX_FUNC_LINES and MAX_FILE_LINES to Ruby `Integer()` and python `int()`, which raise rather than take a false branch; the launcher's two warm-up numbers are AUD-299 and its RAM seam AUD-300; `benchmark/memval_run.sh:108` hands IDLE to the engine, whose `Double(...)` at sources/TinyTitanMemory/MemoryConfiguration.swift:312 falls back to the default in silence while the run header at :219 prints `consolidation_idle=abcs` — named, not widened. The launcher's leading-zero port is filed as AUD-304 on this same seam.",
+      "commit": "19e2a23"
+    },
+    {
+      "id": "AUD-304",
+      "severity": "S3",
+      "tier": "A",
+      "project": "tools",
+      "category": "a guard whose own arithmetic refuses to evaluate the value it is guarding",
+      "status": "OPEN",
+      "host": "Mac (primary)",
+      "file_line": "`tools/server_launcher.sh:1230-1242` — the digit case-glob, then three arithmetic reads of the same value: the range at :1233, the privileged note at :1238, the default comparison at :1242",
+      "title": "`PORT=08757` passes the launcher's port guard with its range rules never evaluated: `(( ))` reads a leading zero as octal, errors, answers neither branch, and the privileged-port warning is skipped the same way",
+      "discovered-by": "AUD-303's sibling sweep over the readers of PORT — the measured reason golden-baseline now refuses a leading-zero port rather than hand one over.",
+      "evidence-before": "Measured on /bin/bash 3.2.57 with :1230-1240 copied verbatim into a probe: `08757` prints `((: 08757: value too great for base (error token is \"08757\")` twice — once for the range check, once for the 1024 check — reports `accepted: 08757`, and reaches `--port 08757`. Every other shape refuses correctly: `0`, `65536`, `70000`, `1e4`, a trailing space and an empty value all exit 2, so the guard is right for all of them except the one its arithmetic cannot read. `01024` is the costly case: range and privilege both skipped, and the launch goes on telling the operator which port to point a client at.",
+      "owner": "next session — compare PORT with `test`, which reads decimal (measured: `[ 0 -lt 0900 ]` is true), or refuse a leading zero outright, and pin `08757`, `01024` and `00080` in `benchmark/test_launcher_port.py`, whose fixture already drives the real launcher through `--dry-run`",
+      "fix-summary": "",
+      "evidence-after": "Not changed. The repair has to take all three `(( ))` reads at once: :1242 compares the same value against the default, so one repaired comparison beside two unrepaired ones is a smaller lie, not a fix.",
+      "sibling-note": "Same class as AUD-297 (the dsh port, closed) and AUD-300 (the RAM seam, closed). AUD-299's row asserts that `tools/server_launcher.sh:1213-1218 refuses every one of these shapes` — true for the words and the out-of-range numbers, false for a leading zero, and this row is what corrects that claim. `tools/golden-baseline.sh`'s new guard refuses the shape before it can be handed here, so the gate is covered while the launcher is not.",
+      "commit": ""
     }
   ]
 }
