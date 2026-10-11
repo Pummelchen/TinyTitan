@@ -180,7 +180,14 @@ class PrefetchShutdownTests(unittest.TestCase):
         import threading
         import time
 
-        baseline = threading.active_count()
+        # The instrument is the set of threads alive before the pool starts,
+        # not a process-global count. A count fails whenever a foreign thread
+        # dies inside the window -- on CI the two suites that run before this
+        # one in the same process leave one behind (run 38130598551 failed
+        # `8 != 9`, actual BELOW baseline, which a leaked fetcher cannot
+        # produce). Only this generator creates threads in the window, so a
+        # thread outside `before` after close() is a fetcher that survived it.
+        before = set(threading.enumerate())
 
         def fetch(shard):
             time.sleep(0.05)
@@ -193,9 +200,10 @@ class PrefetchShutdownTests(unittest.TestCase):
         time.sleep(0.4)  # let the other fetchers fill the one-slot queue and wait
         generator.close()
         deadline = time.time() + 3
-        while threading.active_count() > baseline and time.time() < deadline:
+        while set(threading.enumerate()) - before and time.time() < deadline:
             time.sleep(0.05)
-        self.assertEqual(threading.active_count(), baseline)
+        leaked = sorted(t.name for t in set(threading.enumerate()) - before)
+        self.assertEqual([], leaked)
 
     def test_the_pool_still_fetches_every_shard_in_the_normal_case(self):
         def fetch(shard):
