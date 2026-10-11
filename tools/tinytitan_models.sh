@@ -505,25 +505,31 @@ tinytitan_catalog_find_dir() {
 # The workspace defaults to the directory the launcher was run from, which
 # is the repository being worked on, so two checkouts never share memory.
 
+# The one reading of the memory switch. MemoryConfiguration.fromEnvironment takes
+# 1, on and true, case-insensitively, and `on` is pinned by its own test
+# (tests/TinyTitanMemory/MemoryConfigurationTests.swift); every shell reader has
+# to agree with it, on ON and on OFF, or a launch that asked for memory gets a
+# different answer from a launch that asked in the other way. Callers use this
+# rather than comparing the value themselves, so a fourth reader cannot appear.
+tinytitan_memory_requested() {
+  local flag
+  flag="$(printf '%s' "${TINYTITAN_MEMORY:-0}" | tr '[:upper:]' '[:lower:]')"
+  case "$flag" in
+    1 | on | true) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 tinytitan_export_memory_environment() {
   local workspace_dir="${1:-$PWD}"
   export TINYTITAN_MEMORY="${TINYTITAN_MEMORY:-0}"
-  # The same words the engine reads. MemoryConfiguration.fromEnvironment takes
-  # 1, on and true, case-insensitively, and `on` is pinned by its own test; this
-  # compared the literal "1" alone. So TINYTITAN_MEMORY=on started a server with
-  # memory ON and none of the three exports below, which is the worst of both:
-  # the store fell through to the engine's defaults -- ~/.tinytitan/memory rather
+  # AUD-301: this used to compare the literal "1" alone, so TINYTITAN_MEMORY=on
+  # started a server with memory ON and none of the three exports below. The
+  # store fell through to the engine's own defaults -- ~/.tinytitan/memory rather
   # than the <TinyTitan>/memory beside models/, and workspace "default", one file
   # for every project -- and because the refusal keys off TINYTITAN_WORKSPACE_DIR,
-  # neither side refused. Two readers of one switch must agree on ON and on OFF:
-  # anything the engine reads as off stays off here, rather than gaining a
-  # refusal it does not have.
-  local memory_flag
-  memory_flag="$(printf '%s' "$TINYTITAN_MEMORY" | tr '[:upper:]' '[:lower:]')"
-  case "$memory_flag" in
-    1 | on | true) ;;
-    *) return 0 ;;
-  esac
+  # neither side refused.
+  tinytitan_memory_requested || return 0
   # The home directory, its parent and the root are not projects. A server
   # launched from one and used for everything would put a novel and a
   # codebase in one fact store, so this refuses to start rather than mix.

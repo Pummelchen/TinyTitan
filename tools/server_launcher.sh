@@ -1452,7 +1452,7 @@ print_setup() {
   fi
   echo "  Runtime:    $runtime_note"
   echo "  Engine:     $engine_line"
-  if [[ "$MEMORY" == "1" ]]; then
+  if tinytitan_memory_requested; then
     echo "  Memory:     on (persistent, repo-scoped; guard on)"
   fi
   echo ""
@@ -1499,11 +1499,13 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-# Persistent memory, when TINYTITAN_MEMORY=1. The workspace is the directory this
-# was launched from, so each repository keeps its own memory.
+# Persistent memory, however it was asked for: the --memory flag exports
+# TINYTITAN_MEMORY above, and the environment spelling is the one
+# docs/agent-memory.md documents. The workspace is the directory this was
+# launched from, so each repository keeps its own memory.
 tinytitan_export_memory_environment "$PWD"
 
-if [[ "$MEMORY" == "1" ]]; then
+if tinytitan_memory_requested; then
   echo "Memory: on (in-process, ${TINYTITAN_MEMORY_DIR}${TINYTITAN_MEMORY_CACHE_MIB:+, cap ${TINYTITAN_MEMORY_CACHE_MIB} MiB}, workspace $(basename "$PWD"))"
 fi
 

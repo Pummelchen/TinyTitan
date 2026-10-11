@@ -1,11 +1,14 @@
-"""AUD-301: the memory switch has two readers, and one of them reads only `1`.
+"""The memory switch's readers, and the one definition they all have to call.
 
-Measured, before the fix:
+Measured, before the AUD-301 fix, for the two readers that then existed:
 
 | reader | source | words it reads as ON |
 |---|---|---|
 | engine | MemoryConfiguration.swift:236 | `1`, `on`, `true`, case-insensitively |
 | launcher library | tools/tinytitan_models.sh:509 | the literal `1` and nothing else |
+
+A third reader appeared in the same seam (AUD-302): the launcher's own reporting,
+which looked only at the `--memory` flag's shell variable.
 
 The engine's alias set is not an accident: `on` is pinned by a test
 (tests/TinyTitanMemory/MemoryConfigurationTests.swift:61), and the sibling
@@ -27,12 +30,24 @@ The tests source the real library and call the real function in a `/bin/bash`
 subprocess -- 3.2.57 on a factory Mac -- with HOME and the launch directory in a
 scratch tree. Nothing here loads a model.
 
+AUD-302 is the same switch with a third reader: `tools/server_launcher.sh`
+reported memory in the plan and the banner from the `--memory` flag's shell
+variable alone, while `docs/agent-memory.md` tells the operator to use the
+environment spelling, which since this fix does turn memory on. The two report
+sites now call `tinytitan_memory_requested`, so the ON-set has one definition
+besides the engine's, and the suites here drive both spellings through the real
+launcher (`--dry-run`, which starts nothing) and through the two reporting blocks
+lifted verbatim from it.
+
 The mutation sweep killed eleven of eleven shapes, but only after a survivor
 corrected the suite: dropping the `export TINYTITAN_MEMORY="${...:-0}"` line
 passed everything, because the engine reads an absent name as off too. The suite
 was not looking at the child's environment at all, so the two pass-through tests
 added for it are what make that line mean something. One more shape -- the
-named-workspace escape hatch -- had no test either, and the sweep found it.
+named-workspace escape hatch -- had no test either, and the sweep found it. A
+third, from the AUD-302 sweep, reads the switch without `:-0`: it still answers
+OFF for an unset value, so only watching stderr catches it, because the launcher
+runs under `set -u` and would print `unbound variable` on every ordinary launch.
 
     cd benchmark && python3 -m unittest test_models_memory_gate -v
 """
@@ -45,8 +60,12 @@ import subprocess
 import tempfile
 import unittest
 
+import launcher_fixture
+from test_launcher_port import run_launcher
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 LIBRARY = REPO_ROOT / "tools" / "tinytitan_models.sh"
+LAUNCHER = REPO_ROOT / "tools" / "server_launcher.sh"
 
 # Sourced, called, then the three exports it owns are printed. The function can
 # `exit 2` from the junk-drawer refusal, which ends the child before the prints:
@@ -231,6 +250,198 @@ class TheJunkDrawerRefusalReachesEverySpelling(unittest.TestCase):
         # stop a launch that never asked for memory.
         result = self.refuse("0")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+ON_SET_SCRIPT = """
+set -uo pipefail
+source "$1"
+if tinytitan_memory_requested; then echo ON; else echo OFF; fi
+"""
+
+
+class TheOneReadingOfTheSwitch(unittest.TestCase):
+    """AUD-302: a third reader appeared, so the ON-set needs one definition.
+
+    The engine reads `TINYTITAN_MEMORY` (1/on/true, case-insensitive) and, since
+    AUD-301, so does `tinytitan_export_memory_environment`. The launcher's own
+    reporting reads only the `--memory` flag's shell variable, so
+    `TINYTITAN_MEMORY=1 tools/server_launcher.sh` -- the spelling
+    `docs/agent-memory.md` documents under "Setup" -- starts a server with
+    memory on, with the repo-scoped store exported, and says nothing about it in
+    the plan or the banner. This pins the predicate every reader is meant to
+    call, in the shape the engine reads.
+    """
+
+    def asked(self, memory_value: str | None) -> str:
+        environment = dict(os.environ)
+        environment.pop("TINYTITAN_MEMORY", None)
+        if memory_value is not None:
+            environment["TINYTITAN_MEMORY"] = memory_value
+        result = subprocess.run(
+            ["/bin/bash", "-c", ON_SET_SCRIPT, "bash", str(LIBRARY)],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        # The launcher runs under `set -u`, so a predicate that reads the switch
+        # without a default does not merely mis-report an unset value: it prints
+        # `TINYTITAN_MEMORY: unbound variable` on every ordinary launch. The
+        # mutation sweep showed nothing watched stderr, so this is what pins it.
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def test_the_engine_s_on_words_are_all_requested(self) -> None:
+        for value in ("1", "on", "true", "ON", "True", "TRUE"):
+            with self.subTest(value=value):
+                self.assertEqual(self.asked(value), "ON")
+
+    def test_everything_the_engine_reads_as_off_is_not_requested(self) -> None:
+        # "" is unset-as-read; "  on" and "yes" are off to the engine too, so
+        # this must not ask for more than the engine does.
+        for value in ("0", "off", "", "yes", "2", "  on", "1 on", None):
+            with self.subTest(value=value):
+                self.assertEqual(self.asked(value), "OFF")
+
+
+# The launcher's two reporting lines, lifted verbatim so they can run with no
+# model: the flag-to-environment bridge, and the export call followed by the
+# banner that reads it.
+BRIDGE_START = 'if [[ "$MEMORY" == "1" ]]; then\n  export TINYTITAN_MEMORY=1'
+BRIDGE_END = "\nfi\n"
+BANNER_START = 'tinytitan_export_memory_environment "$PWD"'
+BANNER_END = "# 10) Start the server"
+
+# The launcher's argument parser sets MEMORY; this hands the extracted bridge the
+# same variable from the environment so a test can drive either spelling. The
+# placeholders are replaced rather than formatted: the slice is full of shell
+# braces, and str.format would read every one of them as a field.
+LAUNCHER_SLICE_SCRIPT = """
+set -uo pipefail
+source "@LIBRARY@"
+MEMORY="${TEST_MEMORY:-0}"
+@BRIDGE@
+@BANNER@
+"""
+
+
+def launcher_report_script() -> str:
+    """The launcher's bridge and banner, verbatim, sourced with the real library."""
+    text = LAUNCHER.read_text(encoding="utf-8")
+    try:
+        start = text.index(BRIDGE_START)
+        bridge = text[start : text.index(BRIDGE_END, start) + len(BRIDGE_END)]
+        start = text.index(BANNER_START)
+        banner = text[start : text.index(BANNER_END, start)]
+    except ValueError as error:  # pragma: no cover - a marker moved
+        raise AssertionError(f"launcher reporting line moved: {error}") from error
+    return (
+        LAUNCHER_SLICE_SCRIPT.replace("@LIBRARY@", str(LIBRARY))
+        .replace("@BRIDGE@", bridge)
+        .replace("@BANNER@", banner)
+    )
+
+
+class TheLauncherReportsEverySpelling(unittest.TestCase):
+    """What the operator is told about memory must match what runs."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.installs = launcher_fixture.SyntheticInstalls().create()
+        cls.addClassCleanup(cls.installs.destroy)
+        cls.model = cls.installs.first_gpu()
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.project = pathlib.Path(self._tmp.name).resolve() / "work" / "my-project"
+        self.project.mkdir(parents=True)
+
+    def memory_lines(self, stdout: str) -> list[str]:
+        return [line for line in stdout.splitlines() if "Memory:" in line]
+
+    def plan(self, args: tuple[str, ...], memory_value: str | None) -> list[str]:
+        """The real launcher's plan, from a dry run that starts nothing."""
+        environment = {"TINYTITAN_MEMORY": memory_value or ""}
+        run = run_launcher(
+            self.installs,
+            "--client",
+            "server",
+            "--model",
+            self.model,
+            *args,
+            env=environment,
+        )
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        return self.memory_lines(run.stdout)
+
+    def banner(
+        self, test_memory: str, memory_value: str | None, *, cache_mib: str | None = None
+    ) -> list[str]:
+        """The launcher's bridge and banner, verbatim, against the real library."""
+        environment = dict(os.environ)
+        environment["HOME"] = str(self.project.parent)
+        environment["TEST_MEMORY"] = test_memory
+        for name in ("TINYTITAN_MEMORY", "TINYTITAN_MEMORY_CACHE_MIB"):
+            environment.pop(name, None)
+        if memory_value is not None:
+            environment["TINYTITAN_MEMORY"] = memory_value
+        if cache_mib is not None:
+            environment["TINYTITAN_MEMORY_CACHE_MIB"] = cache_mib
+        result = subprocess.run(
+            ["/bin/bash", "-c", launcher_report_script()],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+            cwd=str(self.project),
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return self.memory_lines(result.stdout)
+
+    def test_the_flag_is_reported_in_the_plan(self) -> None:
+        self.assertEqual(len(self.plan(("--memory",), None)), 1)
+
+    def test_the_environment_is_reported_in_the_plan(self) -> None:
+        # The spelling docs/agent-memory.md:322 tells the operator to use.
+        for value in ("1", "on", "TRUE"):
+            with self.subTest(value=value):
+                self.assertEqual(len(self.plan((), value)), 1)
+
+    def test_a_switch_that_is_off_is_not_reported(self) -> None:
+        # Reporting memory that is off would be the same bug wearing the other
+        # half of the coat: the line has to follow the switch, not lead it.
+        for value in ("0", "off", ""):
+            with self.subTest(value=value):
+                self.assertEqual(self.plan((), value), [])
+
+    def test_the_banner_follows_the_flag(self) -> None:
+        lines = self.banner("1", None)
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("Memory: on", lines[0])
+
+    def test_the_banner_follows_the_environment(self) -> None:
+        # The property is that the report cannot depend on the spelling: the line
+        # the flag produces is the line the environment has to produce. (The line
+        # names the workspace with `basename "$PWD"`, so this compares whole
+        # lines rather than reaching for a path it never prints.)
+        expected = self.banner("1", None)
+        for value in ("1", "on", "true"):
+            with self.subTest(value=value):
+                self.assertEqual(self.banner("0", value), expected)
+
+    def test_the_banner_names_the_store_the_server_gets(self) -> None:
+        # The line's whole purpose: the operator sees which directory holds the
+        # facts, and which workspace names it.
+        lines = self.banner("0", "on", cache_mib="64")
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn("/memory", lines[0])
+        self.assertIn("cap 64 MiB", lines[0])
+        self.assertIn("workspace my-project", lines[0])
+
+    def test_an_undocumented_word_is_not_reported(self) -> None:
+        self.assertEqual(self.banner("0", "yes"), [])
 
 
 if __name__ == "__main__":

@@ -119,7 +119,7 @@ Environment variables, which is how the start scripts pass them:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TINYTITAN_MEMORY` | `0` | `1` enables memory |
+| `TINYTITAN_MEMORY` | `0` | `1`, `on` or `true` (any case) enables memory; anything else is off |
 | `TINYTITAN_MEMORY_DIR` | `<TinyTitan>/memory` | Directory holding the project files (the binary alone falls back to `~/.tinytitan/memory`) |
 | `TINYTITAN_MEMORY_RETENTION_DAYS` | `30` | Delete a project file untouched this long; `0` keeps all |
 | `TINYTITAN_MEMORY_MAX_WORKSPACES` | `100` | Keep at most this many project files, oldest first out; `0` is no cap |
