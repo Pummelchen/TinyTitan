@@ -159,3 +159,35 @@ tail fetch, and the front fetch's window remains unfilled at this hit rate.
 Text outputs were not compared across arms: the CLI's default sampling is
 temperature 1.0, so run-to-run text differs inside each arm; the golden
 gate is the numerics verdict and it passed.
+
+## 5d. Reader throughput vs the device wall — closed (2026-10-11)
+
+The one remaining byte-identical candidate was raising the reader's raw
+throughput. Premise checked before touching code: what does this SSD
+actually deliver on the reader's exact access pattern — 2.64 MiB
+expert-stride-aligned preads scattered over 48 layer files? A thread-pool
+probe (`stride = 2,768,896`, random file + expert-aligned offset per read,
+~2 GB per configuration, 48 layer files ≈ 68 GB so the page cache never
+answers):
+
+| workers | GB/s |
+| ---: | ---: |
+| 1 | 2.01 |
+| 2 | 2.84 |
+| 4 | 3.57 |
+| 8 | 3.71 |
+| 16 | 3.69 |
+
+Saturation is ~3.7 GB/s at 8–16 workers; the engine's 4-worker reader
+(3.57 GB/s in this probe, matching its in-engine effective throughput) is
+already at the wall. The sequential contrast kills the alternative shape:
+`dd` over a whole layer file measures 3.15 GB/s (`layer_47.bin`) and
+2.61 GB/s (`layer_31.bin`) — sequential is *slower* than the reader's
+strided parallelism, so "read more sequentially" is not a lever either.
+The earlier assumption of a ~7 GB/s M3 SSD was wrong for this access
+pattern; scattered 2.64 MiB reads are the binding constraint.
+
+**The reader-throughput lever is closed with these numbers.** Combined
+with B1 (cache policy dead) and B2 (PLE = 0.0015%), no byte-identical
+lever of material size remains; what is left is §6, gated on an operator
+decision.
