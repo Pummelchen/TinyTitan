@@ -86,10 +86,22 @@ class StormVerdictTests(unittest.TestCase):
         bundle.write_text("#!/usr/bin/env bash\nexit 0\n")
         bundle.chmod(0o755)
         # The script looks for the runtime beside the bundle's MacOS directory,
-        # at Contents/Frameworks, so the stub goes exactly where it looks.
+        # at Contents/Frameworks, so the stub goes exactly where it looks. It
+        # must be a real dylib, not a stand-in file: the storm injects it via
+        # DYLD_INSERT_LIBRARIES, and on the xcode-27 CI runner (SIP disabled,
+        # probe run 38135275281) dyld terminates any helper whose inserted
+        # library is not a Mach-O — CI run 38132374149 lost every stub helper
+        # before its first test line. A SIP-on host strips that variable, which
+        # is why a text file here stayed green locally while failing CI.
         runtime = bundle.parent.parent / "Frameworks/libclang_rt.tsan_osx_dynamic.dylib"
         runtime.parent.mkdir(parents=True)
-        runtime.write_text("stub")
+        stub_source = self.tmp / "stub_tsan_runtime.c"
+        stub_source.write_text("int tinytitan_stub_tsan_runtime;\n")
+        subprocess.run(
+            ["clang", "-dynamiclib", str(stub_source), "-o", str(runtime)],
+            check=True,
+            capture_output=True,
+        )
 
         tools = self.tmp / "tools"
         tools.mkdir()
@@ -124,6 +136,41 @@ class StormVerdictTests(unittest.TestCase):
             check=False,
         )
 
+    def test_the_injected_tsan_runtime_is_a_real_mach_o_image(self):
+        # The storm injects the runtime through DYLD_INSERT_LIBRARIES, and on
+        # the xcode-27 CI runner (SIP disabled, measured by probe run
+        # 38135275281: csrutil reports disabled) that variable reaches the
+        # helper, where dyld terminates any process whose inserted library is
+        # not a Mach-O ("terminating because inserted dylib ... could not be
+        # loaded: slice is not valid mach-o file", rc 134 on the runner). A
+        # SIP-on host strips the variable instead, so this file's validity is
+        # invisible locally and the CI run is where a text file at this path
+        # fails: run 38132374149 lost every stub helper before its first test
+        # line and three verdict tests read the storm's refusal as 2 != 0/1.
+        # The magic bytes are the host-independent pin: whatever builds this
+        # fixture must produce something dyld can actually insert.
+        runtime = self.tmp / (
+            ".build/out/Products/Debug/TinyTitanServerTests.xctest/Contents"
+            "/Frameworks/libclang_rt.tsan_osx_dynamic.dylib"
+        )
+        header = runtime.read_bytes()[:16]
+        self.assertEqual(
+            len(header),
+            16,
+            f"the injected runtime is {len(header)} bytes — no Mach-O header",
+        )
+        self.assertEqual(
+            header[:4],
+            b"\xcf\xfa\xed\xfe",
+            f"first bytes {header[:4]!r} are not a 64-bit little-endian Mach-O image",
+        )
+        self.assertEqual(
+            header[12:16],
+            (6).to_bytes(4, "little"),
+            f"Mach-O filetype {int.from_bytes(header[12:16], 'little')} is not "
+            "MH_DYLIB (6) — dyld inserts dylibs, not objects or text",
+        )
+
     def test_a_run_that_executed_nothing_is_not_a_clean_verdict(self):
         result = self.run_storm("refuse", "--runs", "1", "--parallel", "1")
         self.assertNotEqual(result.returncode, 0, "a storm that ran no test must not exit clean")
@@ -133,7 +180,12 @@ class StormVerdictTests(unittest.TestCase):
 
     def test_one_refused_run_among_clean_ones_still_fails_the_storm(self):
         result = self.run_storm("pass", "--runs", "1", "--parallel", "2")
-        self.assertEqual(result.returncode, 0, "the fixture itself: two passing runs read clean")
+        self.assertEqual(
+            result.returncode,
+            0,
+            "the fixture itself: two passing runs read clean\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}",
+        )
         # Exactly one of two parallel runs refuses: the stub helper lets the first
         # process to claim the lock pass and makes the other exit 69.
         result = self.run_storm("refuse-second", "--runs", "1", "--parallel", "2")
@@ -145,7 +197,9 @@ class StormVerdictTests(unittest.TestCase):
 
     def test_a_storm_that_runs_nothing_is_not_a_clean_verdict(self):
         result = self.run_storm("pass", "--runs", "0", "--parallel", "1")
-        self.assertEqual(result.returncode, 2, f"--runs 0 read as: {result.stdout}")
+        self.assertEqual(
+            result.returncode, 2, f"--runs 0 read as: {result.stdout}{result.stderr}"
+        )
         self.assertNotIn("Clean:", result.stdout)
 
     def test_a_non_numeric_run_count_is_refused_before_anything_launches(self):
@@ -155,12 +209,14 @@ class StormVerdictTests(unittest.TestCase):
 
     def test_a_reproduced_race_still_exits_one(self):
         result = self.run_storm("report", "--runs", "1", "--parallel", "1")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("REPRODUCED", result.stdout)
 
     def test_the_clean_verdict_counts_the_runs_that_actually_ran(self):
         result = self.run_storm("pass", "--runs", "2", "--parallel", "1")
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(
+            result.returncode, 0, result.stdout + result.stderr
+        )
         self.assertIn("Clean: no report in 2 instrumented runs", result.stdout)
 
     def assert_padded_refusal(self, option: str, value: str) -> None:
