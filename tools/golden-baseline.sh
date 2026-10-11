@@ -75,6 +75,58 @@ SEED="${SEED:-1234}"
 PORT="${PORT:-8757}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 
+# Those four numbers are read far from here, and only one of them is checked
+# anywhere before it costs a model load: MAX_NEW and SEED go to the CLI's own
+# parser (sources/TinyTitanCLI/Args.swift:254) and to the python body builder
+# below, PORT to the launcher, and READY_TIMEOUT to nothing but the
+# `[ "$waited" -lt "$READY_TIMEOUT" ]` that decides whether the server is polled
+# at all. A word is the expensive shape. `test` errors on a non-integer and takes
+# the false branch -- `[ 0 -lt 1800s ]` prints "integer expression expected" and
+# is false -- so the poll never runs, `ready` stays 0, and the gate reports
+# "server: FAILED — not ready after 1800s": the operator's own typo returned as a
+# model that loaded too slowly, over a run that never waited for anything. Refuse
+# at the read, in the exit-2 style the checks below this file already use.
+#
+# Refused, and deliberately not:
+#   - anything with a non-digit in it (`-5` too: the CLI refuses it after the
+#     load, the body builder's int() accepts it, so the two readers disagree);
+#   - zero for MAX_NEW and READY_TIMEOUT, both of which mean "poll/generate for
+#     no time at all" and report a timeout or an empty run instead;
+#   - a port the port space does not hold, and a leading-zero port, because
+#     tools/server_launcher.sh:1233 range-checks with `(( ))`, which reads octal
+#     and leaves the verdict unevaluated on `08757` (measured: two "value too
+#     great for base" lines, then the launch proceeds unchecked).
+#   - a leading zero on the other three: `test` and int() both read `0900` as 900,
+#     so refusing it would be a rule no reader of this value has.
+#   - an out-of-range but numeric size: that is the CLI's named error, and this
+#     script does not restate the engine's bounds.
+for name in MAX_NEW SEED PORT READY_TIMEOUT; do
+  case "${!name}" in
+    *[!0-9]*)
+      echo "unknown $name: ${!name} (a number)" >&2
+      exit 2
+      ;;
+  esac
+done
+if [ "$MAX_NEW" -eq 0 ]; then
+  echo "unknown MAX_NEW: 0 (at least one token)" >&2
+  exit 2
+fi
+if [ "$READY_TIMEOUT" -eq 0 ]; then
+  echo "unknown READY_TIMEOUT: 0 (seconds to poll for readiness)" >&2
+  exit 2
+fi
+case "$PORT" in
+  0*)
+    echo "unknown PORT: $PORT (a port 1-65535, no leading zero)" >&2
+    exit 2
+    ;;
+esac
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  echo "unknown PORT: $PORT (a port 1-65535)" >&2
+  exit 2
+fi
+
 # Pin the ANE prefill switch OFF, and export it so the CLI, the server, and
 # anything the server spawns all inherit it.
 #
