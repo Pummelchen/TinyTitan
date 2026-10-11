@@ -34,6 +34,9 @@ extension RealForwardRunner {
             if let phase1HitCB = pending.phase1HitCB {
                 try waitForCompletion(phase1HitCB)
             }
+            if let phase1MissCB = pending.phase1MissCB {
+                try waitForCompletion(phase1MissCB)
+            }
             try waitForCompletion(pending.cb)
         } else if let err = pending.cb.error {
             throw ModelError.commandBufferFailed(
@@ -68,6 +71,13 @@ extension RealForwardRunner {
         if let phase1HitCB = pending.phase1HitCB, let err = phase1HitCB.error {
             throw ModelError.commandBufferFailed(
                 detail: "routed phase-1 hit command buffer: \(err)")
+        }
+        if let phase1MissCB = pending.phase1MissCB {
+            if let err = phase1MissCB.error {
+                throw ModelError.commandBufferFailed(
+                    detail: "routed early phase-1 miss fixup command buffer: \(err)")
+            }
+            recordKernelGPU(role: "moe_phase1_miss_fixup", phase1MissCB)
         }
         if let sharedCB = pending.sharedCB {
             recordKernelGPU(role: "shared_expert", sharedCB)

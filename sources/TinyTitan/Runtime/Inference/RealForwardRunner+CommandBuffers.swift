@@ -25,6 +25,9 @@ extension RealForwardRunner {
         let cb: MTLCommandBuffer
         let sharedCB: MTLCommandBuffer?
         let phase1HitCB: MTLCommandBuffer?
+        /// The miss phase-1 fixup committed early, when the load split its
+        /// reads and the front range landed before the tail.
+        let phase1MissCB: MTLCommandBuffer?
         let expertLease: RoutedExpertLease?
         let storageOperation: RoutedExpertLoadOperation?
         let overlapCompletionClock: CommandCompletionClock?

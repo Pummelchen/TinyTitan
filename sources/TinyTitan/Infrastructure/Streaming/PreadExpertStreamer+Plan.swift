@@ -247,7 +247,9 @@ extension PreadExpertStreamer {
         let operation = ExpertLoadOperation(
             completionToken: token,
             eventCoordinator: eventCoordinator,
-            backendSignalsEvent: false)
+            backendSignalsEvent: false,
+            publishesFirstStage:
+                boundedReader != nil && layout.phase1Bytes != nil)
         ExpertIOScheduler.shared.submit { [self, operation] in
             operation.markInFlight()
             do {

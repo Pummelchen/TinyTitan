@@ -31,6 +31,11 @@ public final class ExpertLoadOperation: @unchecked Sendable {
     /// completed. Pread writes cache slots directly and therefore remains
     /// false.
     let requiresGPUFinalization: Bool
+    /// True when the read is split and `publishFirstStage` will fire between
+    /// the front (gate+up) and tail (down) fetches. Whole-region backends and
+    /// miss-free plans never publish, and a caller that plans work against the
+    /// first stage must check this rather than assume the split exists.
+    let publishesFirstStage: Bool
     private var startedAtNanos: UInt64 = 0
     private var completedAtNanos: UInt64 = 0
 
@@ -43,6 +48,7 @@ public final class ExpertLoadOperation: @unchecked Sendable {
         backendSignalsEvent: Bool = false,
         metalStagingTransfer: MetalExpertStagingTransfer? = nil,
         requiresGPUFinalization: Bool = false,
+        publishesFirstStage: Bool = false,
         submittedNanos: UInt64 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
     ) {
         precondition(
@@ -53,6 +59,7 @@ public final class ExpertLoadOperation: @unchecked Sendable {
         self.backendSignalsEvent = backendSignalsEvent
         self.metalStagingTransfer = metalStagingTransfer
         self.requiresGPUFinalization = requiresGPUFinalization
+        self.publishesFirstStage = publishesFirstStage
         self.submittedNanos = submittedNanos
     }
 
