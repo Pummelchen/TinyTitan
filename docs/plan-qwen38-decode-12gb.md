@@ -14,7 +14,12 @@ measured (`docs/qwen38-decode-12gb-measurements.md` §5c). B4 closed at its
 own algebra gate (2026-10-12): on the real install's weights the
 hyper-connection read map violates linearity by 19–44% on every arm
 probed (fp32 rounding <1e-6), so no fixed `B` exists and `W_eff = W·B` is
-not an identity (`docs/qwen38-decode-12gb-measurements.md` §5f). The
+not an identity (`docs/qwen38-decode-12gb-measurements.md` §5f). The B3
+follow-up gate|up sub-split closed at its probe gate the same day: finer
+ranges (0.88 MiB) do not raise the reader's throughput over the as-is
+1.76 MiB front at the real ~3-miss parallelism (all arms 3.2–3.4 GB/s,
+inside noise — §5g), so the reader is closed in both directions (§5d:
+workers; §5g: range size). The
 remaining headroom is §6, which is gated on an explicit operator decision
 that has
 not been given yet. §3 stands only as the recorded design that stage 0

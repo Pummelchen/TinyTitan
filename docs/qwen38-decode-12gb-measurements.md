@@ -316,3 +316,36 @@ gate.** No golden re-capture was spent, no engine code was touched; this
 is the outcome the plan's check-first ordering exists to catch cheaply.
 The plan's §6 item 1 and status header record the closure.
 
+## 5g. gate|up sub-split — premise measured false (2026-10-12)
+
+The mechanism hypothesis after §5c: at 74% hit rate × 10 routed experts ×
+48 layers, a token misses ~2.6 experts per layer, so the B3 front phase
+issues only ~2.6 ranges of 1.76 MiB to the 4-worker reader — possibly
+undersaturated — while splitting gate|up at the real blob seam (up's
+offset, 921,600 B) would double the range count. Premise checked with the
+§5d thread-pool probe at the real geometry (F_NOCACHE preads at
+expert-aligned offsets over the 48 real layer files, random file per job,
+~1.5 GB per arm, 4-bit front = 1,843,200 B, blob = 2,768,896 B):
+
+| arm | GB/s |
+| --- | ---: |
+| front as-is: 3 concurrent × 1.76 MiB | 3.25 |
+| front as-is: 4 concurrent × 1.76 MiB | 3.36 |
+| sub-split: 3 × 2 × 0.88 MiB (6 concurrent) | 3.22 |
+| sub-split: 3 × 2 × 0.88 MiB (4 workers) | 3.33 |
+| control: 6 × 0.88 MiB | 3.36 |
+| control: 3 × 2.64 MiB whole blob | 3.38 |
+| tail-split blob: 3 × 2 × 1.32 MiB | 3.32 |
+
+Every arm lands in 3.2–3.4 GB/s, inside arm-to-arm noise, and the
+sub-split arms are not faster than the as-is front. **Per-pread size
+between 0.88 MiB and 2.64 MiB does not move this SSD's throughput, and the
+front phase at ~3 concurrent ranges is already at the same wall as
+everything else — the "undersaturated front" premise is false and the
+sub-split lever is closed at its probe gate.** A pinned single-file run
+(layer_00 only) reproduced the same verdict (2.92–3.17 GB/s, sub-split
+slowest), so the conclusion is not an artifact of the scatter. No engine
+code was touched, no golden gate was spent. Combined with §5d, the reader
+is closed in both directions: more workers buy nothing (§5d) and finer
+ranges buy nothing (this section).
+
