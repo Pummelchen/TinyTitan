@@ -10,8 +10,13 @@ B3 measured and accepted: split gate+up/down reads with an early miss fixup
 give +2.5% tok/s (4.180 → 4.286 mean over two A/B pairs) with the
 hit-rate-equal + `io_hidden_pct`-up falsifier satisfied, golden
 byte-identical — below the §5 projection of +0.3–0.5 tok/s, recorded as
-measured (`docs/qwen38-decode-12gb-measurements.md` §5c). The remaining
-headroom is §6, which is gated on an explicit operator decision that has
+measured (`docs/qwen38-decode-12gb-measurements.md` §5c). B4 closed at its
+own algebra gate (2026-10-12): on the real install's weights the
+hyper-connection read map violates linearity by 19–44% on every arm
+probed (fp32 rounding <1e-6), so no fixed `B` exists and `W_eff = W·B` is
+not an identity (`docs/qwen38-decode-12gb-measurements.md` §5f). The
+remaining headroom is §6, which is gated on an explicit operator decision
+that has
 not been given yet. §3 stands only as the recorded design that stage 0
 rejected. Written 2026-10-11, after v5.19. This is a plan, not a promise:
 nothing here is supported until a measurement says so and the release notes
@@ -250,11 +255,14 @@ None of these start without the operator's explicit yes. Each is listed with
 its algebra-check-first rule, because a wrong premise here costs a golden
 re-capture.
 
-1. **HC-factored QKV (B4).** If the hyper-connection mixin is exactly
-   low-rank (`hc_lowrank=320` against a 10,240-wide stream), `W_eff = W·B`
-   precomputed offline cuts the QKV input read ≈72%. Verify the algebra
-   against the manifest's declared matrices on real tensors *first*
-   (bit-exact modulo float order), then measure. Golden re-capture required.
+1. **HC-factored QKV (B4) — CLOSED at the algebra gate (2026-10-12).**
+   The premise is false: the mixin is data-dependent by construction
+   (`sigmoid(Wup @ silu(Wdown @ normed/4))`, measured mix spread 0.24–0.71
+   of its mean across tokens) and the map `normed → blockInput` violates
+   linearity by 0.19–0.44 relative on every arm probed (layers 0/1/2/47,
+   attn + mlp, and the model-level mixer) against a real-tensor float32
+   noise floor <1e-6. No fixed `B` exists; §5f of the measurements doc
+   holds the table. No golden re-capture was spent.
 2. **Expert merging 512→256–320 in the repack.** Shrinks the streamed corpus
    (68 → ~45 GB) and the per-token miss count together; the only lever that
    makes 7 tok/s comfortable if stage 0 says cache work tops out below it.

@@ -284,3 +284,35 @@ measured dead at this profile or bounded below 2% by a mechanism nothing
 in the engine controls; decode tok/s at 12 GB remains SSD-bound, and the
 open levers are the operator decisions in §6.
 
+## 5f. B4 algebra check — the HC-factored QKV premise is false (2026-10-12)
+
+Plan §6 item 1 ordered the algebra check before anything else: `W_eff =
+W·B` precomputed offline is only valid if the hyper-connection read map
+`normed → blockInput` equals a fixed linear `B @ normed`, bit-exact modulo
+float order. The runtime (`HyperConnection.swift`) computes
+`h = silu(Wdown @ normed/4)`, `mix = sigmoid(Wup @ h)`,
+`input = mean_st(mix[st] ⊙ normed[st])` — so the map is linear only if the
+gates are degenerate. The check ran over the real install's dequantized
+weights (`tools/ssdai_reader.py`, layers 0/1/2/47, attn + mlp arms and the
+model-level mixer):
+
+| arm | \|Wdown\|max | \|Wup\|max | mix std/mean | linearity viol. | scale viol. |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| layers.0.attn | 1.28 | 3.94 | 0.24 | 0.19 | 0.33 |
+| layers.1.attn | 6.47 | 2.94 | 0.41 | 0.44 | 0.45 |
+| layers.2.attn | 1.84 | 4.50 | 0.52 | 0.36 | 0.30 |
+| layers.47.attn | 1.06 | 2.89 | 0.34 | 0.40 | 0.31 |
+| layers.0.mlp | 2.78 | 8.56 | 0.44 | 0.29 | 0.23 |
+| layers.1.mlp | 2.34 | 4.49 | 0.39 | 0.26 | 0.33 |
+| layers.2.mlp | 4.13 | 6.19 | 0.49 | 0.32 | 0.23 |
+| layers.47.mlp | 0.94 | 2.95 | 0.37 | 0.27 | 0.24 |
+| model mixer | 1.35 | 4.16 | 0.71 | 0.39 | 0.36 |
+
+The gates are live (weight maxima O(1)–O(10), mix moves 24–71% of its mean
+across random tokens) and the linearity violation is 0.19–0.44 relative on
+every arm — against a float32 noise floor below 1e-6. **No fixed `B`
+exists; the B4 premise is false and the lever is closed at the algebra
+gate.** No golden re-capture was spent, no engine code was touched; this
+is the outcome the plan's check-first ordering exists to catch cheaply.
+The plan's §6 item 1 and status header record the closure.
+
