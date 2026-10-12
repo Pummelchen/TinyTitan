@@ -430,16 +430,20 @@ and the KL is modest, so this is not obviously a dumber model — but it is
 measurably a *different* one, against an operator constraint that says no
 quality reduction.
 
-**Decision left deliberately open, priced:** advancing B5 means a repack
-change (the engine already supports a 4-bit head end to end —
+**Decision: declined at the operator decision (2026-10-12)** — "quality
+loss cannot be accepted." Advancing B5 would have meant a repack change
+(the engine already supports a 4-bit head end to end —
 `lmHeadWeightBits` resolves per-role and the decode/prefill head kernels
 are width-keyed, so no kernel work), a fresh ~68 GB install from the
 pinned source checkpoint, the full quality panel (perplexity + prompt
 panel), a golden re-capture, and the runner-stats A/B for what B5 buys
 (the head GEMV read halves, ~640 → ~320 MiB/token ≈ +2-3% ceiling at the
-67.8 GB/s the plan measured). The offline gate's job was to kill a
-bad premise before that spend; instead it says the premise is false but
-the damage is small — an operator call, not a measurement call.
+67.8 GB/s the plan measured). The offline gate's job was to kill a bad
+premise before that spend; it did: the premise is false (7.9% logit
+noise, 1.1% greedy flips), and the operator declined any numerics
+change regardless of the small perplexity damage. No repack build, no
+install, no quality panel. This closes the §6 list and with it the
+decode-12GB campaign, standing at the measured 4.286 tok/s.
 
 ## 5j. B6 re-affirmed closed by its own gate (2026-10-12)
 

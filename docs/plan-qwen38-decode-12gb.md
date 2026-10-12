@@ -22,10 +22,14 @@ inside noise — §5g), so the reader is closed in both directions (§5d:
 workers; §5g: range size). Expert merging closed the same day at its
 study gate (§5h): the 512 experts are mutually orthogonal and any merge
 destroys ~95% of the merged expert's output, failing the operator's
-no-quality-loss constraint. The
-remaining headroom is §6, which is gated on an explicit operator decision
-that has
-not been given yet. §3 stands only as the recorded design that stage 0
+no-quality-loss constraint. lm_head 4-bit (B5) closed at the operator
+decision the same day (§5i): the offline gate showed the "near-lossless"
+premise false (7.9% relative logit noise, 1.1% greedy flips on 175 real
+decode positions) and the operator declined any numerics change — no
+repack, no install, no quality panel. The MTP re-verdict (B6) stays
+closed by its own condition (nothing left moves the hit rate off
+74.2–74.8%, §5j). **Every §6 lever is closed; the campaign stands at the
+measured 4.286 tok/s.** §3 stands only as the recorded design that stage 0
 rejected. Written 2026-10-11, after v5.19. This is a plan, not a promise:
 nothing here is supported until a measurement says so and the release notes
 carry it. The analysis it builds on is §1's measured state; every stage is
@@ -281,15 +285,14 @@ re-capture.
    output (drop contrast 1.41×). There is no cluster structure to merge;
    §5h of the measurements doc holds the tables. The quality-eval step is
    never reached — no merge schedule is worth building.
-3. **lm_head 4-bit (B5) — offline gate run (2026-10-12), decision open.**
+3. **lm_head 4-bit (B5) — CLOSED at the operator decision (2026-10-12).**
    The "near-lossless" premise is false: on 175 real decode positions
    (TINYTITAN_ACT_DUMP) the simulated repack scheme injects 7.9% relative
    logit noise and flips 1.1% of greedy argmaxes, though perplexity damage
-   is small (≤0.5% greedy) and KL 0.0065 (`§5i`). Engine support already
-   exists (`lmHeadWeightBits` resolves per-role; head kernels are
-   width-keyed), so advancing costs a repack change, a fresh ~68 GB
-   install, the full quality panel, a golden re-capture, and the A/B —
-   against the operator's no-quality-loss constraint. Operator decision.
+   is small (≤0.5% greedy) and KL 0.0065 (`§5i`). The operator declined to
+   accept any numerics change: no repack build, no install, no quality
+   panel. The engine's existing 4-bit head support changes nothing —
+   the lever is closed.
 4. **MTP re-verdict (B6) — stays closed (re-affirmed 2026-10-12).** The
    re-verdict is conditional on the hit rate rising; nothing left in the
    campaign moves it (§5d, §5g, §5f, §5h). The condition never fires
