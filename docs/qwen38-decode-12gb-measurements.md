@@ -395,3 +395,56 @@ rescue a √2 distance. With this, §6 item 2 is closed; the remaining
 pooled-summary print crashed on a scalar shape after every per-layer row
 had printed, so the per-layer table above is complete.
 
+## 5i. B5 offline gate — lm_head 4-bit is not near-lossless (2026-10-12)
+
+Plan §6 item 3 hypothesized that 4-bit group-64 affine might be
+near-lossless for the vocabulary head. Measured on **real activations**:
+one decode run (175 positions, Hamlet prompt, `--max-new 192`) with
+`TINYTITAN_ACT_DUMP` captured the true pre-head hidden state (`mixer_out`)
+and the engine's own 8-bit logits per position; the study
+(`/tmp/b5_head_4bit.py`, model-free afterwards) simulated the repack's
+4-bit affine scheme (asymmetric uint4, groups of 64 along the input dim,
+BF16-rounded scale and bias) on the real 8-bit head weights and compared
+logits.
+
+Reference sanity first: the offline fp32 recomputation of the 8-bit head
+matches the engine's dumped logits to 0.00021 relative — the proxy is
+sound, so all the error below is the 4-bit step itself.
+
+| metric (175 real decode positions) | value |
+| --- | ---: |
+| relative logit error (4-bit vs 8-bit) | 0.079 |
+| greedy top-1 flips | 2 / 175 (1.1%) |
+| positions where err@top1 exceeds the top-1/top-2 margin | 6 / 175 |
+| ΔNLL on the generated token (perplexity multiplier) | mean +0.005 nats on greedy, p90 +0.59 on generated |
+| KL(p8‖p4), T=1 | 0.0065 mean, 0.020 p90 |
+| entropy shift | 0.345 → 0.334 |
+
+**The "near-lossless" premise is false: 4-bit injects 7.9% relative logit
+noise — ~370x the 8-bit reference error — and flips the greedy argmax on
+1.1% of positions.** Over a 300-token greedy generation that is a ~96%
+chance of at least one divergence, and every divergence is a visible
+quality event (the golden text changes, which is why the plan priced a
+golden re-capture). The perplexity-side damage is small (≤0.5% on greedy)
+and the KL is modest, so this is not obviously a dumber model — but it is
+measurably a *different* one, against an operator constraint that says no
+quality reduction.
+
+**Decision left deliberately open, priced:** advancing B5 means a repack
+change (the engine already supports a 4-bit head end to end —
+`lmHeadWeightBits` resolves per-role and the decode/prefill head kernels
+are width-keyed, so no kernel work), a fresh ~68 GB install from the
+pinned source checkpoint, the full quality panel (perplexity + prompt
+panel), a golden re-capture, and the runner-stats A/B for what B5 buys
+(the head GEMV read halves, ~640 → ~320 MiB/token ≈ +2-3% ceiling at the
+67.8 GB/s the plan measured). The offline gate's job was to kill a
+bad premise before that spend; instead it says the premise is false but
+the damage is small — an operator call, not a measurement call.
+
+## 5j. B6 re-affirmed closed by its own gate (2026-10-12)
+
+The MTP re-verdict is conditional on the hit rate rising; with B1, the
+reader (§5d/§5g), B4, §5h and the sub-split all closed, nothing in the
+campaign moves it off 74.2–74.8%. The condition never fires; B6 stays
+closed without a re-measurement.
+

@@ -281,12 +281,19 @@ re-capture.
    output (drop contrast 1.41×). There is no cluster structure to merge;
    §5h of the measurements doc holds the tables. The quality-eval step is
    never reached — no merge schedule is worth building.
-3. **lm_head 4-bit (B5).** 644 MiB/token of 8-bit logits at 67.8 GB/s;
-   4-bit halves the bytes. Quality gate required (perplexity + a fixed prompt
-   panel), golden re-capture.
-4. **MTP re-verdict (B6)** only after stage 1: the −43% gate failure was
-   measured at 78% hit; the verify-pair economics change if the hit rate
-   rises. Re-measure, never re-argue.
+3. **lm_head 4-bit (B5) — offline gate run (2026-10-12), decision open.**
+   The "near-lossless" premise is false: on 175 real decode positions
+   (TINYTITAN_ACT_DUMP) the simulated repack scheme injects 7.9% relative
+   logit noise and flips 1.1% of greedy argmaxes, though perplexity damage
+   is small (≤0.5% greedy) and KL 0.0065 (`§5i`). Engine support already
+   exists (`lmHeadWeightBits` resolves per-role; head kernels are
+   width-keyed), so advancing costs a repack change, a fresh ~68 GB
+   install, the full quality panel, a golden re-capture, and the A/B —
+   against the operator's no-quality-loss constraint. Operator decision.
+4. **MTP re-verdict (B6) — stays closed (re-affirmed 2026-10-12).** The
+   re-verdict is conditional on the hit rate rising; nothing left in the
+   campaign moves it (§5d, §5g, §5f, §5h). The condition never fires
+   (`§5j`).
 
 ## §7 Verification matrix
 
