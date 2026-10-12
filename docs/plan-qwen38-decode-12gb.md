@@ -19,7 +19,10 @@ follow-up gate|up sub-split closed at its probe gate the same day: finer
 ranges (0.88 MiB) do not raise the reader's throughput over the as-is
 1.76 MiB front at the real ~3-miss parallelism (all arms 3.2–3.4 GB/s,
 inside noise — §5g), so the reader is closed in both directions (§5d:
-workers; §5g: range size). The
+workers; §5g: range size). Expert merging closed the same day at its
+study gate (§5h): the 512 experts are mutually orthogonal and any merge
+destroys ~95% of the merged expert's output, failing the operator's
+no-quality-loss constraint. The
 remaining headroom is §6, which is gated on an explicit operator decision
 that has
 not been given yet. §3 stands only as the recorded design that stage 0
@@ -268,11 +271,16 @@ re-capture.
    attn + mlp, and the model-level mixer) against a real-tensor float32
    noise floor <1e-6. No fixed `B` exists; §5f of the measurements doc
    holds the table. No golden re-capture was spent.
-2. **Expert merging 512→256–320 in the repack.** Shrinks the streamed corpus
-   (68 → ~45 GB) and the per-token miss count together; the only lever that
-   makes 7 tok/s comfortable if stage 0 says cache work tops out below it.
-   Numerics-changing by construction; needs the merge-distance study before
-   the operator can decide.
+2. **Expert merging 512→256–320 in the repack — CLOSED at the merge-distance
+   study gate (2026-10-12).** The study ran before any repack work, per the
+   operator's no-quality-loss constraint: on the real install's dequantized
+   4-bit weights, the 512 experts of every sampled layer are pairwise
+   orthogonal (all-pair relative distance = √2 = 1.4143 median over
+   131,072 pairs; even the closest matched pairs 1.4131), and weight-
+   averaging the closest pair still destroys ~95% of the expert's SwiGLU
+   output (drop contrast 1.41×). There is no cluster structure to merge;
+   §5h of the measurements doc holds the tables. The quality-eval step is
+   never reached — no merge schedule is worth building.
 3. **lm_head 4-bit (B5).** 644 MiB/token of 8-bit logits at 67.8 GB/s;
    4-bit halves the bytes. Quality gate required (perplexity + a fixed prompt
    panel), golden re-capture.

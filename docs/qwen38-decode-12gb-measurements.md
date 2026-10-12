@@ -349,3 +349,49 @@ code was touched, no golden gate was spent. Combined with §5d, the reader
 is closed in both directions: more workers buy nothing (§5d) and finer
 ranges buy nothing (this section).
 
+## 5h. Expert merging — the 512 experts are mutually orthogonal (2026-10-12)
+
+Plan §6 item 2 was the last lever with a big ceiling: merge 512 experts to
+256–320 so the decode working set fits the 3,072-pair cache. The operator
+set the constraint first: **no merge that makes the model dumber.** The
+study therefore asks whether the experts cluster at all, on the real
+install's dequantized 4-bit weights (`PackedExperts`, layers 0/6/12/24/36/
+47, all 512 experts, gate+up+down). Method: pairwise relative Frobenius
+distance `d(i,j) = ||Wi−Wj||_F / sqrt(||Wi||_F ||Wj||_F)` — for
+uncorrelated equal-norm matrices this is √2; then a greedy closest-pair
+matching (the merge schedule), then the functional cost: SwiGLU output of
+the weight-averaged expert vs both originals over unit-RMS gaussian inputs
+(RMSNorm makes the hidden state unit-RMS; real activations would need a
+model run), plus the milder "drop expert i, route its tokens to j"
+contrast.
+
+Per layer, 131,072 pairs each; pooled medians across the six layers:
+
+| quantity | median | p90 | max |
+| --- | ---: | ---: | ---: |
+| all-pair relative distance | 1.4143 | 1.4159 | 1.5282 |
+| matched-pair (closest 256) distance | 1.4131 | 1.4135 | 1.4438 |
+| merge→256: merged-expert output error | 0.947 | 0.971 | 1.162 |
+| merge→320 (closest 192 pairs) error | 0.946 | 0.963 | 1.123 |
+| drop contrast (route i's token to j) | 1.411 | 1.419 | 1.470 |
+
+The verdict is structural, not marginal. **The experts are pairwise
+orthogonal: the all-pair distance is √2 = 1.4142 with almost no spread,
+and even the closest matched pairs (1.4131) sit a rounding error below
+random.** There is no cluster structure to merge. The functional numbers
+agree: weight-averaging the *closest* pair still destroys ~95% of the
+routed expert's output, and the drop contrast is worse than the output
+itself (1.41×). Merging 512→256–320 would make the model measurably
+dumber — it fails the operator's constraint at the study gate, and the
+quality-eval-on-a-merged-install step is never reached because there is
+no merge schedule worth building.
+
+Caveats, stated plainly: the study measures weight geometry and
+gaussian-input function, not task quality; and a merged install would add
+re-quantization error on top. Both push the same direction — neither could
+rescue a √2 distance. With this, §6 item 2 is closed; the remaining
+§6 items are lm_head 4-bit (B5, quality-gated) and the MTP re-verdict
+(B6). The study's script was a one-off (`/tmp/merge_distance.py`); its
+pooled-summary print crashed on a scalar shape after every per-layer row
+had printed, so the per-layer table above is complete.
+
