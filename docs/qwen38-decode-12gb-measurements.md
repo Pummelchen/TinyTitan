@@ -484,3 +484,68 @@ option only pays when a kernel repeatedly re-reads a working set that
 fits the cache, and the only such compute available would have to be
 *added* to the CPU — which is the measured-loss co-execution lever. Not
 re-openable on the evidence.
+
+## 5l. Low Power Mode re-baseline and turnaround decomposition (2026-10-13)
+
+A runner-stats re-baseline captured **inside Low Power Mode** (`pmset -g`
+`lowpowermode 1`, on battery), at the operator's explicit direction after
+an LPM throttle was found to have invalidated an earlier attempt to
+re-measure. **Scope caveat: these numbers are valid for comparison
+against each other and against the code's structure only — not against
+the 4.286 tok/s campaign record or any mains-power number.** Method is
+the §5c CLI command, run twice back-to-back (run 1 warms, run 2 is the
+measured arm):
+
+| | prefill | decode | tok/s | ms/token |
+| --- | --- | --- | ---: | ---: |
+| LPM run 1 (warm) | 58 tok / 8.53 s | 384 tok / 112.59 s | **3.411** | 293.2 |
+| LPM run 2 (measured) | 58 tok / 8.35 s | 384 tok / 128.28 s | **2.993** | 334.1 |
+| campaign B3 arm, mains, for orientation only | — | — | 4.286 | 233.3 |
+
+Runner-stats decomposition (all values ms/token):
+
+| segment | run 1 | run 2 |
+| --- | ---: | ---: |
+| cb1 (encode) | 8.28 | 12.77 |
+| io (miss I/O) | 106.86 | 117.98 |
+| cb2 | 1.78 | 2.99 |
+| rdadvise (issue) | 17.53 | 26.81 |
+| wait (GPU + hidden I/O) | 118.96 | 124.38 |
+| **body** | **262.13** | **299.48** |
+| head | 21.54 | 22.91 |
+| cache_plan | 5.37 | 8.65 |
+| io_completion_to_fixup | 2.99 | 5.15 |
+| gather | 2.96 | 3.74 |
+| loop_sample | 1.92 | 1.92 |
+| loop_other | 1.97 | 1.98 |
+| embed | 0.70 | 0.90 |
+| expert hit rate | 76.0% | 74.4% |
+| io_hidden | 99.79% | 99.09% |
+| expert load p50/p95/p99 | 4 / 8 / 16 | 4 / 8 / 16 |
+| rdadvise calls / MiB per token | 102.5 / 272.4 | 110.1 / 334.0 |
+| prefetch issued / adopted per token | 43.5 / 23.6 | 44.0 / 26.1 |
+
+Findings:
+
+- **The token's structure is unchanged under LPM.** Hit rate (74–76%),
+  I/O hidden fraction (99+%), expert load percentiles and the segment
+  ordering all match the campaign's B3 arm; the throttle scales every
+  segment roughly together — clock throttling, not a new bottleneck.
+- **LPM run-to-run spread is ±14% on decode time** (112.6 vs 128.3 s)
+  while every CPU-side dispatch segment moved 30–50% between runs
+  (rdadvise 17.5→26.8, cb1 8.3→12.8, plan 5.4→8.6). **This baseline
+  cannot resolve a single-% candidate**: the noise floor is an order of
+  magnitude above one percent. It prices structure, not micro-levers.
+- **CPU-side dispatch segments total ≈44–66 ms/token (15–20% of the
+  token)**, the same magnitude as the mains-power turnaround finding
+  (profile doc §C). rdadvise issuing is the largest single segment, but
+  the §8 closure covers the *policy* A/B (`7cc8b5e`: default beats off
+  by ~10.6% at 4-bit, neutral on M5/8-bit; `db1c102`: off costs 8.5%,
+  adaptive/bounded no win) — not the issue count. A call-count reduction
+  (~105 `F_RDADVISE` syscalls/token for ~300 MiB advised) is the one
+  uncovered seam this baseline names, and it is unpriceable at LPM's
+  noise floor; it would need a mains window and an A/B to go further.
+
+Verdict: no new lever opened. The LPM baseline confirms the delivered
+build's structure and re-identifies the turnaround as the remaining
+non-GPU cost; any single-% work against it requires mains power.
