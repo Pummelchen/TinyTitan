@@ -452,3 +452,35 @@ reader (§5d/§5g), B4, §5h and the sub-split all closed, nothing in the
 campaign moves it off 74.2–74.8%. The condition never fires; B6 stays
 closed without a re-measurement.
 
+
+## 5k. The CPU L1/L2 cache is not an accelerator for this engine (2026-10-13)
+
+Asked whether the CPU cores' L1 (192+128 KB per P-core) or 16 MB P-cluster
+L2 could be used as an accelerator for a critical area. Attribution from
+the code, no model run needed:
+
+- **No tensor math runs on the CPU in the main decode loop.** Router,
+  GEMVs, attention, expert FFN and sampling are all Metal kernels; the
+  `Sampler` touches the logits on the host only when a repetition/presence
+  penalty or a structured constraint is active, which the default path is
+  not (`sources/TinyTitan/Runtime/Generation/Sampler.swift:84-106`).
+- **The one real CPU cost per token is dispatch latency, not data.** The
+  profiled "≈20 ms/token turnaround" is GPU idle during readback, plan,
+  pin, encode and commit (`docs/qwen38-decode-profile-2026-09-05.md`
+  §C) — command-buffer scheduling, on which a cache has no effect. The
+  early-hits work (profile doc §12) already shipped most of it down.
+- **The CPU data the decode loop does touch is already trivially
+  resident**: kernel arguments, expert plans, PLE bookkeeping — kilobytes
+  against a 128 KB L1d.
+- **The only CPU tensor machinery in the tree is the closed side
+  engine.** `CPUEngine/` + `Int8AffineGEMV`/`CPUExpertFFN` exist for CPU
+  co-execution, measured at **−22.6%** tok/s (`cpu-coexecution-plan.md`),
+  and CPU spinning during I/O wait measured −15%. This profile is
+  bus-bound: moving compute onto the CPU cores turns them into another
+  memory-bus consumer competing with the SSD streaming that is the wall.
+
+Verdict: the cache-residency lever prices at **~0%** here. The L1/L2
+option only pays when a kernel repeatedly re-reads a working set that
+fits the cache, and the only such compute available would have to be
+*added* to the CPU — which is the measured-loss co-execution lever. Not
+re-openable on the evidence.
