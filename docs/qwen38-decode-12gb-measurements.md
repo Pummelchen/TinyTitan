@@ -647,3 +647,102 @@ is §8-closed (slots_128 swaps at 68% cost; the flat-pair cache is at
 capacity by design), and no routing or policy change recovers the hit
 rate the larger working set spends. The number is recorded as the
 long-context figure future proposals have to argue against.
+
+## 5o. Budget × context sweep — the working-set cliff, and what actually sits on it (2026-10-14)
+
+Two questions in one protocol. The sweep question (#147): does any
+(cache slots × max-context) combination beat the derived default on this
+machine? The regression question (#152): v5.0 shipped qwen38 at a 12 GiB
+budget — 96 slots — and measured 6.957 tok/s (wiki Changelog);
+`808cea3` then clamped the budget to a third of physical memory, which
+is 8 GiB — 64 slots — on this 24 GB machine, and the whole campaign ran
+there. Did the clamp cost the configuration?
+
+Protocol: release build `33b3a06`, CLI (no `--ram`, so derivation picks
+the slots the server would pick), essay prompt, `--max-new 384`,
+`TINYTITAN_RUNNER_STATS=1`, mains power. Mirrored arms, and the mirror
+of the decisive arm was run after two *healthy* arms so a predecessor's
+swap debt cannot be the explanation. 129.6 MB per slot per layer group
+(expert stride × 48 layers), so 64 slots is 7.92 GiB, 96 is 12.15,
+112 is 14.51, 128 is 16.58, 160 is 20.74; the resident floor is 3.72 GiB.
+
+| arm | slots | max-context | decode tok/s (pair) |
+| --- | ---: | ---: | --- |
+| base | 64 (derived) | 262144 | **4.551 / 4.481** |
+| c32 | 64 | 32768 | 4.543 / 4.175 |
+| s96 | 96 | 262144 | 3.052 / 3.201 |
+| s96_32k | 96 | 32768 | **4.929 / 4.966** |
+| s112_32k | 112 | 32768 | 3.622 |
+| s128_32k | 128 | 32768 | 0.999 / 1.473 |
+| s160_32k | 160 | 32768 | 0.498 / 0.579 |
+
+Findings:
+
+- **96 slots at the shipped 262144 context is a 30% loss, mirrored**
+  (3.05/3.20 against 4.55/4.48). #152's hypothesis is false on the
+  current build: restoring the tuned 12 GiB budget — the exact experiment
+  `808cea3`'s comment deferred — would be a regression, not a recovery.
+- **96 slots at a 32K context cap is the only winning arm: +9%**
+  (4.93/4.97 against the base pair's 4.52). Hit rate rises 0.775 →
+  0.850, confirming the extra 32 slots genuinely hold experts.
+- **The cliff is the machine's working set, and the QSA indexer is what
+  the context cap actually frees.** Runner stats, s96b vs s96_32kb:
+  io_ms identical (66.2 / 65.7), hit rate identical (0.8525 / 0.8531),
+  io_queue_ms identical (0.38) — but wait_ms 201 vs 98 and body_ms 290
+  vs 184. The disk does the same work at the same speed in both arms;
+  the slow arm pages. The accounting: the QSA indexer preallocates its
+  per-layer key buffers at *full context* on first use
+  (`QSAIndexer+Scratch.swift`: "Sized to the full context on a layer's
+  first use, unlike the KV cache which grows on demand"). From the
+  installed manifest (indexerHeadDim 128, compressRatio 4, 12
+  full-attention layers of 48): **0.94 GiB at 262144 against 0.12 GiB
+  at 32768**. That 0.82 GiB is the entire difference between the two
+  96-slot arms: 12.15 + 3.72 + 0.12 ≈ 16.0 GiB fits, +0.82 ≈ 16.8 GiB
+  does not. The KV cache is not the variable — it starts at 8192 tokens
+  and grows (`min(maxContext, initialCapacityTokens)`), identical in
+  both arms.
+- **64 slots is on the right side of the cliff either way**, which is
+  why the context cap measured neutral there (4.54/4.18 against
+  4.55/4.48, inside the ~8% mirror noise this prompt shows).
+- **112 slots is over the cliff even at 32K** (3.62), and 128/160 swap
+  to collapse as before. The last good rung on this machine is 96, and
+  only with the 0.82 GiB freed.
+- **Deviation noted:** the s128/s160 arms left 9.4 GB of swap debt that
+  persisted through the sweep; the mirrored pairs (and s96b running
+  after two healthy arms at the same 3.2 as s96) are what make the
+  cliff attribution safe anyway.
+
+Verdicts:
+
+- **#147 closed.** At shipped defaults the derived 64 slots is the best
+  runnable configuration on this 24 GB machine. The binding constraint
+  is physical working set, not budget policy.
+- **#152 closed — hypothesis false, mechanism found.** The third-of-RAM
+  ceiling is the *right* answer for qwen38 at the shipped context on
+  this machine; v5.0's 6.957 is not reachable by any configuration this
+  sweep turned. What grew since is named: the QSA decode indexer
+  (`f5b1720`, 2026-08-30) wires ~0.94 GiB at full context and postdates
+  the v5.0 measurement window. The rest of the gap to 6.957 is not
+  attributable to a single knob and is not chased here.
+- **#149 closed by the base arm's own runner line.** io_ms = 102.0 per
+  token for ~403 MB moved ≈ 3.95 GB/s against the device's measured
+  3.92 GB/s four-thread ceiling (`ParallelExpertReader`); io_queue_ms
+  0.41 — no queueing to buy back. The disk is at its wall; every
+  alternative allocation of that bandwidth (deeper rings, more staged
+  reads, two-layer lookahead) is already measured loss-making in the
+  prefetch study. The miss-read path has no headroom.
+- **#151 closed without an experiment.** The serial tail per token is
+  head 12.2 ms + gather 2.5 + sample 1.0 + embed 0.45 against a ~220 ms
+  body; overlapping it across tokens requires starting the next token's
+  embedding before this token is sampled, which is speculation — and
+  speculation is §8-closed (MTP), with the fused head architecturally
+  excluded for this family (hyper-connections on). The residue is ~1%,
+  below the 8% mirror noise floor.
+- **The lever the sweep did open:** the QSA preallocation is the file's
+  own deferred work ("growing on demand is worth doing… and is not
+  worth the bookkeeping yet"). Growing the indexer buffers on demand,
+  exactly as KV does, frees ~0.82 GiB at short contexts at *any*
+  max-context — which is precisely the headroom the +9% arm needs at
+  the shipped 262144 default, with numerics untouched (the buffers are
+  storage; selection runs over visible keys only). That is the next
+  task.

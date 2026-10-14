@@ -192,82 +192,18 @@ extension RealForwardRunner {
         // empty value-semantic snapshots and silently disabled hit/fixup.
         let phase1HitSlots = decodeHitSlotsScratch
         let phase1MissSlots = decodeMissSlotsScratch
-        func encodeRoutedPhase1Full(
-            _ cb: MTLCommandBuffer,
-            argBuf: MTLBuffer,
-            routedBufs: [MTLBuffer],
-            ioStatus: MTLBuffer? = nil,
-            ioStatusOffset: Int = 0
-        ) throws {
-            try moe.encodeRoutedPersistentPhase1U16Load(
-                commandBuffer: cb,
-                routedArgBuffer: argBuf,
-                routedBlobs: routedBufs,
-                routedOffsets: routedOffsets,
-                x: routedX,
-                acts: moeActs,
-                d: D,
-                f: FmoE,
-                topK: topK,
-                ioStatus: ioStatus,
-                ioStatusOffset: ioStatusOffset)
-        }
-
-        func encodeRoutedPhase1Subset(
-            _ cb: MTLCommandBuffer,
-            argBuf: MTLBuffer,
-            routedBufs: [MTLBuffer],
-            activeSlots: MTLBuffer,
-            activeSlotIndices: [UInt32],
-            activeCount: UInt32,
-            ioStatus: MTLBuffer? = nil,
-            ioStatusOffset: Int = 0
-        ) throws {
-            try moe.encodeRoutedPersistentPhase1SubsetU16Load(
-                commandBuffer: cb,
-                routedArgBuffer: argBuf,
-                routedBlobs: routedBufs,
-                routedOffsets: routedOffsets,
-                x: routedX,
-                acts: moeActs,
-                activeSlots: activeSlots,
-                activeSlotIndices: activeSlotIndices,
-                activeCount: activeCount,
-                d: D,
-                f: FmoE,
-                topK: topK,
-                ioStatus: ioStatus,
-                ioStatusOffset: ioStatusOffset)
-        }
 
         if let plan = plannedFetch,
-            plan.hits > 0,
-            !plan.misses.isEmpty,
-            !phase1HitSlots.isEmpty
+            let plannedHit = try encodeDecodePlannedHitPhase1(
+                plan: plan,
+                phase1HitSlots: phase1HitSlots,
+                routedOffsets: routedOffsets,
+                d: D,
+                f: FmoE,
+                topK: topK)
         {
-            let plannedBlobs = try model.routedExpertBuffers(for: plan)
-            for blob in plannedBlobs {
-                decodeHitSplitRoutedBufsScratch.append(blob.buffer)
-                decodeHitSplitRoutedOffsetsScratch.append(Int(blob.offset))
-            }
-            phase1HitSplitArgBuf = moe.makeRoutedArgumentBuffer(
-                routedBlobs: decodeHitSplitRoutedBufsScratch,
-                topK: topK,
-                routedBufferOffsets: decodeHitSplitRoutedOffsetsScratch)
-            if let argBuf = phase1HitSplitArgBuf, plan.hits > 0, !plan.misses.isEmpty {
-                writeActiveSlots(phase1HitSlots, into: moeHitActiveSlots)
-                guard let cb = ctx.queue.makeCommandBuffer() else {
-                    throw ModelError.residentBufferWrapFailed
-                }
-                try encodeRoutedPhase1Subset(
-                    cb,
-                    argBuf: argBuf,
-                    routedBufs: decodeHitSplitRoutedBufsScratch,
-                    activeSlots: moeHitActiveSlots,
-                    activeSlotIndices: phase1HitSlots,
-                    activeCount: UInt32(phase1HitSlots.count))
-                phase1HitCB = cb
-            }
+            phase1HitSplitArgBuf = plannedHit.argBuf
+            phase1HitCB = plannedHit.cb
         }
 
         if let cb = phase1HitCB {
@@ -307,51 +243,6 @@ extension RealForwardRunner {
         let tIoStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let blobs: [TensorView]
         var completedStorageNanos: UInt64?
-        // Encodes and commits phase 1 over the miss slots as soon as the
-        // load's front range (gate+up) is resident, so it executes on the GPU
-        // while the tail (down) fetch is still in flight. Slot resources are
-        // known from the reservation, so the argument buffer is built before
-        // any wait; its bytes are consumed only by commands committed after
-        // `firstStageCompletion` resumed.
-        func encodeEarlyMissFixup(load: RoutedExpertLoadOperation) async throws {
-            guard load.storage.publishesFirstStage, !phase1MissSlots.isEmpty else { return }
-            try await load.storage.firstStageCompletion()
-            let planBlobs = try model.routedExpertBuffers(for: load.plan)
-            var planBufs: [MTLBuffer] = []
-            var planOffsets: [Int] = []
-            planBufs.reserveCapacity(planBlobs.count)
-            planOffsets.reserveCapacity(planBlobs.count)
-            for blob in planBlobs {
-                planBufs.append(blob.buffer)
-                planOffsets.append(Int(blob.offset))
-            }
-            let argBuf =
-                phase1HitSplitArgBuf
-                ?? moe.makeReusedRoutedArgumentBuffer(
-                    routedBlobs: planBufs,
-                    topK: topK,
-                    routedBufferOffsets: planOffsets)
-            guard let cb = ctx.queue.makeCommandBuffer() else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            writeActiveSlots(phase1MissSlots, into: moeMissActiveSlots)
-            if phase1HitSplitArgBuf != nil {
-                try encodeRoutedPhase1Subset(
-                    cb,
-                    argBuf: argBuf,
-                    routedBufs: planBufs,
-                    activeSlots: moeMissActiveSlots,
-                    activeSlotIndices: phase1MissSlots,
-                    activeCount: UInt32(phase1MissSlots.count))
-            } else {
-                try encodeRoutedPhase1Full(cb, argBuf: argBuf, routedBufs: planBufs)
-            }
-            completionClock?.track(cb)
-            cb.commit()
-            phase1MissCB = cb
-            earlyFixupArgBuf = argBuf
-            totalHitFixupLayers &+= 1
-        }
         let eventLoad = plannedLoad.flatMap { operation -> RoutedExpertLoadOperation? in
             operation.storage.completionToken == nil ? nil : operation
         }
@@ -369,7 +260,19 @@ extension RealForwardRunner {
             totalExpertIOHostWaitsAvoided &+= 1
         } else if let plannedLoad {
             totalExpertIOHostWaits &+= plannedLoad.plan.misses.isEmpty ? 0 : 1
-            try await encodeEarlyMissFixup(load: plannedLoad)
+            if let fixup = try await encodeDecodeEarlyMissFixup(
+                load: plannedLoad,
+                phase1MissSlots: phase1MissSlots,
+                phase1HitSplitArgBuf: phase1HitSplitArgBuf,
+                routedOffsets: routedOffsets,
+                d: D,
+                f: FmoE,
+                topK: topK,
+                completionClock: completionClock)
+            {
+                phase1MissCB = fixup.cb
+                earlyFixupArgBuf = fixup.argBuf
+            }
             blobs = try await plannedLoad.completion()
             totalIOQueueNanos &+= plannedLoad.storage.submissionToStartNanos
             completedStorageNanos = plannedLoad.storage.completedNanos
@@ -379,7 +282,19 @@ extension RealForwardRunner {
             // begins here, after the independent hit work is committed.
             let deferredLoad = try model.beginFetchRoutedExperts(plan: plannedFetch)
             totalExpertIOHostWaits &+= plannedFetch.misses.isEmpty ? 0 : 1
-            try await encodeEarlyMissFixup(load: deferredLoad)
+            if let fixup = try await encodeDecodeEarlyMissFixup(
+                load: deferredLoad,
+                phase1MissSlots: phase1MissSlots,
+                phase1HitSplitArgBuf: phase1HitSplitArgBuf,
+                routedOffsets: routedOffsets,
+                d: D,
+                f: FmoE,
+                topK: topK,
+                completionClock: completionClock)
+            {
+                phase1MissCB = fixup.cb
+                earlyFixupArgBuf = fixup.argBuf
+            }
             blobs = try await deferredLoad.completion()
             totalIOQueueNanos &+= deferredLoad.storage.submissionToStartNanos
             completedStorageNanos = deferredLoad.storage.completedNanos
@@ -477,13 +392,17 @@ extension RealForwardRunner {
         if splitArgBuf != nil {
             totalHitFixupLayers &+= 1
             writeActiveSlots(phase1MissSlots, into: moeMissActiveSlots)
-            try encodeRoutedPhase1Subset(
+            try encodeDecodeRoutedPhase1Subset(
                 routedCB,
                 argBuf: argBuf,
                 routedBufs: routedBufs,
                 activeSlots: moeMissActiveSlots,
                 activeSlotIndices: phase1MissSlots,
                 activeCount: UInt32(phase1MissSlots.count),
+                routedOffsets: routedOffsets,
+                d: D,
+                f: FmoE,
+                topK: topK,
                 ioStatus: ioStatus?.0,
                 ioStatusOffset: ioStatus?.1 ?? 0)
         } else if phase1MissCB == nil {
@@ -491,10 +410,14 @@ extension RealForwardRunner {
             // is already committed and running; this buffer carries phase 2
             // and the tail only. Same-queue FIFO order puts it after the
             // fixup commit.
-            try encodeRoutedPhase1Full(
+            try encodeDecodeRoutedPhase1Full(
                 routedCB,
                 argBuf: argBuf,
                 routedBufs: routedBufs,
+                routedOffsets: routedOffsets,
+                d: D,
+                f: FmoE,
+                topK: topK,
                 ioStatus: ioStatus?.0,
                 ioStatusOffset: ioStatus?.1 ?? 0)
         }

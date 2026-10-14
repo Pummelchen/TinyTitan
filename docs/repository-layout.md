@@ -607,6 +607,16 @@ from `private` to internal, since the initializer that calls them stays behind;
 `openForAppend` also gained `O_RDWR`, because the scan reads through the same
 descriptor whose bytes it truncates.
 
+`RealForwardRunner+DecodeMoE.swift` was split a second time (567 → 490) when
+the B3 early-miss-fixup work pushed it over 500: the phase-1 encodes moved to
+`RealForwardRunner+DecodeMoEPhase1.swift` (180) — the full and subset phase-1
+dispatches, the planned-hit phase-1 encode and the early miss fixup, the last
+two returning their command and argument buffers instead of assigning the
+caller's locals. The nested closures became methods taking the layer's locals
+(`routedOffsets`, `d`, `f`, `topK`, the hit/miss slot state) as parameters;
+every declaration they touch was already internal, so nothing widened and no
+behaviour changed.
+
 ## Generated and local files
 `models/`, `.build/`, `.swiftpm/`, `benchmark/mock/`,
 `benchmark/benchmark-results/`, `.qwen/` (the wiki clone), `.claude/` and
