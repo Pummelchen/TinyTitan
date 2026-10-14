@@ -549,3 +549,49 @@ Findings:
 Verdict: no new lever opened. The LPM baseline confirms the delivered
 build's structure and re-identifies the turnaround as the remaining
 non-GPU cost; any single-% work against it requires mains power.
+
+## 5m. rdadvise on/off on this family — measured, closure re-affirmed (2026-10-14)
+
+§5l named the rdadvise issue count (~105 `F_RDADVISE` syscalls/token) as the
+one seam §8's closure did not cover, and noted the closure's provenance is
+ornith-era (`7cc8b5e`, `db1c102`) — this family at 12G had never been
+arm'd. Mains window, §5c CLI command, `--rdadvise default` vs
+`--rdadvise off`, two back-to-back runs per arm, `TINYTITAN_RUNNER_STATS=1`,
+`--max-new 384`, prompt "Write a detailed essay about the history of
+computing." (10 prefill tokens):
+
+| arm | run | tok/s | hit rate | io_hidden_pct | wait_ms/token | rdadvise_ms/token |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | 1 | 4.313 | 77.79% | 99.84 | 89.02 | 11.60 |
+| default | 2 | 4.805 | 77.74% | 99.93 | 74.83 | 9.72 |
+| off | 1 | 4.380 | 77.26% | 84.26 | 81.17 | 0.00 |
+| off | 2 | 4.538 | 77.53% | 84.90 | 79.42 | 0.00 |
+
+Findings:
+
+- **The mechanism is confirmed and the two effects roughly cancel.** Off
+  removes the 9.7–11.6 ms/token issue cost — and io_hidden falls from
+  99.8–99.9% to 84.3–84.9%, i.e. ~15% of the ~100–120 ms/token miss I/O
+  stops hiding behind GPU work. Wall-clock: default mean 4.559 vs off
+  mean 4.459 (+2.2% for default), but the run-1 pairing went the other
+  way (4.313 vs 4.380). The difference is inside the run spread — the
+  default arm's own pair spans 11% (4.313 → 4.805).
+- **The ornith-era "off costs 8.5%" does not transfer to this family at
+  this budget.** Here the policy is worth ≤2%, not 8.5%. The §8 closure
+  ("family-dependent") is re-affirmed on measurement, and the shipped
+  `default` policy stays: it is never worse and its hiding is real.
+- **Issue-count coalescing prices at a theoretical ceiling of the 10–12
+  ms/token it could recover while keeping the hiding — ≈2–3%, single-%
+  territory**, below what a 384-token single run can resolve here. Parked
+  as unproven; an A/B would need many more repeats per arm than four.
+- **Warmth keeps climbing across back-to-back runs** (4.313 → 4.805
+  inside one arm), so short single-run A/Bs on this model carry a warmth
+  confound the campaign's more stable pairs did not show. Today's
+  no-route-trace runs also reach 4.805, above the 4.286 record — that
+  record was captured with `TINYTITAN_ROUTE_TRACE` writing ~19,824 lines
+  to /tmp during the run; the trace capture itself is part of the gap.
+  The 4.286 campaign number stands as recorded; a no-trace run is a
+  lighter-instrumented environment, not a faster build.
+
+Verdict: no lever opens. Default rdadvise stays; the issue-count seam is
+priced at ≤2–3% and parked.
