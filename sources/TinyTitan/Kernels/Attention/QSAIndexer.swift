@@ -22,6 +22,17 @@ import Metal
 /// The block's rope position is `blockIndex * compressRatio` -- the position
 /// of its first member, not the query's.
 final class QSAIndexer {
+    /// Cells each layer's key buffers are sized for before any growth.
+    ///
+    /// 8192 for the same reason the KV cache starts at
+    /// `KVCacheManager.initialCapacityTokens`: it holds an ordinary
+    /// conversation without a single grow, and the per-layer cost is 2.5 MB
+    /// against the 84 MB a full 262144-cell reservation wires on first use.
+    /// That reservation is what kept 96 expert-cache slots from fitting at the
+    /// shipped context on a 24 GB machine — measured in
+    /// `docs/qwen38-decode-12gb-measurements.md` §5o.
+    static let initialCapacityCells = 8_192
+
     struct Weights {
         let queryProjection: TensorView
         let keyProjection: TensorView
@@ -190,7 +201,7 @@ final class QSAIndexer {
     /// special case for either.
     /// Repools every block a prefill chunk touched. The caller has already
     /// projected the chunk's raw keys into the cache at
-    /// `rawKeyDestination(layer:startPosition:)`.
+    /// `rawKeyDestination(layer:startPosition:tokens:)`.
     func encodePoolPrefill(
         commandBuffer: MTLCommandBuffer,
         weights: Weights, layer: Int,
@@ -201,7 +212,7 @@ final class QSAIndexer {
             startPosition + tokens <= capacity,
             "QSA indexer capacity \(capacity) exceeded at "
                 + "\(startPosition + tokens)")
-        let buffers = try layerBuffers(layer)
+        let buffers = try layerBuffers(layer, hold: startPosition + tokens)
         let f16 = MemoryLayout<Float16>.stride
         let endPosition = startPosition + tokens
         let firstBlock = startPosition / compressRatio
@@ -232,10 +243,10 @@ final class QSAIndexer {
     }
 
     /// The raw-key cache slice a prefill chunk's projection should write into.
-    func rawKeyDestination(layer: Int, startPosition: Int) throws
+    func rawKeyDestination(layer: Int, startPosition: Int, tokens: Int) throws
         -> (buffer: MTLBuffer, offset: Int)
     {
-        let buffers = try layerBuffers(layer)
+        let buffers = try layerBuffers(layer, hold: startPosition + tokens)
         return (
             buffers.raw,
             startPosition * headDim * MemoryLayout<Float16>.stride
@@ -278,7 +289,7 @@ final class QSAIndexer {
         weights: Weights, layer: Int, position: Int,
         eps: Float
     ) throws {
-        let buffers = try layerBuffers(layer)
+        let buffers = try layerBuffers(layer, hold: position + 1)
         let query = weights.queryProjection
         try gemv.encode(
             commandBuffer: commandBuffer,
@@ -341,7 +352,7 @@ final class QSAIndexer {
             MTLBuffer, Int, Int, Int
         ) throws -> Void
     ) throws {
-        let buffers = try layerBuffers(layer)
+        let buffers = try layerBuffers(layer, hold: startPosition + tokens)
         let query = weights.queryProjection
         try growQueryScratch(rows: tokens)
         guard let queryRows = queryRowsBuf else {

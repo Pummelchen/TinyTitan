@@ -255,7 +255,7 @@ extension RealForwardRunner {
         let commandBuffer = cb
         let weights = try indexerWeights(layer: layer)
         let destination = try indexer.rawKeyDestination(
-            layer: layer, startPosition: startPosition)
+            layer: layer, startPosition: startPosition, tokens: tokens)
         let key = weights.keyProjection
         // A promoted projection has no scales or biases, and the quantized QMM
         // cannot read one: it would take the first k bytes of each 2k-byte bf16

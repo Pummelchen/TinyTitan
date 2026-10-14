@@ -10,27 +10,50 @@ import Metal
 // `private` to internal, and so did the twelve stored properties they read.
 extension QSAIndexer {
 
-    func layerBuffers(_ layer: Int) throws -> (raw: MTLBuffer, pooled: MTLBuffer) {
-        if let raw = rawKeys[layer], let pool = pooled[layer] {
+    /// The layer's key buffers, grown to hold at least `required` cells.
+    ///
+    /// Grows on demand like the KV cache, starting at
+    /// `QSAIndexer.initialCapacityCells` and doubling to the configured
+    /// capacity: at the production geometry the full-context reservation is
+    /// 84 MB a layer and a short conversation never touches most of it (§5o
+    /// measured that reservation deciding whether 96 expert-cache slots fit
+    /// on a 24 GB machine). The copy is host-side over shared buffers, and it
+    /// is safe for the same reason `KVCacheManager.reserve` is: callers reach
+    /// the buffers only through this accessor, growth happens before the
+    /// token or chunk that needs the room is encoded, and Metal keeps the old
+    /// buffer alive for any command buffer already holding it.
+    func layerBuffers(_ layer: Int, hold required: Int) throws -> (
+        raw: MTLBuffer, pooled: MTLBuffer
+    ) {
+        precondition(
+            required <= capacity,
+            "QSA indexer capacity \(capacity) exceeded: \(required) cells requested")
+        let f16 = MemoryLayout<Float16>.stride
+        let cellBytes = headDim * f16
+        if let raw = rawKeys[layer], let pool = pooled[layer],
+            raw.length / cellBytes >= required
+        {
             return (raw, pool)
         }
-        // Sized to the full context on a layer's first use, unlike the KV
-        // cache which grows on demand. At the production geometry that is
-        // 1.25 MB a layer for a 4,096-token context and about 84 MB at the
-        // model's full 262,144 -- so growing on demand is worth doing if long
-        // contexts become routine, and is not worth the bookkeeping yet.
-        let f16 = MemoryLayout<Float16>.stride
+        let current = rawKeys[layer].map { $0.length / cellBytes } ?? 0
+        var target = max(current, min(capacity, QSAIndexer.initialCapacityCells))
+        while target < required { target *= 2 }
+        target = min(target, capacity)
         guard
             let raw = ctx.device.makeBuffer(
-                length: capacity * headDim * f16, options: .storageModeShared),
+                length: target * cellBytes, options: .storageModeShared),
             let pool = ctx.device.makeBuffer(
-                length: (capacity / compressRatio + 1) * headDim * f16,
+                length: (target / compressRatio + 1) * cellBytes,
                 options: .storageModeShared)
         else {
             throw MetalError.bufferAllocationFailed("QSA indexer layer \(layer)")
         }
         raw.label = "qsa.rawKeys.L\(layer)"
         pool.label = "qsa.pooled.L\(layer)"
+        if let oldRaw = rawKeys[layer], let oldPool = pooled[layer] {
+            memcpy(raw.contents(), oldRaw.contents(), oldRaw.length)
+            memcpy(pool.contents(), oldPool.contents(), oldPool.length)
+        }
         rawKeys[layer] = raw
         pooled[layer] = pool
         return (raw, pool)
@@ -47,7 +70,7 @@ extension QSAIndexer {
         precondition(
             position < capacity,
             "QSA indexer capacity \(capacity) exceeded at \(position)")
-        let buffers = try layerBuffers(layer)
+        let buffers = try layerBuffers(layer, hold: position + 1)
         let key = weights.keyProjection
         try gemv.encode(
             commandBuffer: commandBuffer,
