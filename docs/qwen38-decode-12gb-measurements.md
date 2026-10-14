@@ -595,3 +595,55 @@ Findings:
 
 Verdict: no lever opens. Default rdadvise stays; the issue-count seam is
 priced at ≤2–3% and parked.
+
+## 5n. Context length at 12G — decode pays ~20% for a long prompt (2026-10-14)
+
+The wiki-derived recommendation that was not already closed: measure decode
+at more than one context length. Run with `benchmark/tinytitan_longctx.py`,
+qwen3.8 4-bit, `--ram 12G`, mains power, build `d26d97a`, server v5.19 on
+127.0.0.1:8091. One generation per cell, driver cells in order A, B, C:
+
+| cell | prompt | max_new | prefill s | decode tok/s | finish |
+| --- | --- | --- | ---: | ---: | --- |
+| A: long+128 | 1,697 tok | 128 | 74.4 | **3.962** | length |
+| B: short+1024 | 22 tok | 1024 | 4.4 | **4.271** | length |
+| C: long+1024 | 1,697 tok | 1024 | 67.8 | **3.423** | stop @ 549 |
+
+Runner stats, per-token, B vs C (the two 1024-token decodes):
+
+| metric | B: short | C: long |
+| --- | ---: | ---: |
+| expert_hit_rate | 0.7588 | 0.6824 |
+| expert_load p95 | 8 ms | 16 ms |
+| wait_ms | 84.0 | 95.6 |
+| cache_plan_ms | 3.68 | 5.64 |
+| io_hidden_pct | 99.88 | 99.63 |
+| rdadvise MiB/token | 300.2 | 191.7 |
+
+Findings:
+
+- **A long prompt costs ~20% of decode throughput at this budget**
+  (4.271 → 3.423 on the same 1024-token decode length). The mechanism is
+  the §B/§5n cache mechanism, not attention: the expert hit rate falls
+  0.759 → 0.682 and the expert-load p95 doubles (8 → 16 ms) as the 96-slot
+  per-(layer,expert) cache turns over against a larger live working set.
+  I/O stays almost fully hidden (99.6–99.9%) — the loss surfaces as GPU
+  wait, not as exposed I/O.
+- **Prefill is ~40 ms/token at this context** (67.8–74.4 s for 1,697
+  tokens) and warms ~9% on the second long prompt of the session
+  (74.4 → 67.8), the same warmth climb §5m saw.
+- **Cell C stopped at 549 tokens on EOS** — greedy on the long prompt ends
+  its essay there; the 3.423 figure is measured over those 549 tokens, not
+  truncated at 1024.
+- Single run per cell: these are first-measurement figures, not settled
+  means. But the direction is structural (hit rate is a counted
+  quantity, not a clock reading), and the cache-churn mechanism is the
+  same one §5/Stage-0 priced: capacity, not policy, bounds the long case.
+
+Verdict: the wiki proposal's premise is confirmed — context length is a
+real decode variable at 12G, worth ~20% between short and ~1.7K-token
+prompt. It does not open a lever: raising cache capacity at this budget
+is §8-closed (slots_128 swaps at 68% cost; the flat-pair cache is at
+capacity by design), and no routing or policy change recovers the hit
+rate the larger working set spends. The number is recorded as the
+long-context figure future proposals have to argue against.
