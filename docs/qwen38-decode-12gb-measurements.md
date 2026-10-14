@@ -746,3 +746,66 @@ Verdicts:
   the shipped 262144 default, with numerics untouched (the buffers are
   storage; selection runs over visible keys only). That is the next
   task.
+
+## 5p. The lever taken: QSA grows on demand, the ceiling floor, and the default is now 96 slots (2026-10-15)
+
+§5o's open lever, implemented and measured. Two commits:
+
+- **`45f55bb` — the QSA indexer buffers grow on demand**, exactly as the KV
+  cache does: 8192 cells at first touch, doubling with a `memcpy` of the live
+  prefix, capped at `maxContext`. The full-context preallocation (0.94 GiB
+  across the 12 full-attention layers) becomes 0.12 GiB at short contexts at
+  any max-context. Growth is safe for the same reason KV's is: every access
+  funnels through the one accessor, growth completes before the needing
+  token or chunk is encoded, and Metal retains an old buffer for any command
+  buffer still in flight. Selection runs over visible keys only, so the
+  numerics are storage-independent. Model-free suite:
+  `QSAIndexerGrowthTests` (start small, whole when small fits, doubling and
+  capping, contents preserved across a grow).
+- **The ceiling floor** — the experiment `808cea3`'s comment deferred ("a
+  floor at the tuned budget, so only machines below the tune are cut").
+  `affordableExpertCacheBudget` now keeps `wanted` on any machine with at
+  least the 24 GiB the budgets were tuned on, and keeps the third-of-RAM
+  clamp below it. The test amendment is stated in the test itself: the old
+  32 GiB assertion expected `(32<<30)/3` because the 96 slots it buys paged
+  under the QSA preallocation; with that gone, the cut buys nothing on a
+  large machine and the assertion now expects the tuned 12 GiB through. A
+  new boundary test pins the floor inclusive at 24 GiB and the third still
+  cutting at 20.
+
+Verification, all on this 24 GB M3, release build, greedy essay prompt,
+`--max-new 128`, temperature 0:
+
+| arm | slots | decode tok/s | text |
+| --- | ---: | ---: | --- |
+| old build (pre-`45f55bb`), default | 64 | 4.811 | reference |
+| new build, default | 64 | 4.720 | byte-identical |
+| new build, `--expert-cache-slots 96`, full 262144 context | 96 | **5.156** | byte-identical |
+| floor build, **no flags** — shipped default derivation | 96 | **5.045** | byte-identical to both |
+
+The floor run's own log: `ram profile cache=11.88G slots=96
+resident_floor=3.72G estimate=15.60G` — the default now lands on the rung
+the sweep measured as the last good one, with no operator flag. Greedy text
+is byte-identical across all four arms, and `tools/golden-baseline.sh
+--check qwen38-4` reports the output identical to the recorded baseline
+(ornith-8 not checked: no install on this machine, reported rather than
+fetched).
+
+Effect by family on a ≥24 GiB machine: qwen38 4-bit gets its tuned 12 GiB
+(64 → 96 slots, **4.48–4.81 → 5.05–5.16**, +7–14% depending on the base
+arm); qwen3.6 35B-A3B 4-bit gets its tuned 10 GiB back (the ~+1.3%
+`808cea3` priced); Ornith 8-bit is unchanged (its 8 GiB is a third of 24
+GiB exactly, so floor and clamp agree); machines under 24 GiB are
+unchanged — the 8 GB mini evidence for the third still stands and still
+applies there.
+
+Campaign accounting against the ≥6 tok/s goal: the shipped default moves
+from 4.48–4.55 (mirrored base, §5o) to 5.05–5.16. That is the largest
+single measured step of the campaign, taken with numerics untouched and
+greedy output byte-identical. It is still short of 6: §5o/#152 recorded
+that the remaining gap to v5.0's 6.957 is not attributable to a single
+knob, and this step does not change that record. Single-run caveat: the
+96-slot figures are one run each against a prompt whose mirrored spread is
+~8% — but the pre/post gap at 96 slots (3.05/3.20 → 5.16, +61–69%) and
+the default-derivation move (64 → 96 slots at equal text) are structural,
+not clock noise.

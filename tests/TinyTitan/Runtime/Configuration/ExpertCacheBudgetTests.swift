@@ -250,22 +250,36 @@ import Testing
         }
     }
 
-    /// The ceiling is a third of physical memory, not a half.
+    /// The ceiling is a third of physical memory, floored at the tuned budget:
+    /// a machine with at least the 24 GiB the budgets were measured on keeps
+    /// `wanted`, and only a smaller machine is cut to a third.
     ///
-    /// A half handed an 8 GB Mac mini 64 slots - 4.22 GiB of cache at a 70.8 MB
-    /// slot - and it paged: swap grew 855 -> 1610 MB and throughput fell to
-    /// 5.576 tok/s, against a flat swap and 7.289 tok/s at the 40 slots a third
-    /// picks. The third is the tuned value in disguise: the budgets above were
-    /// measured on a 24 GiB machine, and a third of 24 GiB is exactly the 8 GiB
+    /// The third exists for the small machine. A half handed an 8 GB Mac mini
+    /// 64 slots - 4.22 GiB of cache at a 70.8 MB slot - and it paged: swap grew
+    /// 855 -> 1610 MB and throughput fell to 5.576 tok/s, against a flat swap
+    /// and 7.289 tok/s at the 40 slots a third picks. The third is the tuned
+    /// value in disguise: the budgets above were measured on a 24 GiB machine,
+    /// and a third of 24 GiB is exactly the 8 GiB
     /// `defaultExpertCacheBudgetBytes`.
+    ///
+    /// The floor exists for the large one. Before the QSA indexer grew on
+    /// demand (45f55bb) it pre-allocated 0.94 GiB of full-context key buffers,
+    /// and qwen38's tuned 12 GiB - 96 slots - paged at the shipped 262144
+    /// context even on the 24 GB machine it was tuned on (3.052/3.201 tok/s
+    /// mirrored, against 4.481-4.551 at the clamped 64). With the indexer
+    /// grown on demand the same 96 slots fit: 5.156 tok/s at full context,
+    /// greedy output byte-identical to the 64-slot run. What the machine above
+    /// the tune was paying for the small machine's safety is therefore gone,
+    /// and the cut is kept only where it buys something.
     @Test func budgetIsClampedToAFractionOfWhatTheMachineCanHold() {
         let wanted = 12 << 30
-        // 32 GiB: a third is 10 GiB, so the 12 GiB aimed at qwen38flash is cut
-        // by one rung. The 35B families are unaffected - their 8 GiB budget is
-        // under a third of even a 24 GiB machine.
+        // 32 GiB: at or above the 24 GiB tune, so the 12 GiB aimed at
+        // qwen38flash passes through untouched. This assertion used to expect
+        // (32<<30)/3; the clamp it encoded predates the QSA grow-on-demand
+        // fix, and 45f55bb's measurement is why it changed.
         #expect(
             RuntimeConfiguration.affordableExpertCacheBudget(
-                wanted, physicalMemory: 32 << 30) == (32 << 30) / 3)
+                wanted, physicalMemory: 32 << 30) == 12 << 30)
         // 16 GiB: a third is 5 GiB, which is a harsher cut than the half it
         // replaces (8 GiB) - stated rather than hidden, because it is the case
         // this test used to assert the other way.
@@ -287,6 +301,26 @@ import Testing
                 expertStrideBytes: Self.qwen38Stride, layers: Self.qwen38Layers,
                 budgetBytes: RuntimeConfiguration.affordableExpertCacheBudget(
                     wanted, physicalMemory: 16 << 30)) == 40)
+    }
+
+    /// The floor is inclusive at the 24 GiB the budgets were tuned on, and the
+    /// third still applies below it.
+    @Test func theFloorStartsAtTheMachineTheBudgetsWereTunedOn() {
+        let wanted = 12 << 30
+        // 24 GiB: the tuning machine itself keeps the tuned budget.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 24 << 30) == wanted)
+        // Just below it the third still cuts, and cuts harder than the floor
+        // would: 20 GiB keeps only 6.67 GiB.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 20 << 30) == (20 << 30) / 3)
+        // The 35B families are unaffected either way: their 8 GiB budget is a
+        // third of 24 GiB exactly, so floor and clamp agree on it.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                8 << 30, physicalMemory: 24 << 30) == 8 << 30)
     }
 
     @Test func clampNeverGrowsABudget() {

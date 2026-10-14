@@ -168,17 +168,25 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     /// 16.55 against 16.76, about **-1.3% decode**, and time to first token moved
     /// the other way (1.27-1.32 s against 1.44-1.56 s) because less cache is
     /// wired. The tuned 10 GiB was not paging there -- peak footprint 14.25 GB,
-    /// zero swaps -- so this ceiling buys memory headroom on the small machine at
-    /// a measured price on the large one. Making the ceiling conditional -- a floor
-    /// at the tuned budget, so only machines *below* the tune are cut -- is the
-    /// obvious next experiment; it is not done here because the 8 GB nodes are
-    /// where the win is and this port stays behaviour-identical to the engine that
-    /// measured it.
+    /// zero swaps.
+    ///
+    /// So the third is floored at the tune: a machine with at least the 24 GiB
+    /// the budgets were measured on keeps `wanted`, and only a smaller machine
+    /// is cut. The floor became safe when the QSA indexer started growing on
+    /// demand (45f55bb): before it, the indexer's 0.94 GiB of full-context key
+    /// buffers sat on top of qwen38's tuned 12 GiB - 96 slots - and the pair
+    /// paged at the shipped 262144 context even on the 24 GB tuning machine
+    /// (3.052/3.201 tok/s mirrored, against 4.481-4.551 at the clamped 64).
+    /// Grown on demand, the same 96 slots fit and measure 5.156 tok/s at full
+    /// context, greedy output byte-identical to the 64-slot run
+    /// (docs/qwen38-decode-12gb-measurements.md §5o/§5p). Below the floor the
+    /// small-machine evidence above still stands and the third still applies.
     public static func affordableExpertCacheBudget(
         _ wanted: Int,
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> Int {
         guard physicalMemory > 0 else { return wanted }
+        if physicalMemory >= 24 << 30 { return wanted }
         return min(wanted, Int(physicalMemory / 3))
     }
 
