@@ -131,8 +131,13 @@ extension ServerModelSession {
         let residentFloor = RuntimeConfiguration.residentFloorBytes(
             residentWeightBytes: loadedManifest?.files["model_weights.bin"]
                 .map { Int($0.size) } ?? 0)
-        let gib = { (bytes: Double) in bytes / 1_073_741_824 }
-        let slotsGib = { (slots: Int) in gib(Double(slots) * cachePerSlotBytes) }
+        // One definition of the precedence, shared by the lines below and by the
+        // load. The diagnostics have to print the count that is actually
+        // allocated: before this, an operator's `--expert-cache-slots` changed
+        // the rung and the log still named the derived one.
+        let appliedSlots = { (derived: Int) in
+            requestedExpertCacheSlots ?? slotOverride ?? derived
+        }
         if let explicitTarget = expertCacheBudgetBytes {
             // The flag is a target for the whole process, not just the cache:
             // the weights and the runtime are resident either way, so the cache
@@ -142,42 +147,32 @@ extension ServerModelSession {
                 expertStrideBytes: loadedManifest?.expertStride ?? 0,
                 layers: loadedManifest?.arch.numLayers ?? 0,
                 cacheBytes: explicitTarget - residentFloor)
-            let targetGib = gib(Double(explicitTarget))
-            let floorGib = gib(Double(residentFloor))
-            let cacheGib = slotsGib(derivedSlots)
-            ServerLog.diagnostic(
-                String(
-                    format: "TinyTitan ram target=%.2fG cache=%.2fG slots=%d "
-                        + "resident_floor=%.2fG estimate=%.2fG",
-                    targetGib, cacheGib, derivedSlots, floorGib,
-                    floorGib + cacheGib))
-            if targetGib < floorGib + cacheGib {
-                ServerLog.diagnostic(
-                    String(
-                        format: "TinyTitan ram warning: %.2fG is below this install's "
-                            + "%.2fG floor (%.2fG resident + the %d-slot minimum cache); "
-                            + "the cache is already at its smallest.",
-                        targetGib, floorGib + cacheGib, floorGib, derivedSlots))
+            for line in ExpertCacheDiagnostics.targetLines(
+                targetBytes: explicitTarget,
+                appliedSlots: appliedSlots(derivedSlots),
+                derivedSlots: derivedSlots,
+                cacheBytesPerSlot: cachePerSlotBytes,
+                residentFloorBytes: residentFloor
+            ) {
+                ServerLog.diagnostic(line)
             }
         } else if let manifest = loadedManifest {
             derivedSlots = RuntimeConfiguration.expertCacheSlots(
                 expertStrideBytes: manifest.expertStride,
                 layers: manifest.arch.numLayers,
                 budgetBytes: tunedBudget)
-            let floorGib = gib(Double(residentFloor))
             ServerLog.diagnostic(
-                String(
-                    format: "TinyTitan ram profile cache=%.2fG slots=%d "
-                        + "resident_floor=%.2fG estimate=%.2fG (cache budget, not a "
-                        + "process target)",
-                    slotsGib(derivedSlots), derivedSlots, floorGib,
-                    floorGib + slotsGib(derivedSlots)))
+                ExpertCacheDiagnostics.profileLine(
+                    appliedSlots: appliedSlots(derivedSlots),
+                    derivedSlots: derivedSlots,
+                    cacheBytesPerSlot: cachePerSlotBytes,
+                    residentFloorBytes: residentFloor))
         } else {
             // Unreadable manifest means the load below will fail with a better
             // message than anything this could throw, so pick the safe small end.
             derivedSlots = RuntimeConfiguration.minimumExpertCacheSlots
         }
-        let loadSlots = requestedExpertCacheSlots ?? slotOverride ?? derivedSlots
+        let loadSlots = appliedSlots(derivedSlots)
         // `nil` keeps the long-standing rule: an installer receipt means the
         // payload's digests were pinned at install time, so the check is against
         // the manifest and the path; without one, hash the payload. An explicit
