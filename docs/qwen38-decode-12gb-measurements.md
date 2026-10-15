@@ -1066,3 +1066,102 @@ report or a lost request. Note that 64 slots is the rung whose whole footprint
 shipped 96 sits at 15.60 GiB estimated: the cap is on the cache tier, and which
 reading an operator wants is their call, not a measurement's.
 
+## 5s. The two RAM diagnostics fixed test-first, and the wiki arm refused (2026-10-15)
+
+§5r recorded the `ram profile` defect as authorised-for but not granted; the
+operator then said fix it. Two commits: `2c2a30b` (the applied count in both
+lines) and `0355d2c` (the warning names the override when the override is what
+misses the target). No clock in this file changes — this section is about what
+the load-time log is allowed to be used as evidence of.
+
+**1. Root cause.** `ram profile` and `ram target` printed the rung the
+*derivation* chose, while the allocation used `requestedExpertCacheSlots ??
+slotOverride ?? derived`. That precedence existed only as an inline expression
+*below* the diagnostics, so the printed number and the allocated one were
+computed twice by different code and had drifted: an operator who passed
+`--expert-cache-slots 96` under `--ram-budget 12G` got 96 slots wired and a load
+line asserting `slots=64`. A second defect surfaced only by probing the fixed
+line against a live server — the warning called those 96 allocated slots "the
+minimum cache" and said "the cache is already at its smallest". Both are false
+when an override pinned the count, and both pointed the reader at the install
+when the flag they set themselves is the thing they can change.
+
+**2. The lines now** (verbatim: a no-flag CLI run with `--expert-cache-slots 64`,
+and the `--ram-budget 12G --expert-cache-slots 96` server probe on port 8086):
+
+```
+TinyTitan ram profile cache=7.92G slots=64 derived_slots=96 resident_floor=3.72G estimate=11.64G (cache budget, not a process target)
+TinyTitan ram target=12.00G cache=11.88G slots=96 derived_slots=64 resident_floor=3.72G estimate=15.60G
+TinyTitan ram warning: 12.00G is below this install's 15.60G footprint (3.72G resident + the 96-slot cache named by --expert-cache-slots); the target alone allows 64 slots, so the gap is the override, not the install.
+```
+
+`slots=` is the applied count in every line; `derived_slots=` is emitted only
+when an override replaced the derivation, so the shipped default line is
+byte-for-byte what it was. `appliedSlots` is defined **once** in
+`ServerModelSession+Loading.swift` and shared by the two diagnostics, the
+`loadSlots` that sizes the cache, and the server banner. The text itself moved to
+a new 76-line `sources/TinyTitanLib/ExpertCacheDiagnostics.swift` with six tests
+pinning both branches of both lines, because these lines are the operator's only
+record of the allocation and nothing downstream re-derives them.
+
+**3. Which prior claims this corrects.** §5p's third arm (line 786,
+`--expert-cache-slots 96` at full context) is the case the defect describes: the
+table's 96 was right, but under the old code that run's own `ram profile` printed
+`slots=64`, so the log could not have confirmed it — the rung was known only from
+the flag. The line quoted at §5p (the floor run) and at §5q was legitimate,
+because those were no-flag loads where derivation *is* the applied count. §5r's
+finding 1 therefore closes: the identity evidence it needed is now produced
+correctly rather than worked around. Nothing is re-measured for this, since every
+rate here already rests on within-batch pairing plus rung-specific counters (hit
+rate, evictions, `expert_read` MiB).
+
+**4. Flag ownership, which two recipe lines here got wrong.** The runtime and
+server take `--ram-budget <size>`; `tools/server_launcher.sh` takes `--ram <whole
+GB>` and forwards it as `--ram-budget "${ram_gb}G"` (`server_launcher.sh:1339`),
+and only when a budget was chosen at all — an unattended run passes nothing and
+the install profile applies; the whole `TinyTitanCLI` target parses **no** RAM
+flag of any spelling, only `--expert-cache-slots`. §5n and §5o cited a bare
+`--ram` on the CLI, which is not
+a command anyone could have run: it exits 2 with `error: unknown flag`. Both lines
+now state what actually executes.
+
+**5. Verification on the committed tree.** `swift test --no-parallel` → seven
+target runs, 1,771 tests (815 / 408 / 157 / 189 / 41 / 63 / 98), each reporting
+*passed*, no failure line. `tools/lint.sh` → exit 0, 18 gate sections clean.
+`tools/golden-baseline.sh --check qwen38-4` → *ok — output identical to baseline*
+(ornith-8 not checked: no install here, and a gate may not fetch one). Both lines
+above came from real loads, the server probe launched by a pgrep-guarded script
+that killed its own server on exit; `lipo -archs` on the release binaries is
+`arm64`. The test-file changes are disclosed in `0355d2c`'s message: one existing
+fixture (applied=8, derived=16) described a pair no loader can produce, so it was
+retargeted to applied=derived=8 — the state it meant to pin — with its expected
+text unchanged, and the override shape it accidentally covered became a new test.
+
+**6. The wiki's Qwen3.8 decode row is not refreshed, and the refusal is the
+finding.** The second authorised item was `.qwen/wiki/Benchmarks.md`'s 6.82 tok/s
+for Qwen3.8-Flash-Next 4-bit (the 2026-08-30 batch) against §5r's 5.02–5.07.
+Those are different protocols, so refreshing the row means running the wiki's own
+instrument, not pasting a number: `benchmark/tinytitan_gate0_profile.py --quant
+4bit --runs 5` at shipped defaults (11.88 GiB cache, 96 slots — no flag, and
+nothing on this Mac may exceed the 12 GiB budget). It refused before starting a
+server:
+
+```
+refusing to start: GPU is already 54% busy before TinyTitan launches (threshold 15%).
+```
+
+`Device Utilization %` held at 43–68% across a 30 s sample with load average
+3.4–6.3, and the consumers are the operator's desktop, not this engine:
+`Qoder Helper (Renderer)` 42–46% CPU, `WindowServer` 42%, three Chrome renderer
+helpers, WhatsApp, Boom 3D. Everything else was compliant — AC power,
+`lowpowermode 0`, macOS 27.0.1, Swift 6.4, 80% memory free, empty `pgrep` guard,
+clean tree. `--allow-busy-gpu` exists to override the threshold to 100%, and its
+own message says a contended result is not comparable with the published
+benchmark, so it was not used and the row stands unchanged, reported as **not
+measured**. Two procedure notes: this driver is the only one under `benchmark/`
+that gates on GPU idleness, so §5r's CLI arms were taken without that check; and
+its threshold is binary (15% or off) — there is no "record the contention and
+carry on" mode, which is the right design for a published table but means a
+wiki-protocol arm needs the GPU-holding apps quit first.
+
+
