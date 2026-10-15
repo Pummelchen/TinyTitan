@@ -21,8 +21,10 @@ from continuous_feeder_sim import (
     RecencyWindow,
     Recurrence,
     TraceFormatError,
+    _Slots,
     load_trace,
     main,
+    replay_misses,
     simulate,
 )
 
@@ -336,6 +338,181 @@ class CalibrationGateTests(unittest.TestCase):
             os.unlink(path)
         self.assertEqual(status, 1)
         self.assertNotIn("PROJ", text)
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+V520_TRACE = os.path.join(HERE, "expert-cache", "route-trace-qwen38-4bit-v520-20261015.txt.gz")
+# The trace's prompt is "Write a detailed essay about the history of computing.",
+# which the engine's own footer records as prefill=10tok, so decode starts at
+# position 10. Counting from 0 would price the prefill's cold cache as decode.
+PREFILL_POSITIONS = 10
+DECODE_TOKENS = 511
+# Arm B of docs/qwen38-decode-12gb-measurements.md 5v -- the run that WROTE this
+# trace, so footer and replay are the same workload:
+#   expert_misses=37724  prefetch_adopted_per_token=18.40  new=512tok
+# A placement replay counts a miss the engine served out of the prefetch ring's
+# staging as a drive read, so the engine's read count is the replay's floor and
+# reads-plus-adoptions is its ceiling.
+ENGINE_READ_MISSES_PER_TOKEN = 37724 / DECODE_TOKENS
+ENGINE_PLACEMENTS_PER_TOKEN = (37724 + 18.40 * 512) / DECODE_TOKENS
+# 5w's interleaved A/B on byte-identical output: 137.3 misses/token at 48 slots
+# against 74.99 at 96. How a policy responds to capacity is the quantity an
+# offline screen has to get right, and it is measurable on the real engine.
+ENGINE_SLOT_RATIO = (28795 / 384 + 62.3) / (28795 / 384)
+
+
+class MissReplayTests(unittest.TestCase):
+    """A pure miss replay, deliberately without the timeline.
+
+    The timeline is refused (its control arm projects 27.1% off a measured clock),
+    but a miss *count* is a structural property of the trace and the placement
+    rule, and 5w measured the conversion from a miss to critical-path time
+    directly: 62.3 fewer misses per token bought 39.7 ms of gap, so one avoided
+    miss is 0.637 ms. These tests pin the replay to `makeExpertCachePlan`'s own
+    semantics and then to what the engine actually did, before any policy is
+    allowed to be compared against it.
+    """
+
+    def setUp(self):
+        self.events = load_trace(V520_TRACE)
+
+    def decode_replay(self, slots_per_layer=96):
+        return replay_misses(
+            self.events,
+            layers=48,
+            slots_per_layer=slots_per_layer,
+            start_position=PREFILL_POSITIONS,
+        )
+
+    def textbook_replay(self, slots_per_layer=96):
+        """`_Slots` driven by the replay's own warm-up and counting, as a drift arm.
+
+        Lives here, not in the module: nothing in the shipped analysis replays with
+        this rule, and the only thing it is good for is proving that the band above
+        can fail.
+        """
+        cache = [_Slots(slots_per_layer) for _ in range(48)]
+        misses = 0
+        positions = set()
+        for position, layer, experts in self.events:
+            absent = [expert for expert in experts if not cache[layer].contains(expert)]
+            for expert in experts:
+                cache[layer].touch(expert)
+            if position >= PREFILL_POSITIONS:
+                positions.add(position)
+                misses += len(absent)
+        return misses / len(positions)
+
+    def test_a_first_visit_and_a_reload_are_both_misses_and_a_resident_expert_is_not(self):
+        # One layer, two slots. Hand-traced through the engine's rule: 1 and 2
+        # arrive (two first visits), 2 is hit (its count rises to 2), 3 then
+        # evicts 1 because 1 is the weaker slot at one use, and 1 comes back as a
+        # miss that is a reload -- not a first visit, and not a hit either.
+        path = write_trace(["0 0 1", "1 0 2", "2 0 2", "3 0 3", "4 0 1"])
+        try:
+            result = replay_misses(load_trace(path), layers=1, slots_per_layer=2)
+        finally:
+            os.unlink(path)
+        self.assertEqual(result.misses, 4)
+        self.assertEqual(result.first_visits, 3)
+        self.assertEqual(result.reloads, 1)
+        self.assertEqual(result.hits, 1)
+        self.assertEqual(result.tokens, 5)
+
+    def test_a_hit_raises_the_use_count_so_a_hot_expert_outlives_a_cold_one(self):
+        # `makeExpertCachePlan` bumps `expertUseCount` for every expert the router
+        # named, resident or not (Plan.swift:65-67). If a hit left the count where
+        # it was, experts 1, 2 and 3 would tie at one use with the two churned
+        # newcomers and be evicted themselves; because each of them was hit once,
+        # they outrank every single-use arrival and the cold experts 4 and 5 are
+        # what the cache gives up -- so neither is ever seen twice.
+        path = write_trace(["0 0 1 2 3", "1 0 1 2 3", "2 0 4", "3 0 5", "4 0 1 2 3 6"])
+        try:
+            result = replay_misses(load_trace(path), layers=1, slots_per_layer=4)
+        finally:
+            os.unlink(path)
+        self.assertEqual(result.misses, 6)
+        self.assertEqual(result.first_visits, 6, "a hot expert was evicted and re-read")
+        self.assertEqual(result.reloads, 0, "a resident expert was treated as absent")
+        self.assertEqual(result.hits, 6)
+
+    def test_no_layer_holds_more_resident_experts_than_its_slot_count(self):
+        self.assertLessEqual(self.decode_replay().max_resident_per_layer, 96)
+
+    def test_the_replay_over_states_drive_reads_by_what_the_prefetch_ring_hid(self):
+        """The absolute level is known-biased, and pinned so it stays known.
+
+        A route trace records what the router asked for, never what the ring had
+        already staged, so every replay miss is counted as a drive read. The
+        replay must sit above the engine's read count and below its total
+        placements -- if it leaves that band, the placement rule has drifted and
+        no delta from it may be quoted.
+
+        Measured here: 89.28 placements/token, 21% above the engine's 73.82 reads
+        and 3.2% below its 92.26 placements. The 5% headroom over the ceiling is
+        not slack for its own sake -- the drift arm below replays the textbook
+        rule on this same trace and shows it breaching the ceiling at
+        151.20/token, which is what this test is hunting.
+        """
+        result = self.decode_replay()
+        self.assertGreater(result.misses_per_token, ENGINE_READ_MISSES_PER_TOKEN)
+        self.assertLess(
+            result.misses_per_token,
+            ENGINE_PLACEMENTS_PER_TOKEN * 1.05,
+            msg=(
+                f"replay {result.misses_per_token:.2f}/token against the engine's "
+                f"{ENGINE_READ_MISSES_PER_TOKEN:.2f} reads and "
+                f"{ENGINE_PLACEMENTS_PER_TOKEN:.2f} placements: outside the "
+                "ring-hidden band, so the placement rule no longer tracks the engine"
+            ),
+        )
+
+    def test_the_replay_reproduces_the_engines_measured_response_to_slot_count(self):
+        """The falsifier, on the quantity an offline screen actually needs.
+
+        5w changed the capacity on the real machine and got 1.831x the misses per
+        token at 48 slots against 96. A replay that reproduces that ratio can
+        rank two placement rules at a fixed budget; one that does not cannot, and
+        its absolute numbers are worthless either way.
+
+        Measured here: 160.13 at 48 against 89.28 at 96, 1.794x -- 2.0% off the
+        machine's own ratio.
+        """
+        wide = self.decode_replay(96).misses_per_token
+        narrow = self.decode_replay(48).misses_per_token
+        self.assertLess(
+            abs(narrow / wide - ENGINE_SLOT_RATIO) / ENGINE_SLOT_RATIO,
+            0.10,
+            msg=(
+                f"replay says {narrow / wide:.3f}x for 48 against 96 slots, the "
+                f"engine measured {ENGINE_SLOT_RATIO:.3f}x"
+            ),
+        )
+
+    def test_the_band_rejects_a_rule_that_prices_a_returning_expert_at_one(self):
+        """The band above is a drift detector, and this arm shows it firing.
+
+        `_Slots` is the rule the refused timeline uses. It keys residency by the
+        expert and drops the expert's count when it is evicted, so a returning
+        expert starts over at one use -- where the engine's `expertUseCount` is a
+        per-layer array that outlives the slot and is zeroed only by
+        `resetExpertUseCounts()` (PreadExpertStreamer.swift:326). Replayed on the
+        same trace with the same warm-up that rule counts 151.20 placements/token,
+        64% over the engine's 92.26, where the plan-faithful replay counts 89.28
+        and sits inside the band. If this test ever passes quietly while the
+        plan-faithful replay also breaches the ceiling, the band has stopped
+        discriminating and no ranking built on it may be quoted.
+        """
+        textbook = self.textbook_replay()
+        self.assertGreater(
+            textbook,
+            ENGINE_PLACEMENTS_PER_TOKEN * 1.05,
+            msg=(
+                f"textbook rule counts {textbook:.2f}/token; the ceiling is "
+                f"{ENGINE_PLACEMENTS_PER_TOKEN * 1.05:.2f} -- the band no longer "
+                "separates the engine's placement rule from the textbook one"
+            ),
+        )
 
 
 if __name__ == "__main__":

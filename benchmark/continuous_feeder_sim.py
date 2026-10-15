@@ -274,6 +274,144 @@ class _Slots:
         return victim
 
 
+class _PlanSlots:
+    """One layer's cache, placed the way `makeExpertCachePlan` places it.
+
+    The three points below are transcribed from Plan.swift, not chosen for style.
+    Together with the lifetime of the count they are what separates this from the
+    textbook rule in `_Slots` (the one the refused timeline uses), which replayed
+    on the 2026-10-15 capture with the same warm-up lands at 151.20 misses/token
+    where this lands at 89.28 -- outside the band the engine's own counters put it
+    in. Dropping any one of the three alone moves the count by at most 1.2%
+    (88.24 / 89.31 / 89.28); letting an expert's count die with its slot, which is
+    what the textbook rule does, moves it to 102.17 (+14.4%). The engine does not
+    do that: `expertUseCount` is a per-layer array sized by the expert count
+    (PreadExpertStreamer.swift:326) and only `resetExpertUseCounts()` zeroes it, so
+    a returning expert is priced by everything it has ever done.
+
+    * the use count is per *expert*, and is raised for every expert the router
+      named -- resident or not (Plan.swift:65-67), so a hit is worth one use
+      exactly as a read is;
+    * `useClock` advances once per plan, so the ten experts of one layer step
+      are co-equal in recency and the next eviction among them is decided by
+      count, not by whichever landed last inside the step;
+    * every slot is ranked once, before any of this step's arrivals land, and the
+      k-th miss takes the k-th weakest slot. An unfilled slot ranks weakest of
+      all, because the engine's comparator puts `slotExpert == -1` before any
+      expert id -- that is where "fill the free slots first" actually comes from.
+    """
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.use_count = {}
+        self.slot_expert = {}
+        self.slot_last_use = {}
+        self.clock = 0
+
+    def plan(self, experts):
+        """Place one layer step and return the experts that were not resident."""
+        self.clock += 1
+        hit_slots = [slot for slot, expert in self.slot_expert.items() if expert in set(experts)]
+        held = set(hit_slots)
+        misses = [expert for expert in experts if expert not in self.slot_expert.values()]
+        # Evictable: every slot this step did not just hit, ranked weakest first,
+        # before any of the step's arrivals land. An unfilled slot has no expert
+        # to price, and the engine's comparator sorts `slotExpert == -1` ahead of
+        # any id, so free slots are the cheapest victims.
+        evictable = sorted(
+            (slot for slot in range(self.capacity) if slot not in held),
+            key=lambda slot: (
+                self.use_count[self.slot_expert[slot]] if slot in self.slot_expert else -1,
+                self.slot_last_use.get(slot, 0),
+            ),
+        )
+        for expert in experts:
+            self.use_count[expert] = self.use_count.get(expert, 0) + 1
+        for slot in hit_slots:
+            self.slot_last_use[slot] = self.clock
+        for index, expert in enumerate(misses):
+            self.slot_expert[evictable[index]] = expert
+            self.slot_last_use[evictable[index]] = self.clock
+        return misses
+
+    def contains(self, expert):
+        return expert in self.slot_expert.values()
+
+    @property
+    def resident_count(self):
+        return len(self.slot_expert)
+
+
+class ReplayResult:
+    def __init__(self, fields):
+        self.__dict__.update(fields)
+
+
+def replay_misses(events, layers, slots_per_layer=96, start_position=0):
+    """Count the cache misses the engine's own placement rule takes on a trace.
+
+    A feeder policy can only win by moving bytes off the critical path, and the
+    cheapest way to screen one offline is its miss count at a fixed slot budget.
+    Calibrated against arm B of the 2026-10-15 capture -- the run that wrote the
+    trace, so footer and replay are one workload -- the answer is a licence and a
+    ban:
+
+    * Licensed -- ranking placement rules at a fixed budget. The replay counts
+      89.28 placements/token against the engine's own 92.26 (reads plus ring
+      adoptions), 3.2% low, and its miss/token rises 1.794x from 96 slots to 48
+      where 5w's paired arms measured 1.831x -- 2.0% error in the response a
+      policy change actually moves. The textbook `_Slots` rule replayed on the
+      same trace with the same warm-up gives 151.20/token, outside the engine's
+      band, which is what makes those two falsifiers bite.
+    * Banned -- quoting a token rate from it. The replay sees placements; 5w's
+      0.637 ms per avoided miss was measured in drive *reads*, and the 15.5
+      placements/token the prefetch ring served without one are invisible in a
+      route trace and not fixed -- they depend on how deep the ring ran. So a
+      replay delta must be scaled by an unmeasured share before it can be priced,
+      and the timeline that would supply it is the refused model (5v).
+
+    Steps at positions before `start_position` warm the cache and place experts
+    exactly as later steps do, but none of their traffic is counted: they are
+    the prefill rows of a capture, which the engine's decode counters exclude.
+    """
+    _validate(events, layers)
+    cache = [_PlanSlots(slots_per_layer) for _ in range(layers)]
+    loaded = set()
+    misses = first_visits = reloads = hits = 0
+    max_resident = 0
+    positions = set()
+    for position, layer, experts in events:
+        warmup = position < start_position
+        if not warmup:
+            positions.add(position)
+        step_misses = cache[layer].plan(experts)
+        if cache[layer].resident_count > max_resident:
+            max_resident = cache[layer].resident_count
+        if not warmup:
+            misses += len(step_misses)
+            for expert in step_misses:
+                if (layer, expert) in loaded:
+                    reloads += 1
+                else:
+                    first_visits += 1
+            hits += len(experts) - len(step_misses)
+        for expert in experts:
+            loaded.add((layer, expert))
+    tokens = len(positions)
+    return ReplayResult(
+        dict(
+            misses=misses,
+            first_visits=first_visits,
+            reloads=reloads,
+            hits=hits,
+            tokens=tokens,
+            misses_per_token=misses / max(1, tokens),
+            hit_rate=hits / max(1, hits + misses),
+            max_resident_per_layer=max_resident,
+        )
+    )
+
+
 class SimResult:
     def __init__(self, fields, read_ms):
         self.__dict__.update(fields)
