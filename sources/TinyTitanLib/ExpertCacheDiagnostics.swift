@@ -36,8 +36,12 @@ package enum ExpertCacheDiagnostics {
             """
     }
 
-    /// The `--ram` case: the number names the whole process, so a footprint
-    /// above it gets a second line saying the cache is already at its smallest.
+    /// The `--ram-budget` case (the launcher spells it `--ram`): the number
+    /// names the whole process, so a footprint above it gets a second line.
+    /// That line says the cache is at its smallest only when the derivation set
+    /// it; an override that pins more slots than the target affords has a
+    /// different cause, and an operator who is told the cache is already
+    /// minimal will not look at their own flag.
     package static func targetLines(
         targetBytes: Int,
         appliedSlots: Int,
@@ -54,13 +58,19 @@ package enum ExpertCacheDiagnostics {
             resident_floor=\(gib(floor)) estimate=\(gib(estimate))
             """
         guard Double(targetBytes) < estimate else { return [line] }
-        return [
-            line,
-            """
+        let warning =
+            appliedSlots == derivedSlots
+            ? """
             TinyTitan ram warning: \(gib(Double(targetBytes))) is below this install's \
             \(gib(estimate)) floor (\(gib(floor)) resident + the \(appliedSlots)-slot \
             minimum cache); the cache is already at its smallest.
-            """,
-        ]
+            """
+            : """
+            TinyTitan ram warning: \(gib(Double(targetBytes))) is below this install's \
+            \(gib(estimate)) footprint (\(gib(floor)) resident + the \(appliedSlots)-slot \
+            cache named by --expert-cache-slots); the target alone allows \(derivedSlots) \
+            slots, so the gap is the override, not the install.
+            """
+        return [line, warning]
     }
 }

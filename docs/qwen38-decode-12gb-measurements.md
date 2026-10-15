@@ -600,7 +600,9 @@ priced at ≤2–3% and parked.
 
 The wiki-derived recommendation that was not already closed: measure decode
 at more than one context length. Run with `benchmark/tinytitan_longctx.py`,
-qwen3.8 4-bit, `--ram 12G`, mains power, build `d26d97a`, server v5.19 on
+qwen3.8 4-bit, `TINYTITAN_EXPERT_CACHE_BUDGET=12` (the harness passes it to the
+launcher as `--ram 12`, which forwards `--ram-budget 12G` to the server), mains
+power, build `d26d97a`, server v5.19 on
 127.0.0.1:8091. One generation per cell, driver cells in order A, B, C:
 
 | cell | prompt | max_new | prefill s | decode tok/s | finish |
@@ -658,8 +660,9 @@ budget — 96 slots — and measured 6.957 tok/s (wiki Changelog);
 is 8 GiB — 64 slots — on this 24 GB machine, and the whole campaign ran
 there. Did the clamp cost the configuration?
 
-Protocol: release build `33b3a06`, CLI (no `--ram`, so derivation picks
-the slots the server would pick), essay prompt, `--max-new 384`,
+Protocol: release build `33b3a06`, CLI (no budget flag: the CLI takes only
+`--expert-cache-slots`, so the derivation picks the slots the server would
+pick), essay prompt, `--max-new 384`,
 `TINYTITAN_RUNNER_STATS=1`, mains power. Mirrored arms, and the mirror
 of the decisive arm was run after two *healthy* arms so a predecessor's
 swap debt cannot be the explanation. 129.6 MB per slot per layer group

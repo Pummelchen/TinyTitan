@@ -60,11 +60,11 @@ struct ExpertCacheDiagnosticsTests {
             ])
     }
 
-    @Test func targetLineWarnsWhenTheAppliedCacheStillExceedsTheNamedTarget() {
+    @Test func targetLineWarnsWhenEvenTheSmallestCacheExceedsTheNamedTarget() {
         let lines = ExpertCacheDiagnostics.targetLines(
             targetBytes: 3_758_096_384,
             appliedSlots: 8,
-            derivedSlots: 16,
+            derivedSlots: 8,
             cacheBytesPerSlot: Self.slotBytes,
             residentFloorBytes: Self.residentFloor)
 
@@ -74,6 +74,26 @@ struct ExpertCacheDiagnosticsTests {
                 TinyTitan ram warning: 3.50G is below this install's 4.00G floor \
                 (3.00G resident + the 8-slot minimum cache); \
                 the cache is already at its smallest.
+                """)
+    }
+
+    /// The `--ram 12G --expert-cache-slots 96` shape measured in §5r: the
+    /// override pins more than the target affords, so the gap is the operator's
+    /// own number and "the cache is already at its smallest" would be false.
+    @Test func targetWarningBlamesTheOverrideWhenItPinsTheCacheAboveTheTarget() {
+        let lines = ExpertCacheDiagnostics.targetLines(
+            targetBytes: 6_442_450_944,
+            appliedSlots: 64,
+            derivedSlots: 24,
+            cacheBytesPerSlot: Self.slotBytes,
+            residentFloorBytes: Self.residentFloor)
+
+        #expect(lines.count == 2)
+        #expect(
+            lines[1] == """
+                TinyTitan ram warning: 6.00G is below this install's 11.00G footprint \
+                (3.00G resident + the 64-slot cache named by --expert-cache-slots); \
+                the target alone allows 24 slots, so the gap is the override, not the install.
                 """)
     }
 
