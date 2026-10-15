@@ -1429,7 +1429,7 @@ by external `iostat -d -w 1` and an `ioreg` AGX poller. Prompt as §5u, `--max-n
 `/tmp/feeder-probe/`. Preconditions at launch: 81% memory free, **swap already
 5.47 GB used**, GPU reader 61%.
 
-**Result 1 — the premise is false as observed: the drive never stops.** Taking
+**Result 1 — the drive never stops, at one-second resolution.** Taking
 arm A's own clock window (decode begins 9 s after launch, runs 113.8 s), the
 `disk0` series over 112 one-second samples reads:
 
@@ -1437,19 +1437,28 @@ arm A's own clock window (decode begins 9 s after launch, runs 113.8 s), the
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1359.5 MB/s | 1353.0 | 753.0 | 1685.7 | **0** | **0** |
 
-There is no read-burst/compute-idle alternation to exploit. Against the four-thread
-`ParallelExpertReader` ceiling recorded in §5o and `docs/v4-core-design.md`
-(3.92 GB/s) the drive sits at **34.7% duty**, so
-the operator's instinct that the SSD has spare capacity is correct — but the spare
-is already being spent, and the next result is what that leaves on the table.
+Against the four-thread `ParallelExpertReader` ceiling recorded in §5o and
+`docs/v4-core-design.md` (3.92 GB/s) the drive sits at **34.7% duty**, so
+the operator's instinct that the SSD has spare capacity is correct. What this
+table does *not* show, and what §5w found, is that "no sample at zero" was a
+statement about the sampler's resolution: a 1 Hz series averages a 51 ms burst
+into the second around it, so alternation at the scale that matters to a 217 ms
+token is invisible here. Reading 2 was the mistake that followed from that.
 
-**Result 2 — what a perfect feeder could still buy is 0.075%.** `io_ms=72.254` is
-the time spent in miss reads per token and `io_hidden_pct=99.77` says how much of
-it already runs under compute, so the exposure is `72.254 × 0.0023 = 0.166` ms of a
-222.27 ms token (1000/4.499). A feeder that removed *all* remaining exposure moves
-4.499 → 4.502 tok/s. The engine's `expert_load_p50/p95/p99` of 2/8/16 ms and the
-`io_host_waits_avoided=8944` of 15,584 waits are the machinery already spending
-that idle capacity; there is no second hiding act to write.
+**Result 2 — what a perfect feeder could still buy is 0.075%.** *Refuted by §5w,
+kept because the arithmetic is the reason the refutation matters.* `io_ms=72.254`
+is the time spent in miss reads per token and `io_hidden_pct=99.77` says how much
+of it already runs under compute, so the exposure is `72.254 × 0.0023 = 0.166` ms
+of a 222.27 ms token (1000/4.499), and a feeder that removed *all* remaining
+exposure moves 4.499 → 4.502 tok/s. The engine's `expert_load_p50/p95/p99` of
+2/8/16 ms and the `io_host_waits_avoided=8944` of 15,584 waits are the machinery
+already spending that idle capacity. The flaw is the instrument, not the
+arithmetic: `io_hidden_pct` compares the read's span with the completion
+timestamps of the command buffers that ran alongside it, so it answers "did the
+*host* have to block", and the routed command buffer is event-gated
+(`sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift:372`) —
+the *device* blocks instead, and that is the time the token pays. §5w measures
+the device side.
 
 **Result 3 — the continuous feeder already exists, and its limit is RAM, not the
 drive.** `prefetch_issued_per_token=39.54` against `prefetch_adopted_per_token=18.23`
@@ -1511,9 +1520,12 @@ with the engine's own byte counters is what bounds that error.
 
 **Verdicts.**
 - **The chunk-by-request → continuous-feeder change is closed by measurement, not
-  by §8.** The drive already reads continuously (0 idle samples in 112) and the
-  reads already hide (99.77%), so the concept's prize is 0.075% of the token. The
-  ring *is* the feeder; what limits it is the slot count.
+  by §8.** *Amended by §5w:* the prize was 0.075% only under `io_hidden_pct`, which
+  measures host blocking, and the routed command buffer is event-gated so the device
+  blocks instead. The device-side ledger prices the same concept at **52.8 ms of a
+  217 ms token (24%)**, and §5w's verdicts keep the closure — the burst is already at
+  97% of the drive's ceiling — on a different and correct basis. "0 idle samples in
+  112" stands as a statement about a 1 Hz sampler, not about the drive.
 - **The live headroom is host-side, and it is bigger than everything the SSD path
   can still give.** Named per-token spans in arm A read `head_ms=11.849`,
   `rdadvise_ms=7.863` over 35,430 calls, `wait_ms=109.113`, `body_ms=202.936`,
@@ -1526,3 +1538,211 @@ with the engine's own byte counters is what bounds that error.
   one spare slot from starved, and any change that frees expert-cache slots without
   giving up residency converts directly into feeder room.
 
+
+## 5w. The device-side token ledger — the feeder premise was right and §5v's instrument could not see it (2026-10-15)
+
+**What this section overturns.** §5v priced the continuous-feeder idea at 0.075% of a
+token on the strength of `io_hidden_pct=99.77`, and reported the drive's 1 Hz duty
+series as proof that there was no burst/idle alternation to exploit. Both readings are
+wrong, and they were wrong for one reason: each measured a *host* or a *sampler* where
+the question is about the *device*. This section measures the device. It lands on the
+operator's side of the argument — the SSD really does burst and then wait, and the wait
+is 52.8 ms of a 217 ms token — and it also shows the prize is not collectable the way
+§5v assumed, because the burst is already running at 97% of the drive's measured ceiling.
+
+**Why `io_hidden_pct` cannot answer this question.** The counter is defined as
+`100 × (1 − exposedIo/missIo)` (`sources/TinyTitanLib/ServerModelSession+Diagnostics.swift:324-329`),
+and `totalExposedIoNanos` is built by comparing a read's span against the *completion
+timestamps of the command buffers that ran alongside it*
+(`sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift:298-321`,
+`RealForwardRunner+DecodeMoEFinalize.swift:44-58`). So it answers "did the **host**
+have to block". It cannot answer "did the **GPU** go idle", because the routed command
+buffer is event-gated on the device —
+`routedCB.encodeWaitForEvent(token.event, value: token.value)` at
+`sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift:372` — which
+means that when bytes are late, the device waits and the host does not, and the counter
+reports the token as essentially fully hidden. The engine already exposes the device-side
+truth: `recordKernelGPU` feeds `kernelGPUOccupancy()`, which merges intervals so
+overlapping buffers are not double-counted, and `kernelGPUGaps()`, which charges each
+true idle interval to the role pair it separates
+(`sources/TinyTitan/Runtime/Inference/RealForwardRunner+Diagnostics.swift:42-140`).
+Nobody had published those two lines for this build.
+
+**Provenance and protocol.** Tree `8c61f14`; `git diff --stat v5.20..HEAD` touches
+`benchmark/`, one workflow file and `docs/` and **no file under `sources/`**, so the
+binary is the released v5.20 engine. 24 GB M3 (Mac15,3), macOS 27.0.1, Swift 6.4
+(`arm64-apple-macosx27.0.0`), AC power, `System-wide memory free 83%`, empty
+model-process guard before launch, one CLI process at a time, **no engine flags** — the
+12 GiB tier is this host's own derivation. Prompt "Write a detailed essay about the
+history of computing.", `--temperature 0`, greedy. Capture arm `--max-new 512` with
+`TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1`; the four A/B arms `--max-new 384`
+with the same two env vars. Exit 0 in all five. Swap was **7.63 GB used before the
+batch and 7.90 GB after**, which is well above the comfort line and is reported as a
+deviation below. Drivers `/tmp/occupancy_probe_run.sh` and `/tmp/gap_slot_ab.sh`, data
+`/tmp/occupancy-probe/` and `/tmp/gap-slot-ab/`.
+
+### The ledger of one decode token (capture arm, 4.601 tok/s)
+
+`busy_ms=58689.240 span_ms=115393.980 occupancy=50.9% busy_share_of_decode=52.7%`,
+against `decode_s=111.283` for 512 tokens:
+
+| part of a 217.34 ms token | ms/token | how it was obtained |
+| --- | ---: | --- |
+| GPU busy | 113.00 | `busy_ms/512`, minus the 832 ms of kernels whose role names are `prefill_*` |
+| GPU idle, in named gaps | 101.98 | sum of the six gap pairs whose counts are decode-sized (table below) |
+| unattributed | 2.36 | 1.1% of the token |
+
+The ledger closes to 1.1%, and it is a *partition* rather than a pile-up: `kernelGPUGaps()`
+advances a single frontier, so no interval is counted twice and overlapping command
+buffers manufacture no gap. The caveat is that `busy_per_token_ms` as printed divides the
+whole session's busy time by *decode* tokens, so the prefill rows would be smeared across
+512 tokens; the 832 ms subtraction is what makes the first line honest, and without it the
+closure would look better than the measurement is (the printed figure is 114.63).
+
+**GPU occupancy is 50.9%, and the idle is not spare worker capacity — it is two
+mechanisms, and only one of them is the drive:**
+
+| gap pair | ms/token | count | ms per occurrence |
+| --- | ---: | ---: | ---: |
+| `moe_phase1_hit → moe_phase1_miss_fixup` | **52.803** | 15,549 | 1.739 |
+| `shared_expert → moe_phase1_hit` | 26.766 | 15,499 | 0.884 |
+| `shared_expert → moe_phase1_2_routed` | 16.070 | 8,964 | 0.918 |
+| `embed → attn_norm_qkv` | 3.008 | 511 | 3.014 |
+| `moe_phase2_routed → attn_norm_qkv` | 1.842 | 15,298 | 0.062 |
+| `moe_phase1_miss_fixup → moe_phase2_routed` | 1.493 | 15,564 | 0.049 |
+| *(prefill-only pairs, excluded above)* | 6.238 | 295 | 10.83 |
+
+The largest single line is the answer to the feeder question: **a quarter of every token
+(52.8 of 217.34 ms) is the device sitting idle between the hit-phase kernels and the
+miss-fixup kernels, waiting for bytes.** Of that, `io_completion_to_fixup_ms=1.6549` is
+host submit latency — 3.1% — and the remaining 51.1 ms is the read itself.
+
+### The burst is at the ceiling, so the bill is the bytes, not the pipe
+
+`expert_read_mib / tokens` divided by the four-thread `ParallelExpertReader` ceiling
+recorded in §5o and `docs/v4-core-design.md` (3.92 GB/s) predicts the gap without using
+it. Five arms, spanning 1.87× in read volume:
+
+| arm | slots | tok/s | MB read/token | predicted gap | measured gap | ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| armA | 96 (default) | 4.601 | 203.55 | 51.93 ms | 52.803 | 1.017 |
+| r1a | 96 (default) | 5.015 | 207.63 | 52.97 ms | 56.348 | 1.064 |
+| r2a | 96 (default) | 5.050 | 207.01 | 52.81 ms | 53.872 | 1.020 |
+| r1b | 48 | 4.574 | 380.19 | 96.99 ms | 96.056 | 0.990 |
+| r2b | 48 | 4.398 | 380.72 | 97.12 ms | 102.999 | 1.061 |
+
+The prediction is `bytes ÷ 3.92 GB/s` and nothing else — no tuning, no fitted constant —
+and it lands within 6.4% on every arm. Two more identities pin the mechanism:
+`expert_read_mib / expert_misses` is **2.7689 MB in all five arms, exactly `expertStride`**,
+so a miss costs one full stride and read volume is fully explained by the miss count; and
+`gap_total / gap_count ÷ (experts_per_miss_layer × stride)` puts the *delivered rate inside
+each burst* at 3.85, 3.68, 3.84, 3.95 and 3.69 GB/s — **mean 3.80 GB/s, 97% of the ceiling**.
+
+So the operator's description of the machine is correct and the diagnosis that followed
+from it is not. The SSD does stop and start — §5v's 1 Hz sampler simply could not see a
+1.7 ms burst — but when it is asked for bytes it already delivers them at essentially the
+full rate the drive was ever measured capable of, in bursts of 1.74–2.51 ms. There is no
+idle pipe to fill that would make these particular bytes arrive sooner. What would help is
+moving them *earlier*, which needs them to be known earlier, and the router decides which
+experts a layer needs only after that layer's routing readback. The ring already tries to
+beat that clock and lands 18.56 of 73.51 demand misses per token (25%) with `free=0.99` —
+about one spare landing slot.
+
+### The falsifier, run before measuring
+
+The claim under test was *"the gap is the drive delivering bytes."* The falsifier written
+down first: cutting the cache to 48 slots must raise the miss count and the gap together;
+if the gap stays put while misses move, the reading in this section is wrong. Arms ran
+interleaved `r1a(96), r1b(48), r2b(48), r2a(96)` — the shipped arm first and last, as the
+drift check — and the counters were near-deterministic while the wall clock was not:
+
+| paired round | miss/token 96 → 48 | gap/token 96 → 48 | tok/s 96 vs 48 | Δ |
+| --- | ---: | ---: | ---: | ---: |
+| round 1 | 74.99 → 137.31 (×1.831) | 56.348 → 96.056 (×1.705) | 5.015 vs 4.574 | +0.441 (+9.6%) |
+| round 2 | 74.76 → 137.50 (×1.839) | 53.872 → 102.999 (×1.912) | 5.050 vs 4.398 | +0.652 (+14.8%) |
+
+**The falsifier did not fire.** Misses ×1.83, gap ×1.70–1.91, same direction in both
+rounds. Mean paired advantage of the shipped 96-slot default: **+0.546 tok/s, +12.2%**,
+with the two rounds agreeing in direction and disagreeing in magnitude by 5 points of
+percent — the spread that §5v's single runs would have had to guess. The response hash is
+`95aa4531b4ea2304` in **all four** arms, so the slot count moves no numerics at all: this
+is a scheduling and residency change with byte-identical output, and the 12.2% is pure
+queueing.
+
+**And the instrument correction, in its strongest form:** across those same four arms
+`io_hidden_pct` reads 99.84, 99.90, 99.86 and 99.85 — a spread of 0.06 points — while the
+clocks differ by 12.2% and the read-bound gap by 70%. `wait_ms` even *falls* (92.562 →
+74.139) as `io_ms` *rises* (70.939 → 105.441), because at 48 slots the host is never the
+one blocked. An instrument that varies by 0.06 points across a 12.2% effect cannot bound
+that effect at 0.075%; §5v's Result 2 was reading the wrong clock.
+
+### The two idle families trade against each other
+
+The second family — `shared_expert → moe_phase1_*`, 42.835 ms/token in the capture arm —
+is host turnaround: router readback, `cache_plan_ms=4.898`, `gather_ms=2.248`,
+`rdadvise_ms=7.624` over 35,260 calls, `cb1_ms=5.079`, encode. The shared MLP
+(`shared_expert` = 5.142 ms/token of GPU work) is what is queued to cover it, and it is
+far too small. But this family is **not independent of the first**: at 48 slots it halves
+to 19.930 and 20.386 ms/token while the read-bound gap doubles (those totals include a
+`shared_expert → moe_phase1_miss_fixup` pair worth 0.975/1.124 ms/token that does not
+appear at 96 slots at all). Per occurrence the dominant pair *falls*
+from 0.730 to 0.393 ms. The reason is queue depth — when the drive is behind, the GPU has
+already-queued work to chew on and the host's bookkeeping disappears under it; when the
+drive is ahead, the host is exposed at the front of an empty queue. So the 102 ms of idle
+is one queueing system, not three prizes, and a change that "fills" family 2 with work
+that then has to wait on the same bytes buys nothing.
+
+### Answer to the tri-worker premise
+
+The premise was: GPU is busy but the ANE and CPU are idle, so reassign slices. The ledger
+says the machine is 50.9% occupied and the whole idle half is attributable to (a) bytes
+that are not yet known and (b) host bookkeeping the dependency chain will not let the GPU
+start earlier. A second worker could only take a slice that does **not** depend on the
+router readback, and the ledger names what those are: the shared MLP (5.1 ms/token,
+already on the GPU, already queued ahead of the wait — `RealForwardRunner+DecodeLayers.swift:211-223`),
+the sampler (0.285 ms/token), and the embeddings (0.106 ms/token). Together 5.5 ms of a
+217 ms token, §8's CPU co-execution arm already measured that transfer at **−22.6%** on
+bus contention, and the ANE decode path is unreachable. That is the honest size of the
+tri-worker idea on this engine: the idle is a dependency chain and a drive, not an
+unassigned worker.
+
+**Deviations, all of them.** (1) The capture arm is a *capture* arm:
+`TINYTITAN_KERNEL_STATS=1` records an interval per command buffer, so 4.601 tok/s is not
+a published level and none of the rate claims above use it — the paired arms' 5.015/5.050
+against 4.574/4.398 are the levels. (2) n=1 for the occupancy run; its role and gap
+per-token figures are reproduced in shape by all four A/B arms but only the gap magnitude
+was re-measured. (3) Swap was 7.63 GB used before the batch and 7.90 GB after, and the
+48-slot arm ran with a smaller resident tier against that pressure — this is a plausible
+cause of round 2's slower 48-slot pair, and it is why the paired *direction* rather than
+the paired *magnitude* carries the finding. (4) The gap list is truncated at the engine's
+own top-8, so the 2.36 ms residual includes small real gaps that were never printed; the
+closure figure is therefore an upper bound on the attribution, not an exact balance.
+(5) The `prefill_*` subtraction from `busy_ms` is by role name, not by timestamp, so any
+prefill work recorded under a decode role name stays in the 113.00 line. (6) `--max-new`
+differs between the capture arm (512) and the A/B (384); the counters are per token and
+the two agree — 203.55 vs 207.63 MB/token, 52.803 vs 56.348 ms/token gap — but they are
+not the same run and are not treated as one.
+
+**Verdicts.**
+- **The continuous-feeder premise is confirmed as a description and closed as a lever.**
+  The drive does burst (1.74–2.51 ms) and idle, §5v's sampler could not see it, and the
+  burst costs 52.8 ms/token — 24% of the token, not 0.075%. But the burst already runs at
+  97% of the drive's measured ceiling, so the remaining lever is *earlier bytes*, not
+  *faster bytes*, and earlier bytes need either prediction that lands (slot room, `free=0.99`)
+  or a router result that arrives sooner. Neither is a feeder rewrite.
+- **The slot count is worth 12.2% and it is the largest single knob measured in this
+  campaign** — larger than every §6/§8 arm here. It is already at the maximum the
+  operator's 12 GiB cap on this 24 GB Mac allows, and §5q's rule is what sets it. Nothing
+  to ship; everything to remember if a bigger host appears, because this section says a
+  host with room for ~200 more slots should be measured as a ~12% decode win, not a rounding error.
+- **The open seam is the 42.8 ms/token of host turnaround, and it is the only part of the
+  idle that is neither drive-bound nor RAM-bound.** §5m already priced the cheapest version
+  of it (rdadvise issue-count coalescing) at ≤2–3% and parked it on paired evidence, so a
+  real attempt needs a different shape: not fewer syscalls but bookkeeping issued a layer
+  ahead of the wait. That is an implementation question, not a measurement, and it is where
+  the next session should start.
+- **`io_hidden_pct` is unfit for any future overlap claim.** Keep the counter — it is the
+  right instrument for host blocking, and `io_host_waits_avoided=8964` of 15,564 waits is
+  a real achievement — but a percentage that moves 0.06 points across a 12.2% clock change
+  must not be used to bound one. The device-side lines (`TinyTitan kernel busy_ms=…`,
+  `TinyTitan gap …`) are the ones to publish, and they are already in the build.
