@@ -1211,4 +1211,16 @@ the four 35B rows are also unreachable on the current engine: this Mac has no 35
 install, and no gate may fetch one, so on this machine TT-049 can only ever refresh
 the 125B row.
 
+The sibling sweep for the same defect found two engineering documents dividing by
+that stale figure. `docs/ngram-table-sharing-plan.md` projected the 8-bit install at
+"about 3.4 tok/s" as half of 6.82; corrected in the same commit as this section,
+because the README already measures that build at **2.10 tok/s** — 0.39x the
+README's own 4-bit row, so the projection was optimistic and its verdict (not worth
+building) was right for a stronger reason than the arithmetic. The other is
+`docs/qwen38-decode-20tps-concept.md:110`, which opens "Published decode is
+**6.82 tok/s**" and reasons from it to a ~12 tok/s target. Left alone: it says
+*published*, which remains true of the wiki row, it is a superseded concept
+document, and §5r's 4.08–5.07 already displaces it for any live decision. Neither
+file is guarded by a gate, so both readings are documents, not proofs.
+
 

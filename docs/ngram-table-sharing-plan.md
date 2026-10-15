@@ -133,8 +133,14 @@ I/O-bound decode, without the quality that is the only reason to pay it.
 
 Worth deciding before spending the disk. Decode on this machine is expert-I/O
 bound: 8-bit streams 117 GiB of experts against 4-bit's 59 GiB, so expect
-roughly half the throughput — about **3.4 tok/s** against the measured 6.82.
-That is slower than every other model in the catalogue, including 8-bit Ornith
-at 11.89 tok/s, in exchange for quality headroom a 125B model already has at
-4-bit. The sharing work is worth doing regardless, because it also makes the
-4-bit install cheaper to rebuild; the 8-bit install is a separate question.
+roughly half the throughput. **That half is a projection off a stale anchor, and
+the answer is now measured:** the "measured 6.82" it divided is the wiki's v4.7
+batch of 2026-08-30; the shipped 96-slot default reaches 4.08–5.07 tok/s under
+§5r's greedy CLI protocol; and the README reports the 8-bit install at **2.10
+tok/s**, which is 0.39x the README's own 4-bit row of 5.46 — worse than the half
+assumed above. Either way the verdict is the same and now stronger: slower than
+every other model in the catalogue, including 8-bit Ornith at 11.89 tok/s, in
+exchange for quality headroom a 125B model already has at 4-bit. The sharing work
+is worth doing regardless, because it also makes the 4-bit install cheaper to
+rebuild; the 8-bit install is a separate question, settled by the 2.10 row rather
+than by the arithmetic.
