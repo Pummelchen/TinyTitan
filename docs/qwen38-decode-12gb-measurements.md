@@ -1224,3 +1224,86 @@ document, and §5r's 4.08–5.07 already displaces it for any live decision. Nei
 file is guarded by a gate, so both readings are documents, not proofs.
 
 
+
+## 5t. The wiki's own instrument, run on v5.20, on a contended GPU (2026-10-15)
+
+§5s recorded the refused arm and left TT-049 open for a quiet machine. The
+operator then said run it now, so it ran with the guard overridden. **This is not
+a benchmark figure and the wiki row is unchanged** — see 4 and 5 for why.
+
+**1. What ran, and against what build.**
+
+```
+python3 benchmark/tinytitan_gate0_profile.py --quant 4bit \
+  --model-dir models/qwen3.8-flash-next_125B_A6B_4Bit --runs 5 --allow-busy-gpu
+exit 0    # 1 warm-up + 5 measured runs, fresh server per run, 9m21s wall
+```
+
+Two launches were refused first, at GPU 53% and 70%, by the 15% preflight
+(`tinytitan_gate0_profile.py:220`); the third went because `--allow-busy-gpu`
+raises the threshold to 100%. Commit `b27f29e` (the v5.20 tag). The binary is
+`.build/release/TinyTitanServer`, mtime 21:19, and carries the `5.20` version
+literal; `b27f29e` changed only that literal and the notes file, so this is the
+shipped code path. The rung is confirmed from the run's own server log rather
+than assumed — `.build/benchmark-logs/gate0_4bit_5.log`:
+
+```
+TinyTitan ram profile cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G (cache budget, not a process target)
+```
+
+No `derived_slots=`, so the derivation applied with no override: the shipped
+default, exactly what the wiki table claims to measure.
+
+**2. The numbers.** Median over five runs; each run is 512 tokens of continuous
+prose at native 262K context, multi-prefix prompt cache on, 8-bit KV, top-k 20,
+temperature 0.6, MTP off.
+
+| run | decode tok/s | busy/token ms | occupancy | expert hit | expert read MiB | wait_ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 5.450 | 104.858 | 52.1% | 0.8718 | 73,459.5 | 96.754 |
+| 2 | 5.491 | 100.333 | 50.3% | 0.8722 | 73,277.3 | 97.026 |
+| 3 | 5.713 | 96.823 | 50.4% | 0.8719 | 73,409.4 | 91.634 |
+| 4 | 6.102 | 92.234 | 51.0% | 0.8718 | 73,464.8 | 84.661 |
+| 5 | 6.026 | 94.920 | 51.7% | 0.8719 | 73,422.6 | 86.497 |
+
+**median 5.713 tok/s = 175.04 ms/token**; `prefill_s` 7.598–7.912 (median 7.79);
+`io_ms` 51.195, `io_hidden` 99.71%, `gpu_share_of_decode` 65.5%, router readback
+0.0162 ms, cache plan 3.4161 ms. Driver verdict: `BANDWIDTH-BOUND (ceiling
+~1.35x)`, which is the same verdict §5c–§5r reached from the other direction.
+
+**3. The finding that outranks the level: all five runs are byte-identical.**
+`completion_sha256` is `aded9bd20fbde145` for every run, 440 completion tokens
+each, and the counters move with it — hit rate spans 0.8718–0.8722 and expert
+reads 73,277–73,465 MiB, both inside 0.25%. The work was provably the same in all
+five arms, yet decode rose 5.450 → 6.102 across them, **+12%**, and
+`busy_per_token` fell from 104.9 to 92.2 ms. That is §5r's first-arm-after-a-load
+effect reproduced inside a single protocol with the bytes held fixed, and it is
+the strongest evidence in this file that a *level* from a batch is a property of
+the machine settling, not of the build. Only paired within-batch deltas carry
+magnitudes; a median of five sequential identical arms carries a range.
+
+**4. The contention, measured rather than assumed.** `Device Utilization %` was
+sampled every 30 s for the whole run (19 samples, `.build/benchmark-logs` aside):
+50–65%, never below 50%, load average 2.7–7.4. Everything else complied — AC
+power, `lowpowermode 0`, macOS 27.0.1, Swift 6.4, 82% memory free, empty `pgrep`
+guard before launch, clean tree, and no model process left after it
+(`_terminate_all` ran in the driver's `finally`). Note what contention did *not*
+do here: the hit rate stayed at 0.872, so the expert cache remained resident and
+this is not the 0.277-collapse shape the preflight's comment describes. The
+sharing shows up as CPU/GPU service time, not as an I/O failure — which is
+exactly why a contended run looks superficially healthy in its counters.
+
+**5. What this licenses, and what it does not.** Three figures now exist for this
+model and width and none of them is the same measurement: this contended
+gate0 median **5.713**, §5r's greedy 384-token CLI arms **4.08–5.07**, and the
+wiki table's **6.82** from the v4.7 engine on 2026-08-30. Note that 5.713 already
+sits *above* the 5.5 this page quotes as the model's peak and the README's 5.46 —
+so the table-versus-peak contradiction the wiki's batch note describes is not
+resolved by taking the table's own instrument; it is a protocol difference between
+the peak row and the table row, still standing. What this run licenses is the
+statement that **the 6.82 row cannot be defended as a current figure at this
+machine's defaults** — it was measured on another engine, and the current build at
+the shipped default under contention does not reach it. What it does not license
+is replacing it: the replacement must come from the same command without
+`--allow-busy-gpu`, on a GPU under 15%, and that window has never been available
+on this Mac while its desktop is running. TT-049 stays open for that arm.
