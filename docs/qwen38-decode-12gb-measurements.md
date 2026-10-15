@@ -1307,3 +1307,102 @@ the shipped default under contention does not reach it. What it does not license
 is replacing it: the replacement must come from the same command without
 `--allow-busy-gpu`, on a GPU under 15%, and that window has never been available
 on this Mac while its desktop is running. TT-049 stays open for that arm.
+
+## 5u. The 32K context cap re-measured on v5.20 — §5o's winning arm is gone (2026-10-15)
+
+§5o found exactly one configuration that beat that batch's default: 96 slots with
+`--max-context 32768`, **+9%** (4.929/4.966 against 4.551/4.481), and it named the
+mechanism — the QSA indexer preallocating 0.94 GiB at full context against 0.12
+GiB at 32K, that 0.82 GiB being the whole margin between the 96-slot arm paging
+(3.05) and fitting (4.93). §5p then shipped the fix (`45f55bb`): the buffers start
+at `initialCapacityCells = 8_192` and double on demand
+(`sources/TinyTitan/Kernels/Attention/QSAIndexer.swift:34`), which frees the same
+0.82 GiB at *any* max-context. The question this section answers is narrow and it
+is the one the operator asked — after that fix, does the cap still buy anything?
+
+**Provenance and protocol.** Tree `3f92d47` (the `v5.20` tag plus a notes-only
+commit), `swift build -c release` refreshed before the batch (Build complete,
+82.35 s), clean `git status`. 24 GB M3, macOS 27.0.1, Swift 6.4, AC power,
+`lowpowermode` off, empty model-process guard before launch, one CLI process at a
+time, none left after. Seven cold runs: three interleaved rounds with the arm
+order alternated (A B · B A · A B) plus a closing baseline run to bound drift.
+
+```
+TINYTITAN_RUNNER_STATS=1 .build/release/TinyTitanCLI \
+  --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0 --max-context 262144   # arm A — shipped default
+                                          --max-context 32768    # arm B — capped
+```
+
+§5o's prompt and length, greedy as §5p ran it. Both arms derived the same tier:
+every one of the seven logs carries `ram profile cache=11.88G slots=96
+resident_floor=3.72G estimate=15.60G`, so the cap is not changing the slot count —
+this is a pure memory-pressure test at equal capacity. Driver
+`/tmp/v520_ctx_ab.sh`, data `/tmp/v520-ctx-ab/summary.tsv`.
+
+**Deviations, all of them.** (1) The desktop held the GPU at 56% at run 1's launch
+instant; runs 2-7 launched at 0%. Round 1's delta is therefore contaminated and
+only rounds 2-3 are clean. (2) A 16-token smoke run preceded the batch to pin the
+footer field names — not an arm, but it warmed the page cache for run 1. (3) The
+harness pipeline exited 1 because `tee` opened its progress log before the script
+created the directory; every one of the seven CLI runs exited 0, so the batch
+itself succeeded. (4) The arms went through the CLI, which accepts any count up to
+262144, while the server refuses a non-rung; 32768 is a rung, so the two paths
+agree on this value.
+
+| run | arm | ctx | tok/s | decode s | hit | wait_ms | body_ms | io_ms | gpu at launch |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | A | 262144 | 4.884 | 78.63 | 0.8460 | 96.086 | 186.469 | 70.619 | 56% |
+| 2 | B | 32768 | 5.061 | 75.88 | 0.8446 | 90.753 | 179.916 | 72.640 | 0% |
+| 3 | B | 32768 | 5.067 | 75.79 | 0.8461 | 92.876 | 179.349 | 69.449 | 0% |
+| 4 | A | 262144 | 5.072 | 75.70 | 0.8463 | 93.603 | 179.082 | 68.707 | 0% |
+| 5 | A | 262144 | 5.111 | 75.13 | 0.8454 | 90.028 | 177.664 | 71.504 | 0% |
+| 6 | B | 32768 | 5.086 | 75.50 | 0.8452 | 90.767 | 178.425 | 71.394 | 0% |
+| 7 | A | 262144 | 5.031 | 76.33 | 0.8458 | 94.640 | 180.768 | 68.603 | 0% |
+
+**Paired deltas, per round.** Round 1 (contended) **+3.62%**, round 2 **−0.10%**,
+round 3 **−0.49%**: median **−0.10%** (−0.005 tok/s). The identical-arm band is
+wider than the effect — the four A runs spread 4.884-5.111 (4.6%), or 5.031-5.111
+(1.6%) once the contended run is excluded, and the three B runs spread 0.5%. A
+direction needs two rounds of its own; here the two clean rounds point opposite
+ways and both are inside the drift band. **The cap is neutral on v5.20.**
+
+**The counters say the mechanism is gone, not just the clock.** `wait_ms` is the
+quantity §5o used to prove the cap was relieving paging: it measured **201 ms
+uncapped against 98 ms capped**. This batch measures **90.03-96.09 uncapped** (A
+median 94.12, or 93.60 with the contended run excluded) against **90.75-92.88
+capped** (B median 90.77); the per-round paired wait deltas are +5.33, +0.73 and
+−0.74 ms, so the arms are not separable on it either way. The point is not the
+1.4% between these two arms — it is that the ~100 ms/token the cap used to buy
+back is already absent from the *un*Capped arm, which is `45f55bb` working, seen
+from the other side. `io_ms` is flat across both arms (68.6-72.6) and the hit rate
+does not separate them either (0.8446-0.8463), so there is no second effect hiding
+under the first.
+
+**Output invariance.** `sha256` of the generated text is `95aa4531b4ea2304…` in all
+seven runs, 384 tokens each, `stop=maxTokens` throughout. The cap changed no token,
+so nothing here is a numerics question.
+
+**Verdicts.**
+- **§5o's +9% arm is closed as a lever.** Do not recommend `--max-context 32768`
+  for decode speed on a machine that keeps its tuned budget: the headroom it was
+  buying is now released by default. It stays what the wiki documents it as — a
+  capacity ceiling — and it still has the one real effect the code shows: because
+  `capacity: maxContext` (`sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:310`),
+  a cap bounds how far the indexer and KV buffers may grow, so a request above the
+  window is refused rather than allowed to page. On a long-prompt workload that is
+  a blast-radius control, not a speed control.
+- **The configuration search for ≥6 tok/s on this Mac has no untried flag left.**
+  The shipped default measures 5.03-5.11 here (median 5.05), agreeing with §5p's
+  5.045 and sitting under §5t's contended 5.713 server-protocol median. Every
+  candidate this campaign turned — budget (§8), context (§5u), rdadvise (§8),
+  knobs (§8), MTP (§8), co-execution (§8) — is now measured closed.
+- **New reading worth carrying:** during each run `memory_pressure -Q` falls to
+  **8-11% free** (77-80% at the launch instants) while the 11.88 GiB tier is
+  resident. That is the margin the 12 GiB budget is chosen to fit, and it is direct
+  evidence the budget sits at the edge rather than comfortably inside: anything
+  else opening on this machine is a few hundred megabytes away from pushing the
+  expert cache out — the collapse shape the gate0 preflight hunts. It also means
+  the paired-batch free-memory guard is measuring the wrong instant for this model:
+  a launch-time 77% free says nothing about the 9% the run runs at.
