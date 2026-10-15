@@ -896,6 +896,10 @@ jobs:
         # expert) pair pool and heat-proportional per-layer allocation -- offline
         # over a trace file handed to it (stage 0 of docs/plan-qwen38-decode-12gb.md);
         # it starts no server, loads no model and imports nothing outside stdlib.
+        # test_continuous_feeder_sim models a speculative weight feeder on the
+        # same trace shape: one serial drive, the engine's own LFU placement, and
+        # a gate that withholds every projected rate when the burst control arm
+        # cannot reproduce a measured clock. Model-free, stdlib-only.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -926,7 +930,7 @@ jobs:
             test_side_engine_wired_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
-            test_flat_pair_cache_sim
+            test_flat_pair_cache_sim test_continuous_feeder_sim
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
