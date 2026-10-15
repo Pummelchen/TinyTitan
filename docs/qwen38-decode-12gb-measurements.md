@@ -1746,3 +1746,173 @@ not the same run and are not treated as one.
   a real achievement — but a percentage that moves 0.06 points across a 12.2% clock change
   must not be used to bound one. The device-side lines (`TinyTitan kernel busy_ms=…`,
   `TinyTitan gap …`) are the ones to publish, and they are already in the build.
+
+## 5x. The completion wait is already the cheapest primitive, and what an extra command buffer costs (2026-10-15)
+
+§5w left ~0.44 ms/layer of GPU idle that no host counter names, and the decode loop blocks once
+per layer on `cb.waitUntilCompleted()` (`RealForwardRunner+CommandBuffers.swift:16`). The obvious
+suspect was the wait itself: a blocking wait sleeps, and waking a thread costs tens of
+microseconds, so if the *wake* were the 0.44 ms, a spin-then-block wait would recover on the order
+of 20 ms of a 217 ms token. Measured directly, it is not.
+
+`/private/tmp/waitcost/main.swift` is a throwaway spike, not engine code: it commits a 4 KiB blit
+and waits for it, 4 000 iterations per arm, on an idle machine on AC power with no model process
+running (record in `/private/tmp/waitcost/run2.log`).
+
+| arm | mean | p50 | p95 | p99 | min |
+|---|---|---|---|---|---|
+| `waitUntilCompleted()` | 126.3 µs | 101.6 | 179.2 | 850.0 | 74.3 |
+| `cb.status` spin | 245.1 | 158.8 | 697.6 | 2438.1 | 80.0 |
+| `sched_yield` spin | 253.1 | 165.4 | 721.9 | 2533.3 | 95.8 |
+| blocking, repeated last | 157.7 | 103.1 | 252.1 | 904.8 | 76.5 |
+
+**The blocking wait is the cheapest arm by 56% on p50 and its tail is 3× better than either spin.**
+Polling `cb.status` costs more than sleeping on it: the driver's completion path beats a userspace
+loop, and a spinning loop also holds a core the engine's own host bookkeeping needs. There is no
+spin-first wait to ship. So the ~0.44 ms/layer from §5w is not a scheduler artefact — it is real work
+the host is doing, which is where §5w's own verdict pointed, and it cannot be recovered by changing
+*how* the engine waits.
+
+### The floor the other direction has to pay
+
+The same spike priced a command buffer with no wait at all: `encode` p50 3.9 µs (mean 22.3, p99
+368.8), `commit` p50 0.5 µs, per-command-buffer host cost mean 22.9 µs — 6.59 ms/token at 6 command
+buffers × 48 layers. So the open direction is the opposite of finer slicing: **fewer, larger command
+buffers**. Every added commit-and-wait pair costs the ~74 µs wait floor this table shows plus ~23 µs
+of host time, which is ~10 ms/token for one extra pair per layer — a tenth of the idle it would have
+to explain.
+
+**Deviations, all of them.** (1) The spike never loads a model, so it prices primitives, not the
+token; the wait figures are a floor on wake cost with the GPU otherwise empty, not an estimate of a
+decode layer's share. (2) An earlier, unsaved run of the same arms gave blocking p50 101.7 / min 73.3
+and a `sched_yield` p50 of 137.2 against 165.4 here; the two spin arms trade places between runs, so
+this section publishes only what is stable across both — the blocking arm is the cheapest, p50 ≈ 102
+µs with a ~74 µs floor, and both spin arms are clearly worse. (3) `min` columns are the best of 4 000
+samples, not a bound. (4) n=2 runs, same process shape, no interleaving — enough for an ordering, not
+for a magnitude difference between the two spin arms.
+
+## 5y. The miss replay is calibrated, and what it says first is that the slot *partition* costs more than the victim rule (2026-10-15)
+
+§5w made capacity the largest knob on this machine (+12.2% decode for a 45% miss change, byte-identical
+output), so the next feeder or placement idea should be screened offline before it costs a model window.
+The screen already existed in `benchmark/continuous_feeder_sim.py` but was known-biased and loosely banded;
+this section calibrates it, states what it may and may not be used for, and then runs the first experiment
+through it.
+
+### Calibration against the run that wrote the trace
+
+Arm B of §5v is the capture that produced `route-trace-qwen38-4bit-v520-20261015.txt.gz`, so footer and
+replay are one workload: 511 decode tokens, `expert_misses=37724`, `prefetch_adopted_per_token=18.40`.
+The engine's own two counters bracket what a route trace can see — a replay must count more than the drive
+*reads* (it cannot know which misses the prefetch ring had already staged) and no more than reads plus
+adoptions (the placements it really made):
+
+| quantity | engine | replay | error |
+|---|---|---|---|
+| drive reads/token (floor) | 73.82 | — | — |
+| placements/token (ceiling) | 92.26 | **89.28** | −3.2% |
+| 48-slot ÷ 96-slot miss ratio | 1.831 (§5w paired) | **1.794** | −2.0% |
+| cold-cache consistency | placements − evictions = 4 610 | one cold cache = 48 × 96 = **4 608** | 2 slots |
+
+The last row is the structural check: if the replay's placement count and the engine's eviction count do not
+differ by about one cold cache, the two are not counting the same object. They do, to 2 slots in 4 610.
+
+**Licensed — ranking placement rules at a fixed budget. Banned — quoting a token rate from it.** §5w's
+0.637 ms of critical path per avoided miss was measured in drive *reads*; the ~15.5 placements/token the
+ring served without one are invisible in a route trace and not fixed, because they depend on how deep the
+ring ran. A replay delta has to be scaled by that unmeasured share before it becomes money, and the
+timeline that would supply it is the refused model (§5v).
+
+### Which detail of the engine's rule is load-bearing
+
+The plan-faithful rule (`_PlanSlots`) and the textbook LFU-with-LRU-tiebreak (`_Slots`, the one the refused
+timeline uses) differ by 69% on this trace — 89.28 against 151.20 placements/token. That gap was previously
+described in this tree as belonging to three transcribed details of `makeExpertCachePlan`. Measured one at a
+time, none of the three is it:
+
+| arm | placements/token | vs shipped |
+|---|---|---|
+| plan rule as shipped | 89.28 | — |
+| use count raised only on misses, not on hits | 88.24 | −1.17% |
+| `useClock` advanced per expert instead of per plan | 89.31 | +0.03% |
+| slots re-ranked for each miss instead of once per plan | 89.28 | +0.00% |
+| expert's count **forgotten when its slot is evicted** | 102.17 | +14.4% |
+| textbook `_Slots` rule, whole | 151.20 | +69.3% |
+
+The load-bearing detail is count lifetime, and it is in the engine, not in the ranking: `expertUseCount` is a
+per-layer array sized by `layout.expertsPerLayer` (`PreadExpertStreamer.swift:326`) and only
+`resetExpertUseCounts()` zeroes it — which is itself env-gated (`TINYTITAN_EXPERT_USE_RESET=1`,
+`RealForwardRunner+Prefill.swift:24`) and therefore **off** in every flag-free arm measured in this document.
+A returning expert is priced by everything it has ever done. The textbook rule prices it at one.
+
+**Withdrawn figures.** Four numbers published earlier in this campaign's working notes — 109.10, 111.64,
+113.39 and 157.11 placements/token for a "textbook" replay — are withdrawn. The first three were three
+different miss *accountings* of the same rule (no warm-up; warm-up counting every visit; warm-up counting
+decode only), and 157.11 came from a probe that leaked residency: `_Slots.contains(e)` is `e in use_count`,
+so restoring a count for an evicted expert makes it look resident, which is also how a broken variant of the
+same probe once collapsed a miss count to 22.92. None of them is reproducible from the tree. The band claim
+is now pinned by a test rather than by prose: `MissReplayTests` asserts the plan rule sits inside
+[73.82, 96.87] and a drift arm asserts the textbook rule breaches the ceiling at 151.20 — the same assertion
+run against the plan rule fails at 89.28, so the band discriminates.
+
+### The ranking: capacity distribution beats victim order
+
+Two throwaway rounds screened victim rules and budget shapes at the shipped 4 608-slot total
+(`/tmp/placement-screen/`, uncommitted — see deviations). Ranking only, no token rate anywhere in these rows.
+
+| rule and budget shape | placements/token | vs shipped |
+|---|---|---|
+| oracle static per-layer split (sum 4 587 slots) | 82.66 | −7.42% |
+| LFU capped at 3 + one flat 4 608-slot pool | 82.97 | −7.07% |
+| LRU + flat pool (capped at 3 or 8 — identical) | 85.50 | −4.24% |
+| oracle static split, plain LFU inside it | 86.08 | −3.59% |
+| LFU capped at 5, per-layer 96 | 86.95 | −2.61% |
+| `lru_then_lfu`, per-layer 96 | 87.46 | −2.04% |
+| **shipped: LFU, per-layer 96** | **89.28** | — |
+| LRU, per-layer 96 | 91.05 | +1.98% |
+| LFU + flat pool, uncapped | 104.56 | +17.11% |
+| FIFO / random, per-layer 96 | 106.64 / 106.43 | +19.4% / +19.2% |
+
+Read the middle of the table, not the top: the shipped rule is already the best *victim order* at this budget
+(every pure alternative here is worse), and the wins come from **how the 4 608 slots are divided**, not from
+who gets evicted. The per-layer decode working sets are very unequal — 174 to 415 distinct experts per layer,
+mean 285, against a uniform 96-slot partition — and an oracle split of nearly the same total recovers 7.4% of
+placements. A single flat pool with LRU recovers 4.2% without knowing the future; combining it with a
+saturating count (cap 3) recovers 7.07%, which is within noise of the oracle. The uncapped LFU in a flat pool
+is much *worse* (104.56): without a cap, one expert's lifetime count can defend a slot for the whole session,
+and in a shared pool that starves every other layer — which is why the cap and the pool help together and the
+cap alone is a 2% story.
+
+Capacity ladder for reference (per-layer, LFU / LRU): 48 slots 160.13 / 157.77, 64 131.22 / 131.59, 96 89.28 /
+91.05, 128 61.81 / 63.52, 192 34.77 / 34.53.
+
+**Deviations, all of them.** (1) One trace, one prompt, 511 decode tokens; the §5w ratio it is calibrated
+against came from a 384-token run, so the calibration compares a *response*, not a level. (2) The screen
+scripts and their logs are uncommitted throwaways under `/tmp/placement-screen/`; only the shipped arm
+(89.28), the 48-slot arm (160.13) and the drift arm (151.20) are reproducible from the tree, via
+`benchmark/test_continuous_feeder_sim.py`. A reboot costs the ranking rows. (3) Deltas of 2–4% are inside the
+instrument's own 3.2% level bias, and §5w showed a 45% miss change buying 12.2% of clock — a 4% placement win
+may express as ~1% or as nothing once the ring and `free=0.99` absorb it. (4) The oracle split uses future
+knowledge (per-layer distinct counts read off the same trace); it is published as the ceiling a static split
+could reach, not as a policy. (5) The `window` arms at 32 and 128 tokens returned exactly the baseline because
+the cutoff (`window × 48` rows) covers the whole session — those two are **inconclusive, not "no effect"**;
+the window-8 arm (88.22, −1.19%) is the only one that tested the shape. (6) An earlier `lfu_decay` arm was a
+no-op by construction — halving every count is a uniform rescaling and cannot change a ranking — caught before
+any of it was reported. (7) The 128- and 192-slot rows exceed the operator's 12 GiB cap on this 24 GB Mac and
+are offline arithmetic, not configurations to run here.
+
+**Verdicts.**
+- **The victim rule is not the open seam.** Shipped LFU beats LRU, FIFO and random at this budget, and every
+  tiebreak reshuffle tried here moved placements by under 3%. Do not spend a model window on a cleverer LRU.
+- **The partition is.** 512 experts per layer and a uniform 96 slots each, against per-layer working sets of
+  174–415. Any real attempt should rebalance the *budget across layers* (or share one pool), not reorder
+  evictions. Both are architectural here: `slotCount` is a `let` per streamer
+  (`PreadExpertStreamer.swift:93`) and the plan guard assumes one uniform capacity per layer, so a non-uniform
+  split is a load-time data-layout change, not a tuning knob. It needs the operator to ask for it.
+- **One cheap live arm survives this screen**: a saturating use count (cap ~5) inside the comparator. It is a
+  clamp in `makeExpertCachePlan`, changes only which slot is given up, and should be output-invariant —
+  residency is a cache, not semantics, and §5w already showed a placement change holding the bytes identical.
+  Offline it is worth −2.6% placements, which is *inside* the instrument's own 3.2% bias: that licenses one
+  paired run, not a claim.
+- **Nothing here is a tok/s number.** This section prices placements. The engine's clock is still what §5w and
+  §5v measured, and no row above has been run on the machine.
