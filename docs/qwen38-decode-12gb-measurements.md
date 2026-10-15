@@ -1141,10 +1141,9 @@ text unchanged, and the override shape it accidentally covered became a new test
 finding.** The second authorised item was `.qwen/wiki/Benchmarks.md`'s 6.82 tok/s
 for Qwen3.8-Flash-Next 4-bit (the 2026-08-30 batch) against §5r's 5.02–5.07.
 Those are different protocols, so refreshing the row means running the wiki's own
-instrument, not pasting a number: `benchmark/tinytitan_gate0_profile.py --quant
-4bit --runs 5` at shipped defaults (11.88 GiB cache, 96 slots — no flag, and
-nothing on this Mac may exceed the 12 GiB budget). It refused before starting a
-server:
+instrument, not pasting a number: `benchmark/tinytitan_gate0_profile.py` with
+`--quant 4bit --model-dir models/qwen3.8-flash-next_125B_A6B_4Bit --runs 5` at
+shipped defaults (11.88 GiB cache, 96 slots). It refused before starting a server:
 
 ```
 refusing to start: GPU is already 54% busy before TinyTitan launches (threshold 15%).
@@ -1163,5 +1162,53 @@ that gates on GPU idleness, so §5r's CLI arms were taken without that check; an
 its threshold is binary (15% or off) — there is no "record the contention and
 carry on" mode, which is the right design for a published table but means a
 wiki-protocol arm needs the GPU-holding apps quit first.
+
+Two further things about that refused arm were found after the fact, and each would
+have cost a quiet-machine window to discover the other way round.
+
+- **The command as actually run named the wrong install.** It was invoked as
+  `--quant 4bit --runs 5` with no `--model-dir`, and that driver's `4bit` key is
+  `models/ornith-1.5_35B_A3B_4Bit` (`tinytitan_gate0_profile.py:75`) — the published
+  workload was Ornith-only until `--model-dir` was added. This Mac has no Ornith
+  install, so on a quiet GPU the arm would have died on a missing model directory
+  after waiting all day for one. The refusal itself still stands, because the GPU
+  preflight runs before the model is opened, but the Qwen3.8 row could never have
+  been refreshed by that invocation. TT-049's next-step command on the tracker
+  already carries the `--model-dir`; the command quoted above did not, and now does.
+- **The budget claim is confirmed in the code rather than assumed.**
+  `server_command` appends `--ram` only when `ram_budget` is not `None`, and the
+  harness default is `os.environ.get("TINYTITAN_BENCH_RAM_BUDGET")` with no fallback
+  — `None`, so the shipped derivation applies (`tinytitan_profile.py:29-30`,
+  `:211`). That is what "no flag, 96 slots" rests on. The gate0 docstring still
+  describes the profile as using an "8 GiB budget", which was true of the v4.1
+  published batch and is not what the harness does now; left unfixed, because this
+  window was not authorised to touch the driver, but no reader should take that
+  line as the arm's configuration.
+
+**7. What the page now says instead (wiki `c2bb180`).** The 6.82 figure was not
+touched — it is still the v4.7 measurement, and only a wiki-protocol arm can change
+it — but the page's own provenance was checked and published, because the
+contradiction is older and wider than one row. `git log -S` on the wiki: all five
+medians arrive in `eb84741` (2026-08-30, "Add the v4.7 benchmark section") and none
+has been edited since, while the peak paragraph was rewritten on 2026-09-29
+(`5d74cd6`) from the README matrix, whose rows for these models all arrived in
+`69dd683` (2026-09-05). Four of the five table medians are *above* the peak the same
+page then quotes for that model and width — 23.28 and 22.65 against "17–22" at
+4-bit, 12.72 against "7–12" at 8-bit, 6.82 against "5.5" — and only Ornith 1.5 8-bit
+at 11.89 sits inside its range. A median at shipped defaults cannot exceed a peak
+taken across every setting, so the two sets cannot both describe one build, and the
+table is the older of the pair by six days. For the 125B row §5r settles it
+independently: 4.08–5.07 tok/s at the shipped 96-slot default, against 6.82. The
+note states the batch, the contradiction, that range and its protocol, points at
+TT-049, and pastes nothing into the table.
+
+Two claims were caught and corrected while drafting that note, and are recorded
+because both were plausible: that the README's `5.46` predated the table (it
+postdates it by six days — the `5.46` in README on 2026-08-08 is a different
+quantity, a "32 slots + pin" reference figure), and a positional "two lines below"
+that the insertion itself invalidated. What the note does *not* establish is whether
+the four 35B rows are also unreachable on the current engine: this Mac has no 35B
+install, and no gate may fetch one, so on this machine TT-049 can only ever refresh
+the 125B row.
 
 
