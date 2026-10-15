@@ -1406,3 +1406,123 @@ so nothing here is a numerics question.
   expert cache out — the collapse shape the gate0 preflight hunts. It also means
   the paired-batch free-memory guard is measuring the wrong instant for this model:
   a launch-time 77% free says nothing about the 9% the run runs at.
+
+## 5v. The continuous weight feeder, tested on the drive itself — the drive is already continuous (2026-10-15)
+
+The operator's idea, stated as the premise to be tested: *"it makes no sense to
+make it read for a couple of seconds, then stop, compute and read again. the SSD
+can read constantly while a user has an active session… the idea is to have a
+constant weight feeder instead of a chunk-by-request reader."* That is a claim
+about duty cycle, so it was measured as one rather than argued from §8's closed
+lever list. Nothing in the probe touches the engine: the samplers are external,
+and the decode arm runs the shipped default with **no flags at all** — the 12 GiB
+tier in its logs is the host-sized derivation on this 24 GB Mac, not an override.
+
+**Provenance and protocol.** Tree `b8002b0`, whose only commits past the `v5.20`
+tag are docs-only (`git diff --stat v5.20..HEAD` = one `docs/` file), so the
+binary is the released engine. 24 GB M3 (Mac15,3), macOS 27.0.1, Swift 6.4, AC
+power, empty model-process guard before launch, one CLI process at a time. Two
+arms, each a cold run: **A** = `TINYTITAN_RUNNER_STATS=1` decode, **B** = the same
+plus `TINYTITAN_ROUTE_TRACE` for the offline simulator. Both sampled every second
+by external `iostat -d -w 1` and an `ioreg` AGX poller. Prompt as §5u, `--max-new
+512 --temperature 0`, exit 0 in both arms. Driver `/tmp/feeder_probe_run.sh`, data
+`/tmp/feeder-probe/`. Preconditions at launch: 81% memory free, **swap already
+5.47 GB used**, GPU reader 61%.
+
+**Result 1 — the premise is false as observed: the drive never stops.** Taking
+arm A's own clock window (decode begins 9 s after launch, runs 113.8 s), the
+`disk0` series over 112 one-second samples reads:
+
+| mean | median | min | max | samples at zero | samples under 400 MB/s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1359.5 MB/s | 1353.0 | 753.0 | 1685.7 | **0** | **0** |
+
+There is no read-burst/compute-idle alternation to exploit. Against the four-thread
+`ParallelExpertReader` ceiling recorded in §5o and `docs/v4-core-design.md`
+(3.92 GB/s) the drive sits at **34.7% duty**, so
+the operator's instinct that the SSD has spare capacity is correct — but the spare
+is already being spent, and the next result is what that leaves on the table.
+
+**Result 2 — what a perfect feeder could still buy is 0.075%.** `io_ms=72.254` is
+the time spent in miss reads per token and `io_hidden_pct=99.77` says how much of
+it already runs under compute, so the exposure is `72.254 × 0.0023 = 0.166` ms of a
+222.27 ms token (1000/4.499). A feeder that removed *all* remaining exposure moves
+4.499 → 4.502 tok/s. The engine's `expert_load_p50/p95/p99` of 2/8/16 ms and the
+`io_host_waits_avoided=8944` of 15,584 waits are the machinery already spending
+that idle capacity; there is no second hiding act to write.
+
+**Result 3 — the continuous feeder already exists, and its limit is RAM, not the
+drive.** `prefetch_issued_per_token=39.54` against `prefetch_adopted_per_token=18.23`
+means the ring issues ~20,244 speculative reads over the run (`spec_ops=20243`)
+at full stride width — about 493 MB/s of pure prediction, on top of the 920 MB/s
+the demand misses cost. Demand plus speculation is 1413 MB/s against the 1359.5
+measured, a 4% cross-check that the two series account for the whole drive load.
+The ring reports `free=0.99` — it runs with about one spare slot — so it is
+throttled by where a read can *land*, not by bandwidth. This is the sentence the
+feeder concept dies on: a constant reader already has the bandwidth it wants, and
+cannot use more of it because the 96-slot tier has no room for the bytes.
+
+**The misses are retention-shaped, not cold-read shaped.** Of 37,807 demand misses,
+**33,239 are reloads** of experts already loaded once, against 42,535 evictions, at
+hit rate 0.8472. Reading earlier does not help an expert that was evicted because
+nothing was holding a slot for it; that is a placement and capacity question, and
+capacity at 12 GiB is the operator's own ceiling on this machine.
+
+**The offline feeder simulator, and why its rates are withheld.**
+`benchmark/continuous_feeder_sim.py` (new) replays a route trace as a timeline —
+one serial drive, the engine's LFU-with-LRU-tiebreak placement, and speculative
+reads that may only issue in the intervals the demand reader leaves free — under
+five arms: `burst` (control), `prev_token`, `recency3`, `hot_set8`, `recurrence`
+(read an expert back before its settled recurrence interval says it is due). 26
+tests in `benchmark/test_continuous_feeder_sim.py`, registered in CI's model-free
+python list. On the real capture — committed as
+`benchmark/expert-cache/route-trace-qwen38-4bit-v520-20261015.txt.gz`, arm B's,
+24,528 layer steps after `--skip-steps 480`, 96 slots/layer — it reports:
+
+```
+burst       demand= 56433 spec=      0 cov=0.000 waste_MB=     0.0 exposed_ms=   9375.2 duty=0.446 REFUSED
+prev_token  demand= 54908 spec=   2732 cov=0.027 waste_MB=   257.5 exposed_ms=   9117.1 duty=0.457 REFUSED
+recency3    demand= 53136 spec=   7098 cov=0.058 waste_MB=   888.8 exposed_ms=   8682.3 duty=0.480 REFUSED
+hot_set8    demand= 54158 spec=   4267 cov=0.040 waste_MB=   473.5 exposed_ms=   8658.0 duty=0.465 REFUSED
+recurrence  demand= 54291 spec=  22533 cov=0.038 waste_MB=  9228.7 exposed_ms=   8138.5 duty=0.616 REFUSED
+calibration: REJECTED (burst projects 5.72 against measured 4.50 tok/s, 27.1% off)
+```
+
+The control arm is 27.1% too fast against the clock measured in this same
+section, which means the timeline is missing ~47 ms/token of per-step cost. The
+tool now says so and exits 1 instead of printing quotable rates — the gate is tested
+(`test_refuses_every_projection_when_the_control_arm_misses_the_measurement`).
+Two readings survive the rejection, because they are within-arm and structural:
+the `prev_token`/`recency` shape removes 0-6% of demand reads while the resident
+set is the last-seen set — a due-soon predictor is the only shape that spends idle
+drive time usefully — and `recurrence` buys its 13% exposure reduction at 9.2 GB
+of wasted reads, 20× the waste of the next arm. Neither is a token-rate claim.
+
+**Deviations, all of them.** (1) Arm B's 4.733 tok/s is **not** a clock: the trace
+capture does an unbuffered `write()` per layer per token (~480 syscalls/token), so
+its rate is perturbed by design and only its trace was used. (2) The `ioreg` AGX
+"Device Utilization%" reader showed 61% with the machine idle and 69.6% mean during
+decode, so it is not an occupancy instrument on this host and no conclusion here
+rests on it — §5u's <15%-at-launch requirement cannot be met by that gauge. (3) One
+run per arm, not a paired batch: the finding is a counter and a duty cycle, not a
+few-percent clock delta. (4) Swap was already 5.47 GB used at launch. (5) The `disk0`
+series is whole-volume, so it includes this machine's other I/O; the 4% agreement
+with the engine's own byte counters is what bounds that error.
+
+**Verdicts.**
+- **The chunk-by-request → continuous-feeder change is closed by measurement, not
+  by §8.** The drive already reads continuously (0 idle samples in 112) and the
+  reads already hide (99.77%), so the concept's prize is 0.075% of the token. The
+  ring *is* the feeder; what limits it is the slot count.
+- **The live headroom is host-side, and it is bigger than everything the SSD path
+  can still give.** Named per-token spans in arm A read `head_ms=11.849`,
+  `rdadvise_ms=7.863` over 35,430 calls, `wait_ms=109.113`, `body_ms=202.936`,
+  `cache_plan_ms=4.877`, `gather_ms=2.329`, `loop_*=2.82` — and because `body_ms`
+  overlaps `wait_ms` these cannot be summed into a budget. That the footer's spans
+  do not decompose a 222 ms token is itself the next instrument to build, and it is
+  where a CPU lane belongs: bookkeeping off the critical path, not tensor compute
+  (which §8 and the operator's no-quality-loss rule both keep closed).
+- `free=0.99` is the number to watch if this is ever reopened: it says the ring is
+  one spare slot from starved, and any change that frees expert-cache slots without
+  giving up residency converts directly into feeder room.
+
