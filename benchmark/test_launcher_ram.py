@@ -384,5 +384,58 @@ class TheSeamIsCheckedWhereItIsRead(unittest.TestCase):
         self.assertNotIn("TINYTITAN_PHYSICAL_RAM_BYTES", run.stdout + run.stderr)
 
 
+class ThePromptCacheTierIsLeftToTheServer(unittest.TestCase):
+    """The launcher must not pin what the server now derives from the machine.
+
+    `ServerArguments.defaultPromptCacheMemoryMiB` sizes the prompt cache's RAM
+    tier from physical memory (256 MiB below 48 GiB, 2 GiB above), the way the
+    expert budget is sized. The launcher used to answer that flag with a flat
+    256 on every machine, which meant the derivation never reached the users
+    this launch path is for — a 128 GiB Mac got the small machine's tier, with
+    the pin written *after* the server had already read its own RAM. Not
+    passing the flag is the whole fix; the plan line prints the mode, not the
+    number, so nothing here needs to know the tier.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
+    def setUp(self) -> None:
+        self.model = self.installs.first_gpu()
+
+    def test_the_default_path_names_no_prompt_cache_tier(self) -> None:
+        for memory in (24 * 2**30, 128 * 2**30):
+            with self.subTest(memory_gb=memory // 2**30):
+                run = dry_run(self.installs, "--model", self.model, physical_bytes=memory)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertIn("--prompt-cache-mode multi-prefix", run.stdout)
+                self.assertNotIn("--prompt-cache-memory-mib", run.stdout)
+
+    def test_turning_the_cache_off_still_reaches_the_server(self) -> None:
+        run = dry_run(
+            self.installs,
+            "--model",
+            self.model,
+            "--prompt-cache",
+            "off",
+            physical_bytes=24 * 2**30,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("--prompt-cache-mode off", run.stdout)
+
+    def test_an_unknown_cache_choice_is_still_refused(self) -> None:
+        run = dry_run(
+            self.installs,
+            "--model",
+            self.model,
+            "--prompt-cache",
+            "sideways",
+            physical_bytes=24 * 2**30,
+        )
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("unknown --prompt-cache", run.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -809,3 +809,155 @@ knob, and this step does not change that record. Single-run caveat: the
 ~8% — but the pre/post gap at 96 slots (3.05/3.20 → 5.16, +61–69%) and
 the default-derivation move (64 → 96 slots at equal text) are structural,
 not clock noise.
+
+## 5q. The same tier-sizing rule applied upward: budgets that scale with the machine (2026-10-15)
+
+§5p floored the expert-cache ceiling at the tune, so a machine with at least the
+24 GiB the budgets were measured on keeps what it was tuned to. That fixed the
+machine this repository has, and left the other half of the answer unfinished: a
+tuned budget is still a **constant derived on one machine class**, so a 64 GiB
+Mac was handed the same 96 slots as a 24 GiB one and left ~40 GiB of the tier it
+could have filled. `docs/lmcache-evaluation.md` named the one concept worth
+taking from LMCache — size the resident tier to the host rather than to a number
+measured elsewhere — and this section applies it at home, to both resident tiers.
+
+**Change 1 — the third becomes a floor as well as a ceiling.**
+`affordableExpertCacheBudget` is now `min(wanted, RAM/3)` below the 24 GiB tune
+and `max(wanted, RAM/3)` at or above it. The measured machine classes are
+byte-identical: below 24 GiB the rule is untouched, so the 8 GB mini evidence
+still stands; at 24 GiB, `max(12, 8)` is the tuned 12 GiB, which is §5p's 96
+slots; at 32 GiB a third is 10.67 GiB, so the tune still wins. What changes is
+everything above, where the third exceeds the tune and the machine can hold it:
+
+| RAM | a third | qwen38 4-bit (its row asks 12 GiB) | 35B-A3B 4-bit installs (ask 10 GiB) | prompt-cache RAM tier |
+| ---: | ---: | --- | --- | ---: |
+| 8 GiB | 2.67 | 2.67 → 24 (min, unchanged) | 2.67 → 40 (unchanged — the measured mini optimum) | 256 MiB |
+| 24 GiB | 8.00 | 12.00 → **96** (measured, §5p) | 10.00 → 160 (unchanged) | 256 MiB |
+| 32 GiB | 10.67 | 12.00 → 96 (tune wins) | 10.67 → 160 (same rung) | 256 MiB |
+| 48 GiB | 16.00 | 16.00 → 128 (new) | 16.00 → 256 (new) | 2 GiB (new) |
+| 64 GiB | 21.33 | 21.33 → 160 (new) | 21.33 → 256 (new) | 2 GiB |
+| 128 GiB | 42.67 | 42.67 → 256, the ladder's top rung | 42.67 → 256 | 2 GiB |
+
+Slot counts are the nearest rung on the 8…256 ladder, then stepped down while
+the footprint exceeds 1.15 × the budget — the same rule that produced the 96 §5p
+shipped. qwen38 4-bit is 129.6 MB a slot (stride 2,768,896 × 48 layers), the 35B
+4-bit geometry 67.5 MiB (1,769,472 × 40). The `wanted` figures are the installs'
+own `ModelProfile` table rows, which is what the server feeds the derivation
+(`ServerModelSession+Loading.swift:118`) — not the family fallback. Nothing
+changes at 32 GiB in either family; 48 GiB is where the third first exceeds the
+tune.
+
+**Change 2 — the prompt cache's RAM tier is derived, not constant.** Its default
+was a flat 256 MiB, which is a small machine's number. The cost of prompt state
+is now measured rather than assumed: this run stored a 152-token prefix as
+`state_bytes=117442560` (112 MiB), so **~0.74 MiB per prefix token** on qwen38
+4-bit — which means the 256 MiB tier holds roughly 350 tokens and pushes any
+longer tool-loop prefix into the SSD tier, a second streaming consumer beside the
+expert reads that already own the disk, while the RAM above it sat idle. 2 GiB is
+the same rule at a big machine's size: about 2,800 prefix tokens resident. The
+default stops there rather than scaling on, because past a few GiB what binds is
+the store's own 4 GiB per-snapshot capture ceiling and the retained-entry count,
+not RAM; an operator who wants more names the flag, whose range reaches 4 GiB.
+Below 48 GiB the 256 MiB stays, because every machine this project has measured
+lives there and it is what those measurements priced.
+
+**Why this is the TTFT lever and not only a decode one.** Prefill streams the
+experts a prompt activates, so a resident slot that holds one of them removes a
+disk read from the path to the first token; a prefix restore served from RAM
+rather than the SSD tier does the same. The profile prices prefill at 17.9 s for a
+262-token qwen38 prompt (`docs/qwen38-decode-profile-2026-09-05.md`), and §5n
+measured that the coupling between the KV reservation and expert residency is
+real but indirect — it runs through RAM, not through the disk.
+
+**Safety properties, each one a place where §5o's cliff was reached by the other
+direction:**
+
+- No measured class changes: below the tune `min`, at the tune `max(12, 8) = 12`,
+  and the prompt-cache default on every machine measured here (< 48 GiB) is still
+  256 MiB.
+- A third cannot exceed the half-of-physical line the launcher warns on
+  (`BatchedMemoryBudget.slotBudgetBytes` refuses to wire more than half), so the
+  growth can never trip that guard by construction. Dense families are inert:
+  `expertCacheHeldBack` is 0 when `numExperts == 0`.
+- Every operator override still wins: `--expert-cache-slots`, `--ram-budget`,
+  `--prompt-cache-memory-mib`.
+- Slot counts and tier sizes change residency, not arithmetic. No numerics path is
+  touched, so greedy output is unchanged by construction, and the golden check is
+  the proof rather than the promise.
+
+**Not measured.** This repository's install is the 24 GiB M3 — exactly 24 GiB, so
+the floor is inclusive and the rule is a deliberate no-op here. There is no 48, 64
+or 128 GiB machine available, so every row at or above 48 GiB is arithmetic on
+the constant ladder, pinned by test (`aboveTheTuneTheBudgetGrowsWithTheMachine`,
+`promptCacheMemoryTierGrowsWithTheMachine`) rather than measured. §5o bounds how
+far to trust them: on 24 GB the rungs above 96 collapsed on *physical working
+set*, not budget policy. A 48 GB machine has the headroom that rung needs (15.84
+GiB of cache + the 3.72 GiB resident floor + 0.12 GiB of QSA at short context,
+against 48 GiB), so the arithmetic is not contradicted by anything measured — but
+nobody should call 128 slots a measured number until it runs on a machine that
+big, and a long-context prompt there should be re-checked against the same
+accounting before it is believed.
+
+**Verification.** Three changes, each with its test run failing first.
+
+- **Change 1** — `aboveTheTuneTheBudgetGrowsWithTheMachine` failed against the
+  floor-only rule (`sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:199`)
+  before the `max` arm existed, and passed after. The existing
+  `clampNeverGrowsABudget` had to be amended rather than left alone: its single
+  assertion *was* the old premise — 8 GiB of budget on a 128 GiB machine stays
+  8 GiB — which this change reverses on purpose. It is renamed
+  `clampNeverGrowsABudgetBelowTheTune` and now pins the side that must not move
+  (16 GiB and 8 GiB machines, `physicalMemory == 0`, the tune itself), and the
+  reversed claim is asserted by the new test rather than dropped. The derivation
+  has one production caller (`sources/TinyTitanLib/ServerModelSession+Loading.swift:118`),
+  so nothing else could have drifted.
+- **Change 2** — the order here was wrong and is recorded as such: `parse`
+  already derived the tier when the assertion was written, so the RED had to be
+  produced by temporarily reverting the seed to a flat `256`, watching
+  `tests/TinyTitanServer/OpenAIValidationTests.swift:566` fail on
+  `big.promptCacheMemoryMiB == 2_048`, and restoring the line. `defaults()` also
+  gained a pinned `physicalMemory: 24 << 30`: an unpinned assertion over a
+  derived default reads whichever host ran the suite, which is the AUD-312
+  defect class.
+- **The launcher pinned the tier away** — found by asking where change 2 is
+  actually *reachable*. `tools/server_launcher.sh` put
+  `--prompt-cache-memory-mib 256` into every GPU command line, and the launcher
+  is how the owners of the big machines this was written for start a server: a
+  dry run against a synthetic 128 GiB host showed the pin, so the derivation
+  would have reached no one who used the supported path. `test_launcher_ram.py`'s
+  new `ThePromptCacheTierIsLeftToTheServer` failed on both the 24 GiB and the
+  128 GiB sub-arm before `tools/server_launcher.sh:1332` changed, and passes now
+  that the launcher names only the mode. `benchmark/tinytitan_profile.py`'s
+  `DEFAULT_PROMPT_CACHE_MEMORY_MIB` had one reader — `test_tinytitan_profile.py`,
+  which asserted the launcher's pin as a property of the benchmark protocol. That
+  test was the wrong side, because the pin was the defect: it now asserts the
+  launcher's command carries no tier, and the constant is gone.
+- **Suites and gates** — `swift test --no-parallel` after the last source edit:
+  7 bundles, 1765 tests, exit 0. `tools/lint.sh` full battery: exit 0 over all
+  18 gates. `swift build -c release`: exit 0, `lipo -archs` reports `arm64`
+  alone. Python: `test_launcher_ram` plus `test_tinytitan_profile` — 35 tests,
+  OK — and ruff clean at the pin.
+- **On the real machine, configuration identity** — a no-flag server launch on
+  this 24 GiB M3 logged `TinyTitan ram profile cache=11.88G slots=96
+  resident_floor=3.72G estimate=15.60G` and bannered `expert_slots=96 …
+  prompt_cache_memory_mib=256`: byte-identical to what the shipped build
+  banners, so both derivations are the deliberate no-ops they claim to be where
+  they must be. `tools/golden-baseline.sh --check qwen38-4` → *ok — output
+  identical to baseline*, exit 0. Ornith 1.5 8-bit is **not checked**: this
+  machine has no 8-bit install and a gate may not fetch one.
+- **A protocol deviation, recorded** — the same live run clocked 0.617 tok/s and
+  a 20.895 s TTFT where §5p measured 5.045 tok/s at the identical configuration.
+  Root-caused before anything was concluded from it: the Mac was on battery at
+  34–35% with `lowpowermode 1`, 8.2 GB of swap in use against 2.9 GB before the
+  run, 8% of RAM free, load 12.4 left over from the suite and builds that
+  preceded it. The protocol requires mains, so those two figures are **not
+  measurements** and are quoted nowhere else in this file; the banner and
+  `ram profile` lines above are clock-independent, which is why they stand. A
+  mains re-run of decode and TTFT at 12G remains open.
+- **One claim corrected by measurement** — this section first said the 2 GiB
+  tier "holds the retained four prefixes at the store's 4 GiB capture ceiling".
+  The run's own log disproved it: `prompt_cache stored tokens=152
+  state_bytes=117442560 ram_bytes=117442560 disk_bytes=0` is 0.74 MiB per prefix
+  token, so 256 MiB holds about 350 tokens and 2 GiB about 2,800 — not four
+  multi-gigabyte prefixes. The doc comment on `defaultPromptCacheMemoryMiB`, this
+  section and the wiki row now carry the measured figure.

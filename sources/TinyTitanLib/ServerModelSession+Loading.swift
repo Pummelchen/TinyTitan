@@ -109,9 +109,10 @@ extension ServerModelSession {
         }
         let derivedSlots: Int
         // An explicit --ram-budget names what the whole server may hold; this
-        // only supplies the cache default, and it is clamped so a family tuned
-        // on a 24 GiB machine cannot hand a smaller one a budget it has no room
-        // for.
+        // only supplies the cache default: clamped so a family tuned on a
+        // 24 GiB machine cannot hand a smaller one a budget it has no room
+        // for, and grown on a larger one, which has working set the tune left
+        // unused.
         let tunedBudget: Int
         if let identity = try? ManifestReader.peekIdentity(directoryURL: modelDirectory) {
             tunedBudget = RuntimeConfiguration.affordableExpertCacheBudget(

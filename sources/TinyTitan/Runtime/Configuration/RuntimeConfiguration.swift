@@ -181,13 +181,29 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     /// context, greedy output byte-identical to the 64-slot run
     /// (docs/qwen38-decode-12gb-measurements.md §5o/§5p). Below the floor the
     /// small-machine evidence above still stands and the third still applies.
+    ///
+    /// Above the tune the third is then taken as a floor as well as a ceiling:
+    /// a machine that can hold more than the tuned budget gets a third of what
+    /// it has, because §5o's verdict is that the slots which collapsed on
+    /// 24 GB did so on physical working set, not on budget policy — so the
+    /// machine with the working set to spare is the case the tune left on the
+    /// table. On a 64 GiB Mac qwen38 4-bit moves from 96 slots to 160 (21.3
+    /// GiB) and 128 GiB reaches the ladder's 256 top rung; that buys both
+    /// prefill and decode expert reads, which is the LMCache rule (size the
+    /// resident tier to the machine, not to one machine class) applied at home.
+    /// A third never contradicts the half-of-RAM line the launcher warns on,
+    /// because a third of a machine is below half of it by construction.
+    /// **Not measured on the larger machines**: this repository's install is
+    /// the 24 GiB M3, where `wanted` is already above a third and the rule is a
+    /// deliberate no-op; the arithmetic is pinned by test instead.
     public static func affordableExpertCacheBudget(
         _ wanted: Int,
         physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) -> Int {
         guard physicalMemory > 0 else { return wanted }
-        if physicalMemory >= 24 << 30 { return wanted }
-        return min(wanted, Int(physicalMemory / 3))
+        let third = Int(physicalMemory / 3)
+        if physicalMemory >= 24 << 30 { return max(wanted, third) }
+        return min(wanted, third)
     }
 
     /// Parses a RAM budget such as `2G`, `512M`, `8GiB` or a plain byte count.

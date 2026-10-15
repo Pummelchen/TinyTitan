@@ -323,9 +323,83 @@ import Testing
                 8 << 30, physicalMemory: 24 << 30) == 8 << 30)
     }
 
-    @Test func clampNeverGrowsABudget() {
+    /// Below the tune the ceiling only ever cuts: a machine smaller than the one
+    /// the budgets were measured on gets a third of what it has, never more.
+    ///
+    /// This test used to assert "the clamp never grows a budget" on the 8 GiB
+    /// case at 128 GiB of RAM. That premise belonged to the floor-only rule
+    /// (3ed7102) and `aboveTheTuneTheBudgetGrowsWithTheMachine` now asserts the
+    /// opposite there, deliberately: a 35B family's 8 GiB on a 128 GiB Mac is
+    /// memory the tune left unused, and the same third that protects the small
+    /// machine is what the big one can hold. What stays forbidden is growth
+    /// *below* the tune, which is what this now pins.
+    @Test func clampNeverGrowsABudgetBelowTheTune() {
+        // 16 GiB: a third is 5.33 GiB, so the 8 GiB budget is cut, not grown.
         #expect(
             RuntimeConfiguration.affordableExpertCacheBudget(
-                8 << 30, physicalMemory: 128 << 30) == 8 << 30)
+                8 << 30, physicalMemory: 16 << 30) == (16 << 30) / 3)
+        // The 8 GB mini, the case that set the rule.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                8 << 30, physicalMemory: 8 << 30) == (8 << 30) / 3)
+        // Zero and unreadable RAM hand back the tuned number rather than
+        // inventing a larger one.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                8 << 30, physicalMemory: 0) == 8 << 30)
+        // At the tune itself a third is 8 GiB, so the floor and the ceiling
+        // agree and nothing grows.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                8 << 30, physicalMemory: 24 << 30) == 8 << 30)
+    }
+
+    /// Above the tune class the budget climbs with the machine: the same
+    /// fraction that protects a small Mac is the headroom a big one paid for.
+    /// The third is the LMCache lesson applied at home -- size the resident
+    /// tier to the machine's RAM, not to a tune pinned on one machine class --
+    /// and it never breaks the half-of-RAM wired-cache line, because a third
+    /// of anything is below half of it.
+    @Test func aboveTheTuneTheBudgetGrowsWithTheMachine() {
+        let wanted = 12 << 30
+        // 48 GiB: a third (16 GiB) beats the tuned 12 GiB, so it wins.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 48 << 30) == 16 << 30)
+        // 64 GiB: 21.33 GiB. On qwen38 4-bit (129.6 MB a slot) that is 160
+        // slots against the 96 the tune pinned it to.
+        let sixtyFour = RuntimeConfiguration.affordableExpertCacheBudget(
+            wanted, physicalMemory: 64 << 30)
+        #expect(sixtyFour == (64 << 30) / 3)
+        #expect(
+            RuntimeConfiguration.expertCacheSlots(
+                expertStrideBytes: Self.qwen38Stride, layers: Self.qwen38Layers,
+                budgetBytes: sixtyFour) == 160)
+        // 128 GiB: a third is 42.67 GiB, past the ladder's 256-slot top rung.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 128 << 30) == (128 << 30) / 3)
+        #expect(
+            RuntimeConfiguration.expertCacheSlots(
+                expertStrideBytes: Self.qwen38Stride, layers: Self.qwen38Layers,
+                budgetBytes: (128 << 30) / 3) == 256)
+        // The tune machine itself is the boundary: max(12 GiB, 8 GiB) is the
+        // tuned 12 GiB, so nothing changes there.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 24 << 30) == wanted)
+        // 32 GiB sits between: a third is 10.67 GiB, so the 12 GiB tune wins.
+        #expect(
+            RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: 32 << 30) == 12 << 30)
+        // And the growth stays inside the wired-cache half: a third never
+        // exceeds half of the same machine.
+        for physical in [24 << 30, 48 << 30, 64 << 30, 128 << 30] {
+            let budget = RuntimeConfiguration.affordableExpertCacheBudget(
+                wanted, physicalMemory: UInt64(physical))
+            #expect(
+                budget <= physical / 2,
+                "\(physical >> 30) GiB machine: \(budget) exceeds the half")
+        }
     }
 }

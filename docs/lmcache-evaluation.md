@@ -71,6 +71,37 @@ new machinery. That is exactly what the #147 budget sweep measures; if a
 smaller context reservation wins, the answer is a flag default, not a cache
 layer.
 
+## Adopted: size the resident tier to the machine (2026-10-15)
+
+Prompted by the observation that some users have larger machines than the one
+every budget here was tuned on, the evaluation was re-read for what transfers
+to *them*. One concept survives that question, and it is not a cache layer at
+all — it is LMCache's habit of deriving a tier's size from the host instead of
+hardcoding a number measured elsewhere. TinyTitan had the opposite habit in three
+places:
+
+- `affordableExpertCacheBudget` clamped the tuned expert-cache budget to a third
+  of RAM *below* the tune and passed it through unchanged *above* it, so a 128
+  GiB Mac was handed the same 96 slots as a 24 GiB one — 42 GiB of RAM the tune
+  left untouched.
+- the prompt cache's RAM tier defaulted to a flat 256 MiB, which is a small
+  machine's number. Prompt state measures ~0.74 MiB per prefix token, so that
+  ceiling holds about 350 tokens and a long tool-loop prefix was pushed onto the
+  SSD tier — a second streaming consumer beside the expert reads that already
+  own the disk — while 40 GiB sat idle above it.
+- `tools/server_launcher.sh` wrote that 256 into every GPU command line, so even
+  a derived server default would have been overridden for the users with the big
+  machines — which is the supported way to start a server. It now names the
+  cache *mode* only and leaves the tier to the server.
+
+The first two are now derived from physical memory (the third, floored at the
+tune, and 2 GiB at ≥48 GiB), and the measured machine classes are byte-identical
+either way. See `docs/qwen38-decode-12gb-measurements.md` §5q for the derivation,
+the per-class table, the launcher's reachability fix, and the explicit statement
+of which rows are arithmetic rather than measurement. Flag defaults, not new
+machinery — which is the shape this document predicted the useful part of LMCache
+would take here.
+
 Re-evaluate only if the workload changes: a multi-session deployment sharing
 long non-prefix context (RAG over a document set) is where CacheBlend-class
 reuse would start paying, and that deployment is currently out of scope.

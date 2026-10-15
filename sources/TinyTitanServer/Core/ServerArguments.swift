@@ -118,12 +118,36 @@ public struct ServerArguments: Equatable, Sendable {
             .map(String.init).joined(separator: ", ")
     }
 
+    /// The RAM tier of the prompt cache that a launch without the flag gets.
+    ///
+    /// Sized by the machine the way the expert-cache budget is. Prompt state
+    /// costs ~0.74 MiB per prefix token on qwen38 4-bit -- measured on a live
+    /// generation, a 152-token snapshot at `state_bytes=117_442_560` = 112 MiB,
+    /// all of it served from this tier -- so the flat 256 MiB default holds
+    /// about 350 tokens and pushes anything longer onto the SSD tier: a second
+    /// streaming consumer beside the expert reads that already own the disk, on
+    /// a Mac that may have 40 GiB spare above it. 2 GiB is the same rule at a
+    /// big machine's size: roughly 2,800 prefix tokens resident. It does not
+    /// scale further, because past a few GiB the limits that bind are the
+    /// store's own 4 GiB per-snapshot capture ceiling and the retained entry
+    /// count rather than RAM; an operator who wants more names it, and the
+    /// flag's range reaches 4 GiB.
+    /// Below 48 GiB the tuned 256 MiB stays, because every machine this
+    /// project has measured lives there and it is what those measurements
+    /// priced.
+    public static func defaultPromptCacheMemoryMiB(
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
+    ) -> Int {
+        physicalMemory >= 48 << 30 ? 2_048 : 256
+    }
+
     /// lint:allow-long a flag table: one `case` per option plus its
     /// validation. Splitting it into per-group parsers would hide the
     /// exhaustive switch that makes an unhandled flag a compile-visible gap.
     public static func parse(
         _ input: [String],
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
     ) throws -> ServerArguments {
         var model: String?
         var mtpModel: String?
@@ -140,7 +164,10 @@ public struct ServerArguments: Equatable, Sendable {
         var maxConcurrentSequences = 1
         var promptCacheMode: ServerPromptCacheMode = .multiPrefix
         var promptCacheMaximumEntries = 4
-        var promptCacheMemoryMiB = 256
+        // Derived, not constant: `--prompt-cache-memory-mib` below still
+        // overrides it when the caller names one.
+        var promptCacheMemoryMiB = Self.defaultPromptCacheMemoryMiB(
+            physicalMemory: physicalMemory)
         var promptCacheDiskDirectory: String?
         var promptCacheDiskMiB = 8_192
         var prefillChunkTokens: Int?

@@ -535,9 +535,50 @@ struct StreamingStopMatcherTests {
 
 @Suite("Server arguments")
 struct ServerArgumentTests {
+    /// The RAM tier of the prompt cache is sized by the machine, the way the
+    /// expert-cache budget is. Prompt state costs ~0.74 MiB per prefix token,
+    /// so a flat 256 MiB tier holds about 350 tokens and pushes a long
+    /// tool-loop prefix onto the SSD tier -- a second streaming consumer beside
+    /// the expert reads -- even on a Mac with 40 GiB spare. Below 48 GiB the
+    /// tuned 256 MiB stays, because every machine this project has measured
+    /// lives there; above it the tier is 2 GiB, which is where the retained
+    /// entry count and the store's per-snapshot capture ceiling, not RAM,
+    /// become the binding limit.
+    @Test func promptCacheMemoryTierGrowsWithTheMachine() throws {
+        #expect(
+            ServerArguments.defaultPromptCacheMemoryMiB(physicalMemory: 16 << 30) == 256)
+        #expect(
+            ServerArguments.defaultPromptCacheMemoryMiB(physicalMemory: 24 << 30) == 256)
+        #expect(
+            ServerArguments.defaultPromptCacheMemoryMiB(physicalMemory: 32 << 30) == 256)
+        #expect(
+            ServerArguments.defaultPromptCacheMemoryMiB(physicalMemory: 48 << 30) == 2_048)
+        #expect(
+            ServerArguments.defaultPromptCacheMemoryMiB(physicalMemory: 128 << 30) == 2_048)
+        // The derivation is the *default*: a named flag stays the caller's
+        // answer on any machine.
+        let named = try ServerArguments.parse(
+            ["--model", "model.ssdai", "--prompt-cache-memory-mib", "512"],
+            environment: [:], physicalMemory: 128 << 30)
+        #expect(named.promptCacheMemoryMiB == 512)
+        let big = try ServerArguments.parse(
+            ["--model", "model.ssdai"], environment: [:], physicalMemory: 64 << 30)
+        #expect(big.promptCacheMemoryMiB == 2_048)
+        let small = try ServerArguments.parse(
+            ["--model", "model.ssdai"], environment: [:], physicalMemory: 16 << 30)
+        #expect(small.promptCacheMemoryMiB == 256)
+    }
+
     @Test func defaults() throws {
+        // The machine is pinned rather than ambient: `promptCacheMemoryMiB` is
+        // derived from RAM now, so an unpinned assertion here would read
+        // whichever host ran the suite -- the defect AUD-312 pinned the
+        // launcher's RAM seam for. The 24 GiB row is the class every budget in
+        // this project was tuned on.
         let arguments = try ServerArguments.parse(
-            ["--model", "model.ssdai"], environment: [:])
+            ["--model", "model.ssdai"],
+            environment: [:],
+            physicalMemory: 24 << 30)
         #expect(arguments.mtpModel == nil)
         #expect(arguments.mtpMemoryMiB == 384)
         #expect(arguments.port == 8080)

@@ -1319,15 +1319,17 @@ fi
 # 8) The server command
 # ============================================================
 
-# Pinned for GPU models; per-install tuning comes from the profile.
+# The mode is pinned for GPU models; per-install tuning comes from the profile.
+# No --prompt-cache-memory-mib: the server sizes that RAM tier from the machine
+# (ServerArguments.defaultPromptCacheMemoryMiB), and naming a number here would
+# override the derivation on exactly the big machines it was added for.
 prompt_cache_mode="multi-prefix"
-prompt_cache_mib=256
 case "$CACHE_ARG" in
   ""|multi-prefix) ;;
-  off) prompt_cache_mode="off"; prompt_cache_mib=0 ;;
+  off) prompt_cache_mode="off" ;;
   *) echo "unknown --prompt-cache: $CACHE_ARG (multi-prefix or off)" >&2; exit 2 ;;
 esac
-gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" --prompt-cache-memory-mib "$prompt_cache_mib" --kv-bits "$kv_bits")
+gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" --kv-bits "$kv_bits")
 if [[ -n "$max_context" ]]; then
   gpu_runtime+=(--max-context "$max_context" --rope-scaling "$rope_scaling")
 elif [[ "$rope_scaling" == "none" ]]; then

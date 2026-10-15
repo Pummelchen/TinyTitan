@@ -55,7 +55,8 @@ extension ServerArguments {
           --prompt-cache-entries <count>
                                  Maximum retained prefixes, 1...64 (default 4).
           --prompt-cache-memory-mib <MiB>
-                                 RAM snapshot budget, 0...4096 (default 256).
+                                 RAM snapshot budget, 0...4096 (default 256,
+                                 or 2048 on a machine with 48 GiB or more).
           --prompt-cache-disk <dir>
                                  Optional persistent SSD cache directory.
           --prompt-cache-disk-mib <MiB>

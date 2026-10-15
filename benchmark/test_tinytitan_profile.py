@@ -18,7 +18,6 @@ from tinytitan_profile import (
     DEFAULT_EXPERT_CACHE_BUDGET,
     DEFAULT_KV_BITS,
     DEFAULT_MODEL_PATH,
-    DEFAULT_PROMPT_CACHE_MEMORY_MIB,
     DEFAULT_PROMPT_CACHE_MODE,
     catalog_id_for,
     request_model,
@@ -74,7 +73,6 @@ class BenchmarkProfileTests(unittest.TestCase):
         self.assertEqual(DEFAULT_MODEL_PATH.name, "ornith-1.5_35B_A3B_8Bit")
         self.assertEqual(DEFAULT_CONTEXT_TOKENS, 262_144)
         self.assertEqual(DEFAULT_PROMPT_CACHE_MODE, "multi-prefix")
-        self.assertEqual(DEFAULT_PROMPT_CACHE_MEMORY_MIB, 256)
 
     def test_explicit_cache_off_is_not_a_default(self) -> None:
         command = server_command(
@@ -84,16 +82,14 @@ class BenchmarkProfileTests(unittest.TestCase):
 
     def test_shell_launchers_explicitly_enable_both_caches(self) -> None:
         launcher = (DEFAULT_MODEL_PATH.parents[1] / "tools/server_launcher.sh").read_text()
-        # The launcher owns the prompt cache, and it can turn it off for the
-        # cache A/B harnesses: 256 MiB multi-prefix by default, 0 when off.
+        # The launcher owns the prompt cache *mode* and can turn it off for the
+        # cache A/B harnesses. It does not name the RAM tier any more: the
+        # server derives that from the machine, and the 256 MiB pin here
+        # overrode the derivation on exactly the big machines it was added for.
         self.assertIn('prompt_cache_mode="multi-prefix"', launcher)
-        self.assertIn(f"prompt_cache_mib={DEFAULT_PROMPT_CACHE_MEMORY_MIB}", launcher)
         self.assertIn("--prompt-cache) CACHE_ARG=", launcher)
-        self.assertIn(
-            'gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" '
-            '--prompt-cache-memory-mib "$prompt_cache_mib"',
-            launcher,
-        )
+        self.assertIn('gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode"', launcher)
+        self.assertNotIn("prompt_cache_mib=", launcher)
         # MTP is a launcher flag too, so the speculative harnesses go through
         # the same script rather than building their own command line.
         self.assertIn("--mtp-model) MTP_MODEL_ARG=", launcher)
