@@ -931,8 +931,7 @@ accounting before it is believed.
   `DEFAULT_PROMPT_CACHE_MEMORY_MIB` had one reader — `test_tinytitan_profile.py`,
   which asserted the launcher's pin as a property of the benchmark protocol. That
   test was the wrong side, because the pin was the defect: it now asserts the
-  launcher's command carries no tier, and the constant is gone.
-- **Suites and gates** — `swift test --no-parallel` after the last source edit:
+  launcher's command carries no tier, and the constant is gone.- **Suites and gates** — `swift test --no-parallel` after the last source edit:
   7 bundles, 1765 tests, exit 0. `tools/lint.sh` full battery: exit 0 over all
   18 gates. `swift build -c release`: exit 0, `lipo -archs` reports `arm64`
   alone. Python: `test_launcher_ram` plus `test_tinytitan_profile` — 35 tests,
@@ -952,8 +951,11 @@ accounting before it is believed.
   run, 8% of RAM free, load 12.4 left over from the suite and builds that
   preceded it. The protocol requires mains, so those two figures are **not
   measurements** and are quoted nowhere else in this file; the banner and
-  `ram profile` lines above are clock-independent, which is why they stand. A
-  mains re-run of decode and TTFT at 12G remains open.
+  `ram profile` lines above are clock-independent, which is why they stand. §5r
+  takes the mains re-run of decode, TTFT and `wait_ms` this left open, and
+  corrects one use of those lines: `ram profile` prints the *derived* budget
+  even after an operator's `--expert-cache-slots` has replaced it, so it is not
+  proof of the rung that actually ran.
 - **One claim corrected by measurement** — this section first said the 2 GiB
   tier "holds the retained four prefixes at the store's 4 GiB capture ceiling".
   The run's own log disproved it: `prompt_cache stored tokens=152
@@ -961,3 +963,103 @@ accounting before it is believed.
   token, so 256 MiB holds about 350 tokens and 2 GiB about 2,800 — not four
   multi-gigabyte prefixes. The doc comment on `defaultPromptCacheMemoryMiB`, this
   section and the wiki row now carry the measured figure.
+
+## 5r. The mains re-measurement of the shipped 96-slot default (2026-10-15)
+
+§5q left three numbers open and one of its own pieces of evidence invalid. All
+four are settled here. Provenance: commit `0242f65`, tree clean, 24 GiB M3
+(`hw.memsize` 25769803776), macOS 27.0.1, Swift 6.4
+(swiftlang-6.4.0.34.1 clang-2100.3.34.1), `swift build -c release` exit 0 in
+85.21 s with `lipo -archs` = `arm64`, **AC power with `lowpowermode 0`**,
+`pgrep` guard empty before every arm, one model process at a time. Seven CLI
+arms, all exit 0, all producing stdout sha256
+`95aa4531b4ea2304a10dde8d079c68bb3b2bf2eea1335b21814fe3fca5c2d0f0` (2,065 bytes)
+— greedy text identical across both rung and both batch.
+
+Arm command, batch A (three identical arms of the shipped default, 15:21–15:26Z):
+
+```
+TINYTITAN_RUNNER_STATS=1 .build/release/TinyTitanCLI \
+  --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0
+```
+
+No `--ram`, no `--expert-cache-slots`: the derivation lands on 96 slots, and each
+arm logged `ram profile cache=11.88G slots=96 resident_floor=3.72G
+estimate=15.60G`. Batch B (15:27–15:33Z) is the same command with
+`--expert-cache-slots 64` interleaved as 64, 96, 96, 64 so machine drift cancels
+in the paired difference and the baseline runs first *and* last.
+
+| batch | run | slots | decode tok/s | prefill s | wait_ms | io_ms | body_ms | hit | read MiB | evictions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A | 1 | 96 | 4.075 | 6.080 | 118.84 | 75.26 | 218.43 | 0.8456 | 75,868 | 31,293 |
+| A | 2 | 96 | 4.406 | 3.824 | 111.73 | 73.41 | 207.10 | 0.8459 | 75,709 | 31,293 |
+| A | 3 | 96 | 4.632 | 3.226 | 102.59 | 73.65 | 196.44 | 0.8452 | 76,047 | 31,293 |
+| B | 1 | 64 | 4.245 | 3.171 | 84.64 | 104.76 | 216.67 | 0.7704 | 112,768 | 48,582 |
+| B | 2 | 96 | **5.021** | 3.808 | 91.67 | 72.10 | 181.19 | 0.8448 | 76,245 | 31,293 |
+| B | 3 | 96 | **5.074** | 3.069 | 93.02 | 68.76 | 179.41 | 0.8462 | 75,554 | 31,293 |
+| B | 4 | 64 | 4.690 | 2.820 | 75.61 | 100.11 | 195.61 | 0.7716 | 112,190 | 48,582 |
+
+**1. §5p's step is confirmed at §5o's own arm length.** Paired 96−64 deltas are
+**+0.776** (runs 1→2) and **+0.384** (runs 4→3): two rounds, both positive. The
+mechanism is in the counters, not the clock — 76 GB of expert reads against 112
+GB (−32%), 31,293 evictions against 48,582, hit rate 0.845 against 0.771, and
+`io_ms` 69–72 against 100–105. §5p measured 5.045 at `--max-new 128` with n=1 and
+flagged that as a caveat; the caveat is discharged for the direction and the
+magnitude at 384 tokens is +0.4 to +0.8 tok/s. This still does not reach 6.
+
+**2. A finding that outranks the headline: the first arm after a load is
+systematically slow.** Batch A rose monotonically on one identical configuration
+(4.075 → 4.406 → 4.632, +13.7% from first to last); batch B's two 64-slot arms
+differ by 10.5% in the same position order; and the server arm's first request
+decoded 4.099 tok/s where its second reached 5.431 (+32%). `wait_ms` carries it —
+102–119 in batch A against 92–93 in batch B at near-identical `io_ms` and hit
+rate, so the engine did the same work and waited longer. The likely mechanism is
+file-cache warmth of the expert stream; it is **untested**, and named as a
+hypothesis rather than a conclusion. The consequence is procedural and applies
+backwards through this whole file: cross-*batch* qwen38 tok/s comparisons are not
+usable, and the "~8% mirror noise" §5o recorded understates this host — the same
+configuration measured up to 24% apart across batches. Within-batch pairing is
+what a qwen38 number has to rest on.
+
+**3. `wait_ms` at the shipped default is 91.7–93.0 ms of a 179–181 ms body.** §5o
+priced the double-buffered-plan axis against 98 ms at 96 slots with a 32K cap; at
+the shipped 262144 context and the QSA fix the number is essentially unchanged,
+and it is ~51% of the token. `io_hidden_pct` is 99.6–99.8% and `io_queue_ms`
+0.28–0.41, so the disk is not queueing and the miss I/O is already hidden — what
+remains exposed is the wait for the *next* layer's plan, which is exactly axis 1.
+
+**4. TTFT at the shipped default on mains is 6.882 s.** The server arm launched
+no flags on port 8085, bannered `model=qwen3.8-flash-next_4-Bit … expert_slots=96
+prompt_cache=multi-prefix prompt_cache_memory_mib=256`, and served a 128-token
+greedy chat request: first content delta at **6.882 s** (`prefill_s=6.808`),
+second identical request 4.674 s (`prefill_s=4.514`). §5q's 20.895 s was 3.0×
+this, which is what "battery artifact" means in numbers. The server was launched
+and stopped by the arm's own script; no other model process existed.
+
+**5. An identical replay is not a prompt-cache hit, and that is the design.** The
+repeat request logged a *second* `prompt_cache stored tokens=149` entry and no
+`hit` line, so this looked like a reuse failure until `ServerPromptCache.match`
+was read: `sources/TinyTitanLib/ServerPromptCache.swift:172` requires
+`renderedPromptIDs.count >= entry.kvPosition`, and the stored entry's KV-backed
+prefix is 149 tokens — the prompt *and* the generation — against a 25-token replay,
+so the direct-prefix arm cannot fire; `:180` then requires more messages than a
+single-turn replay has. Reuse is for continuations (the tool loop the wiki
+documents), where the next request *extends* the stored prefix. §5q's `cached=0`
+is the same mechanism, not a regression — and it bounds what §5q's bigger RAM tier
+buys: a long retained prefix in a multi-turn loop, not a replayed one-shot prompt.
+The per-token cost re-measured here, 117,403,392 bytes over 149 tokens = 0.738
+MiB per prefix token, matches §5q's 0.74 within 0.5%.
+
+**6. The operator cap, and the machine.** On this 24 GiB M3 the rule is that no
+run may take a RAM budget above 12 GiB, because above it the machine destabilises;
+larger Macs keep the §5q host-sized derivation, which is what they were written
+for. Every arm here complied: 11.88 GiB derived cache, nothing above it named, and
+the 64-slot arms deliberately *under* it. Stability held across all seven CLI arms
+and the server — every exit 0, swap peaking at 9.41 GB without a watchdog, a crash
+report or a lost request. Note that 64 slots is the rung whose whole footprint
+(7.92 + 3.72 = 11.64 GiB) fits under 12 GiB including the resident floor, while the
+shipped 96 sits at 15.60 GiB estimated: the cap is on the cache tier, and which
+reading an operator wants is their call, not a measurement's.
+
