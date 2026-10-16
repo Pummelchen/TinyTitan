@@ -5506,3 +5506,144 @@ Deviations.
    under 3.13), `tools/lint.sh docs` ok (87 documents, 101/105 python suites registered in CI), the CI
    markdown-link step run locally 109 checked / 0 broken, and `test_docs_facts_suites` + both benchmark suites
    87 tests OK together.
+
+## 5aw. #208 gives the price screen a third bar — a row must move more than the page's own drift to be signal — and the live round it was aimed at turns out to have needed it badly: the rule shipped at `cf29cd2` priced that page off `base_again`, the drift control itself (2026-10-16)
+
+§5au filed two changes and did not patch them, on the grounds that a bar tuned until a page returns the price the
+campaign already believes is a bar fitted to the answer. [benchmark/tinytitan_price_pair.py](../benchmark/tinytitan_price_pair.py)
+now carries both: a minimum-signal bar keyed to the page's own control row
+([`:399`](../benchmark/tinytitan_price_pair.py#L399)) and the printing of every design that survives it rather
+than one selection ([`:493`](../benchmark/tinytitan_price_pair.py#L493)), with a refusal when those designs
+disagree ([`:503`](../benchmark/tinytitan_price_pair.py#L503)). The statuses are the same three; nothing was
+renumbered. Implementing it turned up two defects in the screen shipped four hours earlier, and one of them
+changes what §5au's page actually searched.
+
+### The bar, and what it is keyed to
+
+`base_again` is the same configuration as `base`, re-measured, so its step is this page's drift with no config
+change in it — a measurement of the machine, not of an arm. The screen now treats it as a floor: a row is stepped
+over when it moves less than the control **in every coordinate the solve reads**, both counters and the column
+([`:429`](../benchmark/tinytitan_price_pair.py#L429)), and the control is never a solve partner however far it
+moved ([`:427`](../benchmark/tinytitan_price_pair.py#L427)). AND over three coordinates is the conservative
+choice — it removes only rows the drift can explain in full, and leaves any row that moves more than the control
+in even one of them. `--control` names the row ([`:606`](../benchmark/tinytitan_price_pair.py#L606)), and a page
+that carries no control is not a refusal: the screen says `no drift sample (base_again is not on this page), so
+no row was checked` and solves, because a bar with nothing to key to must not silently become a veto.
+
+### Three bars, on one page at last
+
+§5au's page — §5at's six rendered rows, assembled from two batches — through the screen shipped at `cf29cd2`, and
+through the same file with the bar:
+
+```
+round 1: best pair slots64_depth25 x slots_64 at 84.3 deg cond 1.0  x=-3.791 y=18.189
+digits: ... so y is known only to ±2.771 ms and x to ±0.703 ms
+REFUTED: y=18.189 is outside the admissible band 0.788-1.301 ms ...                     exit 1
+```
+```
+round 1: best pair layer_depth25 x prefetch_off at 43.9 deg cond 1.4  x=0.683 y=0.796
+  signal: drift sample base_again moved (-0.18, +1.80) and +11.17 ms; inside it, not signal, stepped over: slots_64
+  designs: 2 of 3 solvable pair(s) reach 20 deg: y=0.796 (layer_depth25 x prefetch_off, 43.9 deg),
+          y=0.570 (prefetch_off x slots64_depth25, 42.0 deg); y spread 0.226 ms
+table 1: REFUSED: the 2 designs this page can price do not agree on the band ...          exit 2
+```
+
+The 18.189 ms artifact is gone, and not because a smarter number replaced it: the pair that produced it no longer
+qualifies, and what remains says out loud that the page holds two prices. Told there is no drift sample
+(`--control nosucharm`), the same page prints its whole candidate pool and the disagreement is worse, not better —
+`8 of 10 solvable pair(s) reach 20 deg`, six above the band, one inside it, one below, `y spread 19.749 ms`. That
+is the honest shape of the thing §5au described by hand: the spread, not the selection, is the finding.
+
+**Why a straddle exits 2 and not 1.** Status 1 means *identified a price, and that price refutes the two-price
+model* — a measurement with a verdict. A page whose conditioned designs land on opposite sides of a band edge
+identified no single price, so it has no verdict to be refuted by; it could not be solved, which is status 2, and
+the reason is named. Reporting the inside one (`y=0.796`, gate would pay) would have flattered the model, and
+reporting the below one would have refuted it, on a page that cannot tell them apart.
+
+### Two defects in the file shipped as `cf29cd2`
+
+**The candidate set was a window, not a search.** `best_pair` walked the sorted arm names two at a time
+(`zip(names, names[1:])`) while its own docstring promised "the widest non-degenerate pair a table offers", and
+§5au's published table lists ten pairs. On five priceable rows a window sees four of ten. §5au's answer happened to
+survive the difference because its widest pair — `slots64_depth25 x slots_64` — is adjacent in sorted order, which
+is exactly how a defect like this hides: it changed nothing on the page that exposed it. `itertools.combinations`
+([`:468`](../benchmark/tinytitan_price_pair.py#L468)) is the fix, and it retro-validates §5au's table: the pool the
+fixed screen prints is the ten rows that section published by hand, same angles same prices. The bug is pinned by a
+page where the widest pair is *not* adjacent
+([`test_tinytitan_price_pair.py:303`](../benchmark/test_tinytitan_price_pair.py#L303)); RED there showed the window
+picking a 39.3 deg neighbour.
+
+**Dead arithmetic that was never dead code.** `_solve` carried a second `return Price(...)` after the first,
+predating the bounds and omitting the now-required `x_bound` / `y_bound` — unreachable, and would have raised
+`TypeError` had it ever been reached. Deleted; no behaviour moved.
+
+**A refusal that named the wrong cause.** Once the bar can empty the pool, a page whose every row is inked printed
+`nothing priceable`, which is true of the arithmetic and false about the cause: three rows *were* priceable and the
+drift sample covered all of them. Driving that note out was the last test written here
+([`:393`](../benchmark/test_tinytitan_price_pair.py#L393)), RED against the version that shipped an hour earlier,
+and the pre-existing note `only N priceable arm(s) with signal` lost `with signal` — its count is the pre-bar one,
+which is the second time in this campaign a label has promised a check the number behind it does not perform.
+
+### The live round that needed the bar
+
+#206's round 1 (`/tmp/trio206/round1.log`, measured on this Mac for the trio, not here) is the first live page the
+screen has read, and the old rule priced it off the drift control:
+
+| screen | best pair | `x` | `y` | out-of-sample residual | status |
+|---|---|---:|---:|---:|---|
+| `cf29cd2` | `base_again` x `layer_depth25`, 74.2 deg | 4.403 | −10.977 | −182.67 ms/token (−76.17 %) | 1 REFUTED |
+| this section | `layer_depth25` x `prefetch_off`, 47.8 deg | 0.148 | −0.197 | +25.31 ms/token (+10.55 %) | 1 REFUTED |
+
+Same status, same word, and only one of them is about a config change. The sweep's own footer is what makes round 1
+readable at all: `baseline drift over the sweep: 9.9% (4.17 -> 3.76)`, `INCONCLUSIVE: baseline drift 9.9% is
+larger than the smallest win claimed, +4.5% on prefetch_off`, exit 1, response text identical across 5 arms
+(`md5 3c0c3391`). Round 1 is contaminated and is not used as a price.
+
+**And the bar's own limit, measured on that page.** It inked nothing there — `no row lies inside it` — because the
+control moved counters by only `(+0.23, −2.29)` while its wall moved +26.15 ms. A bar keyed on the counters cannot
+see a drift that is all clock; it kept the selection honest by refusing to partner the control, which is the other
+half of the rule. Keying it on wall alone would ink real arms whose counters move and whose clocks drift, so the
+asymmetry stays, and it is a finding: **the signal bar bounds a row's counter signal, the sweep's drift footer
+bounds its clock, and round 1 is the case where only the second one fires.**
+
+### Tests, and the one test-file edit made for the pin
+
+30 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 29 plus the
+cause-naming one — 95 OK alongside `test_knob_sweep_verdict` and `test_docs_facts_suites`; `tools/lint.sh python`
+ok. Seven tests are new: the enumeration ([`:303`](../benchmark/test_tinytitan_price_pair.py#L303)) and
+[`Signal`](../benchmark/test_tinytitan_price_pair.py#L315)'s six (row inside drift `:326`, control never a partner
+`:337`, straddle refuses `:349`, no control says so `:362`, one survivor prices exactly as it did unbarred `:371`,
+zero drift bars nothing `:383`), plus the inked-page cause `:393`. One edit was made for the linter rather than for
+behaviour and is inventoried here: the new `best_line` helper's bare `assert` became `raise ValueError`, because
+pinned ruff 0.16.7 enforces S101 — the check's strength is unchanged (it still fails the test unless exactly one
+`best pair` line is printed), and it is code added in this section, not a pre-existing assertion weakened.
+
+Deviations.
+
+1. **One live page was read, none was measured here.** `/tmp/trio206/round1.log` is #206's round 1, run on this Mac
+   earlier; every other number is this screen's output over pages built from published rows, run to `exit` status
+   and quoted verbatim. Nothing in this section prices a read.
+2. **Round 1 is contaminated and stays unusable.** 9.9 % baseline drift, `INCONCLUSIVE` from the harness itself,
+   and its `y=−0.197` is offered as a demonstration of the two rules disagreeing about the same table, not as a
+   refutation of the model. #206's rounds 2-3 are the measurement; this section is the instrument that has to read
+   them.
+3. **`ALL_INKED`, `BIG_DRIFT` and `WIDEST_NOT_ADJACENT` are synthetic**, built to exercise three branches of the
+   screen; `PAGE5AT`/`PAGE5AT_ONE` are §5at's published rows across two batches and inherit §5at deviations 2 and 3,
+   including that both verdicts available to them are artifacts.
+4. **The bar is counter-and-column keyed, so a clock-only drift passes it** — measured above on the live page. Not
+   fixed: the alternative keys ink every row whose counters move. The sweep's drift footer is the check for that
+   case, and it fired.
+5. **The two `cf29cd2` defects are disclosed as shipped defects, not as design.** The window enumeration is the
+   more serious of the two and it changed no published number in §5au, which is the reason it is described above
+   with the page that hid it rather than as a cleanup.
+6. **`/tmp/aw208/old_screen.py`** is `cf29cd2`'s file extracted for the before/after comparison. Throwaway, not
+   committed, not proposed as a tool; the committed artifacts are the screen, its suite and this section.
+7. **No new file, so no CI registration change**: `cf29cd2`'s `ci.yml` row already names this suite, and
+   `tools/lint.sh docs` verifies that against the working tree rather than a run having executed it (AUD-211).
+8. **Provenance.** §5au and the screen it shipped landed at `cf29cd2` on `main`; #208's screen, suite and the two
+   defects above landed at `fd3823e`, and this section is the commit that carries it. Seen locally before
+   committing, on that tree: `tools/lint.sh python` ok (ruff 0.16.7, check and format clean, 203 scripts parse
+   under 3.13), `tools/lint.sh docs` ok (87 documents, 101/105 python suites registered in CI), the CI
+   markdown-link step run locally 122 checked / 0 broken, and the 30 tests plus `test_knob_sweep_verdict` and
+   `test_docs_facts_suites` 95 OK together. None of that is evidence a CI run executed them; it is evidence the
+   tree the run will check is the tree this section describes.
