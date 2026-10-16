@@ -6375,3 +6375,109 @@ ray reading above is what is left, and it is a *shape* statement, not a price.
    verified by grep rather than by reading a remembered number), but a reader who opens 372 lands on
    `let ioStatus = …`, which is the same class of error §5az disclosed on its own first draft. §5w's text is left as
    published; this is where the drift is recorded.
+
+## 5bb. The feeder priced on the device ledger: the shipped ring is worth +6.5 % / +8.8 % mirrored, and its prize closes to 0.4 ms/token (2026-10-16)
+
+The run §5ba's own amendment asked for. §5w ruled `io_hidden_pct` unfit for an overlap
+claim and published the device ledger instead; every feeder verdict since — #193's wall
+A/B, §5az's "+14.72 ms/token of exposure" — has priced this ring on wall clock alone. This
+section re-runs the two §5w lines on today's build and answers the question the host counter
+could not: **what does the shipped speculative ring actually remove from device idle, and
+does the byte floor predict it.** It does, and the ledger closes.
+
+Provenance: release build `a8c6fdd`, clean tree, 24 GB M3 MacBook Pro (Mac15,3), macOS
+27.0.1, Swift 6.4, AC power, 100 % charged. `models/qwen3.8-flash-next_125B_A6B_4Bit`, essay
+prompt, `--max-new 384 --temperature 0 --max-context 262144`, no slot or budget flag — the
+load line reads `ram profile cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G` and
+the profile line reads `prefetch=1`, so this is the shipped default. Every arm ran with
+`TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1`; the instrumented rates are **not**
+comparable to §5p's uninstrumented 5.045 and are not quoted against any other batch.
+Arms: `base1, off1, off2, base2` (control first and last, the two `off` arms adjacent in the
+middle), each `off` arm setting `TINYTITAN_PREDICTIVE_PREFETCH=0`. Exit 0 all four.
+**All four responses share one md5, `c172890df88cdbbfa0627bd320d16614`** — the ring is
+numerics-neutral, so nothing here asks the model to be dumber.
+
+| arm | ring | tok/s | busy ms/tok | top gap ms/tok | events/tok | ms/event | adopted/tok | hit | io_host_waits_avoided | io_hidden_pct |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| base1 | on | 2.863 | 202.151 | 58.970 | 29.95 | 1.969 | 19.58 | 0.8474 | 6871 | 99.71 |
+| off1 | off | 2.688 | 208.310 | 75.493 | 34.57 | 2.184 | 0.00 | 0.8070 | 5080 | 99.67 |
+| off2 | off | 4.086 | 118.916 | 74.679 | 34.59 | 2.159 | 0.00 | 0.8070 | 5080 | 99.88 |
+| base2 | on | 4.444 | 115.156 | 56.698 | 30.10 | 1.884 | 19.20 | 0.8467 | 6815 | 99.86 |
+
+`top gap` is `moe_phase1_hit → moe_phase1_miss_fixup`, §5w's largest line and the device's
+wait on the experts the hit path assumed were resident.
+
+Findings:
+
+- **The ring is worth +6.51 % (round 1) and +8.76 % (round 2) on the wall, mirrored.** Paired
+  per token: −22.71 ms and −19.72 ms. §5an's "≈6 %" was right and was a wall-clock guess; the
+  direction is now confirmed on the device and the magnitude is a little larger.
+- **The gap line moved, so the falsifier did not fire.** −16.523 ms/token in round 1, −17.981
+  in round 2, on a line §5w measured at 52.803 on `8c61f14`. The withdrawn §5ba clause claimed
+  reads are "essentially never the reason a layer waits"; this line *is* the reason a layer
+  waits, and the ring shortens it by a quarter.
+- **The byte floor predicts it.** Adoption measured 19.58 and 19.20 reads/token (§5az's trace
+  said 22.12), at the campaign's established 2.7689 MiB per read = 56.85 and 55.74 MB/token;
+  ÷ 3.92 GB/s → **14.50 and 14.22 ms/token predicted** (14.96 and 14.67 at the 3.80 burst
+  mean). Measured 16.52 and 17.98: the line fell by 1.10–1.27× the floor, which is the
+  arithmetic's own slop.
+- **And the decomposition closes exactly**, which is the part worth re-deriving. The line falls
+  for two reasons, and both are countable: whole fixup *events* are converted away (1774 and
+  1721 fewer = 4.62 and 4.48/token, at the off-arm's 2.184 and 2.159 ms each → **10.09 and
+  9.68 ms/token**), and the events that survive are individually shorter (29.95 and 30.10/token
+  × 0.215 and 0.275 ms → **6.44 and 8.28 ms/token**). Sum: 16.53 and 17.96 against measured
+  16.52 and 17.98. `io_host_waits_avoided` rises by 1791 and 1735, which is the same conversion
+  counted on the host side of the seam.
+- **The partition holds on today's build.** Round 2: GPU busy −3.760 ms/token and the six named
+  decode gaps −15.543 = **−19.30**, against a wall step of −19.72; unattributed 0.41 ms/token
+  (2 %). Round 1 leaves 1.81 (8 %), and its prefill rows sit inside the top-8 window with a
+  5.30 s against a 3.00 s prefill, which is where the difference lives.
+- **The ring pays, and the ledger names what it pays.** `shared_expert → moe_phase1_2_routed`
+  grows +4.409 ms/token in round 2 (+6.828 in round 1) and its event count is the adopted count
+  itself (6815 and 6871). Net of that, the device idle removed is −15.543, not the gross
+  −17.981. Any future depth claim has to carry both terms.
+- **Demand bytes really do disappear, not just move.** `expert_read_mib` falls 19849.6 MiB
+  between the round-1 pair (51.7 MiB/token) for 7517 fewer demand misses — 2.641 MiB per
+  avoided read against the 2.7689 stride, 4.6 % under, unexplained at the counter's 0.1 MiB
+  rounding and not chased. The ring's own 39.5 issued reads/token appear in no read counter, so
+  `expert_read_mib` is demand-only; a claim that the ring "reads the same bytes earlier" is not
+  what these four arms show. **It reads fewer bytes, because the demand path never asks for
+  them.**
+- **With the feeder off the run is bit-reproducible; with it on, it is not.** The two `off` arms
+  agree to the digit on every cache counter (hits 150131, misses 35901, read 94801.1, rdadvise
+  33518 calls / 89012.8 MiB). The two `base` arms differ: misses 28384 vs 28527, adoption 19.58
+  vs 19.20 — while `evictions` and `reloads` are identical in all four (31293 / 22986). The
+  noise in this design sits entirely on the ring side, which is what a timing-dependent
+  mechanism looks like in a counter, and why the prize is quoted per round.
+- **§5w's ruling reproduced with a live mechanism.** `io_hidden_pct` spans 99.67–99.86, a
+  0.21-point band, across arms whose device line differs by 18 ms/token and whose wall differs
+  by 23 %. The host counter moved by nothing measurable while the thing it claims to describe
+  moved by a quarter of the largest gap. Two independent falsifiers now say the same thing
+  about that number.
+
+What is left, priced. The line is still 56.698 ms/token = 25.2 % of a 225 ms token, and it is
+30.10 events at 1.884 ms. Converting events is therefore worth ~2.17 ms of device idle each at
+the off-arm mean (2.184 and 2.159), and issuing is 48.7–49.5 % adoptive (19.58 of 39.53, 19.20
+of 39.46). A deeper ring's prize is
+`(events converted × 2.17) − (added bytes ÷ 3.92 GB/s) − (the phase1_2 line's own growth)`, and
+every term is now measurable offline, which is more than §5aq had when it measured deeper rings
+loss-making on wall clock alone. That is the screen to run next; the ceiling named here is what
+the whole remaining line is worth, not a claim that any of it is reachable.
+
+Deviations:
+
+1. `TINYTITAN_KERNEL_STATS=1` was on, so all four walls are instrumented. §5w's ledger was too,
+   but on `8c61f14` at a different run length, so §5w's 52.803 ms/token is context, not a
+   paired control.
+2. **Round-to-round drift of 52–55 %** — base 2.863 → 4.444, off 2.688 → 4.086, prefill 5.30 /
+   3.85 s → 3.02 / 3.00 s, GPU busy 202 / 208 → 119 / 115 ms/token. The machine changed state
+   between the rounds by more than the effect under test, and the likeliest cause is this
+   agent's own session, which was active through round 1 and idle through round 2 (the
+   documented noise source). The paired deltas survive it (+6.51 %, +8.76 %) because both arms
+   of each pair moved together; nothing here pools the two rounds.
+3. Swap was carried in, not created by these arms: 4.01 GB used of 5.12 GB before `base1`, the
+   pool grown to 10.24 GB by `base2`. `memory_pressure -Q` read 75–78 % free across all four
+   arms, which is why the drift is attributed to contention rather than to the working set
+   crossing §5f's cliff.
+4. Adoption (19.58 vs 19.20) is the moving part, so the byte-floor prediction is a range
+   14.5–15.0 ms/token, not a point.
