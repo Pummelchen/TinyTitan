@@ -125,17 +125,25 @@ class CrossCaptureTests(unittest.TestCase):
 
     The floor is a majority, not a fitted threshold. An earlier draft asserted `keeps
     >= 0.8`, taken from a table that divided a capped transfer by the UNCAPPED uniform
-    and so counted the cap's own gain as the split's. Measured like-for-like (every arm
-    against the shipped arm at its own cap) the six transfers at cap 3 -- the arm this
-    test scores -- span 74.4% to 126.5%, and 11 of the 18 across all three caps keep MORE
-    than an oracle that read the future. The worst case is `v520-20261015 ->
-    v520-prompt2`: a donor profile from another prompt, whose routes agree with the
-    target's on 3.2% of picks. 74.4% is the worst of three captures, and three captures do
-    not license an 80% promise, so the assertion states the claim that survives the worst
-    measurement: a foreign profile delivers most of what an oracle would. The magnitudes
-    themselves are §5z's table, not a test's -- and all of them are well under the plan's
-    own acceptance bar of +7 points of hit rate, which is a §5z finding, not something a
-    green suite means.
+    and so counted the cap's own gain as the split's; it then scored every arm at
+    `use_cap=3`, which is the wrong side for a different reason: §5ad measured that cap
+    as a 4.7-6.0% live loss and refused it, while §5z's published table is at cap none,
+    the engine rule as shipped. A test that scores a refused arm cannot guard the table
+    the campaign publishes -- so this test now scores the arm the engine runs, and §5ae
+    confirmed the documentation side of that by reproducing §5z's nine pass-1 figures
+    exactly at cap none.
+
+    Measured like-for-like at the shipped rank the six transfers span 80.3% to 117.0%,
+    and four of the six keep MORE than an oracle that read the future. The worst case is
+    `v520-20261015 -> v520-prompt2`: a donor profile from another prompt, whose routes
+    agree with the target's on 3.2% of picks. 80.3% is the worst of three captures, and
+    three captures do not license an 80% promise, so the assertion states the claim that
+    survives the worst measurement: a foreign profile delivers most of what an oracle
+    would. The magnitudes themselves are §5z's table, not a test's -- and all of them are
+    well under the plan's own acceptance bar of +7 points of hit rate, which is a §5z
+    finding, not something a green suite means. §5ae re-priced these nine arms on a warm
+    cache and found no arm moving by more than 0.16 points, so this test is a single-pass
+    screen on a lever that does not depend on which pass it is scored on.
     """
 
     def test_a_split_never_spends_more_slots_than_the_tier_buys(self):
@@ -153,9 +161,9 @@ class CrossCaptureTests(unittest.TestCase):
         for target, (target_path, start) in CAPTURES.items():
             trace = load_trace(target_path)
             own = heat_profile(trace, layers=48, start_position=start)
-            uniform = placements_per_token(trace, [96] * 48, start_position=start, use_cap=3)
+            uniform = placements_per_token(trace, [96] * 48, start_position=start)
             oracle = placements_per_token(
-                trace, split_slots(own, total_slots=4_608), start_position=start, use_cap=3
+                trace, split_slots(own, total_slots=4_608), start_position=start
             )
             self.assertLess(oracle, uniform, f"{target}: the oracle split must beat uniform")
             for source, (source_path, source_start) in CAPTURES.items():
@@ -168,7 +176,6 @@ class CrossCaptureTests(unittest.TestCase):
                     trace,
                     split_slots(foreign, total_slots=4_608),
                     start_position=start,
-                    use_cap=3,
                 )
                 self.assertLess(transferred, uniform, f"{source} -> {target} is no gain")
                 kept = (uniform - transferred) / (uniform - oracle)
