@@ -152,59 +152,135 @@ PREDICTORS = tuple(RANKERS)
 STAGERS = {"filter": stage_filter_first, "truncate": stage_truncate_first}
 POLICIES = tuple(STAGERS)
 
+
 # Both sides of a ring's price, measured on the device ledger by §5bb (build
-# `a8c6fdd`, four mirrored arms, byte-identical output): converting one whole
-# `moe_phase1_hit -> moe_phase1_miss_fixup` event is worth the off-arm mean of that
-# line's events, and one issued read costs the shared drive its byte floor whether
-# or not anything waits on it. A slot whose precision falls under the ratio of the
-# two buys device idle it never pays for, which is the arithmetic §5aq could only
-# reach on wall clock.
-MS_PER_CONVERTED_EVENT = 2.17
+# `a8c6fdd`, four mirrored arms, byte-identical output). Each round is a complete
+# price book: the device idle its shipped depth-1 ring removed, and the exposed time
+# the ring's own line (`shared_expert -> moe_phase1_2_routed`) grew, reduced to a
+# prize per adopted read and a cost per issued read.
+#
+# The byte floor is deliberately NOT the cost side. One read is 0.74066 ms of *drive
+# busy* time, but §5bb's arms show the drive is not the wall -- `io_host_waits_avoided`
+# moved while the host never blocked, and the ring's speculative bytes overlap compute.
+# Pricing a read at the byte floor therefore charges it for serialized time the machine
+# does not spend, and §5bb's first version of this screen did exactly that.
+@dataclass(frozen=True)
+class PriceBook:
+    """One §5bb round's device ledger, reduced to what a depth decision needs."""
+
+    gap_line_ms_per_token: float
+    events_converted_per_token: float
+    ms_per_event: float
+    adopted_reads_per_token: float
+    issued_reads_per_token: float
+    ring_line_ms_per_token: float
+
+    @property
+    def ms_per_adopted_read(self) -> float:
+        """The countable prize: whole fixup events converted, per adopted read."""
+        return self.events_converted_per_token * self.ms_per_event / self.adopted_reads_per_token
+
+    @property
+    def ms_per_adopted_read_whole_line(self) -> float:
+        """The upper reading: all of the measured gap-line fall, per adopted read."""
+        return self.gap_line_ms_per_token / self.adopted_reads_per_token
+
+    @property
+    def ms_per_issued_read(self) -> float:
+        """The exposed cost: growth of the ring's own device line, per issue."""
+        return self.ring_line_ms_per_token / self.issued_reads_per_token
+
+
+ROUND1 = PriceBook(16.523, 4.62, 2.184, 19.58, 39.53, 6.828)
+ROUND2 = PriceBook(17.981, 4.48, 2.159, 19.20, 39.46, 4.409)
 EXPERT_READ_MIB = 2.7689
 DRIVE_GB_PER_S = 3.92
 MIB_TO_MB = 1.048576
 
 
-def economics() -> dict[str, float]:
-    """The per-event prize, the per-read cost, and the precision between them."""
-    ms_per_read = EXPERT_READ_MIB * MIB_TO_MB / DRIVE_GB_PER_S
+def _pairings() -> list[tuple[float, float, float]]:
+    """(break-even precision, prize per adopted read, cost per issued read), within round."""
+    pairings: list[tuple[float, float, float]] = []
+    for book in (ROUND1, ROUND2):
+        cost = book.ms_per_issued_read
+        for prize in (book.ms_per_adopted_read, book.ms_per_adopted_read_whole_line):
+            pairings.append((cost / prize, prize, cost))
+    return pairings
+
+
+def _corner(side: str) -> tuple[float, float, float]:
+    """One corner of the band: (break-even, prize per adopted read, cost per issued read)."""
+    pairings = _pairings()
+    if side == "pessimistic":
+        return max(pairings, key=lambda item: item[0])
+    return min(pairings, key=lambda item: item[0])
+
+
+def economics() -> dict[str, float | dict[str, float]]:
+    """The byte floor, and the adoption band between which depth is undecidable offline."""
+    low, high = _corner("optimistic")[0], _corner("pessimistic")[0]
     return {
-        "ms_per_converted_event": MS_PER_CONVERTED_EVENT,
-        "ms_per_issued_read": ms_per_read,
-        "break_even_precision": ms_per_read / MS_PER_CONVERTED_EVENT,
+        "drive_busy_ms_per_read": EXPERT_READ_MIB * MIB_TO_MB / DRIVE_GB_PER_S,
+        "break_even_low": low,
+        "break_even_high": high,
+        "pessimistic": {
+            "ms_per_adopted_read": _corner("pessimistic")[1],
+            "ms_per_issued_read": _corner("pessimistic")[2],
+        },
+        "optimistic": {
+            "ms_per_adopted_read": _corner("optimistic")[1],
+            "ms_per_issued_read": _corner("optimistic")[2],
+        },
     }
 
 
+def _net_per_link(bucket: Counters, predicted: int, useful: int, side: str) -> float:
+    if not bucket.links:
+        return 0.0
+    _, prize, cost = _corner(side)
+    return (useful * prize - predicted * cost) / bucket.links
+
+
 def slot_report(bucket: Counters) -> list[dict[str, float | int | bool]]:
-    """Precision and net device time per issue index, so depth has a stop rule."""
-    bar = economics()["break_even_precision"]
-    cost_ms = economics()["ms_per_issued_read"]
+    """Precision and net device time per issue index, so depth has a stop rule.
+
+    A slot is only called when both corners of §5bb's band agree. Between them the
+    offline screen cannot decide, and the honest answer is that a live arm is needed --
+    which is what §5aq found when it priced deeper rings on wall clock alone.
+    """
     slots = []
     for index, (predicted, useful) in enumerate(
         zip(bucket.slot_predicted, bucket.slot_useful, strict=True)
     ):
-        precision = useful / predicted if predicted else 0.0
-        prize = useful * MS_PER_CONVERTED_EVENT / bucket.links if bucket.links else 0.0
-        cost = predicted * cost_ms / bucket.links if bucket.links else 0.0
+        net_worst = _net_per_link(bucket, predicted, useful, "pessimistic")
+        net_best = _net_per_link(bucket, predicted, useful, "optimistic")
         slots.append(
             {
                 "slot": index,
                 "predicted": predicted,
                 "useful": useful,
-                "precision": precision,
-                "prize_ms_per_link": prize,
-                "cost_ms_per_link": cost,
-                "net_ms_per_link": prize - cost,
-                "clears_break_even": bool(predicted) and precision >= bar,
+                "precision": useful / predicted if predicted else 0.0,
+                "net_worst_ms_per_link": net_worst,
+                "net_best_ms_per_link": net_best,
+                "pays_under_every_reading": bool(predicted) and net_worst > 0.0,
+                "loses_under_every_reading": bool(predicted) and net_best < 0.0,
             }
         )
     return slots
 
 
 def first_loss_making_slot(slots: list[dict[str, float | int | bool]]) -> int | None:
-    """The first issue index a ring should not reach, or None if every slot pays."""
+    """The first issue index no reading of §5bb's ledger defends, or None."""
     for slot in slots:
-        if slot["predicted"] and not slot["clears_break_even"]:
+        if slot["loses_under_every_reading"]:
+            return int(slot["slot"])
+    return None
+
+
+def first_unproven_slot(slots: list[dict[str, float | int | bool]]) -> int | None:
+    """The first issue index the ledger cannot prove pays, so a live arm must."""
+    for slot in slots:
+        if slot["predicted"] and not slot["pays_under_every_reading"]:
             return int(slot["slot"])
     return None
 
@@ -268,6 +344,7 @@ def analyze(
         "economics": economics(),
         "slots": slots,
         "first_loss_making_slot": first_loss_making_slot(slots),
+        "first_unproven_slot": first_unproven_slot(slots),
         "overall": overall.report(),
         "per_layer_link": {
             str(layer): bucket.report() for layer, bucket in sorted(per_link.items())
