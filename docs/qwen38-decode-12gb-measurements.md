@@ -3308,3 +3308,149 @@ position, and adoption depends on the headroom. That is #194.
    `ExpertCacheBudgetTests.swift:211-240` assert `prefetchDepth` 1 and 0, which is the arm #193 ran — but nothing
    pins the ring's `.completed` gate or its `prefix(count)` truncation. Any change #194 makes has to start by
    testing the adoption contract, not by changing it.
+
+## 5ah. #194 reads the ring's shortfall off a trace: 93 % of the discarded reads were the wrong expert, 7 % were right but late, and the late pool is too small to measure (2026-10-16)
+
+§5ag left one number unexplained and one idea alive. The number: the ring issues 39.45-39.59 reads a token and
+adopts 47-48 % of them, so 20.5 reads a token are paid for and thrown away. The idea: if a meaningful share of
+those 20.5 were *correct* reads that merely missed their layer, then re-ordering them — issuing after the layer's
+demand burst has taken service, or awaiting them briefly at plan time — would convert them at zero extra bytes.
+§5ag called that the only untested shape. This section tests it, and it does not survive the test.
+
+Two greedy 384-token decodes of the same prompt at the shipped default (`--ram 12`, 96 slots,
+`--max-context 262144`, `TINYTITAN_RUNNER_STATS=1`), each writing `TINYTITAN_PREFETCH_TRACE`: one with the ring
+on, one with `TINYTITAN_PREDICTIVE_PREFETCH=0`. 18 384 records each (383 positions × 48 layers), and the two
+responses are byte-identical (`md5 c172890df88cdbbfa0627bd320d16614`).
+
+### The offline replica, and why its output can be trusted
+
+`ExpertPrefetchRing.begin` is re-implemented offline exactly: at layer L the staged expert is the **first
+element of `next_layer_prediction` that is not in the target layer's `resident` list**, taken from the record at
+(`position`, L+1) — the same set the caller passes in
+([RealForwardRunner+DecodeMoE.swift:322-349](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L322)),
+`model.routedExpertResidentIDs(layer: L + 1)`. Each staged read is then classified against that layer's own
+record: *correct* if it is in `experts` (the exact route), *adopted* if it is in `experts` and **not** in
+`misses` (the trace's `misses` are post-adoption, so a read the plan took from the ring is not a miss), *late* if
+it is in `experts` and still in `misses`.
+
+| check | replica | engine's own counter |
+| --- | ---: | ---: |
+| staged reads per token | 39.73 | `prefetch_issued_per_token` 39.59 |
+| adopted reads per token | **19.25** | `prefetch_adopted_per_token` **19.25** |
+| demand misses removed per token | **19.25** (33 709 − 26 316 between the two arms) | `expert_misses` 35 901 − 28 508 = **7 393** = 19.25/token |
+| speculative MiB/token implied | 104.9 | §5ag's engine/device gap, 112.0 − 7.8 residual = 104.2 |
+
+Three counters agree to the read. The replica over-counts *issues* by 54 reads (0.35 %) because `active`
+deduplication and the rare busy slot are not modelled; every one of those 54 is a wrong read, so the adopted and
+miss identities are exact while the issued figure is a 0.35 % upper bound.
+
+### The decomposition: 92.7 % precision, 7.3 % timing
+
+| per token | reads | MiB | share of the 20.48-read shortfall |
+| --- | ---: | ---: | ---: |
+| issued | 39.73 | 104.9 | — |
+| correct **and** adopted | 19.25 | 50.8 | — |
+| correct but not adopted (**late**) | **1.50** | 3.95 | **7.3 %** |
+| not in the route at all (**wrong**) | **18.98** | 50.1 | **92.7 %** |
+
+The identity closes on the counts: 15 257 issued = 7 393 adopted + 575 late + 7 289 wrong, and 7 968 correct =
+7 393 adopted + 575 late. Nothing in the ring is unaccounted for.
+
+**The lateness channel is spread over the layer stack, not concentrated at a boundary**: 45 of the 47 target
+layers have at least one late read (only layers 1 and 31 have none), the largest count is 33 at layer 38 (9.6 %
+of that layer's 345 issues), and layers 45-47 together carry 19 of 575. So there is no structural discard to
+fix — not the token-boundary
+`beginToken()` reclaim, not the last layer's slot. The ring footer agrees: over 18 001 begins the single slot is
+free 1.00 of the time and submitted, in flight and held are all 0.00, with `spec_load_ms` 1.22 against a 3.91 ms
+layer window (`body_ms 187.974 / 48`). Reads land inside the window; they are simply not the expert the router
+asks for.
+
+### What that prices, and why #195 is not run
+
+The pool a perfect await could convert is 1.50 reads/token = 3.95 MiB/token of duplicate crossings. Three
+routes to a price, all from this campaign's own measurements:
+
+1. **Linear in the byte savings #193 just measured.** §5ag: removing the ring's 49.8 MiB/token of *demand*
+   savings costs 5.6 %. 3.95 / 49.8 × 5.6 % = **+0.44 %**.
+2. **The exchange rate.** 2.641 MiB at the §5af wall (3.3-3.4 GB/s) is 0.78-0.80 ms, so 1.50 reads = 1.20 ms of
+   a 196.8 ms token = **+0.61 %**.
+3. **A two-anchor per-MiB price model.** #193 gives `49.8d − 104.2c = 5.6` and #192's 1-worker feeder gives
+   `322.9c + 17.1(d − c) = 17.1`, where `c` is the cost of a speculative MiB and `d` the value of an avoided
+   demand MiB. Solving: `c = 0.042 %/MiB`, `d = 0.201 %/MiB`, so awaiting a late read is worth 1.50 × 2.641 ×
+   0.201 = **+0.80 %** before its own cost. That model is fitted to those two arms, so it reproduces them by
+   construction; its useful output is the break-even below, not the 0.80 %.
+
+Route 3's upside is the ceiling, not the expectation: the await puts the read's remaining load time on the
+critical path, and 0.3-0.5 % of token time is a plausible cost for it, so the honest range is **+0.3 % to
++0.8 %**. This campaign's control spread in the same configuration is 1.9 % (§5ag) and 4.6 % (§5af). **No arm
+run here can resolve the effect it predicts.** #195 — ordering at fixed volume, and its bounded-await cousin —
+is screened out before being built, and the ring's adoption contract therefore needs no test for a change that
+will not be made. That is the answer §5ag's last deviation line was holding open.
+
+### Two things the trace says that no prior record does
+
+**Rank order is the right staging rule, measured.** Precision by the rank of the first non-resident prediction
+falls monotonically: rank 1 0.754 (2 151 issues), 2 0.687 (1 999), 3 0.611 (1 916), 4 0.560 (1 835), 5 0.501
+(1 647), 6 0.415 (1 478), 7 0.403 (1 320), 8 0.325 (1 143). The ring already stages the best-ranked
+non-resident candidate, so within one read a layer there is no better *choice* available in its own list.
+Overall precision here is 0.522 — the September study's 0.552 at the 64-slot tier, same shape, slightly worse.
+
+**Per-layer precision varies 4×, and it is not actionable.** Layer 6's staged reads are 0.773 correct; layer
+42's are 0.310 and **layer 47's 0.181** (66 correct of 364 issues). Under the route-3 prices a read is worth
+issuing at all when its precision exceeds `c/d` = 0.21, so only layer 47 falls below the line — and dropping its
+staging is worth **+0.02 %** (it saves 2.50 MiB/token of speculative bytes and gives up 0.44 MiB/token of demand
+savings). The reason layer 47 routes so much less predictably is *not* established here; the probe reads layer
+46's residual and misses 82 % of the time at the layer above it, and no candidate explanation was tested. It is
+recorded as a finding and not as a lever, because the screen above says it cannot be cashed at depth 1.
+
+### The size of what is actually left
+
+Scored against the ring-off arm's true demand need, **34.65 of the 48 layer-slots a token have at least one
+demand miss** (histogram: 5 080 layers need nothing, 4 573 need one, 3 370 need two, 2 272 need three, and 20
+need all ten). At depth 1 the ring can adopt at most one read per layer, so that is the ceiling on adoption:
+**19.25 achieved against 34.65 available**. A perfect next-token predictor would issue *fewer* reads than the
+shipped ring does (34.65 against 39.73) and adopt every one of them, worth roughly +4.6 % by route 1's
+arithmetic — and it would remove 13 MiB/token of traffic rather than adding it.
+
+That is the campaign's answer to the feeder premise, and it is the same answer the September study gave from
+the other direction. `docs/qwen38-prefetch-predictor-study.md` measured live per-layer frequency, the previous
+token's route and its misses, an EMA of probe scores, their unions, a second rank, a second horizon and a second
+layer of lookahead; none beat the shipped probe, and every wider arm lost 1.4-10.7 %. What remains after §5af,
+§5ag and §5ah is therefore not a scheduling question at all: **the bytes the ring throws away are the price of
+the 47 % it keeps, the price is set by prediction quality, and prediction quality is a model-side problem this
+engine cannot manufacture by re-ordering reads.** The decode line for qwen38 4-bit on this machine is closed at
+the shipped tier by three independent measurements — remove the ring and lose 5.6 %, feed the device from
+outside and lose 17-53 %, aim the ring better and find that 93 % of what is left is already known to be wrong.
+
+### Deviations
+
+1. **These two arms are traced, so their clocks are not the shipped ones.** 4.865 (ring on) against 4.496 (ring
+   off) is −7.6 %, where §5ag's untraced pair measured −5.6 %; `TINYTITAN_PREFETCH_TRACE` writes 18 384 JSON
+   lines in both arms and is not part of the shipped path. The pair is used for *structure* (which is what #194
+   asks) and never for magnitude. The classification counters agree with §5ag to a tenth of a point: hit rate
+   0.8468 / 0.8070 here against 0.8459 / 0.8070 there.
+2. **383 positions, not 384.** The trace covers positions 10-392; the last decode step is not recorded, so the
+   replica denominators are 383 × 48 records while the per-token figures divide 384. That is a ≤0.26 % skew on
+   any count that ends in the untraced step.
+3. **`late` means "in the route and not adopted", which is the union of three causes.** A still-in-flight buffer
+   at `readyBuffers`, a failed operation and a slot reclaimed before its plan all look the same from the trace.
+   The footer's `inflight = 0.00` is sampled at the *next* `begin`, which runs after that layer's plan, so it
+   cannot exclude in-flight-at-`readyBuffers`; what it does exclude is a read still running at the end of its
+   own layer. So 1.50/token is an **upper bound** on genuine lateness, which makes the screen above conservative
+   in the direction that matters.
+4. **The residency filter is read one instant late.** `resident` in the trace is captured before that layer's
+   plan; the ring queried the same set at the previous layer. For depth 1 the two are identical — nothing writes
+   layer L+1's cache between them, because adoption happens inside layer L+1's plan, which the snapshot precedes.
+   At depth 2 or 3 they would differ, so this replica is only valid for the shipped geometry.
+5. **The ceiling is scored against the ring-off arm on purpose.** The ring's own adoptions shrink the demand need
+   visible in its own trace (68.53 misses/token against 87.78), so measuring headroom on the ring-on records
+   would score it against a need it has already eaten.
+6. **The scorer is a throwaway.** `/tmp/score194.py` is not in the tree; the algorithm is specified above
+   completely enough to rebuild it, and the trace facility it reads is shipped. Nothing in `sources/` changed to
+   produce this section, so no test was added and the golden baseline is **not checked** (docs-only record, as in
+   §5af and §5ag).
+7. **Single round per arm.** #194 is an offline scoring exercise over two traces, not a paired timing batch, so
+   the interleave-and-control rule does not apply to it; the only clock it touches is deviation 1's, and that is
+   reported as contaminated. The tree was clean at `HEAD cd229f6`, the binary is the 04:29 release build, AC
+   power at 100 %, `memory_pressure -Q` 86 % free, swap 6.65 GiB used at launch and 6.63 GiB after, no other
+   model process before or after either arm.
