@@ -2483,3 +2483,113 @@ on encoding. Task #179's premise is therefore answered as written, and the answe
 - **The live work that survives this section unchanged** is #177 — the saturating use-count
   arm in `makeExpertCachePlan`, −2.04…−7.92 % placements offline, output-invariant by
   construction, still needing the paired live A/B — and #163, the wiki decode row.
+
+## 5ac. Issue-count coalescing, priced by structure instead of by more repeats (2026-10-16)
+
+§5m left one seam parked rather than closed: *"Issue-count coalescing prices at a
+theoretical ceiling of the 10–12 ms/token it could recover while keeping the hiding —
+≈2–3%, single-% territory … Parked as unproven; an A/B would need many more repeats
+per arm than four."* That ceiling is the cost of the whole `F_RDADVISE` line item, and
+an A/B was the only instrument proposed for finding how much of it coalescing can
+actually reach. It does not need one. The merge condition is structural, so the
+reachable fraction is computable from the committed route captures.
+
+The mechanism, read rather than assumed: `sources/TinyTitan/Infrastructure/Streaming/RDAdvice.swift:33-38`
+issues one `fcntl(fd, F_RDADVISE, &advice)` per call with a single `radvisory{ra_offset,
+ra_count}`, so two expert ranges share a syscall only if their byte ranges touch —
+i.e. only if their expert ids are consecutive inside the layer file. The live counters
+confirm one call per miss read: `rdadvise_calls=53 712` over a 512-token decode is
+104.9 calls/token against §5y's 89–102 placements/token at that prompt shape.
+
+### What the bursts actually look like
+
+`python3 /tmp/rdadvise_merge_probe.py` (throwaway, not committed, per §5ab deviation 1)
+replays the shipped plan rule over the three committed captures with §5y's warm-up and
+counts, for every `(token, layer)` miss burst, the maximal runs of ascending expert ids
+at three hole tolerances. Gap 0 merges only strictly consecutive ids and therefore costs
+no extra bytes; gap 1 and 2 buy fewer calls by reading the experts in between.
+
+| capture | placements/token | bursts with 2+ misses | gap 0 calls/token | gap 1 net | gap 2 net |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `20261011` | 91.765 | 8 809/13 198 = 66.7 % | 91.21 → **+0.059 ms** | −0.291 ms | −1.036 ms |
+| `v520-20261015` | 89.284 | 11 842/17 951 = 66.0 % | 88.77 → **+0.054 ms** | −0.189 ms | −0.833 ms |
+| `v520-prompt2` | 102.104 | 9 840/14 071 = 69.9 % | 101.37 → **+0.077 ms** | −0.279 ms | −1.119 ms |
+
+The nets are `ms/token` after the wasted bytes are priced against the drive: a merge
+that drags in one extra expert costs 2.64 MiB = **0.66 ms of device time** at §5o's
+measured 3.95 GB/s, while the call it saves is worth **0.105 ms** (`rdadvise_ms`
+10.958/token ÷ 104.9 calls/token). So a byte-costing merge loses by ~6:1 before it
+starts, which is why gap 1 and gap 2 are negative and only gap 0 is a candidate.
+
+**Two thirds of bursts do hold two or more misses — and 0.6 % of them are side by
+side.** That is the whole lever: 0.054–0.077 ms/token = **0.025–0.035 % of a 219 ms
+token**, against the 2–3 % §5m parked it at.
+
+### The only way to buy contiguity is to move the weights, and that is capped too
+
+Contiguity is a property of the on-disk id order, and the id order is the repack's
+choice. Relabelling is numerics-free by construction — the same bytes at a different
+offset, with the routing path resolving id → offset through a table — so a repack could
+place co-routed experts side by side and manufacture the adjacency the router does not
+supply. `python3 /tmp/expert_layout_screen.py` (throwaway) builds a per-layer
+co-occurrence graph from the routed rows, takes a greedy maximum-weight path cover
+(heaviest edge first, degree ≤ 2, no cycles — deterministic and cheap enough to run
+inside a repack), writes each path to consecutive offsets, and replays the shipped rule
+under that permutation.
+
+| layout learned on | evaluated on | placements/token | calls/token | saved |
+| --- | --- | ---: | ---: | ---: |
+| shipped order | any capture | unchanged | 91.21 / 88.77 / 101.37 | 0.025–0.035 % of clock |
+| `20261011` | `20261011` (self) | **91.765** | 88.35 | 0.164 % |
+| `20261011` | `v520-20261015` | **89.284** | 88.17 | 0.053 % |
+| `20261011` | `v520-prompt2` | **102.104** | 100.90 | 0.058 % |
+| `v520-20261015` | `v520-20261015` (self) | **89.284** | 86.21 | 0.147 % |
+| `v520-prompt2` | `v520-prompt2` (self) | **102.104** | 98.26 | 0.184 % |
+| best cross-session arm | — | — | — | **0.063 %** |
+
+The self-check is the `placements/token` column: it is identical, to the last digit,
+under every permutation. That is the proof that a relabel cannot change what the cache
+does — placement depends on the arrival sequence, not on the labels — so the only thing
+moving is the syscall count, exactly as intended.
+
+A learned layout does create adjacency, and it does transfer, but only at ⅓ of its own
+value: 0.147–0.184 % against the session it was trained on, 0.044–0.063 % against
+another. The reason is the same one §5h found from the other side — the 512 experts are
+mutually orthogonal, so their co-routing is diffuse: a layer file has 511 adjacencies
+available against 130 816 possible pairs, and no ordering can make many of them hot.
+
+### Deviations
+
+1. Both probes are `/tmp` throwaways and are deliberately not committed: they read
+   committed captures and change no shipped code, so there is nothing to register.
+   Their full text is reproducible from the tables above.
+2. **My first run of the merge probe was wrong and is recorded as such.** It skipped
+   the prefill rows instead of planning them, so decode started on a cold cache and
+   reported 96.89 / 90.77 / 105.45 placements/token — 5.6 / 1.5 / 3.3 above §5y's
+   calibrated figures. The self-check against `placements_per_token` caught it before
+   any merge number was read; after the warm-up fix all three match to 1e-6. The
+   discard's ratios were not wildly off (0.62 % vs 0.61 % adjacency), which is exactly
+   why the absolute check, not the plausibility of the ratio, is what earns the result.
+3. 0.105 ms per call is the engine's own aggregate: it attributes all of
+   `rdadvise_ms` to the `fcntl`, including whatever the read thread pays around it. If
+   the true syscall is cheaper, the ceiling is lower, not higher.
+4. A 219 ms token is the shipped-default wall from §5r, used only as a denominator;
+   nothing here is a clock claim.
+5. The device side argues against the lever as well. §5d measured `dd` over a whole
+   layer file at 3.15 / 2.61 GB/s — *slower* than the engine's strided 3.57 GB/s — so
+   merging short scattered ranges into longer sequential ones moves toward the access
+   shape this drive handles worse. A pure syscall win of ≤0.18 % would have to survive
+   that to reach the wall clock at all.
+
+### Verdict
+
+**§5m's parked seam closes at two orders of magnitude below its estimate.** Merging
+what is already contiguous reaches 0.025–0.035 % of clock; merging what a learned
+relabel makes contiguous reaches 0.147–0.184 % on its own session and 0.063 % on
+another's, and §5d's sequential contrast says the device may take some of that back.
+None of it is within reach of the 2–3 % that made the A/B look worth many repeats, so
+no repeats are owed: the lever is closed by structure, and the parked row can be
+retired without a model run.
+
+**What survives unchanged** is #177 — the saturating use-count arm, whose live paired
+A/B is the running subject of §5ad — and #163, the wiki decode row.
