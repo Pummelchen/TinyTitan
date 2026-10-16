@@ -9,7 +9,7 @@ both left the arithmetic itself in a throwaway. This screen closes that seam: it
 reads the page `tinytitan_knob_sweep.py` prints and answers `x`, `y`, the
 condition number and the band verdict with an exit status.
 
-Seven things it must not be able to get wrong, each pinned below:
+Eight things it must not be able to get wrong, each pinned below:
 
 1. **The sign.** Rows live in the (`dissued`, `-dadopted`) plane, so the second
    coordinate is positive where a step makes adopted reads *fall*. §5at found the
@@ -40,12 +40,21 @@ Seven things it must not be able to get wrong, each pinned below:
    same adopted read at 0.796 ms (inside the band) and 0.570 ms (below it). A
    screen that prints one number and a status cannot say the page is the problem;
    designs that land on opposite sides of a band edge refuse it.
+8. **That a price is only known as well as the machine is quiet (#209).** The
+   drift sample bounds how far a row moves with no config change, which is a width
+   on the *solve*, not only a gate on the row list: `y ±0.034 ms` printed next to a
+   control that just moved a row 11.17 ms is a bound on the digits and not on the
+   answer. A `p*` whose own width spans the gate's `L/S` cannot call either side,
+   and a held-out row's residual is the only test of the model that is not Cramer
+   agreeing with itself — so both are scored, with statuses.
 
-The statuses are the ones this tree's drivers already use:
+The statuses are the ones this tree's drivers already use, widened by #209 at the
+second one because a page can now solve a price and still not be allowed to spend
+it:
 
-    0  the design identifies and `y` is inside the admissible band
-    1  it identified a price, and that price refutes the model
-    2  it could not solve, with the reason named
+    0  the design identifies, `y` is inside the band, and the gate is drawn
+    1  it identified a price, and that price or a held-out row refutes the model
+    2  it could not solve, or its own widths cannot draw the gate, with the reason named
 
 Every fixture page is built by calling the real `ks.table()`, so these tests fail
 the moment the page the sweep prints and the page this screen reads stop
@@ -128,10 +137,12 @@ DOC1 = """
 
 # The in-band trio of `test_an_in_band_y_is_admissible_and_the_gate_is_scored_from_it`,
 # rounded to one decimal like a human restating it in prose: it still solves inside
-# the band (m1 12.77, m2 17.39 -> y = 1.004), but now 0.05 tok/s of half-ulp is 4.3 ms
-# of step and the band puts only 0.22 ms between y and the near edge. The clause has
-# to fire on the side of the band that agrees with the model, too -- a caveat that
-# only ever prints next to a refutation is a caveat that has never been tested.
+# the band (17.39 and 12.77 ms of step -> y = 1.004, x = 0.238), but now 0.05 tok/s of
+# half-ulp is 4.3 ms of step and the band puts only 0.216 ms between y and the near
+# edge. The clause has to fire on the side of the band that agrees with the model, too
+# -- a caveat that only ever prints next to a refutation is a caveat that has never
+# been tested. And because the same 4.3 ms reaches the ratio, x carries ±0.121 and y
+# ±0.283, so p* runs 0.091 to 0.498 across the gate's 0.155: #209 made that a refusal.
 DOC1_IN = """
 | arm | tok/s | issued/pt | adopted/pt |
 |---|---|---|---|
@@ -199,6 +210,28 @@ ALL_INKED = page(
     arm("a_in", 4.900, 45.00, 16.00),
     arm("b_in", 4.950, 35.00, 24.00),
 )
+
+
+def holdout_page(rate):
+    """A priceable trio plus a fourth arm held out of the solve, priced `rate`.
+
+    The ring-off x depth pair on these rows prices x=0.264 / y=0.946, so the
+    held-out row (+50.00, +15.00) is predicted to cost 27.4 ms of token. One
+    decimal of `tok/s` resolves that row to under a millisecond, so a page that
+    prints it 29 ms slower than its own two prices say is not a rounding
+    question -- it is the model failing on a row it never saw. #209 found the
+    screen printing that residual and handing over no status for it.
+    """
+    return page(
+        arm("base", 5.00, 40.00, 20.00),
+        arm("prefetch_off", 4.80, 0.00, 0.00),
+        arm("layer_depth25", 4.60, 70.00, 10.00),
+        arm("layer_depth35", rate, 90.00, 5.00),
+    )
+
+
+HOLD_BAD = holdout_page(3.90)
+HOLD_OK = holdout_page(4.40)
 
 
 def best_line(out: str) -> str:
@@ -372,13 +405,17 @@ class Signal(unittest.TestCase):
         # The bar changes which rows may be paired; it must not touch the
         # arithmetic. layer_depth25 x prefetch_off on these rows is §5au's
         # x=0.683 / y=0.796, and with one design left there is nothing to
-        # disagree about, so this page is scored.
+        # disagree about, so the band call stands. #209 amended the STATUS: this
+        # page's own control moved a row 11.17 ms, which difference-mode puts 0.832
+        # ms on y -- more than y is -- so the gate draw is refused even though the
+        # price and its band classification print exactly as before.
         status, out = run(PAGE5AT_ONE)
         self.assertIn("not signal, stepped over: slots_64", out)
         self.assertIn("x=0.683 y=0.796", out)
         self.assertIn("ADMISSIBLE", out)
+        self.assertIn("cannot decide the gate", out)
         self.assertNotIn("do not agree", out)
-        self.assertEqual(status, 0, out)
+        self.assertEqual(status, 2, out)
 
     def test_a_zero_drift_sample_bars_no_row(self):
         # TRIO's control carries the baseline's counters verbatim, so its step is
@@ -469,8 +506,11 @@ class Prices(unittest.TestCase):
         self.assertIn("cannot decide", out)
 
     def test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too(self):
+        # #209 turned this page's status from 0 to 2: it keeps saying the band call
+        # is not separable, and now it also refuses to draw the gate that sentence
+        # always claimed it would not draw.
         status, out = run(DOC1_IN, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
-        self.assertEqual(status, 0, out)
+        self.assertEqual(status, 2, out)
         self.assertIn("ADMISSIBLE", out)
         self.assertIn("cannot decide", out)
 
@@ -484,6 +524,116 @@ class Prices(unittest.TestCase):
         self.assertIn("out-of-sample layer_depth325", out)
         self.assertIn("residual", out)
         self.assertIn("predicted", out)
+
+
+class DriftAndHoldout(unittest.TestCase):
+    """#209: the page's own drift bounds the price, and a held-out row is scored.
+
+    The digits bound how finely a row is printed and the angle bound how well two
+    of them are posed, but neither bounds how far the *machine* moves a row between
+    two runs of the same configuration — and the page says exactly how far it moved
+    one, because `base_again` is the baseline re-measured. Before #209 the drift
+    sample only chose which rows could be paired, and never entered the bound: the
+    screen printed "±0.034 ms" for a `y` on a page whose own control had just moved
+    a row by 11.17 ms, and the held-out residual was built, printed and thrown away,
+    so a model that missed a row it never solved by 29 ms still exited 0.
+    """
+
+    def test_the_bound_names_the_digits_and_the_drift_apart(self):
+        # This page's control moved 11.17 ms with no config change; its digits put
+        # only ±0.034 ms on y, and the drift puts ±0.832, which is more than y is.
+        # A single number cannot say which of those two the reader is priced by.
+        _, out = run(PAGE5AT_ONE)
+        self.assertIn("drift:", out)
+        digits = float(re.search(r"the digits put ±([\d.]+)", out).group(1))
+        drift = float(re.search(r"drift alone puts ±([\d.]+) ms on y", out).group(1))
+        total = float(re.search(r"digits and drift together put ±([\d.]+) ms on y", out).group(1))
+        self.assertGreater(drift, digits, out)
+        self.assertGreater(total, drift, out)
+
+    def test_the_digits_line_prices_only_the_printing(self):
+        # §5au published this page's bound on y as ±0.034 ms -- the rounding's own
+        # doing, and the sentence that printed it named the number of decimals it
+        # came from. Folding the drift into that same number attributes 0.832 ms of
+        # machine to 0.005 tok/s of printing, which is the defect this section
+        # exists to close, so the digits line keeps the digits and the sum is said
+        # once, as a sum.
+        _, out = run(PAGE5AT_ONE)
+        self.assertIn("y is known only to ±0.034 ms and x to ±0.015", out)
+        self.assertIn("digits and drift together put ±0.866 ms on y", out)
+
+    def test_the_band_caveat_says_which_half_of_the_bound_printing_can_reach(self):
+        # On this page 0.832 of the 0.866 is the machine, so telling the reader
+        # "more printed decimals is what would settle both" prescribes a cure for
+        # a third of the illness and hides the other two thirds.
+        _, out = run(PAGE5AT_ONE)
+        self.assertIn("its digits ±0.034 ms and its own drift ±0.832", out)
+        self.assertIn("printing more decimals would not settle it", out)
+        self.assertNotIn("more printed decimals is what would settle both", out)
+
+    def test_a_page_with_no_drift_sample_puts_the_whole_bound_on_the_printing(self):
+        # The other half of the same sentence: DOC1 carries no re-measured baseline,
+        # so its bound IS the rounding and more decimals IS the cure. Without this
+        # row the caveat would only ever have been read in its drift branch.
+        _, out = run(DOC1)
+        self.assertIn("cannot decide", out)
+        self.assertIn("the printing alone, ±0.310 ms", out)
+        self.assertIn("more printed decimals is what would settle both", out)
+
+    def test_x_s_drift_sensitivity_is_the_difference_mode_not_the_single_row_max(self):
+        # Both rows drift on their own, so their errors add: (|du1|+|du2|)/|det|.
+        # §5ax had to derive this by hand because the screen printed only the
+        # single-row maximum, and 0.028 (TRIO's x) is not 0.019 (that maximum) or
+        # 0.009 (the common mode, which largely cancels).
+        _, out = run(TRIO)
+        self.assertRegex(out, r"difference-mode sensitivities 0\.073 ms of y and 0\.028 ms of x")
+
+    def test_a_p_star_whose_own_width_spans_the_gate_is_refused(self):
+        # DOC1_IN prices y=1.004 inside the band and p*=0.237 above L/S=0.155, so
+        # before #209 this scored "-> pays" and exited 0. Its own printed decimals
+        # put ±0.121 ms on x and ±0.283 ms on y, which makes p* run 0.091 to 0.498
+        # straight across the threshold: the page cannot say which side the gate is
+        # on, and the band call standing does not make the gate call one.
+        status, out = run(DOC1_IN, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
+        self.assertEqual(status, 2, out)
+        self.assertIn("ADMISSIBLE", out)
+        self.assertIn("cannot decide the gate", out)
+        self.assertIn("L/S = 0.155", out)
+        self.assertNotIn("p*=", out)
+        self.assertNotIn("-> pays", out)
+        self.assertNotIn("-> does not pay", out)
+
+    def test_a_drift_width_larger_than_y_itself_refuses_the_gate_as_unbounded(self):
+        # Here the page's own control moves y by more than y is, so the ratio is not
+        # finite and no threshold test on it means anything. The width comes from
+        # drift, not from coarse decimals: the same rows printed to three decimals
+        # would still refuse.
+        status, out = run(PAGE5AT_ONE)
+        self.assertEqual(status, 2, out)
+        self.assertIn("cannot decide the gate", out)
+        self.assertIn("not finite", out)
+
+    def test_a_held_out_row_beyond_the_page_s_own_width_refutes_the_model(self):
+        # The two prices fit the two rows they were solved from exactly — that is
+        # what Cramer means — so the only test of the model is a row it never saw.
+        # This one misses by 29.00 ms against the 1.694 ms the page cannot resolve:
+        # 0.53 ms is that row's own printed step and the rest is how far the two
+        # prices' widths reach into the prediction, so the miss is a refutation and
+        # not a rounding.
+        status, out = run(HOLD_BAD, "--predict", "layer_depth35")
+        self.assertEqual(status, 1, out)
+        self.assertIn("REFUTED OUT OF SAMPLE", out)
+        self.assertNotIn("p*=", out)  # a refuted model is not allowed to draw the gate
+
+    def test_a_held_out_row_inside_the_page_s_own_width_is_scored_as_consistent(self):
+        # The same page with the held-out arm where the model puts it: the residual
+        # is inside the width the row itself carries, so it is evidence the model
+        # predicted a row it never solved, and the gate stays scored.
+        status, out = run(HOLD_OK, "--predict", "layer_depth35")
+        self.assertEqual(status, 0, out)
+        self.assertIn("out-of-sample consistent", out)
+        self.assertIn("pays", out)
+        self.assertNotIn("REFUTED OUT OF SAMPLE", out)
 
 
 class Rounds(unittest.TestCase):

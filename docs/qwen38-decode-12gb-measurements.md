@@ -5347,10 +5347,10 @@ it runs in CI with no model, no server and nothing fetched.
 
 Every price the campaign has published was solved from rates *as printed*, and nobody had said how much the
 printing costs. The screen does, from the digits of the page it was handed: it records the coarsest printed row
-per column ([`:149`](../benchmark/tinytitan_price_pair.py#L149), [`:203`](../benchmark/tinytitan_price_pair.py#L203)),
+per column ([`:116`](../benchmark/tinytitan_price_pair.py#L116), [`:311`](../benchmark/tinytitan_price_pair.py#L311)),
 turns a half-ulp into a width on each equation's `Δms` and on each counter coordinate
-([`:295`](../benchmark/tinytitan_price_pair.py#L295)), propagates all six widths through the Cramer partials
-([`:311`](../benchmark/tinytitan_price_pair.py#L311)), and prints the result:
+([`:374`](../benchmark/tinytitan_price_pair.py#L374)), propagates all six widths through the Cramer partials
+([`:438`](../benchmark/tinytitan_price_pair.py#L438)), and prints the result:
 
 ```
 digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0.033 ms and x to ±0.013 ms
@@ -5359,11 +5359,17 @@ digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0
 `Price` carries `x_bound` and `y_bound` as *required* fields rather than defaults, because a price that silently
 had no bound would read as an exact one. Bounds are rounded up to the millimetre, so printing one cannot
 understate it. The consequence is the part that matters for the campaign: `_verdict`
-([`:444`](../benchmark/tinytitan_price_pair.py#L444)) compares the bound to the distance from the median `y` to
+([`:787`](../benchmark/tinytitan_price_pair.py#L787)) compares the bound to the distance from the median `y` to
 the nearer band edge and, when the bound reaches it, appends `_cannot_decide`
-([`:433`](../benchmark/tinytitan_price_pair.py#L433)) — in *both* the REFUTED and the ADMISSIBLE branch. A band
+([`:715`](../benchmark/tinytitan_price_pair.py#L715)) — in *both* the REFUTED and the ADMISSIBLE branch. A band
 call that falls inside the resolution of the rates it was computed from is not a refutation of the model; it is
 the page running out of digits.
+
+*(Amended by §5az: `y_bound` is no longer the digits alone. `Price` now carries `x_digits`/`x_drift` and
+`y_digits`/`y_drift` beside the totals, because the campaign's own pages put ~20× more width on a price through
+machine drift than through printing, and a bound printed under the sentence above would have read as a rounding
+note. Every `bound on y` in the table below is a digits half and is still correct as one; §5az prints what each
+of those pages may actually price by.)*
 
 ### Four pages, and what each one's digits cost
 
@@ -5376,6 +5382,13 @@ trio whose counters come from §5aq rather than §5ag, built on purpose to price
 | §5at's published table | 3 decimals | the same, 41.4° cond 1.5 | 1.585 | ±0.004 | 0.284 outside | REFUTED, exit 1 |
 | one decimal, out-of-band arm | 1 decimal | the same, 41.4° cond 1.5 | 1.362 | **±0.310** | 0.061 outside | REFUTED + *cannot decide*, exit 1 |
 | one decimal, in-band arm | 1 decimal | depth-2 × ring-off, 43.9° cond 1.4 | 1.004 | **±0.283** | 0.216 inside | ADMISSIBLE, `p*=0.237` pays, + *cannot decide*, exit 0 |
+
+*(Amended by §5az: the last row's status. #209 scores the ratio's own widths, and `x = 0.238 ±0.121` over
+`y = 1.004 ±0.283` makes `p*` run 0.091 to 0.498 — the gate's 0.155 is inside its own interval, so that page now
+prints `cannot decide the gate` and exits **2** rather than drawing a `pays` it cannot separate. The first three
+rows keep their statuses and their bound column, which is the digits half; on their totals the two refutations
+stand at ±0.147 against a 0.297 ms margin and ±0.107 against 0.284, so they survive the drift term with roughly
+half the room they were published with.)*
 
 Three things come out of that table.
 
@@ -5396,7 +5409,7 @@ tables at one and two decimals; anything read off them is now known to be un-dec
 would be worth nothing, because the dangerous error is the flattering one: an arm that *costs* an implausible
 18 ms per adopted read gets questioned, while an arm that lands at 1.004 ms — right inside the band, gate pays,
 `+0.44 ms` of the token — gets believed. Both fixtures are in `Prices`, and the in-band one
-([`test_tinytitan_price_pair.py:294`](../benchmark/test_tinytitan_price_pair.py#L294)) is written so its hand
+([`test_tinytitan_price_pair.py:461`](../benchmark/test_tinytitan_price_pair.py#L461)) is written so its hand
 arithmetic is in the comment next to it.
 
 ### The sign §5at's table printed backwards
@@ -5411,7 +5424,7 @@ opposite verdict to the one published below the table. A reader who took the pri
 next section ships would have concluded the two-price model was confirmed.
 
 The screen now pins the convention rather than describing it: `Sign`
-([`:141`](../benchmark/test_tinytitan_price_pair.py#L141)) asserts all three cases — a step that makes adoptions
+([`:251`](../benchmark/test_tinytitan_price_pair.py#L251)) asserts all three cases — a step that makes adoptions
 fall is positive, the ring-off step is E1 verbatim (`18.86 y − 39.45 x = 11.7 ms`), and a step that makes them
 *rise* is negative — and `Prices` asserts that those coordinates solve the published `x=0.460` / `y=1.58`. The
 other mis-signing, negating **one coordinate of one row**, is the one that does change `det` and collapses the
@@ -5422,7 +5435,7 @@ asserts it. What the suite closes is the mistake §5at actually made, not every 
 
 Feeding the screen §5at's own rendered six-row page is the first time it has read a table assembled from more than
 one batch, and it found a design defect in the screen itself. `best_pair` picks the widest-angle candidate
-([`:405`](../benchmark/tinytitan_price_pair.py#L405)); every candidate on that page is below, with the row that
+([`:586`](../benchmark/tinytitan_price_pair.py#L586)); every candidate on that page is below, with the row that
 generates each:
 
 | pair | `deg` | cond | `x` | `y` |
@@ -5520,21 +5533,25 @@ Deviations.
 §5au filed two changes and did not patch them, on the grounds that a bar tuned until a page returns the price the
 campaign already believes is a bar fitted to the answer. [benchmark/tinytitan_price_pair.py](../benchmark/tinytitan_price_pair.py)
 now carries both: a minimum-signal bar keyed to the page's own control row
-([`:399`](../benchmark/tinytitan_price_pair.py#L399)) and the printing of every design that survives it rather
-than one selection ([`:493`](../benchmark/tinytitan_price_pair.py#L493)), with a refusal when those designs
-disagree ([`:503`](../benchmark/tinytitan_price_pair.py#L503)). The statuses are the same three; nothing was
+([`:480`](../benchmark/tinytitan_price_pair.py#L480)) and the printing of every design that survives it rather
+than one selection ([`:597`](../benchmark/tinytitan_price_pair.py#L597)), with a refusal when those designs
+disagree ([`:607`](../benchmark/tinytitan_price_pair.py#L607)). The statuses are the same three; nothing was
 renumbered. Implementing it turned up two defects in the screen shipped four hours earlier, and one of them
 changes what §5au's page actually searched.
+
+*(Amended by §5az: the drift sample does more than bar rows now — `_solve` turns it into widths on the price, so
+the same control row that inked `slots_64` also sets what the answer is worth. Nothing was renumbered then, but
+status 2's meaning has widened: it now covers a page that solves a price and cannot draw a gate from it.)*
 
 ### The bar, and what it is keyed to
 
 `base_again` is the same configuration as `base`, re-measured, so its step is this page's drift with no config
 change in it — a measurement of the machine, not of an arm. The screen now treats it as a floor: a row is stepped
 over when it moves less than the control **in every coordinate the solve reads**, both counters and the column
-([`:429`](../benchmark/tinytitan_price_pair.py#L429)), and the control is never a solve partner however far it
-moved ([`:427`](../benchmark/tinytitan_price_pair.py#L427)). AND over three coordinates is the conservative
+([`:519`](../benchmark/tinytitan_price_pair.py#L519)), and the control is never a solve partner however far it
+moved ([`:517`](../benchmark/tinytitan_price_pair.py#L517)). AND over three coordinates is the conservative
 choice — it removes only rows the drift can explain in full, and leaves any row that moves more than the control
-in even one of them. `--control` names the row ([`:606`](../benchmark/tinytitan_price_pair.py#L606)), and a page
+in even one of them. `--control` names the row ([`:845`](../benchmark/tinytitan_price_pair.py#L845)), and a page
 that carries no control is not a refusal: the screen says `no drift sample (base_again is not on this page), so
 no row was checked` and solves, because a bar with nothing to key to must not silently become a veto.
 
@@ -5575,10 +5592,10 @@ reporting the below one would have refuted it, on a page that cannot tell them a
 §5au's published table lists ten pairs. On five priceable rows a window sees four of ten. §5au's answer happened to
 survive the difference because its widest pair — `slots64_depth25 x slots_64` — is adjacent in sorted order, which
 is exactly how a defect like this hides: it changed nothing on the page that exposed it. `itertools.combinations`
-([`:468`](../benchmark/tinytitan_price_pair.py#L468)) is the fix, and it retro-validates §5au's table: the pool the
+([`:565`](../benchmark/tinytitan_price_pair.py#L565)) is the fix, and it retro-validates §5au's table: the pool the
 fixed screen prints is the ten rows that section published by hand, same angles same prices. The bug is pinned by a
 page where the widest pair is *not* adjacent
-([`test_tinytitan_price_pair.py:303`](../benchmark/test_tinytitan_price_pair.py#L303)); RED there showed the window
+([`test_tinytitan_price_pair.py:336`](../benchmark/test_tinytitan_price_pair.py#L336)); RED there showed the window
 picking a 39.3 deg neighbour.
 
 **Dead arithmetic that was never dead code.** `_solve` carried a second `return Price(...)` after the first,
@@ -5618,10 +5635,10 @@ bounds its clock, and round 1 is the case where only the second one fires.**
 
 30 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 29 plus the
 cause-naming one — 95 OK alongside `test_knob_sweep_verdict` and `test_docs_facts_suites`; `tools/lint.sh python`
-ok. Seven tests are new: the enumeration ([`:303`](../benchmark/test_tinytitan_price_pair.py#L303)) and
-[`Signal`](../benchmark/test_tinytitan_price_pair.py#L315)'s six (row inside drift `:326`, control never a partner
-`:337`, straddle refuses `:349`, no control says so `:362`, one survivor prices exactly as it did unbarred `:371`,
-zero drift bars nothing `:383`), plus the inked-page cause `:393`. One edit was made for the linter rather than for
+ok. Seven tests are new: the enumeration ([`:336`](../benchmark/test_tinytitan_price_pair.py#L336)) and
+[`Signal`](../benchmark/test_tinytitan_price_pair.py#L348)'s six (row inside drift `:359`, control never a partner
+`:370`, straddle refuses `:382`, no control says so `:395`, one survivor prices exactly as it did unbarred `:404`,
+zero drift bars nothing `:420`), plus the inked-page cause `:430`. One edit was made for the linter rather than for
 behaviour and is inventoried here: the new `best_line` helper's bare `assert` became `raise ValueError`, because
 pinned ruff 0.16.7 enforces S101 — the check's strength is unchanged (it still fails the test unless exactly one
 `best pair` line is printed), and it is code added in this section, not a pre-existing assertion weakened.
@@ -5706,13 +5723,19 @@ ADMISSIBLE: y=0.867 is inside 0.788-1.301 ms, so the two rows price both reads
 p*=0.199 against the six-link gate's L/S = 0.82/5.30 = 0.155 -> pays (+0.20 ms of a 226.2 ms token, +0.09 %)
 ```
 
+*(Amended by §5az: that transcript is what the screen printed the day it was written, and §5az re-runs this very
+page through #209's screen — it now exits **1**, because the same page's held-out row misses by 1.5× the width
+the page itself cannot resolve, and the pooled `pays` above is not scored from a model that page refutes. The
+`y=0.867` band call also loses its separation: round 3's drift puts ±0.805 ms on `y` where its digits put
+±0.037, and the median sits 0.079 ms from the near edge.)*
+
 Round 2 scored alone said the opposite: `p*=0.134 … does not pay (-0.10 ms …, -0.04 %)`. So the first
 single-batch identification of `x` and `y` in the campaign does not settle §5ar's lever — it moves it across the
 threshold and back depending on which round you read. `y` never moves across the band: 0.897 and 0.837 are both
 inside 0.788-1.301 ms and agree to 7 %. The asymmetry is not luck, and the screen's own Cramer terms name it.
 
 **Why `x` is the unstable one — the arithmetic, worked from the published rows.** With row 1 = `layer_depth25`
-and row 2 = `prefetch_off`, Cramer over the [`:338`](../benchmark/tinytitan_price_pair.py#L338) solve gives, per
+and row 2 = `prefetch_off`, Cramer over the [`:407`](../benchmark/tinytitan_price_pair.py#L407) solve gives, per
 round, the two partials of each price with respect to each row's wall step:
 
 | | det | ∂x/∂m₁ | ∂x/∂m₂ | ∂y/∂m₁ | ∂y/∂m₂ | x per ms common | x per ms of step **difference** | y per ms common |
@@ -5745,19 +5768,23 @@ the clock, and round 3 is exactly that case: the control's counters moved (−0.
 −11.70 ms, so every row cleared a bar set by counters that did not drift while the column the solve reads did.
 The bar did its job on the page it was built from (§5aw: it stepped over `slots_64`, a row that lay inside the
 control in all three coordinates) and does nothing on these pages. That is the honest scope of it, and #209 is
-filed to put the drift term where it belongs — on the price's error bar, not on the row list.
+filed to put the drift term where it belongs — on the price's error bar, not on the row list. *(§5az shipped
+that, and the term is 6-20× the digits on both of these rounds.)*
 
 **The out-of-sample point, and why the screen's status does not speak for it.** Round 2 misses by
 +23.65 ms/token (+10.45 %) and round 3 by +1.77 ms (+0.78 %) on the same held-out row. The residual is printed at
-[`benchmark/tinytitan_price_pair.py`:703](../benchmark/tinytitan_price_pair.py#L703) and returns nothing; the
-status comes only from the band class of `y`. A page whose held-out point sits 6.7× its own drift away from the
-prediction therefore exits 0 as `ADMISSIBLE`. The campaign reads that as the model being valid *interpolating*
+[`benchmark/tinytitan_price_pair.py`:692](../benchmark/tinytitan_price_pair.py#L692) and returned nothing; the
+status came only from the band class of `y`. A page whose held-out point sits 6.7× its own drift away from the
+prediction therefore exited 0 as `ADMISSIBLE`. The campaign reads that as the model being valid *interpolating*
 between du = −42.65 and +33.04 and not extrapolating to +60.20 — round 2's miss is entirely in the extrapolation —
-but the instrument does not say so, and #209 names that as its defect rather than as a measurement finding.
+but the instrument did not say so, and #209 names that as its defect rather than as a measurement finding. *(§5az
+shipped that: the residual is now scored against the page's own width and does move the status.)*
 
 **What the lever is worth even when it pays.** +0.20 ms of a 226.2 ms token: **+0.09 %**, about +0.004 tok/s
 against 4.42. With `x` bounded only to ±0.1 at best and the threshold sitting between the two rounds' answers, the
-correct decision is not to spend a third and fourth round on it. Every I/O-policy lever the campaign has priced
+correct decision is not to spend a third and fourth round on it. *(§5az removes the `even when it pays`: re-run
+with the drift in the bound and the residual scored, this page exits 1 and prints no gate answer at all, so the
++0.09 % is the size of the effect the model would have licensed had it held.)* Every I/O-policy lever the campaign has priced
 since §5ar lands in this ±0.1 %-of-a-token class, and the reason is a bytes floor, not a hiding floor.
 
 **The headroom bound, corrected.** The first version of this section bounded the feeder prize with `io_hidden_pct`
@@ -5811,10 +5838,15 @@ withdrawn exactly as §5aw withdrew it for other purposes.
    (0.199), because the pooled median of a two-element list is its mean and the mean hides the flip. A magnitude
    needs 3+ rounds per the screen's own line; this section does not claim one.
 3. **The partials in the sensitivity table were computed for this section**, from the published rows and the same
-   Cramer terms the screen uses, not read out of it — the screen prints `dy_per_ms` only
-   ([`:384`](../benchmark/tinytitan_price_pair.py#L384), [`:689`](../benchmark/tinytitan_price_pair.py#L689)) and
+   Cramer terms the screen uses, not read out of it — the screen printed `dy_per_ms` only
+   ([`:450`](../benchmark/tinytitan_price_pair.py#L450), [`:929`](../benchmark/tinytitan_price_pair.py#L929)) and
    prints it as the single-row max, which is neither the common-mode nor the difference-mode number. The x
-   sensitivities above are reproducible from the table of rates and counters.
+   sensitivities above are reproducible from the table of rates and counters. *(Amended by §5az: #209 added the
+   difference-mode pair to that line — `difference-mode sensitivities 0.061 ms of y and 0.027 ms of x per ms of
+   drift` — so the table's two right-hand columns are now on the page, and they are this section's numbers to the
+   third digit. The common-mode columns remain computed here and not read out of the screen, because `_spread`
+   adds widths independently by construction: for `y`, whose partials share a sign, the two are numerically equal
+   (0.0610), and for `x`, whose do not, only the difference mode is printed.)*
 4. **Round 2 was contaminated by this session, and less than round 1.** The machine was not idle in the strict
    sense: `Google Chrome Helper (Renderer)` was the top-CPU process at the first sample and the agent's own
    session was running, and swap carried 5.7 GiB of 7.2 GiB in from before. The mitigation was to go silent for
@@ -5951,3 +5983,210 @@ deliver several percent of the bill *per* quality-preserving change to be measur
    distinguishing lesson: the first error reached for a gauge the campaign had ruled out; the second used a gauge
    it had ruled *in* (the ceiling predictor) for a quantity the same batch had already measured. Reading a
    published table is not the same as using it.
+
+## 5az. #209 scores the page's own drift into the price bound and its held-out row into the status — and §5ax's first single-batch identification of `x` and `y` refutes itself on the page that published it, while the six-link gate turns out to need a baseline that repeats to 0.75 ms, which this machine has never given (2026-10-16)
+
+§5ax closed the campaign's identifying sweep with `p*=0.199 … -> pays` and a design statement: a blocked single-pass
+sweep can identify the coefficient that is a sum of its rows and not the one that is a difference. #209 spends no
+new round — it spends the two already published, because §5aw left the drift sample doing exactly one job (choosing
+which rows may be paired) while §5ax showed the same control moving a row 11.70 ms, a quarter of the token those
+rows were being used to price. [benchmark/tinytitan_price_pair.py](../benchmark/tinytitan_price_pair.py) now reads
+that movement as a width on the solve, scores the held-out residual it used to print and discard, and refuses any
+`p*` whose own interval contains the threshold. Over §5ax's own page it answers a different question than the one
+that section printed.
+
+### The four rules, as shipped
+
+1. **The drift is a width, not only a bar.** `Drift` ([`:129`](../benchmark/tinytitan_price_pair.py#L129)) carries
+   the control's step in the column the solve reads and in both counters; `_solve` ([`:413`](../benchmark/tinytitan_price_pair.py#L413))
+   feeds it through the same six Cramer partials the printed digits go through, as `w_drift` beside `w_digits`
+   ([`:438`](../benchmark/tinytitan_price_pair.py#L438)). Sum-of-absolute-input-widths, i.e. the difference mode:
+   two rows drift independently, so their errors add. §5ax derived that mode by hand because the screen printed
+   only the single-row maximum; it prints it now (`difference-mode sensitivities 0.061 ms of y and 0.027 ms of x
+   per ms of drift`), and the numbers land on §5ax's sensitivity table's two right-hand columns to the third digit.
+2. **A bound names its provenance.** `Price` carries six half-widths, not two: `x_digits`/`y_digits`,
+   `x_drift`/`y_drift`, and the totals `x_bound`/`y_bound` ([`:155`](../benchmark/tinytitan_price_pair.py#L155)).
+   `_digits_line` ([`:636`](../benchmark/tinytitan_price_pair.py#L636)) prints the digits and nothing else;
+   `_drift_line` ([`:653`](../benchmark/tinytitan_price_pair.py#L653)) prints the drift, then the total once, as a
+   total. All three are rounded *up* at 0.001 ms ([`:385`](../benchmark/tinytitan_price_pair.py#L385)).
+3. **A `p*` is an interval.** `_pi_interval` ([`:677`](../benchmark/tinytitan_price_pair.py#L677)) runs the ratio
+   from `(x − wx)/(y + wy)` to `(x + wx)/(y − wy)`, and if that reaches the gate's `L/S`, no gate line is printed
+   ([`:751`](../benchmark/tinytitan_price_pair.py#L751)). `y − wy ≤ 0` is not a wide ratio but no ratio at all, and
+   the refusal says `unbounded` rather than inventing an endpoint.
+4. **The held-out row has a status.** `_off_sample` ([`:689`](../benchmark/tinytitan_price_pair.py#L689)) compares
+   the residual to the width this page cannot resolve about that row — its own printed step, plus the control's
+   clock, plus what the two prices' widths reach into the prediction
+   ([`:951`](../benchmark/tinytitan_price_pair.py#L951)) — and a miss past that is `REFUTED OUT OF SAMPLE`, which
+   withdraws the gate from a model the page itself falsifies
+   ([`:812`](../benchmark/tinytitan_price_pair.py#L812)).
+
+The statuses are the same three numbers, with the second and third widened, because a page can now solve a price
+and still not be allowed to spend it:
+
+```
+0  the design identifies, `y` is inside the band, and the gate is drawn
+1  it identified a price, and that price or a held-out row refutes the model
+2  it could not solve, or its own widths cannot draw the gate, with the reason named
+```
+
+### The defect in this section's own first cut, disclosed before the results
+
+The first version of #209 folded the drift into `y_bound` and `x_bound` and left `_digits_line` and the band caveat
+printing those totals under sentences about *printed decimals*. On §5at's page that reads:
+
+> digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0.866 ms
+
+which attributes 0.832 ms of machine movement to 0.005 tok/s of rounding, and then prescribes "more printed
+decimals is what would settle both" — a cure for a third of the illness that hides the other two thirds. It is the
+same shape of error §5ax was amended for: a bound carried under a sentence that names the wrong source. Fixed
+test-first, with three tests (`:554`, `:565`, `:574`), the third of them on the branch where the printing *is* the
+whole bound, so the caveat cannot only ever be read in its drift form.
+
+### §5ax's page, re-run
+
+The two clean rounds through the shipped screen, `--predict layer_depth325`, **exit 1** (the screen numbers its
+tables from 1; §5ax names the sweeps 2 and 3, so its round 2 is `round 1` below). Every number and verdict below is
+the run's own text; `...` marks prose elided in the middle of a line, and the two `signal:` lines and the two
+`designs:` lines are dropped whole:
+
+```
+round 1: best pair layer_depth25 x prefetch_off at 47.3 deg cond 1.4  x=0.120 y=0.897
+digits: ... so y is known only to ±0.034 ms and x to ±0.016 ms
+  drift: ... ±3.527 ms of wall, ±0.14 issued, ±0.26 adopted ... drift alone puts ±0.231 ms on y
+         and ±0.104 on x where the digits put ±0.034 and ±0.016; the digits and drift together put
+         ±0.264 ms on y and ±0.119 on x, and that is the bound this page may price by
+round 2: best pair layer_depth25 x prefetch_off at 45.1 deg cond 1.4  x=0.224 y=0.837
+digits: ... so y is known only to ±0.037 ms and x to ±0.016 ms
+  drift: ... ±11.701 ms of wall ... drift alone puts ±0.768 ms on y and ±0.329 on x where the digits
+         put ±0.037 and ±0.016; the digits and drift together put ±0.805 ms on y and ±0.345 on x
+median x=0.172 y=0.867  spread x=0.104 y=0.060
+ADMISSIBLE: y=0.867 is inside 0.788-1.301 ms, so the two rows price both reads
+cannot decide: this page's bound on y is ±0.805 ms -- its digits ±0.037 ms and its own drift ±0.768 --
+and it sits only 0.079 ms inside the nearer band edge (0.788 of 0.788-1.301 ms) ... printing more
+decimals would not settle it, because the machine's own drift is the wider half of what this page
+cannot resolve
+out-of-sample layer_depth325: ... residual +23.65 ms/token (+10.45 % of a token) against 15.393 ms
+this page cannot resolve: REFUTED OUT OF SAMPLE, ... by 1.5x the page's own width ...
+out-of-sample layer_depth325: ... residual +1.77 ms/token (+0.78 % of a token) against 45.560 ms this
+page cannot resolve: out-of-sample consistent ...
+the six-link gate is not scored from a model this page's own held-out row refutes, however well its
+two solved rows fit
+```
+
+Three verdicts §5ax published move, and they move in the direction of saying less: the band call `y=0.867 is
+inside` now carries a *cannot decide* it did not have (±0.805 against a 0.079 ms margin, 10×); the pooled
+`p*=0.199 -> pays` is gone; and the status is 1 rather than 0, on a page whose two solved rows still fit the band.
+Nothing about the rows changed — the same rates, the same counters, the same arms. What changed is that the screen
+is no longer willing to price a token by a bound it did not have.
+
+### The refutation exists because one round happened to be quieter
+
+The two rounds hold out the *same* row and disagree about whether that refutes anything. Their widths decompose:
+
+| round | control's clock `dm` | row's own printing | prices' reach into the prediction | **width** | residual | verdict |
+|---|---:|---:|---:|---:|---:|---|
+| §5ax round 2 | 3.527 | 0.62 | 60.20×0.119 + 15.45×0.264 = 11.24 | **15.393** | +23.65 | refutes, at 1.5× |
+| §5ax round 3 | 11.701 | 0.61 | 60.22×0.345 + 15.50×0.805 = 33.25 | **45.560** | +1.77 | cannot refute |
+
+The reach is the term that multiplies: a held-out row at `du = +60.20` inherits sixty copies of `x`'s uncertainty.
+Round 3's price widths are 3× round 2's because its control moved 3.3× further, so its width is 3× again, and a
+model it can disprove only by a 45.6 ms miss — a fifth of a token — disproves nothing at 1.77 ms. That is not the
+screen being conservative; it is the campaign's out-of-sample test existing or not existing depending on how quiet
+the machine happened to be in a round that was already chosen for a different reason. **The test is bought with a
+repeating baseline, not with decimals**, which is the same lesson §5ax drew for `x` itself, now arriving through
+the residual.
+
+### What the six-link gate would take, in milliseconds
+
+On these rows (`med_x = 0.172`, `med_y = 0.867`, `L/S = 0.155`), printing a `pays` needs
+`(0.172 − wx)/(0.867 + wy) > 0.155`, i.e. `wx < 0.038 − 0.155·wy` — and 0.038 ms is the loosest reading of that,
+taken as `wy → 0`. The page's digits already cost `wx = 0.016` at two decimals, leaving 0.022 ms for the machine;
+`x` moves at ≈0.030 ms per ms of control drift (0.104 at `dm = 3.527`), so:
+
+- **a baseline that repeats within ≈0.75 ms** (0.33 % of a 226 ms token) scores the gate at 2 decimals;
+- within ≈1.2 ms at 3 decimals, where the digits cost 0.002;
+- **at no printed precision on this sweep**, whose quietest round repeated to 3.53 ms — its `x_drift` alone is
+  0.104 ms, 2.7× the entire budget.
+
+That replaces §5ax's "the correct decision is not to spend a third and fourth round on it" with a number and a
+reason. The gate is not unspent because the effect is small (+0.09 % of a token, as that section says); it is
+unreachable on this machine's clock at any printing precision the sweep offers, and more decimals on a page whose
+drift term dominates is arithmetic performed on a digit that was never the constraint. §5ay's independent route to
+the same place — a withheld read is worth 0.388 ms of token, so the lever's whole class is ±0.1 % — is now bounded
+from the measurement side as well as the price side.
+
+### The other pages, and the one status §5au published that no longer stands
+
+The same §5ax page **without** `--predict` is **exit 2** and says so differently: with `layer_depth325` back in the
+pool the page offers two conditioned designs, `y=0.897` inside the band and `y=1.404` above it, and §5aw's straddle
+refusal fires — *nothing here is a measurement of `y`*. Whether the campaign's best page prices the adopted read or
+refuses to was decided by which arm was held out, which is the sharpest statement of §5aw's "the spread, not the
+selection, is the finding" that the sweep has yet produced.
+
+§5at's six-arm cross-batch page stays **exit 2** on the same 0.796/0.570 straddle, and now prints why its own
+control was there: digits ±0.034 against drift ±0.832 on `y`. Of §5au's four-page table, three keep their statuses,
+and the fourth — the in-band one-decimal trio published as `ADMISSIBLE, p*=0.237 pays … exit 0` — is **exit 2**:
+`x = 0.238 ±0.121` over `y = 1.004 ±0.283` makes `p*` run 0.091 to 0.498 straight across the threshold. Its own
+digits, not the machine, do that one in, and the band call still prints. §5au's bound column is untouched (it is
+the digits half) but the two refutations in its first rows now stand at ±0.147 against a 0.297 ms margin and
+±0.107 against 0.284: they survive the drift term with about half the room they were published with.
+
+The exit-0 path is still reachable and is pinned: `HOLD_OK` carries no re-measured baseline, so its bound is its
+digits alone (1.694 ms), its held-out row lands inside that, and the gate is drawn and pays. That is also a seam
+worth naming rather than burying — **a page with no control row is priced on its digits and can exit 0 on a much
+narrower bound than a page with one** (#209's rule only fires on pages that repeat their baseline), so a reader
+should note which kind of page any future `pays` came from. Whether the screen should refuse to draw a gate at all
+without a drift sample is a design question this section does not decide.
+
+### Tests, gates and provenance
+
+39 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 30 at §5aw, nine
+new in `DriftAndHoldout` ([`:529`](../benchmark/test_tinytitan_price_pair.py#L529)) — 104 OK alongside
+`test_knob_sweep_verdict` and `test_docs_facts_suites` (95 before). Every test-file change is inventoried: the
+module docstring gained an eighth "must not get wrong" and the widened status block; the `DOC1_IN` fixture comment
+gained the interval that #209 derives from it; `holdout_page()` and its two fixtures are new test-side helpers;
+`DriftAndHoldout` is new. Two tests had their expected **status** changed, from 0 to 2, and they are the two the
+section is about —
+[`test_one_surviving_design_prices_exactly_as_it_did_unbarred`:404](../benchmark/test_tinytitan_price_pair.py#L404) and
+[`test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too`:508](../benchmark/test_tinytitan_price_pair.py#L508).
+The production behaviour they pinned was the defect, so it is the tests that moved; each keeps its older assertion
+(`ADMISSIBLE`, `cannot decide`, the price itself) so the band call is still pinned exactly as §5au wrote it, and
+neither was rewritten to reach green. One assertion was re-pointed once more inside this section, when the
+misattribution fix moved the sentence it reads: `test_the_bound_names_the_digits_and_the_drift_apart` now binds the
+three quantities separately instead of one total, which is stronger, not weaker.
+
+RED, as far as this session can attest: the nine drove the implementation and failed against the screen as §5aw
+left it — no drift term, no interval, no residual status. The three provenance tests are the exception and are
+disclosed as such: they were RED against *my own first cut of #209*, which had already folded the drift into the
+totals and printed them under the digits sentence, so their failure was of a sentence rather than of a number. That
+is the class of defect no pre-existing test could have caught, because the string it names was invented in the same
+change that misused it.
+
+Deviations.
+
+1. **No model run, and no new measurement.** Every number above is the shipped screen's output over pages built
+   from rows §5ax, §5at and §5au published; the runs are quoted verbatim from
+   `python3 benchmark/tinytitan_price_pair.py --page … [--predict layer_depth325]`, with the elided spans marked
+   `...` being the drift line's middle clause and the fixture prose, not values.
+2. **The `/tmp/az209/` pages are throwaways** (`ax_two_rounds.md`, `at_six_arm.md`, `four_pages.py`), rebuilt from
+   published tables, not committed and not proposed as tools; the committed artifacts are the screen, its suite and
+   this section. §5ax's logs remain `/tmp/trio206/`.
+3. **The 0.75 ms and 1.2 ms gate requirements are arithmetic on the screen's own printed widths**, at the §5ax
+   medians, and they inherit its round-2 solve (`x=0.120`, `y=0.897`). They are a *bound on reachability*, not a
+   measurement of drift: they say no page this quiet can score the gate, not that some page that quiet exists.
+4. **`_spread` adds widths independently, so every bound printed here is a worst case.** Where two partials share a
+   sign (`y`) the common and difference modes coincide; where they do not (`x`) the screen prints only the
+   difference mode, which is why §5ax's common-mode `x` column (+0.008 per ms) is still not an output of the screen.
+   A bound is not a distribution and nothing here should be read as one.
+5. **Round 3 is the contaminated-of-a-different-kind round.** §5ax deviation 4 records Chrome and this session on
+   the machine and 5.7 GiB of swap carried in; its control moving 11.70 ms is that record showing up as a width.
+   The refutation therefore rests on round 2's quieter clock, which is the same round §5ax's `prefetch_off` sign
+   came from, and both readings of that round are published.
+6. **Provenance.** `#L149`-style anchors in §5au, §5aw, §5ax and §5ay were re-measured against this file as part of
+   this commit; the four amendments they gained are pointers, not rewrites, and every one names what moved. Gates
+   seen locally before committing: `tools/lint.sh python` ok (ruff 0.16.7, check and format clean, 203 scripts parse
+   under 3.13), `tools/lint.sh docs` ok (87 documents, 101/105 python suites registered in CI), the CI markdown-link
+   step run locally 145 checked / 0 broken, and `python3 -m unittest test_tinytitan_price_pair
+   test_knob_sweep_verdict test_docs_facts_suites` — 104 OK in 0.747 s. One anchor written by this section itself was
+   wrong on first draft (`:406` pointed inside a test body rather than at its `def`), found by reading the line each
+   cited number names, and is `:404`. None of it is evidence a CI run executed them.

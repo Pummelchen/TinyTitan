@@ -13,23 +13,26 @@ published counters; both left the arithmetic in a throwaway. This is the shipped
 screen: it reads the page `tinytitan_knob_sweep.py` prints (or a markdown table
 with the same columns from the measurements doc), names the column it solved
 from, reports the condition number and how far 1 ms of wall moves `y`, bounds the
-answer by the digits the page actually carries — the sweep prints `tok/s` to two,
-which is ±0.03 ms on `y` for the campaign's own trio, and a band call that falls
-inside that bound is refused rather than decided — and answers with the status
-this tree's other drivers use:
+answer by the two widths the page itself carries — how finely its rows were
+printed, and how far its own re-measured baseline moved a row with no config
+change in it — refuses a band or gate call that falls inside that bound, and scores
+a held-out row's residual as the only test of the model that is not Cramer
+agreeing with itself. Its answers use the statuses this tree's other drivers do:
 
-    0  the design identifies and `y` is inside the admissible band
-    1  it identified a price, and that price refutes the two-price model
-    2  it could not solve, with the reason named
+    0  the design identifies, `y` is inside the band, and the gate is drawn
+    1  it identified a price, and that price or a held-out row refutes the model
+    2  it could not solve, or its own widths cannot draw the gate, reason named
 
-The angle bounds a design's *conditioning* and the digits bound its *precision*;
-neither bounds whether the row moved at all. §5au fed this screen a real page and
-its widest-angle rule priced an adopted read at 18.189 ms off a row whose entire
-step was smaller than the same page's drift control, so the control (`base_again`,
-the baseline re-measured) is never a solve partner, a row lying inside its step is
-not signal, and the designs that survive are all printed: when they land on
-opposite sides of a band edge the page is refused, because which one the widest
-angle happens to pick is not evidence for it.
+The angle bounds a design's *conditioning*; the digits and the drift together bound
+its *precision*; neither bounds whether the row moved at all. §5au fed this screen a
+real page and its widest-angle rule priced an adopted read at 18.189 ms off a row
+whose entire step was smaller than the same page's drift control, so the control
+(`base_again`, the baseline re-measured) is never a solve partner, a row lying inside
+its step is not signal, and the designs that survive are all printed: when they land
+on opposite sides of a band edge the page is refused, because which one the widest
+angle happens to pick is not evidence for it. #209 added the other half of the same
+control: it is also how far the machine shifts each input the solve reads, so it
+enters the bound instead of only the row list.
 
 Nothing here is measured on hardware — it is arithmetic over a page somebody else
 printed — so it runs in CI with no model, no server, no socket, nothing fetched.
@@ -122,6 +125,22 @@ class Row:
     dv: float
 
 
+@dataclass(frozen=True)
+class Drift:
+    """What the page's own re-measured baseline says the machine does to one row.
+
+    The three fields are that row's step in the column the solve reads and in the
+    two counters. Since no config change is in it, every input the solve reads is
+    as uncertain as this, and it enters the price bound through the same
+    derivatives the printed digits do. `None` when the page carries no such row.
+    """
+
+    control: str
+    dm: float
+    du: float
+    dv: float
+
+
 @dataclass
 class Price:
     """One pair's solve, with the geometry that licenses it."""
@@ -133,10 +152,40 @@ class Price:
     x: float
     y: float
     dy_per_ms: float
-    # Half-widths the page's printed digits put on each price, in ms. Required, not
-    # defaulted: a Price that carries no bound would read as an exact one.
+    # Half-widths the page puts on each price, in ms, split by where they come from:
+    # `*_digits` is how finely the row was printed, `*_drift` is how far the same
+    # page's re-measured control moved a row with no config change, and `*_bound` is
+    # the total a reader is allowed. Required, not defaulted: a Price that carries no
+    # bound would read as an exact one.
+    x_digits: float
+    y_digits: float
+    x_drift: float
+    y_drift: float
     x_bound: float
     y_bound: float
+    # Difference-mode sensitivity: ms of price per ms of width on ONE row, with the
+    # two rows' widths independent so their errors add. `dy_per_ms` above is the
+    # single-row maximum, which understates what a moving machine does to a solve;
+    # the common mode, where both rows shift together, largely cancels in `det`.
+    x_diff_per_ms: float
+    y_diff_per_ms: float
+
+
+@dataclass
+class OffSample:
+    """A row the solve never saw, priced by the model and measured on the same page.
+
+    Two rows pin two prices exactly, so they can never test the model; a third is the
+    only thing that can. `width` is everything this page cannot resolve about that
+    row's own step, which is what the residual has to clear before it is a finding.
+    """
+
+    arm: str
+    du: float
+    dv: float
+    want: float
+    measured: float
+    width: float
 
 
 @dataclass
@@ -154,6 +203,9 @@ class Selection:
     offers: int = 0
     signal: str = ""
     notes: list[str] = field(default_factory=list)
+    # The page's own re-measured baseline, which _solve turns into widths. None when
+    # no such row was on the page, which leaves the bound on the printed digits alone.
+    drift: Drift | None = None
 
 
 def _num(text: str) -> float | None:
@@ -336,14 +388,21 @@ def _round_up(ms: float) -> float:
 
 
 def _solve(
-    r1: Row, r2: Row, m1: float, m2: float, widths: tuple[float, float, float, float]
+    r1: Row,
+    r2: Row,
+    m1: float,
+    m2: float,
+    widths: tuple[float, float, float, float],
+    drift: Drift | None,
 ) -> Price | None:
     """Cramer over the two rows, with the condition number and the page's own bound.
 
     `widths` is the half-width the page's digits put on each input the solve reads:
-    the two steps, then one `du` and one `dv`. Each is multiplied by the derivative
-    of the price it enters, so the sum is the width the printed page allows the
-    answer rather than an estimate of it.
+    the two steps, then one `du` and one `dv`. `drift` is how far the page's own
+    re-measured control moved the same four inputs with no config change in it. Each
+    width is multiplied by the derivative of the price it enters, so each sum is the
+    width that source allows the answer, and their total is the bound a reader has to
+    work to.
     """
     det = r1.du * r2.dv - r1.dv * r2.du
     n1, n2 = math.hypot(r1.du, r1.dv), math.hypot(r2.du, r2.dv)
@@ -351,28 +410,35 @@ def _solve(
         return None
     sin = min(1.0, abs(det) / (n1 * n2))
     hm1, hm2, hdu, hdv = widths
+    dm, ddu, ddv = (drift.dm, drift.du, drift.dv) if drift else (0.0, 0.0, 0.0)
     d2 = det * det
     ny = r1.du * m2 - m1 * r2.du  # y's numerator
     nx = m1 * r2.dv - r1.dv * m2  # x's numerator, the same Cramer numerator as Price.x
-    # Each part is (d price / d input, that input's half-width), in the order
+    # Each tuple is the price's derivative with respect to one input, in the order
     # m1, m2, du1, du2, dv1, dv2. The determinant carries the row coordinates, so
     # their digits reach the price through it as well as through the numerator.
-    y_parts = [
-        (-r2.du / det, hm1),
-        (r1.du / det, hm2),
-        ((m2 * det - ny * r2.dv) / d2, hdu),
-        ((-m1 * det + ny * r1.dv) / d2, hdu),
-        (ny * r2.du / d2, hdv),
-        (-ny * r1.du / d2, hdv),
-    ]
-    x_parts = [
-        (r2.dv / det, hm1),
-        (-r1.dv / det, hm2),
-        (-nx * r2.dv / d2, hdu),
-        (nx * r1.dv / d2, hdu),
-        ((m1 * det - nx * r1.du) / d2, hdv),
-        ((-m2 * det + nx * r2.du) / d2, hdv),
-    ]
+    y_d = (
+        -r2.du / det,
+        r1.du / det,
+        (m2 * det - ny * r2.dv) / d2,
+        (-m1 * det + ny * r1.dv) / d2,
+        ny * r2.du / d2,
+        -ny * r1.du / d2,
+    )
+    x_d = (
+        r2.dv / det,
+        -r1.dv / det,
+        -nx * r2.dv / d2,
+        nx * r1.dv / d2,
+        (m1 * det - nx * r1.du) / d2,
+        (-m2 * det + nx * r2.du) / d2,
+    )
+    # Both rows are read off the same columns, so each counter width applies twice;
+    # the drift step is the same machine moving either row, so `dm` does too.
+    w_digits = (hm1, hm2, hdu, hdu, hdv, hdv)
+    w_drift = (dm, dm, ddu, ddu, ddv, ddv)
+    y_digits, y_drift = _spread(y_d, w_digits), _spread(y_d, w_drift)
+    x_digits, x_drift = _spread(x_d, w_digits), _spread(x_d, w_drift)
     return Price(
         a=r1.arm,
         b=r2.arm,
@@ -382,9 +448,24 @@ def _solve(
         y=ny / det,
         # |d y / d m| is the other row's du over the determinant, per row.
         dy_per_ms=max(abs(r2.du / det), abs(r1.du / det)),
-        x_bound=_round_up(sum(abs(v) * w for v, w in x_parts)),
-        y_bound=_round_up(sum(abs(v) * w for v, w in y_parts)),
+        x_digits=_round_up(x_digits),
+        y_digits=_round_up(y_digits),
+        x_drift=_round_up(x_drift),
+        y_drift=_round_up(y_drift),
+        x_bound=_round_up(x_digits + x_drift),
+        y_bound=_round_up(y_digits + y_drift),
+        x_diff_per_ms=(abs(r1.dv) + abs(r2.dv)) / abs(det),
+        y_diff_per_ms=(abs(r1.du) + abs(r2.du)) / abs(det),
     )
+
+
+def _spread(derivs: tuple[float, ...], widths: tuple[float, ...]) -> float:
+    """The half-width these input widths put on a price.
+
+    First-order propagation with the inputs independent, which is the worst case: a
+    machine that moved one row and not the other is what the drift sample measures,
+    so their errors add rather than cancel."""
+    return sum(abs(d) * w for d, w in zip(derivs, widths, strict=True))
 
 
 def _band_class(y: float) -> str:
@@ -398,19 +479,27 @@ def _band_class(y: float) -> str:
 
 def _drift_sample(
     rnd: Round, step_rows: dict[str, Row], priced: dict[str, float], control: str, column: str
-) -> tuple[dict[str, Row], list[str], str]:
-    """The rows the page's own drift cannot explain, the ones it inked, and the account.
+) -> tuple[dict[str, Row], list[str], str, Drift | None]:
+    """The rows the page's own drift cannot explain, the ones it inked, the account,
+    and the drift itself as a `Drift`.
 
     `control` is the sweep's `base_again`: the baseline re-measured, so its step is
     this page's drift with no config change in it. A row that moves less than that
     -- in both counters and in the column the solve reads -- is inside the drift,
     and a pair built on it is conditioning without signal.
+
+    The same control step is the page's own measurement of how far one row's inputs
+    move with no config change, so it is returned for _solve to carry into the bound.
+    #209 found the screen printing `y is known only to ±0.034 ms` on a page whose
+    control had just moved a row 11.17 ms, because the drift chose the row list and
+    never reached the price.
     """
     if control not in rnd.arms:
         return (
             step_rows,
             [],
             f"no drift sample ({control} is not on this page), so no row was checked",
+            None,
         )
     row, ms = step_rows.get(control), priced.get(control)
     if row is None or ms is None:
@@ -420,6 +509,7 @@ def _drift_sample(
             [],
             f"no drift sample ({control} logged no {label} step or no counters), "
             "so no row was checked",
+            None,
         )
     live = {
         n: r
@@ -436,7 +526,13 @@ def _drift_sample(
         else "no row lies inside it"
     )
     moved = f"{row.du:+.2f}, {row.dv:+.2f}"
-    return live, barred, f"drift sample {control} moved ({moved}) and {ms:+.2f} ms; {inside}"
+    drift = Drift(control=control, dm=abs(ms), du=abs(row.du), dv=abs(row.dv))
+    return (
+        live,
+        barred,
+        f"drift sample {control} moved ({moved}) and {ms:+.2f} ms; {inside}",
+        drift,
+    )
 
 
 def best_pair(
@@ -452,7 +548,7 @@ def best_pair(
     ms = {n: _dm(rnd.arms[n], base, column) for n in all_rows}
     unmeasured = sorted(n for n, v in ms.items() if v is None)
     priced = {n: float(v) for n, v in ms.items() if v is not None}
-    step_rows, inked, signal = _drift_sample(rnd, all_rows, priced, control, column)
+    step_rows, inked, signal, drift = _drift_sample(rnd, all_rows, priced, control, column)
     hrow = {n: _dm_ulp(rnd, rnd.arms[n], base, column) for n in priced}
     hcoords = (_ulp(rnd, ISSUED), _ulp(rnd, ADOPTED))
     candidates = [
@@ -464,6 +560,7 @@ def best_pair(
                 priced[a],
                 priced[b],
                 (hrow[a], hrow[b], *hcoords),
+                drift,
             )
             for a, b in itertools.combinations(sorted(step_rows), 2)
         )
@@ -487,7 +584,14 @@ def best_pair(
         (p for p in candidates if p.deg >= MIN_ANGLE), key=lambda p: p.deg, reverse=True
     )
     best = max(candidates, key=lambda p: p.deg) if candidates else None
-    return Selection(best=best, cleared=cleared, offers=len(candidates), signal=signal, notes=notes)
+    return Selection(
+        best=best,
+        cleared=cleared,
+        offers=len(candidates),
+        signal=signal,
+        notes=notes,
+        drift=drift,
+    )
 
 
 def _designs_line(sel: Selection) -> str:
@@ -530,37 +634,155 @@ def _missing(rnd: Round) -> list[str]:
 
 
 def _digits_line(rnd: Round, column: str, pair: Price) -> str:
-    """What the page's own printed precision says the answer is worth."""
+    """What the page's own printed precision says the answer is worth.
+
+    Only the digits: the drift is a different width of a different thing, and the
+    two together get their own line. A total printed under this sentence would
+    read as though the number of decimals cost a reader a quarter of a token.
+    """
     dec = _digits(rnd, column)
     key = RATE if column == WALL else column
     label = PRINTED.get(key, key)
     return (
         f"digits: the page prints {label} to {dec} decimal{'s' if dec != 1 else ''} "
-        f"(±{0.5 * 10.0**-dec:.{dec + 1}f}), so y is known only to ±{pair.y_bound:.3f} ms "
-        f"and x to ±{pair.x_bound:.3f} ms"
+        f"(±{0.5 * 10.0**-dec:.{dec + 1}f}), so y is known only to ±{pair.y_digits:.3f} ms "
+        f"and x to ±{pair.x_digits:.3f} ms"
     )
 
 
-def _cannot_decide(bound: float, gap: float, med_y: float, edge: float, band: str) -> str:
-    """The one call the band edge forces, said whichever side of the edge `y` is on."""
-    side = "inside" if BAND_LO <= med_y <= BAND_HI else "outside"
+def _drift_line(sel: Selection, pair: Price, column: str) -> str | None:
+    """What the page's own machine says the answer is worth, named apart from its digits.
+
+    The digits bound how finely a row was printed; only the re-measured baseline
+    bounds how far the machine moves a row that did not change. On §5au's page the
+    first was ±0.034 ms and the second a quarter of a token, so one number would have
+    been a bound on the wrong thing.
+    """
+    drift = sel.drift
+    if drift is None:
+        return None
+    label = PRINTED.get(column, column)
     return (
-        f"cannot decide: the page's own digits put ±{bound:.3f} ms on y and it sits only "
-        f"{gap:.3f} ms {side} the nearer band edge ({edge:.3f} of {band}), so neither this "
-        "band call nor a gate draw from it is separable from the rounding of the rates "
-        "the page was read from; more printed decimals is what would settle both"
+        f"drift: {drift.control} is this page's baseline re-measured, so its step "
+        f"(±{drift.dm:.3f} ms of {label}, ±{drift.du:.2f} issued, ±{drift.dv:.2f} adopted) is "
+        f"what the machine does to a row with no config change in it; difference-mode "
+        f"sensitivities {pair.y_diff_per_ms:.3f} ms of y and {pair.x_diff_per_ms:.3f} ms of x "
+        f"per ms of drift, so drift alone puts ±{pair.y_drift:.3f} ms on y and "
+        f"±{pair.x_drift:.3f} on x where the digits put ±{pair.y_digits:.3f} and "
+        f"±{pair.x_digits:.3f}; the digits and drift together put ±{pair.y_bound:.3f} ms on y "
+        f"and ±{pair.x_bound:.3f} on x, and that is the bound this page may price by"
+    )
+
+
+def _pi_interval(x: float, wx: float, y: float, wy: float) -> tuple[float, float | None]:
+    """The interval `x/y` covers once each price carries its own width.
+
+    An empty lower half -- `y - wy <= 0` -- means the ratio is unbounded: the page
+    cannot say the adopted read costs anything at all, so no threshold on `p*` means
+    anything either, and the caller gets None rather than a made-up number.
+    """
+    if y - wy <= 0.0:
+        return ((x - wx) / y if y > 0 else 0.0, None)
+    return ((x - wx) / (y + wy), (x + wx) / (y - wy))
+
+
+def _off_sample(o: OffSample, token_ms: float) -> tuple[str, bool]:
+    """Score a held-out row: the only test of the model that is not Cramer agreeing
+    with itself, bounded by everything this page cannot resolve."""
+    res = o.measured - o.want
+    refuted = abs(res) > o.width
+    said = (
+        f"out-of-sample {o.arm}: rows ({o.du:+.2f}, {o.dv:+.2f}) predicted {o.want:+.2f} ms, "
+        f"measured {o.measured:+.2f} ms, residual {res:+.2f} ms/token "
+        f"({res / token_ms * 100:+.2f} % of a token) against "
+        f"{o.width:.3f} ms this page cannot resolve"
+    )
+    if refuted:
+        return (
+            said + f": REFUTED OUT OF SAMPLE, the pair that fits its own two rows exactly misses a "
+            f"row it never solved by {abs(res) / o.width:.1f}x the page's own width, so the "
+            "two-price model does not hold on this page and no gate draw from it is an answer",
+            True,
+        )
+    return (
+        said + ": out-of-sample consistent, a model fitted to two rows predicted a third it never "
+        "solved to inside the page's own width, which is the strongest thing this design can "
+        "say about it",
+        False,
+    )
+
+
+def _cannot_decide(
+    bound: float,
+    digits: float,
+    drift: float,
+    gap: float,
+    med_y: float,
+    edge: float,
+    band: str,
+) -> str:
+    """The one call the band edge forces, said whichever side of the edge `y` is on.
+
+    Naming which half of the bound dominates says what would settle it: a page
+    printed too coarsely is fixed by more decimals, and a page whose own control
+    moved a quarter of a token is not, so the same width in two different
+    provenances calls for two different pieces of advice.
+    """
+    side = "inside" if BAND_LO <= med_y <= BAND_HI else "outside"
+    if drift > 0.0:
+        parts = f"its digits ±{digits:.3f} ms and its own drift ±{drift:.3f}"
+        remedy = (
+            "more printed decimals is what would settle both"
+            if digits >= drift
+            else "printing more decimals would not settle it, because the machine's own drift "
+            "is the wider half of what this page cannot resolve"
+        )
+    else:
+        parts = f"the printing alone, ±{digits:.3f} ms"
+        remedy = "more printed decimals is what would settle both"
+    return (
+        f"cannot decide: this page's bound on y is ±{bound:.3f} ms -- {parts} -- and it sits "
+        f"only {gap:.3f} ms {side} the nearer band edge ({edge:.3f} of {band}), so neither this "
+        "band call nor a gate draw from it is separable from what the page can resolve; "
+        f"{remedy}"
+    )
+
+
+def _cannot_decide_gate(
+    lo: float, hi: float | None, need: float, med_x: float, wx: float, med_y: float, wy: float
+) -> str:
+    """Refuse the six-link gate when the page's own widths straddle its threshold."""
+    if hi is None:
+        said = f"from {lo:.3f} up, unbounded, because y - ±{wy:.3f} is not finite"
+        why = "the page does not price an adopted read at all, so no ratio of it has a value"
+    else:
+        said = f"from {lo:.3f} to {hi:.3f}"
+        why = "the threshold lies inside the ratio's own interval"
+    return (
+        f"cannot decide the gate: x={med_x:.3f} ±{wx:.3f} and y={med_y:.3f} ±{wy:.3f} make p* run "
+        f"{said} against the six-link gate's L/S = {need:.3f}, and {why}; the band call above "
+        "stands on its own, but which side of this threshold a gate draw lands on is not "
+        "separable from the widths this page carries, so no gate score is printed"
     )
 
 
 def _verdict(
-    pairs: list[Price], token_ms: float, saved: float, lost: float
+    pairs: list[Price],
+    token_ms: float,
+    saved: float,
+    lost: float,
+    off: tuple[OffSample, ...] = (),
 ) -> tuple[list[str], int]:
+    """The band call, the gate call the widths license, and the out-of-sample score."""
     ys = [p.y for p in pairs]
     xs = [p.x for p in pairs]
     med_y, med_x = statistics.median(ys), statistics.median(xs)
-    # The widest bound any round's own digits put on `y`: the median of several
-    # solves is no better known than the least known of them.
-    bound = max(p.y_bound for p in pairs)
+    # The widest bound any round puts on each price: the median of several solves is
+    # no better known than the least known of them. `worst` is that round, kept whole
+    # so a caveat can say what its bound is made of rather than only how wide it is.
+    worst = max(pairs, key=lambda p: p.y_bound)
+    bound = worst.y_bound
+    xbound = max(p.x_bound for p in pairs)
     edge = min((BAND_LO, BAND_HI), key=lambda e: abs(med_y - e))
     gap = abs(med_y - edge)
     band = f"{BAND_LO:.3f}-{BAND_HI:.3f} ms"
@@ -568,6 +790,7 @@ def _verdict(
         f"median x={med_x:.3f} y={med_y:.3f}  "
         f"spread x={max(xs) - min(xs):.3f} y={max(ys) - min(ys):.3f}"
     ]
+    need = lost / saved
     if not BAND_LO <= med_y <= BAND_HI:
         lines.append(
             f"REFUTED: y={med_y:.3f} is outside the admissible band {band} ({SERVICE_TEXT}), so "
@@ -575,20 +798,36 @@ def _verdict(
             "read; the six-link gate is not scored from a refuted price"
         )
         if bound >= gap:
-            lines.append(_cannot_decide(bound, gap, med_y, edge, band))
+            lines.append(
+                _cannot_decide(bound, worst.y_digits, worst.y_drift, gap, med_y, edge, band)
+            )
+        refuted = [_off_sample(o, token_ms) for o in off]
+        lines.extend(t for t, _ in refuted)
         return lines, 1
-    pstar = med_x / med_y
-    need = lost / saved
-    gain = med_x * saved - med_y * lost
     lines.append(f"ADMISSIBLE: y={med_y:.3f} is inside {band}, so the two rows price both reads")
-    lines.append(
-        f"p*={pstar:.3f} against the six-link gate's L/S = {lost:.2f}/{saved:.2f} = {need:.3f} -> "
-        f"{'pays' if pstar > need else 'does not pay'} ({gain:+.2f} ms of a {token_ms:.1f} ms "
-        f"token, {gain / token_ms * 100:+.2f} %)"
-    )
     if bound >= gap:
-        lines.append(_cannot_decide(bound, gap, med_y, edge, band))
-    return lines, 0
+        lines.append(_cannot_decide(bound, worst.y_digits, worst.y_drift, gap, med_y, edge, band))
+    scored = [_off_sample(o, token_ms) for o in off]
+    lines.extend(t for t, _ in scored)
+    if any(r for _, r in scored):
+        lines.append(
+            "the six-link gate is not scored from a model this page's own held-out row refutes, "
+            "however well its two solved rows fit"
+        )
+        return lines, 1
+    lo, hi = _pi_interval(med_x, xbound, med_y, bound)
+    gate_scored = hi is not None and not lo <= need <= hi
+    if gate_scored:
+        pstar = med_x / med_y
+        gain = med_x * saved - med_y * lost
+        lines.append(
+            f"p*={pstar:.3f} against the six-link gate's L/S = {lost:.2f}/{saved:.2f} = "
+            f"{need:.3f} -> {'pays' if pstar > need else 'does not pay'} "
+            f"({gain:+.2f} ms of a {token_ms:.1f} ms token, {gain / token_ms * 100:+.2f} %)"
+        )
+    else:
+        lines.append(_cannot_decide_gate(lo, hi, need, med_x, xbound, med_y, bound))
+    return lines, 0 if gate_scored else 2
 
 
 def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
@@ -662,6 +901,7 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
 
     print(f"column {args.column}  (ms/token stepped against {args.baseline})")
     pairs: list[Price] = []
+    off: list[OffSample] = []
     for index, rnd in enumerate(rounds, start=1):
         sel = best_pair(rnd, args.baseline, args.column, args.predict, args.control)
         pair, notes = sel.best, sel.notes
@@ -688,6 +928,9 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
         )
         print(f"1 ms of {args.column} moves y by {pair.dy_per_ms:.3f} ms")
         print(_digits_line(rnd, args.column, pair))
+        drift_line = _drift_line(sel, pair, args.column)
+        if drift_line is not None:
+            print(f"  {drift_line}")
         print("\n".join(detail))
         if notes:
             print(f"  stepped over: {'; '.join(notes)}")
@@ -699,19 +942,34 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
             step = rows(rnd, args.baseline).get(args.predict)
             measured = _dm(rnd.arms[args.predict], rnd.arms[args.baseline], args.column)
             if step is not None and measured is not None:
-                want = pair.x * step.du + pair.y * step.dv
-                print(
-                    f"out-of-sample {args.predict}: rows ({step.du:+.2f}, {step.dv:+.2f}) "
-                    f"predicted {want:+.2f} ms, measured {measured:+.2f} ms, "
-                    f"residual {measured - want:+.2f} ms/token "
-                    f"({(measured - want) / token_ms * 100:+.2f} % of a token)"
+                # The residual is a difference of two numbers, each with its own width:
+                # this row's step, digits plus whatever the machine moved it, and the
+                # prediction, which inherits both prices' bounds through the row's
+                # coordinates. A page that cannot resolve 5 ms may not call a 5 ms miss
+                # a refutation.
+                dm = sel.drift.dm if sel.drift else 0.0
+                width = (
+                    _dm_ulp(rnd, rnd.arms[args.predict], rnd.arms[args.baseline], args.column)
+                    + dm
+                    + abs(step.du) * pair.x_bound
+                    + abs(step.dv) * pair.y_bound
+                )
+                off.append(
+                    OffSample(
+                        arm=args.predict,
+                        du=step.du,
+                        dv=step.dv,
+                        want=pair.x * step.du + pair.y * step.dv,
+                        measured=measured,
+                        width=_round_up(width),
+                    )
                 )
 
     if len(pairs) == 1:
         print("rounds 1: a direction needs at least 2 paired tables and a magnitude needs more")
     else:
         print(f"rounds {len(pairs)}: a direction is defensible; a magnitude wants 3 or more")
-    lines, status = _verdict(pairs, token_ms, args.s, args.l)
+    lines, status = _verdict(pairs, token_ms, args.s, args.l, tuple(off))
     for line in lines:
         print(line)
     return status
