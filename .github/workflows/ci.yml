@@ -900,6 +900,12 @@ jobs:
         # same trace shape: one serial drive, the engine's own LFU placement, and
         # a gate that withholds every projected rate when the burst control arm
         # cannot reproduce a measured clock. Model-free, stdlib-only.
+        # test_heat_split_sim screens a heat-proportional per-layer slot split
+        # across three committed route captures, and pins that a split learned on
+        # one session still beats the shipped uniform split on another. It reads
+        # only committed .gz traces, starts no server and imports nothing beyond
+        # stdlib and its sibling simulator (stage 0 / B1 of
+        # docs/plan-qwen38-decode-12gb.md).
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -930,7 +936,8 @@ jobs:
             test_side_engine_wired_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
-            test_flat_pair_cache_sim test_continuous_feeder_sim
+            test_flat_pair_cache_sim test_continuous_feeder_sim \
+            test_heat_split_sim
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These

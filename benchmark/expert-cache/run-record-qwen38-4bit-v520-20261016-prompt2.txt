@@ -1,0 +1,55 @@
+Provenance for route-trace-qwen38-4bit-v520-20261016-prompt2.txt.gz
+
+Why this file exists: §5y's deviation list said the screen's evidence lived in throwaway
+logs under /tmp, so a reboot would have cost the rows. The counters a calibration needs
+are recorded here next to the capture they calibrate against.
+
+Capture (the second of two runs; the two traces are byte-identical, md5
+df76a40b380a9d112e0eb2326d1a046f, which is also the md5 of the decommitted .gz here):
+
+  machine  Apple M3 Pro, 24 GB, macOS 26, mains power
+  build    v5.20 (commit b27f29e), `swift build -c release`, no experimental flags
+  exit     0
+
+The argv itself was not logged, so the run is described only by what its own stderr
+record shows: the prompt was the "Mixture-of-Experts Routing" article reproduced at the
+top of the capture's stderr (33 prefill tokens), and
+
+  TinyTitan ram profile cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G
+  TinyTitan profile model=qwen3.8-flash-next bits=4 family=qwen38flash tabled
+            budget=12288MiB prefetch=1 chunk=4096 ...
+
+which names the install, the 12 GiB RAM cap and the shipped 96-slot rung. Treat the
+command line as unrecovered; the identity of what ran is in these two lines.
+
+Footer:
+
+  prefill_s=6.774 decode_s=80.977 decode_tok_s=4.742
+  prefill=33tok new=384tok
+  expert_hit_rate=0.8091 expert_hits=153028 expert_misses=36107
+  expert_evictions=39328 expert_reloads=30323
+  expert_read_mib=95345.0
+  prefetch_issued_per_token=40.51 prefetch_adopted_per_token=20.39
+  io_hidden_pct=99.78 wait_ms=91.896 body_ms=193.313
+  cache_plan_ms=3.9991 hit_fixup_layers=12446
+  prefetch_ring begins=18001 free=0.99 submitted=0.00 inflight=0.01 held=0.00
+
+Arithmetic the calibration uses (all of it reproducible from the two lines above):
+
+  expert_read_mib / (2 768 896 / 1 048 576) = 36 106.98 = expert_misses, so on this run
+  every miss is exactly one drive read and the ring's adoptions cost no extra read bytes.
+
+  (expert_hits + expert_misses) / 480 = 394.03 "token-equivalents" of routed demand,
+  against 384 decode tokens in the footer and 383 decode positions in the trace. The
+  excess is 10.03 token-steps, which is 30.4% of the 33-token prefill: part of the
+  prefill's routing is inside the engine's counters and outside a decode-only replay, so
+  a replay and a footer are not divided by the same denominator.
+
+  floor  = expert_misses / 383 = 94.27 reads/token (94.03 over the footer's 384)
+  ceiling= floor + prefetch_adopted_per_token = 114.66 placements/token
+  decode-only replay of the shipped uniform 96 = 102.10, i.e. inside the bracket,
+  -10.8% from the ceiling and +8.3% above the floor.
+
+That -10.8% is the reason §5z does not quote a token rate. §5y measured a -3.2% level
+bias on its own capture; on this second workload the same instrument sits 10.8% under its
+ceiling, so the bias is a property of the session, not a constant to divide out.

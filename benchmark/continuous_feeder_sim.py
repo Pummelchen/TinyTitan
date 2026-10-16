@@ -301,12 +301,17 @@ class _PlanSlots:
       expert id -- that is where "fill the free slots first" actually comes from.
     """
 
-    def __init__(self, capacity):
+    def __init__(self, capacity, use_cap=None):
         self.capacity = capacity
         self.use_count = {}
         self.slot_expert = {}
         self.slot_last_use = {}
         self.clock = 0
+        # `None` is the engine as shipped. A number clamps only the *ranking key*,
+        # not the count: the engine's `expertUseCount` keeps accumulating
+        # (PreadExpertStreamer.swift:326), so a cap prices a slot by its recent
+        # demand rather than by everything it has done since the model loaded.
+        self.use_cap = use_cap
 
     def plan(self, experts):
         """Place one layer step and return the experts that were not resident."""
@@ -321,7 +326,7 @@ class _PlanSlots:
         evictable = sorted(
             (slot for slot in range(self.capacity) if slot not in held),
             key=lambda slot: (
-                self.use_count[self.slot_expert[slot]] if slot in self.slot_expert else -1,
+                self._price(slot),
                 self.slot_last_use.get(slot, 0),
             ),
         )
@@ -336,6 +341,17 @@ class _PlanSlots:
 
     def contains(self, expert):
         return expert in self.slot_expert.values()
+
+    def _price(self, slot):
+        """What this step's ranking charges for the slot: an unfilled slot is free.
+
+        With a cap the two ranks merge and the tie falls to `slot_last_use`, which is
+        how a saturating count hands a defended slot back to recency.
+        """
+        if slot not in self.slot_expert:
+            return -1
+        count = self.use_count[self.slot_expert[slot]]
+        return count if self.use_cap is None else min(count, self.use_cap)
 
     @property
     def resident_count(self):
