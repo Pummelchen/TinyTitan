@@ -2593,3 +2593,128 @@ retired without a model run.
 
 **What survives unchanged** is #177 — the saturating use-count arm, whose live paired
 A/B is the running subject of §5ad — and #163, the wiki decode row.
+## 5ad. #177 live: the capped use-count is a measured loss — and the replay that recommended it was a first-request proxy (2026-10-16)
+
+§5aa's one surviving candidate was the saturating use-count cap in
+`makeExpertCachePlan`: clamp the *ranking key* `min(useCount, C)` while the engine's
+per-expert count keeps accumulating, so a defended slot is priced by recent demand
+instead of by everything it has done since load. It was −2.04…−7.92 % placements
+offline and output-invariant by construction, and §5ab closed the night with it as the
+one arm still owed a live paired A/B. The arm has now run. **It loses, and the reason
+it loses is a hole in the offline screen itself.**
+
+Provenance: `models/qwen3.8-flash-next_125B_A6B_4Bit`, `.build/release/TinyTitanServer`
+sha256 `fdaa34830d33a1e52d436376e30f821947fd0455e342aba4c26c1a944b0f948d`, built at
+`2ef9d00`; `git diff --name-only 2ef9d00..HEAD` names `ci.yml` and two files under
+`docs/` and **nothing under `sources/`**, so that binary is the engine at `1307a75`.
+Working tree clean at measurement. 24 GB Apple M3, macOS 27.0.1, Swift 6.4,
+target `arm64-apple-macosx27.0.0`, AC power at 100 % (recorded at launch),
+`memory_pressure -Q` 85 % free. Command:
+`python3 benchmark/tinytitan_usecap_ab.py` → exit 0. 3 rounds × 3 arms × 2 requests of
+512 tokens at `--ram 12G`, one fresh server per arm per round (9 servers, never two
+alive), arms interleaved within each round, `default` carried first as the control.
+The cap is `TINYTITAN_EXPERT_USE_CAP`
+(`sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift:110-135`),
+unset for the control arm — the driver *clears* it rather than leaving it, so an
+operator's exported value cannot silently rename an arm.
+
+### The wall clock, both pairings
+
+| round | default r1 | default r2 | cap3 r1 | cap3 r2 | cap5 r1 | cap5 r2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 4.557 | 4.763 | 4.614 | 4.486 | 4.509 | 4.506 |
+| 2 | 4.641 | 4.744 | 4.623 | 4.508 | 4.631 | 4.630 |
+| 3 | 4.664 | 4.879 | 4.544 | 4.533 | 4.558 | 4.572 |
+
+The driver pairs request *2* with request *2*, because that is the request a cache
+policy can actually distinguish — and that pairing is uniformly negative:
+
+| arm | r1 | r2 | r3 | mean |
+| --- | ---: | ---: | ---: | ---: |
+| cap3 (warm pairing) | −0.277 (−5.8 %) | −0.236 (−5.0 %) | −0.346 (−7.1 %) | **−0.286 (−6.0 %)** |
+| cap5 (warm pairing) | −0.257 (−5.4 %) | −0.114 (−2.4 %) | −0.307 (−6.3 %) | **−0.226 (−4.7 %)** |
+| cap3 (cold pairing, request 1) | +0.057 | −0.018 | −0.120 | −0.027 |
+| cap5 (cold pairing, request 1) | −0.048 | −0.010 | −0.106 | −0.055 |
+
+Six of six warm pairs negative; the cold pairs are inside ±0.12 tok/s and average
+−0.6 % and −1.2 %. So the arm is not "slightly slower everywhere" — it is **neutral on
+a cold cache and 5–7 % slower on a warm one**. That shape is the finding.
+
+### The counters carry the mechanism, not the clock
+
+| arm | hit rate range | mean hit | mean misses | mean read MiB |
+| --- | --- | ---: | ---: | ---: |
+| default | 0.7676 … 0.7872 | **0.7775** | 55 418 | 146 336.8 |
+| cap3 | 0.7626 … 0.7643 | 0.7633 | 58 951 (+6.4 %) | 155 667.9 (+6.4 %) |
+| cap5 | 0.7650 … 0.7667 | 0.7659 | 58 315 (+5.2 %) | 153 987.6 (+5.2 %) |
+
+The default arm's second request gains **+1.8 points** of hit rate over its first
+(0.7689 → 0.7864 at round 2): that is the cache remembering the previous request. The
+cap arms gain nothing (cap3 0.7643 → 0.7626, i.e. −0.2 points). A clamp at 3 or 5 makes
+every well-used expert indistinguishable from one used exactly that many times, so the
+rule that defended the resident set across requests degenerates into recency — and
+recency is exactly what §5y's `_Slots` textbook rule is, which lands at 151.20
+misses/token where the shipped plan lands at 89.28. **The cap does not weaken the LFU
+rank at the margin; it removes the memory that made the rank worth having.**
+Response invariance held on every round: `b5c6c72d385f2f20` across default, cap3, cap5.
+
+### Why the offline screen said the opposite, and what it now has to do
+
+§5aa's replay ran each arm on **fresh caches over one session** — the analogue of
+request 1, which is precisely where this arm is neutral-to-better. The second request
+is not reproducible in that shape. Replaying the same route rows **twice over one cache
+set** models it (greedy decoding makes the second request's routes identical, which the
+hash equality above confirms), and the prediction flips:
+
+| capture | pass | shipped | cap3 | cap5 |
+| --- | --- | ---: | ---: | ---: |
+| `20261011` | 1 | 91.765 | 84.496 (**−7.9 %**) | 84.734 (−7.7 %) |
+| | 2 | 81.486 | 86.977 (**+6.7 %**) | 84.044 (+3.1 %) |
+| `v520-20261015` | 1 | 89.284 | 87.458 (−2.0 %) | 86.951 (−2.6 %) |
+| | 2 | 77.258 | 87.487 (**+13.2 %**) | 84.687 (+9.6 %) |
+| `v520-prompt2` | 1 | 102.104 | 96.966 (−5.0 %) | 98.157 (−3.9 %) |
+| | 2 | 90.752 | 95.397 (**+5.1 %**) | 93.493 (+3.0 %) |
+
+Pass 1 reproduces the shipped baselines to the digit (91.765 / 89.284 / 102.104), so
+this harness is §5y's, and only the second pass is new. The shipped rule's second pass
+improves 11.1–13.5 % over its first — that is the warmth the live run measured as
++1.8 points of hit rate — and the cap arms' second passes do not improve at all
+(+2.94 %, +0.03 %, −1.62 % for cap3). The offline second-pass penalty of
+**+5.1…+13.2 %** placements brackets the live **+5.2…+6.4 %** miss penalty, which is
+the agreement that matters: the counters predict each other across an offline replay and
+a real server, and the wall clock is only the third witness.
+
+### Deviations
+
+1. **Swap was already 6 523.62 M of 8 192 M committed before the run started**, on
+   mains, with the machine otherwise idle. Not removable without purging caches, which
+   this repository forbids, so it is disclosed rather than fixed. It raises both arms
+   equally and the counters move with the wall clock, not against it.
+2. **Two single-threaded python screens totalling ~50 s of CPU ran inside the
+   measurement window** — §5ac's merge probe and layout screen, while rounds 2–3 were
+   in flight. Arms are interleaved *within* a round, so common-mode drift cancels in
+   the paired delta, but round 3's losses are the largest of the three and I cannot
+   exclude an asymmetric effect on it. That is why the verdict rests on the six-of-six
+   sign, the counters and §5ad's own offline reproduction, not on the magnitude of
+   −6.0 %. Re-running for a cleaner magnitude is not needed to decide the arm.
+3. The driver's headline pairs the warm request. Quoted above alongside the cold
+   pairing, because the difference between the two *is* the mechanism.
+4. A 512-token request at ~4.6 tok/s is ~111 s per arm-request; 18 requests plus 9
+   server starts is ~40 min of model time. Nothing else ran against the GPU.
+5. `prefetch_issued_per_token` and `io_hidden_pct` are flat across arms (42.3–43.0 and
+   99.7–99.9 %), so the cap does not disturb the prefetch ring — the loss is purely
+   placement.
+
+### Verdict
+
+**The cap is refused.** `TINYTITAN_EXPERT_USE_CAP` stays unset by default — the shipped
+rank remains the uncapped per-expert count that outlives its slot — and the flag and its
+35 model-free tests stay in the tree as a measured-refused control, the same way
+`--rdadvise off` stays after §5m.
+
+**#177 closes as measured, and it leaves a rule behind**: for any candidate that changes
+what the cache *remembers*, the admissible offline screen is the two-pass replay, not
+the single-pass one. §5aa's numbers for this arm were not wrong — they described request
+1, which the live run confirms is neutral. The campaign's other offline-screened policy
+arms share the blind spot and should be re-read with that limit stated, which is what
+this section exists to state.
