@@ -4689,3 +4689,280 @@ Deviations.
    macOS 27.0.1 on this campaign's 24 GB M3 MacBook Pro, one model process at a time, `--ram 12` throughout.
    Logs live in `/tmp/seam202/pass<N>/` and, like every other capture in this campaign, are not committed.
 
+
+## 5aq. #203 turns both knobs at once, as §5ao asked: at 64 slots depth 2 costs −8.1 % against −12.1 % at 96, so the interaction has the predicted sign and no corner of the 2×2 beats the shipped baseline — one clean round, and two more lost to an occupant (2026-10-16)
+
+§5ap's closing reopen named the one cell that could still make an earlier read pay: *"a slot budget tight
+enough that a staged arrival is a larger share of what a layer holds"*. It is an interaction, so neither the
+depth series (§5ak, uniform depth at 96 slots) nor the budget series answers it. `5502ccb` adds
+`slots64_depth25` — `--expert-cache-slots 64` **and** the same 25-link gate-0.45 depth list — so one batch can
+span both knobs:
+
+```
+SWEEP_TOKENS=384 TINYTITAN_BENCH_RAM_BUDGET=12G \
+  python3 benchmark/tinytitan_knob_sweep.py \
+    --arms base,slots_64,layer_depth25,slots64_depth25,base_again
+# arm env: benchmark/tinytitan_knob_sweep.py:222-227; every arm's argv carries --ram-budget 12G
+```
+
+### Round 1 — the one usable round
+
+| arm | pos | tok/s | vs base | hit | `io_ms` | `body_ms` | issued/pt | adopted/pt | `expert_misses` | hash |
+|---|---|---|---|---|---|---|---|---|---|---|
+| base | 1 | 4.55 | — | 0.7745 | 99.4 | 201.129 | 42.75 | 22.85 | 42 313 | `3c0c3391` |
+| slots_64 | 2 | 4.47 | −1.7 % | 0.7741 | 99.1 | 204.825 | 42.72 | 22.64 | 42 392 | `3c0c3391` |
+| layer_depth25 | 3 | 4.00 | **−12.1 %** | 0.7552 | 117.0 | 230.720 | 76.03 | 13.43 | 45 927 | `3c0c3391` |
+| slots64_depth25 | 4 | 4.11 | **−8.1 %** | 0.7576 | 112.7 | 224.694 | 76.22 | 14.58 | 45 489 | `3c0c3391` |
+| base_again | 5 | 4.33 | −4.9 % | 0.7708 | 101.6 | 212.825 | 42.57 | 21.05 | 43 004 | `3c0c3391` |
+
+Harness exit 0, its own drift line reading `4.9% … swallows nothing: no arm claims a win`, and the text hash
+identical across all five arms. The ring evidence line again confirms the configuration: `slots=2 links_deep=25
+free=1.90` for both depth arms against `slots=1 links_deep=0 free=0.99` for the other three.
+
+Read the cell rather than the four levels:
+
+| pair | arms | paired δ | `body_ms` δ | adopted δ |
+|---|---|---|---|---|
+| depth 2 at 96 slots | base → layer_depth25 | **−12.1 %** | **+29.59** | −9.42 |
+| depth 2 at 64 slots | slots_64 → slots64_depth25 | **−8.1 %** | **+19.87** | −8.06 |
+| interaction | — | **+4.0 points** | −9.72 ms | +1.36 |
+| 64 slots at depth 1 | base → slots_64 | −1.7 % | +3.70 | −0.21 |
+| 64 slots at depth 2 | layer_depth25 → slots64_depth25 | +2.7 % | −6.03 | +1.15 |
+
+**The interaction has §5ao's predicted sign, in the clock and in two counters at once.** Deepening costs
+9.7 ms/token less at a tight budget, and the reason is visible: at 96 slots depth 2 destroys 9.42 adopted reads
+a token, at 64 slots only 8.06. **And it is still a loss at both budgets** — the shipped corner (96 slots,
+uniform depth 1) is the fastest arm in the round, so the cell the reopen asked for is answered as a refusal.
+
+§5ap's adoption↔demand-hit identity re-checks clean at a second budget in a second batch: 45 927 − 42 313 =
+3 614 = 9.436 per token against 9.42 adopted lost, and 45 489 − 42 392 = 3 097 = 8.086 against 8.06. The
+identity is not an artefact of one arm or one round.
+
+Position is not doing this. The arms run in `ARMS` order
+([../benchmark/tinytitan_knob_sweep.py:283](../benchmark/tinytitan_knob_sweep.py#L283)), so the two depth pairs
+span exactly two positions each (1→3 and 2→4) and a linear drift term cancels in the *difference of the
+differences*. Applying the control's −4.9 % as a linear ramp (−1.23 % per position) moves both levels by about
+−2.5 % and leaves the interaction where it is: roughly −9.6 % at 96 slots, −5.6 % at 64.
+
+### Rounds 2 and 3 are withdrawn, and they were withdrawn for an occupant, not for drift
+
+| | round 2 | round 3 |
+|---|---|---|
+| depth-2 arms | 0.56 and 1.23 tok/s | 3.53 and 3.90 tok/s |
+| control `base_again` | 0.08 tok/s (**−98.3 %**) | 4.61 tok/s (**+22.1 %**) |
+| harness exit | 1, `INCONCLUSIVE` | 1, `INCONCLUSIVE` |
+| `io_ms` range | 99.1-109.1 | 102.2-128.1 |
+
+Those are not arm effects: a 0.08 tok/s control on a configuration that ran 4.55 minutes earlier is the machine
+being taken. `ps aux -r` at that moment showed **RobloxPlayerPhysics at 124.9 % CPU**, Time Machine's `backupd`,
+and `spotlightknowledged.updater`; load averages 4.74 / 6.54 / 7.08 with 7.6-9.2 GB of swap used. Live timing
+stopped there and nothing belonging to anyone else was terminated. Round 3's *ordering* happens to agree with
+round 1's (+3.3 % at 64 slots against −6.4 % at 96), but its control rose 22 % across the batch, so its levels
+are position, and it is not used for anything.
+
+### Verdict
+
+**The cell §5ao named is refused, with the interaction's direction confirmed at n = 1 clean round.** A tight
+budget softens deepening's harm by ~4 points and ~10 ms/token but does not reverse it, so nothing on the
+depth axis — uniform (§5ak), layer-selective (§5ap), or interaction (§5aq) — pays at this configuration. No
+runtime default moved; the seam stays default-off and no shipped configuration sets it.
+
+What is left in the prefetch family is not deepening at all. §5ap showed the ring issues 42.8 reads a token and
+adopts 22.8, so the question with a positive side is the mirror image: **can the 20 discarded reads be picked out
+at issue time and not issued?** That is §5ar, and it is priced here rather than run, because the price band
+turns out to be the binding uncertainty.
+
+Deviations.
+
+1. **n = 1.** One clean round is a direction, not a magnitude. The 4.0-point interaction would need at least
+   three more clean rounds to price, and every one of them needs the machine quiet; §5ap's four-round spread
+   (1.6 points) is the best available estimate of what "clean" costs in noise.
+2. **Rounds 2-3's logs are gone.** Only round 1's were copied to `/tmp/seam203/logs1/` before the next round
+   started; the withdrawn rounds' logs were overwritten in place by the harness, so their arm-level counters
+   survive only as far as the printed tables in `/tmp/seam203/round{2,3}.out`. The procedural fix from §5ap
+   deviation 2 was applied for round 1 and skipped for the rounds that were rejected on sight of their rates —
+   which is defensible only because nothing from those rounds is used.
+3. **Round 1's pressure and swap were not recorded** in the form this page usually prints. Its provenance is
+   therefore: `pgrep` guard empty at launch, mains power, exit 0, control drift 4.9 %, and the two withdrawn
+   rounds' `ps`/swap readings taken ~20 minutes later. The 4.9 % control is the evidence round 1 was usable,
+   not a precondition line.
+4. **`--expert-cache-slots 64` is a weak lever in this batch**: −1.7 % wall while `expert_hit_rate` moved 0.0004
+   and `expert_evictions` read 51 086 in all five arms. That is §5ap's counter finding ("the eviction column
+   describes the demand plan, not the cache's pressure") re-confirmed, and it means the 2×2's budget axis is
+   doing less than the arm name suggests.
+5. **Provenance.** HEAD `5502ccb` (the arm's own commit); `sources/` was last touched by `dcebe75` (14:34:32),
+   the release binaries on disk are 14:37:28 (CLI) and 14:37:36 (server), and `find sources -newer
+   .build/release/TinyTitanCLI` is empty — so the arms ran the current sources, the same pair §5ap ran. Tree
+   clean at the time of writing this section. One model process at a time, `--ram 12` throughout, one prompt,
+   greedy, 32 warm tokens then 384 measured per arm.
+
+## 5ar. #204 prices the mirror image of the feeder — withholding the reads the ring throws away — and finds the campaign's first positive-side lever: a six-link depth-0 list that transfers out-of-sample at S/L = 6.44, worth +0.05 % to +0.32 %, and a price band too wide to settle it (2026-10-16)
+
+The operator's premise is that the drive should read constantly rather than burst-by-burst. §5ag found the
+engine already does that, §5am found a token-ahead feeder has nothing to fetch, and §5aq closed making it read
+*more*. This section takes the remaining direction — read *less*, by not issuing the half of the ring's work
+that is discarded — and it answers it before writing any engine code, because the answer is arithmetic.
+
+### The price pair, and why it is a band
+
+Let `x` be the wall a single issued speculative read costs and `y` the wall an adopted read saves. Three paired
+arms from three batches give three equations, each in **its own batch's** counters:
+
+| id | arms (same batch) | equation |
+|---|---|---|
+| E1 | §5ag ring on → off: 39.45→0 issued, 18.86→0 adopted | `18.86 y − 39.45 x = 11.7 ms` |
+| E2 | §5ap round 4 base → depth-2-on-25: +33.36 issued, −10.45 adopted | `33.36 x + 10.45 y = 20.15 ms` |
+| E3 | §5aq round 1 base → depth-2-on-25: +33.28 issued, −9.42 adopted | `33.28 x + 9.42 y = 29.59 ms` |
+
+E2 and E3 are the **same configuration in two batches** and they disagree by 9.44 ms per token, so no `(x, y)`
+satisfies all three: E2 is fit at `y = 1.138`, E3 only at `y = 1.559`, which is outside the physically
+admissible range. That range is what anchors the band — an adopted read removes exactly one 2.641 MiB expert
+read from the critical path, so `y` is that read's service time, and §5af measured this drive's wall at
+3.3-3.4 GB/s:
+
+| `y` (ms/adopted) | source | `x` from E1 | `p* = x/y` | E2 residual | E3 residual | suppression ceiling |
+|---|---|---|---|---|---|---|
+| 0.788 | one read at 3.35 GB/s, the measured wall | 0.080 | 0.102 | −9.23 | −19.49 | 0.80 % |
+| 0.981 | 2.69 GB/s | 0.172 | 0.176 | −4.16 | −14.62 | 1.73 % |
+| 1.109 | 2.38 GB/s | 0.233 | 0.211 | −0.77 | −11.38 | 2.34 % |
+| 1.301 | 2.03 GB/s, pessimistic service | 0.325 | 0.250 | +4.30 | −6.51 | 3.26 % |
+
+**So the campaign's own arms prove an issued read is not free** — `x > 0`, 0.08-0.33 ms of it, because E1 does
+not close otherwise (if `x = 0`, `y = 0.62 ms` and E2's 20.15 ms would have to come from 6.5). And the whole
+subtractive family's ceiling — withhold every read that will be discarded, with perfect knowledge — is
+`20.59 × x` = **0.8 % to 3.3 % of a 205.5 ms token**. The byte cross-check holds: 19.03-20.59 discarded reads ×
+2.641 MiB = 50-54 MiB/token against §5ag's measured 54.4.
+
+A gate is worth running iff it removes more reads than it removes adoptions, in the price pair's ratio:
+`S/L > y/x = 1/p*`, i.e. **pays iff `p* > L/S`**. That single inequality is the yardstick for everything below,
+and it never needs a point estimate of `x`.
+
+### Screen 1 — the layer index does separate, and it survives split-half
+
+`/tmp/seam204/slot1.py` runs the shipped screen's `analyze()` at `top_m=1` over the frozen ring-off capture
+(§5al's input, `/tmp/trace194/off.jsonl`; **not** the `benchmark/expert-cache/route-trace-*.txt.gz` files, which
+are a different space-separated format for the replay sims). Calibration: 39.84 issued and 20.80 needed reads
+per token, against the capture's own batch at 39.45 issued / 19.25 adopted (§5ah's replica on the same trace).
+Per-link slot-1 precision spans **0.085 to 0.836 — 9.8×, median 0.567**.
+
+Six links fall below the whole band's top (`p* ≤ 0.288`): **14, 22, 30, 31, 38, 46** (precisions 0.186, 0.217,
+0.085, 0.179, 0.130, 0.181). The next link up is 15 at 0.309, so the list is stable for any `p*` in
+[0.22, 0.30] — most of the band. The env string is 26 characters:
+
+```
+TINYTITAN_PREFETCH_LAYER_DEPTH=14=0,22=0,30=0,31=0,38=0,46=0
+```
+
+Fitting the gate on the first 191 positions and scoring it on the last 192 (`/tmp/seam204/transfer.py`) is the
+test §5al ran for depth 2 and this rule passes it better:
+
+| quantity | in-sample (whole trace) | fitted on half A, scored on half B |
+|---|---|---|
+| per-link precision correlation | — | **r = 0.937** (§5al's depth-2 transfer: 0.540-0.672) |
+| gate list | 14, 22, 30, 31, 38, 46 | **the same six links** |
+| suppressed reads / adopted lost per token | 5.37 / 0.87 = **S/L 6.14** | 5.30 / 0.82 = **S/L 6.44** |
+| pays iff | `p* > 0.163` | `p* > 0.155` |
+
+At the band's rows that is **+0.053 % (p\*=0.176) to +0.318 % (p\*=0.250)** of decode, and a small loss
+(−0.11 %) only at the very bottom row, where the drive serves a read at its measured wall. First positive-side
+prediction of the campaign — and its magnitude is smaller than §5ap's four-round control spread.
+
+### Screen 2 — no read-level gate pays, and that is the closure
+
+`next_weights` is the field the trace already carries and every earlier section ignored: the probe's own weight
+vector for the L+1 candidate list, index-aligned with `next_layer_prediction` at
+[../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift:287](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L287).
+The engine is computing layer L while the ring stages for L+1, so these numbers are in hand at issue time — a
+gate on them carries no future information. `/tmp/seam204/conf.py` reconstructs the shipped depth-1 issue set
+exactly (the first non-resident name in prediction order, filter-then-cap), labels each read *needed*, and
+screens six features:
+
+| feature | precision, worst decile → best | best threshold (either direction) | `S/L` | pays iff |
+|---|---|---|---|---|
+| `own` — the issued name's weight | 0.298 → 0.851 (monotone) | drop below 0.049 | 3.46 | `p* > 0.289` |
+| `rel` — own ÷ top-1 | 0.357 → 0.857 | drop below 0.195 | 2.87 | `p* > 0.348` |
+| `rank` — position in the prediction | 0.245 → 0.754 | drop at rank ≥ 8 | 4.53 | `p* > 0.221` |
+| `top1` — head of the list | 0.403 → 0.489 | drop below 0.135 | 2.72 | `p* > 0.368` |
+| `norm_entropy` | 0.351 → 0.592 | drop at the top decile | 2.87 | `p* > 0.349` |
+| `spread` — w[0] − w[9] | 0.367 → 0.488 | drop below 0.059 | 2.83 | `p* > 0.353` |
+| **`link` — the layer index** | 0.085 → 0.836 | six-link fitted table | **6.44** | **`p* > 0.155`** |
+
+Read the two columns that matter together. Routing confidence **is** a real signal — the issued name's own weight
+drives precision from 0.298 to 0.851, a 2.9× spread the layer index cannot match — and it is still not enough,
+because **even the worst decile of the best feature sits above every break-even in the band**. The ring's mean
+precision (0.485 adopted, 0.522 needed) is roughly 2× break-even, so there is no pool of reads cheap enough to
+be worth dropping: the best confidence gate reaches `S/L = 3.46`, which needs `p* = 0.289`, above the band's
+ceiling. Only `rank` (needs 0.221) enters the top fifth of the band at all, and it does so by suppressing 2.11
+reads a token to lose 0.47 — a fifth of what the layer table removes, at a worse ratio.
+
+**So the wasted reads are not pickable at read granularity, and the layer table beats everything.** That is the
+closure: the subtraction lever exists, is positive, and is capped at the +0.05…+0.32 % that screen 1 names.
+
+### Why the seam is not built
+
+Expressing the six-link list needs `depth == 0`, which today is a refusal at
+[../sources/TinyTitan/Runtime/Configuration/PrefetchDepthProfile.swift:43](../sources/TinyTitan/Runtime/Configuration/PrefetchDepthProfile.swift#L43)
+and an existing test assertion at
+[../tests/TinyTitan/Runtime/ExpertPrefetchDepthTests.swift:40](../tests/TinyTitan/Runtime/ExpertPrefetchDepthTests.swift#L40)
+(`"3=0"` is in the refused list). Everything downstream already handles it: `staged()` returns an empty list
+and `begin` returns before issuing
+[../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift:114-120](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L114-L120),
+and `slotCount: max(ringDepth, depthByTargetLayer.values.max() ?? ringDepth)` at
+[../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:114](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L114)
+leaves a pure-suppression list at the shipped one-slot ring, so the arm would allocate exactly what the baseline
+allocates. It is a one-line change plus inverting that assertion plus a summary line that must not call a
+suppression list `links_deep`
+([../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift:169](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L169)).
+
+It is not built because the arm it exists to measure cannot be decided. At +0.05…+0.32 % against §5ap's observed
+paired spread (1.6 points over four rounds, sd ≈ 0.7), resolving the sign needs on the order of **30-60 clean
+rounds**, and the machine is not clean — §5aq lost two rounds in twenty minutes to an occupant. Spending an hour
+of live time to measure a number that the price band already brackets below the noise floor would be the same
+mistake as the arms this campaign refused for being too small.
+
+### Verdict
+
+**The subtractive feeder is closed at read granularity by measurement, and at layer granularity it is closed as
+unresolvable rather than as a loss.** The campaign's answer to the constant-feeder premise is now complete in
+all three directions it can take: read ahead of demand (§5am — nothing to fetch), read more per link (§5ak,
+§5ap, §5aq — a loss at every budget and every selectivity), read less (§5ar — at most +0.3 %, unmeasurable).
+What remains is the premise itself, and it is worth restating with the numbers attached: the drive **is**
+reading constantly during decode, the ring earns 5.6 % by doing it (§5ag), and each of those continuous reads
+still costs 0.08-0.33 ms of wall, because the price is service time on a queue the demand path shares, not idle
+waiting. Nothing shipped, no default moved, no numerics touched; `next_weights` remains unread by any shipped
+policy.
+
+The one reopen this section earns is an instrument, not a lever: **two depth arms on one link list in one batch**
+(depth 2 and depth 3 on the 25 links, against base) give two equations that share a drift term, so `x` and `y`
+become identifiable *within* a batch and the band collapses to a point. If the collapsed `p*` lands above 0.155,
+the six-link depth-0 arm is worth building and running; if it lands below, §5ar's table above is confirmed and
+the family is closed for good. That costs a few rounds, not thirty.
+
+Deviations.
+
+1. **`x` and `y` are assumed batch-invariant.** E1, E2 and E3 come from three batches, and E2 versus E3 shows
+   the same arm disagreeing by 9.44 ms/token between two of them. The band is the honest form of that fact; a
+   point estimate would not be. Every conclusion above is checked against the whole band, and the read-level
+   closure holds across all of it.
+2. **The screen labels reads *needed*, not *adopted*.** On a ring-off capture, `misses` is the set a read would
+   have served; §5ah's replica on this same trace finds 20.80 needed against 19.25 adopted, so the label
+   over-counts value by ~7 %. That makes every suppression gain quoted here a slight *under*-estimate (about
+   0.006 ms/token at the layer gate) and, in screen 2, makes each feature's `S/L` a slight under-estimate — it
+   does not move any row across the threshold, and the `own`-weight gate would need `p* > 0.270` even with the
+   label corrected.
+3. **The first run of this screen was wrong and is discarded.** It indexed `rank` by the number of reads already
+   issued rather than by position in the prediction list, which made `rank ≡ 0`, `own ≡ top1` and `rel ≡ 1`, and
+   its cut scan tested only "suppress low values" — the wrong direction for `rank` and `entropy`. Both fixed;
+   the tables above come from the corrected scan (`/tmp/seam204/conf_out5.txt`). The earlier
+   "every decile is above break-even, no cut pays anywhere" reading was produced by that broken run and the
+   corrected one is reported instead — it separates real signal from a threshold artefact and leaves the
+   conclusion narrower, not broader.
+4. **The six-link gate was fitted on this trace.** Split-half says the list and its ratio transfer (deviation
+   1 of §5al's discipline), but both halves are one prompt, one session, one model, and links 30/31/38/46 sit at
+   0.085-0.181 with `actual_miss_recall` 0.12-0.21, so the choice is a property of these routes, not of a
+   principle. A live arm must re-fit on a fresh capture or carry the transfer test as its own premise.
+5. **The ceiling row uses 20.59 discarded reads/token** (E1's batch) rather than the trace's 19.03 or §5ap's
+   19.90; the three differ by ≤ 8 % and the ceiling inherits that spread.
+6. **Nothing was measured live in this section.** Every number is arithmetic on arms already published in §5ag,
+   §5ap and §5aq, plus the frozen trace. The throwaways are `/tmp/seam204/{slot1,conf,price,transfer}.py`, are
+   not proposed as tools, and are not committed; `next_weights` is still read by no shipped code.
