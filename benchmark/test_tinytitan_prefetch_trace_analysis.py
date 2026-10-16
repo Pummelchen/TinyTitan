@@ -79,6 +79,22 @@ class PrefetchTraceAnalysisTests(unittest.TestCase):
         self.assertEqual(narrow["useful_prefetches"], 0)
         self.assertEqual(wide["useful_prefetches"], 1)
 
+    def test_screen_stages_the_first_non_resident_pick_as_the_engine_does(self) -> None:
+        observations = [
+            MODULE.Observation(0, 0, (1,), frozenset({1}), frozenset(), (7, 8)),
+            MODULE.Observation(1, 0, (1,), frozenset(), frozenset({1}), (7, 8)),
+            MODULE.Observation(1, 1, (8,), frozenset({8}), frozenset({7})),
+        ]
+
+        shipped = MODULE.analyze(observations, top_m=1, predictor="recorded")["overall"]
+        withdrawn = MODULE.analyze(observations, top_m=1, predictor="recorded", policy="truncate")[
+            "overall"
+        ]
+        self.assertEqual(shipped["predicted_nonresident"], 1)
+        self.assertEqual(shipped["useful_prefetches"], 1)
+        self.assertEqual(withdrawn["predicted_nonresident"], 0)
+        self.assertEqual(withdrawn["useful_prefetches"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

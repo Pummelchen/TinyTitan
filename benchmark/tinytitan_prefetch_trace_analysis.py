@@ -46,6 +46,11 @@ class Link:
     counts: TransitionCounts
     history: History
 
+    @property
+    def candidate_limit(self) -> int:
+        """Names a ranker may expose: the engine scans its whole predicted list."""
+        return max(self.top_m, len(self.source.next_layer_prediction))
+
 
 @dataclass
 class Counters:
@@ -96,7 +101,7 @@ def load_trace(path: pathlib.Path) -> list[Observation]:
 
 def rank_recorded(link: Link) -> list[int]:
     """The shipped probe's own ranking, as recorded in the trace."""
-    return list(link.source.next_layer_prediction[: link.top_m])
+    return list(link.source.next_layer_prediction[: link.candidate_limit])
 
 
 def rank_transition(link: Link) -> list[int]:
@@ -104,7 +109,7 @@ def rank_transition(link: Link) -> list[int]:
     scores: collections.Counter = collections.Counter()
     for expert in link.source.experts:
         scores.update(link.counts[link.source.layer][expert])
-    return [expert for expert, _ in scores.most_common(link.top_m)]
+    return [expert for expert, _ in scores.most_common(link.candidate_limit)]
 
 
 def rank_recent(link: Link) -> list[int]:
@@ -114,11 +119,28 @@ def rank_recent(link: Link) -> list[int]:
         weight = 1.0 / (1 + age)
         for expert in experts:
             scores[expert] += weight
-    return [expert for expert, _ in scores.most_common(link.top_m)]
+    return [expert for expert, _ in scores.most_common(link.candidate_limit)]
+
+
+def stage_filter_first(link: Link, ranked: list[int]) -> list[int]:
+    """The shipped rule: drop what the cache holds, then fill the free slots.
+
+    `RealForwardRunner+DecodeMoE.swift` hands the whole ranked prediction to the
+    ring and lets the ring size cap it, because about 85 % of a top-M prefix is
+    already resident: capping first starves the plan instead of aiming it.
+    """
+    return [expert for expert in ranked if expert not in link.target.resident][: link.top_m]
+
+
+def stage_truncate_first(link: Link, ranked: list[int]) -> list[int]:
+    """The withdrawn v4.3 rule: take the top M names, then drop the resident ones."""
+    return [expert for expert in ranked[: link.top_m] if expert not in link.target.resident]
 
 
 RANKERS = {"recorded": rank_recorded, "transition": rank_transition, "recent": rank_recent}
 PREDICTORS = tuple(RANKERS)
+STAGERS = {"filter": stage_filter_first, "truncate": stage_truncate_first}
+POLICIES = tuple(STAGERS)
 
 
 def analyze(
@@ -126,11 +148,15 @@ def analyze(
     top_m: int,
     predictor: str = "transition",
     window: int = 8,
+    policy: str = "filter",
 ) -> dict[str, object]:
     """Evaluate a trace-only L -> L+1 predictor without future leakage."""
     if predictor not in PREDICTORS:
         raise ValueError(f"unknown predictor {predictor!r}")
+    if policy not in POLICIES:
+        raise ValueError(f"unknown policy {policy!r}")
     ranker = RANKERS[predictor]
+    stager = STAGERS[policy]
     by_position: dict[int, dict[int, Observation]] = collections.defaultdict(dict)
     for observation in observations:
         by_position[observation.position][observation.layer] = observation
@@ -148,10 +174,11 @@ def analyze(
             target = layers.get(layer + 1)
             if target is None:
                 continue
-            candidates = ranker(Link(source, target, top_m, counts, history))
-            issued = [expert for expert in candidates if expert not in target.resident]
+            link = Link(source, target, top_m, counts, history)
+            ranked = ranker(link)
+            issued = stager(link, ranked)
             useful = set(issued).intersection(target.misses)
-            overlap = set(candidates).intersection(target.experts)
+            overlap = set(ranked[:top_m]).intersection(target.experts)
             for bucket in (overall, per_link[layer]):
                 bucket.links += 1
                 bucket.actual_misses += len(target.misses)
@@ -166,6 +193,7 @@ def analyze(
 
     return {
         "predictor": predictor,
+        "policy": policy,
         "top_m": top_m,
         "window": window,
         "overall": overall.report(),
@@ -186,13 +214,23 @@ def main() -> int:
         default=8,
         help="positions of strictly-past history the recent predictor may read",
     )
+    parser.add_argument(
+        "--policy",
+        choices=POLICIES,
+        default="filter",
+        help=(
+            "how a ranking becomes reads: filter drops cache-resident names before the ring "
+            "size caps the plan (what the engine does), truncate caps the ranking first "
+            "(the withdrawn v4.3 ring)"
+        ),
+    )
     parser.add_argument("--output", type=pathlib.Path)
     args = parser.parse_args()
     if args.top_m < 1:
         parser.error("--top-m must be positive")
     if args.window < 1:
         parser.error("--window must be positive")
-    report = analyze(load_trace(args.trace), args.top_m, args.predictor, args.window)
+    report = analyze(load_trace(args.trace), args.top_m, args.predictor, args.window, args.policy)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.write_text(rendered)
