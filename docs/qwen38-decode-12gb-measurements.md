@@ -4525,3 +4525,167 @@ Deviations.
    nothing in them is a shipped arm. The capture is `/tmp/trace200/` and, like every other trace in this campaign,
    is not committed.
 
+## 5ap. #202 runs the paired live arm §5al asked for: the gate-0.45 layer list measures −8.4 % over four interleaved rounds, and the counters name the term the screen had no way to price — the 33 extra reads a token do not add adopted reads, they remove 10.5 of them, exactly one for each demand hit the arm loses (2026-10-16)
+
+§5al's closing requirement was quoted by §5ao and is worth restating exactly, because this section is either its
+fulfilment or its refusal:
+
+> One live paired arm: **selective depth 2 on a fixed link list versus the shipped uniform depth 1**, interleaved
+> A/B/A within rounds, same batch, same control, greedy responses hash-checked for invariance.
+
+Its predicted band was −2.15 % to +6.21 % against a measured uniform-depth result of −6.2 %. Four rounds ran. Every
+one of them is below the band's floor.
+
+### The instrument needed one change first
+
+The seam was already in the tree from `dcebe75` — `TINYTITAN_PREFETCH_LAYER_DEPTH`
+([../sources/TinyTitan/Runtime/Configuration/PrefetchDepthProfile.swift:17](../sources/TinyTitan/Runtime/Configuration/PrefetchDepthProfile.swift#L17),
+read at [../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:104](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L104),
+applied as `min(freeSlots, depthByTargetLayer[layer] ?? slots.count)` at
+[../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift:116](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L116))
+— and it is default-off: with the variable unset the parse gets `nil` and every link keeps the shipped depth.
+
+What the sweep could not do was answer the hash half of that sentence. It compared rates without proving the arms
+generated the same text, so a rate could have been a rate at different work. `2a06f7b` adds the check: the streamed
+completion is reassembled from `delta.content` only — `reasoning_content` is a separate channel and is deliberately
+not hashed — at
+[../benchmark/tinytitan_knob_sweep.py:314](../benchmark/tinytitan_knob_sweep.py#L314), hashed per arm at `:342`,
+and `verdict()` now refuses a page whose arms disagree (`CONTESTED`, status 1) or where an arm streamed nothing
+(status 2). 47 tests in [../benchmark/test_knob_sweep_verdict.py](../benchmark/test_knob_sweep_verdict.py),
+ruff 0.16.7 clean.
+
+```
+SWEEP_TOKENS=384 TINYTITAN_BENCH_RAM_BUDGET=12G \
+  python3 benchmark/tinytitan_knob_sweep.py --arms base,layer_depth25,base_again
+# arm env: TINYTITAN_PREFETCH_LAYER_DEPTH = the 25-link gate-0.45 list, 119 chars,
+#   built at benchmark/tinytitan_knob_sweep.py:70 from §5al's table
+# rounds 3-4: exit 0, "response text identical across 3 arms (md5 3c0c3391)"
+```
+
+The ring evidence line confirms the arm configured what it claims: `slots=2 links_deep=25 free=1.90` against the
+baseline's `slots=1 links_deep=0 free=0.99`, in every round.
+
+### Four interleaved rounds
+
+| round | base tok/s | depth-2-on-25 tok/s | paired delta | drift control | text hash |
+|---|---|---|---|---|---|
+| 1 | 4.403 | 4.072 | **−7.5 %** | −1.1 % | not taken (pre-`2a06f7b`) |
+| 2 | 4.370 | 3.973 | **−9.1 %** | +3.9 % | not taken (pre-`2a06f7b`) |
+| 3 | 4.451 | 4.086 | **−8.2 %** | +0.2 % | `3c0c3391`, all three arms |
+| 4 | 4.464 | 4.075 | **−8.7 %** | +0.5 % | `3c0c3391`, all three arms |
+
+Mean −8.4 %, spread 1.6 points, four of four negative, and the two hash-verified rounds alone land at −8.2 % and
+−8.7 %. The drift control does not explain the ordering: round 2's control got *faster* across the batch (+3.9 %),
+which if anything flatters the middle arm, and that round is the most negative. The greedy text is also identical
+*between* rounds, so the four rounds are four clocks on one answer rather than four answers.
+
+**§5al's Arm B is refused: the layer gate does not turn depth 2 from a loss into a win.**
+
+### Where the screen was wrong is the useful part
+
+Round 4's per-token counters, the hash-verified one (round 1 agrees to two decimals on every line):
+
+| per token | base | depth 2 on 25 links | delta |
+|---|---|---|---|
+| prefetch issued | 42.76 | 76.12 | **+33.36** |
+| prefetch adopted | 22.80 | 12.35 | **−10.45** |
+| adoption ratio | 0.533 | 0.162 | |
+| demand hits (384 tok) | 145 313 | 141 298 | −4 015 |
+| demand misses (384 tok) | 42 330 | 46 345 | +4 015 |
+| demand total | 187 643 | 187 643 | 0 |
+| `expert_read_mib` | 111 777.7 | 122 379.8 | +10 602.1 = 27.61/token |
+| `io_ms` / `body_ms` | 100.406 / 205.540 | 116.461 / 225.691 | +16.06 / +20.15 |
+
+Read the two bold lines together. 4 015 ÷ 384 = **10.456**, and the adopted column fell by **10.45**. The identity
+holds in every round, to the printed precision: round 1 11.5625 against 11.56, round 3 11.1745 against 11.17, and
+round 2 7.8411 against 7.84 (scored against its control, for the reason in deviation 2). The demand total is
+187 643 in both arms of every round.
+
+So the extra 33 issues per token do not add adopted reads. **They remove them, one for one with the demand hits the
+arm loses.** That is §5al deviation 6 answered on the machine it was written about — *"Adoption is still not in any
+of this. `useful` has no arrival time … the live ladder's falling hit column with depth is the counter-evidence"* —
+and it is why the screen's 0.546 realised precision could never be spent: the screen credits a slot-2 read when its
+name is in the route, and charges nothing for the slot-1 read that no longer gets adopted.
+
+### The screen missed in both directions, and the cheap one favours the arm anyway
+
+| quantity | §5al's gate-0.45 screen | measured (rounds 1/3/4) |
+|---|---|---|
+| extra issues/token | 14.83 | 33.06 / 33.25 / 33.36 |
+| extra MiB/token | 39.2 | 30.53 / 29.51 / 27.61 |
+| extra useful reads/token | +8.1 | **−11.56 / −11.17 / −10.45** |
+| net | −2.15 % … +6.21 % | −7.5 % … −9.1 % |
+
+The arm spends ~30 % *fewer* bytes than forecast while issuing 2.25× the ops: 0.83 MiB moved per extra issue against
+the 2.64 MiB a demand miss costs, so most of the extra issues carried little or no read. The likeliest reading is
+that a live ring sees its own earlier arrivals in `resident` and drops them, which is exactly what a ring-off trace
+cannot show; that sentence is a hypothesis, and the ratio is the measurement. It does not matter for the verdict —
+the cheaper-than-predicted traffic still cost 8.4 %, because the loss is not in the bytes, it is in adoption.
+Against §5al's two price models, whose break-evens were 0.4579 (optimistic) and 0.8403 (pessimistic), this arm's
+whole-config precision is 0.162 and its *marginal* precision is negative. Both models agree on the sign for the
+first time in the campaign, and the arm is not near either line.
+
+### What the counters cannot say
+
+`expert_evictions` reads **51 086** and `expert_reloads` **43 662** in every arm of every round, while the hit and
+miss columns move by thousands. Reading the increment site explains the shape of the problem: line 75 of
+[../sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:75](../sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift#L75)
+ticks an eviction per demand-miss slot the plan reassigns, so the column describes the demand plan rather than the
+cache's total pressure — and a speculative arrival that pushed an adopted expert out would not necessarily appear
+in it. The consequence for this page is narrow and it is a refusal, not a mechanism: the displacement channel —
+slot pressure or arrival lateness — is **not decided by these counters**, and §5ap does not claim it. What is
+established is the one-for-one adoption↔hit identity and the 8.4 % that comes with it.
+
+`io_hidden_pct` is deliberately not quoted. §5w established the counter is unfit for an overlap claim, and the
+99.7–99.8 readings in these logs would otherwise read as "the extra traffic was free" — which round 4's `body_ms`
+(+20.15 ms against a rate-implied +21.4 ms, agreeing to 6 %) contradicts.
+
+### Verdict
+
+**The layer axis is closed by measurement.** §5ak closed uniform depth; this closes the selective reading of it,
+so §5al's finding that the *spread* is real (8.1×, r = 0.922, transfers half-to-half at 0.540-0.672) stands as a
+description of the routes and fails as a lever: concentrating a bad read does not make it a good read. Nothing
+shipped — the seam stays default-off and no shipped configuration sets it, no runtime default moved, and no
+numerics changed.
+
+One reopen is left. §5ao named two conditions that could still make an earlier read pay: the layer-selective depth
+(now refused) and a **slot budget tight enough that a staged arrival is a larger share of what a layer holds**. The
+second is an interaction and neither single-knob arm answers it, so the cell that turns both knobs at once — 64
+slots with the same 25 links deep — is added in `5502ccb` as `slots64_depth25` and is measured next.
+
+Deviations.
+
+1. **Rounds 1 and 2 predate the hash instrument.** They are paired, controlled and same-batch, but they do not
+   satisfy §5al's invariance clause. Rounds 3 and 4 do, and they carry the conclusion on their own (−8.2 %,
+   −8.7 %); the four-round mean is reported with the two unhashed rounds labelled as such.
+2. **Round 2's baseline footer is gone.** The harness writes one log path per arm name
+   (`.build/benchmark-logs/sweep_<arm>.log`), so round 3 overwrote it before it was copied. Its rate, hit, io and
+   waits cells survive in `/tmp/seam202/pass2.log`; its full counters do not, which is why round 2's adoption
+   identity is scored against that round's control arm instead of its baseline. Procedural fix adopted and used
+   from round 3 on: copy each round's three logs to `/tmp/seam202/pass<N>/` before starting the next.
+3. **A partial log was caught before it was read.** The salvaged `pass2/sweep_base.log` holds one footer at 32
+   tokens (`decode_tok_s=4.581`, `hit=0.6406`, `misses=6 715`) — a warm-up, not a measurement — because the
+   extractor took `rates[-1]` from a file still being written. It is excluded from every table here. The extractor
+   bug (silent `rates[-1]` over a log with one footer) is in `/tmp`, not in `benchmark/`, and is not shipped.
+4. **One prompt, one session, one 384-token measured request per arm per round**, greedy, `--ram 12`, 96 slots,
+   48 layers, top-k 10 of 512, the shipped 96-slot default as the baseline. Cross-round agreement measures this
+   machine's noise floor, not prompt portability; §5al deviation 1 still applies to the gate list itself, which was
+   fitted on a whole trace.
+5. **The 2.25× issue discrepancy is reported, not explained.** The byte/issue ratio that accompanies it is a
+   measurement; the residency-filter reading attached to it is a hypothesis and is labelled as one.
+6. **`expert_evictions` and `expert_reloads` carry no information for this claim**, for the reason above. They are
+   still printed by the sweep's table; a reader should not treat their invariance as evidence that the cache
+   behaved identically.
+7. **Provenance.** Rounds 1-2 ran at HEAD `b8bb1fa`, rounds 3-4 at HEAD `2a06f7b`; both differ from current `main`
+   only by benchmark python rows. `sources/` was unchanged across all four rounds and across the golden run: every
+   seam file was last written by 14:23:53, [../sources/TinyTitanLib/ServerModelSession+Diagnostics.swift](../sources/TinyTitanLib/ServerModelSession+Diagnostics.swift)
+   and the rest of the tree were untouched after that, the release binaries on disk are 14:37:28 (CLI) and
+   14:37:36 (server), and `find sources -newer` against them is empty — so whatever binary each round used, it
+   carries those sources. `tools/golden-baseline.sh --check qwen38-4` at 14:31:39 read
+   `ok — output identical to baseline` against that same source state. This section moves no sources; the two
+   python commits it cites are ruff-clean with 47 tests, so the golden baseline is **not re-run** for them and is
+   **not** needed by them. Preconditions read immediately before the rounds: `pgrep` guard empty,
+   `memory_pressure -Q` 73-74 % free, AC power 100 % charged, 281-283 GiB free on the data volume, Swift 6.4 /
+   macOS 27.0.1 on this campaign's 24 GB M3 MacBook Pro, one model process at a time, `--ram 12` throughout.
+   Logs live in `/tmp/seam202/pass<N>/` and, like every other capture in this campaign, are not committed.
+
