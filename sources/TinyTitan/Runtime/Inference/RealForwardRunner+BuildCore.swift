@@ -91,12 +91,28 @@ extension RealForwardRunner {
                     detail: "profile prefetch depth \(ringDepth) must be 1...\(cfg.topKExperts)")
             }
         }
+        // Opt-in: deepen *chosen* links past the profile's one read, and leave
+        // the rest alone. The screen that picks the links is §5al's; the sign it
+        // could not settle is what a paired live arm has to decide, so this is
+        // an experiment switch and no shipped row uses it. Unset, the table is
+        // empty, the ring holds one slot, and every link behaves exactly as the
+        // paragraph above describes.
+        let depthByTargetLayer: [Int: Int]
+        if denseFFN {
+            depthByTargetLayer = [:]
+        } else {
+            depthByTargetLayer = try PrefetchDepthProfile.parse(
+                raw: ProcessInfo.processInfo.environment[PrefetchDepthProfile.environmentKey],
+                numLayers: cfg.numLayers,
+                topKExperts: cfg.topKExperts)
+        }
         bp.predictivePrefetch =
             rawPrefetchEnabled
             ? try ExpertPrefetchRing(
                 device: context.device,
                 expertStride: model.routedExpertByteStride(layer: 0),
-                slotCount: ringDepth)
+                slotCount: max(ringDepth, depthByTargetLayer.values.max() ?? ringDepth),
+                depthByTargetLayer: depthByTargetLayer)
             : nil
         // Track A: the ANE prefill sidecar, opt-in. Only the qwen36 target
         // family qualifies (the one-layer MTP draft has no exported sidecar

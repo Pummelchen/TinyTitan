@@ -19,8 +19,15 @@ final class ExpertPrefetchRing: @unchecked Sendable {
 
     private let lock = NSLock()
     private var slots: [Slot]
+    /// Reads to issue for a given target layer, from `PrefetchDepthProfile`.
+    /// A layer absent from the table issues the ring's own capacity, which is
+    /// what it did before the profile existed.
+    private let depthByTargetLayer: [Int: Int]
 
-    init(device: MTLDevice, expertStride: Int, slotCount: Int) throws {
+    init(
+        device: MTLDevice, expertStride: Int, slotCount: Int,
+        depthByTargetLayer: [Int: Int]
+    ) throws {
         guard expertStride > 0, slotCount > 0 else {
             throw ModelError.internalInconsistency(detail: "invalid prefetch ring geometry")
         }
@@ -38,6 +45,25 @@ final class ExpertPrefetchRing: @unchecked Sendable {
             allocated.append(Slot(buffer: buffer))
         }
         slots = allocated
+        self.depthByTargetLayer = depthByTargetLayer
+    }
+
+    /// Slots in the ring: one per read it can hold in flight.
+    var capacity: Int { slots.count }
+
+    /// The names one `begin` should read, in rank order: the residency and
+    /// in-flight filters run *first*, then the layer's depth and the free slots
+    /// cap what survives. Capping the ranking first was the withdrawn v4.3 ring
+    /// -- most of its top ranks were already resident, so the filter starved the
+    /// reads instead of aiming them (see the comment at the call site).
+    static func staged(
+        experts: [Int], resident: Set<Int>, active: Set<Int>, freeSlots: Int, depth: Int
+    ) -> [Int] {
+        var seen: Set<Int> = []
+        let wanted = experts.filter {
+            !resident.contains($0) && !active.contains($0) && seen.insert($0).inserted
+        }
+        return Array(wanted.prefix(min(freeSlots, depth)))
     }
 
     /// Begins missing next-layer reads in unused staging slots. Already queued
@@ -84,18 +110,15 @@ final class ExpertPrefetchRing: @unchecked Sendable {
             slots.compactMap { slot in
                 slot.layer == layer && slot.expert >= 0 ? slot.expert : nil
             })
-        var seen: Set<Int> = []
-        let wanted = experts.filter {
-            !resident.contains($0) && !active.contains($0) && seen.insert($0).inserted
-        }
         let free = slots.indices.filter { slots[$0].expert < 0 }
-        let count = min(wanted.count, free.count)
-        guard count > 0 else {
+        let selectedExperts = Self.staged(
+            experts: experts, resident: resident, active: active,
+            freeSlots: free.count, depth: depthByTargetLayer[layer] ?? slots.count)
+        guard !selectedExperts.isEmpty else {
             lock.unlock()
             return
         }
-        let selectedSlots = Array(free.prefix(count))
-        let selectedExperts = Array(wanted.prefix(count))
+        let selectedSlots = Array(free.prefix(selectedExperts.count))
         let staged = zip(selectedSlots, selectedExperts).map { slot, expert in
             (slot: slot, expert: expert, buffer: slots[slot].buffer)
         }
@@ -143,10 +166,12 @@ final class ExpertPrefetchRing: @unchecked Sendable {
         let b = Double(max(1, begins))
         let n = Double(max(1, reclaimedOps))
         return String(
-            format: "prefetch_ring begins=%d free=%.2f submitted=%.2f inflight=%.2f held=%.2f "
+            format: "prefetch_ring begins=%d slots=%d links_deep=%d free=%.2f submitted=%.2f "
+                + "inflight=%.2f held=%.2f "
                 + "spec_ops=%d spec_queue_ms=%.2f spec_load_ms=%.2f",
-            begins, Double(observedFree) / b, Double(observedSubmitted) / b,
-            Double(observedInFlight) / b, Double(observedHeld) / b,
+            begins, slots.count, depthByTargetLayer.count, Double(observedFree) / b,
+            Double(observedSubmitted) / b, Double(observedInFlight) / b,
+            Double(observedHeld) / b,
             reclaimedOps, Double(reclaimedQueueNanos) / n / 1e6,
             Double(reclaimedLoadNanos) / n / 1e6)
     }

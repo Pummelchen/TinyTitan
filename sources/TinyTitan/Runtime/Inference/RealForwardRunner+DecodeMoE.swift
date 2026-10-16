@@ -321,12 +321,14 @@ extension RealForwardRunner {
         }
         if let predictivePrefetch, L + 1 < cfg.numLayers {
             // The ring is one read a layer, aimed at the next layer, from the
-            // profile's depth. Every alternative allocation measured here lost:
-            // a second rank of the same layer (per-expert operations, -3.3%),
-            // the same read aimed two layers ahead (-2.8%), a second horizon
-            // beside it (-1.4%), the probe-weight margin gate (-4.2%) and a
-            // lower disk tier (-0.6%). Each is recorded in
-            // docs/qwen38-prefetch-predictor-study.md and Lever 5/8 of
+            // profile's depth -- unless `TINYTITAN_PREFETCH_LAYER_DEPTH` names
+            // this link, which is the layer-selective arm §5al screened and left
+            // for a live paired run to settle. Every other allocation of the
+            // same budget measured here lost: a second rank of the same layer
+            // (per-expert operations, -3.3%), the same read aimed two layers
+            // ahead (-2.8%), a second horizon beside it (-1.4%), the probe-weight
+            // margin gate (-4.2%) and a lower disk tier (-0.6%). Each is recorded
+            // in docs/qwen38-prefetch-predictor-study.md and Lever 5/8 of
             // benchmark/internal-speeds/v2-qwen38-4bit-telemetry.txt.
             let target = L + 1
             let prediction = predictedNextLayer

@@ -257,6 +257,10 @@ extension RealForwardRunner {
     /// prefetched experts the cache plan adopted (each one a miss avoided).
     public var totalPrefetchIssued: UInt64 { UInt64(predictivePrefetch?.issuedReads ?? 0) }
     public var prefetchRingSummary: String? { predictivePrefetch?.summary }
+    /// Staging slots, which is the ring's deepest link: 1 as shipped, more only
+    /// when `TINYTITAN_PREFETCH_LAYER_DEPTH` asked for it. Internal, not on the
+    /// library facade -- it exists so a test can see the profile reached the ring.
+    var prefetchRingCapacity: Int? { predictivePrefetch?.capacity }
 
     public var usesFusedGreedyHead: Bool { useFusedGreedyHead }
 
