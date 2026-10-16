@@ -273,10 +273,11 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         // simply never sampled a 48-layer model at a 12 GiB budget, so the one
         // configuration that broke the contract went unmeasured.
         //
-        // Stepping down is the safe direction. The measured cache curve is flat
-        // below the RAM limit -- 112 slots cut 4-bit's I/O time 12% for no
-        // throughput at all -- and a cliff above it. Too few slots costs a
-        // little; too many costs everything.
+        // Stepping down is the safe direction, and §5o measured both sides on
+        // this machine: at the 32K cap 96 slots gave 4.929/4.966 against 64's
+        // 4.543/4.175, so the rung below the top costs ~12 %; 112 fell to
+        // 3.622 (-26 %) and 128 to 1.473 (-70 %). A rung past the working set
+        // does not buy its I/O back -- it pages.
         let ceiling = Double(budgetBytes) * 1.15
         // `last(where:)` reads the list's order as a promise -- the largest rung
         // below the current one -- so it takes a sorted copy rather than the
