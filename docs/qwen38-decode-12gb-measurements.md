@@ -3205,4 +3205,106 @@ with four, nine negative pairs out of nine, identical output hash. The idle cloc
 81 % → 91 % of the wall) and filling it is **worse than the fixed pie #188 measured**, because a speculative
 read that arrives late is not used at all: the same expert crosses the bus again on the path the token waits
 for. Refused as shipped behaviour. What survives of the operator's idea is the internal half of it — the
-engine's own ring discards ~21 reads per token, and pricing that is #193.
+engine's own ring discards ~21 reads per token, and §5ag prices that and keeps the ring.
+
+## 5ag. #193 prices the engine's own feeder by switching it off: it earns +5.6 % while spending 54 MiB per token on reads it throws away (2026-10-16)
+
+§5af refused the *external* constant feeder and left the internal one unpriced. The shipped decode path already
+does what the operator described — it keeps the drive reading while the GPU computes — through a one-slot staging
+ring ([ExpertPrefetchRing.swift:154](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L154),
+built with `slotCount: ringDepth` at
+[RealForwardRunner+BuildCore.swift:99](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L99)).
+`TINYTITAN_PREDICTIVE_PREFETCH=0` turns it off and has never been run at this configuration —
+`docs/qwen38-remaining-levers-plan.md:59` lists it as a check under hypothesis 1 and never ran it, and the
+September depth study that retired two- and three-ahead ran at `--ram-budget 8G` with no depth-0 arm.
+
+Three paired rounds of ring-on (shipped) against ring-off, plus a closing ring-on, greedy 384 tokens, `--ram 12`,
+96 slots, `--max-context 262144`, mains power, one process at a time, `iostat -d -w 1 disk0` across every arm:
+
+| arm | tok/s | paired Δ vs same-round ring-on | hit | `io_ms` | `wait_ms` | engine MiB/tok | device MiB/tok | issued/pt | adopted/pt |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| ring on | 5.079 | — | 0.8459 | 68.3 | 92.6 | 197.1 | 309.1 | 39.45 | 18.86 |
+| ring off | 4.793 | **−0.286 (−5.6 %)** | 0.8070 | 85.3 | 88.1 | 246.9 | 254.7 | 0.00 | 0.00 |
+
+Per-round deltas −0.204, −0.492, −0.286: three pairs, all negative. Control spread 1.9 % (5.027–5.124) and the
+closing ring-on returned to 5.043, inside it. All seven arms emitted the same hash (`95aa4531b4ea2304…`).
+
+**The ring is worth 5.6 % of decode, and it is worth it while moving 18 % fewer bytes than it saves.** That
+sentence is the finding, and the counters close on it exactly:
+
+- Turning the ring off removes **20.59 issued reads per token** (39.45 − 18.86 adopted) and the device total
+  falls by **54.4 MiB per token** — `20.59 × 2.641 MiB = 54.4`, to the read.
+- Turning it off adds **+7 242 demand misses** over the session, which is **18.86 per token** — the adopted
+  count, exactly. `18.86 × 2.641 = 49.8 MiB` per token returns to the demand path, and the engine's own
+  `expert_read_mib` rises 197.1 → 246.9.
+- So the ring's trade is: spend 54.4 MiB/token of device traffic to move 49.8 MiB/token off the critical path.
+  `io_ms` 85.3 → 68.3 is the payment landing, and it is worth 5.6 % of the clock.
+
+**Refused: do not throttle or remove the speculative ring.** The half of it that is discarded is the price of
+the half that arrives ahead of the router, and §5af just measured what happens to a token when something else
+competes for those bytes instead.
+
+**The two shapes this arm might have suggested are already closed, and saying so is not redundant — #193 is
+their first re-confirmation at the shipped tier.** `docs/qwen38-prefetch-predictor-study.md` scored the staged
+*choice* against ground truth from the prefetch trace, at the September `--ram 8` meaning (64 cache slots), and
+found the shipped probe the best ordering available: P@1 0.552, P@2 0.450, P@3 0.379, while frequency
+re-ranking, the previous token's route and the previous token's misses are neutral or worse — the temporal
+predictors stage *nothing*, because the cache has already absorbed that reuse. Its monotone decay by rank also
+settles what this section would otherwise have had to open: the list the ring truncates with `prefix(count)`
+([ExpertPrefetchRing.swift:88-98](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L88))
+is already in router-weight order, so the staged expert is the highest-weight non-resident prediction rather
+than an arbitrary one, and the caller's residency walk decides where it stops. The same study priced the
+*volume* question and lost every arm: 2 slots −3.3 %, 3 slots −10.7 %, mixed horizon −1.4 %, L+2 horizon −3.7 %,
+all byte-identical.
+
+What #193 adds is the two things that study did not have: a depth-0 arm at all, and the current 96-slot tier at
+5.08 tok/s against its 4.56. The conclusion survives the move — the ring earns +5.6 % here — and one number
+moves. Adoption per issued read is 18.86 / 39.45 = **0.478** at 96 slots against 23.3 / 42.8 = **0.544** at 64,
+and issued reads fall 42.8 → 39.45. Both halves of that move are what a bigger cache predicts: fewer
+predictions are worth staging, and more of the ones that are get loaded by the demand path before the staged
+read is wanted. That is an inference from two counters in two batches, not a measurement, and it is the kind
+that must not be carried into a decision — the study's own note that its `--ram 8` rows are not this tier is
+exactly why. #194 scores it from a trace at the shipped configuration.
+
+The ring's own footer also says which failure mode a deferral would have to avoid: over 18 001 `begin` calls the
+single slot is observed free 0.99 of the time and in flight 0.01, with a mean speculative load of 1.21 ms
+against a 3.75 ms layer window (`body_ms 179.9 / 48`). A staged read nearly always *finishes* in time; what it
+fails to be is the right expert. So lateness is not the loss channel at depth 1, and any deferral is spending
+the one thing the ring actually has — its headroom.
+
+The shape neither batch tested is **ordering at fixed volume**: keep the 39.45 speculative reads a token, and
+issue each one after that layer's demand burst has taken service, so the same bytes land in the idle window
+instead of at the head of the queue. It can add no device traffic and remove none, which makes it the only
+remaining version of the operator's "read constantly" premise that §5af's contention result does not already
+kill — and the only version the engine itself owns. Its risk is named above: it trades headroom for queue
+position, and adoption depends on the headroom. That is #194.
+
+### Deviations
+
+1. **Seven arms, not eight.** The plan was three rounds of the pair plus a closing control; the closing control is
+   ring-on only, so it is a drift check and carries no pair. Reported as measured.
+2. **Provenance.** `HEAD 8e82098` (§5af, docs-only); the binary is the release build from `9c858cd` at 04:29, the
+   same one §5af's #192 ran, and the tree was clean at launch. 24 GB M3 MacBook Pro, macOS 27.0.1, Swift 6.4.
+   Nothing was changed in engine code to run this arm — the toggle is the existing env switch — so both arms are
+   the shipped engine, and the only unshipped thing here is the record.
+3. **The device window includes model load**, as in #192, so `device MiB/tok` is session-total ÷ 384 and the
+   309.1 / 254.7 absolutes carry the load phase. The *difference* between the two arms is what the arithmetic
+   above uses, and the ring-off arm's 7.8 MiB/token residual is the load and non-expert traffic, which is
+   consistent with #192's control.
+4. **`engine MiB/tok` is demand-path bytes only.** `recordSuccessfulLoadsUnlocked` charges
+   `experts.count × expertStride` on the demand load path and the adoption path only bumps the load count
+   ([PreadExpertStreamer+Residency.swift:379-399](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L379)),
+   so speculative reads never appear in `expert_read_mib`. That is why the engine/device gap is the ring's
+   traffic and not a discrepancy — the gap in the ring-on arm (112.0 MiB/token) is `39.45 × 2.641 = 104.2`
+   plus the 7.8 MiB residual, which closes to 0.4 %.
+5. **Swap** 7.66–7.92 GiB (ring on) and 7.69–7.82 GiB (ring off): both arms ran under the same pressure, and the
+   closing control sat inside the round range, so no arm is explained by a swap move. Load and pressure at launch
+   were as recorded for §5af; no model process was running before or after the batch.
+6. **`adopted_pt` medians are 18.86 where §5af quoted 19.01** for the same shipped configuration. Different batch,
+   same arm, 0.8 % apart — inside the control spread of both batches, and the identity claims above use each
+   batch's own numbers rather than a cross-batch mix. Never compare a qwen38 clock across batches.
+7. **`ExpertPrefetchRing` has no unit test.** A repo-wide search finds the type only in `sources/` and `docs/`.
+   What *is* covered is the config seam — `tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:116` and
+   `ExpertCacheBudgetTests.swift:211-240` assert `prefetchDepth` 1 and 0, which is the arm #193 ran — but nothing
+   pins the ring's `.completed` gate or its `prefix(count)` truncation. Any change #194 makes has to start by
+   testing the adoption contract, not by changing it.
