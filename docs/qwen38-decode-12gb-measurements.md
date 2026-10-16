@@ -2068,9 +2068,221 @@ partition cannot touch and a feeder can.
   point of hit rate, while Belady at the same slots is +8.4. The gap is temporal, not spatial. That is where the
   operator's constant-feeder idea actually points, and the counters already show a place to look: in the
   `v520-prompt2` capture the ring **issued 40.51 prefetches per token and had 20.39 adopted**, with `free=0.99` and
-  `inflight=0.01` — it is issuing for four times the depth it keeps and still leaving slots idle. Nothing in this
+  `inflight=0.01` — it is issuing for twice the depth it keeps and still leaving slots idle. Nothing in this
   section measures why; that is the next question, and it is a feeder question rather than a budget question.
 - **The live arm that survives unchanged** is the saturating use count (cap ~3–5) in `makeExpertCachePlan`: −2.04%
   to −7.92% placements across three captures, output-invariant by construction, and no model run yet. Task #177.
 - **Nothing here is a tok/s number.** This section prices placements and hit rate, and says how many points of hit
   rate each lever can buy at this budget.
+
+## 5aa. The constant feeder, screened in every shape it can take — it fails as a cache change, and the reason is eviction being zero-sum (2026-10-16)
+
+§5z closed the *budget shape* lever and pointed the residual headroom somewhere else: Belady on the same 4 608 slots
+is +8.4 points while every static partition is worth ~1, so the gap is in **when a slot is given up**, not in where
+slots sit. The operator's premise is exactly that temporal idea — stop reading in bursts around each request and let
+the drive stream weights continuously while a session is live. This section tests the premise instead of another
+knob on the same lever.
+
+The test follows from one constraint: **a feeder can only stream what it can name.** The engine ships no
+per-conversation oracle, so the naming available is (a) an earlier session's statistics, or (b) this session's own
+immediate future. Four arms, all inside the same 4 608-slot tier — none of them is a budget increase wearing another
+name. Same licence as §5y and §5z: **ranking placement shapes at a fixed slot total; banned, quoting a token rate.**
+
+One half of the premise was already measured on this machine, and it is worth naming before the arms. §5v sampled
+`disk0` at one-second resolution across a whole decode run and got **0 idle samples** (mean 1 359.5 MB/s, min 753.0):
+the drive does not stop and wait for compute. So the literal reading — bursty reads with dead wire between them — is
+closed by counters, not by argument. What stayed open is the stronger reading: keep that continuously-busy wire, and
+use it to read *different* weights, chosen ahead of the request. That is the thing the four arms test, and it is the
+only version of the idea the route trace can price.
+
+### What is in the tree
+
+`benchmark/predictive_feeder_sim.py` (new) and `benchmark/test_predictive_feeder_sim.py` (new, 23 tests in 8 classes).
+They reuse §5z's three committed captures, the engine's own `_PlanSlots` placement rule and `heat_split_sim`'s slot
+tier, so every figure below is reproducible: `python3 benchmark/predictive_feeder_sim.py` prints these four tables
+model-free and prints no token rate. Shipped-cache reference lines: hit
+**80.9 / 81.4 / 78.7 %**, placements **91.77 / 89.28 / 102.10** per token, reads 242 / 236 / 270 MiB per token. Units,
+again because everything here depends on them: demand is 480 requests/token, so **1 % of placements = 0.2 points of
+hit rate**, and the plan's bar (`docs/plan-qwen38-decode-12gb.md:150`) of **+7 points** is **−33.6 placements/token**.
+
+### Arm 1 — what an earlier session can name
+
+Top-n per layer learned on one capture, scored on another. `demand cover` is the share of the other session's 480
+requests per token; `miss cover` is the share of the placements the shipped rule actually makes — the only number a
+feeder can act on, because a streamed expert still costs a read and the only thing that changes is whether that read
+is exposed or already done.
+
+| learned on → scored on | width | demand cover | miss cover |
+|---|---|---|---|
+| `20261011` → `v520-20261015` | 96 | 70.2 % | **26.5 %** |
+| `20261011` → `v520-prompt2` | 96 | 42.4 % | **24.9 %** |
+| `v520-20261015` → `20261011` | 96 | 72.0 % | **33.8 %** |
+| `v520-20261015` → `v520-prompt2` | 96 | 36.8 % | **25.9 %** |
+| `v520-prompt2` → `20261011` | 96 | 42.7 % | **28.7 %** |
+| `v520-prompt2` → `v520-20261015` | 96 | 37.6 % | **28.6 %** |
+| same six pairs | 192 | 61.2 – 89.9 % | 53.7 – 71.9 % |
+| same six pairs | 288 | 73.0 – 95.8 % | 69.4 – 88.6 % |
+
+At the tier's own width, **an earlier session names a quarter to a third of the misses the cache pays for**. A random
+width-96 list would name 96/512 = 18.75 % of any requests by construction, so the signal is real but small. It grows
+fast with width — and the width is where the idea dies: 192 and 288 named experts per layer are more than the tier
+holds, so a wider list is not a cheaper feeder, it is a bigger cache under another name, and §5z's deviation 7 already
+records that 128 slots/layer blows past the operator's 12 GiB cap on this Mac.
+
+The two demand figures above 50 % are **not prediction**. They are the one *conversation* shared by two captures:
+`20261011` and `v520-20261015` agree on 432 literal `(position, layer)` rows — positions 0..8 across all 48 layers —
+and every pair involving `v520-prompt2` agrees on 0. Those shared rows are prefill rows, so they are not themselves
+inside the scored demand; they are the marker that the two captures are the same conversation replayed on two builds.
+§5z measured the same thing from the other side: 13.2 % picks in common for that pair against 3.2 % across prompts.
+
+### The pre-registered bar, and the one disclosed rewrite
+
+The bar was written before measuring as *"no earlier session's top-96 covers half of another session's 480 requests"*.
+**It failed** (70.2 % and 72.0 %), and per the standing rule this names which side was wrong: the assertion, not the
+premise. The demand denominator was the mistake — it credits a hot list for requests the live cache had already
+resident-ised, which is why the *miss* column, not the demand column, is 25–34 %. The rewritten test
+(`test_demand_coverage_tracks_how_much_route_the_two_captures_share`) asserts the **relation** in both directions:
+a pair that shares literal rows must cover ≥ 50 %, and a pair that shares none must cover < 50 %. If a different-prompt
+pair ever crosses 50 %, cross-session prediction is real and the test has to be rewritten again to say so.
+
+The second falsifier — miss coverage < 50 % at tier width — was **not** rewritten and holds for all six pairs. Two
+test-file changes are disclosed here: the rewrite above, and a wording correction in the same docstring made after
+measuring, because the first version called the shared prefill rows the mechanism when they are only the marker. Both
+are in a file that has never been committed; no earlier run is withdrawn, because none was published.
+
+### Arm 2 — pinning a learned prefix costs slots the rest of the tier no longer has
+
+P experts held for the whole session, taken **out of** the same 96-slot tier. Δ placements/token vs the shipped tier.
+
+| learned on → scored on | P=12 | P=24 | P=48 | P=72 | P=96 |
+|---|---|---|---|---|---|
+| `20261011` → `v520-20261015` | −0.55 % | **−0.73 %** | +0.45 % | +1.96 % | +59.96 % |
+| `v520-20261015` → `20261011` | +0.05 % | −0.05 % | **−0.71 %** | +0.10 % | +46.64 % |
+| `20261011` → `v520-prompt2` | +4.05 % | +7.65 % | +16.42 % | +31.05 % | +170.89 % |
+| `v520-20261015` → `v520-prompt2` | +5.11 % | +10.06 % | +19.90 % | +35.44 % | +196.92 % |
+| `v520-prompt2` → `20261011` | +5.54 % | +11.22 % | +23.00 % | +41.12 % | +199.93 % |
+| `v520-prompt2` → `v520-20261015` | +6.15 % | +12.70 % | +26.01 % | +49.24 % | +235.46 % |
+
+The best honest arm in the whole table is **+0.14 points of hit rate** (−0.73 % and −0.71 %, the two same-conversation
+transfers), and it is only reachable by a list learned from the same conversation. Every different-prompt transfer is
+worse than shipping nothing, monotonically in P, up to 3.4× the reads at P=96 where no live slot remains. Cost, so the
+ambition is legible: one pinned expert id held in all 48 layers is 0.124 GiB of pre-read, and a full 96-wide pin tier
+is **11.88 GiB** — the entire expert-cache budget spent on a list learned from another session before a single row of
+it is validated.
+
+### Arm 3 — heat-biased eviction: same slots, no reservation, only a different victim
+
+`_HeatedSlots` subclasses the shipped rule and changes exactly one thing: a protected slot's victim price is `+inf`
+instead of its LFU rank, so it gives up its slot only after every unprotected one has. It claims no slot, so a list
+wider than the tier is legal, and this is the arm that would have been free if nameability converted into placements.
+
+| arm | W=96 | W=192 | W=288 | W=384 |
+|---|---|---|---|---|
+| `20261011` → `v520-20261015` | +1.88 % | **−3.04 %** | +0.87 % | +1.59 % |
+| `v520-20261015` → `20261011` | **−6.81 %** | −6.18 % | −3.87 % | −3.20 % |
+| `20261011` → `v520-prompt2` | +24.63 % | +23.33 % | +16.94 % | +16.46 % |
+| `v520-20261015` → `v520-prompt2` | +22.43 % | +23.92 % | +16.71 % | +16.12 % |
+| `v520-prompt2` → `20261011` | +11.52 % | +16.53 % | +9.61 % | +9.34 % |
+| `v520-prompt2` → `v520-20261015` | +20.52 % | +24.22 % | +18.47 % | +17.85 % |
+| **hindsight** `20261011` → itself | −15.24 % | −10.48 % | −2.82 % | −1.97 % |
+| **hindsight** `v520-20261015` → itself | −16.15 % | −7.09 % | +1.15 % | +2.33 % |
+| **hindsight** `v520-prompt2` → itself | −16.16 % | −11.31 % | −4.94 % | −3.89 % |
+
+Best transfer **+1.30 points** (−6.81 %, same conversation). Best different-prompt transfer: there isn't one — the
+worst is +24.63 % of placements (`20261011` → `v520-prompt2`), i.e. **−5.24 points** against its own control. And the
+hindsight rows are the arm's ceiling with zero slot cost: protecting a list learned with perfect knowledge of the very
+session being scored buys **+2.91 / +3.00 / +3.44 points**. Under half the bar, with the future already known.
+
+That is the mechanism this whole screen found, and it is not a prediction-quality problem. **Eviction inside a fixed
+tier is zero-sum.** Naming 62 % of a session's misses at width 192 does not reduce them, because holding those slots
+means refusing to hold the ones the shipped rule would have chosen, and the shipped rule is adapting to the session
+that is actually running. High nameability plus low placement reduction is the expected shape, not a surprise.
+
+### Arm 4 — how much of THIS session's future the engine would have to own
+
+The honest form of reading ahead: protect what this session routes in its next W tokens. It reserves no slot, so
+`W=0` is exactly the shipped rule (pinned to 9 decimal places against `placements_per_token`) and every other window
+reads as a delta on it. This is an **oracle** — the engine cannot see those rows yet — and it exists to bound what any
+real predictor could ever be worth.
+
+| capture | W=1 | W=2 | W=4 | W=8 | W=16 | W=32 |
+|---|---|---|---|---|---|---|
+| `20261011` | −4.19 % (+0.80 pt) | −6.88 % (+1.32) | −11.74 % (+2.24) | −18.92 % (+3.62) | −29.12 % (+5.57) | −40.90 % (**+7.82**) |
+| `v520-20261015` | −5.08 % (+0.95 pt) | −8.26 % (+1.54) | −12.55 % (+2.33) | −18.34 % (+3.41) | −26.48 % (+4.93) | −37.91 % (**+7.05**) |
+| `v520-prompt2` | −5.59 % (+1.19 pt) | −8.87 % (+1.89) | −13.75 % (+2.93) | −21.53 % (+4.58) | −30.73 % (+6.54) | −41.67 % (**+8.86**) |
+
+Monotone and consistent across three captures: each doubling of the window buys more than the last, ≈ +0.8/+0.95/+1.19
+points at one token and **+7.05 to +8.86 at 32** — which is where the plan's +7-point bar actually sits, and it
+recovers most of the +8.4 that §5z attributed to Belady at the same slots. So the temporal headroom is real, and the
+oracle prices it.
+
+What the engine can actually own: nothing. MTP is off on the delivered path (§5t's config list, line 1259) and
+speculation is §8-closed; and its verify pass is **width 2** — one draft token, `StreamingMTPTypes.swift:234` — so
+even re-opening speculation buys W=1, worth **+0.80 to +1.19 points** (−4.2 to −5.6 % of placements). That is not close
+to the bar on any reading, and §5y's licence note applies to it exactly as it applies to every other arm here: a
+replay delta cannot be turned into a clock claim at all, because the ~15.5 placements/token the ring serves without a
+drive read are invisible in a route trace and that share is unmeasured. The gap between what would clear the bar (32
+tokens) and what is available (0, or 1 at the cost of re-opening a closed lever) is the whole result of this arm.
+
+### One correction to §5z, named
+
+§5z's last verdict bullet calls the ring counters "issuing for four times the depth it keeps". The two numbers it
+quotes in the same sentence are 40.51 issued and 20.39 adopted per token — a ratio of **1.99**, not four. The wording
+is corrected there; the counters themselves were right and are unchanged. The mistake does not soften §5z's point:
+issuing 2× the depth it keeps while `inflight=0.01` is still a scheduling question that no budget arm can answer.
+
+### Deviations, all of them
+
+1. Three captures, two prompts, n = 1 conversation per prompt. The "same conversation" pair is one pre-v5.20 and one
+   v5.20 build, so it partly measures model constancy across a build change (§5z deviation 4 applies unchanged).
+2. Cold-cache replay, no warm-up beyond the prefill rows — §5z deviation 2. A live engine's cache at decode time is
+   not cold, which flatters every arm that starts from an empty tier.
+3. The replay's level bias is −3.2 % on `v520-20261015` and −10.8 % on `v520-prompt2` (§5z deviation 3). Only signs,
+   monotonicities and cross-capture agreement survive that; no magnitude here is a machine number.
+4. Arm 4 is an oracle by construction and cannot be implemented. It is published as a price, not a policy.
+5. `_HeatedSlots` overrides only `_price`; `_PinnedSlots` composes the same rule at a smaller capacity. Both were
+   checked to reproduce `placements_per_token` exactly at their neutral setting, so no delta in this section comes from
+   a re-implemented cache rule.
+6. Hot lists rank by request count with ties broken by ascending expert index, so a shipped prefix list would be
+   byte-reproducible offline; that property is tested rather than assumed.
+7. Heat widths above the tier (192/288/384) are legal *for that arm* because protection holds no slot, so those
+   columns are judged on their own numbers. The same widths in Arm 1's table are not affordable, and are reported as
+   nameability only.
+8. The driver's pin-cost line first read "per layer" for a figure that is one pin spread over all 48 layers; the
+   wording was corrected before commit. The first two sweep runs printed identical figures wherever their tables
+   overlapped, so no number moved; deviation 10 records the third run.
+9. No token rate appears in this section, and §5w's 0.637 ms per exposed read must not be used to infer one — same
+   reasoning as §5z deviation 5: that was priced in drive reads, and the ~15.5 placements/token the ring served
+   without one are invisible here.
+10. The sweep has been run three times. The third run, after the footer rewrite and the formatter pass, reproduces the
+    second **byte-for-byte across all four tables** and differs only in the two closing lines (the old one projected
+    "3.6 GB/s → 274 experts/token" from an uncited rate; the new one names its two sources: §5d's 3.57 GB/s reader
+    wall → 271 experts/token, and §5v's measured 1 359.5 MB/s drive → 103). Its own wall time did not reproduce: the
+    same code path took 1 497 s wall / 883 s user the second time and 138.9 s / 136.3 s the third, an unexplained 6×
+    on a machine that was idle in both cases, so no runtime is claimed anywhere in this section — and nothing in it
+    depends on one, because the driver's output is a pure function of three committed files.
+
+### Verdicts
+
+- **The constant-feeder premise fails as a cache change**, in all three shapes it can take: pinning a learned prefix
+  (+0.14 point best honest arm), heat-biased eviction (+1.30 across sessions, +3.44 even in hindsight), and prediction
+  width (25–34 % of the misses the cache pays for at the tier's own width). None reaches +7 and none gets a model
+  window.
+- **Why it fails is the useful finding.** Not because misses are unnameable — at 192 names an unrelated session
+  covers 54–72 % of them — but because a fixed tier makes eviction zero-sum: acting on that knowledge displaces the
+  rule that was already adapting to the live session. Any future feeder screen should be judged against this
+  asymmetry first, or it will re-report nameability as if it were savings.
+- **The temporal headroom §5z pointed at is confirmed and is unreachable.** 32 tokens of lookahead recovers
+  +7.05…+8.86 points, most of Belady's +8.4 on the same slots; one token, which is the widest thing this engine's own
+  drafter could offer, is worth ≈ +1.
+- **"Read constantly" survives only as scheduling, and this instrument cannot price it.** A read moved from exposed to
+  overlapped is the same read, so an arm that changes no placement can still change the critical path — which is
+  §5w's measurement, not a trace replay's. The ring's own counters say the burst-vs-stream question is not the one the
+  engine is stuck on anyway: on `v520-prompt2` it **issued 40.51 prefetches per token and adopted 20.39**, with
+  `free=0.99` and `inflight=0.01`. It is already issuing twice the depth it keeps, and half of what it reads is
+  thrown away. That is a queue-depth and eviction-honesty question, and answering it needs the live paired A/B method,
+  not more offline ranking.
+- **The live arm that survives unchanged** is still the saturating use count (cap ~3–5) in `makeExpertCachePlan`:
+  −2.04 to −7.92 % placements across three captures, output-invariant by construction, no model run yet. Task #177.
+- **Nothing here is a tok/s number.** This section prices placements, says how many points of hit rate each feeder
+  shape can buy at a fixed 4 608 slots, and closes the cache-change reading of the premise.

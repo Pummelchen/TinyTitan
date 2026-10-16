@@ -906,6 +906,12 @@ jobs:
         # only committed .gz traces, starts no server and imports nothing beyond
         # stdlib and its sibling simulator (stage 0 / B1 of
         # docs/plan-qwen38-decode-12gb.md).
+        # test_predictive_feeder_sim screens the operator's constant-feeder premise
+        # in the three cache shapes it could take -- pinning a learned prefix,
+        # biasing eviction by heat, and protecting this session's own next W
+        # tokens -- and it holds the pre-registered bars that decide it, including
+        # the one disclosed rewrite in §5aa. Committed .gz traces only, no server,
+        # no model, no token rate.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -937,7 +943,7 @@ jobs:
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
             test_flat_pair_cache_sim test_continuous_feeder_sim \
-            test_heat_split_sim
+            test_heat_split_sim test_predictive_feeder_sim
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
