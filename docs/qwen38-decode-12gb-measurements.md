@@ -5768,20 +5768,33 @@ the device ledger the same campaign publishes, the idle is **52.803 ms/token —
 first version understated the prize it was dismissing by 75-100×. The bound has to come from §5w's other line,
 which is the one that survives: the gap is *predicted* from the read bill at the drive ceiling on five arms
 (203.55 MB/token ÷ 3.92 GB/s = 51.93 ms against 52.803 measured, ratio 1.017), and the in-burst delivered rate is
-97 % of that ceiling. A constant feeder therefore cannot shorten this wait by scheduling it better — the pipe is
-already flat out, and moving the burst earlier relocates the wait rather than removing it. Only fewer bytes cut
-it, at **0.255 ms per MB**, and the prices below stay inside §5w's own 217.34 ms token so no clock crosses a
-batch: +1 % of tok/s needs 2.15 ms, i.e. 8.4 MB/token — 3.1 of the 73.5 experts a token reads, 4.1 % of the bill;
-+5 % needs 19.9 % of it. That is a capacity question, and §5w's closing line already answered it —
+97 % of that ceiling. *(Amended by §5ay: §5af retired both the 3.92 figure and this 97 % quotient — it argues the
+gap credits the whole demand volume to one window while the ring's speculative reads fly in it. The rate that
+survives is §5af's measured 3.3-3.4 GB/s wall, and the shipped reader is already at it, so "the pipe is flat out"
+holds; what changes is that a byte costs the drive 0.299 ms, not 0.255.)* A constant feeder therefore cannot shorten
+this wait by scheduling it better — the burst already runs at the device's own wall, and moving it earlier
+relocates the wait rather than removing it. Only fewer bytes cut it, at **0.255 ms per MB** *(amended by §5ay:
+0.255 ms/MB is what a byte costs the **drive** at the ceiling §5af retired; §5w's paired table measures what it
+costs the **token** at 0.140 ms/MB, because ~45 % of a marginal read is already absorbed by the host-idle family —
+use 0.140 for screening)*, and the prices below stay inside §5w's own 217.34 ms token so no clock crosses a batch:
++1 % of tok/s needs 2.15 ms, i.e. 8.4 MB/token — 3.1 of the 73.5 experts a token reads,
+4.1 % of the bill; +5 % needs 19.9 % of it. *(§5ay re-prices both: 14.0 MB and 32.6 %, on the paired arms' own
+198.71 ms token.)* That is a capacity question, and §5w's closing line already answered it —
 *"No capacity route is left that does not need more RAM"* — under the operator's 12 GiB cap. So the
 read path is closed on the byte floor and on the ceiling it is read at, not on a host-blocking percentage that was
 never able to measure it. The overlap half of the question is separately closed too: reclaiming a window needs
 something to consume it, and §5w measured that this idle "is not spare worker capacity". One extrapolation of §5w's
 predictor to its own limit, stated as arithmetic on published figures and not as a measurement: take the bill to
 zero bytes, so the gap goes too, and §5w's batch is 164.5 ms/token — **6.08 tok/s** (6.05 from the predicted gap;
-the five arms put that predictor within ±6.4 %). So 6 tok/s on this composition means every routed expert byte
-gone, which is the RAM §5w says is not there, and 7 tok/s means cutting a further 21.7 ms out of what is left
-*after* the reads — the other half of §5w's ledger, not a feeder. Nothing on the read path reaches the goal even at
+the five arms put that predictor within ±6.4 %). *(Amended by §5ay: that step subtracts the whole gap from the
+capture arm's 217.34 ms token, which combines two things the paired table says not to combine — §5w's deviation 1
+excludes 4.601 tok/s from the published levels, and the gap does not convert 1:1 into the token. Staying inside the
+paired arms gives a bracket: **5.90 tok/s** at the measured 0.140 ms/MB conversion, **6.96** only if the host-idle
+family stays flat while the reads go, which the same table argues it will not.)* So 6 tok/s on this composition
+means every routed expert byte gone, which is the RAM §5w says is not there, and 7 tok/s means cutting a further
+21.7 ms out of what is left *after* the reads — the other half of §5w's ledger, not a feeder. *(§5ay states the
+sharper version: 7 needs 55.85 ms, the entire read-bound gap is 55.11 ms, so the read path misses 7 by 0.74 ms even
+in the branch where it is perfect and nothing re-expands.)* Nothing on the read path reaches the goal even at
 its ideal, which is a stronger statement than the one the `io_hidden_pct` paragraph made and the one worth carrying
 forward.
 
@@ -5815,19 +5828,126 @@ withdrawn exactly as §5aw withdrew it for other purposes.
    points across a 12.2 % clock change). It understated the idle it was dismissing by 75-100× (52.803 ms/token on
    the device ledger) and argued from a host-blocking gauge to a device-side conclusion. The correction is in the
    commit that follows `c069115`; it replaces that one paragraph and its conclusion, which becomes stronger rather
-   than softer (the byte floor plus the 97 %-of-ceiling burst rate put the read path's *ideal* at 6.08 tok/s, so no
-   feeder lever of any size reaches the goal). The two rounds' numbers, the sensitivity table, the `p*` verdict and
+   than softer (the byte floor plus the 97 %-of-ceiling burst rate put the read path's *ideal* at 6.08 tok/s — since
+   re-priced by §5ay as a 5.90-6.96 bracket on the paired arms, so no feeder lever of any size reaches the goal). The
+   two rounds' numbers, the sensitivity table, the `p*` verdict and
    the `prefetch_off` sign are untouched, and so are the other deviations in this list. A reader holding `c069115`
-   alone should read the headroom bound as the byte floor, not as `io_hidden_pct`. The sibling uses of the same
+   alone should read the headroom bound as the byte floor, not as `io_hidden_pct`, and should take the ms-per-MB
+   price from §5ay rather than from this section. The sibling uses of the same
    counter were checked and amended the same way, not rewritten: §5ao's "the demand reads are almost entirely
    hidden already" clause now carries an amendment saying which part of its verdict the counter was actually doing,
    and [`docs/plan-qwen38-decode-12gb.md:60`](plan-qwen38-decode-12gb.md#L60)'s falsifier bullet now names the
    device-side lines as the counter to pair. §5m's 0.075 % prize had already been amended by §5w itself, so this is
    the second time since that ruling the gauge was reached for as an overlap argument — the count is the finding.
 7. **Section numbering.** `## 5av` does not exist in this document and no other document refers to it; the sequence
-   runs §5au → §5aw → §5ax. Recorded so a reader looking for a lost section does not spend a session on it.
+   runs §5au → §5aw → §5ax → §5ay. Recorded so a reader looking for a lost section does not spend a session on it.
 8. **Provenance.** §5aw's screen landed at `fd3823e` and its notes at `7ebbba1`, both on `main`; both rounds ran
    against that tree, unmodified, with a binary newer than every source file. Gates seen locally before
    committing this section: `tools/lint.sh docs`, `tools/lint.sh python`, the CI markdown-link step, and the price
    screen's own suite. None of it is evidence a CI run executed them; it is evidence that the tree this section
    describes is the tree the next run will check.
+
+## 5ay. #209's premise, priced from §5w's own paired table: a routed-expert MB removed buys 0.140 ms of token and not the 0.255 ms that `bytes ÷ ceiling` says, because 45 % of a marginal read is already absorbed — and the measured price puts 7 tok/s beyond the entire read-bound gap (2026-10-16)
+
+Nothing here is a new run. It is arithmetic on the five arms §5w published, done because §5ax's corrected
+paragraph — the one that replaced the `io_hidden_pct` bound — carried an assumption that §5w's own table
+contradicts: it priced a byte at the drive ceiling (`1 ÷ 3.92 GB/s` = 0.255 ms/MB) and then subtracted the whole
+gap from the token, i.e. it assumed every millisecond of read-bound device idle converts 1:1 into a millisecond of
+token. §5w measured that conversion and did not price it; §5ax used 1.0 where the pair says 0.55.
+
+### The conversion, read off the paired rows
+
+Both §5w A/B rounds move the read bill and the clock together, so the token's price of a MB is a difference of two
+published arms, and it is the **removal** direction that matters (48 → 96 slots cuts bytes):
+
+| paired round | MB/token | ms/token | Δ bill | Δ token | **token price** | vs 0.255 | Δ gap | gap price | absorbed by family 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| round 1 | 380.19 → 207.63 | 218.63 → 199.40 | −172.56 | −19.23 | **0.1114 ms/MB** | 43.7 % | −39.708 | 0.2301 | −20.48 ms, 0.1187/MB (46.5 %) |
+| round 2 | 380.72 → 207.01 | 227.38 → 198.02 | −173.71 | −29.36 | **0.1690 ms/MB** | 66.2 % | −49.127 | 0.2828 | −19.77 ms, 0.1138/MB (44.6 %) |
+| mean | | | −173.14 | −24.30 | **0.1402 ms/MB** | **55.0 %** | −44.418 | 0.2566 | 0.1163/MB (45.6 %) |
+
+The gap column is the check that the two sections are describing the same physics. The read-bound idle moves at
+**0.2566 ms/MB**, which is 100.6 % of the ceiling price §5w's predictor uses (`bytes ÷ 3.92 GB/s`, five arms inside
+6.4 %) and **86 %** of §5af's planning wall of 3.3-3.4 GB/s — and §5af retired 3.92 as a *rate*, arguing that
+`gap_total / gap_count` credits the whole demand volume to the hit→fixup window while the ring's ~42.8 speculative
+reads per token fly in it too. The difference form is much less exposed to that critique than the absolute one, but
+it is not exempt: on the planning wall, about 0.042 ms/MB of a marginal read's device time lands somewhere other
+than this gap. So the bytes do cost drive time — most of it inside the gap — and what the token sees is 47-55 % of
+it, and the missing part is exactly §5w's family trade: at 48 slots the host-turnaround family fell to
+19.930/20.386 ms/token from 42.835, i.e. the deeper queue buried about 20 ms of host bookkeeping per round, and
+−20.48/−19.77 is what the table needs it to be. The two halves are the same 20 ms measured from opposite sides.
+
+The stable quantity is the absorbed share, not the price. The two rounds disagree about the token price by 52 %
+(0.1114 vs 0.1690) and about the gap price by 23 %, but they agree about the absorption to 4 points (46.5 %,
+44.6 %). That is what §5ax's sensitivity result predicts from the other direction: the wall clock is the noisy
+column and the counters are near-deterministic, so the *difference* between the two idle families is the durable
+number. **Use 0.140 ms/MB (mean) when screening a byte-cutting lever; the `bytes ÷ rate` figures — 0.255 at the
+retired 3.92 ceiling, 0.299 at §5af's planning wall — say what a MB costs the *drive*, which is not what it costs
+the user.**
+
+### What the bill is worth, priced correctly
+
+On the shipped 96-slot arm's own means inside that batch — 207.32 MB/token, 198.71 ms/token, 55.110 ms/token of
+read-bound gap, 5.0325 tok/s — the read-driven share of a token is 207.32 × 0.1402 = **29.07 ms = 14.6 %**, not the
+24 % the gap line alone suggests. Two independent routes reach the same figure: 74.9 misses/token (the paired arms'
+74.99 and 74.76; §5w's capture arm read 73.51, and its deviation 6 says the two are not the same run) × 0.388 ms
+per read (0.1402 × 2.7689 MB) = 28.5 ms, 2 % off. So the extrapolations are:
+
+- **Bill → 0 at the measured price:** 198.71 − 29.07 = 169.64 ms → **5.90 tok/s** (per round 5.67 and 6.13).
+- **Gap → 0 with nothing re-exposed:** 198.71 − 55.11 = 143.60 ms → **6.96 tok/s.**
+
+§5ax published 6.08 for that second shape using §5w's *capture* arm clock (217.34 ms) rather than the paired arms'
+own, and with no branch distinction. The bracket is the honest answer, and the pair decides which end applies: in
+the measured 83 % of the bill, host idle re-expanded as the queue shallowed, so the lower end is the supported
+extrapolation and the upper end requires that trend to stop exactly at zero. Either way the goal is out of reach on
+this path, and by a margin worth stating plainly: **6 tok/s needs 32.04 ms and the entire bill buys 29.07 — 91 % of
+the way there is gone before a single byte is saved; 7 tok/s needs 55.85 ms, which is 192 % of the bill, and the
+whole read-bound gap is 55.11 ms.** Seven is short by 0.74 ms even in the branch where the reads vanish *and* the
+host idle stays flat — a branch the same table argues against.
+
+The screening prices that follow are 1.8× what §5ax printed: at the shipped level a **+1 %** gain needs 1.97 ms =
+**14.0 MB/token = 5.1 of the 74.9 experts a token reads = 6.8 % of the bill** (not 8.4 MB / 3.1 experts / 4.1 %);
+**+5 %** needs 67.5 MB = **32.6 %** of it (not 19.9 %). Every residency lever the campaign has ever screened has to
+deliver several percent of the bill *per* quality-preserving change to be measurable at all, and §5w's closing line
+— *"No capacity route is left that does not need more RAM"* — is now backed by a price rather than by a rate.
+
+### Two prices this corrects in the same direction
+
+1. **The ceiling is the optimistic one.** §5af measured the device wall at 3.3-3.4 GB/s across 30 slice × worker
+   shapes and named 3.3-3.4 the planning number, superseding the 3.92 the `ParallelExpertReader` header records
+   (1 thread 2.43, 4 threads 3.92, 8 threads 3.92 saturated —
+   [`sources/TinyTitan/Infrastructure/Streaming/ParallelExpertReader.swift:9-11`](../sources/TinyTitan/Infrastructure/Streaming/ParallelExpertReader.swift#L9)).
+   Against §5af's 3.35 GB/s the conversion is **47 %** instead of 55 %, so the 0.140 ms/MB is generous to the read
+   path by both constructions at once. It is not a ceiling in the "best case" sense; it is the high end.
+2. **§5ar's withholding lever is a token effect, not a drive effect.** Its band is 0.788-1.301 ms per *issued*
+   read — service time — while a removed read is worth 0.388 ms of token, so the lever's published +0.05 % to
+   +0.32 % should be read as roughly +0.03 % to +0.18 %. That is the same ±0.1 %-of-a-token class §5ax concluded,
+   reached from the price side instead of the gate side, and it moves §5ar's lever further from the six-link
+   threshold, not closer. Nothing reopens.
+
+### Deviations, all of them
+
+1. **No model run.** Every figure is arithmetic on §5w's published rows (arms `r1a`/`r1b`/`r2a`/`r2b` and the
+   family totals), plus §5af's and §5ar's published prices. ms/token comes from `1000 ÷ tok/s`, which is how §5w
+   itself states its 217.34 ms token.
+2. **n = 2 pairs, over a 1.83× swing.** The price is two numbers 52 % apart around a mean. It is not a fitted
+   curve, it carries no error bar, and the 83 %-of-bill coverage cuts both ways: the extrapolation to zero bytes
+   is a 1.2× extension of a measured range, in the measured direction, but an extension still.
+3. **The 12.2 % agreement is not independent evidence.** The paired slot advantage and the token price come from
+   the same four arms, so "the prediction lands inside 6.4 %" and "the token moves 12.2 %" cannot corroborate each
+   other. The only cross-check that is partly independent is the family balance (20 ms from the totals versus 20 ms
+   from the difference) and the miss-count route to 28.5 ms, and both are within a few percent.
+4. **The linear model is a model.** It assumes family 2 re-expands proportionally as bytes retreat. The mechanism
+   §5w gives is queue depth, and queue depth is not linear in bytes all the way to zero — at some point the GPU
+   runs out of already-queued work to hide the host behind and the absorption stops. That is the whole difference
+   between 5.90 and 6.96 and this section does not resolve it; it publishes both ends and says which one the data
+   reaches.
+5. **§5w's own contamination applies to these rows.** Its deviation 3 records swap at 7.63 → 7.90 GB across the
+   batch and calls round 2's slower 48-slot arm a plausible pressure effect, which is precisely the arm that sets
+   round 2's higher price. If that arm was slow because of swap rather than bytes, round 2's 0.1690 is too high and
+   the mean over-prices a MB.
+6. **One correction per day, same section.** §5ax was fixed for using `io_hidden_pct` and is fixed again here for a
+   conversion assumption; both are its own text, both are disclosed rather than silently rewritten. The
+   distinguishing lesson: the first error reached for a gauge the campaign had ruled out; the second used a gauge
+   it had ruled *in* (the ceiling predictor) for a quantity the same batch had already measured. Reading a
+   published table is not the same as using it.
