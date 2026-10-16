@@ -5250,8 +5250,18 @@ so the second coordinate is **positive** where a step makes adopted reads *fall*
 
 | pair | rows | this section | §5as published |
 |---|---|---|---|
-| ring-off × depth-2 | (+39.45, −18.86), (+33.28, +9.42) | **41.36°, cond 1.51** | 41.4°, cond 1.5 |
+| ring-off × depth-2 | (−39.45, +18.86), (+33.28, +9.42) | **41.36°, cond 1.51** | 41.4°, cond 1.5 |
 | depth-2 × depth-3 | (+33.28, +9.42), (+55.28, +13.02) | **2.55°, cond 22.47** | 2.6°, cond 22 |
+
+**This table printed its ring row negated until #207's screen could not reproduce E1 from it.** The step is ring-on
+→ ring-off, so `Δissued` is `0 − 39.45 = −39.45` and adoptions *fall*, which the convention stated two lines above
+makes a positive second coordinate: `(−39.45, +18.86)`. Negating a whole row leaves `det`'s magnitude alone, so the
+41.36° and cond 1.51 were never at risk — which is exactly why nobody noticed. What the negation does change is the
+solve: paired with the same `+11.748 ms` step this section quotes, the printed row gives `x = 0.681` / `y = 0.802`,
+**inside** §5ar's band and the opposite verdict to the one published below. The corrected row is E1 verbatim
+(`18.86 y − 39.45 x = 11.7 ms`), and it is what reproduces the `y = 1.584` of the table after it. The coordinates
+are now pinned to the prices by `Sign` in `benchmark/test_tinytitan_price_pair.py`, so the convention fails a test
+instead of a reader (§5au).
 
 The ring step's wall cost from §5ag's two rates is 11.748 ms/token against the 11.7 ms §5as quoted. Both claims
 hold. The sign is the instrument: read with the opposite sign the identifying pair collapses to **9.75°, condition
@@ -5313,3 +5323,186 @@ Deviations.
    seam, the two pins, the three repointed line pointers and this section are the commit that carries them.
    `benchmark/test_knob_sweep_verdict.py` 53 tests OK, `tools/lint.sh python` ok (ruff 0.16.7, 201 scripts parse
    under 3.13), `tools/lint.sh docs` ok, markdown links 96 checked / 0 broken.
+
+## 5au. #207 ships the price solve §5as and §5at left in a throwaway — and the page's own printed digits turn out to bound what a band call can mean; fed a real page, the screen's widest-angle rule then picks a row that lies entirely inside that page's drift control (2026-10-16)
+
+§5at closed the seam that let #206's command *print* the two columns the price equations are read from, and named
+what it still could not do: solve them. The arithmetic lived in `/tmp/seam206/verify.py`, a throwaway with no
+status, no notion of which column it had used, and no way to say that a page was too coarse to decide anything.
+[benchmark/tinytitan_price_pair.py](../benchmark/tinytitan_price_pair.py) is that arithmetic shipped, and it
+answers with the statuses this tree's other drivers use — `0` identified and inside §5ar's band, `1` identified a
+price and that price refutes the two-price model, `2` could not solve, with the reason named — over a page read
+from stdin or `--page`. Nothing is measured on hardware: it is arithmetic over a table somebody else printed, so
+it runs in CI with no model, no server and nothing fetched.
+
+### The digits are part of the measurement
+
+Every price the campaign has published was solved from rates *as printed*, and nobody had said how much the
+printing costs. The screen does, from the digits of the page it was handed: it records the coarsest printed row
+per column ([`:149`](../benchmark/tinytitan_price_pair.py#L149), [`:203`](../benchmark/tinytitan_price_pair.py#L203)),
+turns a half-ulp into a width on each equation's `Δms` and on each counter coordinate
+([`:295`](../benchmark/tinytitan_price_pair.py#L295)), propagates all six widths through the Cramer partials
+([`:311`](../benchmark/tinytitan_price_pair.py#L311)), and prints the result:
+
+```
+digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0.033 ms and x to ±0.013 ms
+```
+
+`Price` carries `x_bound` and `y_bound` as *required* fields rather than defaults, because a price that silently
+had no bound would read as an exact one. Bounds are rounded up to the millimetre, so printing one cannot
+understate it. The consequence is the part that matters for the campaign: `_verdict`
+([`:444`](../benchmark/tinytitan_price_pair.py#L444)) compares the bound to the distance from the median `y` to
+the nearer band edge and, when the bound reaches it, appends `_cannot_decide`
+([`:433`](../benchmark/tinytitan_price_pair.py#L433)) — in *both* the REFUTED and the ADMISSIBLE branch. A band
+call that falls inside the resolution of the rates it was computed from is not a refutation of the model; it is
+the page running out of digits.
+
+### Four pages, and what each one's digits cost
+
+The identifying trio — ring-on baseline, ring-off, depth-2 — printed at three precisions, and a second one-decimal
+trio whose counters come from §5aq rather than §5ag, built on purpose to price *inside* the band:
+
+| page | printed `tok/s` | best pair | `y` | bound on `y` | distance to nearer edge | verdict |
+|---|---|---|---:|---:|---:|---|
+| `ks.table()` render | 2 decimals | depth-2 × ring-off, 41.4° cond 1.5 | 1.598 | ±0.033 | 0.297 outside | REFUTED, exit 1 |
+| §5at's published table | 3 decimals | the same, 41.4° cond 1.5 | 1.585 | ±0.004 | 0.284 outside | REFUTED, exit 1 |
+| one decimal, out-of-band arm | 1 decimal | the same, 41.4° cond 1.5 | 1.362 | **±0.310** | 0.061 outside | REFUTED + *cannot decide*, exit 1 |
+| one decimal, in-band arm | 1 decimal | depth-2 × ring-off, 43.9° cond 1.4 | 1.004 | **±0.283** | 0.216 inside | ADMISSIBLE, `p*=0.237` pays, + *cannot decide*, exit 0 |
+
+Three things come out of that table.
+
+**The sweep's own page and the published page agree, and only the bound knows it.** The 2-decimal render answers
+`y=1.598` where the 3-decimal page answers `1.585`: a 0.013 ms spread from nothing but printing. It is inside the
+coarser page's own ±0.033, so the two pages are the same measurement — and neither reproduces the other's third
+decimal, which is why §5ar's prices may be quoted to three decimals but may not be *argued* at that precision.
+§5at's published `1.584` is the same solve again: the exact value off these printed rows is `1.58465`, so `1.584`
+and `1.585` are one number displayed two ways, and the ±0.004 bound covers the difference.
+
+**One decimal is enough to un-decide a band call.** Half-ulp on a one-decimal `tok/s` is 0.05, which is ~4.3 ms
+on a step of this size, and 0.039 ms of `y` per ms of wall turns that into ±0.31. Against a band 0.513 ms wide,
+that is not a rounding note — it is the difference between a refutation and no answer. The campaign has published
+tables at one and two decimals; anything read off them is now known to be un-decidable at the edges.
+
+**The caveat had to be built on the side that agrees with the model.** The last row above is the reason. A
+`cannot decide` clause that only ever prints next to a refutation is a clause that has never been tested, and it
+would be worth nothing, because the dangerous error is the flattering one: an arm that *costs* an implausible
+18 ms per adopted read gets questioned, while an arm that lands at 1.004 ms — right inside the band, gate pays,
+`+0.44 ms` of the token — gets believed. Both fixtures are in `Prices`, and the in-band one
+([`test_tinytitan_price_pair.py:294`](../benchmark/test_tinytitan_price_pair.py#L294)) is written so its hand
+arithmetic is in the comment next to it.
+
+### The sign §5at's table printed backwards
+
+§5at's geometry table carried the ring-off row as `(+39.45, −18.86)`. The step is ring-on → ring-off, so issued
+reads *fall* (`0 − 39.45`) and adoptions fall, which under the convention printed two lines above that table makes
+the second coordinate positive: `(−39.45, +18.86)`. The row is corrected in place there and the disclosure is
+there with it; what belongs here is what the error did and did not cost. Negating a **whole row** leaves `det`'s
+magnitude alone, so the 41.36° and cond 1.51 were never wrong — which is exactly why nobody noticed. Negating one
+row while pairing it against the same `+11.748 ms` solves `x = 0.681` / `y = 0.802`: **inside** §5ar's band, the
+opposite verdict to the one published below the table. A reader who took the printed row and did the arithmetic the
+next section ships would have concluded the two-price model was confirmed.
+
+The screen now pins the convention rather than describing it: `Sign`
+([`:141`](../benchmark/test_tinytitan_price_pair.py#L141)) asserts all three cases — a step that makes adoptions
+fall is positive, the ring-off step is E1 verbatim (`18.86 y − 39.45 x = 11.7 ms`), and a step that makes them
+*rise* is negative — and `Prices` asserts that those coordinates solve the published `x=0.460` / `y=1.58`. The
+other mis-signing, negating **one coordinate of one row**, is the one that does change `det` and collapses the
+identifying pair to §5at's 9.75°/cond 5.91; that pair of numbers stays prose, because no test in this suite
+asserts it. What the suite closes is the mistake §5at actually made, not every neighbouring one.
+
+### On a real page, the widest angle points at nothing
+
+Feeding the screen §5at's own rendered six-row page is the first time it has read a table assembled from more than
+one batch, and it found a design defect in the screen itself. `best_pair` picks the widest-angle candidate
+([`:405`](../benchmark/tinytitan_price_pair.py#L405)); every candidate on that page is below, with the row that
+generates each:
+
+| pair | `deg` | cond | `x` | `y` |
+|---|---:|---:|---:|---:|
+| slots64_depth25 × slots_64 | **84.25** | 1.01 | −3.791 | **18.189** |
+| layer_depth25 × slots_64 | 82.33 | 1.01 | −4.223 | 18.127 |
+| base_again × slots64_depth25 | 81.83 | 1.01 | −0.810 | 6.123 |
+| base_again × layer_depth25 | 79.91 | 1.02 | −0.825 | 6.121 |
+| base_again × prefetch_off | 56.16 | 1.20 | 3.775 | 6.581 |
+| prefetch_off × slots_64 | 53.75 | 1.24 | 11.118 | 20.319 |
+| layer_depth25 × prefetch_off | 43.93 | 1.44 | 0.683 | 0.796 |
+| prefetch_off × slots64_depth25 | 42.00 | 1.49 | 0.562 | 0.570 |
+| layer_depth25 × slots64_depth25 | 1.93 | 29.77 | −0.706 | 5.702 |
+| base_again × slots_64 | 2.42 | 23.69 | −292.294 | −23.026 |
+
+The rule picks the 84.25° pair and prints `y=18.189` — 14× the top of the band — and the ordering is not noise:
+every pair above 79° prices `y` at 6.1–18.2 ms, and the only pair on the page that prices `y` *inside* the band is
+`layer_depth25 × prefetch_off` at 43.93°. On a page like this the widest angle is anti-correlated with a plausible
+price, and the reason is geometric. A row whose counters barely move points in whatever direction its noise happens
+to lie, and a near-vertical row is *automatically* near-orthogonal to a row that is not. `slots_64`'s step is
+`(−0.03, +0.21)`, a magnitude 0.212; `layer_depth25`'s is `(+33.28, +9.42)`, a magnitude 34.587. The smaller row is
+0.6 % of the larger and the angle between them is 82.33° — not because the design is good, but because the small
+row's `Δadopted` happens to be seven times its `Δissued`. Conditioning is not signal.
+
+What kills the chosen pair is on the same page. `base_again` is the drift control: the same configuration as
+`base`, re-measured, so its step *is* the page's own drift sample, and it moved `(−0.18, +1.80)` in counters and
+11.17 ms on the wall. `slots_64`'s entire contribution to the solve is `(−0.03, +0.21)` and 3.93 ms — all three
+smaller than the drift control's. The screen used a row lying wholly inside the drift that the same page measured,
+and priced adopted reads at 18.189 ± 2.771 ms. Note that the resolution bound does not catch this and cannot: the
+page's digits are precise to ±0.005 tok/s, the inputs are fine. **The digits bound the answer's precision, the
+angle bounds the design's conditioning, and neither bounds the row's signal.** Three separate bars, and the screen
+has two.
+
+The same page shows what the in-band pair at 43.93° would have said had the rule picked it instead: `y=0.796`,
+inside the band, `exit 0`, model confirmed. Both possible verdicts from that page are artifacts of the ring-off row
+coming from §5ag's batch and the other five from §5aq's — which is precisely the trap §5as deviation 3 warned about
+and §5at made visible. A page assembled across batches cannot price anything, and a screen that prints one number
+and a status cannot say so. That is a finding, not a fix: the candidate rule is a minimum-signal bar keyed to the
+page's own control row, plus printing the *spread* of `y` across the candidates rather than one selection, and it is
+filed as #208. It is deliberately not patched here, because a bar tuned until this page returns the price the
+campaign already believes is a bar fitted to the answer.
+
+### What the tests pin, and where they idealize
+
+22 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py), 75 OK alongside
+`test_knob_sweep_verdict`. Every fixture page is built by calling the real `ks.table()`, so the two files fail
+together the moment the sweep's page and the screen's reader stop agreeing. Five traps are pinned: the sign
+(`Sign`), the sweep's cumulative page — four tables per batch, only the last is the batch
+(`ReadingAPage:173`) — the zero row stepped over as the drift control (`:215`), out-of-band `y` reported as a
+refutation rather than a price (`:241`), and the digits (`:270`, `:280`, `:289`, `:294`).
+
+The drift-control test idealizes, and the real page says so: it asserts `base_again` is stepped over because its
+printed counters are *identical* to the baseline's, which is what a fixture does and what §5at's render shows a
+real control does not — there it moves `(−0.18, +1.80)`, so the exact-zero rule at `:400` does not fire and the
+control becomes a priceable row. The test is not wrong; it pins the case the rule actually handles. The one above
+it in the table is the case it doesn't, and that gap is #208 rather than a loosened assertion.
+
+### Verdict
+
+The price solve is shipped: it names the column it solved from, refuses a page missing either counter, reports the
+condition number and how much 1 ms of wall moves `y`, bounds its own answer by the digits it was handed, and
+declines to decide a band call inside that bound. It moves no runtime default, no engine code and no shipped
+configuration, and it settles nothing about the two-price model: the pages it can read are the ones §5at already
+wrote, and every one of them is a cross-batch artifact. #206's in-batch trio is still the only thing that can
+produce a page this screen's answer means anything for, and #208 now names the bar that page has to clear before
+the selection is trustworthy.
+
+Deviations.
+
+1. **Nothing was measured in this section.** No model process, no server, no arm. Every number is either
+   published-counter arithmetic or the screen's own output over a page built from published rows, run to
+   `exit` status and quoted verbatim.
+2. **The three-decimal and one-decimal fixtures are synthetic.** They exist to measure what printed precision
+   costs a band call, which is a property of the *screen*, not of any run. Their arms' counters are §5ag's and
+   §5aq's, so they inherit §5at deviations 2 and 3: nothing in them prices a read.
+3. **The §5at-page candidate table is the screen's first read of a multi-batch page**, and its widest pair's
+   `y=18.189` is offered as evidence against the selection rule, not as a measurement of anything. The 43.93°
+   pair's `y=0.796` is equally an artifact; the difference between the two is which artifact the rule happened to
+   pick.
+4. **`/tmp/au207/`** holds the four pages quoted above. Throwaways, not committed, not proposed as tools; the
+   committed artifacts are the screen, its suite, the CI registration and §5at's corrected row.
+5. **CI registration is verified by the gate, not by CI.** `test_docs_facts_suites.test_this_repository_is_registered`
+   failed until both new files were tracked — the gate reading `ci.yml` against the working tree — which is the
+   designed behaviour (AUD-211) and not evidence that a run has executed the suite. The 22 tests ran locally under
+   the pinned ruff 0.16.7, which also parses the two files clean.
+6. **Provenance.** §5at landed at `ac69918` and its shipped counter seam at `894ecfa`, both on `main`. This
+   section, the two new python files, the `ci.yml` row and comment, and §5at's negated-ring-row correction are
+   the commit that carries them. `tools/lint.sh python` ok (ruff 0.16.7, check and format clean, 203 scripts parse
+   under 3.13), `tools/lint.sh docs` ok (87 documents, 101/105 python suites registered in CI), the CI
+   markdown-link step run locally 109 checked / 0 broken, and `test_docs_facts_suites` + both benchmark suites
+   87 tests OK together.

@@ -919,6 +919,15 @@ jobs:
         # correctness finding that outranks the clock, and a busy guard returns 3
         # instead of starting a second model process. It patches the spawn, so it
         # runs no server, loads no model and needs no install.
+        # test_tinytitan_price_pair ships §5at's two-price solve. It pins the
+        # (dissued, -dadopted) sign to the equation E1 whose published prices are
+        # only reproducible that way, takes the last table of the sweep's cumulative
+        # page, steps over the zero row the drift control leaves, and bounds its own
+        # answer by the digits the page carries: two decimals on `tok/s` move `y` by
+        # 0.03 ms on the campaign's own trio, which is why the same three arms solve
+        # 1.598 and 1.585 off two pages. A band call inside that bound is refused,
+        # not decided. Fixtures are built by the sweep's real `table()`, so reader
+        # and printer cannot drift apart; no model, no server, nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -951,7 +960,7 @@ jobs:
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
             test_flat_pair_cache_sim test_continuous_feeder_sim \
             test_heat_split_sim test_predictive_feeder_sim \
-            test_tinytitan_usecap_ab
+            test_tinytitan_usecap_ab test_tinytitan_price_pair
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
