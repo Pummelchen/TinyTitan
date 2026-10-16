@@ -6,14 +6,19 @@
 # a rule and nothing excludes a path: the scanner still reads every commit and
 # every file, so a real credential in any of these files is still caught.
 #
-# The three entries were found by the full-history scan on 2026-09-25 (1,035
-# commits, ~14.3 MB) and each was read before being recorded:
+# The first three entries were found by the full-history scan on 2026-09-25
+# (1,035 commits, ~14.3 MB) and each was read before being recorded:
 #   * `gotchas/ferry`             — a memory-scope key in a test's stub engine
 #   * `characters/halvorsen/eyes` — a memory key in a test fixture (historical path)
 #   * `ornith-1.5-35b-a3b`        — a model identifier in a benchmark script
-# All three are matched by `generic-api-key` only because they look like long
+# The fourth was found by the scan on 2026-10-16 (1,695 commits, 28.29 MB):
+#   * `expert_misses=37724`       — an engine counter quoted in a measurement doc,
+#     the same value pinned by `ENGINE_READ_MISSES_PER_TOKEN` in
+#     `benchmark/test_continuous_feeder_sim.py`, which divides it by the token
+#     count of the run that produced it.
+# All four are matched by `generic-api-key` only because they look like long
 # opaque tokens. The values are literal, not shape-based, so no future secret
-# that happens to be shaped like a path or a model id is hidden.
+# that happens to be shaped like a path, a model id or a counter is hidden.
 
 [extend]
 useDefault = true
@@ -25,4 +30,5 @@ regexes = [
   '''^gotchas/ferry$''',
   '''^characters/halvorsen/eyes$''',
   '''^ornith-1\.5-35b-a3b$''',
+  '''^expert_misses=37724$''',
 ]
