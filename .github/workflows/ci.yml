@@ -928,6 +928,17 @@ jobs:
         # 1.598 and 1.585 off two pages. A band call inside that bound is refused,
         # not decided. Fixtures are built by the sweep's real `table()`, so reader
         # and printer cannot drift apart; no model, no server, nothing fetched.
+        # test_tinytitan_gpu_contention pins the host-relative GPU contention gauge
+        # §5bd came out of: the shipped preflight refuses a fixed 15 % device
+        # utilisation, which this Mac has never satisfied (measured idle floor
+        # 56-68 %), so the gauge reads the floor beside the run and grades the run
+        # against the floor's own spread instead of an absolute zero the host never
+        # had. It pins that a run inside the floor band is `indistinguishable` and
+        # not clean, that a side with too few samples is `unreadable` and cannot
+        # pass, and that the operator's load command is split into argv rather than
+        # handed to a shell. Fixtures are the shapes the real `ioreg` reader
+        # returned, including the 0 that lands after a load stops; nothing here
+        # calls `ioreg`, loads a model, or needs macOS.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -960,7 +971,8 @@ jobs:
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
             test_flat_pair_cache_sim test_continuous_feeder_sim \
             test_heat_split_sim test_predictive_feeder_sim \
-            test_tinytitan_usecap_ab test_tinytitan_price_pair
+            test_tinytitan_usecap_ab test_tinytitan_price_pair \
+            test_tinytitan_gpu_contention
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
