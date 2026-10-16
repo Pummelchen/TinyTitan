@@ -6763,3 +6763,131 @@ because `x` is a difference of two solving rows' steps. The duty table's answer 
 premise stands regardless: the drive is idle about two thirds of every token at the shipped
 configuration, and filling that idle with *more* reads is not the lever — §5ap's counters say extra
 reads cost adoption rather than buy it.
+
+## 5bd. The 15 % bar was never this Mac's idle — the utilisation key separates a loaded host from this one by 35 points, so it is an instrument with the wrong zero, and §5s's missing "record the contention" half is now shipped (2026-10-16)
+
+§5s ended on a sentence with a hole in it. The wiki-protocol arm refused at 54 % (doc line 1149),
+and the note that followed said its threshold "is binary (15% or off)" and that there is no
+"record the contention and carry on" mode, "which is the right design for a published table"
+(doc line 1162).
+§5v had already written the reader off: *"The `ioreg` AGX "Device Utilization%" reader showed 61%
+with the machine idle and 69.6% mean during decode, so it is not an occupancy instrument on this
+host and no conclusion here rests on it"* (doc line 1513). Those two statements are about one number,
+and only one of them survives being tested.
+
+**Falsifier, registered before measuring.** From the throwaway probe that preceded the tool:
+
+> the gauge has signal only if the mean of the busy-window readings exceeds the MAXIMUM idle-window
+> reading by more than the idle spread (max-min over the idle windows). If a saturating load lands
+> inside the idle band, the key carries no information about contention on this host, and the gate
+> that reads it cannot certify a clean machine at all.
+
+**Measured.** Five windows, three of them on the shipped tool, from a clean tree at `05b9ff9`, AC
+power, no model process, one heavy process at a time.
+
+| window | `Device Utilization %` | load proof |
+|---|---|---|
+| gate0's own 30 s sample, §5s's refused arm (2026-10-15) | held 43–68, refused at 54 | — (the arm never started) |
+| probe idle windows (2026-10-16) | 0–68, max 68 | — |
+| probe loaded windows (2026-10-16) | 71–97, mean 94.8 | 1 830–1 858 GFLOP/s, 2048³ fp32, `mx.eval` per matmul |
+| shipped gauge, no load | floor 60–71 median 65 → run 59–69 median 63, Δ −2 → **`indistinguishable`** | — |
+| shipped gauge, with load | floor 56–71 median 64 → run 48–99 median 99, Δ +35 → **`elevated`** | 2 107 GFLOP/s, 4096³, materialised |
+
+**What the data says.** Three things, and the third is against this campaign's own interest.
+
+1. **The key is an instrument.** The bands are disjoint on both days: idle max 68 against loaded min
+   71, and on the shipped tool Δ +35 against a floor spread of 15. A saturating load never lands
+   inside the idle band, so the registered falsifier did not fire and §5v's "not an occupancy
+   instrument" was too strong a verdict for what was actually a single untested assumption — that a
+   reader whose floor is 60 % cannot see anything. It sees 35 points.
+2. **The 15 % bar has a zero-point defect, not a sensitivity one.** Across five samples on two days
+   this host's floor never once read below 43 %; the only sub-43 values anywhere in them are the
+   transient `0`s that answer as the first read after a load stops, which is the artifact the
+   shipped tool's median rule exists for. The consumers are the desktop's own compositor, browser
+   and chat renderers (§5s names them at doc lines 1153–1155), and TinyTitan launches none of
+   them. So `preflight(15)` (gate0:661, reader at gate0:121-134) is not misreading
+   the machine; it is correctly saying that a host idling at 56–71 % is not the reference host a
+   published table assumes. §5s's conclusion therefore stands as written — the refusal was the
+   finding, `--allow-busy-gpu` was not used, and the wiki row was reported *not measured*. What
+   §5bd adds is the other half §5s called missing: a way to **record** the contention and carry on,
+   offline, without touching the gate that decides what gets published.
+3. **The same reader cannot certify GPU headroom either.** Engine decode measured 69.6 % mean (§5v),
+   and this host's floor is 56–71 % with a spread of 11–15 points. Decode's occupancy is *inside* the
+   desktop's swing, so on this instrument it grades `indistinguishable` — which means no premise in
+   this campaign may be priced from "the GPU is only 70 % busy, so 30 % is free for a third worker".
+   That is a bound, and it cuts against the tri-worker idea rather than for it; §8's compute-offload
+   closures remain the live evidence there, and §5v's own "no conclusion rests on it" was correct
+   even though the reason given for it was not.
+
+**Shipped: `benchmark/tinytitan_gpu_contention.py`.** It measures the host it is on — a floor window,
+a run window beside it, a verdict graded against the floor's own spread instead of an absolute zero
+the machine never had. Four rules the suite pins, all of them this campaign kept needing: a run
+inside the floor band is `indistinguishable`, never `clean`; a side with fewer than three samples is
+`unreadable`, and an `unreadable` floor cannot report `meets_absolute_limit`, so a check that read
+nothing hands out no pass; the band centre is the **median**, because the first read after a load
+stops answers 0 — a mean over the suite's `[0, 62, 65, 64, 61]` is 50.4 where the median is 62, so
+the average labels a freshly contended host twelve points quieter than it is, and the loaded window
+above carries exactly that artifact as its 48; `--cmd` is split into argv and launched
+directly, so no shell ever sees it and a typo'd load is refused before any sampling rather than
+traced. It changes no gate and refuses nothing — a run is bounded by what it reports. 16 tests,
+registered in CI beside the suites that need neither a model nor macOS, and they run on Linux because
+nothing in the suite calls `ioreg`.
+
+**Disclosed defect in a throwaway, caught before it was quoted.** The first version of the load
+printed **20 616 GFLOP/s**, ten times the headline rate of the machine, because MLX builds lazily:
+ten `a @ a` expressions chained inside a chunk and one `mx.eval` at the end materialise **one**
+matmul, and the other nine are never computed but still get counted. Evaluating each chunk fixes it,
+and the corrected 4096³ load measures 2 107 GFLOP/s. It is the same shape as the AUD rows about
+printed work that was never done, and it is the reason §5bd quotes the probe's 2048³ figures
+(`mx.eval` inside the loop, honest) as well as the shipped tool's.
+
+**Verdicts.**
+- §5v's deviation (2) is **amended, not withdrawn**: "no conclusion rests on it" still holds, and
+  the reason changes from *the reader cannot see* to *the reader sees a floor that is the desktop's,
+  so a single sample against an absolute bar cannot be a host statement*.
+- §5s's missing mode now exists as a separate offline tool. The gate's binary 15 %-or-off design
+  stays exactly as §5s called it — the right design for a published table. Relaxing a shipped
+  cross-host gate is the operator's call, not an overnight experiment's, so nothing in `benchmark/`
+  that refuses a run was edited here.
+- #163 is a **decision**, not another run: the wiki's Qwen3.8 row needs either a window with the
+  GPU-drawing apps quit, which is the operator's machine to make, or a row published with a floor/run
+  pair beside it, which this tool makes cheap to produce. It has not been refreshed on the strength
+  of §5bd alone.
+
+**Not settled.** Nothing about decode tok/s moved; no lever was opened or closed here. The floor
+drifts with what this session is doing, which is the same noise source the paired-benchmarking record
+already names, so a genuinely quiet machine remains the only host that can price a sub-1 % effect on
+wall clock.
+
+**Next.** Nothing in §5bd is a prerequisite for anything. If the operator wants the wiki row, the
+shortest path is one gate0 batch taken while nothing draws to the GPU, with a floor/run pair recorded
+before and after; if the operator would rather publish with the contention labelled, §5bd's tool is
+the label. Either way §5bc's amendment — the feeder question is slot 0 and §5ar's withholding list —
+is unchanged by anything here.
+
+**Provenance.** Commit `05b9ff9` (tree clean for the two shipped-tool rows; the 2026-10-16 probe rows
+were taken from a dirty tree carrying the not-yet-committed gauge and are labelled as a
+discrimination test, not as a benchmark, because they measure `ioreg` and not the engine). 24 GB
+M3 MacBook Pro (Mac15,3), macOS 27.0.1, Swift 6.4/Xcode 27, AC power, 100 % charged, `pgrep` guard
+empty, no model loaded. Commands, verbatim, with exit codes:
+
+```
+$ python3 tinytitan_gpu_contention.py --floor-seconds 10 --run-seconds 10 --interval 0.5
+{"absolute_limit": 15, "cmd_status": 0, "delta": -2, "floor_band": [60, 71], "floor_median": 65,
+ "floor_spread": 11, "meets_absolute_limit": false, "run_band": [59, 69], "run_median": 63,
+ "verdict": "indistinguishable"}                                    exit 0
+$ python3 tinytitan_gpu_contention.py --floor-seconds 10 --run-seconds 20 --interval 0.5 \
+      --cmd "python3 /tmp/gauge215/load.py 15"
+matmuls=230 gflops_per_s=2107
+{"absolute_limit": 15, "cmd_status": 0, "delta": 35.0, "floor_band": [56, 71], "floor_median": 64,
+ "floor_spread": 15, "meets_absolute_limit": false, "run_band": [48, 99], "run_median": 99.0,
+ "verdict": "elevated"}                                              exit 0
+$ python3 -m unittest test_tinytitan_gpu_contention   # 16 tests, OK
+$ PATH="$HOME/.local/bin:$PATH" tools/lint.sh python  # ok, ruff 0.16.7
+$ PATH="$HOME/.local/bin:$PATH" tools/lint.sh docs    # ok, 102/106 python suites registered
+```
+
+Deviations: the two shipped rows ran back-to-back rather than interleaved, because they are
+utilisation bands and not clocks — there is no paired delta to protect, and each row carries its own
+floor measured in the seconds before it. The `/tmp/gauge215/load.py` helper is deliberately not repo
+code: it is an MLX-dependent load, and `benchmark/requirements.txt` does not carry MLX.
