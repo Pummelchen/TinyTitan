@@ -331,4 +331,79 @@ extension PreadExpertStreamerTests {
         #expect(cleared.reloads == 0)
     }
 
+    /// A saturating cap clamps only the eviction *price*, never the accumulated
+    /// count. Two residents whose counts both exceed the cap tie, and recency
+    /// then decides -- so a hot expert that decode has stopped using hands its slot
+    /// back instead of defending it with everything it did since the model loaded.
+    ///
+    /// Expert 0 is used five times and then left alone; expert 1 is used three
+    /// times, most recently. Their counts order one way (1 < 0) and their last-use
+    /// orders the other (0 is the older slot), which is the only shape in which a
+    /// cap can change a victim: uncapped LFU evicts expert 1, a cap of 3 evicts
+    /// expert 0. A brand-new expert always prices at 1 and always loses, capped or
+    /// not, so it cannot be the fixture.
+    @Test func saturatingUseCountCapPricesRecentDemandWithoutClampingTheCount() throws {
+        let url = try Self.writeSyntheticLayer()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+
+        func run(cap: Int?) throws -> (resident: [Int], useCountOfHotterExpert: Int) {
+            let streamer = try PreadExpertStreamer(
+                layout: Self.makeLayout(path: url.path), device: device, slotCount: 2,
+                expertUseCountCap: cap)
+            for _ in 0..<5 { _ = try streamer.loadExpertsCached(experts: [0]) }
+            for _ in 0..<3 { _ = try streamer.loadExpertsCached(experts: [1]) }
+            _ = try streamer.loadExpertsCached(experts: [2])
+            return (streamer.residentExperts().sorted(), streamer.expertUseCount[0])
+        }
+
+        // Shipped LFU: 5 vs 3 counts, so the recent-but-cooler expert 1 is the victim.
+        let uncapped = try run(cap: nil)
+        #expect(uncapped.resident == [0, 2])
+
+        // Both residents now price at the cap, the ranks merge, and the tie falls to
+        // last use -- the stale hot expert 0 gives up the slot. The count itself is
+        // untouched, which is what keeps this a price and not a rescaling (§5y (6)).
+        let capped = try run(cap: 3)
+        #expect(capped.resident == [1, 2])
+        #expect(capped.useCountOfHotterExpert == 5)
+    }
+
+    /// The cap has to clamp the count on *both* sides of the comparator, which a
+    /// victim-set assertion cannot show: the planner sorts two candidates, and a
+    /// two-element sort makes one comparison in one direction, so a one-sided
+    /// clamp leaves the eviction outcome unchanged while leaving the ordering
+    /// relation inconsistent. Probing `shouldEvictSlot` in both directions pins
+    /// the relation itself.
+    ///
+    /// Same state as the test above and no eviction yet: expert 0 planned five
+    /// times, expert 1 planned three times, both resident.
+    @Test func useCountCapMergesRanksInBothComparatorDirections() throws {
+        let url = try Self.writeSyntheticLayer()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+
+        func build(cap: Int?) throws -> PreadExpertStreamer {
+            let streamer = try PreadExpertStreamer(
+                layout: Self.makeLayout(path: url.path),
+                device: device,
+                slotCount: 2,
+                expertUseCountCap: cap)
+            for _ in 0..<5 { _ = try streamer.loadExpertsCached(experts: [0]) }
+            for _ in 0..<3 { _ = try streamer.loadExpertsCached(experts: [1]) }
+            return streamer
+        }
+
+        // Shipped LFU: slot 1's expert has the lower count, in either direction.
+        let uncapped = try build(cap: nil)
+        #expect(!uncapped.shouldEvictSlot(0, before: 1))
+        #expect(uncapped.shouldEvictSlot(1, before: 0))
+
+        // Capped, both price the same, so recency decides in either direction:
+        // slot 0 is the stale one and goes first.
+        let capped = try build(cap: 3)
+        #expect(capped.shouldEvictSlot(0, before: 1))
+        #expect(!capped.shouldEvictSlot(1, before: 0))
+    }
+
 }

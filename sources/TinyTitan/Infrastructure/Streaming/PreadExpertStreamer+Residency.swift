@@ -107,6 +107,38 @@ extension PreadExpertStreamer {
         for i in expertUseCount.indices { expertUseCount[i] = 0 }
     }
 
+    /// The default eviction-price cap, from `TINYTITAN_EXPERT_USE_CAP`.
+    ///
+    /// Plain LFU ranks a slot by how many times its expert has ever been
+    /// planned, so an expert touched hundreds of times during prefill prices
+    /// above anything decode has used since and stays until the session ends —
+    /// `resetExpertUseCounts` handles that by wiping the counts, but it only
+    /// runs at the prefill-to-decode handover. A cap collapses the top of the
+    /// ranking instead: everything at or above it prices the same, so the tie
+    /// falls to `slotLastUse` and the *recently* unused expert goes first.
+    /// Offline replay of the captured qwen38 route trace put cap 3 at 2-8 %
+    /// fewer placements/token against the shipped per-layer budget
+    /// (`docs/qwen38-decode-12gb-measurements.md` §5y). Placements are not
+    /// clock, so this is a knob to measure, not a default to ship.
+    ///
+    /// Read once, like every other decode env flag here: a per-plan
+    /// `ProcessInfo.environment` rebuild is the regression the flags already
+    /// record. A value that is not a positive integer degrades to the shipped
+    /// uncapped policy and says so on stderr rather than refusing the run.
+    public static let expertUseCountCapDefault: Int? = {
+        guard let raw = ProcessInfo.processInfo.environment["TINYTITAN_EXPERT_USE_CAP"] else {
+            return nil
+        }
+        guard let cap = Int(raw), cap > 0 else {
+            FileHandle.standardError.write(
+                Data(
+                    "[cache] ignoring TINYTITAN_EXPERT_USE_CAP '\(raw)'; "
+                        .appending("expected a positive integer\n").utf8))
+            return nil
+        }
+        return cap
+    }()
+
     func shouldEvictSlot(_ lhs: Int, before rhs: Int) -> Bool {
         if cachePolicy == .lru {
             return slotLastUse[lhs] < slotLastUse[rhs]
@@ -116,8 +148,13 @@ extension PreadExpertStreamer {
         if lhsExpert < 0 || rhsExpert < 0 {
             return lhsExpert < rhsExpert
         }
-        let lhsCount = lhsExpert < expertUseCount.count ? expertUseCount[lhsExpert] : 0
-        let rhsCount = rhsExpert < expertUseCount.count ? expertUseCount[rhsExpert] : 0
+        let lhsUses = lhsExpert < expertUseCount.count ? expertUseCount[lhsExpert] : 0
+        let rhsUses = rhsExpert < expertUseCount.count ? expertUseCount[rhsExpert] : 0
+        // The cap clamps the price only. `expertUseCount` keeps accumulating,
+        // so removing the cap restores exact LFU ordering from the same state.
+        let cap = expertUseCountCap ?? Int.max
+        let lhsCount = min(lhsUses, cap)
+        let rhsCount = min(rhsUses, cap)
         if lhsCount != rhsCount { return lhsCount < rhsCount }
         return slotLastUse[lhs] < slotLastUse[rhs]
     }

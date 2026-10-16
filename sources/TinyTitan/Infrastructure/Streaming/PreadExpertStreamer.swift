@@ -92,6 +92,9 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     public let layout: StreamLayout
     public let slotCount: Int
     public let cachePolicy: ExpertCachePolicy
+    /// Ceiling on the LFU use count used as an eviction *price*; nil is the
+    /// shipped uncapped policy. See `expertUseCountCapDefault`.
+    public let expertUseCountCap: Int?
     public let ioBackend: ExpertIOBackend
     public let poolSlotStride: Int
 
@@ -158,6 +161,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         device: MTLDevice,
         slotCount: Int,
         cachePolicy: ExpertCachePolicy = .lfu,
+        expertUseCountCap: Int? = PreadExpertStreamer.expertUseCountCapDefault,
         eventCoordinator: ExpertIOEventCoordinator? = nil,
         metalStagingPool: MetalExpertStagingPool? = nil,
         metalIOService: MetalExpertIOService? = nil
@@ -166,6 +170,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         self.layout = layout
         self.slotCount = slotCount
         self.cachePolicy = cachePolicy
+        self.expertUseCountCap = expertUseCountCap
         self.eventCoordinator = eventCoordinator
         self.metalStagingPool = metalStagingPool
         self.metalIOService = metalIOService
