@@ -6193,6 +6193,10 @@ Deviations.
 
 ## 5ba. The page the campaign has been quoting all night cannot price anything — and the one ray it does carry says the operator's feeder direction is the *cheap* one (2026-10-16)
 
+*Read the §5ba correction before quoting this heading: the refusal and the ray below stand, but the "cheap one"
+clause rested on `io_hidden_pct`, which §5w rules unfit for an overlap claim, and is withdrawn. The ray is a shape
+statement about an unstable page, not a price.*
+
 §5aa closed the cache-change reading of the constant-feeder premise by handing the scheduling reading to another
 instrument: "answering it needs the live paired A/B method, not more offline ranking". The engine names one such A/B.
 [`RealForwardRunner+DecodeLayers.swift:280`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L280)
@@ -6287,6 +6291,34 @@ against September's 7.4 %. So "the SSD can read constantly while compute is doin
 the delivered state, by the engine's own instrument, and the two things it did not buy are bytes and prediction
 quality — which is where §5ay and §5z already said the remaining tok/s lives.
 
+*Amended by the §5ba correction (same day): the paragraph above is the move §5w forbids, and §5w's own table refutes
+it.* The standing ruling is that **"`io_hidden_pct` is unfit for any future overlap claim"** (§5w's verdicts, doc line
+1744), and the reason is in the same section (line 1553): the counter answers "did the **host** have to block", not
+"did the **GPU** go idle", because the routed command buffer is event-gated on the device
+([`+DecodeMoE.swift:374`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L374)), so when
+bytes are late the device waits, the host does not, and the token still reports as fully hidden. §5v was overturned
+for making this move over a 0.075% prize, §5ax was amended for a 99.89% clause, §5ay's deviation 6 recorded the
+pattern — and this section made it a third time, with §5w's refuting ledger already committed some 4,650 lines earlier
+in this same file. So "the engine's own overlap counter says reads are now essentially never the reason a layer
+waits" is withdrawn, and it was never what the data said. On §5w's device ledger the shipped 96-slot default carries
+`moe_phase1_hit → moe_phase1_miss_fixup` = **52.803 ms/token** in its capture arm and 56.348 / 53.872 ms/token on the
+two shipped-default arms of its falsifier batch, while `io_hidden_pct` across those four arms reads 99.84, 99.90,
+99.86 and 99.85 — a 0.06-point spread over a batch whose clocks differ by 12.2% and whose gap line moves by 70%. A
+quarter of every token *is* the device waiting for bytes, on the arm that reports 99.8% hidden.
+
+The re-basing matters more than the withdrawal, because that paragraph was about the operator's premise and not only
+about a gauge. The host-side half of the September-to-October contrast is real: §2's baseline was 18–19% hidden and
+today's shipped round is 99.8%, and §5c already recorded what part of that jump is accounting — "the
+`io_hidden_pct` jump is the accounting seeing the fixup CB complete inside the I/O window" (doc line 152), against a
+wall-clock prize of +2.5%. What has not moved is the device half: 52.8 ms/token of GPU idle waiting for bytes, and
+§5w's five-arm table showing the rate *inside* each burst (3.85, 3.68, 3.84, 3.95, 3.69 GB/s) essentially flat in
+queue depth. Those arms varied the *demand* burst's size, not the marginal speculative read, so that table neither
+confirms nor refutes this section's ray — it removes the only evidence the paragraph offered that the shipped engine
+already sits at the cheap end. The premise's status is §5w's, unchanged and undisputed by anything here: the drive
+does burst and wait, the wait is a quarter of the token, and the burst already runs at 97% of the measured ceiling, so
+the way out is earlier bytes rather than a fuller or faster pipe. The ray stands as the shape statement it was written
+as; the "delivered state" clause did not.
+
 ### Falsifier, and what this section refuses to claim
 
 The falsifier written before running: if the screen solved §8 at ≥20° and put `y` inside 0.788–1.301 ms, the premise
@@ -6319,3 +6351,27 @@ ray reading above is what is left, and it is a *shape* statement, not a price.
    should be read beside `wait_ms` and `io_host_waits` on the shipped default and against §5w's measured exposed wait;
    if §5w's wait is not ≈0.2 ms/token, the ratio is measuring a path the current engine no longer takes. That is a
    one-arm run, not an argument.
+
+   *Amended by the §5ba correction:* withdrawn, twice over. First, it asked a host-side gauge to settle a device-side
+   question — the move §5w rules out — and `wait_ms` and `io_host_waits` are both host-side too: `wait_ms` is
+   `totalWaitNanos`, the host blocked on a GPU command buffer
+   ([`+DecodeLayers.swift:262`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L262)), and
+   `io_host_waits` counts host waits, so the comparison was a category error before it was a forbidden one. Second,
+   its expected value was wrong: §5w's wait is **52.803 ms/token**, not ≈0.2, so the test as written would have
+   "failed" by predicting a number the campaign had already published, in this same file, four and a half thousand
+   lines above it. The device-side instrument is already in the build and already what §5w published:
+   `TINYTITAN_KERNEL_STATS=1` feeds `kernelGPUOccupancy()`
+   ([`+Diagnostics.swift:70`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+Diagnostics.swift#L70)) and
+   `kernelGPUGaps()` ([`:102`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+Diagnostics.swift#L102)).
+   What genuinely remains open is a re-run of those two lines on today's build: §5w's ledger is from `8c61f14`, and
+   two commits have touched `sources/` since — `9c858cd`'s use-count cap and `dcebe75`'s per-link depth knob, both
+   off by default, so the shipped arm should be unchanged but has not been re-measured. That is a one-arm run, not an
+   argument, and it is the run to ask for.
+
+7. **One anchor the campaign has been quoting is stale.** §5w cites the event gate as
+   `RealForwardRunner+DecodeMoE.swift:372` (doc line 1562, and §5v repeats it at 1459). It is on **374** on this
+   tree — `dcebe75` put two lines above it. The code claim is unaffected
+   (`routedCB.encodeWaitForEvent(token.event, value: token.value)` is still that file's only `encodeWaitForEvent`,
+   verified by grep rather than by reading a remembered number), but a reader who opens 372 lands on
+   `let ioStatus = …`, which is the same class of error §5az disclosed on its own first draft. §5w's text is left as
+   published; this is where the drift is recorded.
