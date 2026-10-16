@@ -6190,3 +6190,132 @@ Deviations.
    test_knob_sweep_verdict test_docs_facts_suites` — 104 OK in 0.747 s. One anchor written by this section itself was
    wrong on first draft (`:406` pointed inside a test body rather than at its `def`), found by reading the line each
    cited number names, and is `:404`. None of it is evidence a CI run executed them.
+
+## 5ba. The page the campaign has been quoting all night cannot price anything — and the one ray it does carry says the operator's feeder direction is the *cheap* one (2026-10-16)
+
+§5aa closed the cache-change reading of the constant-feeder premise by handing the scheduling reading to another
+instrument: "answering it needs the live paired A/B method, not more offline ranking". The engine names one such A/B.
+[`RealForwardRunner+DecodeLayers.swift:280`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L280)
+still carries the comment "the prefetch gate that used them (`TINYTITAN_PREFETCH_MIN_MARGIN`) measured -4.2% and is
+gone", and the run that produced that −4.2 % is section 8 of
+[qwen38-decode-profile-2026-09-05.md](qwen38-decode-profile-2026-09-05.md) — the table this campaign has quoted for
+"prefetch loses", for the withholding lever, and for the loss-per-speculative-read, and which #209's screen has never
+been pointed at. No model run: this is two committed tables re-read.
+
+**What ran.** `python3 benchmark/tinytitan_price_pair.py --page /tmp/ba209/page.md --baseline base`, the same with
+`--column io_ms`, and a throwaway `/tmp/ba209/ray.py` over the same numbers. Both exits 2. The page is a transposition
+of [the §8 table](qwen38-decode-profile-2026-09-05.md#L262): the source prints `tok/s` twice (two rounds) and the
+counters once per arm, so the two round tables below carry identical `issued/pt` and `adopted/pt`, and its
+`reads issued / adopted per token` cell is split into the two columns the screen reads. Nothing was invented and
+nothing was dropped.
+
+### The screen's answer, verbatim
+
+```text
+column wall  (ms/token stepped against base)
+table 1: REFUSED: the widest pair here, gate06 x ring_rank, is 6.0 deg apart (condition 9.6), below the 20 deg a two-row solve needs; no prices
+  signal: no drift sample (base_again is not on this page), so no row was checked
+```
+
+`--column io_ms` prints the identical refusal, because the angle is a property of the counter rows, not of the column
+the step is read from, and this page carries no repeated baseline for the drift sample to find
+([`_drift_sample:497`](../benchmark/tinytitan_price_pair.py#L497)).
+
+### Why it refuses, in one line of arithmetic
+
+| arm | Δissued | Δadopted | adopted/issued | its row's line |
+|---|---:|---:|---:|---:|
+| ring_rank (2 slots, rank order) | +57.0 | +4.2 | 0.0737 | −4.21° |
+| probe-margin gate 0.03 | +17.0 | +2.7 | 0.1588 | −9.02° |
+| probe-margin gate 0.06 | +7.8 | +1.4 | 0.1795 | −10.18° |
+
+All three arms differ only in *how much* of one change they make: more reads, proportionally more adoptions. Their
+lines span 5.97°, where the shipped rule asks for 20° and §5ax's identifying pair had 47.33° — a page that varies a
+scalar prices a sum, and this one does not even vary that. So §8 is exactly what its own header claimed, a within-batch
+comparison of rates, and never a price: it closes the *lever* only in the sense that its `prefetch off` row is faster
+than its three prefetch rows. That is still evidence. It is not an `x` and a `y`, and this campaign has been reading it
+as if it were both.
+
+### The one price the page does carry, and the model's failure against it
+
+Along its ray the page gives a per-issued-read cost `c = Δwall / Δissued`. Both rounds, against §5ax's medians
+`x=0.172 y=0.867`, where the model's own `c` is `x − y·(adopted/Δissued)`:
+
+| arm | Δwall r1 | Δwall r2 | c r1 | c r2 | c model | model Δwall | measured/model r1 | r2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ring_rank | +40.65 | +43.07 | 0.713 | 0.756 | +0.108 | +6.16 | 6.6× | 7.0× |
+| gate 0.03 | +29.90 | +18.59 | 1.759 | 1.093 | +0.034 | +0.58 | 51.3× | 31.9× |
+| gate 0.06 | +23.96 | +13.32 | 3.072 | 1.707 | +0.016 | +0.13 | 187.5× | 104.2× |
+
+Three things, none of them the October prices:
+
+1. **`c` is not a constant, and its trend has the wrong sign.** It falls 4.3× as the feeder gets deeper
+   (3.072 → 0.713 ms/read), in both rounds. `dm = x·du − y·adopted` with both prices positive makes `c` *fall* as the
+   adoption ratio rises, and the adoption ratio here rises in the same direction (0.0737 → 0.1795). Measured `c` rises
+   with it. A two-price model cannot express that, and no choice of `x` and `y` fixes it.
+2. **The saturated arm prices below the drive floor.** 0.713 and 0.756 ms per issued read sit under §5ar's band low
+   edge 0.788 ms — the time the band says one 2.641 MiB read cannot beat at the measured wall. Either those 57 reads
+   overlapped on the drive or they were not all single-expert reads; §8 does not say which, and this section does not
+   guess.
+3. **The October prices do not transfer, by 7–188×.** `x=0.172, y=0.867` are the local slope of a *throttling*
+   experiment run around 42–103 reads/token with Δadopted negative against a shipped ring; §8's arms *add* reads to a
+   baseline with none. §5az already withdrew the gate drawn from those two numbers; this is a second and independent
+   reason not to carry them onto another page.
+
+### Where this leaves the operator's premise — in the one place this page is the only evidence
+
+The premise is about *adding* reads while compute runs. Every October arm thins or removes reads; the September batch
+is the only live A/B in the adding direction the campaign has. Read as a schedule instead of a price, its ray says the
+per-byte cost of a speculative read is roughly its own transfer time when the queue is full (0.71 ms at 57 reads/pt)
+and several times it when the queue is nearly empty (3.07 ms at 7.8). A constant feeder is the cheap shape of the same
+bytes; a trickle is the expensive shape. That is the operator's intuition, priced in the direction it was stated, and
+it is the first number tonight pointing *with* the premise rather than against it.
+
+And by the counter the premise is actually about, the shipped engine already lives at the cheap end. `io_ms` is
+*accumulated* read duration
+([`COUNTERS`](../benchmark/tinytitan_knob_sweep.py#L257)), not critical-path time: the exposed part is
+`totalExposedIoNanos`, written where a read's completion misses the layer that needed it
+([`+DecodeMoE.swift:318`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L318),
+[`+DecodeMoEFinalize.swift:63`](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEFinalize.swift#L63)),
+and the summary prints the ratio as `io_hidden_pct`
+([`+Diagnostics.swift:326`](../sources/TinyTitanLib/ServerModelSession+Diagnostics.swift#L326)). September's own
+baseline reads `66 (19%)`, `67 (18%)`, `70 (18%)` hidden
+([§2](qwen38-decode-profile-2026-09-05.md#L65)); §8's rows carry 64.5–86.3 ms/token of a ~172–215 ms token, which is
+why that section could name exposed expert I/O as the limiting resource. The shipped October round reads
+`io_hidden=99.8%` on `io_ms=101.7` of a 226.2 ms token, at 42.65 issued and 22.12 adopted per token — 51.9 % precision
+against September's 7.4 %. So "the SSD can read constantly while compute is doing stuff" is not an untried idea: it is
+the delivered state, by the engine's own instrument, and the two things it did not buy are bytes and prediction
+quality — which is where §5ay and §5z already said the remaining tok/s lives.
+
+### Falsifier, and what this section refuses to claim
+
+The falsifier written before running: if the screen solved §8 at ≥20° and put `y` inside 0.788–1.301 ms, the premise
+would have had a price from the adding direction and this section would have carried it as a lever. It refused; the
+ray reading above is what is left, and it is a *shape* statement, not a price.
+
+1. **No clock.** No process was started and nothing here measures today's build. The 2026-09-05 and 2026-10-16 rates
+   are never compared to each other — only each batch's within-batch deltas — per the rule that qwen38 clocks are not
+   comparable across batches. The two headers say so themselves (5.8–6.1 against 4.4 tok/s is a different machine
+   state, a different reclaim rule and a different I/O path).
+2. **The `wall / Δio` ratios are not carried across batches.** Within September they read 1.94, 1.73, 1.72 (round 1)
+   and 2.00, 2.48, 2.02 (round 2); the same construction on the October round reads +0.87, +0.95, +1.25 and −1.36 for
+   the control. Those are not one quantity measured twice — the September column and today's `io_ms` are the same
+   family of accumulated duration with different amounts of it exposed — so no amplification factor is claimed from
+   them, and the six September ratios are reported only as the fact that its I/O counter moved about half as far as
+   its wall did.
+3. **That page's counters are not stable.** `gate03`'s I/O column moves 81.8 → 72.3 ms/token between two rounds of
+   one batch — 9.5 ms on a counter that should be near-deterministic at identical work — and its wall moves −11.3 ms
+   the other way. It is the same shape as §5ax's contaminated round, and it is a third reason no price is taken from
+   §8's I/O column.
+4. **Transposition loss.** §8 prints one counter pair per arm for two rounds, so the paired `du`/`dv` here cannot
+   carry a per-round width; the screen's refusal therefore has no drift term in it (`no drift sample`), which is the
+   unfiled §5az question about pages with no `base_again` arriving again on this page. It does not change the angle:
+   geometry needs no widths.
+5. **Throwaway.** `/tmp/ba209/` is not committed and needs no re-run: both source tables are in this repository, and
+   every number above is arithmetic on the rows quoted at
+   [§8](qwen38-decode-profile-2026-09-05.md#L264) and the two October logs' printed rows.
+6. **One candidate this leaves open, named not claimed.** `io_hidden_pct` at 99.8 % is a large statement by a
+   counter this campaign has never independently checked. Before it is used as evidence that exposure is solved, it
+   should be read beside `wait_ms` and `io_host_waits` on the shipped default and against §5w's measured exposed wait;
+   if §5w's wait is not ≈0.2 ms/token, the ratio is measuring a path the current engine no longer takes. That is a
+   one-arm run, not an argument.
