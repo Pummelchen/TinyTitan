@@ -5647,3 +5647,141 @@ Deviations.
    markdown-link step run locally 122 checked / 0 broken, and the 30 tests plus `test_knob_sweep_verdict` and
    `test_docs_facts_suites` 95 OK together. None of that is evidence a CI run executed them; it is evidence the
    tree the run will check is the tree this section describes.
+
+## 5ax. #206 lands two clean paired rounds and pins `y` at last — and the six-link gate's answer flips between them, because `x` is a *difference* of the two solving rows' steps while `y` is a *sum*, so the sweep's blocked single-pass order is what bounds it (2026-10-16)
+
+§5aw shipped the instrument and said plainly that it was the instrument, not the measurement: "#206's rounds 2-3 are
+the measurement". They are here, both clean, and together they do what §5as, §5at and §5au could not — identify the
+two prices off one page — while answering a different question from the one the campaign went to ask. `y` is now
+pinned by two independent rounds. `x`, the number the §5ar withholding lever turns on, is not identified by this
+sweep design at all, and the reason is structural rather than noisy.
+
+**What ran.** Two separate invocations, one per round, on AC power, after the full precondition block (no model
+process, `memory_pressure -Q` 83 % free, macOS 27.0.1, Swift 6.4 target `arm64-apple-macosx27.0.0`, 279 Gi free,
+qwen38 4-bit install with its `verified-install.json`), on the tree at `7ebbba1` with nothing modified and a
+release binary newer than every file under `sources/`:
+
+```bash
+TINYTITAN_BENCH_RAM_BUDGET=12 SWEEP_TOKENS=384 \
+  python3 benchmark/tinytitan_knob_sweep.py --arms base,prefetch_off,layer_depth25,layer_depth325,base_again
+```
+
+`--ram 12` is pinned explicitly rather than inherited, so the operator's ceiling is on the command line rather than
+in a default. Both rounds exit 0. Both report `response text identical across 5 arms (md5 3c0c3391)`, so every rate
+below is a rate at the same work. Logs: `/tmp/trio206/round2.log`, `/tmp/trio206/round3.log`.
+
+| arm | round 2 tok/s | ms/token | issued/pt | adopted/pt | round 3 tok/s | ms/token | issued/pt | adopted/pt |
+|---|---|---|---|---|---|---|---|---|
+| base | 4.42 | 226.24 | 42.65 | 22.12 | 4.32 | 231.48 | 42.58 | 21.36 |
+| prefetch_off | 4.15 | 240.96 | 0.00 | 0.00 | 4.17 | 239.81 | 0.00 | 0.00 |
+| layer_depth25 | 4.15 | 240.96 | 75.69 | 10.15 | 4.03 | 248.14 | 75.67 | 10.33 |
+| layer_depth325 | 3.69 | 271.00 | 102.85 | 6.67 | 3.85 | 259.74 | 102.80 | 5.86 |
+| base_again | 4.49 | 222.72 | 42.51 | 21.86 | 4.55 | 219.78 | 42.56 | 21.64 |
+
+The counters reproduce across rounds to the third digit where the machine is not involved (`prefetch_off` 0/0 both
+rounds, `layer_depth25` issued 75.69 against 75.67, `layer_depth325` 102.85 against 102.80) and to the first where
+it is (base adopted 22.12 against 21.36). Baseline drift: 1.7 % in round 2, 5.4 % in round 3 — in wall terms
+−3.53 ms and −11.70 ms per token.
+
+**Both rounds, through the screen.** `benchmark/tinytitan_price_pair.py --predict layer_depth325` over the two
+pages concatenated:
+
+```text
+round 1: best pair layer_depth25 x prefetch_off at 47.3 deg cond 1.4  x=0.120 y=0.897
+  signal: drift sample base_again moved (-0.14, +0.26) and -3.53 ms; no row lies inside it
+out-of-sample layer_depth325: rows (+60.20, +15.45) predicted +21.11 ms, measured +44.76 ms, residual +23.65 ms/token (+10.45 % of a token)
+round 2: best pair layer_depth25 x prefetch_off at 45.1 deg cond 1.4  x=0.224 y=0.837
+  signal: drift sample base_again moved (-0.02, -0.28) and -11.70 ms; no row lies inside it
+out-of-sample layer_depth325: rows (+60.22, +15.50) predicted +26.49 ms, measured +28.26 ms, residual +1.77 ms/token (+0.78 % of a token)
+median x=0.172 y=0.867  spread x=0.104 y=0.060
+ADMISSIBLE: y=0.867 is inside 0.788-1.301 ms, so the two rows price both reads
+p*=0.199 against the six-link gate's L/S = 0.82/5.30 = 0.155 -> pays (+0.20 ms of a 226.2 ms token, +0.09 %)
+```
+
+Round 2 scored alone said the opposite: `p*=0.134 … does not pay (-0.10 ms …, -0.04 %)`. So the first
+single-batch identification of `x` and `y` in the campaign does not settle §5ar's lever — it moves it across the
+threshold and back depending on which round you read. `y` never moves across the band: 0.897 and 0.837 are both
+inside 0.788-1.301 ms and agree to 7 %. The asymmetry is not luck, and the screen's own Cramer terms name it.
+
+**Why `x` is the unstable one — the arithmetic, worked from the published rows.** With row 1 = `layer_depth25`
+and row 2 = `prefetch_off`, Cramer over the [`:338`](../benchmark/tinytitan_price_pair.py#L338) solve gives, per
+round, the two partials of each price with respect to each row's wall step:
+
+| | det | ∂x/∂m₁ | ∂x/∂m₂ | ∂y/∂m₁ | ∂y/∂m₂ | x per ms common | x per ms of step **difference** | y per ms common |
+|---|---|---|---|---|---|---|---|---|
+| round 2 | 1241.4 | +0.01782 | −0.00964 | +0.03436 | +0.02662 | +0.0082 | +0.0275 | +0.0610 |
+| round 3 | 1176.5 | +0.01816 | −0.00938 | +0.03619 | +0.02813 | +0.0088 | +0.0275 | +0.0643 |
+
+`x`'s two partials have **opposite** signs, so a drift that lifts both rows' steps together barely touches it
+(+0.008 per ms), and a drift that lands *unevenly* between them hits it at 0.0275 per ms of difference. `y`'s
+partials have the **same** sign, so it is the opposite: nearly immune to a difference (0.008) and very exposed to a
+common shift (0.062). Two consequences, both checked against the tables above:
+
+1. The observed swing is the difference mode. Round 3 moved `layer_depth25` and `prefetch_off` 8.33 ms apart where
+   round 2 had them 0.00 ms apart, and the round-2 partials predict Δx = +0.096 against an observed +0.104 — a 6-8
+   ms difference between two arms' rates is worth about the whole of `x`.
+2. The control's 11.70 ms cannot be read as common drift. Common-mode would have moved `y` by +0.75 ms, twelve
+   times the 0.060 the two rounds actually differ by. It did not, because the sweep runs each arm **once, in a
+   fixed order** — `base`, `prefetch_off`, `layer_depth25`, `layer_depth325`, `base_again` — so a machine that
+   gets quieter during a round gives the later arms a head start the earlier ones did not get. Position is
+   confounded with arm, and round 3's control is the fastest rate in either round (4.55 against a 4.42 best).
+
+That is the finding, and it is a design statement rather than a result: **a blocked single-pass sweep can identify
+the coefficient that is a sum of its rows (`y`), and cannot identify the one that is a difference (`x`)**, because
+only the former cancels the drift the page's own control measures. §5ap's four-round interleaving worked at the
+level of whole rounds; inside one page there is nothing to interleave.
+
+**What §5aw predicted about its own bar, confirmed live.** Both rounds print `no row lies inside it` — the bar
+inked nothing, in either page. §5aw's deviation 4 said a counter-keyed AND-bar is blind to drift that moves only
+the clock, and round 3 is exactly that case: the control's counters moved (−0.02, −0.28), its wall moved
+−11.70 ms, so every row cleared a bar set by counters that did not drift while the column the solve reads did.
+The bar did its job on the page it was built from (§5aw: it stepped over `slots_64`, a row that lay inside the
+control in all three coordinates) and does nothing on these pages. That is the honest scope of it, and #209 is
+filed to put the drift term where it belongs — on the price's error bar, not on the row list.
+
+**The out-of-sample point, and why the screen's status does not speak for it.** Round 2 misses by
++23.65 ms/token (+10.45 %) and round 3 by +1.77 ms (+0.78 %) on the same held-out row. The residual is printed at
+[`benchmark/tinytitan_price_pair.py`:703](../benchmark/tinytitan_price_pair.py#L703) and returns nothing; the
+status comes only from the band class of `y`. A page whose held-out point sits 6.7× its own drift away from the
+prediction therefore exits 0 as `ADMISSIBLE`. The campaign reads that as the model being valid *interpolating*
+between du = −42.65 and +33.04 and not extrapolating to +60.20 — round 2's miss is entirely in the extrapolation —
+but the instrument does not say so, and #209 names that as its defect rather than as a measurement finding.
+
+**What the lever is worth even when it pays.** +0.20 ms of a 226.2 ms token: **+0.09 %**, about +0.004 tok/s
+against 4.42. With `x` bounded only to ±0.1 at best and the threshold sitting between the two rounds' answers, the
+correct decision is not to spend a third and fourth round on it. Every I/O-policy lever the campaign has priced
+since §5ar lands in this ±0.1 %-of-a-token class, and `io_hidden_pct` says why: 99.7-99.9 % across all ten arms of
+both rounds, i.e. 0.5-0.7 ms of a 226-248 ms token is the entire SSD-exposed budget any feeder can reclaim. The
+remaining distance to the operator's 6 tok/s is not on the read path.
+
+**prefetch_off's sign, settled against §5aw's round 1.** Round 1 read `prefetch_off` at +4.5 % over a baseline
+that itself fell 9.9 % during the sweep. The two clean rounds read it at −6.0 % and −3.5 % with a 1.7 % and 5.4 %
+drift, and its counters are identical in all three (0.00 issued, 0.00 adopted, `evict` 51086, `waits` 15188). The
+predictive ring earns its place on the shipped tier; the round that said otherwise was the contaminated one, and is
+withdrawn exactly as §5aw withdrew it for other purposes.
+
+**Deviations.**
+1. **Nothing here is a quality measurement.** All ten arms of both rounds streamed the same text
+   (md5 `3c0c3391`), so this section prices read policy, not output.
+2. **The two rounds disagree and both are published.** `p*` is quoted per round (0.134, 0.268) as well as pooled
+   (0.199), because the pooled median of a two-element list is its mean and the mean hides the flip. A magnitude
+   needs 3+ rounds per the screen's own line; this section does not claim one.
+3. **The partials in the sensitivity table were computed for this section**, from the published rows and the same
+   Cramer terms the screen uses, not read out of it — the screen prints `dy_per_ms` only
+   ([`:384`](../benchmark/tinytitan_price_pair.py#L384), [`:689`](../benchmark/tinytitan_price_pair.py#L689)) and
+   prints it as the single-row max, which is neither the common-mode nor the difference-mode number. The x
+   sensitivities above are reproducible from the table of rates and counters.
+4. **Round 2 was contaminated by this session, and less than round 1.** The machine was not idle in the strict
+   sense: `Google Chrome Helper (Renderer)` was the top-CPU process at the first sample and the agent's own
+   session was running, and swap carried 5.7 GiB of 7.2 GiB in from before. The mitigation was to go silent for
+   the rest of each sweep; the 30 s sampler (`/tmp/trio206/round2.machine`) is the record of what was on the
+   machine. Both rounds still passed their own drift gate.
+5. **`/tmp/trio206/` is throwaway.** Rounds 1-3 logs and the precondition blocks are not committed; the committed
+   artifacts are the screen, its suite and this section.
+6. **Section numbering.** `## 5av` does not exist in this document and no other document refers to it; the sequence
+   runs §5au → §5aw → §5ax. Recorded so a reader looking for a lost section does not spend a session on it.
+7. **Provenance.** §5aw's screen landed at `fd3823e` and its notes at `7ebbba1`, both on `main`; both rounds ran
+   against that tree, unmodified, with a binary newer than every source file. Gates seen locally before
+   committing this section: `tools/lint.sh docs`, `tools/lint.sh python`, the CI markdown-link step, and the price
+   screen's own suite. None of it is evidence a CI run executed them; it is evidence that the tree this section
+   describes is the tree the next run will check.
