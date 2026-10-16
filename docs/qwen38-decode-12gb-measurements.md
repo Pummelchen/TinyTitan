@@ -3588,3 +3588,172 @@ Deviations.
     (docs-only, as in §5af-§5ah). Provenance: tree clean at `HEAD 0ef95b7`, 04:29 release binary with no
     `sources/` commit since (`git log -1 -- sources/` = 04:28:32), AC 100 %, `memory_pressure -Q` 85 % free,
     swap 6.41 GiB, load average 3.42, no model process before or after.
+
+## 5aj. #196 makes the leakage rule structural in the shipped screen: a bounded strictly-past recency ranking names experts that really are selected 65.4 % of the time and still finds only 16 worth-staging picks in 18 001 links, because the cache already holds 17 985 of them (2026-10-16)
+
+§5ah ends by naming prediction quality as the only lever left, and §5ai closes the last predictor-shaped question
+that could be answered without a GPU (MTP's byte half). Everything that campaign used to rank candidates was a
+throwaway in `/tmp` — including the script that scored the previous window's temporal arms. So this task's
+question was not "is there a better ordering", asked a fourth time, but the one thing that would make the answer
+reusable: **can the shipped screen be made incapable of answering it dishonestly.** The standing instruction
+here is "do not rely just on old tests", and the old tests could not have caught what this section reports —
+the falsifier paragraph below runs them against a deliberately leaky build and they pass.
+
+**The rule, stated once.** When the ring issues a plan for layer *L+1* at position *p*, the engine knows the
+earlier positions' selections at layer *L+1* and position *p*'s layers ≤ *L*. It does not know *(p, L+1)* — that
+is what it is trying to guess. Any feature that reads the target row (its selection, its misses, its residency)
+is not a predictor, and on this trace reading it inflates a 152-issue, 13-useful arm into 1 994 issues at
+precision 0.9975, which is why the rule had to become code rather than a comment.
+
+**What landed** (`894ecfa`, all of it in `benchmark/`):
+
+| piece | where | what it forbids or enables |
+| --- | --- | --- |
+| `Link` | `tinytitan_prefetch_trace_analysis.py:40` | one *L → L+1* plan, carrying only `source`, `target`, `top_m`, `counts`, `history` — a ranker cannot reach anything else |
+| three uniform rankers | `:97`, `:102`, `:110` | `recorded`, `transition`, `recent`, all `Link -> list[int]` |
+| `RANKERS` / `PREDICTORS` | `:120-121` | one derived name list feeds `--predictor`'s `choices` *and* `analyze`'s refusal, so an arm cannot exist in the CLI and not in the guard |
+| position-boundary publish | `:164-165` | history is appended **after** every link at that position is scored — the leak is structurally unavailable |
+| `--window` | `:184-194` | depth of strictly-past history, default 8, refuses ≤ 0 |
+| name refusal | `:131-132` | `unknown predictor 'frequency'` raised, not silently scored as `transition` |
+
+Five tests now pin it (`test_tinytitan_prefetch_trace_analysis.py:17, 33, 42, 55, 67`): the pre-existing
+transition-prior recall test, the unknown-name refusal, a positive test that `recent` credits a past selection
+the probe misses, the no-target-row test, and the window-bound test. All five pass; the python gate is clean
+(`ruff 0.16.7`, check and format, 201 scripts parse under 3.13).
+
+**The falsifier, run rather than asserted.** I copied module and tests to `/tmp/leakcheck` and moved the publish
+above the scoring loop — a one-line change that makes the target position's own selection visible to the ranker.
+Three tests fail, with the exact messages `3 != 1`, `1 != 0` and `4 != 0`, and **the two pre-existing tests stay
+`ok`**. That is the "old tests" finding in concrete form: the suite that shipped before this commit certifies a
+leaky screen, because it only ever scored arms that cannot read the future.
+
+### The shipped screen's own numbers, on #194's ring-off trace
+
+18 384 records, 383 positions, 48 layers, identity `misses == experts \ resident` holding on 18 384 of 18 384,
+18 001 scored links (layer 47 has no *L+1*), 32 046 actual misses:
+
+| predictor | top_m | window | issues | useful | recall | precision | selections named (of 10) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| recorded (shipped probe) | 1 | — | 2 151 | 1 622 | 0.0506 | 0.7541 | **0.919** |
+| recorded | 2 | — | 4 899 | 3 486 | 0.1088 | 0.7116 | 1.798 |
+| recorded | 4 | — | 12 064 | 7 587 | 0.2368 | 0.6289 | 3.402 |
+| recent | 1 | 4 | 21 | 1 | 0.00003 | 0.0476 | **0.654** |
+| recent | 1 | 8 | **16** | 1 | 0.00003 | 0.0625 | 0.654 |
+| recent | 1 | 16 | 9 | 0 | 0.0 | 0.0 | 0.650 |
+| recent | 2 | 8 | 44 | 1 | 0.00003 | 0.0227 | 1.192 |
+| recent | 4 | 8 | 152 | 13 | 0.0004 | 0.0855 | 2.085 |
+| transition | 1 | — | 36 | 30 | 0.0009 | 0.8333 | 0.722 |
+| transition | 2 | — | 88 | 71 | 0.0022 | 0.8068 | 1.324 |
+
+The last column is the screen's `raw_topk_agreement` × 10 — the mean number of the ten actually-selected experts
+that the plan names. At top_m = 1 it is also a probability, and the honest way to read those three rows is as
+probabilities against a chance level of 10/512 = **1.95 %** (one pick from 512 landing among the 10): the probe
+hits 91.9 % of the time, the transition prior 72.2 %, and a bounded strictly-past recency ranking **65.4 %, 33×
+chance**.
+
+**The finding is the issue column, not the precision column.** `recent` is not a bad guesser: 65.4 % of its
+single picks are experts the router really does select at *L+1*, 33× chance, and the transition prior reaches
+72.2 %. It is a bad *staging* rule, because 17 985 of its 18 001 picks are already resident when the plan is
+issued — so only **16 links out of 18 001** offer it anything to read, and one of those 16 turns out to be
+needed. Deeper history makes that worse, not better (window 16 → 9 issues, 0 useful), and widening does too: at
+depth 4 `recent` reaches 0.0004 recall where the probe reaches 0.2368, 592× the demand.
+
+That is §5ai's locality table read from the other side. It measured that the previous token already holds 3.820
+of the next token's 10 selections and the cache covers 4.439 more, leaving 1.741 fresh reads; this section
+measures the consequence for a predictor — **recurrence and cache residency are the same mechanism**, so a
+temporal ranking spends its entire vocabulary on experts the 96-slot ring already has. That is why the September
+study's `previous token` arms scored P@1 0.000 and why the three temporal shapes in §5w staged nothing live: not
+a scoring artifact, an empty order.
+
+### What the leak would have bought
+
+Same trace, leaky module, `recent` only (`recorded` and `transition` are byte-identical between the two modules,
+so the leak is specific to the arm that reads history):
+
+| arm | clean: issues / useful / precision | leaky: issues / useful / precision |
+| --- | --- | --- |
+| `recent` top_m=1 w=4 | 21 / 1 / 0.048 | 213 / 213 / **1.0000** |
+| `recent` top_m=1 w=8 | 16 / 1 / 0.063 | 137 / 137 / **1.0000** |
+| `recent` top_m=1 w=16 | 9 / 0 / 0.000 | 119 / 119 / 1.0000 |
+| `recent` top_m=2 w=8 | 44 / 1 / 0.023 | 466 / 464 / 0.9957 |
+| `recent` top_m=4 w=8 | 152 / 13 / 0.0855 | **1 994 / 1 989 / 0.9975** |
+
+A leaky recency arm reads as precision 1.000 because it names the target row's own selections and then discards
+the resident ones — the definition of "predicting" a miss. Published as-is that table says *a bounded recency
+ring matches the probe's recall at 8× fewer reads*, and it would have been the basis for building an engine arm
+that stages nothing. The honest figure for the same arm is 152 issues, 13 useful.
+
+### Three precisions that are not three measurements of one thing
+
+§5ah's rank table and the September study both quote precision, and this screen adds a third figure; they do not
+line up and the reason is definitional, not a disagreement:
+
+| figure | what it is | tier |
+| --- | --- | --- |
+| 0.552 | study probe P@1 — precision of the first non-resident pick of the whole list, scored against a residency simulation calibrated to the **ring-on** footer (`issued 43.0` against measured `42.74`) | 64 slots |
+| 0.522 | §5ah's *pooled* precision over its per-rank table (ranks 1-8 alone carry 13 489 issues) | 96 slots |
+| 0.7541 | this screen at `--top-m 1` — the probe list truncated to 1 **before** the residency filter | 96 slots |
+
+The checkable cross-validation is the count, not the ratio: the screen's top_m=1 issues **2 151** and §5ah's
+rank-1 row issues **2 151** on the same trace, so the shipped tool reproduces the throwaway that produced §5ah.
+No truncation depth reproduces 0.522 — the curve runs 0.7541 (1), 0.7116 (2), 0.6679 (3), 0.6289 (4), 0.5851
+(5), 0.5424 (6), 0.4687 (8), 0.3995 (10) — because that figure pools ranks rather than deepening a plan, and
+its per-rank denominators (2 151, 1 999, 1 916, …) are a different partition of the same issues. Two consequences
+for how §5ah line 3396 should be read: its "same shape, slightly worse" sentence compares the study's *rank-1*
+figure with this campaign's *pooled* one, so it is not a tier comparison, and the 0.522-vs-0.552 direction it
+asserts is not supported by anything in that table. Both numbers it names are reproduced; the comparison between
+them is the defect, and it is recorded here rather than edited into §5ah, which is a published record.
+
+### Where this leaves the feeder question
+
+§5ah established the size of the prize (a perfect next-token predictor issues 34.65 reads/token, fewer than the
+ring's 39.73, and adopts all of them — ≈ +4.6 %). This section establishes, on the shipped tool rather than a
+scratch script, that **nothing issue-time feasible is a candidate**: the two engine-buildable strictly-past
+rankings offer 16 and 36 worth-staging picks in 18 001 links, and the only ranking with volume is the probe's own
+list, which the ring already stages in that order. Combined with §5ah's "rank order is the right staging rule,
+measured" — the first non-resident pick is the best pick available in the list — the predictor lever is closed on
+precision, not on timing, and it is closed with a guard in the tree so that the next arm proposed against it has
+to pass the same three tests.
+
+**The GPU guard, measured rather than assumed — and one prior reading corrected.** §5w's deviation (2) recorded
+that the `ioreg` AGX "Device Utilization %" reader "showed 61 % with the machine idle … so it is not an occupancy
+instrument on this host". Three samples taken for this section, with the sub-counters, say otherwise: 52 / 71 /
+74 %, with `Tiler`, `Renderer` and `Device` agreeing to ≤ 1 point every time, while `WindowServer` holds 43.8 %
+CPU and `Qoder Helper (Renderer)` 42.3 %. A latched gauge does not move with three correlated counters and a live
+compositor. So the reading §5w took as a broken instrument was real co-tenant GPU work, gate0's 15 % refusal is
+correct, and **every remaining timing arm in this campaign — the live MTP pair, #163's wiki row — stays blocked
+while this app is running**, which is also why the operator's "the macbook is idle, stop checking" holds for
+*my* processes (the `pgrep` guard is empty, nothing of mine runs) but not for the desktop's. `--allow-busy-gpu`
+was not passed and nothing in this section comes from a contended GPU.
+
+Deviations.
+
+1. **The recall denominator is 18 001 scored links, not 18 384 layer-slots.** Layer 47 has no *L+1* target, so
+   it is absent from every recall figure here, and it is the hungriest layer in the trace: 33 709 misses over all
+   48 layers against 32 046 over scored links, i.e. **1 663 misses (4.9 % of all demand) sit on the unscored
+   layer**, at 4.34 per position against the scored average of 1.78. Demand here is therefore 1.780 misses per
+   link, which is *not* §5ai's 1.834 per layer (that figure is 33 709 ÷ 18 384); the two differ by exactly the
+   missing layer.
+2. **`recent`'s precision is not measurable at its own issue count.** 1 useful of 16 issues, and 0 of 9 at
+   window 16: the quoted 0.0625 and 0.0000 have no error bar worth printing. What is solid is the *count* — 16
+   and 9 against the probe's 2 151, a 134× gap that no sampling noise reaches.
+3. **The ranking measured is "recency among everything", filtered to nonresident — not a recency ranking of the
+   nonresident set.** That alternative (an LRU-style "stage the oldest-seen thing") was not scored, and it would
+   carry no next-token information at all; it is a cache-policy idea, not a predictor, and #196's subject is
+   predictors.
+4. **No clocks and no bytes appear in this section.** The screen is offline and non-mutating by design, so
+   nothing here is a tok/s claim, and no §6 or §8 closure is reopened or overturned by it.
+5. **One session, one prose prompt, positions 10-392.** Same trace as #194 and #195, so the same ≤ 0.26 %
+   denominator skew and the same prompt-shape limit; the code-shaped decode the September study scored is not
+   represented, and its 0.554 row is not comparable to this table for the reasons above.
+6. **The leaky module is a throwaway, not a shipped arm.** It exists only at `/tmp/leakcheck/` and was deleted
+   after this section; nothing in `benchmark/` can score an arm that reads its target row.
+7. **The transition prior's own arm is not the engine's.** `rank_transition` accumulates *L → L+1* counts from
+   strictly-past positions, which is what a runtime table could learn, but the shipped probe is a trained
+   next-token head, so this row is a lower bound on what a learned prior could do — not a measurement of the
+   head's alternatives.
+8. **Nothing in `sources/` changed.** `894ecfa` touches two files under `benchmark/`, so no engine behaviour
+   moves and the golden baseline is **not checked** (docs-and-python only, as in §5af-§5ai). Test inventory: 3
+   tests added, 2 pre-existing tests unmodified, both green. Provenance: tree clean at `HEAD 894ecfa`, AC 100 %,
+   `memory_pressure -Q` 83 % free, swap 5.49 GiB used, load average 4.45, Swift 6.4 / macOS 27.0.1, `pgrep` guard
+   empty before and after, and no model process at any point in this task.
