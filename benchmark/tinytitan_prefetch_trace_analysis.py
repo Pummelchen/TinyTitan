@@ -19,7 +19,7 @@ import argparse
 import collections
 import json
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 History = dict[int, collections.deque]
@@ -60,6 +60,16 @@ class Counters:
     useful: int = 0
     overlap: int = 0
     actual_experts: int = 0
+    slot_predicted: list[int] = field(default_factory=list)
+    slot_useful: list[int] = field(default_factory=list)
+
+    def tally_slot(self, index: int, *, hit: bool) -> None:
+        """Record one issued read at its issue index, so a depth is judged per slot."""
+        while len(self.slot_predicted) <= index:
+            self.slot_predicted.append(0)
+            self.slot_useful.append(0)
+        self.slot_predicted[index] += 1
+        self.slot_useful[index] += 1 if hit else 0
 
     def report(self) -> dict[str, float | int]:
         return {
@@ -142,6 +152,62 @@ PREDICTORS = tuple(RANKERS)
 STAGERS = {"filter": stage_filter_first, "truncate": stage_truncate_first}
 POLICIES = tuple(STAGERS)
 
+# Both sides of a ring's price, measured on the device ledger by §5bb (build
+# `a8c6fdd`, four mirrored arms, byte-identical output): converting one whole
+# `moe_phase1_hit -> moe_phase1_miss_fixup` event is worth the off-arm mean of that
+# line's events, and one issued read costs the shared drive its byte floor whether
+# or not anything waits on it. A slot whose precision falls under the ratio of the
+# two buys device idle it never pays for, which is the arithmetic §5aq could only
+# reach on wall clock.
+MS_PER_CONVERTED_EVENT = 2.17
+EXPERT_READ_MIB = 2.7689
+DRIVE_GB_PER_S = 3.92
+MIB_TO_MB = 1.048576
+
+
+def economics() -> dict[str, float]:
+    """The per-event prize, the per-read cost, and the precision between them."""
+    ms_per_read = EXPERT_READ_MIB * MIB_TO_MB / DRIVE_GB_PER_S
+    return {
+        "ms_per_converted_event": MS_PER_CONVERTED_EVENT,
+        "ms_per_issued_read": ms_per_read,
+        "break_even_precision": ms_per_read / MS_PER_CONVERTED_EVENT,
+    }
+
+
+def slot_report(bucket: Counters) -> list[dict[str, float | int | bool]]:
+    """Precision and net device time per issue index, so depth has a stop rule."""
+    bar = economics()["break_even_precision"]
+    cost_ms = economics()["ms_per_issued_read"]
+    slots = []
+    for index, (predicted, useful) in enumerate(
+        zip(bucket.slot_predicted, bucket.slot_useful, strict=True)
+    ):
+        precision = useful / predicted if predicted else 0.0
+        prize = useful * MS_PER_CONVERTED_EVENT / bucket.links if bucket.links else 0.0
+        cost = predicted * cost_ms / bucket.links if bucket.links else 0.0
+        slots.append(
+            {
+                "slot": index,
+                "predicted": predicted,
+                "useful": useful,
+                "precision": precision,
+                "prize_ms_per_link": prize,
+                "cost_ms_per_link": cost,
+                "net_ms_per_link": prize - cost,
+                "clears_break_even": bool(predicted) and precision >= bar,
+            }
+        )
+    return slots
+
+
+def first_loss_making_slot(slots: list[dict[str, float | int | bool]]) -> int | None:
+    """The first issue index a ring should not reach, or None if every slot pays."""
+    for slot in slots:
+        if slot["predicted"] and not slot["clears_break_even"]:
+            return int(slot["slot"])
+    return None
+
 
 def analyze(
     observations: Iterable[Observation],
@@ -186,16 +252,22 @@ def analyze(
                 bucket.useful += len(useful)
                 bucket.overlap += len(overlap)
                 bucket.actual_experts += len(target.experts)
+                for index, expert in enumerate(issued):
+                    bucket.tally_slot(index, hit=expert in useful)
             for source_expert in source.experts:
                 counts[layer][source_expert].update(target.experts)
         for seen_layer, row in layers.items():
             history[seen_layer].appendleft(row.experts)
 
+    slots = slot_report(overall)
     return {
         "predictor": predictor,
         "policy": policy,
         "top_m": top_m,
         "window": window,
+        "economics": economics(),
+        "slots": slots,
+        "first_loss_making_slot": first_loss_making_slot(slots),
         "overall": overall.report(),
         "per_layer_link": {
             str(layer): bucket.report() for layer, bucket in sorted(per_link.items())

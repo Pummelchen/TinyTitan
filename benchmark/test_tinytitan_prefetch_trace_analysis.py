@@ -95,6 +95,45 @@ class PrefetchTraceAnalysisTests(unittest.TestCase):
         self.assertEqual(withdrawn["predicted_nonresident"], 0)
         self.assertEqual(withdrawn["useful_prefetches"], 0)
 
+    def test_slot_level_precision_separates_the_marginal_read_from_the_first(self) -> None:
+        # §5bb priced the device prize per converted fixup event, so a ring's depth
+        # is decidable per issued slot: one prediction that hits and two that do
+        # not must not pool into a single 33% that judges nothing.
+        observations = [
+            MODULE.Observation(0, 0, (1,), frozenset({1}), frozenset(), (7, 8, 9)),
+            MODULE.Observation(0, 1, (7,), frozenset({7}), frozenset()),
+        ]
+
+        report = MODULE.analyze(observations, top_m=3, predictor="recorded")
+        slots = report["slots"]
+        self.assertEqual([slot["slot"] for slot in slots], [0, 1, 2])
+        self.assertEqual([slot["predicted"] for slot in slots], [1, 1, 1])
+        self.assertEqual([slot["useful"] for slot in slots], [1, 0, 0])
+        self.assertEqual([slot["precision"] for slot in slots], [1.0, 0.0, 0.0])
+
+    def test_break_even_bar_is_the_byte_floor_over_the_measured_event_value(self) -> None:
+        economics = MODULE.economics()
+        self.assertAlmostEqual(economics["ms_per_issued_read"], 0.7407, places=4)
+        self.assertAlmostEqual(economics["ms_per_converted_event"], 2.17, places=4)
+        self.assertAlmostEqual(
+            economics["break_even_precision"],
+            economics["ms_per_issued_read"] / economics["ms_per_converted_event"],
+            places=6,
+        )
+
+    def test_a_slot_below_the_bar_is_named_as_the_stop_rule_for_the_ring_depth(self) -> None:
+        hit_then_miss = [
+            MODULE.Observation(0, 0, (1,), frozenset({1}), frozenset(), (7, 8, 9)),
+            MODULE.Observation(0, 1, (7, 8), frozenset({7, 8}), frozenset()),
+        ]
+
+        report = MODULE.analyze(hit_then_miss, top_m=3, predictor="recorded")
+        slots = report["slots"]
+        self.assertEqual([slot["useful"] for slot in slots], [1, 1, 0])
+        self.assertEqual([slot["clears_break_even"] for slot in slots], [True, True, False])
+        self.assertEqual(report["first_loss_making_slot"], 2)
+        self.assertAlmostEqual(slots[0]["net_ms_per_link"], 2.17 - 0.74066, places=4)
+
 
 if __name__ == "__main__":
     unittest.main()
