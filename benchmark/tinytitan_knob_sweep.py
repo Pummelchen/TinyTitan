@@ -214,6 +214,17 @@ ARMS: list[tuple[str, dict[str, str], str]] = [
         {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH25},
         "§5al: depth 2 on the 25 links whose slot-2 precision clears 0.45",
     ),
+    # §5ao named the one condition under which an earlier read could still buy
+    # time: a slot budget tight enough that a staged arrival is a larger share of
+    # what a layer holds. It is an interaction, so it needs the cell that changes
+    # both knobs at once -- 64 slots is the shipped policy's own measured losing
+    # arm, and depth 2 on the same 25 links is the arm above. Which way the
+    # interaction goes is what this row is for; neither single-knob row answers it.
+    (
+        "slots64_depth25",
+        {"TINYTITAN_EXPERT_CACHE_SLOTS": "64", "TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH25},
+        "§5ao: does depth 2 pay at 64 slots, where it loses at 96?",
+    ),
     ("base_again", {}, "drift check -- must match base"),
 ]
 
