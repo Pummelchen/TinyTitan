@@ -1909,6 +1909,9 @@ are offline arithmetic, not configurations to run here.
   evictions. Both are architectural here: `slotCount` is a `let` per streamer
   (`PreadExpertStreamer.swift:93`) and the plan guard assumes one uniform capacity per layer, so a non-uniform
   split is a load-time data-layout change, not a tuning knob. It needs the operator to ask for it.
+  **— Corrected by §5z.** The streamers are already one per layer with their own `slotCount`, and the split is
+  one expression (`Model+LayerStreamers.swift:168`); the "architectural" claim was wrong. §5z also shows this
+  lever's own oracle ceiling is ~1 point of hit rate, so it is not worth the change.
 - **One cheap live arm survives this screen**: a saturating use count (cap ~5) inside the comparator. It is a
   clamp in `makeExpertCachePlan`, changes only which slot is given up, and should be output-invariant —
   residency is a cache, not semantics, and §5w already showed a placement change holding the bytes identical.
@@ -1916,3 +1919,158 @@ are offline arithmetic, not configurations to run here.
   paired run, not a claim.
 - **Nothing here is a tok/s number.** This section prices placements. The engine's clock is still what §5w and
   §5v measured, and no row above has been run on the machine.
+
+## 5z. A heat split learned on one session does transfer to another — and the bar it has to clear is arithmetic, not empirical (2026-10-16)
+
+§5y ended by naming the partition as the open seam and calling a non-uniform split architectural. Both halves of
+that are wrong, and this section is the experiment that says so. It also answers the question §5y could not: a
+split can only ship if it is learned from an **earlier** session, so the number that matters is not what an
+oracle split wins on its own trace, but what a split carries across captures.
+
+Everything below is reproducible from the tree. `benchmark/heat_split_sim.py` (new) plus
+`benchmark/test_heat_split_sim.py` (17 tests) commit the screen that §5y left as a `/tmp` throwaway, together with
+the third route capture it needed. Same licence as §5y: **ranking budget shapes at a fixed slot total. Banned:
+quoting a token rate from any of it.**
+
+### The captures
+
+| capture | decode rows from | distinct experts/layer | demand | what it is |
+|---|---|---|---|---|
+| `20261011` | position 30 | 146..409, mean 261 | 480 req/token | pre-v5.20 build, the campaign's first trace |
+| `v520-20261015` | position 10 | 174..415, mean 285 | 480 | §5y's arm B, the shipped 96-slot default |
+| `v520-prompt2` | position 33 | 122..417, mean 269 | 480 | **new** — same build, a different prompt |
+
+`v520-prompt2` is the falsifier's control: `benchmark/expert-cache/run-record-qwen38-4bit-v520-20261016-prompt2.txt`
+fixes its provenance (machine, build, exit code, footer counters) and calibrates it the way §5y calibrated arm B.
+Its replay is 102.10 placements/token against an engine bracket of 94.27 (drive reads) to 114.66 (reads plus
+adoptions) — **−10.8%** from the ceiling. §5y's bias on its own capture was −3.2%. The replay's level error is
+workload-dependent, which is a second, independent reason the tok/s ban is not caution but arithmetic: the bias is
+larger than every effect this section measures.
+
+Deviation on that run: the argv was never logged, so the run-record says so and the command line is treated as
+unrecovered. The identity lines and counters in that file are the evidence; nothing else about the invocation is claimed.
+
+### Do two sessions of the same model route the same experts?
+
+| pair | profile correlation | shared rows | identical rows | picks in common |
+|---|---|---|---|---|
+| `20261011` × `v520-20261015` | +0.976 | 18 384 | **0** | 13.206% |
+| `20261011` × `v520-prompt2` | +0.960 | 18 240 | **0** | 5.117% |
+| `v520-20261015` × `v520-prompt2` | +0.957 | 18 384 | **0** | 3.209% |
+
+Chance for a top-10 pick out of 512 is 1.953%. So the two same-prompt captures agree on 13.2% of picks — about 7×
+chance, which is the prompt-memory an engine could in principle exploit — but the different-prompt pair sits at
+3.2%, barely above chance, and **no row in any pair is routed identically**. Meanwhile the per-layer *shape*
+correlates at +0.957 to +0.976 everywhere, including across the pair whose routes are nearly independent.
+
+That is the result that decides whether a shipped table is data or memorisation: **which layer is busy is a property
+of the model; which expert is busy is a property of the conversation.** A per-layer budget table is therefore
+portable in the way a per-(layer, expert) table would not be.
+
+### The transfer table
+
+`split_slots` spends **exactly 4 608 slots** — the shipped tier — in proportion to one capture's heat profile, floor
+10, ceiling 512. Each row replays that budget on a *different* capture. All figures are placements/token at cap
+none, engine rule as shipped.
+
+| scored on | shipped uniform | oracle (own trace) | transfer from the other two |
+|---|---|---|---|
+| `20261011` | 91.77 (80.88% hit) | 88.38 −3.69%, +0.71 pt | 88.58 (+0.66 pt, keeps 94.0%) / 88.25 (+0.73 pt, keeps 103.7%) |
+| `v520-20261015` | 89.28 (81.40% hit) | 85.54 −4.19%, +0.78 pt | 85.32 (+0.82 pt, keeps 105.9%) / 84.91 (+0.91 pt, keeps 117.0%) |
+| `v520-prompt2` | 102.10 (78.73% hit) | 97.69 −4.32%, +0.92 pt | 98.36 (+0.78 pt, keeps 84.9%) / 98.56 (+0.74 pt, keeps 80.3%) |
+
+Six transfers, six better than the shipped uniform split, and four of them beat an oracle that read the future of
+the very trace it is scored on. With the saturating count added (cap 3, cap 5) all eighteen transfers still win;
+the keeps-fraction column, like-for-like at each cap, runs 74.4% to 128.3%.
+
+### The bar, and why no budget shape reaches it
+
+`docs/plan-qwen38-decode-12gb.md:150` sets B1's acceptance as **≥ +7 points of hit rate** over the reproduced
+control. The measured transfers deliver **+0.66 to +1.52 points**. That is a factor of four to eleven short — and
+the miss is not a transfer penalty, it is a ceiling: the *oracle* split, which knows the trace it is scored on, only
+reaches +0.71 to +0.92 points. Every static partition of 4 608 slots is bounded by that.
+
+The reason is units. Hit rate is `1 − placements / demand` with demand 480, so a percentage of placements buys
+one-fifth of a point per percent: §5y's headline −7.4% of placements is 6.6 placements, 1.4 points. To buy +7 points
+at this tier you must remove 33.6 placements/token, i.e. cut 89.28 by **37.6%**. The only arms in this campaign's
+ladder that large are 128 slots/layer (−30.8%) and 192 (−61%), and §5y's deviation 7 already records that both blow
+past the operator's 12 GiB cap on this 24 GB Mac.
+
+So the plan's bar and §5y's percentage were never commensurable, and the honest reading is the strong one: **at a
+fixed 4 608-slot budget, capacity *shape* is worth at most ~1 point of hit rate.** For contrast, §3/§4 measured
+Belady at the same 4 608 slots at 89.8% hit — +8.4 points over the shipped 81.40%. The headroom at this budget is
+real and it is nearly all in *when a slot is given up* relative to when it is needed, which is the one thing a static
+partition cannot touch and a feeder can.
+
+### Corrections to §5y, named
+
+1. **"Both are architectural here: … a non-uniform split is a load-time data-layout change, not a tuning knob."**
+   False, and the plan had already designed the seam. Verified in the engine:
+   - `Model+LayerStreamers.swift:195-202` constructs **one `PreadExpertStreamer` per layer**, each with its own
+     `slotCount:`, and each streamer allocates its own slot buffers from that number
+     (`PreadExpertStreamer.swift:231-259`, `321-325`). Per-layer memory is already per-layer; nothing is a shared
+     fixed-size table. The whole load-time change is line 168, `let effectiveSlotCount = slotCount`, which is the
+     identity `docs/plan-qwen38-decode-12gb.md:182` says a heat table plugs into.
+   - Two readers assume the count is uniform, and **both clear this split without modification**. The MTP pair
+     schedule needs `slotCount >= 2 × topK` = 20 (`RealForwardRunner+MTPVerify.swift:67-68`); the prefill tile
+     scheduler keeps its default 8 experts/tile for any `slotCount ≥ 16` at the shipped
+     `maxPendingDepth = 1` (`PrefillRoutedTileScheduler.swift:36-56`, `RealForwardRunner.swift:238`). The three
+     splits' minimum budgets are 53, 58 and 43 slots, so neither gate moves — which is why the floor in
+     `split_slots` is inert: floors of 10, 20 and 32 produce byte-identical budgets, and only 48 changes anything
+     (oracle 97.67 vs 97.69, keeps ±2%).
+   - `Engine.swift:283-284` reports `slots × stride × layers` and would need `sum(budgets) × stride`; that is
+     exactly equal, because `split_slots` conserves the total by construction (`test_heat_split_sim.py` pins it).
+   - `ModelExpertIO.swift:147-152` documents the no-layer-argument property as deliberate; under a split it must
+     return the **minimum** budget (or grow the argument), and `PreadExpertStreamer+Plan.swift:30`'s
+     `experts.count <= slotCount` guard becomes per-layer — which it already effectively is, since it reads the
+     streamer's own `slotCount`.
+2. **§5y's top table row pooled two levers.** "oracle static per-layer split … −7.42%" was replayed with the
+   saturating count *and* the split (`screen2.py`: `replay({"cap": 3}, budgets=scaled)`). The split-only arm in that
+   same table is 86.08, −3.59%. Decomposed at the exact shipped total on `v520-20261015`: split alone **−4.19%**,
+   cap 3 alone **−2.04%**, both **−8.04%**. The partition is a smaller share of §5y's headline than the prose implied.
+3. **§5y's table has one arm listed twice.** "`lru_then_lfu`, per-layer 96 | 87.46" is the same rule as
+   "LFU capped at 3 | 87.46" — the throwaway's rank key was `(min(count, 3), last)` (`screen.py:68`). It is not a
+   second, independent victim order, so the ranking table's breadth overstated by one row how many distinct rules
+   were tested.
+4. **The cap is not a 2.6% arm.** §5y priced it from one capture and called it "inside the instrument's own 3.2%
+   bias". Across three captures, cap 3 on the uniform split is −7.92% / −2.04% / −5.03%. On two of three it is well
+   outside the bias. That strengthens, not weakens, the case for the one live arm §5y left open (task #177).
+5. **Withdrawn:** the 92.79 placements/token figure used for `20261011`'s shipped arm in the working throwaways
+   (`crossprofile3.py` carried the note). The committed instrument reads **91.77** on that capture and the tests pin
+   it; `crossprofile3.py`'s number is not reproducible from the tree and is superseded.
+
+### Deviations, all of them
+
+1. Three captures, two prompts, one model. `v520-prompt2` is the only different-workload pair, so the shape
+   transfer rests on two of three pairs being same-prompt.
+2. Every transfer is scored with a cold cache and no warm-up beyond the prefill rows, the same convention as
+   `replay_misses`; a live engine's cache at decode time is not cold.
+3. The replay's level bias is −3.2% on `v520-20261015` and **−10.8%** on `v520-prompt2`, i.e. larger than the effect
+   under test. Only the *sign* and the cross-capture agreement survive that; the magnitude does not.
+4. `20261011` was captured on a pre-v5.20 build, so a shape agreement with the two v5.20 traces partly measures
+   model constancy across a build change rather than session constancy.
+5. No token rate appears in this section, and the one that could be inferred from §5w's 0.637 ms/miss must not be:
+   that was priced in drive reads, and the ~15.5 placements/token the ring served without a read are invisible here.
+6. The oracle column uses future knowledge of the trace it scores; it is published as the ceiling a static split can
+   reach, not as a policy — which is the whole of its use here.
+7. `v520-prompt2`'s command line is unrecovered (see the run-record). Its identity and counters are logged; nothing
+   about its flags is claimed.
+
+### Verdicts
+
+- **The B1 heat split does not clear its own acceptance bar.** Six transfers all beat the shipped uniform split and
+  four beat an oracle, and it is still a rejection: +0.66…+1.52 points against a required +7. It does not become a
+  shipped default and does not get a model window on its own.
+- **§5y's "architectural" verdict is withdrawn.** The change is one expression at
+  `Model+LayerStreamers.swift:168` plus a table read, and the two consumers that assume a uniform count clear it at
+  the split's own minimum. Anyone told in §5y that this needs a data-layout change was told wrong.
+- **Do not spend the next screen on capacity shape.** At 4 608 slots the oracle ceiling of every partition is ~1
+  point of hit rate, while Belady at the same slots is +8.4. The gap is temporal, not spatial. That is where the
+  operator's constant-feeder idea actually points, and the counters already show a place to look: in the
+  `v520-prompt2` capture the ring **issued 40.51 prefetches per token and had 20.39 adopted**, with `free=0.99` and
+  `inflight=0.01` — it is issuing for four times the depth it keeps and still leaving slots idle. Nothing in this
+  section measures why; that is the next question, and it is a feeder question rather than a budget question.
+- **The live arm that survives unchanged** is the saturating use count (cap ~3–5) in `makeExpertCachePlan`: −2.04%
+  to −7.92% placements across three captures, output-invariant by construction, and no model run yet. Task #177.
+- **Nothing here is a tok/s number.** This section prices placements and hit rate, and says how many points of hit
+  rate each lever can buy at this budget.
