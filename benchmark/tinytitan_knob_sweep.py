@@ -101,9 +101,10 @@ def _layer_depth(links, depth: int) -> str:
 
 
 LAYER_DEPTH25 = _layer_depth(DEPTH25_LINKS, 2)
-# Same list, one deeper. §5ar could only price an issued read as a band because its
-# equations came from three batches; two arms on one link list inside one batch share
-# the drift term, so their two paired equations identify both prices at once.
+# Same list, one deeper. NOT the second equation §5ar hoped for: two depth arms have
+# rows 2.6 degrees apart in the (issued, -adopted) plane, so they cannot identify the
+# price levels however clean the batch is. It is the ladder's third point, and the
+# out-of-sample check on prices identified by prefetch_off instead.
 LAYER_DEPTH325 = _layer_depth(DEPTH25_LINKS, 3)
 
 # Every arm is one env delta from the shipped defaults, so a win is
@@ -222,14 +223,19 @@ ARMS: list[tuple[str, dict[str, str], str]] = [
         {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH25},
         "§5al: depth 2 on the 25 links whose slot-2 precision clears 0.45",
     ),
-    # The second equation. §5ap's single depth-2 arm could say what deepening cost
-    # but not what it was made of: an issued read and a lost adoption price differently,
-    # and one paired arm gives one equation in two unknowns. A second arm on the *same*
-    # links, same batch, same control, gives the other one.
+    # The ladder's third point, and an out-of-sample check -- NOT the second equation
+    # §5ar asked for. Two depth arms cannot price x and y: their rows are (+33.28, +9.42)
+    # and (+55.28, +13.02), 2.6 degrees apart in the (issued, -adopted) plane, condition
+    # number 22, so one millisecond of wall moves y across the whole admissible band and
+    # p* over three orders of magnitude. The identifying pair is prefetch_off with
+    # layer_depth25 at 41 degrees, because switching the ring off removes adopted reads
+    # while deepening destroys them. Given prices from that pair this arm's delta is
+    # predicted before it is measured, and a miss is the finding: an issued read's cost
+    # would be non-additive in the number issued, which is what queue saturation does.
     (
         "layer_depth325",
         {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH325},
-        "§5as: the same 25 links at depth 3, to price issued vs adopted within one batch",
+        "§5as: the same 25 links at depth 3 -- the ladder's third point, and the price model's out-of-sample check",
     ),
     # §5ao named the one condition under which an earlier read could still buy
     # time: a slot budget tight enough that a staged arrival is a larger share of

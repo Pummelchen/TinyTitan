@@ -221,13 +221,15 @@ class SelectedArms(unittest.TestCase):
 
 
 class DepthArmPair(unittest.TestCase):
-    """Two depth arms must differ in depth and nothing else, or they price nothing.
+    """Two depth arms must differ in depth and nothing else, or they measure nothing.
 
-    §5ar's `x` (ms per issued read) and `y` (ms saved per adopted read) came out as a
-    band because its three equations were taken from three batches, and the same arm
-    disagreed with itself by 9.44 ms/token between two of them. Two arms on one link
-    list in one batch share the drift term, so their two paired equations identify
-    both prices -- but only while the lists are literally the same list.
+    They are a ladder, not a price pair: §5as solved the September three-depth series and
+    found the two depth rows 1.7-2.6 degrees apart in the (issued, -adopted) plane, so the
+    levels they return are unidentifiable (y came out 7.3x the physically admissible band)
+    however clean the batch. What the pair CAN do is predict and then be checked: price the
+    ladder from the identifying pair in `PricePair` below, then compare the depth-3 arm's
+    measured delta with the prediction. That only holds if the lists are literally the same
+    list, which is what these two assertions pin.
     """
 
     def test_a_depth_three_arm_deepens_exactly_the_depth_two_links(self):
@@ -239,6 +241,39 @@ class DepthArmPair(unittest.TestCase):
     def test_the_two_arms_differ_only_in_the_depth_they_ask_for(self):
         self.assertEqual(depth_values(depth_env("layer_depth25")), {2})
         self.assertEqual(depth_values(depth_env("layer_depth325")), {3})
+
+
+class PricePair(unittest.TestCase):
+    """The registry must keep the arms that price `x` and `y` in one batch.
+
+    §5ar closed with a band because its three equations came from three batches. §5as
+    found the identifying pair already in the table: `prefetch_off` removes issued reads
+    AND adopted ones while costing wall, so its row points the other way from a depth
+    arm's -- 41 degrees apart, condition number 1.5, against 20-35 for any two depth
+    arms. Two ways that arm stops being that arm: someone edits its value, or the engine
+    stops reading the key. The second is the trap this file's own comment on the removed
+    arms names -- "their env vars no longer exist, so an arm here would silently measure
+    the baseline" -- and it is invisible in the output, because a base-vs-base pair fits
+    any equation it is asked to.
+    """
+
+    def test_the_registry_carries_the_ring_suppression_arm(self):
+        rows = {a[0]: a[1] for a in ks.ARMS}
+        self.assertEqual(rows["prefetch_off"], {"TINYTITAN_PREDICTIVE_PREFETCH": "0"})
+
+    def test_no_arm_sets_a_key_the_engine_stopped_reading(self):
+        body = "".join(
+            path.read_text(errors="ignore") for path in (ROOT / "sources").rglob("*.swift")
+        )
+        # A scan that read nothing would pass every lookup, so the walk answers first.
+        self.assertGreater(len(body), 100_000, "reading sources/ returned almost nothing")
+        offenders = [
+            f"{name} sets {key}"
+            for name, env in ((a[0], a[1]) for a in ks.ARMS)
+            for key in env
+            if key not in body
+        ]
+        self.assertEqual(offenders, [])
 
 
 class TableCell(unittest.TestCase):

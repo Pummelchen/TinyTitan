@@ -4549,7 +4549,7 @@ What the sweep could not do was answer the hash half of that sentence. It compar
 generated the same text, so a rate could have been a rate at different work. `2a06f7b` adds the check: the streamed
 completion is reassembled from `delta.content` only — `reasoning_content` is a separate channel and is deliberately
 not hashed — at
-[../benchmark/tinytitan_knob_sweep.py:314](../benchmark/tinytitan_knob_sweep.py#L314), hashed per arm at `:342`,
+[../benchmark/tinytitan_knob_sweep.py:337](../benchmark/tinytitan_knob_sweep.py#L337), hashed per arm at `:365`,
 and `verdict()` now refuses a page whose arms disagree (`CONTESTED`, status 1) or where an arm streamed nothing
 (status 2). 47 tests in [../benchmark/test_knob_sweep_verdict.py](../benchmark/test_knob_sweep_verdict.py),
 ruff 0.16.7 clean.
@@ -4739,7 +4739,7 @@ uniform depth 1) is the fastest arm in the round, so the cell the reopen asked f
 identity is not an artefact of one arm or one round.
 
 Position is not doing this. The arms run in `ARMS` order
-([../benchmark/tinytitan_knob_sweep.py:283](../benchmark/tinytitan_knob_sweep.py#L283)), so the two depth pairs
+([../benchmark/tinytitan_knob_sweep.py:306](../benchmark/tinytitan_knob_sweep.py#L306)), so the two depth pairs
 span exactly two positions each (1→3 and 2→4) and a linear drift term cancels in the *difference of the
 differences*. Applying the control's −4.9 % as a linear ramp (−1.23 % per position) moves both levels by about
 −2.5 % and leaves the interaction where it is: roughly −9.6 % at 96 slots, −5.6 % at 64.
@@ -4966,3 +4966,182 @@ Deviations.
 6. **Nothing was measured live in this section.** Every number is arithmetic on arms already published in §5ag,
    §5ap and §5aq, plus the frozen trace. The throwaways are `/tmp/seam204/{slot1,conf,price,transfer}.py`, are
    not proposed as tools, and are not committed; `next_weights` is still read by no shipped code.
+
+## 5as. #205 retires the instrument §5ar named before spending a live round on it — two depth arms sit 1.7-4.5° apart in the (issued, −adopted) plane and price nothing, while the pair that does identify `x` and `y` (ring-off × depth-2, 41.4° apart) has been in the sweep registry since the first pass and has never shared a batch (2026-10-16)
+
+§5ar's reopen was an instrument, not a lever:
+
+> **two depth arms on one link list in one batch** (depth 2 and depth 3 on the 25 links, against base) give two
+> equations that share a drift term, so `x` and `y` become identifiable *within* a batch and the band collapses
+> to a point.
+
+`2327dfd` builds exactly that: `LAYER_DEPTH325` on the byte-identical 25-link list (119 characters both, so the
+lists are the one §5ap ran), pinned by two new assertions in `benchmark/test_knob_sweep_verdict.py` (47 → 49
+tests, ruff clean). This section does not run it. It shows the instrument cannot answer the question it was
+built for, using arms the campaign has already measured, and names the one that can.
+
+### Why two depth arms price nothing
+
+Write each paired arm as a row `(Δissued, −Δadopted)` acting on the price vector `(x, y)`, so
+`Δms = x·Δissued − y·Δadopted`. Two arms identify `(x, y)` iff their rows are not nearly parallel: the condition
+number is `1/sin θ`, where θ is the angle between them. The admissible `y` is 0.788-1.301 ms (§5ar's service
+time of one 2.641 MiB read). The campaign owns a **three-depth, single-batch series with issued and adopted
+counters on every row** — `docs/qwen38-prefetch-predictor-study.md:72-77`, the September per-expert ladder — so
+the depth pair can be *solved* here rather than guessed at:
+
+| design | rows `(Δissued, −Δadopted)` | θ | det | `1/sin θ` | solve | ±1 ms in each `Δms` moves `y` | usable? |
+|---|---|---:|---:|---:|---|---|---|
+| September 1→2 vs 1→3 slots | (+33.5, −3.2), (+60.2, −4.0) | **1.7°** | 58.6 | 34.6 | `x` 0.991, `y` **9.467** | 7.87-11.06 ms | no — `y` is 7.3× the band top |
+| September 1→2 vs 2→3 slots | (+33.5, −3.2), (+26.7, −0.8) | 3.7° | 58.6 | 15.3 | the same three points, so the same answer | 8.44-10.49 ms | no |
+| live depth 2 vs depth 3 (synthesised) | (+33.28, +9.42), (+55.28, +13.02) | 2.6° | −87.4 | 22.5 | returns `x` 0.270, `y` 1.185 only at exact `Δms` | 0.17-2.20 ms | no — `p*` spans 0.006-3.082 |
+| **ring-off × depth-2, one batch** | (+39.45, −18.86), (+33.28, +9.42) | **41.4°** | **999.3** | **1.5** | `x` 0.270-0.448, `y` 1.185-1.558 | ±0.07 ms | **yes** |
+
+The mechanism is structural, not a calibration accident: **one knob cannot move two counters in two different
+directions.** Deepening the ring raises issued reads and moves adoption by whatever the marginal slot's
+precision happens to be — in the September series +3.2 then +0.8 reads, in §5ap/§5aq's live arms *minus* 9.4 —
+so every depth arm lands on nearly the same ray, and the ill-determined direction of the design is the price
+*level*. The September solve proves it: residuals −0.000/+0.000 ms, so the two equations are satisfied exactly,
+and the answer is `y` = 9.467 ms — 7.3× the physical maximum, because an adopted read removes one 2.641 MiB
+service and nothing else. A design that returns an impossible level while fitting its data perfectly does not
+have a calibration problem; it has no information.
+
+The third row is the live pair §5ar asked for, so the retirement is not tied to September's operating point. It
+is a **synthesis**: depth 3's row is generated *from prices inside the band* (`x` = 0.270, `y` = 1.185, the
+mid-band pair below) and then read back with the batch's own noise. Recovery at exact `Δms` is trivially right;
+at ±1 ms it returns `y` anywhere in 0.17-2.20 ms and `p*` anywhere in **0.006-3.082** — i.e. the same instrument
+says the suppression family is worthless or worth 3× its own ceiling, depending on a millisecond of wall. Three
+projected ladder shapes give θ = 2.1°, 2.6° and 2.8° (condition 20-28), so no plausible depth-3 outcome fixes
+that. And the noise is real, not assumed: that batch's own round-to-round spreads are 2.82, 10.24 and 0.79
+ms/token per arm, against a `Δms` of 2.91 and 21.80 ms to resolve.
+
+One nuance, because it is the kind of trap this campaign has walked into before. The September solve's `p*`
+(*ratio*) is tight — 0.101-0.110 across the ±1 ms corners — and `p*` is all the six-link verdict needs, so the
+depth pair looks salvaged. It is not: that tightness is the shadow of an inadmissible level. The ambiguity
+direction for near-parallel rows moves `x` and `y` together, so the ratio survives only because the solve landed
+at `y` ≈ 9.5 ms; the same computation on live-regime rows, where the adopted coefficient flips sign, gives the
+0.006-3.082 swing above. **A ratio read off an ill-conditioned level is not evidence**, and §5ar's verdict must
+not be closed by it.
+
+### The instrument that works is already in the registry
+
+`prefetch_off` — `TINYTITAN_PREDICTIVE_PREFETCH=0` at
+[../benchmark/tinytitan_knob_sweep.py:139](../benchmark/tinytitan_knob_sweep.py#L139) — has been in the
+registry since the first pass and was run by §5ag, but never in the same batch as a depth arm. It is the arm
+that moves adopted the *other* way: switching the ring off removes 39.45 issued reads **and** 18.86 adopted ones
+while costing 11.7 ms/token, whereas deepening adds issued reads while destroying adoptions. Opposite-signed
+`Δadopted` at 41.4° is what makes the level identifiable: condition 1.5, and ±1 ms/token of wall — the
+resolution a 384-token paired round can reach — moves `y` by 0.07 ms, one-seventh of the band.
+
+```
+SWEEP_TOKENS=384 TINYTITAN_BENCH_RAM_BUDGET=12G \
+  python3 benchmark/tinytitan_knob_sweep.py \
+    --arms base,prefetch_off,layer_depth25,layer_depth325,base_again
+```
+
+Four paired arms plus the drift control, in `ARMS` order, so `base` at position 1 and `base_again` at 5 bound
+the ramp the way §5aq's did. The two equations are `prefetch_off → base` and `base → layer_depth25`, and
+`layer_depth325` is no longer an equation — it is the **out-of-sample test** (below).
+
+That arm is the whole instrument, so two ways it silently stops being one are now pinned by tests (49 → 51):
+`prefetch_off`'s value must stay `"0"`, and no arm may set a key that no `.swift` source reads any more — the
+failure mode this file's own comment on the removed knobs names, and the one that would show up as a clean
+base-vs-base pair fitting any equation it is asked. Both are pins on existing behaviour, so they pass the moment
+they were written; proven non-hollow by mutation (flipping the value and truncating a key each fail, and each
+fails with a message that names the offender rather than the 3.5 MB corpus it searched).
+
+Composing the same two rows from the two batches that already measured them is not a measurement, but it shows
+what an in-batch answer would look like and where it would land:
+
+| price pair | how obtained | `x` ms/issued | `y` ms/adopted | `p*` | §5ar's six-link gate | subtractive ceiling |
+|---|---|---:|---:|---:|---:|---:|
+| solved from a depth pair | September 1→2 vs 1→3 | 0.991 | 9.467 *(7.3× band)* | 0.105 | −1.22 % | 9.9 % |
+| `y` anchored, `x` from the 1→2 step | `y` = 0.788 | 0.162 | 0.788 | 0.206 | +0.104 % | 1.6 % |
+| `y` anchored, `x` from the 1→2 step | `y` = 1.301 | 0.211 | 1.301 | 0.162 | +0.025 % | 2.1 % |
+| rows from §5ag × §5ap (two batches) | composed | 0.270 | 1.185 | 0.228 | +0.224 % | 2.7 % |
+| rows from §5ag × §5aq (two batches) | composed | 0.448 | 1.558 *(above band)* | 0.288 | +0.535 % | 4.5 % |
+
+Gate column is `x·5.30 − y·0.82` over a 205.5 ms token, the out-of-sample S/L = 6.44 of §5ar's screen 1, which
+pays iff `p* > 0.155`. **The instrument's own falsifier is the interesting part:** if the in-batch trio returns
+`y` inside 0.788-1.301, the two-price linear model is confirmed and `p*` is known to ±0.02, which settles the
+six-link gate's sign for good; if it returns `y` outside the band — as the §5ag×§5aq composition does — then the
+model itself is refuted, because an issued read's cost is not additive in the number issued (the queue-
+saturation channel the predictor study named: 1.2 ms cold per read idle against 3.4-6.5 ms with four or more
+outstanding). Refuting the price model is the larger finding, and it is the one a depth pair can never produce.
+
+### What the ladder economics say without any identification
+
+The series cannot price `x` and `y`, and it does close depth on the one quantity that needs no price model — the
+wall spent per adopted read gained, against a value that is physically capped at 1.30 ms:
+
+| step | Δissued | Δadopted | marginal precision | Δms | ms per extra read | **ms per adopted gained** |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 → 2 slots | +33.5 | +3.2 | 0.096 | +2.91 | 0.087 | **0.91** |
+| 1 → 3 slots | +60.2 | +4.0 | 0.066 | +21.80 | 0.362 | **5.45** |
+| 2 → 3 slots | +26.7 | +0.8 | 0.030 | +18.89 | 0.707 | **23.61** |
+
+The last column is the ladder's shape expressed as a price: the first extra read is bought at about a service
+time (which is why depth 2 is only −3.3 %), and the third costs 5-18× what an adoption is worth. `wait_ms`
+rises 83.0 → 86.8 → 85.4 → 91.1 along the same series, so the demand queue is the channel doing the charging.
+Depth is closed by §5ak, §5ap and §5aq on the clock, by this table on the price mechanics, and by the condition
+number on any further pricing.
+
+### Why nothing ran live
+
+At 18:39 the machine carried **RobloxPlayer at 143.7 % CPU** (up since 17:52), a Chrome renderer at 92.8 %,
+WindowServer at 41.8 %, load 6.13 / 4.79 / 4.82 and 5.99 of 7.17 GB of swap used, on mains power at 100 % with
+no model process running. The trio's entire requirement is ±1 ms/token resolution, and §5aq's rounds 2-3 are
+this hour's own evidence of what an occupant does to it: a 0.08 tok/s control against a 4.55 tok/s one measured
+minutes earlier. Running the batch now would spend ~40 minutes to produce a number the condition table already
+condemns. Nothing belonging to anyone else was terminated.
+
+### Verdict
+
+**§5ar's named instrument is retired by its geometry, and the reopen passes to an arm selection that needs no
+new code**: `base,prefetch_off,layer_depth25` in one batch on a quiet machine identifies `x` and `y` at
+condition 1.5, decides the six-link gate's sign, and falsifies the two-price model if it cannot hold. No runtime
+default moved, no engine code changed, no shipped configuration sets either knob.
+
+The depth-3 arm stays in the registry, and its committed comment is corrected in this section's commit: it was
+added as "the second equation" and it is not one. Its real job is the out-of-sample check — predict
+`Δms(depth 3) = x·Δi₃ − y·Δa₃` from the trio's solved prices and compare it with the measured arm. One
+prediction, one measurement, same batch: if the linear model holds, the third point falls where the first two
+put it; if it does not, the non-additivity is the finding. That is a use the depth pair cannot make of itself.
+
+Deviations.
+
+1. **The solved rows are September's, and September is not this tier.** `docs/qwen38-prefetch-predictor-study.md`
+   ran at `--ram-budget 8G` (the old meaning: 64 slots), 256-token prose, two interleaved rounds per arm, and its
+   per-expert-operation arms no longer exist — `TINYTITAN_PREFETCH_PER_EXPERT` was added by `45ea73b` and removed
+   by `3eb11cf`, so that series cannot be re-run. Its rates are means of two rounds and its table carries no
+   `body_ms`. What transfers is the **condition number**, which is a property of row angles, not of levels; what
+   does not transfer is any `x`, `y` or `p*` taken from it.
+2. **The third and fourth rows of the geometry table are syntheses.** The projected depth-3 row is generated from
+   mid-band prices and read back through the batch's noise, so it demonstrates the design's sensitivity, not the
+   engine's behaviour. The composed `x`/`y` pairs join §5ag's batch to §5ap's or §5aq's, which is exactly the
+   cross-batch move §5ar deviation 1 forbids: note that the two compositions disagree with each other (0.228 vs
+   0.288) and one lands outside the band. They are bracketed candidates for what the in-batch trio will find,
+   nothing more.
+3. **The campaign's own baseline moves by 10 % between batches** — §5ag's ring-on ran 5.079 tok/s, §5aq's `base`
+   ran 4.55 at the same nominal configuration. So a composition across those batches carries a drift term far
+   larger than the 1 ms it is trying to resolve, which is a second, independent reason the trio must be one batch.
+4. **`p* = 0.105 from the September solve would "close" the six-link gate as a −1.22 % loss, and this section
+   refuses to accept that** on the grounds it states above (a ratio read off an inadmissible level). The refusal
+   is a judgement, not a measurement, and the trio is what adjudicates it.
+5. **The gate re-score inherits §5ar's *needed*-not-*adopted* label** (its deviation 2), so each gain column is a
+   slight under-estimate, ~0.006 ms/token at the layer gate.
+6. **The depth-3 arm was built test-first on a premise this section then refuted, and the test file carries the
+   seam of that.** Full inventory: in `benchmark/test_knob_sweep_verdict.py` the two `DepthArmPair` *assertions*
+   are untouched — what changed is their docstring, which claimed two depth arms "identify both prices" and now
+   says they cannot and states what the pair is for; a new `PricePair` class adds the two registry pins (49 → 51
+   tests, both passing on arrival and mutation-checked). In `benchmark/tinytitan_knob_sweep.py` nothing but
+   comments and the `layer_depth325` purpose string changed. No test was edited to reach green, and no run this
+   section reports was withdrawn, because no section-#205 measurement exists yet. The throwaways are `/tmp/seam205/{identify,trio}.py`, not proposed as tools and not
+   committed.
+7. **Provenance.** §5aq/§5ar landed at `31b8f61`, and the depth-3 arm at `2327dfd`; both are on `main` before
+   this section, and every number above comes from commits already on `main`, so nothing is published from a
+   dirty tree. This section, the sweep's rewritten comments and the two `PricePair` pins are the commit that
+   carries them. No model process was started here.
+8. **Three `tinytitan_knob_sweep.py` line pointers in earlier sections were stale and are repointed here** —
+   `:314`→`:337` and `:342`→`:365` (§5ap, the stream reassembly and its hash), `:283`→`:306` (§5aq, the
+   `ARMS`-order return). Six lines of comment were all that moved them; the constructs are unchanged, and the
+   two markdown links are what CI's link check reads, so nothing else re-points them when the file shifts again.
