@@ -2349,7 +2349,7 @@ The recurrence idea — predict layer L's next-token experts from layer L's *pre
 selection — is the one prefetch-predictor shape not covered by §5aa's four feeder arms. It
 turns out to be measured already, in the committed study, and its precision is zero on every
 rank
-([docs/qwen38-prefetch-predictor-study.md:44-45](file:///Users/andreborchert/Downloads/TinyTitan/docs/qwen38-prefetch-predictor-study.md#L44-L45)):
+([docs/qwen38-prefetch-predictor-study.md:44-45](qwen38-prefetch-predictor-study.md#L44-L45)):
 `previous token's selection at that layer` = 0.000 / 0.000 / 0.000 / 0.000 P@1..4 and
 0 / 0 / 0 adopted per token; `previous token's misses at that layer` the same; and mixing it
 with the shipped probe changes nothing (0.552 / 0.450 / 0.379 / 0.328, identical to probe
