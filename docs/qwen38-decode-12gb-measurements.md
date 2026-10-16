@@ -2732,3 +2732,196 @@ from `_PlanSlots` and worth knowing before writing an arm: a row may not name mo
 than its layer has slots, which the engine cannot produce anyway (top-k 10 against 96) but
 a hand-built fixture easily can — the failure is an `IndexError` inside the plan, not a
 refusal.
+
+## 5ae. The two-pass screen run over the campaign's backlog: the feeder family splits in two (2026-10-16)
+
+§5ad left a rule and a backlog. This is the backlog. Three arms that were priced on fresh caches are
+re-priced on both passes, at **cap none — the engine rule as shipped** — and every figure is placements
+of token converted to hit-rate points on the 480-request denominator (1 placement = 0.2083 points, bar
+= +7 points). Model-free: the three committed captures, python, no GPU, no clock, same licence as
+§5y/§5z/§5aa.
+
+Each arm was gated before it was read, by a self-check that **pass 1 reproduces the published
+single-pass function to 1e-9**:
+
+| arm | pass-1 gate | arms checked |
+|---|---|---|
+| §5z per-layer budget split | `heat_split_sim.placements_per_token` + §5z's own printed table | 9/9 |
+| §5aa arm 3, heat-biased eviction | `predictive_feeder_sim.heated_placements` | 18/18 |
+| §5aa arm 4, oracle look-ahead | `predictive_feeder_sim.lookahead_placements` | 21/21 |
+
+That gate is not decoration — it is the reason this section's numbers are trustworthy. The first arm-3
+screen counted with `placements += len(cache.plan(experts)) if decode else 0`, and Python evaluates only
+the chosen branch of a conditional expression, so `plan()` never ran on a prefill row: the replay had
+silently dropped §5y's warm-up and scored a cold cache. Its shipped baseline came out at 90.775
+placements/token against the capture's published 89.284 — and 90.775 is *exactly* the discarded cold
+figure §5ac disclosed and withdrew, which is what pointed the finger at my copy rather than at the
+published value. Calling `plan` unconditionally and counting conditionally fixes it; all 18 arms then
+reproduce to 1e-9. No number below comes from the broken copy.
+
+### 1. The §5z heat split is warmth-neutral — and it never rested on the refused cap
+
+| scored on | arm | pass 1 pts | pass 2 pts |
+|---|---|---:|---:|
+| `20261011` | uniform (shipped), 91.765 → 81.486 | — | — |
+| | oracle: own profile | **+0.71** | **+0.87** |
+| | transfer from `v520-20261015` | **+0.66** | **+0.75** |
+| | transfer from `v520-prompt2` | **+0.73** | **+0.84** |
+| `v520-20261015` | uniform (shipped), 89.284 → 77.258 | — | — |
+| | oracle: own profile | **+0.78** | **+0.74** |
+| | transfer from `20261011` | **+0.82** | **+0.80** |
+| | transfer from `v520-prompt2` | **+0.91** | **+0.82** |
+| `v520-prompt2` | uniform (shipped), 102.104 → 90.752 | — | — |
+| | oracle: own profile | **+0.92** | **+0.99** |
+| | transfer from `20261011` | **+0.78** | **+0.85** |
+| | transfer from `v520-20261015` | **+0.74** | **+0.81** |
+
+Pass 1 reproduces §5z's transfer table to the printed digit on all nine rows, which answers the second
+question §5ad raised: **no, §5z never depended on `use_cap=3`.** Its own words already said "cap none,
+engine rule as shipped" and the figures agree. The cap is only what `CrossCaptureTests` scores — a test
+problem, not a documentation problem, filed as #185.
+
+The first question: nine of nine split arms are positive on **both** passes. Six arms move up on the warm
+pass (by +0.07…+0.16) and three move down (by −0.02…−0.09), so no arm moves by more than 0.16 points. That
+is mechanism, not luck. `split_slots` changes **how many slots a layer holds** — a property of the cache's
+size — and leaves the eviction rule's memory untouched, so it prices the same cold and warm. §5z's verdict
+therefore stands unchanged by warmth: the six transfers land at +0.66…+0.91 on pass 1 and +0.75…+0.85 on
+pass 2, against oracle ceilings of +0.71…+0.92 and +0.74…+0.99, which is every static partition of 4 608
+slots sitting seven to eleven times under the +7-point bar.
+
+### 2. Arm 4 keeps four fifths of its gain on a warm cache, and the bar it clears is one capture wide
+
+| capture | W | pass 1 pts | pass 2 pts | retained | placements the 2nd request saves |
+|---|---|---:|---:|---:|---:|
+| `20261011` | 0 = shipped | — | — | — | 10.28 |
+| | 1 | +0.80 | +0.66 | 82 % | 9.60 |
+| | 8 | +3.62 | +2.90 | 80 % | 6.84 |
+| | 16 | +5.57 | +4.47 | 80 % | 5.00 |
+| | 32 | **+7.82** | **+6.40** | 82 % | 3.45 |
+| `v520-20261015` | 0 = shipped | — | — | — | 12.03 |
+| | 1 | +0.95 | +0.77 | 82 % | 11.21 |
+| | 8 | +3.41 | +2.71 | 79 % | 8.64 |
+| | 16 | +4.92 | +4.00 | 81 % | 7.56 |
+| | 32 | **+7.05** | **+5.75** | 82 % | 5.78 |
+| `v520-prompt2` | 0 = shipped | — | — | — | 11.35 |
+| | 1 | +1.19 | +0.94 | 79 % | 10.18 |
+| | 8 | +4.58 | +3.69 | 81 % | 7.08 |
+| | 16 | +6.54 | +5.24 | 80 % | 5.11 |
+| | 32 | **+8.86** | **+7.19** | 81 % | 3.30 |
+
+Three results, and the middle one is the interesting one.
+
+**The gain survives warmth.** Across 18 window/capture points the arm retains 79–82 % of its cold value
+— a near-constant four fifths, independent of window size. So §5aa's temporal headroom was not an artifact
+of cold caches, unlike everything else in the feeder family.
+
+**The crossing is.** At W=32 the +7-point bar is cleared on pass 1 by 3 of 3 captures (+7.82/+7.05/+8.86)
+and on pass 2 by **1 of 3** (+6.40/+5.75/+7.19). The bar is a threshold, so this does not soften the
+conclusion into "still clears, roughly" — it moves two of three captures to the wrong side of it. And the
+form the engine could actually own (§5aa: MTP is off, and its verify pass is width 2, so W=1 at best) is
+**+0.66…+0.94 points warm** against +0.80…+1.19 cold.
+
+**Protection and warmth are substitutes.** The shipped rule's second request saves 10.28/12.03/11.35
+placements/token — offline warmth of 2.14/2.51/2.37 points against the +1.8 points §5ad measured live on the
+same default arm. An engine that already protected this session's next 32 tokens saves only 3.45/5.78/3.30
+on the same second request: the look-ahead had already consumed **66 %, 52 % and 71 %** of what the repeated
+request would have delivered.
+Both mechanisms buy the same thing — the right expert resident before it is named — so their gains are not
+additive, and any future plan that prices "prediction" and "multi-turn warmth" together must subtract one
+from the other.
+
+### 3. Arm 3 is a cold-start discovery effect: every positive transfer flips sign
+
+| learned on → scored on | W | pass 1 pts | pass 2 pts |
+|---|---|---:|---:|
+| **hindsight** `20261011` → itself | 96 | +2.91 | +1.12 |
+| | 192 | +2.00 | −0.08 |
+| **hindsight** `v520-20261015` → itself | 96 | +3.00 | +0.84 |
+| | 192 | +1.32 | −0.92 |
+| **hindsight** `v520-prompt2` → itself | 96 | +3.44 | +1.24 |
+| | 192 | +2.41 | +0.07 |
+| `v520-20261015` → `20261011` | 96 | **+1.30** | **−1.16** |
+| | 192 | **+1.18** | **−0.96** |
+| `20261011` → `v520-20261015` | 96 | −0.35 | −2.42 |
+| | 192 | **+0.57** | **−1.67** |
+| `20261011` → `v520-prompt2` | 96 | −5.24 | −8.49 |
+| | 192 | −4.96 | −7.53 |
+| `v520-20261015` → `v520-prompt2` | 96 | −4.77 | −7.73 |
+| | 192 | −5.09 | −7.76 |
+| `v520-prompt2` → `20261011` | 96 | −2.20 | −6.53 |
+| | 192 | −3.16 | −5.95 |
+| `v520-prompt2` → `v520-20261015` | 96 | −3.82 | −8.94 |
+| | 192 | −4.51 | −7.75 |
+
+All three transfers that were worth anything on a cold cache (**+1.30, +1.18, +0.57**) are worth *less than
+nothing* on a warm one (−1.16, −0.96, −1.67), and the nine that were already negative get worse — up to
+−8.94 points. The hindsight rows, the arm's ceiling with the session's own future already known and at zero
+slot cost, keep 38 %/28 %/36 % at W=96 and **nothing at all at W=192** (+0.07…−0.92).
+
+So §5aa's mechanism claim ("eviction inside a fixed tier is zero-sum") is not merely confirmed, it is
+narrowed: what little arm 3 did convert was the cache **discovering its working set**, and a second pass
+discovers it for free. A list learned from another session is redundant with the memory the shipped rule
+already has — which is the same verdict §5ad reached for the cap from the live side, arriving here from the
+offline side, and the reason both are now one finding rather than two.
+
+### The rule the campaign gets out of this
+
+The two passes separate policy arms by *what they change*, and that is worth stating before the next
+candidate is screened:
+
+- Arms that change **how fast the cache reaches its steady state** — cross-session victim protection
+  (arm 3), a saturating count that flattens the rank (§5ad) — are priced almost entirely by pass 1 and
+  collapse or flip on pass 2. Both arms of this class that the campaign measured are in that shape.
+- Arms that change **what the steady state is** — per-layer budget size (§5z, ±0.16 points), own-future
+  protection (arm 4, 79–82 % retained) — price similarly on both passes.
+
+A single-pass offline screen therefore over-reports exactly the first class, and the first class is the one
+that looks cheapest to build. Nothing of that class shipped, which is the only good news in the section.
+
+### Deviations
+
+1. **My first arm-3 replay dropped the warm-up** (the conditional-expression shape described above) and its
+   figures are withdrawn, not adjusted. The corrected screen's 18/18 self-check is the evidence for §3.
+2. **The arm-4 throwaway still contains the bug in its own arm-3 half**, so `feeder_two_pass_screen.py`
+   exits 1 and the 12 arm-3 rows it prints are wrong — the corrected `/tmp/arm3_two_pass.py` rows are the
+   ones used here. Its arm-4 loop calls `plan` first and counts second, which is why 21/21 of the arm-4
+   checks pass. Disclosed because both scripts are in `/tmp` and may be re-run by someone who is not me.
+3. **Arm 2 (pinned prefix) was not re-screened.** Its published best honest arm is +0.14 points, fifty times
+   under the bar and reachable only from the same conversation; a sign flip cannot move that decision. This
+   is the one backlog row closed by reasoning instead of measurement, and it is named as such.
+4. **Pass 2 models a repeated identical request**, which is the shape §5ad confirmed live (greedy routes,
+   hash `b5c6c72d385f2f20`). A multi-turn conversation whose next turn asks something different routes
+   differently — §5z measured that agreement as 3.2–13.2 % of picks — so it lands *between* the two passes.
+   Read both columns as a bracket on a session's value, not the warm one as the answer. For arm 3 that
+   bracket is the whole story: its cold gain is real only to the extent turns repeat routes.
+5. **Two §5aa intermediate points differ by 0.01** (+4.93 vs +4.92 at `v520-20261015` W=16; +2.93 vs +2.92
+   at `v520-prompt2` W=4). Placements reproduce to 1e-9, so the difference is the doc's hand-converted
+   rounded percentages: `predictive_feeder_sim.main()` prints points only at W=32. Not a measurement
+   disagreement.
+6. **Only `two_pass_placements` is shipped** (`85f810a`, and `test_heat_split_sim.py` is at 20 tests — §5z
+   recorded 17, the three new ones are `TwoPassReplayTests`). §1 runs through it; §2 and §3 need their own
+   two-pass loops, because a protection set is not a budget. If the campaign keeps pricing warm policies
+   that loop shape belongs in `predictive_feeder_sim.py` — a decision, not a task for this section.
+7. **No clock anywhere.** These are placement counts on three captures whose replay level error (§5z: −3.2 %
+   to −10.8 % against the engine's own bracket) is larger than every effect above. The ban on quoting a
+   token rate from them is arithmetic, not caution.
+8. Provenance: tree `85f810a` clean, python 3.14.8, three committed route captures, no model loaded, no GPU
+   work, mains power but nothing timed.
+
+### Verdict
+
+**The backlog §5ad named is re-priced, and the feeder family splits in two.** The budget-shape lever is
+warmth-neutral and still seven to eleven times under the bar; arm 4's own-future protection survives warmth
+at four fifths of its value but clears the +7-point bar on one capture of three rather than three of three;
+arm 3's cross-session protection does not survive it at all. No shipped default changes: the 96-slot tier,
+the uncapped rank and the flat per-layer budget are all steady-state levers, and this section is the check
+that nothing in the cold-start class was quietly priced into one of them.
+
+**What it does change** is the campaign's read on the temporal headroom. §5aa said the headroom is real but
+owned by nobody; §5ae says the headroom is real *on a warm cache too*, which is the stronger claim — a
+predictor that only paid off on cold starts would not be worth building, and one that keeps 80 % of its
+points would. The blocker is unchanged and is not a measurement: the window that clears the bar is 32 tokens
+and the window the engine can own is 1. **The reusable rule is the one to take forward**: price every future
+policy arm on both passes and treat a pass-1-only gain as a cold-start effect until proven otherwise —
+which is now the shape of two refusals (§5ad's cap, §5aa's arm 3) and would have saved the campaign a live
+A/B if it had been stated first.
