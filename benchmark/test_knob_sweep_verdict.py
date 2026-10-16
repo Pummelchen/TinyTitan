@@ -52,7 +52,9 @@ landed: a table cell uses the token that table already uses (`--`, which is what
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
+import json
 import os
 import pathlib
 import sys
@@ -80,11 +82,13 @@ COUNTERS = {
 
 def arm(name, rate=4.0, **changes):
     """One measured arm row. A change of `None` removes the key, which is how a
-    counter the server never printed is shaped."""
+    counter the server never printed is shaped. The five counters are always
+    present, so the pop only ever had a key to remove; `resp` is absent unless a
+    test puts it there, so removal is now conditional."""
     row = {"ok": True, "tok_s": rate, **COUNTERS}
     for key, value in changes.items():
         if value is None:
-            row.pop(key)
+            row.pop(key, None)
         else:
             row[key] = value
     return {"arm": name, **row}
@@ -92,6 +96,18 @@ def arm(name, rate=4.0, **changes):
 
 def failed(name, note="server not healthy"):
     return {"arm": name, "ok": False, "note": note}
+
+
+def frame(chunk: dict) -> bytes:
+    """One server SSE frame, shaped the way `HTTPServerHandler+Streaming` writes
+    a chat chunk: the text lives under `choices[].delta`."""
+    body = {"id": "chatcmpl-test", "object": "chat.completion.chunk", "choices": [chunk]}
+    return f"data: {json.dumps(body)}\n\n".encode()
+
+
+def sse(parts):
+    """A stream that carried these completion fragments, in one chunk."""
+    return [b"".join(frame({"delta": {"content": p}, "finish_reason": None}) for p in parts)]
 
 
 def selection(names):
@@ -366,6 +382,114 @@ class VerdictStatus(unittest.TestCase):
         self.assertEqual(status, 2, out)
         self.assertIn("the sync_event arm logged no io_host_waits", out)
         self.assertNotIn("the base arm logged no", out)
+
+
+class ResponseTextInvariance(unittest.TestCase):
+    """§5al's Arm B spec: "greedy responses hash-checked for invariance".
+
+    A sweep that only reports a rate cannot tell a scheduling change from a
+    different generation: if the arm decoded different tokens, it did different
+    work, and its tok/s is not the same quantity. The driver read the stream and
+    threw it away, so the page could not make that claim at all.
+    """
+
+    def test_the_hash_is_of_the_streamed_completion_text(self):
+        self.assertEqual(
+            ks.stream_hash(sse(["Hello", " world"])),
+            hashlib.md5(b"Hello world").hexdigest(),
+        )
+
+    def test_a_frame_split_across_chunk_boundaries_hashes_the_same(self):
+        # `resp.read(8192)` cuts a frame wherever the buffer ends, so a parser
+        # that worked on one big chunk and not on small ones would silently
+        # disagree with itself between arms.
+        whole = sse(["The quick brown fox", " jumps over", " the lazy dog"])
+        split = [b"".join(whole)[i : i + 7] for i in range(0, len(b"".join(whole)), 7)]
+        self.assertEqual(ks.stream_hash(split), ks.stream_hash(whole))
+
+    def test_the_reasoning_channel_adds_no_text(self):
+        # Thinking is off in this sweep, but the channel exists on the same
+        # route, and reasoning text is not the completion being compared.
+        stream = [
+            frame({"delta": {"reasoning_content": "because it is long"}}),
+            frame({"delta": {"content": "Answer"}}),
+            frame({"delta": {"reasoning_content": "and short"}}),
+        ]
+        self.assertEqual(
+            ks.stream_hash([b"".join(stream)]),
+            hashlib.md5(b"Answer").hexdigest(),
+        )
+
+    def test_the_done_sentinel_and_comments_are_not_text(self):
+        self.assertEqual(
+            ks.stream_hash([frame({"delta": {"content": "x"}}) + b"data: [DONE]\n\n: ping\n\n"]),
+            hashlib.md5(b"x").hexdigest(),
+        )
+
+    def test_a_stream_that_carried_no_completion_text_has_no_hash(self):
+        self.assertIsNone(ks.stream_hash([frame({"delta": {"role": "assistant"}})]))
+
+    def test_arms_that_generated_different_text_are_contested_and_named(self):
+        rows = [
+            arm("base", 4.00, resp=hashlib.md5(b"one").hexdigest()),
+            arm("layer_depth25", 3.80, resp=hashlib.md5(b"two").hexdigest()),
+            arm("base_again", 4.01, resp=hashlib.md5(b"one").hexdigest()),
+        ]
+        lines, status = ks.verdict(rows, selection(("base", "layer_depth25", "base_again")))
+        out = "\n".join(lines)
+        self.assertEqual(status, 1, out)
+        self.assertIn("CONTESTED", out)
+        self.assertIn("layer_depth25", out)
+
+    def test_arms_that_generated_the_same_text_are_reported_as_invariant(self):
+        digest = hashlib.md5(b"same essay").hexdigest()
+        rows = [
+            arm("base", 4.00, resp=digest),
+            arm("layer_depth25", 3.80, resp=digest),
+            arm("base_again", 4.01, resp=digest),
+        ]
+        lines, status = ks.verdict(rows, selection(("base", "layer_depth25", "base_again")))
+        out = "\n".join(lines)
+        self.assertEqual(status, 0, out)
+        self.assertIn("identical", out)
+        self.assertIn(digest[:8], out)
+
+    def test_an_arm_of_three_that_hashed_nothing_refuses_the_claim(self):
+        # Silence is not invariance: an arm whose stream carried no text cannot
+        # be said to have generated the same text as its neighbours.
+        digest = hashlib.md5(b"same essay").hexdigest()
+        rows = [
+            arm("base", 4.00, resp=digest),
+            arm("layer_depth25", 3.80, resp=None),
+            arm("base_again", 4.01, resp=digest),
+        ]
+        lines, status = ks.verdict(rows, selection(("base", "layer_depth25", "base_again")))
+        out = "\n".join(lines)
+        self.assertEqual(status, 2, out)
+        self.assertIn("layer_depth25", out)
+
+    def test_a_page_whose_rows_carry_no_hash_at_all_makes_no_claim(self):
+        # The control: every pre-existing caller of `verdict` passes rows built
+        # without a response, and adding this check must not silently become a
+        # refusal for them.
+        rows = [arm("base", 4.00), arm("layer_depth25", 3.80), arm("base_again", 4.01)]
+        lines, status = ks.verdict(rows, selection(("base", "layer_depth25", "base_again")))
+        out = "\n".join(lines)
+        self.assertEqual(status, 0, out)
+        self.assertNotIn("identical", out)
+
+    def test_the_live_line_publishes_the_digest_it_hashed(self):
+        digest = hashlib.md5(b"same essay").hexdigest()
+        rows = [arm("base", 4.00, resp=digest)]
+        status, out, _ = drive(rows, ["--arms", "base"])
+        line = next(line for line in out.splitlines() if "tok/s" in line)
+        self.assertIn(f"resp={digest[:8]}", line)
+
+    def test_the_live_line_refuses_a_response_it_never_saw(self):
+        rows = [arm("base", 4.00, resp=None)]
+        status, out, _ = drive(rows, ["--arms", "base"])
+        line = next(line for line in out.splitlines() if "tok/s" in line)
+        self.assertIn("resp=not logged", line)
 
 
 class MainWiring(unittest.TestCase):

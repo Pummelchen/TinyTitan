@@ -23,12 +23,16 @@ status as well as on the page. AUD-277.
 
 A counter no run logged is published as `--` in the table and `not logged` in
 the live line, never as `0.0`: a hit rate that was never measured and prints as
-zero reads as a cache that never hit.
+zero reads as a cache that never hit. The same applies to the answer itself --
+every arm hashes the text its measured request streamed, and the page says
+whether the arms generated identical text. A rate is only comparable to another
+rate if the two are rates at the same work.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -288,6 +292,49 @@ def cell(
     return logged(None if value is None else value * scale, spec, suffix, refusal)
 
 
+def resp_cell(row: dict) -> str:
+    """The measured answer's digest, shortened. `not logged` is the same refusal
+    the counter columns use: a stream that carried no completion text is not a
+    response that matched."""
+    digest = row.get("resp")
+    return "not logged" if digest is None else digest[:8]
+
+
+def sse_text(chunks: list[bytes]) -> str | None:
+    """The completion text a streamed chat response carried, or None if it
+    carried none.
+
+    The frames are joined before parsing because `read(8192)` ends a chunk
+    wherever its buffer stops, including inside a frame. `reasoning_content` is
+    the other channel on the same delta and is not the answer being compared.
+    """
+    body = b"".join(chunks).decode("utf-8")
+    text = ""
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:") :].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            frame = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        for choice in frame.get("choices") or []:
+            part = (choice.get("delta") or {}).get("content")
+            if isinstance(part, str):
+                text += part
+    return text or None
+
+
+def stream_hash(chunks: list[bytes]) -> str | None:
+    """md5 of the streamed answer, so an arm that generated different text is
+    visible as one. None when the stream carried no completion text."""
+    text = sse_text(chunks)
+    return None if text is None else hashlib.md5(text.encode()).hexdigest()
+
+
 def wait_ready(proc, timeout=2400) -> str | None:
     start = time.time()
     while time.time() - start < timeout:
@@ -304,7 +351,7 @@ def wait_ready(proc, timeout=2400) -> str | None:
     return None
 
 
-def request(model_id: str, tokens: int) -> None:
+def request(model_id: str, tokens: int) -> str | None:
     payload = json.dumps(
         {
             "model": model_id,
@@ -321,9 +368,14 @@ def request(model_id: str, tokens: int) -> None:
         "POST", "/v1/chat/completions", body=payload, headers={"Content-Type": "application/json"}
     )
     resp = conn.getresponse()
-    while resp.read(8192):
-        pass
+    chunks: list[bytes] = []
+    while True:
+        part = resp.read(8192)
+        if not part:
+            break
+        chunks.append(part)
     conn.close()
+    return stream_hash(chunks)
 
 
 def run_arm(name: str, env_delta: dict[str, str], tokens: int) -> dict:
@@ -347,7 +399,7 @@ def run_arm(name: str, env_delta: dict[str, str], tokens: int) -> dict:
         # configuration is worse than losing the arm.
         try:
             request(model_id, 32)  # warm shaders and the cache
-            request(model_id, tokens)  # measured
+            resp = request(model_id, tokens)  # measured
         except Exception as exc:
             alive = proc.poll() is None
             return {
@@ -368,6 +420,8 @@ def run_arm(name: str, env_delta: dict[str, str], tokens: int) -> dict:
     if not rates:
         return {"arm": name, "ok": False, "note": "no decode footer"}
     out = {"arm": name, "ok": True, "tok_s": rates[-1]}
+    if resp is not None:
+        out["resp"] = resp
     runner = re.findall(r"TinyTitan runner (.+)", text)
     if runner:
         fields = dict(kv.split("=", 1) for kv in runner[-1].split() if "=" in kv)
@@ -435,6 +489,32 @@ def verdict(results: list[dict], selected: list[str]) -> tuple[list[str], int]:
         if not row.get("ok"):
             lines.append(f"CONTESTED: {row['arm']} did not measure ({row.get('note', '')})")
             status = 1
+
+    # A rate is only comparable to another rate if the two are rates at the same
+    # work. §5al's Arm B spec asks for the check by name, and an arm that decoded
+    # a different answer is a correctness finding, not a scheduling result.
+    hashed = [(row["arm"], row["resp"]) for row in results if row.get("ok") and "resp" in row]
+    if hashed:
+        silent = [row["arm"] for row in results if row.get("ok") and "resp" not in row]
+        if silent:
+            lines.append(
+                f"NOT MEASURED: the {', '.join(silent)} arm(s) streamed no completion text, so "
+                "the page cannot say its arms generated the same answer"
+            )
+            return lines, 2
+        digests = {digest for _, digest in hashed}
+        if len(digests) > 1:
+            who = ", ".join(f"{name}={digest[:8]}" for name, digest in hashed)
+            lines.append(
+                f"CONTESTED: the arms generated different greedy text ({who}), so the rates on "
+                "this page are not rates at the same work"
+            )
+            status = 1
+        else:
+            lines.append(
+                f"response text identical across {len(hashed)} arms "
+                f"(md5 {next(iter(digests))[:8]}): every rate here is the same answer"
+            )
 
     first = measured[BASELINE]["tok_s"]
     # The drift control is the baseline's own configuration, so its delta is the
@@ -511,7 +591,8 @@ def main() -> int:
                 f"   {r['tok_s']:.2f} tok/s"
                 f"  hit={cell(r, 'expert_hit_rate', 100, suffix='%')}"
                 f"  io_hidden={cell(r, 'io_hidden_pct', suffix='%')}"
-                f"  io_ms={cell(r, 'io_ms')}",
+                f"  io_ms={cell(r, 'io_ms')}"
+                f"  resp={resp_cell(r)}",
                 flush=True,
             )
         else:
