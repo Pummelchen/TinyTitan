@@ -9,7 +9,7 @@ both left the arithmetic itself in a throwaway. This screen closes that seam: it
 reads the page `tinytitan_knob_sweep.py` prints and answers `x`, `y`, the
 condition number and the band verdict with an exit status.
 
-Five things it must not be able to get wrong, each pinned below:
+Seven things it must not be able to get wrong, each pinned below:
 
 1. **The sign.** Rows live in the (`dissued`, `-dadopted`) plane, so the second
    coordinate is positive where a step makes adopted reads *fall*. §5at found the
@@ -30,6 +30,16 @@ Five things it must not be able to get wrong, each pinned below:
    solves `y=1.598` off a sweep page and `y=1.585` off the published one. The
    screen has to bound its own answer by the digits it was given, and refuse to
    decide a band call that falls inside that bound.
+6. **That conditioning is not signal (#208).** The angle bounds how well a pair
+   is posed and the digits bound how well it is known; neither bounds whether the
+   row moved. On §5at's real six-row page the widest pair (84.25 deg, `y=18.189`)
+   rested on a row whose whole step was inside the same page's drift control, so
+   the control is never a partner and a row inside its step is not signal -- and
+   every pair of surviving rows is a candidate, not a window over sorted names.
+7. **That one page may hold two answers.** After the bar that page prices the
+   same adopted read at 0.796 ms (inside the band) and 0.570 ms (below it). A
+   screen that prints one number and a status cannot say the page is the problem;
+   designs that land on opposite sides of a band edge refuse it.
 
 The statuses are the ones this tree's drivers already use:
 
@@ -130,6 +140,73 @@ DOC1_IN = """
 | layer_depth25 | 4.6 | 76.03 | 13.43 |
 """
 
+# §5at's own rendered page: six arms, and the first table this screen has ever
+# read that was assembled from two batches (§5ag's ring-off row, §5aq's five
+# others). Rates and counters are that section's, printed as the sweep prints
+# them. §5au scored it by hand and found the selection rule picking the 84.25 deg
+# pair, which rests on `slots_64`'s step of (-0.03, +0.21) and 3.93 ms -- every
+# one of those inside what the same page's `base_again` moved with no config
+# change at all, (-0.18, +1.80) and 11.17 ms. This page is the bug report.
+PAGE5AT = page(
+    arm("base", 4.55, 42.75, 22.85),
+    arm("slots_64", 4.47, 42.72, 22.64),
+    arm("layer_depth25", 4.00, 76.03, 13.43),
+    arm("slots64_depth25", 4.11, 76.22, 14.58),
+    arm("base_again", 4.33, 42.57, 21.05),
+    arm("prefetch_off", 4.79, 0.00, 0.00),
+)
+
+# The same page with `slots64_depth25` removed, so after the low-signal row is
+# stepped over exactly one design survives: `layer_depth25 x prefetch_off`, the
+# 43.93 deg pair §5au prices y=0.796 -- inside the band. One design cannot
+# disagree with itself, so this is the page that has to price something.
+PAGE5AT_ONE = page(
+    arm("base", 4.55, 42.75, 22.85),
+    arm("slots_64", 4.47, 42.72, 22.64),
+    arm("layer_depth25", 4.00, 76.03, 13.43),
+    arm("base_again", 4.33, 42.57, 21.05),
+    arm("prefetch_off", 4.79, 0.00, 0.00),
+)
+
+# A page whose drift control moved MORE than every arm it is pooled with, so the
+# signal bar would keep it, and whose widest pair is the control x an arm. The
+# control is the baseline re-measured: its row is drift by construction, and a
+# solve that rests on it is pricing the machine and calling it a config change.
+BIG_DRIFT = page(
+    arm("base", 4.55, 42.75, 22.85),
+    arm("base_again", 4.30, 30.75, 10.85),
+    arm("layer_depth25", 4.00, 76.03, 13.43),
+    arm("prefetch_off", 4.79, 0.00, 0.00),
+)
+
+# Three rows in alphabetical order, where the widest pair is the first and the
+# last. A candidate set built by walking a sorted list two at a time never sees
+# it, and "the widest pair a table offers" is not a property of the arm names.
+WIDEST_NOT_ADJACENT = page(
+    arm("base", 5.000, 40.00, 20.00),
+    arm("a_first", 4.900, 50.00, 19.00),
+    arm("m_middle", 4.800, 50.00, 10.00),
+    arm("z_last", 4.700, 41.00, 10.00),
+)
+
+# A page where the drift control moved more than everything else, so the bar has
+# no row left to pair. `base_again` moved (+10.00, +10.00) and +22.22 ms; both
+# arms move less in all three coordinates. The refusal is the screen's own doing
+# here, not the page's, and it has to say which.
+ALL_INKED = page(
+    arm("base", 5.000, 40.00, 20.00),
+    arm("base_again", 4.500, 50.00, 10.00),
+    arm("a_in", 4.900, 45.00, 16.00),
+    arm("b_in", 4.950, 35.00, 24.00),
+)
+
+
+def best_line(out: str) -> str:
+    lines = [line for line in out.splitlines() if "best pair" in line]
+    if len(lines) != 1:
+        raise ValueError(f"expected one 'best pair' line, got {len(lines)} in:\n{out}")
+    return lines[0]
+
 
 def run(text, *argv):
     out = io.StringIO()
@@ -222,6 +299,106 @@ class Geometry(unittest.TestCase):
         self.assertRegex(best[0], r"41\.\d deg")
         self.assertRegex(best[0], r"cond 1\.\d")
         self.assertEqual(status, 1, out)  # identified, and the price refutes the model
+
+    def test_the_candidate_set_is_every_pair_of_rows_not_a_window_of_names(self):
+        # a_first x z_last is 78.5 deg apart; m_middle sits between the two in
+        # sorted order and pairs with each at 39.3. An enumeration that steps a
+        # sorted list two at a time can only ever see the 39.3 deg pairs, and
+        # "the widest pair a table offers" is not a property of arm-name order.
+        _, out = run(WIDEST_NOT_ADJACENT)
+        best = best_line(out)
+        self.assertIn("a_first", best)
+        self.assertIn("z_last", best)
+        self.assertRegex(best, r"7[0-9]\.\d deg")
+
+
+class Signal(unittest.TestCase):
+    """A row has to move more than the page's own drift before it is signal.
+
+    The angle bounds the *conditioning* of a design and the digits bound its
+    precision; neither bounds whether the row moved at all. §5au showed a real
+    page where the widest pair rested on a row whose whole step -- both counters
+    and the wall -- was smaller than the drift control's, and priced an adopted
+    read at 18.189 ms because of it. `base_again` is the same configuration
+    re-measured, so its step IS this page's drift sample, and it is not an arm.
+    """
+
+    def test_a_row_inside_the_page_s_own_drift_sample_is_not_signal(self):
+        status, out = run(PAGE5AT)
+        self.assertIn("signal: drift sample base_again", out)
+        self.assertIn("not signal, stepped over: slots_64", out)
+        self.assertNotIn("18.189", out)
+        best = best_line(out)
+        self.assertIn("layer_depth25", best)
+        self.assertIn("prefetch_off", best)
+        self.assertNotIn("slots_64", best)
+        self.assertEqual(status, 2, out)  # and what is left refuses the page
+
+    def test_the_drift_control_is_never_a_solve_partner(self):
+        # Here the control moved (-12, +12) and 12.8 ms -- more than every arm it
+        # is pooled with, so the signal bar keeps it. It is still the baseline
+        # re-measured: a pair built on it prices the machine, not a config change.
+        # Widest otherwise: base_again x layer_depth25 at 60.8 deg.
+        _, out = run(BIG_DRIFT)
+        best = best_line(out)
+        self.assertNotIn("base_again", best)
+        self.assertIn("layer_depth25", best)
+        self.assertIn("prefetch_off", best)
+        self.assertRegex(best, r"4[0-9]\.\d deg")
+
+    def test_surviving_designs_that_straddle_a_band_edge_refuse_the_page(self):
+        # Two designs, 43.9 deg and 42.0 deg, both well-conditioned, both priced
+        # off this page: y=0.796 inside the band and y=0.570 below its low edge.
+        # One of them is what a cross-batch page says about an adopted read, and
+        # which one a single-number rule prints is not evidence for it.
+        status, out = run(PAGE5AT)
+        self.assertEqual(status, 2, out)
+        self.assertIn("do not agree", out)
+        self.assertIn("y=0.796", out)
+        self.assertIn("y=0.570", out)
+        self.assertNotIn("ADMISSIBLE", out)
+        self.assertNotIn("p*=", out)
+
+    def test_a_page_without_the_control_row_says_it_has_no_drift_sample(self):
+        # No drift sample is not a refusal: the bar has nothing to key to, so the
+        # screen says so and solves, and the price is the one §5au printed for it.
+        status, out = run(DOC1)
+        self.assertIn("signal: no drift sample", out)
+        self.assertIn("not on this page", out)
+        self.assertIn("y=1.362", out)
+        self.assertEqual(status, 1, out)
+
+    def test_one_surviving_design_prices_exactly_as_it_did_unbarred(self):
+        # The bar changes which rows may be paired; it must not touch the
+        # arithmetic. layer_depth25 x prefetch_off on these rows is §5au's
+        # x=0.683 / y=0.796, and with one design left there is nothing to
+        # disagree about, so this page is scored.
+        status, out = run(PAGE5AT_ONE)
+        self.assertIn("not signal, stepped over: slots_64", out)
+        self.assertIn("x=0.683 y=0.796", out)
+        self.assertIn("ADMISSIBLE", out)
+        self.assertNotIn("do not agree", out)
+        self.assertEqual(status, 0, out)
+
+    def test_a_zero_drift_sample_bars_no_row(self):
+        # TRIO's control carries the baseline's counters verbatim, so its step is
+        # zero and nothing can lie inside it. The fixture pages the campaign's
+        # published prices were pinned on must solve exactly as before the bar.
+        status, out = run(TRIO)
+        self.assertIn("no row lies inside it", out)
+        self.assertIn("y=1.598", out)
+        self.assertNotIn("do not agree", out)
+        self.assertEqual(status, 1, out)
+
+    def test_a_page_whose_every_row_is_inked_says_the_bar_emptied_it(self):
+        # The screen's own doing, not the page's: three rows were priceable and
+        # the drift sample covered all of them. "Nothing priceable" would be true
+        # of the arithmetic and false about the cause.
+        status, out = run(ALL_INKED)
+        self.assertEqual(status, 2, out)
+        self.assertIn("not signal, stepped over: a_in, b_in", out)
+        self.assertIn("the drift sample stepped over 2 row(s), leaving 0 with signal", out)
+        self.assertNotIn("nothing priceable", out)
 
 
 class Prices(unittest.TestCase):

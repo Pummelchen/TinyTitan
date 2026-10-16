@@ -22,6 +22,15 @@ this tree's other drivers use:
     1  it identified a price, and that price refutes the two-price model
     2  it could not solve, with the reason named
 
+The angle bounds a design's *conditioning* and the digits bound its *precision*;
+neither bounds whether the row moved at all. §5au fed this screen a real page and
+its widest-angle rule priced an adopted read at 18.189 ms off a row whose entire
+step was smaller than the same page's drift control, so the control (`base_again`,
+the baseline re-measured) is never a solve partner, a row lying inside its step is
+not signal, and the designs that survive are all printed: when they land on
+opposite sides of a band edge the page is refused, because which one the widest
+angle happens to pick is not evidence for it.
+
 Nothing here is measured on hardware — it is arithmetic over a page somebody else
 printed — so it runs in CI with no model, no server, no socket, nothing fetched.
 """
@@ -29,6 +38,7 @@ printed — so it runs in CI with no model, no server, no socket, nothing fetche
 from __future__ import annotations
 
 import argparse
+import itertools
 import math
 import pathlib
 import re
@@ -127,6 +137,23 @@ class Price:
     # defaulted: a Price that carries no bound would read as an exact one.
     x_bound: float
     y_bound: float
+
+
+@dataclass
+class Selection:
+    """What one table offers a solve, and what this screen stepped over to offer it.
+
+    `cleared` is every design that both solves and reaches `MIN_ANGLE`, widest
+    first, not only the selected one: §5au showed a page whose designs price the
+    same read on opposite sides of a band edge, and a screen that prints one
+    number cannot say that the page it read is the reason.
+    """
+
+    best: Price | None = None
+    cleared: list[Price] = field(default_factory=list)
+    offers: int = 0
+    signal: str = ""
+    notes: list[str] = field(default_factory=list)
 
 
 def _num(text: str) -> float | None:
@@ -358,28 +385,76 @@ def _solve(
         x_bound=_round_up(sum(abs(v) * w for v, w in x_parts)),
         y_bound=_round_up(sum(abs(v) * w for v, w in y_parts)),
     )
-    return Price(
-        a=r1.arm,
-        b=r2.arm,
-        deg=math.degrees(math.asin(sin)),
-        cond=1.0 / sin,
-        x=(m1 * r2.dv - r1.dv * m2) / det,
-        y=(r1.du * m2 - m1 * r2.du) / det,
-        # |d y / d m| is the other row's du over the determinant, per row.
-        dy_per_ms=max(abs(r2.du / det), abs(r1.du / det)),
+
+
+def _band_class(y: float) -> str:
+    """Which side of the admissible band a price lands on."""
+    if y < BAND_LO:
+        return "below"
+    if y > BAND_HI:
+        return "above"
+    return "inside"
+
+
+def _drift_sample(
+    rnd: Round, step_rows: dict[str, Row], priced: dict[str, float], control: str, column: str
+) -> tuple[dict[str, Row], list[str], str]:
+    """The rows the page's own drift cannot explain, the ones it inked, and the account.
+
+    `control` is the sweep's `base_again`: the baseline re-measured, so its step is
+    this page's drift with no config change in it. A row that moves less than that
+    -- in both counters and in the column the solve reads -- is inside the drift,
+    and a pair built on it is conditioning without signal.
+    """
+    if control not in rnd.arms:
+        return (
+            step_rows,
+            [],
+            f"no drift sample ({control} is not on this page), so no row was checked",
+        )
+    row, ms = step_rows.get(control), priced.get(control)
+    if row is None or ms is None:
+        label = PRINTED.get(column, column)
+        return (
+            step_rows,
+            [],
+            f"no drift sample ({control} logged no {label} step or no counters), "
+            "so no row was checked",
+        )
+    live = {
+        n: r
+        for n, r in step_rows.items()
+        if n != control
+        and not (
+            abs(r.du) <= abs(row.du) and abs(r.dv) <= abs(row.dv) and abs(priced[n]) <= abs(ms)
+        )
+    }
+    barred = sorted(set(step_rows) - set(live) - {control})
+    inside = (
+        f"inside it, not signal, stepped over: {', '.join(barred)}"
+        if barred
+        else "no row lies inside it"
     )
+    moved = f"{row.du:+.2f}, {row.dv:+.2f}"
+    return live, barred, f"drift sample {control} moved ({moved}) and {ms:+.2f} ms; {inside}"
 
 
-def best_pair(rnd: Round, baseline: str, column: str, holdout: str | None):
-    """The widest non-degenerate pair a table offers, and what it stepped over."""
-    step_rows = {n: r for n, r in rows(rnd, baseline).items() if n != holdout}
+def best_pair(
+    rnd: Round, baseline: str, column: str, holdout: str | None, control: str = "base_again"
+) -> Selection:
+    """Everything one table offers a solve: the widest row with signal, and the rest.
+
+    Every pair of surviving rows is a candidate -- a sorted list walked two at a
+    time is a window over arm names, not a search.
+    """
+    all_rows = {n: r for n, r in rows(rnd, baseline).items() if n != holdout}
     base = rnd.arms[baseline]
-    ms = {n: _dm(rnd.arms[n], base, column) for n in step_rows}
+    ms = {n: _dm(rnd.arms[n], base, column) for n in all_rows}
     unmeasured = sorted(n for n, v in ms.items() if v is None)
     priced = {n: float(v) for n, v in ms.items() if v is not None}
+    step_rows, inked, signal = _drift_sample(rnd, all_rows, priced, control, column)
     hrow = {n: _dm_ulp(rnd, rnd.arms[n], base, column) for n in priced}
     hcoords = (_ulp(rnd, ISSUED), _ulp(rnd, ADOPTED))
-    names = sorted(priced)
     candidates = [
         p
         for p in (
@@ -390,20 +465,56 @@ def best_pair(rnd: Round, baseline: str, column: str, holdout: str | None):
                 priced[b],
                 (hrow[a], hrow[b], *hcoords),
             )
-            for a, b in zip(names, names[1:], strict=False)
+            for a, b in itertools.combinations(sorted(step_rows), 2)
         )
         if p is not None
     ]
     notes = []
     if unmeasured:
         notes.append(f"no {column} step for {', '.join(unmeasured)}")
-    zero = sorted(n for n, r in step_rows.items() if r.du == 0.0 and r.dv == 0.0)
+    zero = sorted(n for n, r in all_rows.items() if r.du == 0.0 and r.dv == 0.0 and n != control)
     if zero:
-        notes.append(f"zero row, stepped over as the drift control: {', '.join(zero)}")
-    if not candidates and len(names) < 2:
-        notes.append(f"only {len(names)} priceable arm(s): a pair needs two")
+        notes.append(f"zero row, stepped over as a second drift control: {', '.join(zero)}")
+    if not candidates:
+        if inked and len(step_rows) < 2:
+            notes.append(
+                f"the drift sample stepped over {len(inked)} row(s), leaving "
+                f"{len(step_rows)} with signal: a pair needs two"
+            )
+        elif len(priced) < 2:
+            notes.append(f"only {len(priced)} priceable arm(s): a pair needs two")
+    cleared = sorted(
+        (p for p in candidates if p.deg >= MIN_ANGLE), key=lambda p: p.deg, reverse=True
+    )
     best = max(candidates, key=lambda p: p.deg) if candidates else None
-    return best, notes
+    return Selection(best=best, cleared=cleared, offers=len(candidates), signal=signal, notes=notes)
+
+
+def _designs_line(sel: Selection) -> str:
+    """Each design the page can price, named, so a reader sees the disagreement."""
+    said = ", ".join(f"y={p.y:.3f} ({p.a} x {p.b}, {p.deg:.1f} deg)" for p in sel.cleared)
+    spread = f"; y spread {max(p.y for p in sel.cleared) - min(p.y for p in sel.cleared):.3f} ms"
+    return (
+        f"designs: {len(sel.cleared)} of {sel.offers} solvable pair(s) reach "
+        f"{MIN_ANGLE:.0f} deg: {said}{spread if len(sel.cleared) > 1 else ''}"
+    )
+
+
+def _disagreement(sel: Selection) -> str | None:
+    """Refuse a page whose own designs do not agree on which side of the band it is on."""
+    if len(sel.cleared) < 2:
+        return None
+    kinds = {_band_class(p.y) for p in sel.cleared}
+    if len(kinds) < 2:
+        return None
+    band = f"{BAND_LO:.3f}-{BAND_HI:.3f} ms"
+    said = ", ".join(f"y={p.y:.3f} is {_band_class(p.y)} it" for p in sel.cleared)
+    return (
+        f"REFUSED: the {len(sel.cleared)} designs this page can price do not agree on the band "
+        f"({band}): {said}, so this page does not have one price for an adopted read and the "
+        "widest angle picking among them is a property of the arm names, not of the machine; "
+        "nothing here is a measurement of y"
+    )
 
 
 def _missing(rnd: Round) -> list[str]:
@@ -491,6 +602,12 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
         "column the page carries, e.g. body_ms",
     )
     ap.add_argument("--predict", help="an arm held out of the solve and priced as out-of-sample")
+    ap.add_argument(
+        "--control",
+        default="base_again",
+        help="the drift control's arm name: its step is this page's own drift, so it is "
+        "never a solve partner and a row whose step lies inside it is not signal",
+    )
     ap.add_argument("--s", type=float, default=DEFAULT_S, help="reads suppressed per token")
     ap.add_argument("--l", type=float, default=DEFAULT_L, help="adoptions lost per token")
     ap.add_argument("--token-ms", type=float, help="default: the baseline's own 1000/tok/s")
@@ -546,10 +663,15 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
     print(f"column {args.column}  (ms/token stepped against {args.baseline})")
     pairs: list[Price] = []
     for index, rnd in enumerate(rounds, start=1):
-        pair, notes = best_pair(rnd, args.baseline, args.column, args.predict)
+        sel = best_pair(rnd, args.baseline, args.column, args.predict, args.control)
+        pair, notes = sel.best, sel.notes
+        detail = [f"  signal: {sel.signal}"]
+        if sel.cleared:
+            detail.append(f"  {_designs_line(sel)}")
         if pair is None:
             why = "; ".join(notes) if notes else "nothing priceable"
             print(f"table {index}: REFUSED: no non-degenerate pair of rows to solve ({why})")
+            print("\n".join(detail))
             return 2
         if pair.deg < MIN_ANGLE:
             print(
@@ -557,6 +679,7 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
                 f"{pair.deg:.1f} deg apart (condition {pair.cond:.1f}), below the "
                 f"{MIN_ANGLE:.0f} deg a two-row solve needs; no prices"
             )
+            print("\n".join(detail))
             return 2
         pairs.append(pair)
         print(
@@ -565,8 +688,13 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
         )
         print(f"1 ms of {args.column} moves y by {pair.dy_per_ms:.3f} ms")
         print(_digits_line(rnd, args.column, pair))
+        print("\n".join(detail))
         if notes:
             print(f"  stepped over: {'; '.join(notes)}")
+        refused = _disagreement(sel)
+        if refused is not None:
+            print(f"table {index}: {refused}")
+            return 2
         if args.predict and args.predict in rnd.arms:
             step = rows(rnd, args.baseline).get(args.predict)
             measured = _dm(rnd.arms[args.predict], rnd.arms[args.baseline], args.column)
