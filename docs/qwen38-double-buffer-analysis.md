@@ -57,8 +57,8 @@ it. The four ways to close that gap:
 
 | Lever | Status |
 | --- | --- |
-| Fewer bytes: raise the expert hit rate (budget axis) | **Open** — #147 budget sweep measures `--expert-cache-slots` × `--max-context` |
-| Faster bytes: deeper queue depth, coalescing, layout | **Open** — #149 miss-read path; the disk runs ~1.4 GB/s effective against a multi-GB/s device |
+| Fewer bytes: raise the expert hit rate (budget axis) | **Closed** — #147 measured, and §5z priced the shape: at shipped defaults the derived rung is the best runnable configuration on this 24 GB machine, the binding constraint is physical working set not budget policy, and every static partition of a fixed tier is worth ≤ ~1 point (§5o, §5p, §5z) |
+| Faster bytes: deeper queue depth, coalescing, layout | **Closed** — #149 measured the read path at its own wall: io_ms 102.0/token for ~403 MB ≈ **3.95 GB/s** against the 3.92 GB/s four-thread ceiling, with `io_queue_ms` **0.41** — no queueing to buy back (§5d: 8–16 workers saturate at ~3.7, so depth buys nothing; §5m: coalescing priced at the 10–12 ms/token it could recover ≈ 2–3%, parked) |
 | Earlier issue: speculation beyond the prefetch ring | **Closed** — second rank −3.3%, second horizon −1.4%, depth≠1 −2.8% (docs/qwen38-prefetch-predictor-study.md); capacity-bound evictions eat the gain |
 | More GPU work per layer to hide the wait behind | **Does not exist** — residual chain, above |
 
@@ -73,6 +73,43 @@ headroom. At 12G the cache is the scarce resource, so the prior stands, but
 the experiment is cheap if #149 shows bandwidth headroom converting into
 exposed-wait reduction.
 
+### Re-read 2026-10-16: both rows above said "Open", and the condition just stated is now answered
+
+Two corrections, because as written this note pointed the next session at a
+closed lever.
+
+- **The "~1.4 GB/s effective against a multi-GB/s device" premise was real and is
+  not wrong — but it does not mean what the row inferred.** §5v sampled `disk0`
+  at one-second resolution across a whole decode run and got a mean of
+  **1 359.5 MB/s** (min 753.0, **0 idle samples**) — that is the device at
+  **34.7 % duty**. Meanwhile §5o's runner line measures the engine's *own read
+  path* at **3.95 GB/s against its 3.92 GB/s ceiling** with `io_queue_ms` 0.41.
+  The two figures are not in tension: the read path runs flat out when it is
+  asked to run, and the drive is idle between bursts because the bytes it would
+  read in that gap are not known yet. That is exactly §5w's finding, and it is
+  the reason the operator's continuous-feeder premise reads as a bandwidth
+  problem and measures as a dependency-chain one. The headroom depth could
+  reach is 3.9 % of *read throughput*, not of clock — §5d's worker probe is
+  1 / 2 / 4 / 8 / 16 workers = 2.01 / 2.84 / **3.57** / 3.71 / 3.69 GB/s, so the
+  engine's 4-worker reader sits 3.9 % under its own saturation point — and the
+  "read more sequentially" shape the same probe contrasts is worse, not better:
+  `dd` over a whole layer file measures 3.15 GB/s and 2.61 GB/s, *slower* than
+  the strided parallel reader.
+- **The L+1 top-k pin described above was priced, and it is worth less than the
+  bar.** §5aa arm 4 is the oracle form of exactly this idea — protect what this
+  session routes in its next W tokens, reserving no slot — and W=1 (the whole of
+  what an L+1 pin can own, since MTP is off on the delivered path and the verify
+  pass is width 2) buys **+0.80 / +0.95 / +1.19 points** of hit rate across three
+  captures. The +7-point bar sits at **W=32**. §5aa's mechanism sentence covers
+  the rest: inside a fixed tier eviction is zero-sum, and even a protection list
+  learned with hindsight at zero slot cost tops out at +2.91…+3.44 points.
+
+So the four-way table is complete: none of the four has an arm left to run on
+this machine at this budget. What remains open in the campaign is the victim
+rule itself (#177, the saturating use-count cap — §5aa's zero-sum finding is
+about *protection lists*, not about the shipped rule's own count saturation) and
+the RAM ceiling, and both are outside what this note was ever about.
+
 ## Verdict
 
 The classic double-buffer — two layers of GPU work in flight — is
@@ -86,3 +123,7 @@ prefetch ring), and the deeper-speculation arms are measured losses.
 ~84 ms/token; the levers that move it are #147 (fewer bytes) and #149 (faster
 bytes). Cross-token overlap, the only remaining source of independent work,
 is #151's subject.
+
+Both of those two were measured the same day and closed — see the re-read
+above — so this note's remaining contribution is the structural result: the
+residual chain leaves no independent GPU work to schedule.
