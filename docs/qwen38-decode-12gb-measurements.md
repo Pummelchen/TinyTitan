@@ -2286,3 +2286,200 @@ issuing 2× the depth it keeps while `inflight=0.01` is still a scheduling quest
   −2.04 to −7.92 % placements across three captures, output-invariant by construction, no model run yet. Task #177.
 - **Nothing here is a tok/s number.** This section prices placements, says how many points of hit rate each feeder
   shape can buy at a fixed 4 608 slots, and closes the cache-change reading of the premise.
+
+## 5ab. Four overnight premises, each closed by a measurement — and the empty scan that had to be re-run first (2026-10-16)
+
+The overnight mandate was to try things out rather than re-run the plan's knob list. Five
+premises were taken apart with model-free instruments — an SDK header inventory, a codec
+entropy screen on real blob bytes, a codec *cost* screen on the same bytes, the committed
+predictor study, and §5x's µs-scale host primitives. All five closed. None of them moved a
+clock, and this section claims no clock.
+
+### The scan that read nothing, and why it is first
+
+The first version of the header inventory below was run as
+
+```
+find "$SDK/System/Library/Frameworks/Metal.framework/Headers" -name '*.h' | wc -l   # 0
+grep -rli "accel" "$H"                                                              # (no output)
+```
+
+and it returned **nothing**, which is exactly what an absent API looks like. It was not
+evidence: `Metal.framework/Headers` **is a symbolic link** (`stat -f '%HT'` → `Symbolic
+Link`), and neither `find` nor `grep -r` follows a symlinked starting directory by default.
+`ls "$H" | wc -l` over the same path reports **97** entries, and a direct `grep -c MTLIO`
+on one of those files reports **18** hits, so the files were always readable — the walk was
+blind. Re-run with `find -L`, which enumerates **96** headers, is the instrument every
+figure below comes from.
+
+This is the same defect shape `tools/lint.sh` hunts in `unbounded-read` and `test-hollow`:
+*a scan that read nothing reporting a pass.* The earlier session's conclusion happened to
+survive the re-run; the claim is nevertheless withdrawn and re-measured, because "right" and
+"proven" are different properties and only the second one is reusable.
+
+### GPU-side fetch planning is not expressible on this SDK
+
+`docs/qwen38-decode-20tps-concept.md:96-102` leaves exactly two things that could move this
+model, and the second is "GPU-side fetch planning, so the CPU never blocks on the router at
+all… an architecture change". It is now answered from the API surface rather than from code,
+on the toolchain this repository is required to use (macOS SDK **27.0**, Xcode 27 / Swift 6.4):
+
+- `MTLIOCommandBuffer.h` exposes **three** load entry points — `loadBytes:` (46),
+  `loadBuffer:` (56), `loadTexture:` (67) — and each one takes
+  `sourceHandleOffset:(NSUInteger)`, a **host-supplied scalar baked in at encode time**.
+- The device-selectable I/O family is absent: `MTLIOAccelTable`, `MTLIODevice`, `MTLHandle`,
+  `MTLIOHandleDescriptor`, `MTLBufferIndirectHandleDescriptor` each appear in **0 of 96**
+  headers. `MTL4AccelerationStructure.h` is ray tracing and has no I/O role.
+- The complete `MTLIO*` symbol set in this SDK is the queue/buffer/status/compressor family:
+  `MTLIOCommandQueue`, `MTLIOCommandBuffer`, `MTLIOFileHandle`, `MTLIOStatus*`,
+  `MTLIOCompression*`, `MTLIOScratchBuffer*`, `MTLIOPriority*`. Nothing takes an offset from
+  a buffer.
+
+So the thing the architecture change needs — a kernel that decides *which file range* to
+fetch after the router result lands on device — has no entry point here. Every read offset
+must be known by the host before the command is encoded, which is the dependency the change
+was meant to remove. What the SDK *does* offer and the engine already uses is device-gated
+completion (`copyStatusToBuffer:` :81 then `signalEvent:` :139, wired together at
+`MetalExpertReader.swift:114-117`), so the kernels can gate on bytes without a host
+callback. That half is already shipped; the offset half is not buildable.
+
+### The last predictor shape was already measured at 0.000
+
+The recurrence idea — predict layer L's next-token experts from layer L's *previous* token's
+selection — is the one prefetch-predictor shape not covered by §5aa's four feeder arms. It
+turns out to be measured already, in the committed study, and its precision is zero on every
+rank
+([docs/qwen38-prefetch-predictor-study.md:44-45](file:///Users/andreborchert/Downloads/TinyTitan/docs/qwen38-prefetch-predictor-study.md#L44-L45)):
+`previous token's selection at that layer` = 0.000 / 0.000 / 0.000 / 0.000 P@1..4 and
+0 / 0 / 0 adopted per token; `previous token's misses at that layer` the same; and mixing it
+with the shipped probe changes nothing (0.552 / 0.450 / 0.379 / 0.328, identical to probe
+alone). The mechanism is stated at lines 52-55: **the previous token's experts are always
+already resident, which is why a temporal predictor stages nothing at all — the cache has
+already absorbed that reuse.** §5aa arm 4 prices the same conclusion from the other side:
+1 token of lookahead is worth +0.80…+1.19 points of hit rate and the plan's bar (+7) sits at
+**32** tokens, which no part of this engine can own.
+
+No test is needed and none was run: there is nothing left in the predictor shape to measure.
+
+### Lossless expert compression — capacity measured, then cost measured, and the lever closes
+
+This was the one genuinely new idea of the night: **gain slots without gaining RAM, without
+touching numerics.** A lossless codec over the packed 4-bit blobs cannot change a single
+value, so it is quality-exact by construction — the only capacity lever in this campaign that
+is not in tension with the standing "never make the model dumber for tok/s" rule.
+
+Screen on the real install (`python3 /tmp/expert_reducibility.py`, exit 0; layers
+0/7/15/23/31/39/47 × experts 0/37/129/250/391/503 = 42 blobs = 116 293 632 B = 110.9 MiB,
+i.e. 6 of 512 blobs per sampled layer):
+
+| measured | value |
+| --- | --- |
+| codes used in the 4-bit space | **16/16** |
+| order-0 nibble entropy | **3.7745 bits** = 94.36 % of 4 bits |
+| order-1 conditional entropy | 3.7438 bits/nibble |
+| single-valued code groups (32 B of codes each) | **0 / 3 225 600** = 0.000 % |
+| zlib-9, whole blob | ratio **0.90555** → **+10.43 %** slots (96 → 106.0/layer) |
+| zlib-9, code region only | 0.916 → +9.21 % (104.8) |
+| zlib-9 per-blob spread | 0.901 … 0.907 |
+| lzma-9, 8 blobs | **0.89493** → +11.74 % slots (0.8888 … 0.8956) |
+| scale array / header | 0.945 / 0.707 |
+
+Arithmetic pinned: `quantGroupSize 64` weights at 4 bits = 32 B of codes per group, so one
+expert's 2 457 600 code bytes are 76 800 groups and the 42-blob sample is 3 225 600 groups.
+The price comes from §5w's own measured slope — 48 → 96 slots (+100 %) bought **+12.2 %**
+paired — so +10.43 % of capacity projects to **+1.27 % of clock**, under the 2.9 % drift
+floor this campaign refuses to report as a win. lzma's +11.74 % projects to +1.43 %.
+
+Then the cost, which is what actually kills it (`python3 /tmp/codec_cost.py`, exit 0, same
+blobs, single thread, best of 5 rounds, Python's `zlib`/`lzma` i.e. the same C libraries a
+Swift build would call):
+
+| codec | decode throughput | a token's 203.55 MiB of reads costs | vs §5v drive demand 1 359.5 MB/s |
+| --- | --- | --- | --- |
+| zlib inflate | **458 MiB/s** (rounds 453 / 457 / 458 / 457 / 458) | **444 ms of CPU** | 0.35× |
+| same, at perfect 8-core scaling (arithmetic, not measured) | 3 664 MiB/s | 55.6 ms = 26 % of the 217.34 ms token | 2.8× |
+| lzma-9 inflate | 31 MiB/s | 6 572 ms | 0.02× |
+
+One 2.64 MiB blob inflates in **5.207 ms**, which is 3× the 1.739 ms the drive spends
+delivering a layer's *entire* miss burst, and inflating at the rate a burst arrives needs
+**7.9×** the sustained pipe (3 622 MiB/s at §5w's measured 3.80 GB/s against 458 MiB/s of
+inflate). So a lossless tier would move the bottleneck off the SSD and onto CPU cores that
+already own the busiest host budget in the loop — and §5w's ledger says the token is 50.9 %
+GPU-busy with 102 ms already accounted for by the drive and the dependency chain.
+
+The one escape hatch was checked rather than assumed: the SDK's own compression surface is
+**compress-only**. `MTLIOCompressor.h` declares three functions —
+`MTLIOCreateCompressionContext` (:40), `MTLIOCompressionContextAppendData` (:46),
+`MTLIOFlushAndDestroyCompressionContext` (:52), all macOS 13+ — with no decompression entry
+point anywhere in the 96 headers. The hardware path that could beat a CPU inflate is not
+nameable on this toolchain, so the codec lever is closed on both halves: +1.27 % projected
+capacity for 2× a token's wall in CPU.
+
+### What family 2's 42.8 ms is not, by arithmetic
+
+§5w left the 42.835 ms/token of `shared_expert → moe_phase1_*` host turnaround open and
+suggested "bookkeeping issued a layer ahead of the wait". §5x's µs measurements close that
+suggestion off. Family 2 is 42.835 ms/token = **0.892 ms per layer**. §5x measured
+encode p50 3.9 µs, commit p50 0.5 µs and a per-command-buffer host mean of 22.9 µs, so the
+whole 6-CB-per-layer encoding budget is 6 × 48 × 22.9 µs = **6.59 ms/token** — 15 % of the
+gap, and 0.892 ms per layer is **39×** the per-CB host mean.
+
+Summing the named host counters on the same arm (line 1682) reaches the same place:
+`cache_plan_ms=4.898` + `gather_ms=2.248` + `rdadvise_ms=7.624` + `cb1_ms=5.079` =
+**19.85 ms/token**, i.e. 46 % of family 2 is named and the rest is queue serialization —
+which §5w already explains: at 48 slots the same pair *falls* from 0.730 to 0.393 ms per
+occurrence because the drive is behind and the host's bookkeeping disappears under already-
+queued work. And §5x prices the proposed remedy: one extra commit-and-wait pair is ≈10 ms per
+token, so a look-ahead command buffer spends ~10 to save ≤19.85, most of which is not waiting
+on encoding. Task #179's premise is therefore answered as written, and the answer is no.
+
+### Deviations, all of them
+
+1. Both spikes live in `/tmp` and are **deliberately not committed**: the levers they tested
+   are closed, so a new `benchmark/` driver would be a new file to audit for no usable gain.
+   Their full printed output is embedded above so the numbers stay in the tree even when the
+   scripts do not. They are throwaway probes, not engine code, and nothing under `sources/`
+   changed in this section.
+2. No model window was taken and no token rate appears in this section. Every clock-like
+   figure quoted is a reference to an earlier section's measurement.
+3. The entropy screen samples 6 of 512 blobs in each of 7 layers, and holds the same six
+   expert ids fixed across those layers, so it is 42 blobs of 24 576 (0.17 %) and cannot
+   separate layer variation from expert variation. The per-blob ratio spread (0.901 … 0.907)
+   is that sample's variance, not a claim about the whole install.
+4. The first entropy run was **broken and is withdrawn**: `entropy()` summed a `Counter`'s
+   keys instead of its values and printed −29 141 861.85 bits (−728 546 546 % of 4 bits). The
+   zlib/lzma ratios in that run were unaffected, the bug was fixed, and only the re-run's
+   entropy lines are quoted.
+5. The same run initially used a 128 B group where the format's is 32 B; the single-valued
+   count and the group total changed with the fix. 76 800 groups/expert matches the manifest's
+   scale count exactly, which is what confirms the corrected size.
+6. Inflate throughput is single-threaded C-library throughput on this Mac. The 8-core row is
+   labelled arithmetic and is **not** a measurement — no parallel inflate was run.
+7. The capacity→clock projection uses §5w's 48→96 slope linearly across +10 %. The real
+   slot/response curve is not linear and §5o's cliff sits elsewhere; the projection is quoted
+   as an upper bound on a small step, not as a measurement of that step.
+8. The SDK conclusion is about **this** SDK (macOS 27.0 from Xcode 27). A newer SDK could add
+   the device-handle family; that is a toolchain question, and this repository's rule is that
+   only the pinned toolchain's guarantees count as supported.
+9. `nm -gU` over the framework binary returned nothing (the SDK ships a stub; the real image
+   is in the dyld shared cache), so it is not part of the evidence. The header walk is.
+
+### Verdicts
+
+- **Four of the five overnight premises are closed by measurement, not by argument**: the
+  recurrence predictor (already 0.000 on every rank), GPU-side fetch planning (no API for it
+  on this SDK), lossless expert compression (+1.27 % projected capacity against 2× a token's
+  wall in CPU), and look-ahead host bookkeeping (15 % of the gap it is meant to remove, and
+  priced above its own saving).
+- **The fifth is the instrument**: a blind `find`/`grep -r` walk over a symlinked SDK
+  directory produced a confident, empty, wrong-shaped result. It is recorded here as the
+  section's headline finding, not a footnote, because the conclusion it happened to support
+  was already the right one — which is precisely when a broken gauge is dangerous.
+- **No capacity route is left that does not need more RAM.** Slots can be bought with bytes
+  (lossless: refused, sub-noise and CPU-expensive), with placement (5aa: zero-sum), with
+  budget shape (5z: capped), or with hardware (not this Mac, and the operator's 12 GiB rule
+  binds here). The concept document's remaining two levers are now both measured: more RAM,
+  and nothing else.
+- **The live work that survives this section unchanged** is #177 — the saturating use-count
+  arm in `makeExpertCachePlan`, −2.04…−7.92 % placements offline, output-invariant by
+  construction, still needing the paired live A/B — and #163, the wiki decode row.
