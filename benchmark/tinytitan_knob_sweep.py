@@ -67,36 +67,44 @@ PROMPT = "Write a detailed essay about the history of computing."
 # The 25 links §5al's gate keeps, keyed by the *source* layer of the L -> L+1 link
 # the engine deepens. Written out rather than regenerated so the arm names the
 # configuration it measured; `--top-m 2` over the frozen trace reproduces it.
-LAYER_DEPTH25 = ",".join(
-    f"{layer}=2"
-    for layer in (
-        1,
-        4,
-        5,
-        6,
-        7,
-        11,
-        12,
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
-        26,
-        28,
-        32,
-        33,
-        34,
-        35,
-        37,
-        40,
-        43,
-        44,
-        45,
-        46,
-    )
+DEPTH25_LINKS = (
+    1,
+    4,
+    5,
+    6,
+    7,
+    11,
+    12,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    26,
+    28,
+    32,
+    33,
+    34,
+    35,
+    37,
+    40,
+    43,
+    44,
+    45,
+    46,
 )
+
+
+def _layer_depth(links, depth: int) -> str:
+    return ",".join(f"{layer}={depth}" for layer in links)
+
+
+LAYER_DEPTH25 = _layer_depth(DEPTH25_LINKS, 2)
+# Same list, one deeper. §5ar could only price an issued read as a band because its
+# equations came from three batches; two arms on one link list inside one batch share
+# the drift term, so their two paired equations identify both prices at once.
+LAYER_DEPTH325 = _layer_depth(DEPTH25_LINKS, 3)
 
 # Every arm is one env delta from the shipped defaults, so a win is
 # attributable. Combinations come later, built from what wins here.
@@ -213,6 +221,15 @@ ARMS: list[tuple[str, dict[str, str], str]] = [
         "layer_depth25",
         {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH25},
         "§5al: depth 2 on the 25 links whose slot-2 precision clears 0.45",
+    ),
+    # The second equation. §5ap's single depth-2 arm could say what deepening cost
+    # but not what it was made of: an issued read and a lost adoption price differently,
+    # and one paired arm gives one equation in two unknowns. A second arm on the *same*
+    # links, same batch, same control, gives the other one.
+    (
+        "layer_depth325",
+        {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH325},
+        "§5as: the same 25 links at depth 3, to price issued vs adopted within one batch",
     ),
     # §5ao named the one condition under which an earlier read could still buy
     # time: a slot budget tight enough that a staged arrival is a larger share of

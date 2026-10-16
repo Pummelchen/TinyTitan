@@ -116,6 +116,24 @@ def selection(names):
     return [a[0] for a in ks.ARMS if a[0] in wanted]
 
 
+def depth_env(name):
+    """The `TINYTITAN_PREFETCH_LAYER_DEPTH` string the named arm sets."""
+    rows = {a[0]: a[1] for a in ks.ARMS}
+    if name not in rows:
+        raise AssertionError(f"no {name} arm in the registry")
+    if "TINYTITAN_PREFETCH_LAYER_DEPTH" not in rows[name]:
+        raise AssertionError(f"{name} sets no per-link ring depth")
+    return rows[name]["TINYTITAN_PREFETCH_LAYER_DEPTH"]
+
+
+def depth_links(spec):
+    return {int(item.split("=")[0]) for item in spec.split(",")}
+
+
+def depth_values(spec):
+    return {int(item.split("=")[1]) for item in spec.split(",")}
+
+
 def row_line(out, name):
     for line in out.splitlines():
         if line.startswith(f"{name:<15}") or line.startswith(name):
@@ -200,6 +218,27 @@ class SelectedArms(unittest.TestCase):
         arms, unknown = ks.selected_arms("base,bse")
         self.assertEqual([a[0] for a in arms], ["base"])
         self.assertEqual(unknown, ["bse"])
+
+
+class DepthArmPair(unittest.TestCase):
+    """Two depth arms must differ in depth and nothing else, or they price nothing.
+
+    §5ar's `x` (ms per issued read) and `y` (ms saved per adopted read) came out as a
+    band because its three equations were taken from three batches, and the same arm
+    disagreed with itself by 9.44 ms/token between two of them. Two arms on one link
+    list in one batch share the drift term, so their two paired equations identify
+    both prices -- but only while the lists are literally the same list.
+    """
+
+    def test_a_depth_three_arm_deepens_exactly_the_depth_two_links(self):
+        self.assertEqual(
+            depth_links(depth_env("layer_depth325")),
+            depth_links(depth_env("layer_depth25")),
+        )
+
+    def test_the_two_arms_differ_only_in_the_depth_they_ask_for(self):
+        self.assertEqual(depth_values(depth_env("layer_depth25")), {2})
+        self.assertEqual(depth_values(depth_env("layer_depth325")), {3})
 
 
 class TableCell(unittest.TestCase):
