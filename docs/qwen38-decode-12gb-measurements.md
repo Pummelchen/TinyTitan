@@ -3923,3 +3923,234 @@ Deviations.
    checker reports "Checked 66 local link(s); 0 broken". The pre-existing rows are the AUD-180 class — a doc
    reference no local gate caught — found again, and `tools/lint.sh docs` does not cover link targets.
 
+## 5al. #198 scores the one axis the live depth series never varied: slot 2's marginal precision spans 8.1x across the 47 links and is stable within a session (r = 0.922), so uniform-depth closure does not close it — but the campaign's two price models put a layer-selective arm on opposite sides of zero, and only a live paired run can settle it (2026-10-16)
+
+§5ak closed **depth as a uniform knob**: one number, applied to every layer, decided by the engine's own paired
+M=1/M=2/M=4 series. That series never varied the other axis in the same line of the build path — depth is *one
+scalar for all 47 links* ([RealForwardRunner+BuildCore.swift:87](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L87),
+handed to the ring at `slotCount: ringDepth` line 99) — and the §5z result that survived the whole campaign says
+why a uniform number is suspect: **which layer is busy is a property of the model; which expert is busy is a
+property of the conversation**, and six cross-trace per-layer budget transfers all beat the shipped uniform split.
+So the question #198 asks is narrow and unasked before: is the second read worth staging *at some layers*?
+
+### First finding: a counterfactual depth arm must be scored on the ring-off trace
+
+The screen ran on `on.jsonl` first and returned a depth-1 precision of **0.0377** — not the 0.5223 §5ak
+established for the shipped arm. That is not a bug in either section; it is what the two traces record.
+In `on.jsonl` the engine's `misses` field is written **after** the ring has already staged its read, so a
+counterfactual arm evaluated there is scored against a demand set the shipped prefetcher already consumed:
+
+| scored on | depth | issues | useful | precision | recall | `actual_misses` |
+|---|---|---|---|---|---|---|
+| `off.jsonl` (ring off) | 1 | 15 257 | 7 968 | **0.5223** | 0.2486 | 32 046 |
+| `off.jsonl` | 2 | 26 594 | 12 660 | 0.4760 | 0.3951 | 32 046 |
+| `on.jsonl` (ring on) | 1 | 15 257 | **575** | 0.0377 | 0.0233 | 24 653 |
+| `on.jsonl` | 2 | 26 594 | 5 267 | 0.1981 | 0.2136 | 24 653 |
+
+The issue counts agree to the count across the two substrates (15 257 and 26 594 — they are properties of the
+prediction list, not of what ran), while the useful column collapses. Every number below is on `off.jsonl`, the
+same 18 384 observations and 18 001 scored links as §5ak. The on-trace stays the right substrate for *adoption
+and lateness* (§5ah/§5ai) and the wrong one for *counterfactual value*; nothing in the repo says which is which,
+so it is recorded here.
+
+### Method
+
+No production code changed and nothing new was added to `benchmark/`. The shipped screen
+([../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py)) was run
+at `--top-m` 1, 2, 3, 4, 6, 10 with `--predictor recorded --policy filter` on `off.jsonl`, and the per-link
+counters differenced between adjacent depths:
+
+    slot-k marginal precision = (useful@k − useful@k−1) / (predicted_nonresident@k − predicted_nonresident@k−1)
+
+That is the value of the k-th read *alone*, on the shipped issue policy — filter-then-cap means `--top-m` is ring
+depth, per §5ak. The differencing, the two price models and the gate tables are arithmetic, done in throwaway
+scripts under `/tmp/depthsel/` (`slot2.py`, `gates.py`, `split.py`, `layeraxis.py`, `verify.py`); they are not
+proposed as a shipped tool.
+
+### The spread is real and it is 8-10x, across all three slots
+
+| slot | min | p25 | median | p75 | max | ratio |
+|---|---|---|---|---|---|---|
+| 1 — the shipped read (`prec1`) | 0.085 | 0.410 | 0.567 | 0.667 | 0.836 | **9.8x** |
+| 2 — one deeper read (`prec2`) | 0.093 | 0.284 | 0.454 | 0.533 | 0.752 | **8.1x** |
+| 3 — a third (`prec3`) | 0.064 | 0.248 | 0.372 | 0.478 | 0.660 | **10.4x** |
+
+All 47 L→L+1 links have a slot-2 read available and none saturates at depth 3 either — the smallest slot-2
+increment over the whole trace is 69 issues (slot 3: 19, slot 4: 10), so the deeper ring is never offered a layer
+it cannot fill. Slot 2 pooled over the trace is 4 692 useful against 11 337 extra reads = **0.4139** — below the
+median of the per-link distribution, which is exactly what a spread of that size means: the uniform arm averages a
+good half and a bad half into one number that is neither. The eight most valuable slot-2 links:
+
+| link | `prec2` | extra useful/tok | extra reads/tok | its `prec1` |
+|---|---|---|---|---|
+| L 6 | 0.752 | +0.55 | +0.73 | 0.836 |
+| L21 | 0.708 | +0.59 | +0.83 | 0.809 |
+| L37 | 0.704 | +0.49 | +0.70 | 0.820 |
+| L 5 | 0.634 | +0.51 | +0.80 | 0.773 |
+| L28 | 0.600 | +0.32 | +0.53 | 0.769 |
+| L40 | 0.596 | +0.17 | +0.28 | 0.757 |
+| L 7 | 0.565 | +0.37 | +0.66 | 0.705 |
+| L44 | 0.563 | +0.15 | +0.27 | 0.531 |
+
+Two structural facts come with it. **One ordering, not two:** `prec1` and `prec2` correlate at Pearson **r = 0.851**
+across the 47 links (`prec2` vs `prec3` at **0.899**), so a layer that is a good use of a first read is a good use
+of a second — one per-layer quality list serves both gates. **Concentration:** ranked by slot-2 useful reads, the
+top 11 links carry 1 865 of 4 692 = **39.7 %** and the top 23 carry 3 187 = **67.9 %**, for 2.26-14.83 extra
+reads/token instead of uniform depth 2's 29.52.
+
+### And it is stable within the session, which is the part §5z could not show
+
+The obvious objection is that a per-layer statistic from one 384-token capture is that conversation's noise. A
+position split tests it: the trace's positions 10-201 and 202-392 are scored separately (this is a clean
+out-of-sample test for a *layer-selection* rule, because `recorded` reads only the trace's own prediction list and
+the gate is fitted on one half and applied unchanged to the other):
+
+| per-link statistic | half-1 mean | half-2 mean | Pearson r across the 47 links |
+|---|---|---|---|
+| `prec2` (slot-2 marginal) | 0.428 | 0.418 | **0.922** |
+| `prec1` (slot-1) | 0.514 | 0.538 | **0.939** |
+
+A gate fitted on half 1 and never shown half 2 selects 24 / 17 / 9 / 6 links at `prec2` ≥ 0.45 / 0.50 / 0.55 /
+0.60 and realises **0.540 / 0.568 / 0.620 / 0.672** on half 2. All four clear the optimistic break-even derived
+below (0.4579) and none reaches the pessimistic one (0.8403): what survives the split is the *ranking* — the
+layers that aimed well in the first half aim well in the second — while whether that earns anything stays the
+price dispute below.
+
+### Two price models for one extra read, and they disagree in sign
+
+The screen cannot say whether 0.546 realised precision is good, because the campaign has two defensible answers.
+Both are anchored on the same live pair quoted in §5ak — **M=1 +12.2 %, M=2 +6.0 %**, one batch, one control, so
+neither crosses batches.
+
+1. **Optimistic.** Solve a benefit `B` per adopted-equivalent read/token and a cost `K` per speculative
+   read/token from the two ladder arms and this trace's own counts: `B = +5.142`, `K = −2.184`. Break-even
+   marginal precision `= −K / (B × 0.9277)` = **0.4579**. It reproduces both anchors by construction, and
+   **22 of the 47 links clear it**, carrying 2 739 of the 4 692 slot-2 useful reads (58.4 %).
+2. **Pessimistic.** Hold the benefit at §5ak's route-3 price (`d = 0.201 %` per demand MiB avoided, times
+   stride, times the 0.9277 conversion → 0.4925 % per adopted-equiv read/token) and charge the whole measured
+   6.2-point depth-1→2 loss to the 11 337 extra reads → **0.4138 % per extra read/token**. Break-even
+   **0.8403** — and **no link reaches it**; the best is 0.752.
+
+The optimistic fit is the one to distrust, and the ladder itself proves it. Its depth-4 falsifier: predicted
+`u4 × 0.9277 × B + r4 × K` = **−15.1 %** against the **measured −9.8 %** (and +12.2 / +6.0 reproduced exactly).
+The error is specific — a *constant* per-read cost under-prices the third and fourth reads, because each one
+contends longer with the demand burst — which is precisely the mechanism §5ak named. It says nothing about
+whether a *per-layer* constant is right, but it is the same extrapolation class the selective arm is asking for.
+
+### Arm B — depth 2 only at the links that aim best
+
+Using the whole trace to fit the gate (the live arm would have to ship a list; see the seam below):
+
+| gate on `prec2` | links kept | extra reads/tok | extra MiB/tok | realised precision | optimistic net | pessimistic net |
+|---|---|---|---|---|---|---|
+| 0.00 — uniform depth 2 | 47 | 29.52 | 78.0 | 0.414 | **−6.20 %** (the ladder, by construction) | −6.20 % |
+| 0.30 | 35 | 21.13 | 55.8 | 0.499 | +4.16 % | −3.55 % |
+| 0.40 | 30 | 17.67 | 46.7 | 0.527 | +5.82 % | −2.73 % |
+| **0.45** | **25** | **14.83** | **39.2** | **0.546** | **+6.21 %** | **−2.15 %** |
+| 0.50 | 15 | 8.41 | 22.2 | 0.602 | +5.76 % | −0.99 % |
+| 0.55 | 9 | 5.21 | 13.8 | 0.648 | +4.73 % | −0.49 % |
+| 0.60 | 5 | 3.60 | 9.5 | 0.684 | +3.88 % | −0.28 % |
+| 0.65 | 3 | 2.26 | 6.0 | 0.721 | +2.84 % | −0.13 % |
+
+The gate's shape is the interesting part: at `prec2 ≥ 0.45` it keeps **66.2 % of slot-2's useful reads for 50.2 %
+of its bytes**, so the pessimistic model's objection — speculative traffic — is the one thing it demonstrably
+reduces, while its own break-even claim (0.8403) is a bar no arm of *any* depth can clear. A third reading,
+route-3's own prices, is worth naming because it disagrees with both: under `c = 0.042 / d = 0.201` the selective
+arm is +0.55 to +2.85 % against the shipped depth-1 arm, but so is *uniform* depth 2 (+2.74 %), i.e. route-3 says
+the layer gate buys 0.11 points and depth itself is free — the model §5ak already rejected on live evidence.
+
+### Arm A — depth 0, i.e. skipping the shipped read at the bad layers
+
+The mirror question (the ring is already spending there; is the *first* read worth it?) was priced the same way and
+answers no. Under route-3's prices, keeping only links with `prec1` ≥ threshold:
+
+| gate on `prec1` | links kept | reads/tok | useful/tok | vs shipped |
+|---|---|---|---|---|
+| 0.20 | 42 | 35.34 | 20.09 | **+0.16 %** |
+| 0.30 | 41 | 34.38 | 19.88 | +0.16 % |
+| 0.40 | 36 | 30.23 | 18.49 | −0.06 % |
+| 0.50 | 30 | 24.66 | 16.06 | −0.64 % |
+| 0.60 | 18 | 15.03 | 10.60 | −2.26 % |
+
+Nothing above +0.16 % is worth a code change, and the reason is arithmetic rather than subtle: route-3 prices a
+demand MiB avoided about **4.8x** above a speculative MiB spent, so the reads that are lost are worth more than the
+traffic that is saved. Under the optimistic pair the same gate models +6.4 to +10.5 % — which is the same
+sign-disagreement as arm B, and is a *larger* extrapolation (arm A removes 4-25 reads/token where the ladder only
+ever moved between 39.73 and 69.25), so neither model is being believed here either.
+
+### What would settle it, and the seam it needs
+
+One live paired arm: **selective depth 2 on a fixed link list versus the shipped uniform depth 1**, interleaved
+A/B/A within rounds, same batch, same control, greedy responses hash-checked for invariance. Its predicted band
+is −2.2 % to +6.2 % against a known uniform result of −6.2 % — i.e. the arm is only worth running because the
+screen says the layer axis could be worth ~12 points relative to the uniform arm that was measured and rejected.
+
+It is not implementable by flipping a knob, and this is the concrete finding for whoever runs it:
+
+- `ExpertPrefetchRing.begin(model:layer:experts:resident:currentLayer:)`
+  ([ExpertPrefetchRing.swift:65-114](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L65)) takes
+  **no depth argument** — the depth arrives once, as the ring's `slotCount`, and `wanted.prefix(count)` caps every
+  link identically.
+- The ring carries **global counters only** — `issuedReads` (:51), `begins` (:58), `reclaimedOps` (:61) and the
+  `observed*` gauges (:54-57). There is no per-link state, so an *online* gate that learns which layers aim badly
+  has nothing to key on; it would be new bookkeeping, not a filter.
+- What is already reachable is the **offline-fitted list**, which is how §5z's per-layer budgets ship: one value
+  per layer in the profile, read at build time, handed to `begin` as a per-layer cap. That is the shape the live
+  arm needs, and it costs a `depth:` argument (or a profile array) plus the guard that a per-layer depth outside
+  `1...topKExperts` is refused the way line 89's scalar check already refuses it.
+
+### Verdict
+
+**The layer axis is genuinely untested, the effect is large (8.1x), stable within a session (r = 0.922, and a
+half-trace gate transfers to the other half at 0.540-0.672), and concentration is real (top 23 links = 67.9 % of
+slot 2's value). §5ak's closure was of uniform depth and does not automatically extend to it.** It stays a
+*question* rather than a lever, because the campaign's two price models put the same arm at +6.21 % and −2.15 %,
+the optimistic one fails an out-of-sample check at depth 4, and the pessimistic one's break-even (0.8403) is above
+anything any link achieves — a bar that would also condemn the shipped depth-1 arm, which earns +12.2 % live.
+No engine change is proposed, no default moved, nothing shipped.
+
+Deviations.
+
+1. **Every figure is from one 384-token capture, one session, one prompt shape.** The half-split test is
+   out-of-sample *within* a session; it is not a cross-session portability claim. §5z's +0.957/+0.960/+0.976
+   per-layer shape correlation across three captures is the evidence that the layer axis travels, and it is
+   quoted, not re-measured here.
+2. **`--top-m` differencing assumes the shipped filter-then-cap policy at each depth.** Depth k−1's issue set is a
+   prefix of depth k's because both use the same ranking and the same `resident`/`active` filters, and the
+   candidate side is checked rather than assumed: no link runs out of names at any depth used here (smallest
+   per-link increments 69 / 19 / 10 reads for slots 2 / 3 / 4). What is **not** checked is the runtime free-slot
+   pool — the rare busy slot §5ah names — which could make a depth-k read fail to stage where depth k−1's did;
+   §5ak's 0.35 % bound is carried here rather than re-derived.
+3. **The two price models are two readings of one three-point ladder, not two measurements.** Both are anchored
+   on +12.2 % / +6.0 % / −9.8 % quoted from the tree; §5ak deviation 4 still applies — the "hit" column's counter
+   was never established. The optimistic fit is used for its break-even and its falsifier, not as a forecast.
+4. **`split.py`'s gate-transfer nets (+2.49 to +2.99 %) are not comparable to the arm-B table's nets.** That script
+   prices its two anchors as depth-1 = +5.6 % (#193's batch) and depth-2 = −0.6 % (that batch's +12.2 % minus this
+   ladder's 6.2 points), which composes across batches against the campaign rule, and it prints its break-even as
+   `−K/B` (0.4441) while its own net formula multiplies benefit by 0.9277, so its stated bar is 0.4788 under its
+   convention. **Only the price-free parts of that script are carried above**: the two half-to-half correlations
+   and the realised precisions 0.540/0.568/0.620/0.672. Its nets are recorded as a direction and are not quoted
+   in the verdict or the tables.
+5. **The per-link `prec2` used for the gates is a whole-trace statistic, so the arm-B table is in-sample fitted.**
+   The half-split rows are the honest estimate of what a shipped list would achieve; the table is the menu of what
+   the axis could reach, and the two are deliberately separated.
+6. **Adoption is still not in any of this.** `useful` has no arrival time (§5ak's closing sentence), so slot 2's
+   extra reads are credited as if they always land in time. The live ladder's falling hit column with depth is
+   the counter-evidence, and it is the reason the recommendation is a live arm rather than a default change.
+7. **No clocks, and nothing in `sources/` or `benchmark/` moved.** The golden baseline is **not checked**
+   (docs-only, as in §5af-§5ak); no model process ran at any point, `pgrep` guard empty before and after.
+   Provenance: analysis run against `HEAD 760b62a` with this doc file as the only modification, the trace being
+   the #194 artefact pair under `/tmp/trace194/` (`off.jsonl`, mtime 2026-10-16 07:47, unchanged since capture),
+   AC power. Environment at the time the screen ran: battery 100 %, `memory_pressure -Q` 83 % free, swap
+   5 434 MiB used, load average 2.35, Swift 6.4 / macOS 27.0.1. Re-verified at 13:05 with the machine busier
+   (97 % charging, 72 % free, swap 3 968 MiB, load 4.50): **every number above reproduced identically**, because
+   the analysis is a deterministic read of a frozen file — which is the check that makes the load readings
+   irrelevant here rather than a protocol deviation. The determinism claim is itself tested, not assumed: the
+   shipped screen was re-invoked at 13:07 on `off.jsonl` at `--top-m` 1 and 2 and its JSON output is
+   **byte-identical** to the 09:55 artefacts every table above was built from (`md5` of the trace
+   `67d221e2546baca4b26d1e66aaa360ae`).
+8. **The per-token denominator is 384, inherited with all its error from §5ak deviation 1** — every `reads/tok`,
+   `MiB/tok` and `useful/tok` figure here is ~0.26 % high against a per-position reading, and the same convention
+   makes the two price models' `B`/`K` internally consistent with each other but 0.26 % off a strict per-token
+   truth. It cancels in every comparison inside this section, since all arms share the denominator.
+
