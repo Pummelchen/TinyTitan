@@ -3119,9 +3119,9 @@ Three independent counters then agree to ±1 read, in all six feeder arms:
 That is the mechanism, and it is in the code. A plan adopts a speculative read only if its buffer is ready when
 the router's indices come back: `if let source = prefetched[...]` memcpys it into the slot, and anything without
 a ready buffer falls through to `misses.append(index)`
-([PreadExpertStreamer+Plan.swift:95-106](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift#L95)),
+([PreadExpertStreamer+Plan.swift:95-106](../sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift#L95)),
 while every demand miss charges `experts.count × expertStride` to the byte counter
-([PreadExpertStreamer+Residency.swift:381](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L381)).
+([PreadExpertStreamer+Residency.swift:381](../sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L381)).
 A late speculative read is therefore **not used at all**: the same 2.641 MiB crosses the bus twice, once in the
 window the feeder stole and once on the path the token waits for. That is why the engine reads *more* under a
 co-tenant (197.3 → 213.8 → 241.5 MiB/token) — a fixed-bytes model like #188's cannot predict it, and it is the
@@ -3211,9 +3211,9 @@ engine's own ring discards ~21 reads per token, and §5ag prices that and keeps 
 
 §5af refused the *external* constant feeder and left the internal one unpriced. The shipped decode path already
 does what the operator described — it keeps the drive reading while the GPU computes — through a one-slot staging
-ring ([ExpertPrefetchRing.swift:154](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L154),
+ring ([ExpertPrefetchRing.swift:154](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L154),
 built with `slotCount: ringDepth` at
-[RealForwardRunner+BuildCore.swift:99](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L99)).
+[RealForwardRunner+BuildCore.swift:99](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L99)).
 `TINYTITAN_PREDICTIVE_PREFETCH=0` turns it off and has never been run at this configuration —
 `docs/qwen38-remaining-levers-plan.md:59` lists it as a check under hypothesis 1 and never ran it, and the
 September depth study that retired two- and three-ahead ran at `--ram-budget 8G` with no depth-0 arm.
@@ -3251,7 +3251,7 @@ found the shipped probe the best ordering available: P@1 0.552, P@2 0.450, P@3 0
 re-ranking, the previous token's route and the previous token's misses are neutral or worse — the temporal
 predictors stage *nothing*, because the cache has already absorbed that reuse. Its monotone decay by rank also
 settles what this section would otherwise have had to open: the list the ring truncates with `prefix(count)`
-([ExpertPrefetchRing.swift:88-98](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L88))
+([ExpertPrefetchRing.swift:88-98](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L88))
 is already in router-weight order, so the staged expert is the highest-weight non-resident prediction rather
 than an arbitrary one, and the caller's residency walk decides where it stops. The same study priced the
 *volume* question and lost every arm: 2 slots −3.3 %, 3 slots −10.7 %, mixed horizon −1.4 %, L+2 horizon −3.7 %,
@@ -3293,7 +3293,7 @@ position, and adoption depends on the headroom. That is #194.
    consistent with #192's control.
 4. **`engine MiB/tok` is demand-path bytes only.** `recordSuccessfulLoadsUnlocked` charges
    `experts.count × expertStride` on the demand load path and the adoption path only bumps the load count
-   ([PreadExpertStreamer+Residency.swift:379-399](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L379)),
+   ([PreadExpertStreamer+Residency.swift:379-399](../sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L379)),
    so speculative reads never appear in `expert_read_mib`. That is why the engine/device gap is the ring's
    traffic and not a discrepancy — the gap in the ring-on arm (112.0 MiB/token) is `39.45 × 2.641 = 104.2`
    plus the 7.8 MiB residual, which closes to 0.4 %.
@@ -3327,7 +3327,7 @@ responses are byte-identical (`md5 c172890df88cdbbfa0627bd320d16614`).
 `ExpertPrefetchRing.begin` is re-implemented offline exactly: at layer L the staged expert is the **first
 element of `next_layer_prediction` that is not in the target layer's `resident` list**, taken from the record at
 (`position`, L+1) — the same set the caller passes in
-([RealForwardRunner+DecodeMoE.swift:322-349](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L322)),
+([RealForwardRunner+DecodeMoE.swift:322-349](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L322)),
 `model.routedExpertResidentIDs(layer: L + 1)`. Each staged read is then classified against that layer's own
 record: *correct* if it is in `experts` (the exact route), *adopted* if it is in `experts` and **not** in
 `misses` (the trace's `misses` are post-adoption, so a read the plan took from the ring is not a miss), *late* if
@@ -3757,3 +3757,169 @@ Deviations.
    tests added, 2 pre-existing tests unmodified, both green. Provenance: tree clean at `HEAD 894ecfa`, AC 100 %,
    `memory_pressure -Q` 83 % free, swap 5.49 GiB used, load average 4.45, Swift 6.4 / macOS 27.0.1, `pgrep` guard
    empty before and after, and no model process at any point in this task.
+9. **Every `top_m` row in this section was scored under the withdrawn v4.3 issue policy, and §5ak corrects what
+   the axis means.** Before `bc4c648` the screen capped the ranking at `top_m` *then* dropped the resident names,
+   which is what v4.3 did and not what ships; the shipped ring is handed the whole list and caps the *reads*. So
+   the 0.7541-at-`top_m`=1 row is a marginal count of §5ah's rank table, not the engine's issue total, and the
+   "2 151 = 2 151" cross-validation in this section proves less than it appears to. §5ak adds the policy axis,
+   reproduces the shipped total exactly, and states which figures here survive the correction.
+
+## 5ak. #197 puts the issue policy inside the screen: the shipped filter-then-cap rule reproduces §5ah's live ring to the count, and the depth ladder that reproduction exposes is decided by the engine's own series rather than by the screen (2026-10-16)
+
+§5aj's deviation (9) is this section's premise, and it was checked rather than assumed. The engine hands the ring
+the **whole** ranked prediction and lets the ring's own size cap the reads
+([RealForwardRunner+DecodeMoE.swift:334-348](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L334)),
+and `ExpertPrefetchRing.begin` then computes `wanted = experts.filter { !resident.contains($0) && … }`,
+`count = min(wanted.count, free.count)` and stages `wanted.prefix(count)`
+([ExpertPrefetchRing.swift:88-98](../sources/TinyTitan/Runtime/Inference/ExpertPrefetchRing.swift#L88)).
+That is **filter first, cap second**. The screen had been doing the opposite — cap the ranking at `top_m`, then
+drop the resident names — which is exactly the v4.3 behaviour the same comment records as the reason v4.3 lost.
+One flag name was sweeping two different axes, and every `top_m` figure in §5aj belongs to the withdrawn one.
+
+### What landed
+
+| piece | where | what it does |
+| --- | --- | --- |
+| `Link.candidate_limit` | [benchmark/tinytitan_prefetch_trace_analysis.py:50](../benchmark/tinytitan_prefetch_trace_analysis.py#L50) | every ranker may expose `max(top_m, len(prediction))` names, so the two policies differ **only** in the order of cap and filter |
+| `stage_filter_first` | [:125](../benchmark/tinytitan_prefetch_trace_analysis.py#L125) | the shipped rule — drop resident names, then take the first `top_m` |
+| `stage_truncate_first` | [:135](../benchmark/tinytitan_prefetch_trace_analysis.py#L135) | the withdrawn v4.3 rule — take the first `top_m` names, then drop resident |
+| `analyze(…, policy="filter")` | [:151-157](../benchmark/tinytitan_prefetch_trace_analysis.py#L151) | unknown names raise; the default is the shipped arm, so a reader gets the engine's behaviour unless they ask for the other one |
+| `--policy`, `report["policy"]` | [:196](../benchmark/tinytitan_prefetch_trace_analysis.py#L196), [:218](../benchmark/tinytitan_prefetch_trace_analysis.py#L218) | the axis is named in the artefact, not implied by a flag's default |
+| the pinning test | [benchmark/test_tinytitan_prefetch_trace_analysis.py:82](../benchmark/test_tinytitan_prefetch_trace_analysis.py#L82) | one fixture, both policies: the pool's rank-1 name is resident and rank-2 is a real miss, so shipped stages 1 read and 1 useful while v4.3 stages 0 and 0 |
+
+Test-first, in full: the new test was written before the implementation and failed with
+`TypeError: analyze() got an unexpected keyword argument 'policy'` — the expected RED, since the axis did not
+exist. It is now green along with the five pre-existing tests (6/6, `python3 -m unittest`, serial). The five are
+unmodified; their fixtures leave every target's `resident` empty, so the two policies coincide on them and the
+shipped default moves none of their assertions. `ruff format` reflowed two lines of *my own new test* (not a
+pre-existing file) and the suite was re-run to green after it; `tools/lint.sh python` reports
+`ok (ruff 0.16.7, check and format clean, 201 scripts parse under 3.13)`. Commit `bc4c648`.
+
+### Both policies on the #194 ring-off trace, `recorded` ranking, 18 001 scored links
+
+| `top_m` | filter issues | filter useful | filter precision | truncate issues | truncate useful | truncate precision |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | **15 257** | **7 968** | **0.5223** | **2 151** | **1 622** | **0.7541** |
+| 2 | 26 594 | 12 660 | 0.4760 | 4 899 | 3 486 | 0.7116 |
+| 3 | 34 356 | 15 300 | 0.4453 | 8 212 | 5 485 | 0.6679 |
+| 4 | 39 274 | 16 768 | 0.4269 | 12 064 | 7 587 | 0.6289 |
+| 5 | 42 130 | 17 509 | 0.4156 | 16 437 | 9 617 | 0.5851 |
+| 6 | 43 737 | 17 863 | 0.4084 | 21 239 | 11 521 | 0.5424 |
+| 7 | 44 604 | 18 011 | 0.4038 | 26 548 | 13 411 | 0.5052 |
+| 8 | 45 063 | 18 079 | 0.4012 | 32 283 | 15 130 | 0.4687 |
+| 9 | 45 277 | 18 106 | 0.3999 | 38 550 | 16 693 | 0.4330 |
+| 10 | 45 339 | 18 113 | 0.3995 | 45 339 | 18 113 | 0.3995 |
+
+**The shipped arm is the one the engine already produced.** `filter` at `top_m` = 1 reads 15 257 times and finds
+7 968 correct names, and §5ah's offline replica of `ExpertPrefetchRing.begin` — built from the live run, validated
+against three engine counters — reports **15 257 issued** and **7 968 correct** on the same trace
+(§5ah line 3356), with overall precision 0.522 against this table's 0.5223. Identical to the read. `truncate` at
+`top_m` = 1 reads 2 151 times at 0.7541 — which is §5ah's **rank-1 marginal row** (2 151 issues, 0.754 precision,
+line 3393), a slice of a partition, not an issue total. That is what §5aj's "2 151 = 2 151" cross-validation
+actually matched — one marginal row of the rank table, while the engine's own total, which the shipped tool now
+reproduces exactly, went unscored by it for a whole section. The partition reconciles completely: the per-rank
+marginals sum to 13 489 over ranks 1-8 (the figure §5aj quotes) and to 15 257 over all ten, which is the shipped
+total. The two policies meet at `top_m` = 10 because the recorded pool is exactly ten names wide, so beyond that
+the cap cannot bind and only the filter order differs.
+
+### Under the shipped rule `top_m` is ring depth, not pool width
+
+The caller never truncates, so the pool is always the full prediction; the only thing `top_m` can be is
+`slotCount`, the number of reads in flight — the knob `ringDepth = max(1, profile.prefetchDepth)` sets in the
+build path. So the two rows at `top_m` = 1 are the two arms of the v4.3 withdrawal, and the gap between them is
+its size: **7.09× more reads** (15 257 against 2 151) and 4.91× more correct names. §5aj's precision curve
+0.7541 → 0.3995 is the withdrawn arm's *precision against pool width*; the shipped arm's *precision against ring
+depth* is 0.5223 → 0.3995, and the two are not interchangeable at any depth below ten.
+
+### The depth ladder, priced with this campaign's own money
+
+Counts from the `filter` column, divided by 384 tokens as §5ah does, `2.641 MiB` per read. `adopted-equiv`
+multiplies `useful` by the one measured conversion in the record — 19.25 adopted of 20.75 correct at depth 1 =
+**0.9277** — because the screen counts a correct-but-late read as adopted and §5ah measured that 1.50 reads/token
+never were. `ceiling` is `Σ min(depth, |misses|)`, the reads a *perfect* predictor could use at that depth.
+
+| depth | reads/tok | spec MiB/tok | useful/tok | adopted-equiv | demand MiB avoided | marginal precision of slot *n* | ceiling reads/tok | cum % at route-3 prices |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 39.73 | 104.9 | 20.75 | 19.25 | 50.8 | 0.5223 (pooled) | 33.67 | **+5.81** |
+| 2 | 69.26 | 182.9 | 32.97 | 30.58 | 80.8 | 0.4139 | 55.53 | +8.55 |
+| 3 | 89.47 | 236.3 | 39.84 | 36.96 | 97.6 | 0.3402 | 68.78 | +9.70 |
+| 4 | 102.28 | 270.1 | 43.67 | 40.51 | 107.0 | 0.2985 | 76.26 | +10.16 |
+| 5 | 109.71 | 289.8 | 45.60 | 42.30 | 111.7 | 0.2594 | 80.12 | **+10.29** |
+| 6 | 113.90 | 300.8 | 46.52 | 43.16 | 114.0 | 0.2203 | 82.03 | +10.27 |
+| 7 | 116.16 | 306.8 | 46.90 | 43.51 | 114.9 | 0.1707 | 82.90 | +10.21 |
+| 8 | 117.35 | 309.9 | 47.08 | 43.68 | 115.4 | 0.1482 | 83.26 | +10.17 |
+| 9 | 117.91 | 311.4 | 47.15 | 43.75 | 115.5 | 0.1262 | 83.42 | +10.14 |
+| 10 | 118.07 | 311.8 | 47.17 | 43.77 | 115.6 | 0.1129 | 83.45 | +10.13 |
+
+The screen's depth-1 row validates; its extrapolation to depth > 1 is **falsified by the engine**, and the reason
+is structural rather than a calibration question. Price a saved demand MiB `d` and a spent speculative MiB `c`
+from the two arms that measure them:
+
+- **#193's ring-off↔on arm** gives `49.8d − 104.2c = 5.6`. Read at `c = 0` it gives `d = 0.1124 %/MiB`, and then
+  the ladder is monotone: depth 10 is the best arm at **+13.0 %**. Take #192's `c = 0.0530` as a flat cost instead
+  and the same equation gives `d = 0.2233`. §5ah's route-3 pair splits the difference by modelling the feeder as
+  partly *substituting* demand reads (`322.9c + 17.1(d − c) = 17.1`), which solves to `c = 0.042, d = 0.201` —
+  and that is the pair in the last column: **cumulative maximum +10.29 % at depth 5**, depth 2 worth +2.74 % more
+  than depth 1.
+- Both readings are wrong about depth, and wrong in the same direction: **no price pair this campaign can produce
+  puts the peak at depth 1.** The route-3 pair peaks at **+10.29 % (depth 5)**, #192's flat cost gives a lower
+  curve that still peaks at **+9.6 % (depth 4)**, and the `c = 0` corner is monotone to **+13.0 % (depth 10)**. The
+  live ladder in the build path measured **M=1 +12.2 % (hit 78.7 %), M=2 +6.0 % (77.9 %), M=4 −9.8 % (77.1 %)**
+  against the same prefetch-off control in the same batch: depth 2 is 6.2 points *worse* than depth 1 and depth 4
+  is 22 points worse, while all three priced ladders say both are better — depth 2 by 2.6-3.4 points and depth 4
+  by 3.8-6.3.
+
+What the screen cannot see is what the build-path comment names: the drive is saturated while it reads, so a
+second speculative read steals service from the demand burst it was meant to anticipate and lands too late to be
+adopted — which is why the live *hit* column falls with depth while this table's byte totals rise. The `useful`
+counter has no arrival time in it, so depth beyond one is outside what the screen measures. **The predictor lever
+is screened by this tool; the depth lever is closed by the engine's own paired series, and this section adds
+nothing to it.**
+
+### The one figure that does carry, and one §5aj magnitude that moves
+
+At depth 1 the shipped ring reads 15 257 times where 12 930 links have any demand miss at all: **2 327 reads
+(6.06/token, 16.0 MiB/token) are traffic a perfect depth-1 predictor would never generate**, and of the 12 930
+links that needed something the single pick is right on 7 968 — **61.6 % of what depth 1 can reach, 24.9 % of all
+demand**. That is the prize §5aj named, now on the shipped denominator.
+
+§5aj's other headline needed the same correction and one number in it was off by an order of magnitude. Under the
+shipped policy the two engine-buildable strictly-past rankings do not offer "16 and 36 worth-staging picks":
+`recent` issues **607** reads (92 useful, precision 0.1516) and `transition` **805** (514 useful, precision
+0.6385) at depth 1, and both saturate at 740 and 1 705 reads by depth 10. The qualitative conclusion is untouched
+— 805 against the 12 930 links that need a read is 6.2 %, and the probe's own list is the only ranking with
+volume — but the quoted magnitudes belonged to the withdrawn arm. §5aj's deviation (9) points here.
+
+Deviations.
+
+1. **Per-token figures divide by 384, per-link figures by 18 001.** Same convention as §5ah (its 39.73 reads/token
+   is 15 257 ÷ 384 while the trace holds 383 positions), and it makes every per-token number here ~0.26 % high
+   against a per-position reading.
+2. **The 0.9277 adopted conversion is measured at depth 1 only.** Applying it to depths 2-10 is *generous* to them:
+   lateness must grow with depth for the reason this section is about, so the true cum curve is flatter and lower
+   than the last column, and its peak is earlier. The live ladder already says where the peak is; nothing here
+   moves it.
+3. **Three ring behaviours stay unmodelled**, all named in §5ah: `active` deduplication, the rare busy slot, and
+   arrival time. The first two make the depth-1 issue count a 0.35 % upper bound; the third is the whole
+   depth argument.
+4. **The live M=1/M=2/M=4 series is quoted from the tree, not re-measured here**, and it comes from its own batch:
+   per the campaign rule its +12.2 % is not compared with #193's +5.6 %, only with its own M=2 and M=4 arms. The
+   "hit" column is quoted as the comment labels it; which counter it names was not established.
+5. **`raw_topk_agreement` is a prefix property of the ranking, not of the issued set**, so at equal `top_m` it is
+   identical under both policies and none of §5aj's selection-named figures needed re-running.
+6. **Only `recorded` is the engine's ranking.** The `filter` rows for `transition` and `recent` are screen-only
+   arms of synthetic rankers; the shipped ring never sees them.
+7. **No clocks, and nothing in `sources/` moved**: `bc4c648` touches two files under `benchmark/`, so no engine
+   behaviour changes and the golden baseline is **not checked** (docs-and-python, as in §5af-§5aj). Provenance:
+   code at `HEAD bc4c648` with only this doc file modified when the environment was read, AC 100 %,
+   `memory_pressure -Q` 83 % free, swap 5 458 MiB used, load average 2.57, Swift 6.4 / macOS 27.0.1, `pgrep` guard
+   empty before and after, no model process at any point, and the trace is the #194 artefact pair under
+   `/tmp/trace194/` (both arms' responses byte-identical, `md5` recorded in §5ah).
+8. **The link form in this repository's prose is repo-relative, and `file:///` absolute links break CI.** The
+   markdown-link check (`.github/workflows/ci.yml:984-1018`) resolves a link relative to the document's own
+   directory and skips only `http(s)://`, `#` and `mailto:` — so a `file:///Users/…` target is read as a path
+   under `docs/` and reported broken. This section's 9 references and **7 more that already sat on `main`**
+   (2 in §5af, 4 in §5ag, 1 in §5ah) were in that form and are now `../sources/…` or `../benchmark/…`; the
+   checker reports "Checked 66 local link(s); 0 broken". The pre-existing rows are the AUD-180 class — a doc
+   reference no local gate caught — found again, and `tools/lint.sh docs` does not cover link targets.
+
