@@ -2718,3 +2718,17 @@ the single-pass one. §5aa's numbers for this arm were not wrong — they descri
 1, which the live run confirms is neutral. The campaign's other offline-screened policy
 arms share the blind spot and should be re-read with that limit stated, which is what
 this section exists to state.
+
+**The rule is now code, not prose.** `two_pass_placements` in `benchmark/heat_split_sim.py`
+replays the same rows twice over one shared cache set and returns both counts; its three
+tests live in the already-CI-registered `benchmark/test_heat_split_sim.py` as
+`TwoPassReplayTests`. The first pins pass 1 against `placements_per_token` over the same
+events, so the two numbers cannot drift into different quantities and every §5y/5z/5ad
+single-pass table stays comparable to a two-pass one; the second hand-traces the
+remembering itself (a 3-expert working set over 3 slots costs 1.0 placements/token cold
+and 0.0 warm); the third asserts the flip on the committed captures — `use_cap=3` beats
+the shipped rank on pass 1 and loses on pass 2, on all three. One constraint inherited
+from `_PlanSlots` and worth knowing before writing an arm: a row may not name more experts
+than its layer has slots, which the engine cannot produce anyway (top-k 10 against 96) but
+a hand-built fixture easily can — the failure is an `IndexError` inside the plan, not a
+refusal.

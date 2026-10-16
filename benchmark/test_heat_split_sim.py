@@ -28,6 +28,7 @@ from heat_split_sim import (
     route_agreement,
     route_rows,
     split_slots,
+    two_pass_placements,
 )
 
 
@@ -176,6 +177,56 @@ class CrossCaptureTests(unittest.TestCase):
                     0.5,
                     f"{source} -> {target} keeps only {kept:.1%} of the oracle's gain",
                 )
+
+
+class TwoPassReplayTests(unittest.TestCase):
+    """§5ad's screen rule, as code: a policy that changes what the cache *remembers* must
+    be replayed twice over one cache set, because one pass is request 1.
+
+    The reason this exists is a specific mistake. The capped use-count (#177) looked like
+    a −2.0…−7.9 % win offline on a single pass and measured −4.7…−6.0 % on a live paired
+    A/B -- it was a loss the whole time. A saturating count only pays when it meets an
+    expert whose unsaturated rival would have defended a slot; that is a *stale* holder,
+    and a stale holder can only exist in a cache that already ran. So the gain lives
+    entirely in the difference between a cold cache and a warm one, which is exactly the
+    difference a single pass cannot see. The second pass is what the operator's session
+    actually runs in.
+    """
+
+    def test_the_first_pass_is_the_single_pass_replay_over_the_same_events(self):
+        # Pins the warm-up semantics: a prefill row is planned but not counted, and pass 1
+        # starts on the same cold cache `placements_per_token` starts on. If this drifted,
+        # every pass-1 number quoted from a two-pass run would be a different quantity
+        # from the single-pass ones §5y/5z/5ad tabulated. Hand-traced to 1.5: the prefill
+        # row fills both slots, then {2,3} takes one miss and {1,4} both.
+        trace = events(["0 0 1 2", "1 0 2 3", "2 0 1 4"])
+        first, _ = two_pass_placements(trace, budgets=[2], start_position=1)
+        self.assertAlmostEqual(first, placements_per_token(trace, [2], start_position=1))
+        self.assertAlmostEqual(first, 1.5)
+
+    def test_the_second_pass_asks_for_fewer_placements_because_the_cache_remembers(self):
+        # A 3-expert working set over a 3-slot layer, requested in a rotating order. Pass 1
+        # pays for each expert exactly once -- {1,2} misses both, {2,3} misses 3 into the
+        # still-free slot 2 (an unfilled slot ranks weakest, which is where "fill the free
+        # slots first" comes from), {3,1} is a clean hit -- so 3 placements over 3 tokens.
+        # Pass 2 replays the same rows over the cache pass 1 left, and asks for nothing.
+        # Same rows, same budget, same rule; the only difference is that it already ran.
+        trace = events(["1 0 1 2", "2 0 2 3", "3 0 3 1"])
+        first, second = two_pass_placements(trace, budgets=[3])
+        self.assertAlmostEqual(first, 1.0)
+        self.assertAlmostEqual(second, 0.0)
+
+    def test_a_capped_use_count_wins_the_first_pass_and_loses_the_second(self):
+        # The §5ad result, asserted on the committed captures rather than a fixture built
+        # to demonstrate it. On all three captures the cap ranks better on pass 1 and
+        # worse on pass 2, which is the signature of a policy whose only advantage is
+        # paying less for a stale holder -- and the reason #177 was refused.
+        for name, (path, start) in CAPTURES.items():
+            trace = load_trace(path)
+            uncapped = two_pass_placements(trace, [96] * 48, start_position=start)
+            capped = two_pass_placements(trace, [96] * 48, start_position=start, use_cap=3)
+            self.assertLess(capped[0], uncapped[0], f"{name}: no first-pass cap win")
+            self.assertGreater(capped[1], uncapped[1], f"{name}: cap holds up on pass 2")
 
 
 class EvidenceTests(unittest.TestCase):

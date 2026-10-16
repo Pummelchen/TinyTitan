@@ -116,6 +116,39 @@ def placements_per_token(events, budgets, start_position=0, use_cap=None):
     return misses / max(1, len(tokens))
 
 
+def two_pass_placements(events, budgets, start_position=0, use_cap=None):
+    """Placements per decode token, for each of two identical passes over one cache set.
+
+    §5ad's admissible screen for a policy that changes what the cache *remembers*. A single
+    pass replays a cold cache, so it measures request 1; a saturating use count only pays
+    against a holder it would otherwise have over-defended, and an over-defended holder is
+    by definition a stale one, which cannot exist before the cache has run. Greedy decoding
+    makes the second request route the same tokens (§5ad's hash equality), so replaying the
+    same rows twice is the warm session, not a guess at one.
+
+    Pass 1 starts exactly where `placements_per_token` starts -- cold caches, prefill rows
+    planned but not counted -- so the two numbers are comparable by construction. A row may
+    not name more experts than its layer has slots, which is the same limit the shipped plan
+    runs under (top-k 10 against 96 slots) and both functions inherit from `_PlanSlots`.
+    """
+    deepest = max((layer for _, layer, _ in events), default=-1)
+    if deepest >= len(budgets):
+        raise ValueError(
+            f"trace reaches layer {deepest} but only {len(budgets)} per-layer budgets were given"
+        )
+    cache = [_PlanSlots(budgets[layer], use_cap=use_cap) for layer in range(len(budgets))]
+    tokens = max(1, len({position for position, _, _ in events if position >= start_position}))
+    passes = []
+    for _ in range(2):
+        misses = 0
+        for position, layer, experts in events:
+            step = cache[layer].plan(experts)
+            if position >= start_position:
+                misses += len(step)
+        passes.append(misses / tokens)
+    return passes[0], passes[1]
+
+
 def demand_per_token(events, start_position=0):
     """Expert requests each decode token makes -- the denominator of a hit rate.
 
