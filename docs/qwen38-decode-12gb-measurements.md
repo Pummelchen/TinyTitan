@@ -3454,3 +3454,137 @@ outside and lose 17-53 %, aim the ring better and find that 93 % of what is left
    reported as contaminated. The tree was clean at `HEAD cd229f6`, the binary is the 04:29 release build, AC
    power at 100 %, `memory_pressure -Q` 86 % free, swap 6.65 GiB used at launch and 6.63 GiB after, no other
    model process before or after either arm.
+
+## 5ai. #195 separates MTP's byte term from its time term at the shipped tier: a width-2 verify pass moves 0.79x the device traffic the shipped path moves per token, so the recorded loss is a time story — and the number a rewrite would have to beat is 1.582x (2026-10-16)
+
+§5ah ends by naming prediction quality as the only lever left, and the one trained next-token predictor in this
+tree is the MTP draft head. §8 carries MTP as closed on three records — 2026-09-18 (a pair pass at **2.238x** a
+scalar token, 86.9 % acceptance), 2026-09-21 at `--ram 8` / 64 slots on a machine Chrome was using (−32.3 % and
+−46.9 % paired, and the project's own B3 gate at **−43.2 %** with 85.7 % acceptance and byte-identical output),
+and the archived 8-bit case (1.926 emitted per pass, −2 %). Two things about those records are checkable without
+a model run: whether the *byte* half of the price was ever separated from the *time* half, and whether either
+half moved when the tier went 64 → 96 slots and B1 lifted the hit rate 0.7577 → 0.8459.
+
+**The trace answers the byte half.** A width-W verify plan loads the union of its W rows' selections as one
+cache plan (`RealForwardRunner+MTPVerify.swift:64-68`), so its expert traffic is `|union(experts) \ resident|`.
+Consecutive trace positions are consecutive decode tokens and `experts` is the target router's exact selection,
+so that union is readable from #194's ring-off trace without running MTP. The replica is validated the way §5ah
+validated its own: `misses == experts \ resident` holds on **18 384 of 18 384 records**, and the demand it
+reconstructs is 88.013 reads/token against the footer's 87.78.
+
+**Route locality is the reason the union is cheap, and it is measured here for the first time.** Of the second
+row's 10 selections at a layer, over **18 336** sliding consecutive-pair layer-slots (both rows present, residency
+read at the first row as a verify plan would read it; the three columns partition the 10 by construction and sum
+to 10.000):
+
+| where the next token's expert is | per layer | note |
+| --- | ---: | --- |
+| also selected by the previous token | **3.820** | independence over 512 experts would give 0.195 |
+| not in it, but already resident | **4.439** | |
+| needs a fresh read | **1.741** | the disjoint-pair tiling the width table uses puts the same marginal at 1.750 |
+| control: 10 tokens apart (17 904 slots) | 1.878 / 5.652 / 2.471 | locality decays but does not vanish |
+
+That closes a question the September study left as an assertion. It found the previous token's route scores
+P@1 0.000 as a prefetch ranking and wrote "the previous token's experts are always already resident, which is
+why a temporal predictor stages nothing at all". Now both halves have a number: the reuse is real (38 % of a
+token's selections), and the cache is what absorbs it, so there is nothing left for a temporal predictor to
+stage. The same locality is why MTP's second row costs 1.74 reads rather than 10.
+
+**Width table** — `E` is the emitted tokens per pass at the recorded acceptance 0.869 (`E = Σ pᵏ`, capped at
+1/(1−p) = 7.63), and the two ratio columns are the shipped path's own counters from §5ag: 309.1 MiB/token of
+device traffic, of which 197.1 MiB is demand-path:
+
+| W | passes | reads/layer/pass | MiB/pass | E | MiB per emitted token | vs 309.1 (device) | vs 197.1 (demand) |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 383 | 1.834 | 232.4 | 1.000 | 232.41 | 0.752 | 1.179 |
+| 2 | 191 | 3.584 | 454.3 | 1.869 | 243.07 | **0.786** | 1.233 |
+| 3 | 127 | 5.254 | 666.0 | 2.624 | 253.79 | 0.821 | 1.288 |
+| 4 | 95 | 6.879 | 872.0 | 3.280 | 265.81 | 0.860 | 1.349 |
+| 5 | 76 | 8.447 | 1070.7 | 3.851 | 278.06 | 0.900 | 1.411 |
+| 6 | 63 | 10.044 | 1273.0 | 4.346 | 292.91 | 0.948 | 1.486 |
+| 7 | 54 | 11.621 | 1472.9 | 4.777 | 308.35 | 0.998 | 1.564 |
+| 8 | 47 | 13.069 | 1656.5 | 5.151 | 321.58 | 1.040 | 1.632 |
+| 13 | 29 | 20.358 | 2580.4 | 6.403 | 402.98 | 1.304 | 2.045 |
+| 42 | 9 | 52.414 | 6643.5 | 7.613 | 872.70 | 2.823 | 4.428 |
+
+**What that says about the closure.** The union does keep growing per emitted token — 232.4 → 872.7 MiB from
+W=1 to W=42 — so `RealForwardRunner+MTPVerify.swift:31-34`'s stated reason is directionally right, and this
+table is the first quantification of it on qwen38 (their 5.18x at W=13 and 11.25x at W=42 are Qwen3.6-35B-A3B,
+256 experts, top-K 8, a different cache). But against the baseline a shipped token actually pays, the growth is
+not what fails MTP: **a pair pass costs 0.786x the shipped path's device traffic per emitted token**, and the
+byte race stays favourable to W=7 (308.35 against 309.1 MiB) before W=8 turns it. The reason is that the two
+mechanisms are substitutes for the same locality: the ring spends 54.4 MiB/token on reads it throws away
+(§5ag), and the draft's second row needs only 1.74 fresh reads because the cache already holds 8.26 of its
+10 selections.
+
+So the −17 % of 2026-09-18 and the −43 % of 2026-09-21 cannot be a byte story, and the record already knew
+that — "the union is not where it goes", with `verify_routed_pair` at 1.45x the scalar routed GPU time. The cost
+lives in the two **time** terms the same header names: two rows through the 32-token prefill kernels at
+1.6-1.7x where the decode path is 1.0x, and ~200 ms/pass of host and commit (0.93x a token), where the
+sequential fetch awaits nothing at width 2. Neither term depends on the cache tier, which is why 64 → 96 slots
+and +8.9 points of hit rate could not have flipped them. **MTP stays closed.**
+
+**The number to beat, if anyone revisits it.** Starting from 5.079 tok/s (§5ag, shipped), break-even needs a
+pass costing ≤ E = 1.869x a token and 6.0 tok/s needs **≤ 1.582x** (1.869 ÷ 6.0/5.079). The best width-2 pass
+ever measured anywhere in this tree is 1.585x — on Qwen3.6, and as a union model, not a qwen38 decode-native
+kernel. So the design target is a 29 % cut in the pass's time from 2.238x, and since the byte term is already
+favourable, the whole cut has to come out of the prefill-path inefficiency and the per-pass host work. That is
+a much better-specified question than the "large rewrite against a gate that fails by 43 points" the 2026-09-21
+verdict recorded, and it is the one thing this section leaves open.
+
+**Not run: the live arm, refused by its own guard.** The arm that would price the two time terms at the shipped
+tier — `benchmark/tinytitan_mtp_phases.py --target models/qwen3.8-flash-next_125B_A6B_4Bit --sidecar
+models/qwen3.8-flash-next_125B_A6B_MTP_4Bit --ram-budget 12G --verify-arm pair --presence-penalty 0 --pairs 1
+--warmups 1` — reached `gate0.preflight(15)` and stopped: "GPU is already 51 % busy before TinyTitan launches".
+`idle_gpu_utilization()` (`ioreg -c AGXAccelerator`, "Device Utilization %") read 51 % then 45 % on a second
+sample, no model process was live, and **`--allow-busy-gpu` was not passed**, so nothing was measured and no
+number in this section comes from a contended GPU. The sidecar is present and its manifest guard passed:
+`models/qwen3.8-flash-next_125B_A6B_MTP_4Bit/{manifest.json, model_weights.bin 51 681 440 B, packed_experts/}`,
+which the driver mounts at `--mtp-memory-mib 384`. It is still the right next run — it also settles the one
+correctness finding the tree has never explained, the prose-scenario divergence at character 553 that §8's own
+verdict says must be explained "before quoting any speed number".
+
+Deviations.
+
+1. **The byte denominators are three, and the table shows two of the comparisons.** 232.41 MiB/token is this
+   trace's own demand (ring off, 96 slots), and is the denominator the union is measured against in the same
+   records; 309.1 is §5ag's device traffic including 104.2 MiB of speculation and a 7.8 MiB load/non-expert
+   residual; 197.1 is the shipped demand path. So the only strictly internal figure is 243.07 ÷ 232.41 =
+   **1.046x** — a pair costs 4.6 % more demand bytes than a scalar token — while the 0.786x headline is the
+   comparison against the shipped alternative the reader is choosing between, and it inherits §5ag's deviation
+   that the device counter includes model load, which makes it *harder* for MTP, not easier.
+2. **The first pass at this scored the wrong ratio.** Dividing the union by W (rows) instead of E (emitted
+   tokens) produced 0.977x at W=2 and, at W=42, 0.681x — a flattering full-acceptance bound that would have
+   read as "widening is byte-free". The correction is why the table divides by E and reports W=42 at 2.823x.
+3. **The tables were re-derived from one loop each before this commit, and four cells changed.** The first
+   draft mixed outputs: the locality table's resident-only and fresh columns (4.352, 1.828) came from a
+   disjoint-pair loop while its shared column and slot count came from the sliding one, and the W=13 / W=42
+   `MiB/pass` cells (2493.6, 6399.9) do not reproduce from the width loop, which gives 2580.4 and 6643.5. The
+   republished numbers come from `/tmp/score195c.py` (widths, disjoint tiling, row-0 residency) and
+   `/tmp/locality195.py` (locality, sliding, same snapshot). Nothing the argument rests on moved: the
+   MiB-per-emitted-token column and both ratio columns are what the single method already gave, and the
+   sliding and disjoint marginals agree to 0.009 reads (1.741 against 1.750). **W=13 is 29 disjoint passes and
+   W=42 is 9**, so those two rows are sample-thin; W ≤ 8 has 47 passes or more.
+4. **E assumes independent acceptance.** Real qwen38 acceptance is measured per pass (85.7-92.6 %) and streaks
+   are autocorrelated; the pass also pays all W rows' bytes up front, so a draft rejected at rank 2 of 6 has
+   already staged rows 3-6. That waste is invisible to this accounting, and it grows with W — one more reason
+   the short drafts are the only byte-favourable ones.
+5. **Residency comes from a ring-off demand trace.** A live MTP session loads two tokens' experts per pass, so
+   its cache holds more of the next union and its misses are fewer: the reads in this table are an **upper
+   bound** on the byte bill.
+6. **The draft's own traffic is not here.** The 384 MiB sidecar has its own `packed_experts` and runs a proposal
+   pass per verification pass; its bytes, and every non-byte term (KV, PLE, head, commit, rollback), are outside
+   this accounting. `tinytitan_mtp_phases.py` reads them as `proposal=` milliseconds, not as bytes.
+7. **One session, one prose prompt, positions 10-392.** Same trace as #194, so the same ≤0.26 % denominator
+   skew and the same prompt-shape limit; the code-shaped decode in the September study is not represented.
+8. **`io_ms` is not converted to a rate anywhere in this section.** §5ag's marginal 17 ms for 54.4 MiB is 3.20
+   GB/s and matches the saturated device, but its absolute io_ms/bytes ratio does not, so claims here are byte
+   claims only.
+9. **My own launch masked the driver's exit status** by piping it through `tee`, so the background task reported
+   exit 0 while the driver raised `SystemExit`. The refusal text in the log is the evidence; the status was
+   lost. That is the AUD-230 shape, in my command line rather than in the driver.
+10. **Nothing in `sources/` changed.** `/tmp/score195.py`, `/tmp/score195b.py`, `/tmp/score195c.py` and
+    `/tmp/locality195.py` are throwaways, so no test was added and the golden baseline is **not checked**
+    (docs-only, as in §5af-§5ah). Provenance: tree clean at `HEAD 0ef95b7`, 04:29 release binary with no
+    `sources/` commit since (`git log -1 -- sources/` = 04:28:32), AC 100 %, `memory_pressure -Q` 85 % free,
+    swap 6.41 GiB, load average 3.42, no model process before or after.
