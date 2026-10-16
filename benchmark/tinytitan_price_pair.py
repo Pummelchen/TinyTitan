@@ -21,7 +21,8 @@ agreeing with itself. Its answers use the statuses this tree's other drivers do:
 
     0  the design identifies, `y` is inside the band, and the gate is drawn
     1  it identified a price, and that price or a held-out row refutes the model
-    2  it could not solve, or its own widths cannot draw the gate, reason named
+    2  it could not solve, or the page cannot license a gate draw — its own widths
+       straddle the threshold, or it never sampled its drift — reason named
 
 The angle bounds a design's *conditioning*; the digits and the drift together bound
 its *precision*; neither bounds whether the row moved at all. §5au fed this screen a
@@ -32,7 +33,11 @@ its step is not signal, and the designs that survive are all printed: when they 
 on opposite sides of a band edge the page is refused, because which one the widest
 angle happens to pick is not evidence for it. #209 added the other half of the same
 control: it is also how far the machine shifts each input the solve reads, so it
-enters the bound instead of only the row list.
+enters the bound instead of only the row list. #215 added the third half, which is
+the case where the control is absent: such a page has an *unmeasured* drift, not a
+zero one, and the screen used to charge it 0.0 and let it draw the six-link gate off
+its decimals alone. It still prices and still classifies the band — #208's ruling
+that a missing control is not a refusal to solve — but a pass it may no longer hand out.
 
 Nothing here is measured on hardware — it is arithmetic over a page somebody else
 printed — so it runs in CI with no model, no server, no socket, nothing fetched.
@@ -163,6 +168,11 @@ class Price:
     y_drift: float
     x_bound: float
     y_bound: float
+    # Whether the page this was solved from actually read the machine move. False is
+    # not a drift of zero: `*_drift` is 0.0 in both cases, and only this flag tells
+    # them apart. #215 found a page with no re-measured baseline drawing the
+    # six-link gate off a digits-only bound, so silence was being paid out as a pass.
+    drift_sampled: bool
     # Difference-mode sensitivity: ms of price per ms of width on ONE row, with the
     # two rows' widths independent so their errors add. `dy_per_ms` above is the
     # single-row maximum, which understates what a moving machine does to a solve;
@@ -454,6 +464,7 @@ def _solve(
         y_drift=_round_up(y_drift),
         x_bound=_round_up(x_digits + x_drift),
         y_bound=_round_up(y_digits + y_drift),
+        drift_sampled=drift is not None,
         x_diff_per_ms=(abs(r1.dv) + abs(r2.dv)) / abs(det),
         y_diff_per_ms=(abs(r1.du) + abs(r2.du)) / abs(det),
     )
@@ -720,16 +731,26 @@ def _cannot_decide(
     med_y: float,
     edge: float,
     band: str,
+    sampled: bool,
 ) -> str:
     """The one call the band edge forces, said whichever side of the edge `y` is on.
 
     Naming which half of the bound dominates says what would settle it: a page
     printed too coarsely is fixed by more decimals, and a page whose own control
     moved a quarter of a token is not, so the same width in two different
-    provenances calls for two different pieces of advice.
+    provenances calls for two different pieces of advice. A third provenance is
+    neither: a page that never sampled its drift has an unmeasured half, and an
+    unmeasured drift is not a zero one, so promising decimals would be prescribing
+    the cure for the part that was read.
     """
     side = "inside" if BAND_LO <= med_y <= BAND_HI else "outside"
-    if drift > 0.0:
+    if not sampled:
+        parts = f"the printing alone, ±{digits:.3f} ms"
+        remedy = (
+            "more printed decimals would narrow only that half, because this page carries no "
+            "re-measured baseline and its drift is unmeasured rather than zero"
+        )
+    elif drift > 0.0:
         parts = f"its digits ±{digits:.3f} ms and its own drift ±{drift:.3f}"
         remedy = (
             "more printed decimals is what would settle both"
@@ -799,14 +820,34 @@ def _verdict(
         )
         if bound >= gap:
             lines.append(
-                _cannot_decide(bound, worst.y_digits, worst.y_drift, gap, med_y, edge, band)
+                _cannot_decide(
+                    bound,
+                    worst.y_digits,
+                    worst.y_drift,
+                    gap,
+                    med_y,
+                    edge,
+                    band,
+                    worst.drift_sampled,
+                )
             )
         refuted = [_off_sample(o, token_ms) for o in off]
         lines.extend(t for t, _ in refuted)
         return lines, 1
     lines.append(f"ADMISSIBLE: y={med_y:.3f} is inside {band}, so the two rows price both reads")
     if bound >= gap:
-        lines.append(_cannot_decide(bound, worst.y_digits, worst.y_drift, gap, med_y, edge, band))
+        lines.append(
+            _cannot_decide(
+                bound,
+                worst.y_digits,
+                worst.y_drift,
+                gap,
+                med_y,
+                edge,
+                band,
+                worst.drift_sampled,
+            )
+        )
     scored = [_off_sample(o, token_ms) for o in off]
     lines.extend(t for t, _ in scored)
     if any(r for _, r in scored):
@@ -816,18 +857,28 @@ def _verdict(
         )
         return lines, 1
     lo, hi = _pi_interval(med_x, xbound, med_y, bound)
-    gate_scored = hi is not None and not lo <= need <= hi
-    if gate_scored:
-        pstar = med_x / med_y
-        gain = med_x * saved - med_y * lost
-        lines.append(
-            f"p*={pstar:.3f} against the six-link gate's L/S = {lost:.2f}/{saved:.2f} = "
-            f"{need:.3f} -> {'pays' if pstar > need else 'does not pay'} "
-            f"({gain:+.2f} ms of a {token_ms:.1f} ms token, {gain / token_ms * 100:+.2f} %)"
-        )
-    else:
+    separable = hi is not None and not lo <= need <= hi
+    licensed = all(p.drift_sampled for p in pairs)
+    if not separable:
         lines.append(_cannot_decide_gate(lo, hi, need, med_x, xbound, med_y, bound))
-    return lines, 0 if gate_scored else 2
+    if not licensed:
+        lines.append(
+            "the six-link gate is not scored: a round in this pool carried no re-measured "
+            "baseline, so the bound its price carries is the printing alone, and the median of "
+            "several solves is no better known than its least-read member -- a threshold on p* "
+            "drawn from prices whose machine movement was never read is a statement about the "
+            "arithmetic, not about this Mac"
+        )
+    if not separable or not licensed:
+        return lines, 2
+    pstar = med_x / med_y
+    gain = med_x * saved - med_y * lost
+    lines.append(
+        f"p*={pstar:.3f} against the six-link gate's L/S = {lost:.2f}/{saved:.2f} = "
+        f"{need:.3f} -> {'pays' if pstar > need else 'does not pay'} "
+        f"({gain:+.2f} ms of a {token_ms:.1f} ms token, {gain / token_ms * 100:+.2f} %)"
+    )
+    return lines, 0
 
 
 def main(argv: list[str] | None = None, stdin: str | None = None) -> int:

@@ -9,7 +9,7 @@ both left the arithmetic itself in a throwaway. This screen closes that seam: it
 reads the page `tinytitan_knob_sweep.py` prints and answers `x`, `y`, the
 condition number and the band verdict with an exit status.
 
-Eight things it must not be able to get wrong, each pinned below:
+Nine things it must not be able to get wrong, each pinned below:
 
 1. **The sign.** Rows live in the (`dissued`, `-dadopted`) plane, so the second
    coordinate is positive where a step makes adopted reads *fall*. §5at found the
@@ -47,14 +47,27 @@ Eight things it must not be able to get wrong, each pinned below:
    answer. A `p*` whose own width spans the gate's `L/S` cannot call either side,
    and a held-out row's residual is the only test of the model that is not Cramer
    agreeing with itself — so both are scored, with statuses.
+9. **That an unmeasured drift is not a zero one (#215).** A page with no
+   re-measured baseline put 0.0 into every drift width, which is the number a page
+   whose control moved *nothing* prints, and it then priced `y=1.002`, called it
+   admissible, drew §5ar's six-link gate and exited 0 on digits alone — a pass paid
+   out for the channel it never read, on a Mac whose measured drift (§5az: the gate
+   wants a baseline repeating to 0.75 ms) is an order of magnitude above its
+   decimals. Such a page still prices and still classifies, because #208 ruled a
+   missing control is not a refusal to solve, but it draws no gate, and its caveat
+   names the row it lacks instead of promising decimals it cannot spend on a half
+   it has not seen. The refusal is added after #209's rather than returned in front
+   of it: a page can carry both defects, and the interval sentence is a finding
+   about that page which the license rule has no business eating.
 
 The statuses are the ones this tree's drivers already use, widened by #209 at the
 second one because a page can now solve a price and still not be allowed to spend
-it:
+it, and again by #215 because a page that never read its drift may not spend it either:
 
     0  the design identifies, `y` is inside the band, and the gate is drawn
     1  it identified a price, and that price or a held-out row refutes the model
-    2  it could not solve, or its own widths cannot draw the gate, with the reason named
+    2  it could not solve, or the page cannot license a gate draw — its own widths
+       straddle the threshold, or it sampled no drift — with the reason named
 
 Every fixture page is built by calling the real `ks.table()`, so these tests fail
 the moment the page the sweep prints and the page this screen reads stop
@@ -151,6 +164,43 @@ DOC1_IN = """
 | layer_depth25 | 4.6 | 76.03 | 13.43 |
 """
 
+# The in-band trio `test_an_in_band_y_is_admissible_and_the_gate_is_scored_from_it`
+# was built on, twice: once as the page stands (three decimals, no re-measured
+# baseline, so the drift is unmeasured) and once with `base_again` carrying base's
+# counters verbatim. That row is the difference between the two: it is the page's
+# only measurement of how far the machine moves a row that did not change, and its
+# step of exactly zero is a MEASURED zero, which is not the same statement as the
+# first page's silence. #215.
+INBAND_NO_CONTROL = """
+| arm | tok/s | issued/pt | adopted/pt |
+|---|---|---|---|
+| base | 5.000 | 42.75 | 22.85 |
+| prefetch_off | 4.665 | 0.00 | 0.00 |
+| layer_depth25 | 4.628 | 76.03 | 13.43 |
+"""
+
+INBAND = """
+| arm | tok/s | issued/pt | adopted/pt |
+|---|---|---|---|
+| base | 5.000 | 42.75 | 22.85 |
+| prefetch_off | 4.665 | 0.00 | 0.00 |
+| layer_depth25 | 4.628 | 76.03 | 13.43 |
+| base_again | 5.000 | 42.75 | 22.85 |
+"""
+
+# DOC1_IN again with the zero control added: a page whose drift IS sampled, and
+# sampled at nothing. Its bound is still the printing, and the printing is still
+# what would narrow it -- which is the sentence #215 must keep saying here and stop
+# saying on a page that never read the channel.
+DOC1_IN_SAMPLED = """
+| arm | tok/s | issued/pt | adopted/pt |
+|---|---|---|---|
+| base | 5.0 | 42.75 | 22.85 |
+| prefetch_off | 4.7 | 0.00 | 0.00 |
+| layer_depth25 | 4.6 | 76.03 | 13.43 |
+| base_again | 5.0 | 42.75 | 22.85 |
+"""
+
 # §5at's own rendered page: six arms, and the first table this screen has ever
 # read that was assembled from two batches (§5ag's ring-off row, §5aq's five
 # others). Rates and counters are that section's, printed as the sweep prints
@@ -221,12 +271,19 @@ def holdout_page(rate):
     prints it 29 ms slower than its own two prices say is not a rounding
     question -- it is the model failing on a row it never saw. #209 found the
     screen printing that residual and handing over no status for it.
+
+    `base_again` carries base's counters and rate verbatim, so its step is zero
+    and the bound stays what the printing gives it. It is here because #215 says
+    a page without it may not score the gate: this fixture's whole point is that
+    the gate *is* scored on a consistent held-out row, and an unsampled drift
+    would refuse that for a reason that has nothing to do with the residual.
     """
     return page(
         arm("base", 5.00, 40.00, 20.00),
         arm("prefetch_off", 4.80, 0.00, 0.00),
         arm("layer_depth25", 4.60, 70.00, 10.00),
         arm("layer_depth35", rate, 90.00, 5.00),
+        arm("base_again", 5.00, 40.00, 20.00),
     )
 
 
@@ -460,22 +517,12 @@ class Prices(unittest.TestCase):
 
     def test_an_in_band_y_is_admissible_and_the_gate_is_scored_from_it(self):
         # x=0.199 and y=1.002 built into the rates: the pair must return them, and
-        # score §5ar's six-link gate as paying, because p* 0.199 > 0.82/5.30.
-        status, out = run(
-            """
-| arm | tok/s | issued/pt | adopted/pt |
-|---|---|---|---|
-| base | 5.000 | 42.75 | 22.85 |
-| prefetch_off | 4.665 | 0.00 | 0.00 |
-| layer_depth25 | 4.628 | 76.03 | 13.43 |
-""",
-            "--s",
-            "5.30",
-            "--l",
-            "0.82",
-            "--token-ms",
-            "205.5",
-        )
+        # score §5ar's six-link gate as paying, because p* 0.199 > 0.82/5.30. #215
+        # moved this page to the named INBAND fixture and gave it a `base_again` row
+        # carrying base's counters verbatim: without that row the page has measured
+        # nothing of how far the machine moves a row, and the gate score below is a
+        # pass drawn from its decimals alone. The unsampled twin is what #215 refuses.
+        status, out = run(INBAND, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
         self.assertEqual(status, 0, out)
         self.assertIn("ADMISSIBLE", out)
         self.assertIn("p*=0.199", out)
@@ -508,7 +555,10 @@ class Prices(unittest.TestCase):
     def test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too(self):
         # #209 turned this page's status from 0 to 2: it keeps saying the band call
         # is not separable, and now it also refuses to draw the gate that sentence
-        # always claimed it would not draw.
+        # always claimed it would not draw. #215 moved the gate refusal on THIS page
+        # one check earlier -- it carries no drift control, so the widths it would
+        # have been refused for are not even its own -- which is why the width-based
+        # refusal is pinned on the sampled twin above.
         status, out = run(DOC1_IN, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
         self.assertEqual(status, 2, out)
         self.assertIn("ADMISSIBLE", out)
@@ -572,13 +622,15 @@ class DriftAndHoldout(unittest.TestCase):
         self.assertNotIn("more printed decimals is what would settle both", out)
 
     def test_a_page_with_no_drift_sample_puts_the_whole_bound_on_the_printing(self):
-        # The other half of the same sentence: DOC1 carries no re-measured baseline,
-        # so its bound IS the rounding and more decimals IS the cure. Without this
-        # row the caveat would only ever have been read in its drift branch.
+        # The arithmetic half, which #215 leaves standing: with no re-measured
+        # baseline on the page, the bound it prints IS the printing, so the two
+        # numbers have to agree exactly and no drift term may quietly be charged as
+        # zero. What used to be asserted here was the sentence's other half -- "and
+        # more decimals is the cure" -- and that is the premise #215 refuses, so it
+        # is gone and the equality is what remains.
         _, out = run(DOC1)
         self.assertIn("cannot decide", out)
-        self.assertIn("the printing alone, ±0.310 ms", out)
-        self.assertIn("more printed decimals is what would settle both", out)
+        self.assertIn("bound on y is ±0.310 ms -- the printing alone, ±0.310 ms", out)
 
     def test_x_s_drift_sensitivity_is_the_difference_mode_not_the_single_row_max(self):
         # Both rows drift on their own, so their errors add: (|du1|+|du2|)/|det|.
@@ -589,12 +641,15 @@ class DriftAndHoldout(unittest.TestCase):
         self.assertRegex(out, r"difference-mode sensitivities 0\.073 ms of y and 0\.028 ms of x")
 
     def test_a_p_star_whose_own_width_spans_the_gate_is_refused(self):
-        # DOC1_IN prices y=1.004 inside the band and p*=0.237 above L/S=0.155, so
+        # This page prices y=1.004 inside the band and p*=0.237 above L/S=0.155, so
         # before #209 this scored "-> pays" and exited 0. Its own printed decimals
         # put ±0.121 ms on x and ±0.283 ms on y, which makes p* run 0.091 to 0.498
         # straight across the threshold: the page cannot say which side the gate is
-        # on, and the band call standing does not make the gate call one.
-        status, out = run(DOC1_IN, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
+        # on, and the band call standing does not make the gate call one. #215 moved
+        # it to the sampled twin, because on the unsampled DOC1_IN the refusal now
+        # comes one check earlier and for a different reason -- the drift was never
+        # read at all -- which that section's own test pins.
+        status, out = run(DOC1_IN_SAMPLED, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
         self.assertEqual(status, 2, out)
         self.assertIn("ADMISSIBLE", out)
         self.assertIn("cannot decide the gate", out)
@@ -612,6 +667,76 @@ class DriftAndHoldout(unittest.TestCase):
         self.assertEqual(status, 2, out)
         self.assertIn("cannot decide the gate", out)
         self.assertIn("not finite", out)
+
+    def test_a_page_that_never_sampled_the_drift_does_not_score_the_gate(self):
+        # The first page this screen was handed priced an adopted read, drew the
+        # six-link gate and exited 0 on digits alone. What it never did is measure how
+        # far the machine moves a row with no config change in it: it carries no
+        # `base_again`, so `_solve` was handed a drift width of exactly 0.0, which is
+        # the number it would have printed had the control been there and moved
+        # nothing. Silence was read as a measurement, and the campaign's own pages say
+        # this Mac's drift is nowhere near 0.004 ms: §5az found the gate needs a
+        # baseline repeating to 0.75 ms, "which this machine has never given". The
+        # price and its band call print -- #208's ruling that a missing control is not
+        # a refusal to solve -- and the gate is refused for the reason, with its own
+        # status.
+        status, out = run(INBAND_NO_CONTROL, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
+        self.assertEqual(status, 2, out)
+        self.assertIn("ADMISSIBLE", out)
+        self.assertIn("x=0.199 y=1.002", out)
+        # Not "no drift sample", which the signal line printed before this fix too:
+        # this is the verdict's own reason, and it is what the status hangs on.
+        self.assertIn("carried no re-measured baseline", out)
+        self.assertNotIn("p*=", out)
+        self.assertNotIn("pays", out)
+
+    def test_an_unsampled_drift_is_not_the_same_page_as_a_measured_zero(self):
+        # The two pages differ by one row, and the row's step is zero, so every
+        # number either page solves is the same. Only the license differs: one read
+        # the machine and found it still, the other did not look. If the fixture
+        # above refuses and this one exits 0, the rule is about the channel, not
+        # about the arithmetic.
+        sampled, out_sampled = run(INBAND, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
+        unsampled, out_unsampled = run(
+            INBAND_NO_CONTROL, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5"
+        )
+        self.assertIn("x=0.199 y=1.002", out_sampled)
+        self.assertIn("x=0.199 y=1.002", out_unsampled)
+        self.assertEqual(sampled, 0, out_sampled)
+        self.assertEqual(unsampled, 2, out_unsampled)
+
+    def test_the_remedy_on_an_unsampled_page_names_the_row_it_lacks(self):
+        # DOC1's bound is 0.310 ms and it is all printing: no control was on the
+        # page, so no drift entered it. Telling that reader "more printed decimals
+        # is what would settle both" prescribes the cure for the half it measured and
+        # calls the half it never read settled.
+        _, out = run(DOC1)
+        self.assertIn("cannot decide", out)
+        self.assertIn("the printing alone, ±0.310 ms", out)
+        self.assertIn("no re-measured baseline", out)
+        self.assertNotIn("more printed decimals is what would settle both", out)
+
+    def test_a_measured_zero_drift_still_points_at_the_printing(self):
+        # The same sentence on a page that DID sample the drift and found nothing:
+        # here more decimals genuinely is what would narrow the bound, because the
+        # other half has been read and is zero. Without this row the #215 branch
+        # would swallow the case it was meant to distinguish.
+        status, out = run(DOC1_IN_SAMPLED, "--s", "5.30", "--l", "0.82", "--token-ms", "205.5")
+        self.assertIn("cannot decide", out)
+        self.assertIn("more printed decimals is what would settle both", out)
+        self.assertNotIn("no re-measured baseline", out)
+        self.assertEqual(status, 2, out)
+
+    def test_the_missing_license_does_not_swallow_the_interval_refusal(self):
+        # DOC1_IN carries both defects: one decimal makes `p*` straddle the threshold
+        # (#209) and no re-measured baseline means its drift was never read (#215).
+        # The license is the more basic refusal, but the interval is a finding about
+        # this page, and a rule that returns first would cost the screen the sentence
+        # #209 was shipped to print -- so both lines print and one status answers.
+        status, out = run(DOC1_IN)
+        self.assertEqual(status, 2, out)
+        self.assertIn("cannot decide the gate", out)
+        self.assertIn("carried no re-measured baseline", out)
 
     def test_a_held_out_row_beyond_the_page_s_own_width_refutes_the_model(self):
         # The two prices fit the two rows they were solved from exactly — that is

@@ -5347,10 +5347,10 @@ it runs in CI with no model, no server and nothing fetched.
 
 Every price the campaign has published was solved from rates *as printed*, and nobody had said how much the
 printing costs. The screen does, from the digits of the page it was handed: it records the coarsest printed row
-per column ([`:116`](../benchmark/tinytitan_price_pair.py#L116), [`:311`](../benchmark/tinytitan_price_pair.py#L311)),
+per column ([`:121`](../benchmark/tinytitan_price_pair.py#L121), [`:321`](../benchmark/tinytitan_price_pair.py#L321)),
 turns a half-ulp into a width on each equation's `Δms` and on each counter coordinate
-([`:374`](../benchmark/tinytitan_price_pair.py#L374)), propagates all six widths through the Cramer partials
-([`:438`](../benchmark/tinytitan_price_pair.py#L438)), and prints the result:
+([`:384`](../benchmark/tinytitan_price_pair.py#L384)), propagates all six widths through the Cramer partials
+([`:448`](../benchmark/tinytitan_price_pair.py#L448)), and prints the result:
 
 ```
 digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0.033 ms and x to ±0.013 ms
@@ -5359,9 +5359,9 @@ digits: the page prints tok/s to 2 decimals (±0.005), so y is known only to ±0
 `Price` carries `x_bound` and `y_bound` as *required* fields rather than defaults, because a price that silently
 had no bound would read as an exact one. Bounds are rounded up to the millimetre, so printing one cannot
 understate it. The consequence is the part that matters for the campaign: `_verdict`
-([`:787`](../benchmark/tinytitan_price_pair.py#L787)) compares the bound to the distance from the median `y` to
+([`:808`](../benchmark/tinytitan_price_pair.py#L808)) compares the bound to the distance from the median `y` to
 the nearer band edge and, when the bound reaches it, appends `_cannot_decide`
-([`:715`](../benchmark/tinytitan_price_pair.py#L715)) — in *both* the REFUTED and the ADMISSIBLE branch. A band
+([`:726`](../benchmark/tinytitan_price_pair.py#L726)) — in *both* the REFUTED and the ADMISSIBLE branch. A band
 call that falls inside the resolution of the rates it was computed from is not a refutation of the model; it is
 the page running out of digits.
 
@@ -5409,7 +5409,7 @@ tables at one and two decimals; anything read off them is now known to be un-dec
 would be worth nothing, because the dangerous error is the flattering one: an arm that *costs* an implausible
 18 ms per adopted read gets questioned, while an arm that lands at 1.004 ms — right inside the band, gate pays,
 `+0.44 ms` of the token — gets believed. Both fixtures are in `Prices`, and the in-band one
-([`test_tinytitan_price_pair.py:461`](../benchmark/test_tinytitan_price_pair.py#L461)) is written so its hand
+([`test_tinytitan_price_pair.py:518`](../benchmark/test_tinytitan_price_pair.py#L518)) is written so its hand
 arithmetic is in the comment next to it.
 
 ### The sign §5at's table printed backwards
@@ -5424,7 +5424,7 @@ opposite verdict to the one published below the table. A reader who took the pri
 next section ships would have concluded the two-price model was confirmed.
 
 The screen now pins the convention rather than describing it: `Sign`
-([`:251`](../benchmark/test_tinytitan_price_pair.py#L251)) asserts all three cases — a step that makes adoptions
+([`:308`](../benchmark/test_tinytitan_price_pair.py#L308)) asserts all three cases — a step that makes adoptions
 fall is positive, the ring-off step is E1 verbatim (`18.86 y − 39.45 x = 11.7 ms`), and a step that makes them
 *rise* is negative — and `Prices` asserts that those coordinates solve the published `x=0.460` / `y=1.58`. The
 other mis-signing, negating **one coordinate of one row**, is the one that does change `det` and collapses the
@@ -5435,7 +5435,7 @@ asserts it. What the suite closes is the mistake §5at actually made, not every 
 
 Feeding the screen §5at's own rendered six-row page is the first time it has read a table assembled from more than
 one batch, and it found a design defect in the screen itself. `best_pair` picks the widest-angle candidate
-([`:586`](../benchmark/tinytitan_price_pair.py#L586)); every candidate on that page is below, with the row that
+([`:597`](../benchmark/tinytitan_price_pair.py#L597)); every candidate on that page is below, with the row that
 generates each:
 
 | pair | `deg` | cond | `x` | `y` |
@@ -5533,9 +5533,9 @@ Deviations.
 §5au filed two changes and did not patch them, on the grounds that a bar tuned until a page returns the price the
 campaign already believes is a bar fitted to the answer. [benchmark/tinytitan_price_pair.py](../benchmark/tinytitan_price_pair.py)
 now carries both: a minimum-signal bar keyed to the page's own control row
-([`:480`](../benchmark/tinytitan_price_pair.py#L480)) and the printing of every design that survives it rather
-than one selection ([`:597`](../benchmark/tinytitan_price_pair.py#L597)), with a refusal when those designs
-disagree ([`:607`](../benchmark/tinytitan_price_pair.py#L607)). The statuses are the same three; nothing was
+([`:491`](../benchmark/tinytitan_price_pair.py#L491)) and the printing of every design that survives it rather
+than one selection ([`:608`](../benchmark/tinytitan_price_pair.py#L608)), with a refusal when those designs
+disagree ([`:618`](../benchmark/tinytitan_price_pair.py#L618)). The statuses are the same three; nothing was
 renumbered. Implementing it turned up two defects in the screen shipped four hours earlier, and one of them
 changes what §5au's page actually searched.
 
@@ -5548,10 +5548,10 @@ status 2's meaning has widened: it now covers a page that solves a price and can
 `base_again` is the same configuration as `base`, re-measured, so its step is this page's drift with no config
 change in it — a measurement of the machine, not of an arm. The screen now treats it as a floor: a row is stepped
 over when it moves less than the control **in every coordinate the solve reads**, both counters and the column
-([`:519`](../benchmark/tinytitan_price_pair.py#L519)), and the control is never a solve partner however far it
-moved ([`:517`](../benchmark/tinytitan_price_pair.py#L517)). AND over three coordinates is the conservative
+([`:530`](../benchmark/tinytitan_price_pair.py#L530)), and the control is never a solve partner however far it
+moved ([`:528`](../benchmark/tinytitan_price_pair.py#L528)). AND over three coordinates is the conservative
 choice — it removes only rows the drift can explain in full, and leaves any row that moves more than the control
-in even one of them. `--control` names the row ([`:845`](../benchmark/tinytitan_price_pair.py#L845)), and a page
+in even one of them. `--control` names the row ([`:896`](../benchmark/tinytitan_price_pair.py#L896)), and a page
 that carries no control is not a refusal: the screen says `no drift sample (base_again is not on this page), so
 no row was checked` and solves, because a bar with nothing to key to must not silently become a veto.
 
@@ -5592,10 +5592,10 @@ reporting the below one would have refuted it, on a page that cannot tell them a
 §5au's published table lists ten pairs. On five priceable rows a window sees four of ten. §5au's answer happened to
 survive the difference because its widest pair — `slots64_depth25 x slots_64` — is adjacent in sorted order, which
 is exactly how a defect like this hides: it changed nothing on the page that exposed it. `itertools.combinations`
-([`:565`](../benchmark/tinytitan_price_pair.py#L565)) is the fix, and it retro-validates §5au's table: the pool the
+([`:576`](../benchmark/tinytitan_price_pair.py#L576)) is the fix, and it retro-validates §5au's table: the pool the
 fixed screen prints is the ten rows that section published by hand, same angles same prices. The bug is pinned by a
 page where the widest pair is *not* adjacent
-([`test_tinytitan_price_pair.py:336`](../benchmark/test_tinytitan_price_pair.py#L336)); RED there showed the window
+([`test_tinytitan_price_pair.py:393`](../benchmark/test_tinytitan_price_pair.py#L393)); RED there showed the window
 picking a 39.3 deg neighbour.
 
 **Dead arithmetic that was never dead code.** `_solve` carried a second `return Price(...)` after the first,
@@ -5605,7 +5605,7 @@ predating the bounds and omitting the now-required `x_bound` / `y_bound` — unr
 **A refusal that named the wrong cause.** Once the bar can empty the pool, a page whose every row is inked printed
 `nothing priceable`, which is true of the arithmetic and false about the cause: three rows *were* priceable and the
 drift sample covered all of them. Driving that note out was the last test written here
-([`:393`](../benchmark/test_tinytitan_price_pair.py#L393)), RED against the version that shipped an hour earlier,
+([`:450`](../benchmark/test_tinytitan_price_pair.py#L450)), RED against the version that shipped an hour earlier,
 and the pre-existing note `only N priceable arm(s) with signal` lost `with signal` — its count is the pre-bar one,
 which is the second time in this campaign a label has promised a check the number behind it does not perform.
 
@@ -5635,10 +5635,10 @@ bounds its clock, and round 1 is the case where only the second one fires.**
 
 30 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 29 plus the
 cause-naming one — 95 OK alongside `test_knob_sweep_verdict` and `test_docs_facts_suites`; `tools/lint.sh python`
-ok. Seven tests are new: the enumeration ([`:336`](../benchmark/test_tinytitan_price_pair.py#L336)) and
-[`Signal`](../benchmark/test_tinytitan_price_pair.py#L348)'s six (row inside drift `:359`, control never a partner
-`:370`, straddle refuses `:382`, no control says so `:395`, one survivor prices exactly as it did unbarred `:404`,
-zero drift bars nothing `:420`), plus the inked-page cause `:430`. One edit was made for the linter rather than for
+ok. Seven tests are new: the enumeration ([`:393`](../benchmark/test_tinytitan_price_pair.py#L393)) and
+[`Signal`](../benchmark/test_tinytitan_price_pair.py#L405)'s six (row inside drift `:416`, control never a partner
+`:427`, straddle refuses `:439`, no control says so `:452`, one survivor prices exactly as it did unbarred `:461`,
+zero drift bars nothing `:477`), plus the inked-page cause `:487`. One edit was made for the linter rather than for
 behaviour and is inventoried here: the new `best_line` helper's bare `assert` became `raise ValueError`, because
 pinned ruff 0.16.7 enforces S101 — the check's strength is unchanged (it still fails the test unless exactly one
 `best pair` line is printed), and it is code added in this section, not a pre-existing assertion weakened.
@@ -5735,7 +5735,7 @@ threshold and back depending on which round you read. `y` never moves across the
 inside 0.788-1.301 ms and agree to 7 %. The asymmetry is not luck, and the screen's own Cramer terms name it.
 
 **Why `x` is the unstable one — the arithmetic, worked from the published rows.** With row 1 = `layer_depth25`
-and row 2 = `prefetch_off`, Cramer over the [`:407`](../benchmark/tinytitan_price_pair.py#L407) solve gives, per
+and row 2 = `prefetch_off`, Cramer over the [`:417`](../benchmark/tinytitan_price_pair.py#L417) solve gives, per
 round, the two partials of each price with respect to each row's wall step:
 
 | | det | ∂x/∂m₁ | ∂x/∂m₂ | ∂y/∂m₁ | ∂y/∂m₂ | x per ms common | x per ms of step **difference** | y per ms common |
@@ -5773,7 +5773,7 @@ that, and the term is 6-20× the digits on both of these rounds.)*
 
 **The out-of-sample point, and why the screen's status does not speak for it.** Round 2 misses by
 +23.65 ms/token (+10.45 %) and round 3 by +1.77 ms (+0.78 %) on the same held-out row. The residual is printed at
-[`benchmark/tinytitan_price_pair.py`:692](../benchmark/tinytitan_price_pair.py#L692) and returned nothing; the
+[`benchmark/tinytitan_price_pair.py`:703](../benchmark/tinytitan_price_pair.py#L703) and returned nothing; the
 status came only from the band class of `y`. A page whose held-out point sits 6.7× its own drift away from the
 prediction therefore exited 0 as `ADMISSIBLE`. The campaign reads that as the model being valid *interpolating*
 between du = −42.65 and +33.04 and not extrapolating to +60.20 — round 2's miss is entirely in the extrapolation —
@@ -5839,7 +5839,7 @@ withdrawn exactly as §5aw withdrew it for other purposes.
    needs 3+ rounds per the screen's own line; this section does not claim one.
 3. **The partials in the sensitivity table were computed for this section**, from the published rows and the same
    Cramer terms the screen uses, not read out of it — the screen printed `dy_per_ms` only
-   ([`:450`](../benchmark/tinytitan_price_pair.py#L450), [`:929`](../benchmark/tinytitan_price_pair.py#L929)) and
+   ([`:460`](../benchmark/tinytitan_price_pair.py#L460), [`:980`](../benchmark/tinytitan_price_pair.py#L980)) and
    prints it as the single-row max, which is neither the common-mode nor the difference-mode number. The x
    sensitivities above are reproducible from the table of rates and counters. *(Amended by §5az: #209 added the
    difference-mode pair to that line — `difference-mode sensitivities 0.061 ms of y and 0.027 ms of x per ms of
@@ -5997,28 +5997,28 @@ that section printed.
 
 ### The four rules, as shipped
 
-1. **The drift is a width, not only a bar.** `Drift` ([`:129`](../benchmark/tinytitan_price_pair.py#L129)) carries
-   the control's step in the column the solve reads and in both counters; `_solve` ([`:413`](../benchmark/tinytitan_price_pair.py#L413))
+1. **The drift is a width, not only a bar.** `Drift` ([`:134`](../benchmark/tinytitan_price_pair.py#L134)) carries
+   the control's step in the column the solve reads and in both counters; `_solve` ([`:423`](../benchmark/tinytitan_price_pair.py#L423))
    feeds it through the same six Cramer partials the printed digits go through, as `w_drift` beside `w_digits`
-   ([`:438`](../benchmark/tinytitan_price_pair.py#L438)). Sum-of-absolute-input-widths, i.e. the difference mode:
+   ([`:448`](../benchmark/tinytitan_price_pair.py#L448)). Sum-of-absolute-input-widths, i.e. the difference mode:
    two rows drift independently, so their errors add. §5ax derived that mode by hand because the screen printed
    only the single-row maximum; it prints it now (`difference-mode sensitivities 0.061 ms of y and 0.027 ms of x
    per ms of drift`), and the numbers land on §5ax's sensitivity table's two right-hand columns to the third digit.
 2. **A bound names its provenance.** `Price` carries six half-widths, not two: `x_digits`/`y_digits`,
-   `x_drift`/`y_drift`, and the totals `x_bound`/`y_bound` ([`:155`](../benchmark/tinytitan_price_pair.py#L155)).
-   `_digits_line` ([`:636`](../benchmark/tinytitan_price_pair.py#L636)) prints the digits and nothing else;
-   `_drift_line` ([`:653`](../benchmark/tinytitan_price_pair.py#L653)) prints the drift, then the total once, as a
-   total. All three are rounded *up* at 0.001 ms ([`:385`](../benchmark/tinytitan_price_pair.py#L385)).
-3. **A `p*` is an interval.** `_pi_interval` ([`:677`](../benchmark/tinytitan_price_pair.py#L677)) runs the ratio
+   `x_drift`/`y_drift`, and the totals `x_bound`/`y_bound` ([`:160`](../benchmark/tinytitan_price_pair.py#L160)).
+   `_digits_line` ([`:647`](../benchmark/tinytitan_price_pair.py#L647)) prints the digits and nothing else;
+   `_drift_line` ([`:664`](../benchmark/tinytitan_price_pair.py#L664)) prints the drift, then the total once, as a
+   total. All three are rounded *up* at 0.001 ms ([`:395`](../benchmark/tinytitan_price_pair.py#L395)).
+3. **A `p*` is an interval.** `_pi_interval` ([`:688`](../benchmark/tinytitan_price_pair.py#L688)) runs the ratio
    from `(x − wx)/(y + wy)` to `(x + wx)/(y − wy)`, and if that reaches the gate's `L/S`, no gate line is printed
-   ([`:751`](../benchmark/tinytitan_price_pair.py#L751)). `y − wy ≤ 0` is not a wide ratio but no ratio at all, and
+   ([`:772`](../benchmark/tinytitan_price_pair.py#L772)). `y − wy ≤ 0` is not a wide ratio but no ratio at all, and
    the refusal says `unbounded` rather than inventing an endpoint.
-4. **The held-out row has a status.** `_off_sample` ([`:689`](../benchmark/tinytitan_price_pair.py#L689)) compares
+4. **The held-out row has a status.** `_off_sample` ([`:700`](../benchmark/tinytitan_price_pair.py#L700)) compares
    the residual to the width this page cannot resolve about that row — its own printed step, plus the control's
    clock, plus what the two prices' widths reach into the prediction
-   ([`:951`](../benchmark/tinytitan_price_pair.py#L951)) — and a miss past that is `REFUTED OUT OF SAMPLE`, which
+   ([`:1002`](../benchmark/tinytitan_price_pair.py#L1002)) — and a miss past that is `REFUTED OUT OF SAMPLE`, which
    withdraws the gate from a model the page itself falsifies
-   ([`:812`](../benchmark/tinytitan_price_pair.py#L812)).
+   ([`:853`](../benchmark/tinytitan_price_pair.py#L853)).
 
 The statuses are the same three numbers, with the second and third widened, because a page can now solve a price
 and still not be allowed to spend it:
@@ -6039,7 +6039,7 @@ printing those totals under sentences about *printed decimals*. On §5at's page 
 which attributes 0.832 ms of machine movement to 0.005 tok/s of rounding, and then prescribes "more printed
 decimals is what would settle both" — a cure for a third of the illness that hides the other two thirds. It is the
 same shape of error §5ax was amended for: a bound carried under a sentence that names the wrong source. Fixed
-test-first, with three tests (`:554`, `:565`, `:574`), the third of them on the branch where the printing *is* the
+test-first, with three tests (`:604`, `:615`, `:624`), the third of them on the branch where the printing *is* the
 whole bound, so the caveat cannot only ever be read in its drift form.
 
 ### §5ax's page, re-run
@@ -6138,17 +6138,22 @@ narrower bound than a page with one** (#209's rule only fires on pages that repe
 should note which kind of page any future `pays` came from. Whether the screen should refuse to draw a gate at all
 without a drift sample is a design question this section does not decide.
 
+*(Amended by §5be: it is decided, and the answer is no. The page described above — three rows, no re-measured
+baseline, digits-only bound — now prints `ADMISSIBLE` and exits **2** with the gate unscored, so the exit-0 path is
+pinned on `HOLD_OK` only because that fixture gained a zero `base_again`; §5be names which published statuses that
+changes and which it leaves alone.)*
+
 ### Tests, gates and provenance
 
 39 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 30 at §5aw, nine
-new in `DriftAndHoldout` ([`:529`](../benchmark/test_tinytitan_price_pair.py#L529)) — 104 OK alongside
+new in `DriftAndHoldout` ([`:579`](../benchmark/test_tinytitan_price_pair.py#L579)) — 104 OK alongside
 `test_knob_sweep_verdict` and `test_docs_facts_suites` (95 before). Every test-file change is inventoried: the
 module docstring gained an eighth "must not get wrong" and the widened status block; the `DOC1_IN` fixture comment
 gained the interval that #209 derives from it; `holdout_page()` and its two fixtures are new test-side helpers;
 `DriftAndHoldout` is new. Two tests had their expected **status** changed, from 0 to 2, and they are the two the
 section is about —
-[`test_one_surviving_design_prices_exactly_as_it_did_unbarred`:404](../benchmark/test_tinytitan_price_pair.py#L404) and
-[`test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too`:508](../benchmark/test_tinytitan_price_pair.py#L508).
+[`test_one_surviving_design_prices_exactly_as_it_did_unbarred`:461](../benchmark/test_tinytitan_price_pair.py#L461) and
+[`test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too`:555](../benchmark/test_tinytitan_price_pair.py#L555).
 The production behaviour they pinned was the defect, so it is the tests that moved; each keeps its older assertion
 (`ADMISSIBLE`, `cannot decide`, the price itself) so the band call is still pinned exactly as §5au wrote it, and
 neither was rewritten to reach green. One assertion was re-pointed once more inside this section, when the
@@ -6223,7 +6228,7 @@ table 1: REFUSED: the widest pair here, gate06 x ring_rank, is 6.0 deg apart (co
 
 `--column io_ms` prints the identical refusal, because the angle is a property of the counter rows, not of the column
 the step is read from, and this page carries no repeated baseline for the drift sample to find
-([`_drift_sample:497`](../benchmark/tinytitan_price_pair.py#L497)).
+([`_drift_sample:508`](../benchmark/tinytitan_price_pair.py#L508)).
 
 ### Why it refuses, in one line of arithmetic
 
@@ -6891,3 +6896,180 @@ Deviations: the two shipped rows ran back-to-back rather than interleaved, becau
 utilisation bands and not clocks — there is no paired delta to protect, and each row carries its own
 floor measured in the seconds before it. The `/tmp/gauge215/load.py` helper is deliberately not repo
 code: it is an MLX-dependent load, and `benchmark/requirements.txt` does not carry MLX.
+
+## 5be. #215 decides the question §5az left open — a page that never re-measured its baseline has an *unmeasured* drift, not a zero one, and the screen was paying out a six-link `pays` for a term it had not read (2026-10-17)
+
+§5az closed by naming a seam rather than burying it: *a page with no control row is priced on its digits and can
+exit 0 on a much narrower bound than a page with one … Whether the screen should refuse to draw a gate at all
+without a drift sample is a design question this section does not decide.* It is decided, and the answer is that it
+should. Not on taste. The campaign's whole audit queue is one defect class — **a gate that did not run reading as a
+pass** (AUD-210, AUD-212, AUD-233) — and here it arrives in arithmetic form: the channel nobody read contributed a
+`0.0` to the bound, and `0.0` is exactly the number a page whose control moved *nothing* prints. The two pages are
+indistinguishable downstream, and one of them is being graded on a term that was never measured.
+
+### The false pass, printed whole
+
+The screen as §5az left it, over a three-decimal in-band trio carrying no `base_again` row (fixture
+`INBAND_NO_CONTROL`):
+
+```
+status 0
+digits: the page prints tok/s to 3 decimals (±0.0005), so y is known only to ±0.004 ms and x to ±0.002 ms
+  signal: no drift sample (base_again is not on this page), so no row was checked
+median x=0.199 y=1.002  spread x=0.000 y=0.000
+ADMISSIBLE: y=1.002 is inside 0.788-1.301 ms, so the two rows price both reads
+p*=0.199 against the six-link gate's L/S = 0.82/5.30 = 0.155 -> pays (+0.24 ms of a 200.0 ms token, +0.12 %)
+```
+
+Every clause of that is defensible but the last. The screen had already *said* the drift was unread — `no drift
+sample (base_again is not on this page)` — and then priced as though it were zero. §5az's own numbers say what that
+zero costs on this Mac: the quietest round of the identifying sweep moved its control **3.527 ms**, §5ax's noisier
+one **11.701 ms**, §5at's page carries **±0.832 ms** of drift against **±0.034 ms** of printing, and scoring the
+gate wants a baseline repeating to **0.75 ms**, which no page here has ever given. A digits-only bound on this
+machine is not a conservative bound; it is a bound with the dominant term removed.
+
+### The rule, as shipped: one required field and one conjunct
+
+`Price.drift_sampled: bool` ([`:175`](../benchmark/tinytitan_price_pair.py#L175)) is a required field, not a
+default, for the reason #207 made `x_bound` and `y_bound` required — a price that silently carried no provenance
+would read as a price that needed none. It is set from the only thing that actually separates the two cases, whether
+a control row was found ([`:467`](../benchmark/tinytitan_price_pair.py#L467), `drift_sampled=drift is not None`),
+because one line later the *widths* agree: `y_drift` is `0.0` both when the baseline repeated exactly and when
+nobody asked it. Any number written into the drift column would have to be a number, and every number means "the
+machine moved this far" — which is why this is a flag and not a sentinel.
+
+`_verdict` then gates the gate: `licensed = all(p.drift_sampled for p in pairs)`
+([`:861`](../benchmark/tinytitan_price_pair.py#L861)), with a refusal of its own
+([`:864`](../benchmark/tinytitan_price_pair.py#L864)):
+
+```
+the six-link gate is not scored: a round in this pool carried no re-measured baseline, so the bound its
+price carries is the printing alone, and the median of several solves is no better known than its
+least-read member -- a threshold on p* drawn from prices whose machine movement was never read is a
+statement about the arithmetic, not about this Mac
+```
+
+`all` over the pool, not over the median: one uncontrolled round withdraws the gate from a batch of otherwise
+controlled ones, because a median cannot recover what its least-read member never carried.
+
+`_cannot_decide` ([`:726`](../benchmark/tinytitan_price_pair.py#L726)) took the same flag as an eighth parameter and
+now has **three** provenances instead of two:
+
+| the page's drift | width clause printed | remedy printed |
+|---|---|---|
+| never read | `the printing alone, ±{digits}` | *more printed decimals would narrow only that half, because this page carries no re-measured baseline and its drift is unmeasured rather than zero* ([`:747`](../benchmark/tinytitan_price_pair.py#L747)) |
+| read, and moved | `its digits ±… and its own drift ±…` | §5az's two forms, chosen by which half is wider |
+| read, and repeated | `the printing alone, ±{digits}` | *more printed decimals is what would settle both* ([`:761`](../benchmark/tinytitan_price_pair.py#L761)) |
+
+Rows 1 and 3 print the **same width string** and now get opposite statuses. That coincidence is the finding: the
+screen's advice, not its arithmetic, is what tells an unread channel from a quiet one, so the advice had to become
+load-bearing before a status could depend on it.
+
+### What #215 does not refuse
+
+Such a page still prices and still classifies — `ADMISSIBLE: y=1.002 is inside 0.788-1.301 ms` prints above the
+refusal — because #208 ruled that a missing control is not a refusal to *solve*, and the arithmetic genuinely does
+not need the machine. What it may no longer do is *spend* the answer on this Mac, which is what a gate draw does.
+The same distinction is why the new refusal is **added after** #209's interval refusal rather than returned in front
+of it ([`:872`](../benchmark/tinytitan_price_pair.py#L872), `if not separable or not licensed: return lines, 2`): a
+page can carry both defects, and #209's sentence is a finding about that page — which half of its bound dominates,
+and how wide its own `p*` runs — that a licensing rule has no business eating. I found that by writing the second
+refusal as an early return and watching `DOC1_IN` lose its interval line, which is the defect [`:730`](../benchmark/test_tinytitan_price_pair.py#L730) now pins.
+
+### The blast radius: eleven pages, two statuses
+
+Every page the campaign has quoted, through the screen before and after. The probe that ran them,
+`/tmp/be215_probe.py`, is a throwaway; the full text of both runs is in `/tmp/be215_old.txt` and
+`/tmp/be215_new.txt`:
+
+| page | `base_again` on it | before | after |
+|---|---|---:|---:|
+| §5ag's trio | yes | 1 | 1 |
+| §5at's published table | yes | 1 | 1 |
+| one decimal, out-of-band (`DOC1`) | no | 1 | 1 |
+| one decimal, in-band (`DOC1_IN`) | no | 2 | 2 |
+| three decimals, in-band, no control | no | **0** | **2** |
+| the same trio, control repeats exactly | yes, zero | 0 | 0 |
+| `DOC1_IN`, control repeats exactly | yes, zero | 2 | 2 |
+| §5at's six-arm page | yes | 2 | 2 |
+| `HOLD_OK` as #209 shipped it | yes, zero | 0 | 0 |
+| `HOLD_OK` as §5az wrote it | no | **0** | **2** |
+| `HOLD_BAD` (held-out row refutes) | yes | 1 | 1 |
+
+Two statuses flip, both `0 → 2`, and both are the same shape — a control-less page drawing a `pays`. **No published
+§5 verdict changes**, because every page the campaign actually measured carried `base_again`: §5ax's sweep and
+§5at's batch both ran a re-measured baseline, so the flip lands on a fixture and on a hypothetical. That is the
+honest size of it, and it is also the argument for paying now rather than after a real page had spent it. §5au's
+fourth row, already `2` since #209, now prints two refusals — one about widths, one about provenance — and both are
+true of that page.
+
+### Two test premises that were wrong, and which side moved
+
+The suite failed twice on the first run after the production change, and neither failure was the production code's.
+
+1. **`holdout_page()` had no control row.** The out-of-sample tests build their page at
+   ([`:265`](../benchmark/test_tinytitan_price_pair.py#L265)) from `base`, two arms and a held-out arm — no
+   `base_again`. Under #215 that fixture's exit-0 premise *is* the false pass this section is about, and the test
+   failed `2 != 0`. The fixture was asserting the defect, so the fixture moved: it gained
+   `arm("base_again", 5.00, 40.00, 20.00)` ([`:286`](../benchmark/test_tinytitan_price_pair.py#L286)) carrying the
+   baseline's rate and counters verbatim, which makes its step zero and leaves the bound at its digits. `HOLD_OK`'s
+   published behaviour is unchanged; only the page it is pinned on became one the screen may score.
+2. **`DOC1`'s remedy assertion pinned the rejected claim.**
+   [`test_a_page_with_no_drift_sample_puts_the_whole_bound_on_the_printing`:624](../benchmark/test_tinytitan_price_pair.py#L624)
+   required `more printed decimals is what would settle both` on a page with no sample. Its arithmetic half
+   (`±0.310 ms -- the printing alone, ±0.310 ms`) still passes and is kept; the advice clause is gone, and the test
+   comment says so rather than hiding it.
+
+Three more tests were **re-pointed at sampled fixtures**, not re-asserted:
+`test_an_in_band_y_is_admissible_and_the_gate_is_scored_from_it` now runs `INBAND`
+([`:182`](../benchmark/test_tinytitan_price_pair.py#L182)), `test_a_p_star_whose_own_width_spans_the_gate_is_refused`
+runs `DOC1_IN_SAMPLED` ([`:195`](../benchmark/test_tinytitan_price_pair.py#L195)), and
+`test_a_bound_wider_than_the_band_on_the_admissible_side_says_that_too` deliberately keeps the un-sampled `DOC1_IN`,
+because it pins the band caveat and not the gate. New fixture `INBAND_NO_CONTROL`
+([`:174`](../benchmark/test_tinytitan_price_pair.py#L174)) is the page from the false pass above. The module
+docstring gained a ninth *must not get wrong* — *"That an unmeasured drift is not a zero one (#215)"* — and its
+status legend's second line now reads `2  it could not solve, or the page cannot license a gate draw — its own
+widths straddle the threshold, or it never sampled its drift — reason named`.
+
+### Tests, gates and provenance
+
+44 tests in [benchmark/test_tinytitan_price_pair.py](../benchmark/test_tinytitan_price_pair.py) — 39 as §5az left
+them plus five new in `DriftAndHoldout` ([`:579`](../benchmark/test_tinytitan_price_pair.py#L579)) — and 109 OK
+alongside `test_knob_sweep_verdict` and `test_docs_facts_suites` (104 before). **Four of the five are RED against
+the screen as §5az left it**, re-measured for this section rather than remembered: `:671` (the status), `:693` (an
+unsampled page and a measured-zero page must not be the same page), `:708` (the remedy names the row it lacks) and
+`:730` (the missing license does not swallow the interval refusal). The fifth,
+[`test_a_measured_zero_drift_still_points_at_the_printing`:719](../benchmark/test_tinytitan_price_pair.py#L719),
+passes before and after and is disclosed as **RED-invalid**: it is a regression pin on the branch that already
+worked, not a demonstration of the fix.
+
+Deviations.
+
+1. **No model run, and no new measurement.** Every number is the shipped screen's output over fixture pages built
+   from rows §5ag, §5at and §5ax published. `/tmp/be215_probe.py`, `/tmp/be215_old.txt`, `/tmp/be215_new.txt` and
+   `/tmp/be215_red.txt` are throwaways, not repo code and not proposed as tools; the committed artifacts are the
+   screen, its suite and this section.
+2. **The RED re-measurement used a reversible in-place swap**, not a copy: `git show HEAD:benchmark/tinytitan_price_pair.py`
+   over the working file, run the five tests, restore from `/tmp/pp215_final_mine.py`, `diff -q` clean, and the full
+   suite re-run to 109 OK afterwards. A copy outside `benchmark/` cannot work — importing the screen pulls
+   `tinytitan_knob_sweep`, which pulls `tinytitan_profile` — so the fixture builders' transitive import is what makes
+   the screen un-copyable. No other file was touched while the pre-fix screen was in place.
+3. **A count kept earlier in this session said "3 of 5" RED. The measured number is 4.** `:730` fails pre-fix too,
+   because the pre-fix screen prints no license line at all. The section states the re-measurement.
+4. **Anchors.** This change adds 51 lines to the screen and 125 to its suite, which moved 38 `#L` anchors in §5au
+   through §5ba; all were renumbered by diff alignment against `HEAD`, each with its visible label, and every result
+   re-checked to land on a non-blank line (one legitimately lands on the comment that documents the six half-widths,
+   `:160`). Three labels whose text is a file or function name rather than `:NNN` were fixed by hand. Two *bare*
+   inline ref lists in §5au's tests paragraph — its `ReadingAPage:173`, `:215`, `:241`, `:270`, `:280`, `:289`,
+   `:294` and the `:400` in the following paragraph — were **already stale before this commit**: the constructs they
+   name had moved in #208 and #209, and those sections re-measured their links but not their prose. They are left
+   alone and named here, because renumbering them means re-deriving what the author pointed at, which is a separate
+   fix and not this one.
+5. **Gates and provenance.** `PATH="$HOME/.local/bin:$PATH" tools/lint.sh python` ok (ruff 0.16.7, check and format
+   clean, 205 scripts parse at the declared 3.13 floor); `tools/lint.sh docs` ok (87 documents, 102/106 python suites
+   registered in CI); the CI markdown-link step (`ci.yml:1008-1038`) run locally on this tree: **187 local links
+   checked, 0 broken, exit 0**. `test_tinytitan_price_pair` is already named in CI (`.github/workflows/ci.yml:974`),
+   so AUD-211 does not apply. `ruff format` was run on the two
+   files this change touches, and nothing else. Machine: M3 MacBook Pro, 24 GiB, macOS 27, Xcode 27 / Swift 6.4, on
+   AC power at 100 %; HEAD `f1b8346`; no model process was started and nothing under `sources/` was touched. None of
+   it is evidence that a CI run executed the suites.
