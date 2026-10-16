@@ -60,6 +60,40 @@ BASELINE = "base"
 DRIFT_CONTROL = "base_again"
 PROMPT = "Write a detailed essay about the history of computing."
 
+# The 25 links §5al's gate keeps, keyed by the *source* layer of the L -> L+1 link
+# the engine deepens. Written out rather than regenerated so the arm names the
+# configuration it measured; `--top-m 2` over the frozen trace reproduces it.
+LAYER_DEPTH25 = ",".join(
+    f"{layer}=2"
+    for layer in (
+        1,
+        4,
+        5,
+        6,
+        7,
+        11,
+        12,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        26,
+        28,
+        32,
+        33,
+        34,
+        35,
+        37,
+        40,
+        43,
+        44,
+        45,
+        46,
+    )
+)
+
 # Every arm is one env delta from the shipped defaults, so a win is
 # attributable. Combinations come later, built from what wins here.
 ARMS: list[tuple[str, dict[str, str], str]] = [
@@ -161,6 +195,20 @@ ARMS: list[tuple[str, dict[str, str], str]] = [
         "async_pread",
         {"TINYTITAN_DECODE_EXPERT_EXECUTION": "gpu-residency", "TINYTITAN_EXPERT_IO_SYNC": "event"},
         "GPU classification + event sync on pread -- avoids the MTLIO crash",
+    ),
+    # §5al scored the *per-link* value of a second speculative read on the frozen
+    # ring-off trace, with the shipped screen at adjacent ring depths. It found an
+    # 8.1x spread (slot-2 precision 0.093-0.752 over 47 links) and that gate 0.45
+    # keeps 25 links: 5,694 extra reads for a 384-token run (14.83/token instead of
+    # uniform depth 2's 29.6), at a realised 0.546 precision. Two price models put
+    # the payoff between -2.15% and +6.21%, and the whole point of the ladder
+    # (§5l: depth 2 everywhere = -6.2% against depth 1) was that the average is
+    # meaningless when the spread is that wide. An offline screen cannot see *when*
+    # the extra bytes land, so this arm exists to settle the sign on a live machine.
+    (
+        "layer_depth25",
+        {"TINYTITAN_PREFETCH_LAYER_DEPTH": LAYER_DEPTH25},
+        "§5al: depth 2 on the 25 links whose slot-2 precision clears 0.45",
     ),
     ("base_again", {}, "drift check -- must match base"),
 ]
