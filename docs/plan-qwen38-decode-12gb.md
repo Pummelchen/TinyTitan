@@ -58,10 +58,16 @@ semantics*, first-touch bound 93.6%.
 - **Numerics work needs two keys before code: the operator's sign-off and a
   golden re-capture.** §6 stages do not start without both.
 - **The falsifier for any performance arm**: `TINYTITAN_RUNNER_STATS` must
-  show `io_hidden_pct` **and** throughput rising together. An arm that raises
+  show a mechanism counter and throughput moving together. An arm that raises
   one and not the other is a failed arm; the pairing has never been observed
   and treating either alone as a win is the error the prefetch study warned
   about.
+  *Amended by §5w:* the counter to pair is the **device-side** one
+  (`TinyTitan kernel busy_ms=…`, `TinyTitan gap …`), not `io_hidden_pct`.
+  That gauge measures host blocking and moves 0.06 points across a 12.2 %
+  clock change, so it cannot certify an overlap claim; §5ap and §5ax both
+  refuse to quote it for one. Keep reading it — it is the right instrument
+  for host waits — but never as the overlap half of a falsifier.
 - **Model runs need the window**: `pgrep -fl
   'TinyTitanServer|TinyTitanCLI|TinyTitanPackageTests|swiftpm-testing-helper|mlx_lm|mlx-lm'`
   empty, `memory_pressure -Q` acceptable, macOS 26+, Xcode 27 / Swift 6.4.

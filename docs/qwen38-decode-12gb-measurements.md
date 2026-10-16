@@ -4490,6 +4490,14 @@ therefore has no traffic argument and no latency argument left in this configura
 **tighter slot budget** (§5r-§5s's axis, where arrivals are a larger share of what a layer holds and reads stop
 being hidden) or the **layer-selective depth** §5al left undecided — not a longer horizon.
 
+*Amended by the §5ax correction:* the `io_hidden_pct` = 99.89 clause is the move §5w forbids and §5ap declines to
+make — the counter measures host blocking, not device idle, so "almost entirely hidden already" was never evidence
+that arriving earlier buys nothing. The verdict survives without it. The traffic half of the argument never needed
+the counter (a slack arm adds no byte, it moves one), and the latency half rests on §5ah's 7 % correct-but-late
+share and on the two break-even models agreeing below both lines for the adjusted and unadjusted precision alike.
+Against the device ledger the correct basis for the same conclusion is the one §5ax now publishes: the wait is
+bytes ÷ a ceiling the burst already runs at 97 % of, so earlier arrival relocates the wait rather than removing it.
+
 Deviations.
 
 1. **One capture, one prompt, one configuration** — 383 decode positions, `--ram 12`, 96 slots, ring off, LFU order,
@@ -5750,9 +5758,32 @@ but the instrument does not say so, and #209 names that as its defect rather tha
 **What the lever is worth even when it pays.** +0.20 ms of a 226.2 ms token: **+0.09 %**, about +0.004 tok/s
 against 4.42. With `x` bounded only to ±0.1 at best and the threshold sitting between the two rounds' answers, the
 correct decision is not to spend a third and fourth round on it. Every I/O-policy lever the campaign has priced
-since §5ar lands in this ±0.1 %-of-a-token class, and `io_hidden_pct` says why: 99.7-99.9 % across all ten arms of
-both rounds, i.e. 0.5-0.7 ms of a 226-248 ms token is the entire SSD-exposed budget any feeder can reclaim. The
-remaining distance to the operator's 6 tok/s is not on the read path.
+since §5ar lands in this ±0.1 %-of-a-token class, and the reason is a bytes floor, not a hiding floor.
+
+**The headroom bound, corrected.** The first version of this section bounded the feeder prize with `io_hidden_pct`
+(99.7-99.9 % across the ten arms, hence "0.5-0.7 ms of a 226-248 ms token is all any feeder can reclaim"). That is
+the move §5ap refuses on the record — *"deliberately not quoted … unfit for an overlap claim"* — and §5w says why:
+the counter moves 0.06 points across a 12.2 % clock change, so it measures host blocking, not device idle. Against
+the device ledger the same campaign publishes, the idle is **52.803 ms/token — a quarter of the token** — so the
+first version understated the prize it was dismissing by 75-100×. The bound has to come from §5w's other line,
+which is the one that survives: the gap is *predicted* from the read bill at the drive ceiling on five arms
+(203.55 MB/token ÷ 3.92 GB/s = 51.93 ms against 52.803 measured, ratio 1.017), and the in-burst delivered rate is
+97 % of that ceiling. A constant feeder therefore cannot shorten this wait by scheduling it better — the pipe is
+already flat out, and moving the burst earlier relocates the wait rather than removing it. Only fewer bytes cut
+it, at **0.255 ms per MB**, and the prices below stay inside §5w's own 217.34 ms token so no clock crosses a
+batch: +1 % of tok/s needs 2.15 ms, i.e. 8.4 MB/token — 3.1 of the 73.5 experts a token reads, 4.1 % of the bill;
++5 % needs 19.9 % of it. That is a capacity question, and §5w's closing line already answered it —
+*"No capacity route is left that does not need more RAM"* — under the operator's 12 GiB cap. So the
+read path is closed on the byte floor and on the ceiling it is read at, not on a host-blocking percentage that was
+never able to measure it. The overlap half of the question is separately closed too: reclaiming a window needs
+something to consume it, and §5w measured that this idle "is not spare worker capacity". One extrapolation of §5w's
+predictor to its own limit, stated as arithmetic on published figures and not as a measurement: take the bill to
+zero bytes, so the gap goes too, and §5w's batch is 164.5 ms/token — **6.08 tok/s** (6.05 from the predicted gap;
+the five arms put that predictor within ±6.4 %). So 6 tok/s on this composition means every routed expert byte
+gone, which is the RAM §5w says is not there, and 7 tok/s means cutting a further 21.7 ms out of what is left
+*after* the reads — the other half of §5w's ledger, not a feeder. Nothing on the read path reaches the goal even at
+its ideal, which is a stronger statement than the one the `io_hidden_pct` paragraph made and the one worth carrying
+forward.
 
 **prefetch_off's sign, settled against §5aw's round 1.** Round 1 read `prefetch_off` at +4.5 % over a baseline
 that itself fell 9.9 % during the sweep. The two clean rounds read it at −6.0 % and −3.5 % with a 1.7 % and 5.4 %
@@ -5778,9 +5809,24 @@ withdrawn exactly as §5aw withdrew it for other purposes.
    machine. Both rounds still passed their own drift gate.
 5. **`/tmp/trio206/` is throwaway.** Rounds 1-3 logs and the precondition blocks are not committed; the committed
    artifacts are the screen, its suite and this section.
-6. **Section numbering.** `## 5av` does not exist in this document and no other document refers to it; the sequence
+6. **A shipped error in this section, and what the correction changed.** §5ax's first version bounded the feeder
+   prize with `io_hidden_pct` — 99.7-99.9 %, hence "0.5-0.7 ms … is the entire SSD-exposed budget any feeder can
+   reclaim" — which is the exact move §5ap refuses on the record and §5w declares unfit (the counter moves 0.06
+   points across a 12.2 % clock change). It understated the idle it was dismissing by 75-100× (52.803 ms/token on
+   the device ledger) and argued from a host-blocking gauge to a device-side conclusion. The correction is in the
+   commit that follows `c069115`; it replaces that one paragraph and its conclusion, which becomes stronger rather
+   than softer (the byte floor plus the 97 %-of-ceiling burst rate put the read path's *ideal* at 6.08 tok/s, so no
+   feeder lever of any size reaches the goal). The two rounds' numbers, the sensitivity table, the `p*` verdict and
+   the `prefetch_off` sign are untouched, and so are the other deviations in this list. A reader holding `c069115`
+   alone should read the headroom bound as the byte floor, not as `io_hidden_pct`. The sibling uses of the same
+   counter were checked and amended the same way, not rewritten: §5ao's "the demand reads are almost entirely
+   hidden already" clause now carries an amendment saying which part of its verdict the counter was actually doing,
+   and [`docs/plan-qwen38-decode-12gb.md:60`](plan-qwen38-decode-12gb.md#L60)'s falsifier bullet now names the
+   device-side lines as the counter to pair. §5m's 0.075 % prize had already been amended by §5w itself, so this is
+   the second time since that ruling the gauge was reached for as an overlap argument — the count is the finding.
+7. **Section numbering.** `## 5av` does not exist in this document and no other document refers to it; the sequence
    runs §5au → §5aw → §5ax. Recorded so a reader looking for a lost section does not spend a session on it.
-7. **Provenance.** §5aw's screen landed at `fd3823e` and its notes at `7ebbba1`, both on `main`; both rounds ran
+8. **Provenance.** §5aw's screen landed at `fd3823e` and its notes at `7ebbba1`, both on `main`; both rounds ran
    against that tree, unmodified, with a binary newer than every source file. Gates seen locally before
    committing this section: `tools/lint.sh docs`, `tools/lint.sh python`, the CI markdown-link step, and the price
    screen's own suite. None of it is evidence a CI run executed them; it is evidence that the tree this section
