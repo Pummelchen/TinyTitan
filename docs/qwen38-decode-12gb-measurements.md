@@ -4265,3 +4265,263 @@ Deviations.
    [../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py)'s
    `load_trace` and `analyze` rather than duplicating a second screen, and nothing in them is a shipped arm.
 
+## 5an. #201 asks whether the two-layer-slack axis §5am left unscreened is blocked by predictability: a learned hop-2 ranking holds hop-1 precision (ratio 1.019-1.061), and the capture it called for then shows the engine's real probe does not (2026-10-16)
+
+§5am closed feeding *across tokens* and ended on a sentence that needs qualifying here: "Depth-1 lookahead in
+**layers** is the only place where this model's future is readable." What §5am actually measured is that a name
+carried from one token to the next is already resident by the time it is demanded. It did not measure whether
+layer L+2 is readable *from* layer L — it reported that the trace field which would say so, `next2_layer_prediction`,
+is empty in all 18 384 rows of the #194 capture. That is the third reading of the operator's "keep reading weights
+even if compute is doing stuff": not more reads per link (§5ak), not future tokens (§5am), but **more slack within
+the token** — issue for L+2 while layer L computes, and a read gets two layers of compute to land in instead of one.
+
+The `L -> L+2` link turns out not to need the engine's field at all. It is just the pair of observations at
+(`t`, `L`) and (`t`, `L+2`), and the frozen ring-off capture has 17 618 of them against 18 001 hop-1 links — the
+same 383 positions, 46 layers instead of 47. So the predictability question is screenable offline, on the
+substrate §5al requires (ring off) and the policy §5ak put in the screen (filter-then-cap).
+
+### Three arms, and one of them exists to prove the script leaks nothing
+
+All three rank with the shipped `rank_transition`, on tables keyed by layer, and every link is scored before the
+position's pairs are folded in — the shipped screen's anti-leakage order
+([../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py#L189)),
+reproduced rather than trusted:
+
+- **C** hop-1: `L`'s route ranks names for `L+1` through an `L -> L+1` co-occurrence table. This is the decay
+  denominator, and it is also the control — the shipped screen scores the same arm independently.
+- **A** hop-2, weakest: `L`'s route ranks names for `L+2` through an `L -> L+2` table. No prediction at all, just
+  the same learned co-occurrence one layer further out.
+- **B** hop-2 through the probe: the engine's own recorded `L+1` prediction (`source.next_layer_prediction`, the
+  list the shipped ring actually reads) is composed with the learned `L+1 -> L+2` table, so each name the real
+  probe offers is carried one layer further. Because the layer sweep at a position runs ascending, the table B
+  reads has only strictly-past positions in it — the current position's `L+1` pairs are folded in after B scores.
+
+| depth | arm C hop-1 | arm A hop-2 | arm B hop-2 | A/C | B/C | shipped `recorded` | A extrapolated | B extrapolated |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 0.6385 (805 / 514) | **0.6506** (601 / 391) | 0.5727 (557 / 319) | **1.019** | 0.897 | 0.5223 (15 257 / 7 968) | **0.5321** | 0.4684 |
+| 2 | 0.6160 (1 190 / 733) | **0.6534** (854 / 558) | 0.5649 (793 / 448) | **1.061** | 0.917 | 0.4760 (26 594 / 12 660) | **0.5050** | 0.4366 |
+| 4 | 0.6078 (1 545 / 939) | **0.6384** (1 048 / 669) | 0.5567 (997 / 555) | **1.050** | 0.916 | 0.4269 (39 274 / 16 768) | 0.4484 | 0.3911 |
+
+Precision is issues / useful under the shipped policy; the last two columns are the ratio applied to the shipped
+`recorded` arm, not a measurement of it. The control passes exactly: arm C reproduces the shipped screen's
+`transition` row to the count at all three depths (805 / 514 / 0.6385, 1 190 / 733 / 0.6160, 1 545 / 939 / 0.6078),
+so this script's table order and its `candidate_limit` behave like the shipped one's.
+
+**One hop out, precision does not decay — it rises slightly and holds.** The ratio is above 1 at every depth, and
+the warm subset (positions ≥ 60, away from the cold-start ramp) says the same thing: 0.6535 against C's 0.6425 at
+depth 1, 0.6562 against 0.6185 at depth 2, 0.6414 against 0.6110 at depth 4. That is the §5am result in reverse:
+**across tokens the future is unreadable, across layers it is nearly as readable as the next layer is.** What does
+decay is recall (0.0128 against 0.0160) and raw top-k agreement (0.0684 against 0.0722), which is expected — the
+set two layers out is a different set, so a ranker that is precise about it is precise about fewer of the misses.
+**What this does not license is the inference one would most want from it** — that the engine's own probe decays the
+same way one hop out. That is a claim about a different ranker, and §5ao measures it at 0.808 rather than 1.019.
+
+### The demand pool is not the binding constraint either
+
+| horizon | scored links | target-side demand misses | per link |
+|---|---|---|---|
+| 1 (`L -> L+1`) | 18 001 | 32 046 | 1.78 |
+| 2 (`L -> L+2`) | 17 618 | 30 649 | 1.74 |
+
+And on this substrate every one of those is genuinely available to an early feeder, by structure rather than by
+counting: with `TINYTITAN_PREDICTIVE_PREFETCH=0` nothing else can have staged them, so a name in `L+2`'s miss set
+is absent from the moment `L` computes until `L+2` demands it. Two honest limits sit next to that. The misses are
+counted against the *target's own* pre-plan resident view, so a live arm running *beside* the shipped 1-layer ring
+would see its room shrink by whatever the ring already staged — §5ah measured the ring converting 19.25 of ~39.5
+reads a token, and that overlap is not modelled here. One statistic that would have looked good in this section was
+measured and then dropped: the share of `L+2`'s misses whose expert id also appears in `L`'s resident view, or in
+`L+1`'s route. Both are cross-layer comparisons over an id space, and the cache is keyed by (layer, expert), so
+"resident at `L`" says nothing about slot `(L+2, id)`; the 0.190 / 0.182 figures that came out of it are properties
+of the id union, not of the feeder's room, and they are recorded here only so the next session does not reuse them.
+
+### What the two price models make of it, and what only a capture can settle
+
+§5al left this campaign with two break-even precisions for one extra read per link: **0.4579** on the optimistic
+constant (`B = +5.142`, `K = −2.184` per read, CONV 0.9277) and **0.8403** on the pessimistic one. The hop-2
+extrapolation sits above the first at depths 1 and 2 (0.5321, 0.5050) and at depth 4 below both (0.4484); arm B
+clears the optimistic line only marginally (0.4684). So the screen said what §5al's arm B said: **the
+predictability objection is void, and the price question is still open.** The asymmetry that decided §5am was
+absent — a feeder issued at layer L has a causal input either way, because layer L+2's router can be run on L's
+residual rather than on a route that has not been drawn yet.
+
+What the screen could not supply was the *arm a shipped engine would actually run*: not a learned co-occurrence
+table but the second probe's own ranking, and whether that ranking still aims one layer further out. The flag for
+it already exists and needs no code —
+[RealForwardRunner.swift:156-160](../sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift#L156)
+reads `TINYTITAN_PROBE2_TRACE=1`,
+[RealForwardRunner+DecodeLayers.swift:179](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L179)
+encodes layer L+2's router on `hidden: routedX` (L's residual) into a dedicated buffer, and
+[RealForwardRunner+DecodeMoE.swift:80](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L80)
+is its **only** consumer: the value reaches the trace line and nowhere else. The #194 capture simply did not set
+the flag.
+
+**That run was made in the same session, and it refutes the extrapolation.** The engine's real hop-2 probe scores
+0.4223 against the hop-1 probe's 0.5223 — a ratio of 0.808, not 1.019 — and its non-duplicate reads are worth
+0.240, below both break-evens. §5an's learned-table arms therefore describe how *a table* behaves one hop out, not
+how *the probe* does, and the two disagree in sign. The measurement is §5ao; this section stands as the record of
+the screen that came to the wrong conclusion and of the check that caught it.
+
+Deviations.
+
+1. **Both hop-2 arms are learned-table arms on one capture** — one essay prompt, 383 decode positions, `--ram 12`,
+   96 slots, ring off, no clocks. Arm A issues 601 reads where the shipped ring issues 15 257, so its precision
+   rests on a sample 25x smaller than the number it is being used to discount, and a table arm is only as
+   conservative as its sparsity: 601 issues in 17 618 links means it declines to name almost everything.
+2. **The extrapolated columns are arithmetic, not measurement, and they were wrong.** They transfer a ratio
+   measured between two learned-table arms onto a recorded-probe arm whose ranker is different, which assumes the
+   two kinds of ranker decay at the same rate one layer out. §5ao ran the capture that tests the assumption and it
+   failed: the measured hop-2 recorded precision is **0.4223**, a ratio of 0.808 to the same probe at hop 1, not
+   the 1.019 predicted. The columns above are kept because the mistake is the finding — a learned co-occurrence
+   table is not a proxy for the router probe, and the campaign's screens should not treat one as the other.
+3. **The control is the reason to believe the order.** Arm C equals the shipped screen's independent `transition`
+   row at all three depths to the read, which is what rules out the leakage this script could most easily have
+   introduced (a hop-2 table folded in before its own links were scored). No second check on that exists.
+4. **Precision is not adoption and not speed.** Nothing in this section measures whether a read issued at `L`
+   lands before `L+2` demands it, how much queue it competes with, or what it evicts; §5ah's late pool (7 % of
+   discarded reads) is the shape of that question and it was already too small to measure there.
+5. **Warm subset uses `WARM_START = 60` positions**, chosen as comfortably past the ramp §5am located at
+   positions 10-12; the all/warm pair is reported side by side rather than one being the headline, because the
+   difference between them never exceeded 0.006 precision.
+6. **Nothing in `sources/` or `benchmark/` moved.** Docs-only, as in §5af-§5am, so the golden baseline is **not
+   checked**. Provenance: `HEAD d4189f6` with this file the only modification, `memory_pressure -Q` 72 % free,
+   AC power 100 % finishing charge, load average and swap as read at the capture's start below, Swift 6.4 /
+   macOS 27.0.1, `pgrep` guard empty before the offline work. Every figure in the tables above is a deterministic
+   read of the same frozen file §5al and §5am were built on (`/tmp/trace194/off.jsonl`, md5
+   `67d221e2546baca4b26d1e66aaa360ae`). The arithmetic lives in throwaways under `/tmp/slack/` (`hop2.py` for the
+   three arms and the extrapolation, `room.py` for the miss-pool counts; its cross-layer "already resident" column
+   is the statistic deviation above rejects), deliberately not added to `benchmark/`: they reuse
+   [../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py)'s
+   `load_trace`, `Link`, `rank_transition`, `stage_filter_first` and `analyze` rather than duplicating a second
+   screen, and nothing in them is a shipped arm. The capture this section calls for was run in the same session and
+   its figures are §5ao; the machine readings above were taken before it, and none of §5an's numbers is a clock.
+
+## 5ao. #202 runs the capture §5an called for and prices the slack-in-layers axis: the engine's real two-layer-ahead probe keeps 0.808 of the one-layer probe's precision (0.4223 against 0.5223), and once its duplicated reads are removed it is at 0.240 — below both of §5al's break-evens (2026-10-16)
+
+§5an ended on an inference it could not test and told the next reader exactly what would test it. This section is
+that run. One model run, no code change: the flag
+[RealForwardRunner.swift:156-160](../sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift#L156)
+already exists, the L+2 router encode at
+[RealForwardRunner+DecodeLayers.swift:179](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeLayers.swift#L179)
+already runs on layer L's residual, and
+[RealForwardRunner+DecodeMoE.swift:80](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoE.swift#L80)
+is still the only consumer — the value reaches the trace line and nowhere else, so nothing here is a shipped arm
+and nothing here needed a rebuild.
+
+```
+TINYTITAN_RUNNER_STATS=1 TINYTITAN_PREFETCH_TRACE=/tmp/trace200/probe2.jsonl \
+TINYTITAN_PROBE2_TRACE=1 TINYTITAN_PREDICTIVE_PREFETCH=0 \
+  .build/release/TinyTitanCLI --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0 --max-context 262144
+# exit 0; 18 384 trace rows; md5 caf3128e9ddc7fdd1e0394bc63b20bc9 (14 701 537 bytes)
+```
+
+### Two controls, both of them exact
+
+The field is populated where #194's was empty: **17 618 of 18 384 rows carry a full ten-name
+`next2_layer_prediction`**, and the 766 that do not are exactly layers 46 and 47 of each of the 383 positions — the
+rows with no `L+2` to predict. Two things had to be checked before any of that could be scored.
+
+1. **Does the field name the layer it claims to?** Mean overlap with the actual top-10 route of the layer it should
+   describe versus its neighbour: **5.952 of 10 against layer `L+2`'s route, 0.191 of 10 against `L+1`'s.** The
+   alignment is the documented one, not an off-by-one artefact of where the readback lands.
+2. **Did turning the probe on change the engine the numbers are measured on?** It did not, and this is the check
+   that matters most, because every precision figure below is a claim about cache state. Scored per observation
+   against the frozen `/tmp/trace194/off.jsonl` (md5 `67d221e2546baca4b26d1e66aaa360ae`), all four traced fields —
+   `experts`, `misses`, `resident`, `next_layer_prediction` — are **identical on all 18 384 rows**, and the run's
+   own counters repeat the #194 ring-off arm to the read: `expert_hits=150131`, `expert_misses=35901`,
+   `expert_evictions=31293`, `expert_reloads=22986`, `expert_read_mib=94801.1`, `hit_fixup_layers=13304`,
+   `io_host_waits=13304`, `rdadvise_calls=33518`, `prefetch_issued_per_token=0.00`. Route identity across 18 384
+   observations is also the response-identity evidence §5ah got from an md5 of the text; the greedy decode
+   followed the same tokens, so the two captures are the same engine run with one more field written.
+
+### The real probe, one hop out
+
+Same file, same `recorded` ranker, same shipped filter-then-cap policy, `analyze` on the hop-1 link and the hand
+score below on the hop-2 link — and the hop-1 arm re-scored **on the new file** reproduces §5ak's figures exactly
+(15 257 / 7 968 / 0.5223 / 0.2486), which is what lets the two columns be read as one comparison.
+
+| measure | hop 1 (`L -> L+1`) | hop 2 (`L -> L+2`) | ratio |
+|---|---|---|---|
+| names of the real top-10 route hit, of 10 | 6.709 | 5.952 | 0.887 |
+| slot-1 name present in the route | 0.9193 | 0.8677 | 0.944 |
+| rank-ordered (positionwise) matches | 0.1575 | 0.1272 | 0.808 |
+| issues / useful under the policy, depth 1 | 15 257 / 7 968 | 15 455 / 6 527 | 1.013 / 0.819 |
+| **precision** | **0.5223** | **0.4223** | **0.808** |
+| recall of the target's demand misses | 0.2486 | 0.2130 | 0.857 |
+
+Depth 2 and 4 behave the same way they do on hop 1, only lower — 27 444 / 10 240 / 0.3731 (recall 0.3341) and
+41 610 / 13 560 / 0.3259 (recall 0.4424), against hop-1's 0.4760 and 0.4269; the warm subset (positions ≥ 60) is
+0.4096 / 0.3611 / 0.3142. **§5an's extrapolation was wrong in the direction that mattered.** Its learned-table arms
+predicted a ratio of 1.019 and a shipped-arm landing at 0.5321; the probe measured 0.808 and 0.4223. The set
+accuracy only falls 11 % (6.709 → 5.952) and slot-1 accuracy only 6 % (0.9193 → 0.8677), so the loss is not mainly
+in naming the route — it is in naming route members that are *still absent* when demanded, which is the thing a
+feeder has to hit. That is where a co-occurrence table and a router probe part company, and it is why the screen's
+answer could not be trusted.
+
+### 42 % of the early reads are reads the engine was already going to make
+
+The two probes are not alternatives — a feeder running the hop-2 probe would run *beside* the shipped ring, and the
+shipped ring stages for layer `L+2` one layer later. Both arms therefore name experts in the same (layer, expert)
+key space, so the overlap is a real duplication count rather than the cross-layer id union §5an had to reject:
+
+| depth | early issues | also issued by the ring | marginal issues | marginal useful | **marginal precision** | ring's own, same target |
+|---|---|---|---|---|---|---|
+| 1 | 15 455 | 6 443 (0.417) | 9 012 | 2 160 | **0.2397** | 14 874 issues / 7 811 useful |
+| 2 | 27 444 | 12 137 (0.442) | 15 307 | 2 522 | 0.1648 | 25 828 / 12 402 |
+| 4 | 41 610 | 18 716 (0.450) | 22 894 | 2 546 | 0.1112 | 37 748 / 16 376 |
+
+Read the depth-1 row as the arm a live engine would run: adding the second probe to the shipped ring costs **9 012
+extra reads to remove 2 160 more demand misses — precision 0.240** — while raising total coverage from 7 811 to
+9 971 useful reads (+27.7 %) on 14 874 to 23 886 issues (+60.6 %). Against §5al's two price models for one extra
+read per link, the break-evens are **0.4579** (optimistic `B = +5.142`, `K = −2.184`, CONV 0.9277) and **0.8403**
+(pessimistic). **0.240 is below both, and so is the unadjusted 0.4223** — for the first time in this stretch of the
+campaign the two models agree on a sign, because the arm is not near either line.
+
+### The other reading of "constant", and what it does not buy
+
+The 6 443 duplicated reads are the version of the operator's idea that this section cannot price as a cost: those
+bytes are spent by the shipped engine anyway, and knowing them one layer sooner moves them out of the demand burst
+without adding a byte. That is genuinely the "keep reading while compute works" shape. It is also the one the
+campaign already priced from the other side: §5ah found **7 %** of the ring's discarded reads were correct-but-late
+and called the pool too small to measure, and this run's own `io_hidden_pct` is 99.89 — the demand reads are almost
+entirely hidden already, so a read that arrives earlier than an already-hidden read hides nothing. The slack arm
+therefore has no traffic argument and no latency argument left in this configuration. What would reopen either is a
+**tighter slot budget** (§5r-§5s's axis, where arrivals are a larger share of what a layer holds and reads stop
+being hidden) or the **layer-selective depth** §5al left undecided — not a longer horizon.
+
+Deviations.
+
+1. **One capture, one prompt, one configuration** — 383 decode positions, `--ram 12`, 96 slots, ring off, LFU order,
+   greedy. The duplication counts and precisions are deterministic reads of that file, and §5al's r = 0.922
+   session-stability result is what makes them worth reading as a shape rather than a one-off; they are still one
+   prompt's shape.
+2. **Marginal precision is a counterfactual against a ring that was not running.** The substrate rule (§5al) forces
+   ring off, so the "also issued by the ring" column is what the shipped ring *would* have staged from the same
+   pre-plan `resident` snapshot, not what a live co-running pair would each find still absent. A live arm would see
+   the earlier read land, and the ring would then skip it — which moves bytes between arms rather than adding them,
+   and is exactly why the marginal column, not the total, is the one compared to the break-evens.
+3. **The run's clock is not a magnitude and is not used as one.** It read `decode_tok_s=2.636` against the #194
+   ring-off arm's 4.496, with `body_ms` 354.7 against 204.2, `wait_ms` 229.7 against 96.1 and the engine's own
+   `router_readback_ms` 0.0401 against 0.0194. That is a cross-batch comparison — the paired-benchmarking rule this
+   campaign follows forbids reading it as an effect — and the second router dispatch plus a ten-index host readback
+   per layer per token is tracing overhead a shipped feeder would not pay, since the prediction would stay on
+   device. What can be said from it is only that the capture is not a speed run, which is what §5an predicted
+   before making it. Nothing here prices the probe itself; if a future arm needs that, it is a paired A/B.
+4. **The two 0.808s in the probe table are different quantities that happen to agree.** Rank-ordered match rate and
+   policy precision both fall by that factor; nothing makes one follow from the other, and the coincidence is not
+   evidence.
+5. **`next2_layer_prediction` is still trace-only.** This section measures what a feeder *would have aimed at*; it
+   does not add a feeder. `sources/` did not move, so the golden baseline is **not checked**.
+6. **Nothing in `sources/` or `benchmark/` moved.** Docs-only, as in §5af-§5an, so the golden baseline is **not
+   checked**. Provenance: `HEAD d4189f6` with this file the only modification, and the tree's sources unchanged
+   since `9c858cd` (04:28:32) against a CLI built at 04:29, so the binary is HEAD's sources. Preconditions read
+   once immediately before the run: `pgrep` guard empty, `memory_pressure -Q` 72 % free, AC power 100 % finishing
+   charge, 283 GiB free on the data volume, Swift 6.4 / macOS 27.0.1 on this campaign's 24 GB M3 MacBook Pro, one
+   model process start to finish. The screen arithmetic lives in `/tmp/slack/probe2.py` (controls, both horizons,
+   the duplication count) and `/tmp/slack/hop2.py` (§5an's arms), deliberately not added to `benchmark/`: they reuse
+   [../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py)'s
+   `load_trace`, `Link`, `stage_filter_first`, `analyze` and `Counters` rather than duplicating a second screen, and
+   nothing in them is a shipped arm. The capture is `/tmp/trace200/` and, like every other trace in this campaign,
+   is not committed.
+
