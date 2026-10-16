@@ -6484,6 +6484,11 @@ Deviations:
 
 ## 5bc. #213 runs §5bb's named screen: the byte-floor bar was the wrong price, the exposed-idle band is 11.93–33.52 %, and on two live traces slots 0–2 pay under every reading while slot 3 is undecidable offline (2026-10-16)
 
+*Read the §5bc correction below before quoting this heading. The band correction, the reproducibility
+findings, the adoption bias and the duty table stand — they are depth-1 and byte statements. The title's
+verdict on slots 1–2 does not: this screen's extrapolation past depth 1 was already falsified on live arms
+by §5ak (doc line 3854), and §5al priced the identical read pool at −6.20 % (doc lines 3980, 4046).*
+
 §5bb ended by naming the next screen: *"(events converted × 2.17) − (added bytes ÷ 3.92 GB/s) −
 (the phase1_2 line's own growth) … That is the screen to run next."* It is run, and the first
 thing the run found is that the formula's three terms do not divide by the same denominator —
@@ -6572,6 +6577,42 @@ pessimistic corner **between slot 2 and slot 3**, on two different access patter
 crosses the optimistic corner. The screen's stop rule therefore puts the useful width of the
 feeder at **three reads per link**, not one — a claim §5aq could only reach on wall clock.
 
+**Amended (same day, after publication).** That paragraph is withdrawn for slots 1 and 2 — the
+"pays under every reading" verdict on them and the "three reads per link" width with it. The reason
+is not that the arithmetic is wrong; it is that **slot 1 is not a new arm.** §5al already scored the
+same pool on the same trace: *"Slot 2 pooled over the trace is 4 692 useful against 11 337 extra
+reads = 0.4139"* (doc line 3980), which is this table's slot-1 precision 41.39 % to the digit, and
+11 337 ÷ 384 = 29.52 reads/token, which is §5al's uniform-depth-2 row exactly (doc line 4046). §5al
+prices that arm at **−6.20 %**; this band prices it at **+1.200 → +8.165 ms/token**. One of the two
+is wrong about an arm the machine has already run, and the tie-breaker is not a model.
+
+The tie-breaker is §5ak, which ruled on this sentence before this section existed: *"The screen's
+depth-1 row validates; its extrapolation to depth > 1 is **falsified by the engine**"* (doc line
+3854), on a live ladder measured **M=1 +12.2 %, M=2 +6.0 %, M=4 −9.8 %** against one control in one
+batch (doc lines 3867-3870). It also named the term the band cannot see: the drive is saturated
+while it reads, so *"a second speculative read steals service from the demand burst it was meant to
+anticipate and lands too late to be adopted"*, and *"The `useful` counter has no arrival time in it,
+so depth beyond one is outside what the screen measures"* (doc lines 3872-3875). §5al found the same
+term from the price side: its optimistic fit reproduces the depth-1 and depth-2 anchors exactly and
+then predicts **−15.1 %** against a **measured −9.8 %** at depth 4, because *"a constant per-read
+cost under-prices the third and fourth reads, because each one contends longer with the demand
+burst"* (doc lines 4034-4037). This band is the **fifth** curve on that trace to say depth 2 and 4
+beat depth 1 — §5ak's three priced ladders (doc lines 3858-3866) plus §5al's optimistic fit are the
+first four — and a fifth model of an axis is not evidence against the arms that closed it.
+
+Where the band's cost term comes from is the whole error. `ms_per_issued_read`
+([:189](../benchmark/tinytitan_prefetch_trace_analysis.py#L189)) is the ring's own device line growth
+divided by its issues **on the shipped depth-1 arm**: one read per link, issued one layer ahead, most
+of it landing inside the window. Slot 1's marginal read is charged that in-time price because the
+screen has no other, and §5bb's ledger — which is what the band is built from — never contained a
+depth-2 arm. **What this section keeps:** the correction of the two denominators, which is a depth-1
+statement and a real one (2.17 ms is per converted *event*, not per read, and 0.74066 ms is drive
+*busy* time, not a cost the host pays); the byte-reproducible capture; the +2.7–3.6-point adoption
+bias, which if anything understates slot 1 since a read issued later must miss more often; and the
+duty table, which counts bytes rather than prizes and so is untouched by any of this. The depth lever
+stays where §5ak left it: *"the depth lever is closed by the engine's own paired series, and this
+section adds nothing to it."*
+
 ### Three cross-checks, and what they say about the instrument
 
 - **The capture reproduces a frozen file to the byte.** `/tmp/bc213/essay.jsonl` and
@@ -6628,6 +6669,18 @@ one of which is checkable offline:
    +4.409 ms per token` over the ring's own line is one round's slope; if the line grows
    superlinearly once `free.count` truncation and eviction bite, the band's corners move and the
    ladder's crossing moves with them.
+
+**Amended:** neither term was open. Term (1) is §5ak's named mechanism (doc lines 3872-3875) and
+§5al's depth-4 falsifier (doc lines 4034-4037, −15.1 % predicted against −9.8 % measured); term (2)
+is §5al's optimistic fit itself, solved from the M=1 and M=2 anchors, reproducing both exactly, and
+wrong by 5.3 points one rung up. §5ap's live gate-0.45 arm (**−8.4 %** over four interleaved rounds)
+is the closest of the three, and its own conclusion is the sentence this band should have been
+written against: *"the cheaper-than-predicted traffic still cost 8.4 %, because the loss is not in
+the bytes, it is in adoption"* (doc line 4631) — the counters showed 33 extra reads a token *removing*
+10.5 adopted reads, one for each demand hit the arm loses (doc line 4536). §5aq's −8.1 % / −12.1 %
+are further live data on the same side. The sign was settled before this section ran; what this
+section added was a fifth model that re-opened a settled question, and the section above shows why
+the models lose here.
 
 **Blind spots, named:** residency is held fixed at the ring-off world, so the eviction a deeper
 ring causes is invisible to the screen; lateness is not modelled at all; and the band is two
@@ -6691,3 +6744,22 @@ model run, and the prefetch trace already carries both lists it needs (`experts`
 per-slot issued set), so no new capture is required. If the evicted-slot term swallows slot 1's
 +1.2 ms/token, this section's ladder is wrong and §5aq stands; if it does not, then the depth
 question is ready for one paired live arm on the 25-link and uniform widths in the same batch.
+
+**Amended, and this paragraph is withdrawn with the ladder.** A residency replay prices the pool
+occupancy a deeper ring causes; it does not price arrival time, which is the term §5ak says the
+trace cannot carry (*"The `useful` counter has no arrival time in it"*), so running it would have
+produced a sixth offline depth curve over an axis the engine closed with one batch and one control.
+Task #214 — screen the lateness term offline — is retired for the same reason: an honest offline
+lateness price needs a per-read arrival timestamp, the trace has none, and adding one is a change to
+the engine's instrument rather than to `benchmark/`, made to re-open a lever that §5ak, §5al, §5ap
+and §5aq all closed in the same direction. Nothing it could screen is open, so it is not worth a
+`sources/` change.
+
+What is left of the feeder question is therefore slot 0 only — the shipped depth, priced correctly
+for the first time by the band above — and the campaign's one positive-side candidate, §5ar's
+withholding arm: a six-link depth-0 list that transfers out-of-sample at S/L = 6.44 and is worth
++0.05 % to +0.32 %, which §5ax and §5az then found the instrument cannot settle on this machine
+because `x` is a difference of two solving rows' steps. The duty table's answer to the operator's
+premise stands regardless: the drive is idle about two thirds of every token at the shipped
+configuration, and filling that idle with *more* reads is not the lever — §5ap's counters say extra
+reads cost adoption rather than buy it.
