@@ -4549,7 +4549,7 @@ What the sweep could not do was answer the hash half of that sentence. It compar
 generated the same text, so a rate could have been a rate at different work. `2a06f7b` adds the check: the streamed
 completion is reassembled from `delta.content` only — `reasoning_content` is a separate channel and is deliberately
 not hashed — at
-[../benchmark/tinytitan_knob_sweep.py:337](../benchmark/tinytitan_knob_sweep.py#L337), hashed per arm at `:365`,
+[../benchmark/tinytitan_knob_sweep.py:347](../benchmark/tinytitan_knob_sweep.py#L347), hashed per arm at `:375`,
 and `verdict()` now refuses a page whose arms disagree (`CONTESTED`, status 1) or where an arm streamed nothing
 (status 2). 47 tests in [../benchmark/test_knob_sweep_verdict.py](../benchmark/test_knob_sweep_verdict.py),
 ruff 0.16.7 clean.
@@ -4739,7 +4739,7 @@ uniform depth 1) is the fastest arm in the round, so the cell the reopen asked f
 identity is not an artefact of one arm or one round.
 
 Position is not doing this. The arms run in `ARMS` order
-([../benchmark/tinytitan_knob_sweep.py:306](../benchmark/tinytitan_knob_sweep.py#L306)), so the two depth pairs
+([../benchmark/tinytitan_knob_sweep.py:316](../benchmark/tinytitan_knob_sweep.py#L316)), so the two depth pairs
 span exactly two positions each (1→3 and 2→4) and a linear drift term cancels in the *difference of the
 differences*. Applying the control's −4.9 % as a linear ramp (−1.23 % per position) moves both levels by about
 −2.5 % and leaves the interaction where it is: roughly −9.6 % at 96 slots, −5.6 % at 64.
@@ -5060,6 +5060,11 @@ what an in-batch answer would look like and where it would land:
 | rows from §5ag × §5ap (two batches) | composed | 0.270 | 1.185 | 0.228 | +0.224 % | 2.7 % |
 | rows from §5ag × §5aq (two batches) | composed | 0.448 | 1.558 *(above band)* | 0.288 | +0.535 % | 4.5 % |
 
+*Added by §5at, which re-derived these rows: the last two solve the depth step's Δms from `body_ms` (29.591 ms).
+On the wall-clock Δms (30.220 ms) the same two rows give `x` 0.460, `y` 1.584, `p*` 0.290 — still above the band,
+so the conclusion this section draws does not depend on the choice, but the two prices do, and the table did not
+say which column it had read.*
+
 Gate column is `x·5.30 − y·0.82` over a 205.5 ms token, the out-of-sample S/L = 6.44 of §5ar's screen 1, which
 pays iff `p* > 0.155`. **The instrument's own falsifier is the interesting part:** if the in-batch trio returns
 `y` inside 0.788-1.301, the two-price linear model is confirmed and `p*` is known to ±0.02, which settles the
@@ -5145,3 +5150,166 @@ Deviations.
    `:314`→`:337` and `:342`→`:365` (§5ap, the stream reassembly and its hash), `:283`→`:306` (§5aq, the
    `ARMS`-order return). Six lines of comment were all that moved them; the constructs are unchanged, and the
    two markdown links are what CI's link check reads, so nothing else re-points them when the file shifts again.
+   **That last clause was false within one commit**: §5at added ten lines above all three and they moved again
+   (`:337`→`:347`, `:365`→`:375`, `:306`→`:316`, `:139` unchanged). Nothing guards a `#LNN` fragment — the link
+   check strips it — so each shift is found by hand or not at all.
+
+## 5at. #206's instrument could not print its own inputs — `COUNTERS` carried neither number §5as's price solve reads, so the named batch would have run 40 minutes and handed the identification back to a person with a log file; the seam closed, and §5as's geometry re-derived from published counters rather than remembered (2026-10-16)
+
+§5as's reopen is one command and two equations, and both equations are read from `prefetch_issued_per_token` and
+`prefetch_adopted_per_token`. Reading the driver instead of trusting the design found the gap: `run_arm()` keeps
+from the footer only the names listed in `COUNTERS`, and neither of those two was listed; `PRINTED_CELLS` and the
+table's header carried five counters, not seven. The page §5as said it would produce could not have been produced.
+The ring row the whole instrument turns on — 39.45 issued against 18.86 adopted — is in this file because a person
+read it out of the server log in §5ag, and after §5as the same hand step would have been required of a 40-minute
+batch whose own output was silent on the two columns the solve consumes.
+
+### The engine already emits both, unconditionally
+
+`prefetch_issued_per_token=%.2f prefetch_adopted_per_token=%.2f` sits in the same `TinyTitan runner …` diagnostic
+line as `io_ms` and the hit rate, at
+[../sources/TinyTitanLib/ServerModelSession+Diagnostics.swift:348](../sources/TinyTitanLib/ServerModelSession+Diagnostics.swift#L348),
+with no `if` in front of it, so a ring-off arm reports `0.00` rather than omitting the key. Nothing engine-side
+changed here; the gap was purely in the reader. That distinction is what makes the refusal below worth having: a
+missing cell can only be a driver that dropped a name or a footer that moved, never an arm that legitimately
+issued no reads.
+
+### The seam, test-first
+
+51 → 53 tests in [../benchmark/test_knob_sweep_verdict.py](../benchmark/test_knob_sweep_verdict.py). Both new
+`PricePair` tests were seen failing before the production change, and each says which seam it pins:
+
+```
+AssertionError: 'prefetch_issued_per_token' not found in ('expert_hit_rate', …, 'expert_load_p50_ms')
+AssertionError: Lists differ: ['4', '26'] != ['44.10', '12.35']
+```
+
+Then `COUNTERS` 9 → 11 names, `PRINTED_CELLS` 5 → 7, `table()`'s header and each row gained the two columns, and
+`verdict()`'s `NOT MEASURED: the {arm} arm logged no {key}` refusal now covers seven cells — so a page missing
+either counter exits 2 instead of printing `--` under a heading that promises a number.
+
+Both pins kill. The mutants were applied to the working file, run, and reverted; `git diff --stat` after the
+restore is byte-for-byte the diff before them:
+
+| mutant | test | outcome |
+|---|---|---|
+| the two `prefetch_*` names dropped from `COUNTERS` | `test_the_batch_parses_the_two_counters_the_price_solve_consumes` | FAIL, and the message names the counter |
+| the two row cells dropped from `table()`, header left intact | `test_the_table_prints_issued_and_adopted_reads_per_token` | FAIL: the row's last two cells read `['4', '26']` |
+
+The second is the one worth keeping. A table whose header promises a column its rows do not carry does not crash:
+the neighbouring columns shift into the price slots, and a reader keying `x` and `y` off it is quoted an eviction
+count as a cost per read.
+
+### The fixture was the bug, and both sides are named
+
+Widening `PRINTED_CELLS` broke 18 tests, every one reading `NOT MEASURED: the base arm logged no
+prefetch_issued_per_token`. Production was right — a printed column an arm did not log must refuse — and the
+suite's own `arm()` fixture was wrong: it logged five of the seven cells the table prints. The inventory of every
+test-file change, none of which loosens an assertion:
+
+| change | what it is |
+|---|---|
+| `CELLS` 5 → 7 names | the fixture logs a complete row, so the gate no longer refuses the fixture |
+| fixture counters gained `39.45` / `18.86` | a fixture row reads like a real ring-on arm, valued at §5ag's shipped tier |
+| `arm()` docstring "five" → "seven" | prose |
+| the `sync_event` row literal ends `… 26 39.45 18.86` | re-pinned: the table genuinely has two more columns |
+| all-`None` refusal row `["--"] * 5` → `["--"] * 7` | re-pinned: it still refuses, over seven cells now |
+| one-missing-column row appends `39.45`, `18.86` | re-pinned for the same reason |
+| header test gained `issued/pt`, `adopted/pt` | stricter, not looser |
+
+No run in this file was withdrawn, because there is no #205 or #206 measurement to withdraw.
+
+### The page now carries its own inputs
+
+`table()` called on §5aq round 1's published rows and §5ag's published ring-off row; cells those tables do not
+carry are `None`, so they print the refusal token. No model process, no server, nothing measured on hardware for
+this render:
+
+```
+arm               tok/s  vs base   hit%  io_hid%   io_ms   evict   waits issued/pt adopted/pt
+---------------------------------------------------------------------------------------------
+base               4.55    +0.0%   77.5       --    99.4   42313      --     42.75      22.85
+slots_64           4.47    -1.8%   77.4       --    99.1   42392      --     42.72      22.64
+layer_depth25      4.00   -12.1%   75.5       --   117.0   45927      --     76.03      13.43
+slots64_depth25    4.11    -9.7%   75.8       --   112.7   45489      --     76.22      14.58
+base_again         4.33    -4.8%   77.1       --   101.6   43004      --     42.57      21.05
+prefetch_off       4.79    +5.3%   80.7       --    85.3      --      --      0.00       0.00
+```
+
+The last row is the point of the render: an arm that issued nothing prints `0.00 0.00`, a value, not a refusal.
+Its `+5.3 %` is §5as deviation 3 made visible — the row comes from §5ag's batch, whose whole tier ran ~11 %
+faster than §5aq's, so a ring-off arm beats a §5aq baseline on the clock while being the arm that *loses* 5.6 %
+when it is paired inside its own batch. That is the arithmetic reason the trio has to be one batch, printed here
+by accident rather than designed.
+
+### The geometry, re-derived rather than remembered
+
+§5as's whole argument is a condition-number claim sourced from a throwaway script. Recomputed from published
+counters alone, with the convention stated rather than implied — rows live in the (`Δissued`, `−Δadopted`) plane,
+so the second coordinate is **positive** where a step makes adopted reads *fall*:
+
+| pair | rows | this section | §5as published |
+|---|---|---|---|
+| ring-off × depth-2 | (+39.45, −18.86), (+33.28, +9.42) | **41.36°, cond 1.51** | 41.4°, cond 1.5 |
+| depth-2 × depth-3 | (+33.28, +9.42), (+55.28, +13.02) | **2.55°, cond 22.47** | 2.6°, cond 22 |
+
+The ring step's wall cost from §5ag's two rates is 11.748 ms/token against the 11.7 ms §5as quoted. Both claims
+hold. The sign is the instrument: read with the opposite sign the identifying pair collapses to **9.75°, condition
+5.91** — not a good design but one of the worse rows in §5as's own table — and my first pass at this arithmetic
+reported it as ~170°, the supplement of the same near-parallel line. The classification was right and the number
+was not, which is the reason this section recomputes from published counters instead of remembering.
+
+The composition §5as bracketed is now computed both ways, and the difference is a column choice its table did not
+state: the published row solved the depth step's Δms from `body_ms` (29.591 ms); on the wall-clock Δms (30.220 ms)
+the same two rows give
+
+| depth Δms read from | `x` ms/issued | `y` ms/adopted | `p*` | vs the admissible band 0.788-1.301 |
+|---|---:|---:|---:|---|
+| `body_ms` | 0.448 | 1.559 | 0.287 | above |
+| wall | 0.460 | 1.584 | 0.290 | above |
+
+The out-of-band verdict does not depend on the choice, but the two prices differ by 2-3 %, and the campaign has
+been mixing the columns without saying so: §5ar's band is a **service time** — one 2.641 MiB read at a measured
+wall rate — which is a wall quantity, so the equation it is tested against should carry a wall Δms. A screen that
+takes the column as an argument and names it in its own output is the only way to stop that being a reader's job,
+and that is the next unit (#207). §5as deviation 4 refused the September `p* = 0.105` as "a judgement, not a
+measurement": the refusal now has arithmetic behind it and still is not a price, because a band violation computed
+across two batches cannot be told apart from the 10 % drift between them. Only an in-batch trio separates the two.
+
+### Why the live round is still not run
+
+At 19:10 `ps -A -r` put **RobloxPlayer (75778) at 121.1 % CPU**, the same resident it has been since 17:52, with
+WindowServer at 21.8 %, 5.71 of 7.17 GB of swap used, 64 % of memory free, load 3.09 / 3.49 / 3.97, on AC at
+100 %, and no model process running. The trio's requirement is ±1 ms/token, which §5aq's rounds 2-3 price at
+"unusable while a game is resident". One instrument note is worth keeping, because it very nearly sent a 40-minute
+batch to a machine I had mis-read as idle: `top -l 1 -o cpu` reported **every** process at 0.0 % CPU on its first
+sample — its CPU column is a delta over the sample interval and the first interval is empty — while `ps -r` named
+the 121 % occupant in the same minute. Nothing belonging to anyone else was terminated.
+
+### Verdict
+
+#206's command now prints the two columns its own equations are read from, and refuses a page that lacks either.
+Two things this commit deliberately does not do: it does not **solve** the pair — the arithmetic is still done
+outside the driver, and the shipped `price_pair` screen that reads this page, states which column it solved from,
+and answers with a status is #207 — and it moves no runtime default, no engine code and no shipped configuration.
+
+Deviations.
+
+1. **Nothing was measured in this section.** Every number is published-counter arithmetic, a synthetic `table()`
+   render, or a gate/test run. No model process was started and no arm ran.
+2. **The ring row's Δms is inferred from §5ag's two rates, which are a different batch from every other row here.**
+   The geometry uses only its *sign*, which is unambiguous (ring on is the faster tier); 11.748 ms carries §5ag's
+   batch drift and supports no claim of its own. §5as deviation 3 is the standing warning and the render above
+   shows the trap.
+3. **The depth-3 row is §5as's synthesis, not an arm that ran**, so 2.55°/22.47 is a property of that synthetic
+   row and #206's out-of-sample prediction against it is still unpaid.
+4. **The `body_ms`/wall choice was unstated when §5as's composition rows were written.** It is disclosed there as
+   an added note rather than silently corrected: §5as's table numbers are unchanged, and both readings land out of
+   band, so no conclusion of that section moves.
+5. **`/tmp/seam206/verify.py`** holds this section's arithmetic. It is a throwaway — not committed, not proposed
+   as a tool, superseded by #207. The two mutation runs edited `benchmark/tinytitan_knob_sweep.py` in place and
+   were reverted from a copy taken first; the committed diff is the counter seam and nothing else.
+6. **Provenance.** §5as landed at `1b24b09` and the depth-3 arm at `2327dfd`, both already on `main`; the counter
+   seam, the two pins, the three repointed line pointers and this section are the commit that carries them.
+   `benchmark/test_knob_sweep_verdict.py` 53 tests OK, `tools/lint.sh python` ok (ruff 0.16.7, 201 scripts parse
+   under 3.13), `tools/lint.sh docs` ok, markdown links 96 checked / 0 broken.

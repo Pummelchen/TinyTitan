@@ -261,19 +261,29 @@ COUNTERS = (
     "io_host_waits",
     "cache_plan_ms",
     "rdadvise_ms",
+    # What the speculative ring issued and what the router adopted, per token. §5as
+    # prices an issued read and an adopted read off two paired arms, and these are the
+    # only two numbers in the footer that a paired arm can be priced from.
+    "prefetch_issued_per_token",
+    "prefetch_adopted_per_token",
 )
 
-# The five counters the published table prints, in the order a reader needs them
+# The seven counters the published table prints, in the order a reader needs them
 # rather than the order of the columns: this file's own rule is that "a rate
 # without io_hidden_pct or the hit rate is a number you cannot act on", so those
-# two are the first the verdict looks for. `wait_ms`, `body_ms`, `cache_plan_ms`
-# and `rdadvise_ms` are parsed but never printed, so no cell claims them.
+# two are the first the verdict looks for. The last two are the pair a price solve
+# reads -- an arm that logged no issued/adopted count cannot be priced, so the
+# verdict refuses rather than printing `--` and letting a reader re-key the log.
+# `wait_ms`, `body_ms`, `cache_plan_ms` and `rdadvise_ms` are parsed but never
+# printed, so no cell claims them.
 PRINTED_CELLS = (
     "io_hidden_pct",
     "expert_hit_rate",
     "io_ms",
     "expert_evictions",
     "io_host_waits",
+    "prefetch_issued_per_token",
+    "prefetch_adopted_per_token",
 )
 
 
@@ -469,6 +479,7 @@ def table(results: list[dict], baseline: float | None) -> str:
     head = (
         f"{'arm':<15}{'tok/s':>8}{'vs base':>9}{'hit%':>7}"
         f"{'io_hid%':>9}{'io_ms':>8}{'evict':>8}{'waits':>8}"
+        f"{'issued/pt':>10}{'adopted/pt':>11}"
     )
     lines = [head, "-" * len(head)]
     for r in results:
@@ -483,6 +494,8 @@ def table(results: list[dict], baseline: float | None) -> str:
             f"{cell(r, 'io_ms', refusal='--'):>8}"
             f"{cell(r, 'expert_evictions', spec='.0f', refusal='--'):>8}"
             f"{cell(r, 'io_host_waits', spec='.0f', refusal='--'):>8}"
+            f"{cell(r, 'prefetch_issued_per_token', spec='.2f', refusal='--'):>10}"
+            f"{cell(r, 'prefetch_adopted_per_token', spec='.2f', refusal='--'):>11}"
         )
     return "\n".join(lines)
 

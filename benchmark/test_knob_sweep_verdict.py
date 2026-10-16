@@ -66,10 +66,18 @@ sys.path.insert(0, str(ROOT / "benchmark"))
 
 import tinytitan_knob_sweep as ks  # noqa: E402
 
-# The five counters the published table prints. `wait_ms`, `body_ms`,
+# The seven counters the published table prints. `wait_ms`, `body_ms`,
 # `cache_plan_ms` and `rdadvise_ms` are parsed but never printed, so no cell of
 # this table claims them and their absence is not a refusal.
-CELLS = ("expert_hit_rate", "io_hidden_pct", "io_ms", "expert_evictions", "io_host_waits")
+CELLS = (
+    "expert_hit_rate",
+    "io_hidden_pct",
+    "io_ms",
+    "expert_evictions",
+    "io_host_waits",
+    "prefetch_issued_per_token",
+    "prefetch_adopted_per_token",
+)
 TRIO = ("base", "sync_event", "base_again")
 COUNTERS = {
     "expert_hit_rate": 0.874,
@@ -77,12 +85,15 @@ COUNTERS = {
     "io_ms": 3.2,
     "expert_evictions": 4.0,
     "io_host_waits": 25.7,
+    # §5ag's shipped-tier counts, so a fixture row reads like a real ring-on arm.
+    "prefetch_issued_per_token": 39.45,
+    "prefetch_adopted_per_token": 18.86,
 }
 
 
 def arm(name, rate=4.0, **changes):
     """One measured arm row. A change of `None` removes the key, which is how a
-    counter the server never printed is shaped. The five counters are always
+    counter the server never printed is shaped. The seven counters are always
     present, so the pop only ever had a key to remove; `resp` is absent unless a
     test puts it there, so removal is now conditional."""
     row = {"ok": True, "tok_s": rate, **COUNTERS}
@@ -275,6 +286,25 @@ class PricePair(unittest.TestCase):
         ]
         self.assertEqual(offenders, [])
 
+    def test_the_batch_parses_the_two_counters_the_price_solve_consumes(self):
+        # A pair of arms identifies `x` and `y` only through issued and adopted reads
+        # per token. Both are in the server's `TinyTitan runner` line, which this driver
+        # already reads, so the only thing between them and a price solve is `COUNTERS`.
+        for key in ("prefetch_issued_per_token", "prefetch_adopted_per_token"):
+            self.assertIn(key, ks.COUNTERS)
+
+    def test_the_table_prints_issued_and_adopted_reads_per_token(self):
+        # Transcribing the two counters out of a raw log by hand is how §5ag got them,
+        # and a batch that must resolve 1 ms/token cannot be trusted to a re-keyed number.
+        out = ks.table(
+            [arm("base", 5.0, prefetch_issued_per_token=44.10, prefetch_adopted_per_token=12.35)],
+            5.0,
+        )
+        head = out.splitlines()[0]
+        self.assertIn("issued/pt", head)
+        self.assertIn("adopted/pt", head)
+        self.assertEqual(row_line(out, "base")[-2:], ["44.10", "12.35"])
+
 
 class TableCell(unittest.TestCase):
     def test_a_measured_row_prints_the_cells_it_always_printed(self):
@@ -283,7 +313,8 @@ class TableCell(unittest.TestCase):
         rows = [arm("base", 4.0), arm("sync_event", 4.12)]
         out = ks.table(rows, 4.0)
         self.assertIn(
-            "sync_event         4.12    +3.0%   87.4     18.9     3.2       4      26",
+            "sync_event         4.12    +3.0%   87.4     18.9     3.2       4      26"
+            "     39.45      18.86",
             out,
         )
 
@@ -291,7 +322,7 @@ class TableCell(unittest.TestCase):
         out = ks.table([arm("io_metal", 4.0, **dict.fromkeys(CELLS, None))], 4.0)
         self.assertEqual(
             row_line(out, "io_metal"),
-            ["io_metal", "4.00", "+0.0%", "--", "--", "--", "--", "--"],
+            ["io_metal", "4.00", "+0.0%"] + ["--"] * 7,
         )
 
     def test_one_missing_column_does_not_zero_the_ones_that_answered(self):
@@ -299,12 +330,23 @@ class TableCell(unittest.TestCase):
         out = ks.table([arm("base", 4.0), row], 4.0)
         self.assertEqual(
             row_line(out, "sync_event"),
-            ["sync_event", "4.12", "+3.0%", "87.4", "--", "3.2", "--", "26"],
+            ["sync_event", "4.12", "+3.0%", "87.4", "--", "3.2", "--", "26", "39.45", "18.86"],
         )
 
     def test_the_header_still_names_every_column(self):
         head = ks.table([], None).splitlines()[0]
-        for column in ("arm", "tok/s", "vs base", "hit%", "io_hid%", "io_ms", "evict", "waits"):
+        for column in (
+            "arm",
+            "tok/s",
+            "vs base",
+            "hit%",
+            "io_hid%",
+            "io_ms",
+            "evict",
+            "waits",
+            "issued/pt",
+            "adopted/pt",
+        ):
             self.assertIn(column, head)
 
     def test_the_live_line_refuses_with_the_words_not_a_zero(self):
