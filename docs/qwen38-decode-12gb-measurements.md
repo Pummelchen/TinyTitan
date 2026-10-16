@@ -6481,3 +6481,213 @@ Deviations:
    crossing §5f's cliff.
 4. Adoption (19.58 vs 19.20) is the moving part, so the byte-floor prediction is a range
    14.5–15.0 ms/token, not a point.
+
+## 5bc. #213 runs §5bb's named screen: the byte-floor bar was the wrong price, the exposed-idle band is 11.93–33.52 %, and on two live traces slots 0–2 pay under every reading while slot 3 is undecidable offline (2026-10-16)
+
+§5bb ended by naming the next screen: *"(events converted × 2.17) − (added bytes ÷ 3.92 GB/s) −
+(the phase1_2 line's own growth) … That is the screen to run next."* It is run, and the first
+thing the run found is that the formula's three terms do not divide by the same denominator —
+which is a correction of §5bb's own published text, recorded here rather than edited into it.
+
+Provenance. Two model runs, release build `.build/release/TinyTitanCLI` stamped 2026-10-16
+14:37:28; `find sources -newer` against it is empty and **no commit between `a8c6fdd` and HEAD
+`9df2973` touches `sources/`** (`daf3817`, `9df2973` add `benchmark/` python, `d2e3e95` a doc
+row), so the capture ran on the same engine as §5bb's four arms. 24 GB M3 MacBook Pro
+(Mac15,3), macOS 27.0.1, Swift 6.4, AC power, 100 % charged, one model process at a time,
+`pgrep` guard empty before and after. `models/qwen3.8-flash-next_125B_A6B_4Bit`,
+`--max-new 384 --temperature 0 --max-context 262144`, no slot or budget flag; both arms set
+`TINYTITAN_PREDICTIVE_PREFETCH=0 TINYTITAN_RUNNER_STATS=1 TINYTITAN_PREFETCH_TRACE=<file>`,
+and `TINYTITAN_KERNEL_STATS` is **off** because this batch needs no device ledger. The load lines
+read `ram profile cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G` and
+`profile … prefetch=0`. Exit 0 both, 18 384 records each (383 positions × 48 layers, 18 001
+scored links). essay 21:51:28–21:53:14 UTC, code 21:53:14–21:54:56 UTC; `memory_pressure -Q`
+82 % then 77 % free, swap used 7.23 → 8.57 → 8.62 GiB of a pool the system grew from 8 192 to
+9 216 MiB between the arms. Prompts: §5bb's essay line, and a second one chosen to be a
+different access pattern — `Refactor this Python function to avoid the repeated file read, then
+write tests for it: def load(path): return open(path).read().split()`. Response md5s: essay
+`c172890df88cdbbfa0627bd320d16614` (the same hash all four §5bb arms printed), code
+`b004f8f2d0ccc0055da6f9e3e55d6e9d` (single arm, so no invariance pair for it). **No wall clock
+from this batch is quoted anywhere** — the session was active while it ran; the driver at
+`/tmp/bc213/driver.sh` records that as its own header, and the traces and logs are not committed.
+
+### The price, corrected
+
+`PriceBook` ([benchmark/tinytitan_prefetch_trace_analysis.py:168](../benchmark/tinytitan_prefetch_trace_analysis.py#L168))
+now holds one round's ledger and derives the two prices a depth decision needs, paired **within
+a round**. `daf3817` had paired them across kinds, and both errors are named in `9df2973`:
+
+| price | what it is | round 1 | round 2 |
+| --- | --- | ---: | ---: |
+| prize, countable | events converted × ms/event ÷ adopted reads | 0.5153 ms/read | 0.5038 ms/read |
+| prize, whole line | measured gap-line fall ÷ adopted reads | 0.8439 ms/read | 0.9365 ms/read |
+| cost, exposed | ring's own line growth ÷ issued reads | 0.1727 ms/issue | 0.1117 ms/issue |
+| cost, drive busy | 2.7689 MiB ÷ 3.92 GB/s | 0.74066 ms/read | 0.74066 ms/read |
+
+The two prize readings × the two rounds give four break-even precisions: **33.52 %, 22.18 %,
+20.47 %, 11.93 %** — the pessimistic corner is round 1's countable reading and the optimistic
+corner is round 2's whole-line one.
+
+Two things that were wrong: 2.17 ms is the value of a converted **event**, and only 23.6 % of
+adopted reads convert one (4.62 of 19.58), so charging it per read inflated the prize ~4×; and
+0.74066 ms is the drive's **busy** time, which §5bb itself showed is not what a read costs —
+the same arms moved `io_host_waits_avoided` by 1 791 and 1 735 while `io_hidden_pct` never left
+99.67–99.86, i.e. the host was not blocked. **The exposed cost is 4.3–6.6× smaller than the
+byte floor.** The break-even precision is therefore a band, not a bar: **11.93 %–33.52 %**
+([:219](../benchmark/tinytitan_prefetch_trace_analysis.py#L219)). The wrong bar, 34.15 %, landed
+0.6 points under the corrected pessimistic corner, which is why none of the earlier fixture
+verdicts showed the error. `slot_report`
+([:244](../benchmark/tinytitan_prefetch_trace_analysis.py#L244)) reports both corners per issue
+index, and `first_loss_making_slot` / `first_unproven_slot`
+([:272](../benchmark/tinytitan_prefetch_trace_analysis.py#L272),
+[:280](../benchmark/tinytitan_prefetch_trace_analysis.py#L280)) are the stop rule and the
+"honesty" flag: a slot between the corners is *undecided*, and the screen says so instead of
+choosing a side. 11 tests OK (`python3 -m unittest`, serial), `tools/lint.sh python` ok on ruff
+0.16.7; RED observed as 4 errors (`KeyError: drive_busy_ms_per_read`, `break_even_high`,
+`pays_under_every_reading` ×2). Two of the eleven tests were deleted and one renamed, all inside
+the block `daf3817` added — no pre-existing test was edited or reformatted, verified by hunk
+range. The falsifier on the instrument (`test_the_shipped_depth_clears_its_own_band`,
+[benchmark/test_tinytitan_prefetch_trace_analysis.py:138](../benchmark/test_tinytitan_prefetch_trace_analysis.py#L138))
+requires the shipped ring's own measured adoption (48.7–49.5 %) to clear the high corner; it
+does, so the band prices an arm the machine already proved profitable rather than a phantom.
+
+### The two traces, scored
+
+`recorded` ranking (the engine's own `next_layer_prediction`), `filter` policy (the shipped
+filter-then-cap rule, §5ak), `top_m = 4`, 18 001 links. A *slot* is the issue index within one
+L→L+1 link, so "depth d" here means the ring may stage the first d non-resident names of the
+plan — the same axis as the shipped `prefetchDepth`
+([sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:124](../sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift#L124),
+currently 1 at this tier).
+
+| slot | essay precision | essay net ms/tok worst → best | code precision | code net ms/tok worst → best | verdict |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 0 (shipped) | 52.23 % | +3.840 → +15.032 | 55.09 % | +4.486 → +16.312 | pays under every reading |
+| 1 (depth 2) | 41.39 % | +1.200 → +8.165 | 43.90 % | +1.676 → +9.379 | pays under every reading |
+| 2 (depth 3) | 34.01 % | +0.052 → +4.191 | 37.83 % | +0.484 → +5.277 | pays under every reading |
+| 3 (depth 4) | 29.85 % | −0.243 → +2.155 | 32.01 % | −0.111 → +2.683 | **inside the band: undecidable** |
+
+`first_loss_making_slot` is `None` on both traces and `first_unproven_slot` is `3` on both. Read
+against the band corners (33.52 % / 11.93 %): the marginal precision ladder crosses the
+pessimistic corner **between slot 2 and slot 3**, on two different access patterns, and nothing
+crosses the optimistic corner. The screen's stop rule therefore puts the useful width of the
+feeder at **three reads per link**, not one — a claim §5aq could only reach on wall clock.
+
+### Three cross-checks, and what they say about the instrument
+
+- **The capture reproduces a frozen file to the byte.** `/tmp/bc213/essay.jsonl` and
+  `/tmp/trace194/off.jsonl` — the trace §5ak–§5am were built on, md5
+  `67d221e2546baca4b26d1e66aaa360ae` as §5am recorded it — are **identical**, 18 384 records,
+  despite #194 having been captured at HEAD `cd229f6` on the 04:29 build and this one on the
+  14:37 build. So a greedy ring-off route trace is reproducible across builds as well as across
+  arms, and the slot tallies match §5ak's published table exactly at every `top_m`
+  (15 257 / 26 594 / 34 356 / 39 274 issues, 0.5223 → 0.4269 precision). **The consequence for
+  this section is a limitation, and it is stated as one: the essay arm is not new routing
+  evidence.** The load-bearing new datum is the code prompt, which is hungrier (hit 0.7719
+  against 0.8070, 43 039 misses against 35 901 = 112.4 demand reads/token against 93.7) and
+  still lands within 2.9 points of the essay ladder at every slot.
+- **The replica prices the shipped arm against the engine.** At `top_m = 1` the screen issues
+  15 257 / 18 001 = 0.8476 reads/link = **39.84/token** against §5bb's measured **39.53**
+  (+0.78 %), and calls **52.23 %** of them useful where the engine adopted
+  **49.53 % / 48.66 %** — an upper-bound bias of 2.7–3.6 points, the same size and sign as
+  §5ah's ~7 % "right but late" pool counted as a share of the useful set. Every slot verdict
+  above inherits that bias, so slots near a corner are exactly where it matters — and slot 2, at
+  34.01 % against a 33.52 % corner, is near a corner.
+- **The trace is a clean instrument.** The essay arm's counters are bit-identical to §5bb's two
+  untraced ring-off arms (hits 150131, misses 35901, evictions 31293, reloads 22986,
+  `expert_read_mib` 94 801.1, `rdadvise_calls` 33 518 / 89 012.8 MiB,
+  `io_host_waits_avoided` 5 080) even though those arms carried `TINYTITAN_KERNEL_STATS=1` and
+  this one carried the trace instead, and the response hash is §5bb's. Per-miss bytes come out
+  at 2.6406 MiB on both prompts — §5bb's 2.641 again.
+
+### The falsifier, and why it was weak as written
+
+Registered before measuring: *"if no depth in the captured traces holds marginal adoption
+> 32.5 %, the ring is already at its optimum and the remaining 56.7 ms/token is not buyable with
+earlier bytes — the next prize must be sought elsewhere (host turnaround family)."* It did not
+fire: slots 0–2 clear 32.5 % on both prompts. **It could not have fired unless even the shipped
+slot failed**, since slot 0 is at 52 % on any reading, so the probe tested something already
+known. The informative version is the ladder-against-the-corners statement above, and the live
+`daf3817` message's claim that *"no `TINYTITAN_PREFETCH_TRACE` capture exists on disk"* was
+simply false — the shipped screen has been scoring `/tmp/trace194/off.jsonl` since §5ak. Caught
+while scoring, disclosed here, no verdict of that section depended on it.
+
+### Reconciling with §5aq, which measured depth 2 loss-making
+
+§5aq priced `layer_depth25` and `slots64_depth25` at **−8.1 % / −12.1 %** wall against the
+shipped baseline; this screen says slot 1 pays +1.2/+1.7 ms/token even on the pessimistic
+reading. They are not the same arm — §5aq's depth was applied to **25 selected links** (gate
+0.45, §5al) while the screen's slot 1 is a read on **every** link — but the sign cannot be
+reconciled by selection alone, because uniform depth 2 was also retired. Two candidate terms,
+one of which is checkable offline:
+
+1. **Lateness grows with width.** §5z found the shipped ring *"issuing 2× the depth it keeps"*
+   with `inflight = 0.01` (doc lines 2229, 2282). A second staged read lands later relative to
+   its fixup than a first one, so the marginal read's conversion rate is not its precision; the
+   replica prices precision and calls it the prize.
+2. **The ledger's cost term is fitted at depth 1 and extrapolated to depth 2.** `+6.828 /
+   +4.409 ms per token` over the ring's own line is one round's slope; if the line grows
+   superlinearly once `free.count` truncation and eviction bite, the band's corners move and the
+   ladder's crossing moves with them.
+
+**Blind spots, named:** residency is held fixed at the ring-off world, so the eviction a deeper
+ring causes is invisible to the screen; lateness is not modelled at all; and the band is two
+rounds' worth of one build's one prompt pair, not a fitted curve.
+
+### The operator's premise, answered in duty rather than in silence
+
+The overnight brief asks why the drive reads *"for a couple of seconds, then stops"* instead of
+feeding constantly. At the campaign's own prices (2.7689 MiB/read ÷ 3.92 GB/s = 0.74066 ms of
+drive time each, against §5bb's 225 ms instrumented token):
+
+| feeder | drive time/token | duty |
+| --- | ---: | ---: |
+| demand only, ring off (essay) | 69.4 ms | **30.9 %** |
+| demand only, ring off (code) | 83.2 ms | 37.0 % |
+| shipped depth 1 (issued 39.53 + demand left) | 84.2 ms | 37.4 % |
+| depth 4 replica (issued 102.5 + demand left) | 113.0 ms | 50.2 % |
+
+So the drive is **not** the constraint on a constant feeder: at the shipped configuration it is
+idle roughly two thirds of every token, and there is room to read continuously — the shipped
+depth-1 ring is already using part of that room, and a depth-4 feeder would take half the token.
+The binding question is not bandwidth but whether a *further* read converts device idle, which
+is what the band prices. One clarification of §5bb's "reads fewer bytes": **demand** bytes do
+fall (19 849.6 MiB between §5bb's round-1 pair), and **total** bytes rise — depth 1 moves
+×1.212 of the ring-off traffic, and depth 4 ×1.63. A feeder that "keeps reading while compute
+runs" spends bytes to buy idle, and this table is the price of the bytes.
+
+Deviations.
+
+1. **No wall clock, no paired control, one round per prompt.** This is an offline scoring
+   exercise over two traces; the interleave-and-mirror rule does not apply to a batch that
+   reports no rate. Both arms ran while this agent's session was active, which is why the driver
+   header forbids quoting their rates.
+2. **The essay trace duplicates a file already priced.** §5ak–§5am scored the identical bytes,
+   so the essay column is a reproduction check, not a second measurement. The cross-prompt claim
+   rests on n = 1 for the code prompt, single session, no mirrored repeat.
+3. **The band is extrapolated.** Both corners come from §5bb's depth-1 arms; every slot ≥ 1 is a
+   counterfactual width that build never ran. Slot 2's 34.01 % is 0.5 point above a corner that
+   is itself a two-round mean of a slope fitted at a different depth.
+4. **Replica adoption is biased high** by 2.7–3.6 points against the engine's own counters, so
+   the ladder's true crossing is at or left of slot 2, not right of it. That cuts against the
+   section's own headline, and is stated as the risk rather than as a caveat.
+5. **The trace's `misses` are post-adoption**, so both arms were run with the ring off on
+   purpose (§5ah). The probe still records `next_layer_prediction` because
+   [sources/TinyTitan/Runtime/Inference/RealForwardRunner+CommandBuffers.swift:10](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+CommandBuffers.swift#L10)
+   enables it whenever the trace fd is open; `next2_layer_prediction` is empty in all 18 384 rows
+   of both captures, as in #194's, because nothing sets the two-layer probe without the ring.
+6. **Swap was carried in, not created by these arms** (7.23 GiB used before the first launch,
+   pool grown by the system between them), and `memory_pressure -Q` fell 82 % → 77 % free.
+   Counters are bit-reproducible under that pressure, which is the finding, not the exception.
+7. Nothing in `sources/` changed; no numerics, default or runtime behaviour moved. The two
+   python commits it cites add `benchmark/` code and tests only, so `tools/golden-baseline.sh`
+   is **not re-run** for them and is **not** needed by them; the golden baseline is **not
+   checked** by this section, which is docs-only.
+
+Next, offline and before any further live arm: give the residency simulator
+([benchmark/flat_pair_cache_sim.py:79](../benchmark/flat_pair_cache_sim.py#L79)) the ring's
+staged reads as well as the demand line, so a depth-d counterfactual replays against a pool that
+the ring itself occupies. That is the only way to price candidate term (1) and (2) without a
+model run, and the prefetch trace already carries both lists it needs (`experts` and the
+per-slot issued set), so no new capture is required. If the evicted-slot term swallows slot 1's
++1.2 ms/token, this section's ladder is wrong and §5aq stands; if it does not, then the depth
+question is ready for one paired live arm on the 25-link and uniform widths in the same batch.
