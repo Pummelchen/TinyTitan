@@ -4154,3 +4154,114 @@ Deviations.
    makes the two price models' `B`/`K` internally consistent with each other but 0.26 % off a strict per-token
    truth. It cancels in every comparison inside this section, since all arms share the denominator.
 
+## 5am. #200 tests the constant-feeder premise in its other dimension and closes it on arithmetic rather than price: of the 70 043 expert names that survive one token, **70 043 are already resident and 0 are missed**, so a token-ahead feeder has literally nothing to fetch (2026-10-16)
+
+The operator's brief for this campaign is a *shape* of reading, not a knob: "the SSD can read constantly while a
+user has an active session and can keep on reading weights even if compute is doing stuff… instead of a
+chunk-by-request reader". Two sections have now priced one dimension of that — **how many reads per link**
+(§5ak closed uniform depth, §5al found the layer axis undecided). This section tests the other dimension, which
+no section has measured: **how far ahead in time a read can be issued at all.** A feeder that runs ahead in time
+is the only version of "constant" that could fill the idle windows, so the question is whether the future is
+predictable far enough out to be worth reading for.
+
+It is not, and the reason is stronger than a bad precision number. On the same #194 ring-off trace
+(18 384 observations, 383 decode positions 10-392, 48 layers), for each horizon `p` the same-layer top-10 route
+was compared between position `t` and `t+p`, and both a persistence ranker (this token's score-ordered route
+names the read for `t+p`) and a strictly-past recency ranker were scored depth-1 under the shipped filter-then-cap
+policy — the same rule §5ak put in the screen, and the same §5al substrate rule applies: ring-off, or the
+counterfactual is scored against demand the shipped prefetcher already ate.
+
+### Route churn between tokens is real — and entirely invisible to the cache
+
+| horizon `p` | links | mean top-10 overlap | per-layer mean overlap min/p25/med/p75/max |
+|---|---|---|---|
+| 1 | 18 336 | **0.382** | 0.075 / 0.276 / 0.399 / 0.466 / 0.654 |
+| 2 | 18 288 | 0.299 | 0.072 / 0.204 / 0.302 / 0.365 / 0.566 |
+| 3 | 18 240 | 0.274 | 0.072 / 0.189 / 0.277 / 0.323 / 0.521 |
+| 4 | 18 192 | 0.257 | 0.075 / 0.178 / 0.254 / 0.306 / 0.489 |
+
+Only 38 % of the ten names a layer demands at `t+1` were also routed at `t` (the overlap is scored against
+`t+1`'s set, which is the one a feeder would have to hit), and the layer axis is there again (some layers repeat
+65 % of their picks, one repeats 7.5 %). Now the part that decides the lever — of the names that *do* carry over,
+what does the cache still hold at the moment they are demanded:
+
+| horizon `p` | carried names | already resident at `t+p` | in `t+p`'s miss set |
+|---|---|---|---|
+| 1 | 70 043 | **70 043 (1.000)** | **0 (0.000)** |
+| 2 | 54 682 | 53 716 (0.982) | 966 (0.018) |
+
+Not a rate near one — exactly one, with no exception in 70 043 observations, on the *pre-plan* residency capture
+([RealForwardRunner+Diagnostics.swift:151-153](../sources/TinyTitan/Runtime/Inference/RealForwardRunner+Diagnostics.swift#L151):
+"`resident` is captured before cache planning so a later miss reservation cannot make the trace falsely report an
+expert as absent"). The complement carries the lesson: **every demand miss at `t+1` is a name that was not routed
+at `t`.** So a one-token-ahead feeder would issue reads only for experts that are already hits, and would need to
+name the misses out of a set that does not contain them. There is no price model, no adoption discount and no
+noise floor that turns that into traffic worth paying for — it is the rare case in this campaign where the screen
+settles a lever by itself.
+
+### What the two past-visible rankers get, and what the shipped link gets instead
+
+| horizon `p` | persistence slot-1 issues / useful / precision | persistence slot-2 marginal | recency slot-1 precision |
+|---|---|---|---|
+| 1 | **0 / 0 / —** (nothing non-resident to stage) | — | 0.0267 |
+| 2 | 7 355 / 564 / **0.0767** | 0.0638 | 0.0268 |
+| 3 | 8 855 / 607 / 0.0685 | 0.0591 | 0.0308 |
+| 4 | 9 391 / 536 / 0.0571 | 0.0521 | 0.0382 |
+
+Against the shipped link — **same token, one layer ahead, `recorded` ranker: 15 257 issues, 7 968 useful,
+precision 0.5223, recall 0.2486** (§5ak) — the best cross-token arm is 6.8x worse at depth 1 and reaches 564
+useful reads out of 33 709 demand misses in the trace (**1.7 % recall**) while the shipped ring reaches 24.9 %.
+The asymmetry explains itself: the pipeline inside one token gives the ring a *causal* input (layer L's route is
+known while layer L computes, and layer L+1's demand is one kernel away), whereas a token-ahead feeder's input is
+a statistical guess about a route that has not been drawn yet. Depth-1 lookahead in **layers** is the only place
+where this model's future is readable.
+
+### The axis this trace cannot answer, named so the next capture fixes it
+
+"Constant while compute runs" has a third reading that is *not* closed here: not more reads per link (§5ak/§5al)
+and not future tokens (closed above), but **more slack within the token** — issuing for layer L+2 while layer L
+computes, so a read has two layers of compute to land in instead of one. The trace has a field for exactly that,
+`next2_layer_prediction`, and in this capture it is **empty in all 18 384 rows**. So the slack axis is unscreened,
+and the cheapest untried experiment in the campaign is the one that would screen it: a re-capture with that field
+populated (the MTP work in §5ai reads it, so it is writable), which costs one model run and no code.
+
+Deviations.
+
+1. **The overlap and precision figures are route-set arithmetic on one capture** — one prompt shape, 383 decode
+   positions, `--ram 12`, 96 slots, no clocks and no model process. The 1.000 residency result is a joint property
+   of *this* slot budget and *this* eviction order, not of the route. Measured on the same file: each layer's own
+   resident view averages 91.9-95.9 of the 96 slots while admitting only **1.78 demand misses per scored link**
+   (32 046 over 18 001; 1.83 per observation over all 18 384), so a token's arrivals are about 2 % of what the
+   layer already holds, and the order deciding who is dropped is LFU by accumulated use count
+   ([ExpertCacheTypes.swift:176](../sources/TinyTitan/Infrastructure/Streaming/ExpertCacheTypes.swift#L176)) —
+   LRU is the configured alternative and was not run, so neither order has been varied here. A tighter budget,
+   where those two arrivals are a larger share, is what would break the 1.000; §5r-§5s's budget work is where that
+   trade lives. The smallest resident set anywhere in the capture is 28, at positions 10-12 — the cold-start ramp,
+   not steady state.
+2. **"Every miss at `t+1` was not routed at `t`" is a statement about the route, not about predictors.** A
+   transition-table ranker can still name some of those misses — that is §5aj's `transition` arm, which does it at
+   horizon 0 (805 issues, 0.6385 precision) and is what #196's leakage guard exists to keep honest. This section
+   closes the *persistence* route to them, not every conceivable ranking.
+3. **Recency and persistence are ranked here from trace-visible past state only** (`t`'s route, and the strictly
+   past window of 8 for recency), matching the shipped screen's rule. Both are scored against `t+p`'s own
+   `resident` and `misses`, which are the ring-off cache's — a token-ahead feeder would have changed that state by
+   now. The first-order effect is nil at `p=1` because that arm issues zero reads; at `p≥2` it is unmodelled, and
+   none of those arms is anywhere near worth modelling.
+4. **Two different miss denominators appear in this section and both are right**: 33 709 is the sum over all
+   18 384 observations, while §5ak's 32 046 counts only the 18 001 scored `L -> L+1` links (layer 47's demand is
+   never a scored target). The recall figures here use the first, §5ak's uses the second.
+5. **The `next2_layer_prediction` emptiness is a property of the capture, not of the engine.** Nothing was
+   re-run to fill it, because that is a model run and none was available; the claim checked is the count (0 of
+   18 384 rows carry a name).
+6. **Nothing in `sources/` or `benchmark/` moved.** Docs-only, as in §5af-§5al, so the golden baseline is
+   **not checked**. Provenance: `HEAD 3bd3314` with this file the only modification, read at 13:21 on AC power
+   (99 % finishing charge), `memory_pressure -Q` 70 % free, swap 3 904 MiB used, load average 3.51, Swift 6.4 /
+   macOS 27.0.1, `pgrep` guard empty before and after, no model process at any point. The machine state is
+   recorded for completeness, not because it can move a number: every figure here is a deterministic read of the
+   same frozen file §5al was built on (`/tmp/trace194/off.jsonl`, md5 `67d221e2546baca4b26d1e66aaa360ae`). The
+   arithmetic lives in throwaways under
+   `/tmp/horizon/` (`decay.py` for the arms and the mechanism table, `shape.py` and `reshape.py` for the churn
+   and resident-view counts in deviation 1), deliberately not added to `benchmark/`: they reuse
+   [../benchmark/tinytitan_prefetch_trace_analysis.py](../benchmark/tinytitan_prefetch_trace_analysis.py)'s
+   `load_trace` and `analyze` rather than duplicating a second screen, and nothing in them is a shipped arm.
+
