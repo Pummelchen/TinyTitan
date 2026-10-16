@@ -2925,3 +2925,284 @@ and the window the engine can own is 1. **The reusable rule is the one to take f
 policy arm on both passes and treat a pass-1-only gain as a cold-start effect until proven otherwise —
 which is now the shape of two refusals (§5ad's cap, §5aa's arm 3) and would have saved the campaign a live
 A/B if it had been stated first.
+
+## 5af. Seven probes of the constant-feeder premise: the drive's wall is 3.3–3.4 GB/s, and the live session pays 17–53 % of decode for filling its idle clock (2026-10-16)
+
+§5aa closed the feeder as a *cache* change (eviction inside a fixed tier is zero-sum) and §5v closed the
+duty-cycle reading (34.7 % busy, and the idle clock is not spare bandwidth). Neither measured the thing the
+operator's own words ask about: *"the sdd can read constantly while a user has an active session and can keep
+on reading weights even if compute is doing stuff."* Whether that is worth doing depends on what the device
+delivers when it is asked to read constantly, in the shapes a feeder would produce. Six model-free probes on
+on the 48 `packed_experts/layer_NN.bin` files answer the device half of it. The seventh probe is not model-free: it runs
+the same feeder beside a live decode session, because the offline arms can say what the device does under a constant
+feed but not what a token does.
+
+### The instrument
+
+`/tmp/slice_sweep2.c` mirrors the shipped reader's terms and nothing else: `pread` on descriptors opened
+`F_NOCACHE`, 2 MiB-aligned scratch, expert-stride-aligned offsets, a full-length read loop, per-read latency,
+1–32 workers, and an arbitrary number of cooperating processes released by a shared gate file so their
+windows overlap. Its aggregate for multi-process arms is `Σ bytes / (max end − min start)` — the union window,
+not an average of averages. Worker seeds carry `getpid()`, because two processes chasing the same LBA
+sequence would measure locality instead of the device.
+
+### #186 — granularity × concurrency: the knee is in-flight bytes, and the shipped reader sits on it
+
+Median of 5 interleaved rounds; control noise floor 3.258–3.385 GB/s (3.9 %). Rate at a given amount of
+in-flight bytes:
+
+| in-flight MiB | 0.17 | 0.66 | 2.64 | 5.28 | 10.56 | 21.12 | 42.25 | 84.50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| slice 2.641 MiB | — | — | 2.459 | 3.239 | **3.360** | 3.380 | 3.344 | 3.329 |
+| slice 1.320 MiB | — | — | 2.132 | 3.073 | 3.318 | 3.352 | 3.359 | 3.274 |
+| slice 0.660 MiB | — | — | 1.716 | 2.632 | 3.202 | 3.309 | 3.316 | 3.309 |
+| slice 0.330 MiB | — | 0.999 | 1.676 | 2.347 | 2.856 | 3.052 | 3.039 | — |
+| slice 0.165 MiB | 0.722 | 1.276 | 1.968 | 2.541 | 2.803 | 2.747 | — | — |
+
+Three readings, all of them against the feeder idea:
+
+1. **Throughput is set by in-flight bytes, not by how you cut them.** At 10.56 MiB in flight the three
+   coarse slices deliver 3.202–3.360; at 21.12 they deliver 3.309–3.380. Granularity is free *down to
+   0.66 MiB* and then costs: at the same 10.56 MiB, 0.330 MiB reads give 2.856 and 0.165 MiB give 2.541.
+2. **The shipped shape is the knee.** Four workers × 2.64 MiB = 10.56 MiB is where the curve flattens; 8, 16
+   and 32 workers move it by +0.020, −0.016 and −0.031 GB/s against that control. A reader with more
+   concurrency in it would not read any faster.
+3. **Extra workers buy latency, not bandwidth.** p50 per full read at slice 2.641 MiB: 1100 µs at w=1, 3260
+   at w=4, 6534 at w=8, 13 182 at w=16, 26 793 at w=32 — linear in queue depth while the rate is flat.
+
+The finer slices are not hypothetical: they are what B3's split blob reads issue. At w=4 a 1.32 MiB half-read
+costs −0.019 (noise), and the campaign's own sub-0.66 MiB shapes cost −0.245 and −0.545 at their best.
+
+### #187 — burst length: the wall is flat from 64 MiB to 6.4 GiB, so "constantly" is not slower, and not faster either
+
+Control 203 MiB at 2.641 MiB × 4: 3.218–3.391 across 9 round-pairs (5.2 %).
+
+| window MiB | 64 | 128 | 203 | 406 | 812 | 1625 | 3250 | 6500 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2.641 MiB × 4 | 3.265 | 3.317 | 3.356 | 3.374 | 3.373 | 3.374 | 3.388 | 3.376 |
+| paired Δ vs control | −0.074 | −0.017 | n/a | +0.008 | +0.013 | +0.008 | +0.022 | +0.004 |
+| 0.165 MiB × 16 | 3.044 | 3.213 | 3.242 | 3.260 | 3.291 | 3.292 | 3.314 | 3.300 |
+
+A continuous feed runs 32 s at 3.376 GB/s with no decay — last-bin / first-bin is 0.974–0.993 for every arm
+of 406 MiB or more. So the premise that the drive slows while it works is false, and the corollary matters
+more: a feeder that keeps it busy forever earns the *same* 3.4 GB/s the burst already gets. There is no
+sustained-read bonus to be had. (The summarizer prints the 0.165 MiB shape as `0MiBx16`; it is `%.0f` of
+0.165, not a zero-length read.)
+
+### #188 — a co-running feeder is strictly zero-sum, and it lands on the critical path
+
+The question the operator's idea actually needs answered is not "can the drive do two things" but "does the
+second thing cost the first anything". 200.7 MiB demand burst at the shipped shape, against a feeder reading
+2 GiB of its own, 9 interleaved rounds, burst row is the measurement:
+
+| arm | burst GB/s | burst wall ms | paired Δ vs same-round solo | feeder GB/s |
+| --- | ---: | ---: | ---: | ---: |
+| solo | 3.342 / 3.305 | 63 / 64 | — | — |
+| thin (1 feeder worker) | 2.705 / 2.673 | 78 / 79 | −0.619 / −0.628 | 2.33 / 2.32 |
+| full (4 feeder workers) | 1.710 / 1.694 | 123 / 124 | −1.642 / −1.633 | 3.08 / 3.07 |
+
+All nine replication rounds are negative in both feeder arms. The two-averages figure this first suggested —
+"aggregate 5.0 GB/s" — was an artifact: the feeder's 2 GiB window is mostly uncontended, so summing two
+medians over two different windows invents bandwidth. #189's union-window instrument is what replaced it, and
+the naive sums are labelled as naive wherever they appear.
+
+### #189 — processes do not break the wall either; 3.31–3.38 at every count
+
+Union-window aggregate, 2 GiB per process, 5 interleaved rounds, control noise floor 5.1 %, launch skew
+sub-millisecond:
+
+| p1w4 | p2w2 | p2w4 | p3w4 | p4w2 | p4w4 | p6w4 | p8w1 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3.385 | 3.378 | 3.383 | 3.375 | 3.370 | 3.334 | 3.331 | 3.308 |
+
+Per-process share of the total falls as 1/P. Eight processes with one reader each get the same 3.31 that one
+process with four readers gets. Whatever the 3.3–3.4 GB/s is, it is not a per-process limit, so no amount of
+external feeding processes buys a faster device.
+
+### #190 — splitting one demand burst across processes buys nothing
+
+203 MiB delivered, gate-synchronised, 7 interleaved rounds: **63.2 ms** at 1×4, **63.0 ms** at 2×2 (paired
++0.023 — nothing), 64.5 ms at 4×1, 67.0 ms at 2×4, 71.5 ms at 6×2. A burst served by two cooperating
+readers is not served faster than one.
+
+### #191 — file scope: locality does not help, and sequential is the slowest arm
+
+§5w reports the engine delivering 3.85/3.68/3.84/3.95/3.69 GB/s inside its own bursts (mean 3.80) at the
+identical shape #186 measured at 3.36. The last structural difference between the two instruments is *which
+files the concurrent reads touch*, so the address set was made the only variable — slice, worker count and
+total bytes fixed at 2.641 MiB × 4 × 203 MiB — across two interleaved batches (9 rounds, then a 16-round
+replication), with `spread` carried as the control in every round and the sharing arm's file rotated per
+round so no arm is favoured by one platter range:
+
+| scope | what it reads | GB/s (9 / 16 rounds) | paired Δ vs control |
+| --- | --- | --- | --- |
+| spread | random file, random expert | 3.310 / 3.310 | — |
+| one | one file per worker | 3.320 / 3.317 | −0.005 / +0.029 |
+| same | all four workers in one layer file | 3.218 / 3.234 | −0.100 / −0.049 |
+| seq | consecutive expert strides in one file | 3.216 / 3.236 | −0.093 / −0.053 |
+
+Two arms bracket the engine's own shapes: a token's ten routed experts live in one file (`same`), and a
+token's 480 requests spread over all 48 (`spread`). Neither is faster, and maximal locality is ~3 % *slower*.
+`seq` at −0.922 in one of its rounds is the same first-round warm-up shape seen in both batches — round 1's
+control read 2.66–2.69 GB/s while every other arm of that round read high, which inflates all three of its
+deltas; excluding round 1 the medians are `same` −0.06, `one` +0.03, `seq` −0.07. Short reads: 0 everywhere.
+
+### The ceiling this section retires, and the one it replaces it with
+
+Nothing the campaign can make this device do offline exceeds **3.39 GB/s** — across 30 slice × worker shapes
+(#186), 8 burst lengths to 6.4 GiB (#187), 8 process counts (#189), 5 burst splits (#190) and 4 address sets
+(#191). That contradicts three citations still standing in this doc and in `docs/v4-core-design.md`:
+
+- the **3.92 GB/s** four-thread `ParallelExpertReader` ceiling (§5o),
+- the engine's own **3.95 GB/s**,
+- §5w's **3.80 GB/s "delivered inside each burst, 97 % of the ceiling"**.
+
+§5w's number is a quotient, not a rate: `gap_total / gap_count` divided by `experts_per_miss_layer × stride`
+credits the *whole token's demand volume* to the hit→fixup gap, while the ring's ~42.8 speculative reads per
+token (§5v) are also flying in that window. Either the gap was not entirely demand-read time or not all of
+those bytes flew inside it — both make the quotient larger than the device rate, and the device is what the
+five scopes above just measured directly. **The planning number from here is 3.3–3.4 GB/s.** That does not
+weaken §5w's conclusion, it strengthens it: if the bytes cost *more* device time than the section assumed,
+the bill for a constant feed is bigger, not smaller, and moving them earlier is even more the only lever.
+
+### Arithmetic on the idle clock the operator pointed at
+
+How much idle clock there is depends on which of the campaign's two busy figures you believe: §5w's kernel
+ledger leaves `217.34 − 95.7 = 121.6` ms of every token with the device not serving reads, while §5v's duty
+sample (34.7 %) implies 141.9 ms. Take the smaller. Filling all of it at the wall measured here moves
+`121.6 ms × 3.37 GB/s = 391 MiB` per token — roughly double the 203.55 MiB the token's demand misses actually
+cost. So the idle clock is real and large enough; the reason the feeder still fails is not that there is
+nothing to read, it is #188 (bytes read while a burst runs are taken from that burst) plus §5aa's landing
+limit (42.8 issued per token, 18.56 adopted, `free=0.99`) — the tier has nowhere to put the extra bytes.
+
+### #192 — the live session: the idle clock really is fillable, and filling it costs 17 % and 53 % of decode
+
+The six offline probes share one limitation: their victim is a synthetic burst that never stops. A session is
+different — §5v measured the device idle roughly two thirds of the time — so the same feeder was run beside ten
+live greedy 384-token decodes at the shipped default (`--ram 12`, 96 slots, `--max-context 262144`,
+`TINYTITAN_RUNNER_STATS=1`), in three interleaved rounds of control / 1-worker feeder / 4-worker feeder plus a
+closing control, with `iostat -d -w 1 disk0` sampled across every arm:
+
+| arm | tok/s median | paired Δ vs same-round control | hit rate | engine MiB/tok | device MB/s mean | % of the 3.37 GB/s wall |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| control | 5.082 | — | 0.8457 | 197.3 | 1467.9 | 44 % |
+| feeder ×1 | 4.216 | −0.870 (−17.1 %) | 0.8329 | 213.8 | 2724.9 | 81 % |
+| feeder ×4 | 2.370 | −2.709 (−53.3 %) | 0.8112 | 241.5 | 3072.5 | 91 % |
+
+Per-round paired deltas are −0.661, −1.008, −0.870 for ×1 and −2.717, −2.709, −2.650 for ×4: nine arm-pairs, all
+negative, and no round in which a feeder helped. All ten arms emitted the same response hash
+(`95aa4531b4ea2304…`), so this is scheduling and not numerics. The control's own spread is 4.6 %
+(4.896–5.132), with round 1's control the low outlier — the same first-round warm-up #191 showed.
+
+The premise is **confirmed** in the only sense the device can confirm it. Device utilisation rises from 44 % of
+the wall to 81 % and 91 %, and the ×4 arm's busiest second is 3228 MB/s, 96 % of everything the offline probes
+ever got out of this drive. The engine is not short of idle clock; it has never been using it. It is **refuted**
+in the sense that matters: those bytes are not free, and they are worse than the fixed-pie split #188 measured.
+
+**The demand volume is identical; only the classification moves.** `expert_hits + expert_misses` is 186 032 in
+every arm of every round (484.5 per token), and round 1's `expert_evictions` (31 293) and `expert_reloads`
+(22 986) are the same number in all three arms — the plan asked for the same experts in the same order and
+chased the same slots. What changed is how many of them had already arrived: `prefetch_adopted_per_token` falls
+19.01 → 12.52 → 4.66 while `prefetch_issued_per_token` barely moves, 39.45 → 37.98 → 35.93.
+
+Three independent counters then agree to ±1 read, in all six feeder arms:
+
+| round × arm | Δ demand misses | −Δ prefetch adoptions | Δ `expert_read_mib` ÷ stride |
+| --- | ---: | ---: | ---: |
+| R1 ×1 | +2 491 | 2 492 | 2 491.0 |
+| R1 ×4 | +5 510 | 5 511 | 5 510.0 |
+| R2 ×1 | +2 212 | 2 211 | 2 212.0 |
+| R2 ×4 | +6 360 | 6 359 | 6 359.9 |
+| R3 ×1 | +2 542 | 2 542 | 2 542.0 |
+| R3 ×4 | +6 504 | 6 505 | 6 504.0 |
+
+That is the mechanism, and it is in the code. A plan adopts a speculative read only if its buffer is ready when
+the router's indices come back: `if let source = prefetched[...]` memcpys it into the slot, and anything without
+a ready buffer falls through to `misses.append(index)`
+([PreadExpertStreamer+Plan.swift:95-106](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift#L95)),
+while every demand miss charges `experts.count × expertStride` to the byte counter
+([PreadExpertStreamer+Residency.swift:381](file:///Users/andreborchert/Downloads/TinyTitan/sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Residency.swift#L381)).
+A late speculative read is therefore **not used at all**: the same 2.641 MiB crosses the bus twice, once in the
+window the feeder stole and once on the path the token waits for. That is why the engine reads *more* under a
+co-tenant (197.3 → 213.8 → 241.5 MiB/token) — a fixed-bytes model like #188's cannot predict it, and it is the
+reason a feeder is worse than zero-sum rather than merely zero-sum.
+
+The time follows the bytes. Per token, `io_ms` goes 69.1 → 98.2 → 189.7 ms against token time 196.8 → 237.2 →
+389.0 ms, while `wait_ms` (the host blocked on the GPU) only goes 92.3 → 98.2 → 124.0. The regression is the read
+span, not a new stall — which is what a contention story should look like, and not what a scheduling-priority
+story would.
+
+What survives is the version of the operator's idea that the engine owns. Its ring issues 39.45 reads per token at
+the shipped default and adopts 47 % of them, so about 21 reads — 55 MiB, 18 % of the 309.7 MiB/token this session
+moves at the device — is read and then thrown away for arriving late. The argument that kills an external feeder
+says the internal one is paying for its own lateness. Whether throttling it helps is #193, and
+`TINYTITAN_PREDICTIVE_PREFETCH=0` has never been priced in this configuration:
+`docs/qwen38-remaining-levers-plan.md:59` lists it as a check under hypothesis 1 and never ran it, while the
+ring-depth study that retired two-and-three-ahead ran at `--ram-budget 8G` in September with no depth-0 arm.
+
+### Deviations
+
+1. **The probe's p99 was read out of bounds**, `all[n - n/100]` with `n < 100` evaluating to index `n`. It
+   printed 0 for every short arm: #187's 64/128/203 MiB rows and #188's 76-read burst rows. Fixed to
+   `all[n * 99 / 100]` and #188 re-run from the corrected binary (`/tmp/contention_rounds2.tsv`), so the
+   #188 figures quoted here are from the fix. Rates, walls and p50 come from timestamps and a sorted array
+   and were never affected. Note the converse degeneracy: with the fix, a 76-read row's p99 *is* its max, so
+   #191's tail column is reported as max, not as a percentile.
+2. **Binary provenance is not uniform.** #186 and #187 ran on the pre-edit binary (no pid in the seed, no
+   gate, no bound on the gate wait). Both were single-process, so pid-in-seed and the gate are inert there;
+   their rate/wall/p50 columns are valid. #188 was run once on the old binary and re-run on the corrected
+   one; #189–#191 ran entirely on the corrected one.
+3. **A `""` gate argument hung the smoke test.** An empty fifth argument was treated as a real path, so
+   workers spun waiting for a file that never appears. Fixed (empty means no gate) and the spin is now
+   bounded to 15 s with a loud exit, after it had cost two minutes. Probe defect, not a device finding.
+4. **First-round warm-up in both #191 batches**, described above, is why per-round deltas are printed rather
+   than only medians. #192's round-1 control is the same effect (4.896 against a 5.082 median), which is why
+   its deltas are paired within a round and not against the batch median.
+5. **Machine state before the live batch**: `sysctl vm.swapusage` read 6.19 GiB of 7.17 GiB already in use,
+   `memory_pressure -Q` 82–83 % free, load 3.25, AC power, no model process. The swap is not something these
+   probes created and it is sampled per arm in #192.
+6. **Provenance.** The offline arms (#186–#191) ran at tree `b5fba5e`. 24 GB M3 MacBook Pro, macOS 27.0.1,
+   Xcode 27 / Swift 6.4 toolchain present but not exercised — the probes are C, built `cc -O2 -Wall -Wextra`,
+   and `swift build` was not re-run. No model loaded, no GPU work, no numerics touched. #192 is the exception
+   on every one of those points: it loaded the installed 4-bit Qwen3.8-Flash-Next through the release binary
+   built at 04:29 from the last source commit `9c858cd`, with `b5fba5e` (a benchmark-only change) as `HEAD`
+   and this document the only dirty file. Its numbers are therefore attributable to a committed engine, but
+   the tree they were measured in was not clean, and the standing rule is not to publish from one — so the
+   #192 rows are a measurement of `9c858cd`, recorded here as such, not a shipped-artifact benchmark.
+   Everything in §5af is a throwaway under `/tmp`; nothing shipped.
+7. **The #192 driver averaged `iostat` over the wrong denominator.** It divided by every row past `NR>2`,
+   including the trailing blank and zero rows, so each arm's device mean was understated by roughly 9–10 %.
+   Every device figure in the #192 table was recomputed from the raw `.iostat` files with `NR>3 && $3+0>0`.
+   The wall clocks, hit rates and byte counters came from the driver and are unaffected.
+8. **`iostat`'s first data row is the since-boot average.** The driver's per-arm MiB total included it, adding
+   ~47 MiB to ~121 206. The recomputed totals the table uses exclude it.
+9. **The device window is the whole arm, not the decode loop.** `iostat` runs from before model load to after
+   the last token, so the device MiB/token column is session-total bytes ÷ generated tokens and carries the
+   load phase. The paired arm-to-arm deltas are still the right comparison; the absolute 197–241 MiB/token is
+   an upper bound. The `engine MiB/tok` column is the engine's own counter and has no such inflation.
+10. **The feeder's own achieved rate was not captured** — its stdout went to `/dev/null` — so its bytes are
+    derived by difference between the recomputed device total and the engine counter, not read from the probe.
+    Its process liveness and wall were captured.
+11. **The driver's `load1` field is malformed** (`tr -d '{} '` collapses `vm.loadavg`'s spaces into
+    `3.693.293.25`). Load was read off the raw sysctl for the record; no conclusion in this section rests on it.
+12. **Swap moved during the live batch**: 7.35–7.85 GiB used across the ten arms against 6.19 GiB before it.
+    §5v's warning is that swap movement, not the device, is what distorts a live arm. Here the regression is
+    monotone in feeder intensity (−17.1 %, then −53.3 %) and the closing control returned to 5.132, which is
+    what contention predicts and not what a swap cliff looks like — but the swap was there, and it is the
+    strongest reason to re-run this arm on a machine that has not been fed before adopting anything from it.
+
+### Verdict
+
+**The drive wall is 3.3–3.4 GB/s and the shipped reader is already at it.** In-flight bytes set throughput
+and 10.56 MiB is the knee (#186); sustained feeding is neither slower nor faster than a burst (#187); a
+co-tenant's bytes come straight out of the demand burst, by 0.62–1.64 GB/s (#188); and no process count
+(#189), burst split (#190) or address set (#191) moves the wall by more than the control's own noise. The
+constant-feeder concept therefore dies in the offline limit for the same reason it died in the cache: the
+machine can already be kept busy, and keeping it busy buys bytes the engine has nowhere to put. #192 then
+tested the one version the offline probes could not see — the same feeder scheduled into a *live session's*
+gaps instead of into a synthetic burst — and the session pays for it: −17.1 % decode with one worker, −53.3 %
+with four, nine negative pairs out of nine, identical output hash. The idle clock really is fillable (44 % →
+81 % → 91 % of the wall) and filling it is **worse than the fixed pie #188 measured**, because a speculative
+read that arrives late is not used at all: the same expert crosses the bus again on the path the token waits
+for. Refused as shipped behaviour. What survives of the operator's idea is the internal half of it — the
+engine's own ring discards ~21 reads per token, and pricing that is #193.
