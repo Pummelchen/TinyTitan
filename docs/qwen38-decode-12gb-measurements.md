@@ -7865,3 +7865,224 @@ the whole range, and it follows the round rather than the arm, so no arm here ra
 7. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated.
 8. Nothing here ran in CI and no CI run executed a model. The eight logs are on disk under `/tmp/bi219/` and will not
    survive the machine; the numbers above are transcribed from them.
+
+## 5bj. #220 prices the last unpriced knob on the decode expert path: the shipped hit/fixup split is worth 7.51 %, and moving the partition to the GPU is the first arm that is not slower — by a sixth of what its own first batch said (2026-10-17)
+
+**Question.** §5bi ended by naming the one knob this campaign had never measured, because naming it is cheaper than
+letting the next session re-find it: `TINYTITAN_DECODE_EXPERT_EXECUTION` (`hit-fixup` default | `barrier` |
+`gpu-residency`). Both non-default modes are worth a measurement for different reasons. `barrier` is documented as
+"the former all-experts-after-I/O path as a correctness/performance control for A/B measurements"
+(`RuntimeConfigurationTypes.swift:29-34`) — so the whole §5 campaign has been quoting a split it never priced against
+the path it replaced. `gpu-residency` moves the hit/miss partition from `DecodeExpertPartition.populate` on the host to
+a device-side atomic classification, which is the one change on this path that removes *host work from under the wait*
+rather than re-arranging bookkeeping about it — exactly the narrowing §5bi left behind.
+
+**What ships (nothing was written for this section).** The enum and its fail-closed environment read are
+`RuntimeConfigurationTypes.swift:29-51` (unset ⇒ `.hitFixup`; unknown value ⇒
+`RuntimeConfigurationError.invalidDecodeExpertExecution` and the load refuses). The split is taken only when the mode is
+`hitFixup` or `gpuResidency` (`RealForwardRunner+DecodeMoE.swift:125-126`), so `barrier` falls through to commit every
+expert after the I/O — there is no separate barrier code to read, which is why it is a control and not a feature. The
+GPU arm's residency resources are wired only for that mode (`RealForwardRunner+DecodeLayers.swift:70-71`, from
+`ModelExpertIO.swift:162`), the classification is encoded at `RealForwardRunner+DecodeLayers.swift:200`, and the host
+then reads the device's lists back under a superset guard (`RealForwardRunner+DecodeMoE.swift:128-174`) that throws if
+the GPU ever misses a miss the cache plan expected. That guard is why `gpu_classified_*` read 0 in every prior section:
+the mode had never been run.
+
+**Method.** Two batches, one artifact, no source change, mains power, one model process at a time. Batch 1
+(`/tmp/bj220/`) is eight arms in mirrored order — r1 `base,barrier,gpu,base`, r2 `base,gpu,barrier,base` — so the
+shipped control opens and closes every round and each candidate is measured from two different positions. Batch 2
+(`/tmp/bj220b/`) is a confirmation batch written *before* batch 1's magnitude was believed: 3 rounds × 4 arms
+(`base, gpu, base, gpu`), 12 arms, no barrier, because a candidate that has to be re-measured is a candidate whose
+first number is not yet a number.
+
+**Falsifiers, written first.** *barrier:* if it lands within its round's drift band of base, the shipped phase-1
+hit/fixup split buys nothing and every §5 number attributed to it is misattributed. *gpu-residency:*
+`gpu_classified_*` must be non-zero — it is, and identically in all eight GPU arms (150 131 / 33 709 / 5 080) — and
+host turnaround must fall; if the classifier provably runs and the clock is not up, host partitioning was never on the
+critical path, which is what §5bg's screen already predicts.
+
+### The clock
+
+Batch 1, tok/s, with the base bracket's own spread as the drift band:
+
+| round | base1 | barrier | gpu | base2 | base mean | band | barrier Δ | gpu Δ |
+|---|---|---|---|---|---|---|---|---|
+| r1 | 4.981 | 4.620 | 5.098 | 4.857 | 4.919 | 2.52 % | −6.08 % | **+3.64 %** |
+| r2 | 5.093 | 4.533 | 5.211 | 4.863 | 4.978 | 4.62 % | −8.94 % | **+4.68 %** |
+
+Batch 2, same artifact, 02:31–02:48Z:
+
+| round | base1 | gpu1 | base2 | gpu2 | base mean | band | gpu mean Δ |
+|---|---|---|---|---|---|---|---|
+| c1 | 4.956 | 4.967 | 4.997 | 5.026 | 4.9765 | 0.82 % | **+0.40 %** |
+| c2 | 5.013 | 5.158 | 5.260 | 5.267 | 5.1365 | 4.81 % | **+1.48 %** |
+| c3 | 5.061 | 5.106 | 5.048 | 5.018 | 5.0545 | 0.26 % | **+0.15 %** |
+
+Five rounds out of five put `gpu-residency` above its own round's base mean, which is the first time in this campaign
+that an alternative to a shipped default has been *not slower* in every round it was measured. Under a null of no
+effect, five same-sign rounds has probability 1/32 (0.5 × 0.5 × 0.5 × 0.5 × 0.5), so the sign is not chance. Taken
+arm-by-arm against each individual base instead of against the round mean, it is 12 positives and 4 negatives out of
+sixteen comparisons, and all four negatives are in the confirmation batch — which is the same fact as the previous
+paragraph, stated at the resolution the confirmation batch was built to provide.
+
+The magnitude is a different matter, and it does not survive. +3.64 and +4.68 became +0.40, +1.48 and +0.15 — the
+confirmation batch's mean is +0.68 % where batch 1's was +4.16 %, and the pooled mean over the five rounds is +2.07 %
+with a median of +1.48 %. Nothing about the machine or the arm changed between the two batches except the window, and
+the rounds do not rank by drift either (c2's band is 4.81 %, wider than r1's 2.52 %, and its effect is 41 % of
+r1's), so this is not "the effect hides inside the drift" — it is "batch 1's two rounds over-stated it, and the
+tight-bracket rounds read it at under half a percent." Per the paired-benchmarking rule, an effect that shrinks under
+re-pairing was partly drift, and the smaller number is the one to keep.
+
+### The counters say what the clock could not
+
+Per-token wall (= 1000 / the footer's tok/s), against the only counter that replicates. `exposed_ms` is the part of the
+read that is *not* hidden behind compute — `(100 − io_hidden_pct)/100 × io_ms`, the quantity §5bi's conclusion said was
+the only one worth moving:
+
+| round | base wall | gpu wall | Δ wall | base exposed | gpu exposed | Δ exposed |
+|---|---|---|---|---|---|---|
+| r1 | 203.29 | 196.16 | −7.14 | 0.133 | 0.068 | −0.065 |
+| r2 | 200.88 | 191.81 | −9.08 | 0.135 | 0.069 | −0.067 |
+| c1 | 200.94 | 200.14 | −0.80 | 0.190 | 0.095 | −0.094 |
+| c2 | 194.69 | 191.85 | −2.84 | 0.155 | 0.076 | −0.080 |
+| c3 | 197.84 | 197.55 | −0.29 | 0.195 | 0.103 | −0.092 |
+| **mean** | | | **−4.03** | | | **−0.079** |
+
+The counter is stable: −0.065 to −0.094 ms/token across five rounds, all negative, spread 0.030. The clock is not:
+−0.29 to −9.08, a factor of 31. 0.079 of 4.03 is **2.0 %** — so the change's demonstrable win is roughly four
+hundredths of a percent of a token (0.079 / ~200 ms), and the clock's much larger swing is not the same quantity as the
+mechanism. `io_hidden_pct` itself: across all ten base arms it spans 99.65–99.85, across all eight GPU arms 99.78–99.92, and the
+two sets separate *within* every round — all sixteen GPU-arm-versus-base-arm comparisons in the same round (one GPU arm
+against two bases in batch 1, two against two in batch 2) have the GPU arm above both bases. It is the only counter
+in this section that does that.
+
+What did *not* replicate is the attribution batch 1 seemed to offer. `cache_plan_ms` read −0.461 and −0.521 ms/token in
+batch 1 — the host planning work the GPU arm removes — and in the confirmation batch it is −0.135, −0.351 and **+0.209**:
+c3's GPU arms planned *slower* on the host than its bases. `io_completion_to_fixup_ms` is −0.115, −0.115, −0.110,
+−0.093, +0.011: four rounds of a ~0.1 ms/token turnaround gain that is 0.05 % of the token and cannot carry a percent
+of clock either. `wait_ms` and `body_ms` are lower in the GPU arm in four and five rounds respectively, but with
+magnitudes (−3.5/−4.7 and −6.4/−8.4 in batch 1, −0.7/−1.8/+0.3 and −0.6/−2.7/−0.3 in batch 2) that move with the clock
+rather than explaining it — which is the signature of a scope that measures how long the token took, not a quantity of
+work removed.
+
+So: the partition does move to the device and it demonstrably does the same job (identical classification counts,
+identical output), the exposed read gets reliably a little smaller, and **no counter accounts for more than about 1 % of
+the clock gain batch 1 reported, or 2 % of the five-round mean.** The honest claim is that `gpu-residency` is not slower
+and is very slightly ahead; the mechanism behind anything larger is not established, and batch 1's own apparent cause
+(`cache_plan_ms`) is refuted by batch 2.
+
+### barrier: the control prices the split, and the split is real
+
+| arm | tok/s | wait_ms | body_ms | io_ms | io_hidden_pct | hit_fixup_layers | cache_plan_ms | prefetch adopted/token | read MiB |
+|---|---|---|---|---|---|---|---|---|---|
+| r1 base (mean) | 4.919 | 95.798 | 185.538 | 69.759 | 99.81 | 11 606 | 4.522 | 18.80 | 75 740 |
+| r1 barrier | 4.620 | 114.498 | 198.201 | 66.377 | **0.14** | **0** | 4.262 | **20.66** | **73 856** |
+| r2 base (mean) | 4.978 | 93.181 | 183.581 | 71.131 | 99.81 | 11 636 | 4.192 | 18.51 | 76 037 |
+| r2 barrier | 4.533 | 116.718 | 202.112 | 67.390 | **0.14** | **0** | 4.585 | **20.57** | **73 945** |
+
+The falsifier did not fire. `barrier` is 6.08 % and 8.94 % slower (mean −7.51 %), and it is slow for a reason the
+counters state outright: `io_hidden_pct` goes from 99.81 to 0.14 — the read stops being hidden behind compute almost
+entirely — and `wait_ms` gains ~21 ms/token while `io_ms` actually *falls*, by 3.38 and 3.74. The phase-1 hit/fixup
+split is therefore worth about 7.5 % of decode, and every §5 number this campaign has attributed to it stands.
+
+And it feeds *better* while losing: 20.57–20.66 prefetched experts adopted per token against base's 18.5–18.9, fewer
+bytes read (73.9 GiB against 75.7–76.0), a higher `expert_hit_rate` (0.8495–0.8497 against base's 0.8451–0.8461). That is the
+fourth independent instance of the same anti-correlation after §5bb, §5bh and §5bi — better feed, worse clock — and it
+is now hard to read as anything else: **the engine's decode rate is not limited by how much the feeder delivers.**
+
+### The screen's verdict on each arm
+
+`benchmark/tinytitan_host_path_split.py`, measured without a pipe. `barrier` → **exit 0** on both rounds:
+"a host-path change inside the layer loop can address at most 17.326 ms/token of its 111.378 (16 %, 8.0 % of the
+token)" (r2: 18.004 of 113.215). Its family-2 span — the host turnaround the split exists to shorten — is 111–113
+ms/token against base's 34–36, which is the same fact `io_hidden_pct=0.14` says from the other side.
+`base` and `gpu` → **exit 1** on all four arms screened (batch 1 only — one base and one GPU arm per round; batch 2 ran
+no screen): every one has its family 2 (33.200–36.428) below its own absolute bound (34.735–37.092), so a host-path arm
+is still worth pricing, but not inside the loop — bookkeeping is only 17.964–19.599 ms/token. The GPU arm's family-2
+value (34.887, 33.200) is below its round's base (36.428, 34.351) by 1.54 and 1.15 ms/token, which is the host span the
+classifier does take off the path. ~1.3 ms of removed host span against the confirmation rounds' 0.29–2.84 ms wall gain
+is at least the right order of magnitude — unlike batch 1's 7.14 and 9.08 ms.
+
+### Numerics
+
+All twenty arms — 8 + 12, three execution modes, two batches — hash to `c172890df88cdbbfa0627bd320d16614`, identical
+to §5bb, §5bh and §5bi's 384-token output. `barrier` recomputes the hit experts it did not overlap, so a differing hash
+there would have been a correctness finding outranking every number above; it does not differ. `gpu-residency` runs a
+different partition *authority* — the device decides, the host only checks the superset — and produces the same tokens,
+which is the strongest statement this page can make that the two partitions agree. Note that `expert_hits` does vary
+arm-to-arm (157 195–157 455) while the output does not: the routing is fixed, which experts happened to be resident
+when needed is not, so no two arms share a byte-exact I/O state. That is a reason the clock is noisy, not a reason to
+distrust the hash.
+
+### What this closes, and what it leaves
+
+`TINYTITAN_DECODE_EXPERT_EXECUTION` is now fully priced and is the last knob on the decode expert path that was not.
+`barrier` is retired as a live option — it is worth its documented weight (−7.5 %) and nothing else. `gpu-residency` is
+the first non-default arm in this campaign measured *not slower* than the shipped default, with a replicating but tiny
+mechanism (−0.079 ms/token of exposed read, ≈0.04 % of a token) and a clock that will not support a promotion decision.
+It stays opt-in and un-promoted: the bar here is a number that survives re-pairing, and +4 % did not. Promoting it
+would also put a new fail-closed throw (`ModelError.internalInconsistency`, when the GPU's miss list ever fails to
+contain the plan's) on the default path of a shipping engine, and it allocates per-layer residency buffers whose memory
+cost this section did not measure — on a 24 GB host under a 12 GiB cap, an unmeasured allocation is not a free win.
+
+What it leaves, named so it is not re-found: the one surviving reading of all of §5ba–§5bj is that decode is bounded by
+the *token's own critical path*, not by the feed. Nothing tried here — better synchronisation (event −12.5 %,
+per-layer −12.9 %), better prefetch (ring depth, horizon, per-layer), better partition authority (+0.04 % real) or worse
+(I/O overlap −7.5 %) — has moved the clock by an amount that both replicated and was large. The gap between what the
+device ledger says a token should take and what it takes has been measured from four sides now and priced from none.
+
+**Provenance.** Machine Mac15,3 Apple M3, 24 GB (25,769,803,776 bytes), macOS 27.0.1, Apple Swift 6.4
+(swiftlang-6.4.0.34.1 clang-2100.3.34.1), AC power (`pmset -g batt` re-checked immediately before batch 1: "Now drawing
+from 'AC Power'", 100 % charged). Measured artifact is `c262da7`'s code, built 01:45Z; the tree was clean from
+`b43a19c` through both batches and **no source file was modified for this section**, so every arm ran the same binary
+that §5bi's arms did (`.build/release/TinyTitanCLI` mtime unchanged across all twenty runs). Model
+`models/qwen3.8-flash-next_125B_A6B_4Bit`, tier `cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G`,
+`prefetch=1`. Gates: none were re-run, because nothing but this document changed — see deviation 8. Per-arm machine
+state sampled beside the clock: batch 1 free 78–80 %, swap used 7,874.88–8,079.56 MB (205 MB spread, and the fastest
+arm of each round is not the arm with the least swap); batch 2 free 77–80 %, swap 7,824.94–8,181.19 MB. No arm ran
+under materially different pressure from its own round.
+
+**Exact arm commands.** Batch 1 and batch 2 differ only in the `TINYTITAN_DECODE_EXPERT_EXECUTION` prefix (unset for
+the shipped `hit-fixup`) and in the output directory:
+
+```bash
+TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1 \
+  [TINYTITAN_DECODE_EXPERT_EXECUTION=barrier|gpu-residency] \
+  .build/release/TinyTitanCLI --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0 --max-context 262144
+```
+
+All twenty arms exit 0. Two footers, one per batch: batch 1 `r1_gpu` ends
+`[stop=maxTokens prefill=10tok/3.02s new=384tok decode=75.33s tok/s=5.098]`, batch 2 `c3_gpu2` ends
+`[stop=maxTokens prefill=10tok/2.90s new=384tok decode=76.53s tok/s=5.018]`. Both premise smokes (24 tokens, one arm per
+mode) ran before the batches and exited 0, which is what established that `gpu-residency` executes at all.
+
+**Deviations, all of them.**
+
+1. Two batches, twenty arms, and the magnitude is read across them. That is the point of writing the second batch, but
+   it means the pooled +2.07 % mean is not one batch's number; the raw clocks are never compared across batches, only
+   within-round paired deltas, and the 1/32 sign calculation treats the five round-level deltas as independent draws,
+   which two of them arguably are not (batch 1's two rounds share a window).
+2. `barrier` is priced from two rounds in one batch and never confirmed. Its sign is not in doubt — the read's exposed
+   fraction goes from 0.19 % of `io_ms` in base (0.13 ms/token) to 99.86 % in `barrier` (66.3–67.3 ms/token), a
+   deterministic 526-fold change, not a drift artefact — but its −7.51 % magnitude is n=2 and should be read as "about
+   seven and a half percent", not to a decimal.
+3. In batch 2 the GPU arms sit at fixed positions (2nd and 4th) while batch 1 measured them 3rd and 2nd. Position was
+   controlled for in batch 1 and given up in batch 2 in exchange for two GPU samples per round. Against the base arm
+   that ran immediately before it, six of the seven GPU arms that have one are faster (+0.13 % to +2.89 %) and the
+   seventh, c3_gpu2, is −0.59 %. The eighth arm, batch 1's r1 `gpu`, ran third directly behind `barrier`, so no base
+   precedes it; against the base two positions back it is +2.35 %.
+4. The residency buffers' memory cost is not measured, and the superset guard's throw has never been observed to fire
+   in any of these twenty arms (all exit 0), so it is an untested-in-production failure mode that promotion would put
+   on the default path.
+5. This unit changes no runtime code — the section is a measurement over the shipped tree, so no test was added and no
+   suite was re-run. `swift test --no-parallel`, the 18 `tools/lint.sh` gates and CI were all verified on this exact
+   tree in §5bi (`b43a19c`); what is verified *for this change* is `tools/lint.sh docs` and the markdown link check.
+6. `--ram 12` was not passed; the host derivation on this Mac produces the 11.88 G / 96-slot tier by itself, within the
+   operator's cap.
+7. No golden baseline: `tools/golden-baseline.sh` targets the installed 8-bit Ornith build, which is not what this
+   campaign measures, and output invariance here is proven directly by twenty matching hashes on the model that matters.
+8. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated. Nothing here ran
+   in CI and no CI run executed a model. The logs are under `/tmp/bj220/` and `/tmp/bj220b/` and will not survive the
+   machine; every number above is transcribed from them.
