@@ -6009,7 +6009,7 @@ that section printed.
    `_digits_line` ([`:647`](../benchmark/tinytitan_price_pair.py#L647)) prints the digits and nothing else;
    `_drift_line` ([`:664`](../benchmark/tinytitan_price_pair.py#L664)) prints the drift, then the total once, as a
    total. All three are rounded *up* at 0.001 ms ([`:395`](../benchmark/tinytitan_price_pair.py#L395)).
-3. **A `p*` is an interval.** `_pi_interval` ([`:688`](../benchmark/tinytitan_price_pair.py#L688)) runs the ratio
+3. **A `p*` is an interval.** `pi_interval` ([`:688`](../benchmark/tinytitan_price_pair.py#L688)) runs the ratio
    from `(x − wx)/(y + wy)` to `(x + wx)/(y − wy)`, and if that reaches the gate's `L/S`, no gate line is printed
    ([`:772`](../benchmark/tinytitan_price_pair.py#L772)). `y − wy ≤ 0` is not a wide ratio but no ratio at all, and
    the refusal says `unbounded` rather than inventing an endpoint.
@@ -7073,3 +7073,204 @@ Deviations.
    files this change touches, and nothing else. Machine: M3 MacBook Pro, 24 GiB, macOS 27, Xcode 27 / Swift 6.4, on
    AC power at 100 %; HEAD `f1b8346`; no model process was started and nothing under `sources/` was touched. None of
    it is evidence that a CI run executed the suites.
+
+## 5bf. #216 answers the question §5ar left as an estimate — would more rounds settle the band? — and no pool this campaign can publish does, while the one rule that shrinks had to be stopped from dividing a scatter it never measured (2026-10-17)
+
+Two sentences have been carrying this campaign's "we need more data" since the day they were written. §5ar closed its
+withholding arm on an estimate: at "+0.05…+0.32 % against §5ap's observed paired spread (1.6 points over four rounds,
+sd ≈ 0.7), resolving the sign needs on the order of **30-60 clean rounds**". §5az closed its deviation on a limit of
+language: *"they say no page this quiet can score the gate, not that some page that quiet exists"*. Both are claims
+about a **pool** of rounds, and a pool of pages already on disk is an arithmetic question that can be answered before
+any more live time is spent. It is answered, offline, on pages the campaign published, and the answer is status `2`.
+
+[`tinytitan_round_budget.py`](../benchmark/tinytitan_round_budget.py) reads the same markdown
+[`tinytitan_price_pair.py`](../benchmark/tinytitan_price_pair.py) reads, keeps from every table the pair that table
+offers ([`pick_pair`:328](../benchmark/tinytitan_round_budget.py#L328)), solves `dm = x·du + y·dv` **inside each page**
+([`pool`:355](../benchmark/tinytitan_round_budget.py#L355)), and prices the pooled `y` three ways. It answers the two
+questions the campaign actually asks of a pooled price — is `y` inside `0.788-1.301 ms`, and does `p* = x/y` clear the
+six-link gate's `L/S = 0.82/5.30 = 0.155` — and refuses to answer either on a width it has not earned.
+
+### Three provences, and the only one that has to earn its licence
+
+| rule | estimator | width | does more rounds help? |
+|---|---|---|---|
+| 1 median / widest | median | the **widest** member's bound | **never** — one wild control caps the pool forever |
+| 2 mean / triangle | mean | the **mean** of the bounds | toward the average bound, and no further |
+| 3 mean / sqrt(n) | mean | `t(df) · sd_y / √n` | **toward zero**, if and only if each round's error is independent zero-mean noise |
+
+Rules 1 and 2 are distribution-free. [`median_rule`:229](../benchmark/tinytitan_round_budget.py#L229) *is* the shipped
+screen's rule and is pinned to it to the digit ([`test:210`](../benchmark/test_tinytitan_round_budget.py#L210)); two
+screens that price one pool differently are two bugs, not a choice.
+[`mean_rule`:245](../benchmark/tinytitan_round_budget.py#L245) is `|mean(z_r) − z| ≤ mean(b_r)` — a triangle inequality
+with no independence assumption, which is why it goes with the **mean** and not the median. On §5ax's two rounds plus a
+repeat of the quieter one the pool lands at **±0.445 ms** where rule 1 still says **±0.805 ms**: the average of its
+bounds, and no further, however many quiet rounds are added to a pool that keeps one wide control
+([`test:251`](../benchmark/test_tinytitan_round_budget.py#L251)).
+
+Rule 3 ([`sqrt_n_rule`:262](../benchmark/tinytitan_round_budget.py#L262)) is the one that would license "30-60 rounds",
+and it is the one that assumes. The pool carries its own `n` samples of the assumption — the **signed** step each
+round's `base_again` row took, the field #215 made required and per-round — so the screen reads them and licenses the
+shrink only if they support it ([`license`:179](../benchmark/tinytitan_round_budget.py#L179)). Four refusals, in the
+order that says the most, and the two licences:
+
+| the pool's drift samples | verdict | pinned by |
+|---|---|---|
+| one round never carried a `base_again` | refused — "the pool has an unread half" | [`test:362`](../benchmark/test_tinytitan_round_budget.py#L362) |
+| `−3.527, −11.701` (unanimous) | refused — "averaging rounds cancels nothing that has a direction" | [`test:265`](../benchmark/test_tinytitan_round_budget.py#L265) |
+| two rounds, any signs | refused — "an sd from two points is the two points talking to themselves" | [`test:282`](../benchmark/test_tinytitan_round_budget.py#L282) |
+| net step wider than their own spread | refused — "a bias does not average out" | [`test:293`](../benchmark/test_tinytitan_round_budget.py#L293) |
+| mixed signs, spread the wider | **licensed** | [`test:305`](../benchmark/test_tinytitan_round_budget.py#L305) |
+| every round stepped exactly `0.000` | **licensed** — "the drift never moved … the channel measured no bias rather than failing to measure" | [`test:335`](../benchmark/test_tinytitan_round_budget.py#L335) |
+
+The last row is §5as's rule applied to a pool: a control that steps exactly zero is a *measured* zero, which is a
+different statement from a page that never read the channel, and refusing it would have made the steadiest pool in the
+campaign the least poolable one. That refusal is a bug I wrote and then removed; it is in the next subsection because
+the real guard turned out to sit on a different quantity.
+
+### §5ax's two clean rounds, pooled — printed whole
+
+The fixture is §5ax's two published tables, carried in the suite verbatim as `AX`, which is the campaign's best pair:
+two paired rounds, both with a re-measured baseline, both admitting the same `layer_depth25 × prefetch_off` solve. The
+screen echoes the path it was handed, so `table 1` and `table 2` below are §5ax's own two tables read out of a scratch
+copy of that page:
+
+```
+pair: layer_depth25 x prefetch_off is priced by every round, tightest at 45.1 deg
+pool of 2 round(s), column wall, gate L/S = 0.155
+  /tmp/az209/ax_two_rounds.md table 1: x=0.120 y=0.897 y bound ±0.264 deg 47.3 drift sample -3.527 ms
+  /tmp/az209/ax_two_rounds.md table 2: x=0.224 y=0.837 y bound ±0.805 deg 45.1 drift sample -11.701 ms
+  median / widest  : y=0.867 ±0.805 -> cannot settle the band, its bound is 0.805 ms against a margin of 0.079 ms
+  mean / triangle  : y=0.867 ±0.535 -> cannot settle the band, its bound is 0.535 ms against a margin of 0.079 ms
+  mean / sqrt(n)   : y=0.867 ±0.384 -> not licensed: the pool's own drift samples (-3.527, -11.701 ms) moved the same direction in every round, and averaging rounds cancels nothing that has a direction
+  the sqrt(n) budget would clear this margin at 4 rounds of the same scatter -- 2 here
+  and that number is a planning estimate only: not licensed: the pool's own drift samples (-3.527, -11.701 ms) moved the same direction in every round, and averaging rounds cancels nothing that has a direction. If more rounds are pooled, their drift samples have to keep pointing different ways for it to mean anything about this Mac rather than about the arithmetic
+cannot settle: no licensed rule narrows y enough -- the widest the pool may claim distribution-free is the mean of its bounds, and the rule that shrinks is refused by the pool's own drift samples
+exit 2
+```
+
+The campaign's headline number survives pooling exactly as §5ax left it — `y = 0.867`, 0.079 ms inside the near edge —
+and no distribution-free pooling closes a 0.079 ms margin with a 0.805 ms bound. The projection line is worth reading
+carefully, because it reaches for the same decision §5ar's "30-60" was reaching for while measuring a different
+quantity: it projects rounds at *the same price scatter* for *this band margin*, on the shrinking rule, and the line
+immediately below it marks it "a planning estimate only" and re-quotes the refusal. §5ar's 30-60 was a rate estimate
+off a paired `tok/s` spread; this is a price estimate off a solved-`y` scatter. This screen does not re-derive §5ar's
+number and does not contradict it.
+
+### A third round from §5at's batch licenses the shrinking rule, and it still loses
+
+A three-round pool adds §5at's published table — a different launch, same day:
+
+```
+pair: layer_depth25 x prefetch_off is priced by every round, tightest at 43.9 deg
+pool of 3 round(s), column wall, gate L/S = 0.155
+  /tmp/az209/pool3.md table 1: x=0.120 y=0.897 y bound ±0.264 deg 47.3 drift sample -3.527 ms
+  /tmp/az209/pool3.md table 2: x=0.224 y=0.837 y bound ±0.805 deg 45.1 drift sample -11.701 ms
+  /tmp/az209/pool3.md table 3: x=0.683 y=0.796 y bound ±0.866 deg 43.9 drift sample +11.167 ms
+  median / widest  : y=0.837 ±0.866 -> cannot settle the band, its bound is 0.866 ms against a margin of 0.049 ms
+  mean / triangle  : y=0.843 ±0.645 -> cannot settle the band, its bound is 0.645 ms against a margin of 0.055 ms
+  mean / sqrt(n)   : y=0.843 ±0.128 -> cannot settle the band, its bound is 0.128 ms against a margin of 0.055 ms
+  the sqrt(n) budget would clear this margin at 7 rounds of the same scatter -- 3 here
+cannot settle: no licensed rule narrows y enough -- the widest the pool may claim distribution-free is the mean of its bounds, and the rule that shrinks, licensed by this pool's own drift samples, is still ±0.128 against a margin of 0.055 ms
+exit 2
+```
+
+That is the campaign's answer in one line: **the shrinking rule is licensed here, shrinks from 0.645 to 0.128, and
+still does not clear the margin.** And the licence has a price that the screen prints rather than hides — the third
+round is what licenses it, because its control stepped **+11.167 ms** while the other two stepped −3.527 and −11.701.
+The machine has to move in different directions for `√n` to mean anything about this Mac, and the movement that grants
+the licence is the same movement that puts ±0.83 ms on that round's own price (§5az's `±0.832 ms` from drift against
+`±0.034 ms` from digits). So §5az's sentence about a page becomes §5bf's sentence about a pool: *no pool this campaign
+can publish both licenses the shrink and is quiet enough for the shrink to land*, and the arithmetic here bounds that
+claim rather than the silence of one page.
+
+### Two defects the screen had to be built past, and which side was wrong on each
+
+1. **A bound of `±0.000 ms/token`, printed as a settlement.** The first pool built to test the licence — five rounds
+   whose drift samples moved in both directions, so licensed, and whose solved prices were all `0.897` — handed rule 3
+   `sd_y = 0`. `t·0/√n` is `0`, `_ceil_ms(0.0)` is `0.0`, and the shipped formatter, on that budget object, prints:
+   ```
+   mean / sqrt(n)   : y=0.897 ±0.000 -> settles the band inside 0.788-1.301 ms, and the gate does not pay
+   ```
+   An absence of measurement wearing the costume of the tightest budget in the campaign — the same defect class as
+   #215's `0.0` for a channel nobody read, arriving one rule later. My **first** fix was wrong about the cause: I
+   refused the licence when the *drift* `sd` was zero, which is over-refusal, because a control that re-measures the
+   same number is the steadiest evidence the channel gives. The real guard is scatter in the **prices**, so
+   `sqrt_n_rule` refuses itself ([`:291`](../benchmark/tinytitan_round_budget.py#L291)) and the licence now accepts the
+   measured zero ([`:215`](../benchmark/tinytitan_round_budget.py#L215)). What the guard prints instead:
+   ```
+   mean / sqrt(n)   : y=0.897 ±0.000 -> the pool's 5 prices are all 0.897 ms/token: its drift samples moved between rounds but the pair did not, so t*sd/sqrt(n) is t*0/sqrt(n) = 0 and the absence of a measurement would print as the tightest budget in the campaign. n copies of one price is one price, and a scatter never measured cannot be divided by root n
+   ```
+   The RED was `AssertionError: True is not false` on `budget.licensed`; it is pinned by
+   [`test:316`](../benchmark/test_tinytitan_round_budget.py#L316), which also asserts `n_needed is None` so the
+   projection line cannot be printed for a budget that never existed.
+2. **The closing sentence blamed the drift on a pool whose drift had licensed the rule.** Pool 2 above fails to settle
+   on *width*, not on provenance, and the draft ending said so wrongly: "…the rule that shrinks is refused by the
+   pool's own drift samples". The RED was
+   `"refused by the pool's own drift samples" unexpectedly found`; the ending now branches on `last.licensed`
+   ([`:538`](../benchmark/tinytitan_round_budget.py#L538)) and the licensed branch quotes both numbers — ±0.128 against
+   a margin of 0.055 — so the sentence is true of the pool that printed it and is pinned by
+   [`test:428`](../benchmark/test_tinytitan_round_budget.py#L428).
+
+**One test premise was wrong and the implementation was right.** `test_a_baseline_that_never_moved…`
+([`test:355`](../benchmark/test_tinytitan_round_budget.py#L355)) first asserted `assertLess(budget.y_bound, 0.02)` and
+failed `0.02 not less than 0.02`. Bounds here round **up** to the millimetre, which is #209's shipped rule and the
+whole point of the screen; `sd = 0.01581`, `t(4) = 2.776`, `√5` gives `0.01963`, which prints `±0.020`. The assertion
+was re-aimed to `0.019 < bound < 0.021` with that arithmetic spelled out in the comment. No shipped rounding rule was
+touched, and nothing was widened to accommodate a failure.
+
+### Sibling audit: every other place a scatter is divided by root n
+
+The screen is new, so the defect class had to be looked for in the files that already had it. Two call sites divide by
+`√n` ([`quant_perplexity_ab.py:100`](../benchmark/quant_perplexity_ab.py#L100),
+[`memory_master.py:534`](../benchmark/memory_master.py#L534)), and only the first is the same shape:
+[`paired()`](../benchmark/quant_perplexity_ab.py#L94) returns `mean, 0.0, math.inf` for a single paired position
+([`:99`](../benchmark/quant_perplexity_ab.py#L99)) and maps a zero `stderr` to `t = inf`
+([`:101`](../benchmark/quant_perplexity_ab.py#L101)) — so one sample, or `n` samples that differ by exactly the same
+amount, prints `±se 0.000000` beside a `t` of `inf`. That is this section's defect, one rule over. It is **half**
+defended already, and that is why it is not bundled here: the row prints its own `n` immediately after the `t`
+([`:147`](../benchmark/quant_perplexity_ab.py#L147), header at [`:139`](../benchmark/quant_perplexity_ab.py#L139)), so
+the emptiness is disclosed rather than hidden, and the quantity is a per-token-position mean over ~1024 continuous NLLs,
+where `n` identical differences would themselves be the finding. The fix is to print `n/a` where the statistic is not a
+statistic, and it belongs in its own unit with its own failing test, not in this one.
+`memory_master.py:534` is not the same shape at all: `stdev(values) if len(values) > 1 else 0.0` is a *reported* spread
+column in a memory matrix, not a denominator, and no verdict divides by it.
+
+### The arithmetic is shared, not copied
+
+`dm_step` ([`price_pair:357`](../benchmark/tinytitan_price_pair.py#L357)), `missing_cells`
+([`:635`](../benchmark/tinytitan_price_pair.py#L635)) and `pi_interval`
+([`:688`](../benchmark/tinytitan_price_pair.py#L688)) were private and are now public, so the pool screen calls the
+shipped screen's own solve, its own refusals and its own interval rather than a second copy of them. The renames are
+identifier-only — no line of `tinytitan_price_pair.py` moved, so every `#L` anchor §5au through §5be wrote at it is
+still on its line, and `_pi_interval` in §5be's prose was updated in place. The reuse is not cosmetic:
+[`test:210`](../benchmark/test_tinytitan_round_budget.py#L210) pins rule 1 to the shipped screen's published `±0.805`
+on §5ax's real pair, and the live check agrees independently — on §5at's own page the pool screen prints that page's
+`y=0.796`, bound `±0.866`, angle `43.9 deg`, drift `+11.167 ms`, which is what the shipped screen says for the same
+table.
+
+### Deviations, gates and provenance
+
+1. **Pool 2 is cross-batch**, and that is the deviation the campaign's own rule forbids for clocks. It is legal here
+   for one reason and one reason only: every price was solved **within** its own page, from that page's rows against
+   that page's baseline, and no `tok/s` from one batch was ever compared with a `tok/s` from another. `x` and `y` are
+   ratios of steps inside a page; pooling them pools estimates of one physical quantity, not two machines' rates. Read
+   the 7-round projection as a planning number with that asterisk on it, which is what the screen's own "planning
+   estimate only" line exists to say.
+2. **The falsifier was written before measuring:** *if any pool the campaign can publish lets a licensed rule clear its
+   band margin, the campaign's "more rounds would settle it" answer changes and a live re-run is justified.* It did not
+   fire. Both published pools exit `2`, one with the rule unlicensed and one with the rule licensed and still 0.073 ms
+   short. So this section buys the campaign nothing that costs machine time — and it retires the question rather than
+   answering it with another sweep.
+3. **Suites.** `python3 -m unittest test_tinytitan_round_budget test_tinytitan_price_pair` → **Ran 63 tests OK** (19
+   new, 44 pre-existing); adding `test_quant_perplexity_ab` for the sibling audit → **Ran 71 tests OK**. Only these
+   three files import the renamed helpers, so the rename's blast radius is closed by grep and not by assumption. The
+   new suite is named in CI (`.github/workflows/ci.yml:992`), so AUD-211 is satisfied; `tools/lint.sh docs` ok (87
+   documents, **103/107** python suites registered in CI, was 102/106);
+   `PATH="$HOME/.local/bin:$PATH" tools/lint.sh python` ok (ruff 0.16.7, check
+   and format clean, 207 scripts parse at the declared 3.13 floor); the CI markdown-link step (`ci.yml:1022-1056`) run
+   locally on this tree — **220 local links checked, 0 broken**. `ruff format` was run on the files this change touches
+   and nothing else.
+4. **Nothing here is a model run.** No server, no process, no fetch: the fixtures are pages already on disk, and
+   `/tmp/az209/*.md` are throwaway copies of markdown this repository already published. Machine: M3 MacBook Pro,
+   24 GiB, macOS 27.0.1, Xcode 27 / Swift 6.4, HEAD `03c2d03`, on AC power. None of it is evidence that a CI run
+   executed the suites.

@@ -354,7 +354,7 @@ def rows(rnd: Round, baseline: str) -> dict[str, Row]:
     return out
 
 
-def _dm(arm: Arm, base: Arm, column: str) -> float | None:
+def dm_step(arm: Arm, base: Arm, column: str) -> float | None:
     """The step's cost in ms/token, read from the named column."""
     if column == WALL:
         if arm.cells.get(RATE) is None or base.cells.get(RATE) is None:
@@ -556,7 +556,7 @@ def best_pair(
     """
     all_rows = {n: r for n, r in rows(rnd, baseline).items() if n != holdout}
     base = rnd.arms[baseline]
-    ms = {n: _dm(rnd.arms[n], base, column) for n in all_rows}
+    ms = {n: dm_step(rnd.arms[n], base, column) for n in all_rows}
     unmeasured = sorted(n for n, v in ms.items() if v is None)
     priced = {n: float(v) for n, v in ms.items() if v is not None}
     step_rows, inked, signal, drift = _drift_sample(rnd, all_rows, priced, control, column)
@@ -632,7 +632,7 @@ def _disagreement(sel: Selection) -> str | None:
     )
 
 
-def _missing(rnd: Round) -> list[str]:
+def missing_cells(rnd: Round) -> list[str]:
     out = []
     for key in (RATE, ISSUED, ADOPTED):
         if key not in rnd.columns:
@@ -685,7 +685,7 @@ def _drift_line(sel: Selection, pair: Price, column: str) -> str | None:
     )
 
 
-def _pi_interval(x: float, wx: float, y: float, wy: float) -> tuple[float, float | None]:
+def pi_interval(x: float, wx: float, y: float, wy: float) -> tuple[float, float | None]:
     """The interval `x/y` covers once each price carries its own width.
 
     An empty lower half -- `y - wy <= 0` -- means the ratio is unbounded: the page
@@ -856,7 +856,7 @@ def _verdict(
             "however well its two solved rows fit"
         )
         return lines, 1
-    lo, hi = _pi_interval(med_x, xbound, med_y, bound)
+    lo, hi = pi_interval(med_x, xbound, med_y, bound)
     separable = hi is not None and not lo <= need <= hi
     licensed = all(p.drift_sampled for p in pairs)
     if not separable:
@@ -937,7 +937,7 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
                 f"this table's arms are {', '.join(sorted(rnd.arms))}"
             )
             return 2
-        missing = _missing(rnd)
+        missing = missing_cells(rnd)
         if missing:
             print(f"NOT MEASURED (table {index}): " + "; ".join(missing))
             return 2
@@ -991,7 +991,7 @@ def main(argv: list[str] | None = None, stdin: str | None = None) -> int:
             return 2
         if args.predict and args.predict in rnd.arms:
             step = rows(rnd, args.baseline).get(args.predict)
-            measured = _dm(rnd.arms[args.predict], rnd.arms[args.baseline], args.column)
+            measured = dm_step(rnd.arms[args.predict], rnd.arms[args.baseline], args.column)
             if step is not None and measured is not None:
                 # The residual is a difference of two numbers, each with its own width:
                 # this row's step, digits plus whatever the machine moved it, and the

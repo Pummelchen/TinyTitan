@@ -928,6 +928,23 @@ jobs:
         # 1.598 and 1.585 off two pages. A band call inside that bound is refused,
         # not decided. Fixtures are built by the sweep's real `table()`, so reader
         # and printer cannot drift apart; no model, no server, nothing fetched.
+        # test_tinytitan_round_budget asks whether *pooling* rounds can settle what
+        # one page cannot, and prices three provences on the same pool: the shipped
+        # median/widest (distribution-free), mean/triangle (|mean(z_r)-z| <=
+        # mean(b_r), so it converges on the average bound and never on zero), and
+        # mean/t*sd/sqrt(n) — the only budget that shrinks, and the one that has to
+        # earn its independence assumption from the pool's own re-measured baselines.
+        # It refuses that licence when a round never sampled its drift, when the
+        # signs are unanimous, at fewer than three rounds, and when the drift's net
+        # step is wider than its own spread — while a drift measured at exactly zero
+        # in every round licenses it, because §5as's measured zero is not silence.
+        # The shrinking rule then refuses itself if the pool's *prices* repeat, since
+        # t*0/sqrt(n) is the absence of a measurement dressed as the tightest bound.
+        # §5ax's two clean rounds are the fixture, so the headline answer — no
+        # distribution-free pooling settles that band, and the shrinking rule is not
+        # licensed by them — is measured, not asserted. Fixtures are the sweep's own
+        # `table()` and the markdown §5ax was published in; no model, no server,
+        # nothing fetched.
         # test_tinytitan_gpu_contention pins the host-relative GPU contention gauge
         # §5bd came out of: the shipped preflight refuses a fixed 15 % device
         # utilisation, which this Mac has never satisfied (measured idle floor
@@ -972,7 +989,7 @@ jobs:
             test_flat_pair_cache_sim test_continuous_feeder_sim \
             test_heat_split_sim test_predictive_feeder_sim \
             test_tinytitan_usecap_ab test_tinytitan_price_pair \
-            test_tinytitan_gpu_contention
+            test_tinytitan_round_budget test_tinytitan_gpu_contention
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
