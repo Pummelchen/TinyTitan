@@ -237,10 +237,11 @@ reports **1** entry not activating, not 22 — the one left is a `webhook` inser
 not installed. That is a different defect and the operator did not approve touching
 their profile, so it was left untouched **then** — settled later the same day, see the
 amendment below. (2) The 22-entry report is therefore **not
-reproducible** on a fresh boot. The leading explanation is their own long-lived harness
-process (PID 39037, alive since Oct 5) with `patchReload: "live"` re-mounting the old
-plugin against rc.2's renamed packages — but that is a hypothesis, and the test is the
-operator restarting their harness, which they should do and I will not. (3) 13 dangling
+reproducible** on a fresh boot. The leading explanation was their own long-lived harness
+process (PID 39037, alive since Oct 4) with `patchReload: "live"` re-mounting the old
+plugin against rc.2's renamed packages — a hypothesis then, **now confirmed**: the
+restart was made with the operator's approval, and the live page reproduced the report
+before it and cleared it after (see the amendment below). (3) 13 dangling
 links in the legacy `.dsh-module-fallback` farm stay as they are; rc.2 resolves through
 installation scope and does not read them. **Retracted:** the launcher comment first
 said `/dsh-lan/*` answers on this pin. It does not say that any more — `dsh-lan-manager`
@@ -267,9 +268,16 @@ paragraph above said this record did not have. npm 11.20 reported six install sc
 assumed — node-pty's darwin-arm64 `pty.node` and `spawn-helper` ship prebuilt in the
 tarball (the blocked postinstall only chmods the helper, already 0755), `node-pty` loads
 through Node, and koffi's darwin-arm64 binary is present, so the warning is immaterial
-here. The operator's long-lived systemwide process (PID 39037, port 3080) still runs code
-loaded before any of this; only a restart of **their** process picks the new plugin up,
-and that restart is still theirs to make.
+here. The operator's long-lived systemwide process (PID 39037, port 3080, started Oct 4)
+still ran code loaded before any of this until the end of that same day, when it was
+restarted **with the operator's approval** through its launchd service
+(`launchctl kickstart -k gui/501/com.andreborchert.dsh-web`). It came back as PID 33574
+with a boot log holding only the URL. The live page was then driven in headless Chrome
+through its printed token: HTTP 200, no plugin banner, the full UI rendered. Before the
+restart the same probe reproduced the operator's report exactly — `web boot: 22 entries
+did not activate` — so the report is confirmed as the stale process, not a fresh-boot
+defect. The only console errors left are seven 404s from the community
+`dsh-memory-evolve` plugin's own `/memory-evolve/api/*` routes, outside this repository.
 
 **#224 closed 2026-10-17, recorded as §5bn — 52 live arms answered the operator's
 combination question, and the answer is a no.** The two levers §5ba–§5bm that did
