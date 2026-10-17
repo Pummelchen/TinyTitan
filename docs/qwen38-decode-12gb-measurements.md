@@ -8222,3 +8222,120 @@ keep-warm mirrored, output hashed.
    install by this section, so no golden baseline and no `--ram` decision applies.
 7. The logs are `/tmp/bk221/` and do not survive the machine; every figure above
    is transcribed from the printed arm lines.
+
+## 5bl. #222 runs §5bk's keep-warm lever inside the engine, and twenty live arms say what the bench could not: the output is bit-identical at 35 000 dispatches per request, the effect is +0.48 % where its own rounds allow 4 %, and the dose the bench measured best was never actually run (2026-10-17)
+
+**Question.** §5bk measured a −5.88 % cut in the *measured launch's own* `gpuEndTime − gpuStartTime`
+when a second `MTLCommandQueue` fed the device one tiny dispatch through the gaps, at an achieved
+616 µs period. It closed by saying the bench number is a reason to run the live arm and that the live
+arm is the only thing that can price it. This is that arm: the same queue, the same kernel, the same
+8 × 2560 × 8-bit spin, wired into the single generation orchestrator so that the CLI and the server
+both get it, behind `TINYTITAN_GPU_KEEPWARM_US`.
+
+**What shipped.** `RuntimeGPUKeepWarm` in `sources/TinyTitan/Runtime/Configuration/RuntimeConfigurationTypes.swift`
+and `GPUKeepWarmRunner` in `sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift`, hooked at
+`sources/TinyTitanLib/ServerModelSession+Generation.swift:24-31` right after the slot is acquired and
+stopped by `defer`. Unset means inert; a non-integer or anything outside 100…20000 µs refuses the
+request rather than quietly running a control that reads as the arm. Commit `248f795`, handover park
+note `8d46b15`. The default is unchanged, as required.
+
+**Method.** Twenty arms, one artifact, clean tree at `248f795`, mains power, one model process,
+qwen38 4-bit at `--ram 12` and the shipped 96-slot tier, 384 tokens greedy at `--max-context 262144`.
+Batch 1 (`/tmp/kw222/b1/`, 03:57–04:07Z) is the dose axis mirrored — r1
+`base, kw@200us, kw@2000us, base`, r2 `base, kw@2000us, kw@200us, base` — with the shipped control
+first *and* last in both rounds, so each candidate is read from two different positions. Batch 2 (`/tmp/kw222/b2/`, 04:07–04:22Z) is the confirmation batch written before batch 1's
+magnitude was believed: three rounds of `base, kw, base, kw`, so each candidate arm is measured from
+two positions inside one round and the pair straddles the two controls.
+
+**Falsifier, written first** (in #222): *a keep-warm arm that does not beat both controls of its round
+in at least two rounds is drift.*
+
+### The dose is not the ask, and this is the finding the bench could not give
+
+The runner prints its **achieved** period at stop. Asked 200 µs it achieved 2036–2049 µs across six
+arms (34 332–38 490 dispatches per request); asked 2000 µs it achieved 11 817–12 797 µs (5 645–6 425
+dispatches). `Thread.sleep` on this macOS quantises far above the request, so **§5bk's best dose — an
+achieved 616 µs — was never run in the engine.** The live arm sits where §5bk's dose curve measured
+−2.47 % (1 ms) and +2.0 % (5 ms), i.e. on its flat region, and at 2000 µs the ask it ran at six times
+§5bk's worst point. Any verdict here is a verdict on a weak keep-warm, not on the mechanism.
+
+### The clock
+
+Batch 1, against each round's own base mean, with the base-vs-base spread as the drift band:
+
+| round | base1 | kw200 | kw2000 | base2 | base mean | band | kw200 Δ | kw2000 Δ | pair Δ |
+|---|---|---|---|---|---|---|---|---|---|
+| r1 | 4.935 | 5.063 | 5.260 | 5.344 | 5.1395 | 7.96 % | −1.49 % | +2.34 % | +0.43 % |
+| r2 | 5.418 | 5.567 | 5.540 | 5.237 | 5.3275 | 3.40 % | +4.50 % | +3.99 % | **+4.24 %** |
+
+Batch 2, the pre-registered confirmation:
+
+| round | base1 | kw | base2 | kw2 | base mean | band | kw Δ | kw2 Δ | pair Δ |
+|---|---|---|---|---|---|---|---|---|---|
+| c1 | 5.403 | 5.720 | 5.629 | 5.473 | 5.516 | 4.10 % | +3.70 % | −0.78 % | +1.46 % |
+| c2 | 5.543 | 5.601 | 5.698 | 5.688 | 5.6205 | 2.76 % | −0.35 % | +1.20 % | +0.43 % |
+| c3 | 5.587 | 5.543 | 5.645 | 5.640 | 5.616 | 1.03 % | −1.30 % | +0.43 % | −0.44 % |
+
+The falsifier's letter is met: three arms (r2 `kw2000`, r2 `kw200`, c1 `kw`) beat both controls of
+their round, across two rounds. The magnitude is not. Pairing each round's *arm pair* against its
+*control pair* gives +0.43, +4.24, +1.46, +0.43, −0.44 — median **+0.43 %**, mean +1.22 % — and the
+confirmation batch alone gives **+0.48 %** with a split sign (2 of 3 positive, which under a null has
+probability 0.5). Across all five rounds, 4 of 5 pair deltas are positive; that is p = 0.1875 under a
+null of no effect, which is not a finding.
+
+The band is the argument. **In four of the five rounds the pair delta is smaller than that round's own
+base-vs-base spread** — +1.46 % inside a 4.10 % band, +0.43 % inside 2.76 %, −0.44 % inside 1.03 %,
++0.43 % inside 7.96 %. Only r2's +4.24 % escapes its 3.40 % band, and it is one round in a five-round
+series whose other four land inside. The shipped-drift reading is therefore the honest one: this arm
+moves the clock by less than the machine moves it between two identical base arms in the same round.
+
+The session also warmed up as a whole: the ten base arms ran 4.935, 5.344, 5.418, 5.237, 5.403, 5.629,
+5.543, 5.698, 5.587, 5.645 tok/s — first to last **+14.4 %** — and `base2 > base1` in four of five
+rounds, so an arm placed at position 3 inherits upward drift. That is exactly why batch 2 places its
+two keep-warm arms at positions 2 *and* 4 and averages the pair: its +0.48 % is the position-balanced
+number, and it is the smallest one.
+
+### What the run does prove
+
+**Output invariance, twenty for twenty.** Every one of the 20 arms — both doses, both positions, both
+batches — produced md5 `c172890d` on the response text. A second command queue issuing ~35 000
+dispatches per request, on its own timeline, changes nothing the model says. Whatever else this lever
+is, it is not a numerics risk, and that is the property §8-style rejections usually cannot offer.
+
+### Deviations, all of them
+
+1. **The best dose was never tested** (above). A sub-millisecond period needs `mach_wait_until`, not
+   `Thread.sleep`; the knob as shipped cannot ask for what §5bk actually measured.
+2. **No device counters were transcribed.** The manifest carries `tok_s`, `md5`, `dispatches`, free-RAM
+   and swap per arm, but not the runner-stats gap counters, so this batch neither confirms nor denies
+   §5bk's mechanism at engine scale — it only prices its wall-clock consequence. That is a protocol
+   gap against paired-benchmarking rule 5, and it means a follow-up must capture the footer counters.
+3. **Machine pressure was high all batch**: swap used 7 778–8 200 MiB throughout, free 77–82 %. All 20
+   arms share it, so it does not bias the pairing, but it is not the quietest window this campaign has
+   measured in and the bands would likely be tighter on a colder machine.
+4. **The two batch-1 arms share one bracket**, so their deltas are not independent observations.
+5. **Tree provenance**: the batch ran on `248f795`, which was committed and *unpushed* at measurement
+   time (CI 38999848021 / CodeQL 38999848468 were in flight on `36273da`); the tree was clean, so the
+   no-dirty-tree rule holds, and the named commit is the artifact.
+6. **Gates on the shipped tree** (measured before the batch, at `248f795`): `format` (ok, 619 Swift
+   files, after one `[AddLines]` drift in the new file was fixed and the release build re-run clean at
+   76.19 s), `swiftlint --strict`, `sendable` (380 files, 0 undocumented), `force-cast`, `func-length`
+   (14 baselined, 0 new), `file-length` (largest 499), `unbounded-read`, `arch-path`, `stdout-clean`
+   (4 targets in `TinyTitanLib`'s closure, 215 files, no stdout write), `docs` (exit 0), CI's markdown
+   link step verbatim (220 links, 0 broken). `RuntimeConfigurationTests` exit 0, 11 tests in 1 suite.
+   The RED was a compile failure (`cannot find 'RuntimeGPUKeepWarm' in scope`), not a failing
+   assertion, and the first GREEN nearly went unnoticed because a trailing `echo` masked `swift test`'s
+   exit code in a pipeline — the verdict was read from the log, then re-run with the exit code taken
+   directly.
+
+### What it leaves
+
+The keep-warm lever stays unadopted: the shipped default is unchanged, the knob stays opt-in, and the
+number to carry forward is **+0.48 %**, not +4.24 %. The single unpriced thing left on this line is a
+true sub-millisecond spinner — `mach_wait_until` at the 616 µs §5bk achieved, with the footer gap
+counters captured — and the reading here says the expected payoff is under the noise floor, so that
+run needs a reason beyond this batch. What §5w's ledger actually said is that 101.98 ms of a 217.34 ms
+token is GPU idle in named gaps; §5bk said the device executes those gaps' launches faster when kept
+warm; §5bl says feeding them at 2 ms does not buy a user-visible token. The remaining candidate is not
+a second queue at all — it is the 52.8 ms `phase1_hit → phase1_miss_fixup` gap, which is bytes, not
+clock state.
