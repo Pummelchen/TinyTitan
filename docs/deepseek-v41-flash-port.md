@@ -763,6 +763,53 @@ exist. That is a naming change to settle deliberately:
 The per-tensor `weightBits`/`scheme` entries must still be written for every
 tensor, so a reader can never unpack an FP8 or FP4 tensor as affine.
 
+### 6.7 What the container should do for decode throughput
+
+The operator's bar, restated 2026-10-17: *conversion is acceptable provided it
+does the right thing for maximum decode tok/s*. §6.5 fixes the physics —
+≈ 4.5 GB of random expert reads per token, **≈ 0.7 tok/s on this 24 GB Mac** —
+so "the right thing" is not a kernel choice. It is the number of slow misses and
+how well their latency is hidden. The container decides five of those, and each
+is cheap to build in now and expensive to retrofit:
+
+- **One fixed-stride blob per (layer, expert).** `w1`, `w2`, `w3` and their
+  per-32 E8M0 scales contiguous, 16 KiB aligned, so the offset is
+  `layer_base + id × stride` (18.8 MB). One `pread` per miss, no directory read
+  and no second read for scales. A separate scale array doubles the seek count
+  for 3% of the bytes.
+- **Order experts by co-activation, not by id.** Take one routing trace from a
+  representative corpus, place experts that the same token tends to select next
+  to each other in the file, and record the permutation in the manifest so the
+  converter and the loader cannot disagree. This changes no byte of payload; it
+  changes the readahead the SSD can do for free. *Inferred from the store's
+  behaviour, not measured here — the one proposal in this section that needs an
+  A/B before it is claimed.*
+- **Issue the miss reads off the gate's top-k, before the hit phase ends.** This
+  is the lever §5w measured on Qwen3.8 (52.8 ms of every token lost between the
+  hit-phase and miss-fixup kernels because the bytes were not known sooner).
+  Here the router is tiny and runs early, so a layer's six experts are knowable
+  well before they are needed, at 18.8 MB each.
+- **Do not budget an expert cache below ~32 GB of RAM.** At 2.9% coverage
+  (§6.5) the cache buys little and its eviction churn costs bookkeeping on every
+  lookup; "resident core only, stream every activation" is the honest
+  configuration on this machine and should be selectable rather than inferred.
+  Above ~96 GB the arithmetic changes and the cache becomes the main lever
+  again.
+- **Leave MTP/DSpark off by default.** A verify pass multiplies the expert union
+  per token (measured on the sibling port: 12.68 experts/layer at width 2 against
+  8.00 at width 1), and on a model that is already I/O-bound that is a direct
+  slowdown, not a speedup.
+
+Engram is the counter-example worth stating: 264 bytes a row at 48 rows a token
+is ~12.7 KB, three orders of magnitude below an expert miss, so it belongs in its
+own band streamed a layer ahead and must never compete with the expert path for
+queue depth.
+
+The ceiling this buys is honest: **≈ 0.7–0.8 tok/s on a 24 GB Mac**, against
+~1.5 s/token of pure I/O. If that is not the product the operator wants, the
+lever is the host (≥ 96 GB moves the cache coverage), not this document's
+kernels.
+
 ## 7. The eight wiring points
 
 ### 7.0 The integration surface, subsystem by subsystem
