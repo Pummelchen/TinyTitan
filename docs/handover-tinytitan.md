@@ -197,6 +197,29 @@ traps that one named still bite and are folded in below.
 
 ## Where the work stands
 
+**In flight, started 2026-10-17 03:57Z — read this before anything else here.**
+Task #222 is measuring `TINYTITAN_GPU_KEEPWARM_US` live on qwen38 4-bit at
+`--ram 12`, 96 slots, mains power, one model process. The engine arm is committed
+as `248f795` and is **not pushed** (CI 38999848021 and CodeQL 38999848468 were in
+flight on `36273da` when it landed; the no-push-during-CI rule decided the rest).
+Twenty arms write to `/tmp/kw222/b1/manifest.tsv` (dose axis: `base, kw@200us,
+kw@2000us, base`, mirrored over 2 rounds) and `/tmp/kw222/b2/manifest.tsv`
+(pre-registered confirmation: `base, kw@200us, base, kw@200us`, 3 rounds); each
+row is `name exit= md5= tok_s= task_us= achieved_us= dispatches= free= swap_used=
+start=` and `BATCH1DONE` / `BATCH2DONE` close them, so a missing sentinel means a
+truncated batch, not a result. To score it: per round take the paired difference
+against the mean of that round's two `base` arms, and the `base`-vs-`base` spread
+as the drift band; the registered falsifier is that **an arm which does not beat
+both controls of its round in at least two rounds is drift**. Two facts to carry
+into the write-up. First, the dose is the *achieved* period, not the ask: the
+smoke run asked 200 us and printed `achieved_period_us=1999`, because
+`Thread.sleep` quantises ~2 ms on this macOS where §5bk's bench loop achieved
+616 us — so the live arm sits between §5bk's two best points (1 ms −2.47 %,
+5 ms +2.0 %), not at 200 us. Second, `achieved_us=NA` on every `base` row is
+correct, not a failed arm: the runner logs only when the knob is set. The all-20
+`md5` column is the output-invariance gate, and a differing hash outranks any
+speed number. Write-up goes in `docs/qwen38-decode-12gb-measurements.md` as §5bl.
+
 Every measured cell below carries the date it was measured and the command that
 re-measures it. That is the point of the format: this table was a hand-copied
 snapshot, and six of its eleven rows had drifted by 2026-10-06 — it named 5.15 as
