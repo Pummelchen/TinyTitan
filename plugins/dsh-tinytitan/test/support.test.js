@@ -85,6 +85,14 @@ test("the plugin declares exactly the one supported harness release", () => {
   }
 });
 
+test("the bundle's own version is the release it supports", () => {
+  // The third place this release is declared: the package version an operator
+  // reads off `dsh plugin list` and the profile pins. Tied here rather than left
+  // to a release script, because bumping one without the other is the drift this
+  // file's header is about.
+  assert.equal(MANIFEST.version, SUPPORTED_DSH_VERSION);
+});
+
 test("the launcher pins the same release the plugin supports", () => {
   const launcher = readFileSync(join(REPO_ROOT, "tools", "dsh_local.sh"), "utf8");
   const pinned = /^DSH_VERSION="\$\{TINYTITAN_DSH_VERSION:-([^}]+)\}"/m.exec(launcher);

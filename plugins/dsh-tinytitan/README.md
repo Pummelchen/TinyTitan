@@ -42,10 +42,11 @@ composition (the `preset-standard` row of
 when the harness does, and the compaction backend subclasses that release's
 `dsh-compaction-basic`. It is also the release `tools/dsh_local.sh` installs.
 
-The pin lives in three places that cannot import each other — `package.json`'s
-`peerDependencies` (exact, no range), the launcher's `DSH_VERSION` default, and
-`SUPPORTED_DSH_VERSION` in `src/support.js` — and `test/support.test.js` fails if
-they disagree.
+The pin lives in four places that cannot import each other — `package.json`'s
+`peerDependencies` (exact, no range), the launcher's `DSH_VERSION` default,
+`SUPPORTED_DSH_VERSION` in `src/support.js`, and **the bundle's own `version`**,
+which is the release it supports rather than a number of its own — and
+`test/support.test.js` fails if any of them disagrees.
 
 On any other release — older, newer, or a build from `main` — the plugin **refuses
 to run**. It writes one line to **stderr** naming both versions and does nothing

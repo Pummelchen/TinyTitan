@@ -56,6 +56,14 @@ function applyAs(version, { ctx = {}, config = {} } = {}) {
   }
 }
 
+test("the bundle's own version is the release it supports", () => {
+  // The package version is what `dsh plugin list` shows, and the release this
+  // bundle was verified against is the same number. Tied here so a harness move
+  // cannot leave the manifest announcing a version that no longer exists.
+  const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(manifest.version, SUPPORTED_DSH_VERSION);
+});
+
 test("the launcher pins the same release the plugin supports", () => {
   const launcher = readFileSync(LAUNCHER, "utf8");
   const pinned = /^DSH_VERSION="\$\{TINYTITAN_DSH_VERSION:-([^}]+)\}"/m.exec(launcher);
