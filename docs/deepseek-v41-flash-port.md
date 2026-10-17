@@ -1,6 +1,13 @@
-# DeepSeek-V4.1-Flash port — integration concept
+# DeepSeek-V4.1-Flash-1017 port — integration concept
 
 **Status: concept. Nothing here is implemented, and nothing is supported.**
+
+**Target, set 2026-10-17: `deepseek-ai/DeepSeek-V4.1-Flash-1017`** — the dated
+revision published that morning. This is a re-target of a document written
+against the 2026-09-10 checkpoint; §1.1 records exactly what changed, and the
+short version is that the bytes changed and the geometry did not, so the engine
+plan below stands as written. The one exception is prompt encoding, which is
+re-opened in §3.1 and now has a reference implementation to reconcile against.
 
 **Owner decision, 2026-09-25: the weights stay in their original form. If
 something must be converted or modified, it may not degrade the model in any
@@ -9,9 +16,9 @@ this model — re-quantizing is a degradation and is ruled out. There is one
 install, at the checkpoint's own mixed precision. §6 is the policy; §11 is what
 still needs deciding (storage and throughput, not precision).
 
-Requested: integrate `deepseek-ai/DeepSeek-V4.1-Flash` into TinyTitan at 4-bit and
-8-bit, each derived from the original 16-bit. The request's premise does not
-survive contact with the checkpoint; §2 says why.
+Requested: integrate `deepseek-ai/DeepSeek-V4.1-Flash` — now `-1017` — into
+TinyTitan at 4-bit and 8-bit, each derived from the original 16-bit. The
+request's premise does not survive contact with the checkpoint; §2 says why.
 
 This document is the source-verified design record that a later implementation
 session works against, in the shape of
@@ -43,8 +50,8 @@ them (Engram) alone is larger than every model this project has ever shipped.
 
 | | Value | Read from |
 | --- | --- | --- |
-| Repo | `deepseek-ai/DeepSeek-V4.1-Flash` | HF API |
-| Pinned sha | `dba1be0a40aa45a94ad051997016db3960a90277` | HF API (`lastModified` 2026-09-10) |
+| Repo | `deepseek-ai/DeepSeek-V4.1-Flash-1017` (target); `…-Flash` was the 2026-09-10 original | HF API |
+| Pinned sha | `1bae0e1088993b9b82de08f59de5be5a34e42170` (1017, 2026-10-17); the base moved to `314113f8…` on 2026-10-16, superseding this document's original pin `dba1be0…` | HF API (`lastModified`) |
 | `gated` | `false` | HF API |
 | License | MIT | `LICENSE`, card `license: mit` |
 | `architectures` / `model_type` | `DeepseekV41ForCausalLM` / `deepseek_v41` | `config.json` |
@@ -55,12 +62,53 @@ them (Engram) alone is larger than every model this project has ever shipped.
 | Card's parameter claim | 552 B backbone + 196 B Engram = 748 B | card README |
 | Context | 1,048,576 (`max_position_embeddings`) | `config.json` |
 | `tie_word_embeddings` | `false` — the head is a real tensor (`head.weight`, `[129280, 5120]`, BF16) | `config.json` + shard 43 header |
-| Chat template | **absent.** "This release does not include a Jinja-format chat template." | card README |
+| Chat template | **absent in 1017, by design** — the card says so, and the file is not in the tree. The sibling base repo now ships one (15 KB, added 2026-10-16); §1.1 and §3.1 | card README + tree API |
 | `generation_config.json` | **absent** — the repo has no such file | tree API |
 
 The card's 748 B and the safetensors metadata's 763.2 B do not reconcile, and
 neither source explains the gap. Both figures are recorded; the tech report that
 would settle it is an unreadable Git-LFS pointer (§12).
+
+### 1.1 The 1017 revision — what it changes, and what it does not
+
+Read on 2026-10-17 from the HF API, both `config.json`s, the tree listings and
+the safetensors metadata. 1017 calls itself a **minor update** to the same model.
+
+| | Base `…-Flash` | `…-Flash-1017` |
+| --- | --- | --- |
+| sha / modified | `314113f8…` (2026-10-16) | `1bae0e10…` (2026-10-17T05:46Z) |
+| Size / shards | 510.3 GB / 48 | **identical** |
+| Declared parameters | 763,205,315,794 | **identical** |
+| Dtype mix | BF16 1.98 B, F32 42.3 M, FP8 204.0 B, I8 557.2 B | **identical** |
+| `text_config` | 40 layers, 5120 hidden, 384 experts, top-6, MLA head 512, q_lora 1280, o_lora 1024, o_groups 8, 1M ctx, YaRN ×16 | **byte-identical** |
+| `vision_config` (`image_token_id` 129264) | present | **identical** |
+| `chat_template.jinja` | **present** (15 KB, upstream's own port of `encoding.py`) | **absent, deliberately** |
+| `encoding/` | present | present (`encoding.py` 38 KB, `test_encoding.py` 22 KB, README 12 KB) |
+| `inference/` | present | present (`model.py` 62 KB, `engram.py`, `convert.py`, `kernel.py`) |
+| Tech report | `DeepSeek_V41_Tech_Report.pdf` (LFS pointer) | **not shipped** |
+
+Benchmarks (card): HLE 36.8 → **42.6**, Terminal-Bench 4.0 31.2 → **42.3**,
+DeepSWE v1.1 74.2 → **77.0**, ProgramBench 20.3 → **29.1**, NL2Repo 65.4 →
+**68.2**, Automation-Bench 54.8 → **60.5**, Agents' Last Exam 31.8 → **35.4**,
+Apex 64.6 → **72.1**, Chartography 78.9 → **83.0**, BabyVision 89.6 → **92.5**,
+ZeroBench 49.0 → **51.0**. The card also claims shorter outputs and lower
+execution time at equal or better scores, which matters for the throughput
+question in §11: the operator is buying a better model per token, not a cheaper
+one.
+
+Two consequences, and no others:
+
+1. **The engine plan does not change.** §2–§8 were derived from the tensor
+   inventory and `text_config`; both are identical, so Phases 1–6 stand exactly
+   as written. The *bytes* differ, the *geometry* does not. Any work already
+   scoped against the 2026-09-10 checkpoint carries over unchanged.
+2. **Prompt encoding is re-opened, and the oracle got better.** 1017 ships no
+   Jinja template while the sibling base repo gained one on 2026-10-16. That
+   retires the premise in §9/Phase 0 — "there is no upstream template to diff
+   against" — and replaces it with two independent references that must agree:
+   upstream's own `chat_template.jinja` and 1017's `encoding/test_encoding.py`.
+   Reconciling them is Phase 0's new job; inventing a template from prose is no
+   longer necessary.
 
 ### Text geometry
 
@@ -196,13 +244,16 @@ surprise at the end of a 510 GB download:
 
 In dependency order. Each of these is a subsystem, not a config flag.
 
-### 3.1 No chat template — a hard blocker, and the cheapest to fix
+### 3.1 No chat template in 1017 — a hard blocker, now with a reference
 
 TinyTitan's runtime renders prompts from the model's own `chat_template.jinja`
 and errors with "installed tokenizer is missing chat_template.jinja" without it.
-This release ships **no Jinja template at all**; prompt encoding lives in
-`encoding/encoding.py` (a self-contained Python reference with tests) and the
-external `deepseek-recipe` library.
+1017 ships **no Jinja template at all**, deliberately: prompt encoding lives in
+`encoding/encoding.py` (a self-contained Python reference, with 22 KB of tests)
+and the external `deepseek-recipe` library. The 2026-10-16 base revision of the
+same model *does* carry one — upstream's own port of that same `encoding.py`
+(§1.1) — so an install for 1017 must either adopt that file after proving it
+against 1017's own tests, or derive its own from the reference.
 
 Supplying one is a prerequisite for *any* install, at any width, and it is the
 one piece of work here that is genuinely small — but it is also the one that
@@ -832,9 +883,12 @@ Each phase has an exit condition; none of them is "it answers". The ordering
 reflects the owner's preserve decision (§6): the decode kernels are no longer a
 fidelity upgrade at the end, they are on the critical path from Phase 1.
 
-- **Phase 0 — unblock the front door.** Derive `chat_template.jinja` from
-  `encoding/` and prove it against the reference's own test cases. Nothing else
-  can be installed without it. Small, exacting, and independent of the model.
+- **Phase 0 — unblock the front door.** Reconcile a `chat_template.jinja` with
+  `encoding/` and prove it against 1017's own test cases. Nothing else can be
+  installed without it. Small, exacting, and independent of the model. The
+  2026-10-16 base revision now carries upstream's own template, so there are two
+  independent oracles — that file and `encoding/test_encoding.py` — and the phase
+  exits only when they, `encoding.py` and the shipped template all agree.
   The two things it must not get wrong, both from
   [`deepseek-v41-flash-reference.md`](deepseek-v41-flash-reference.md) §9.2:
   the **V4.1 tool-call dialect** — `<｜DSML｜ calls>` with a **leading space**,
@@ -842,9 +896,9 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
   `<｜DSML｜ parameter … string="true|false">` distinguishing a raw string from a
   JSON value — and the **two thinking modes**, since chat mode emits `</think>`
   immediately after `<｜Assistant｜>` while thinking mode wraps the reasoning and
-  injects the one-time `<｜System｜>Reasoning Effort: {budget} …` line. There is
-  no upstream template to diff against, so the reference's `encoding/` tests are
-  the only oracle.
+  injects the one-time `<｜System｜>Reasoning Effort: {budget} …` line. The
+  reference's `encoding/` tests and upstream's own template are now two oracles,
+  and the phase is done when they agree.
 - **Phase 1 — a bit-exact container, no forward.** A new `prepare_dsv41.py`
   with a `--plan` mode that fetches only `config.json` and the index, classifies
   every tensor, and refuses on anything it cannot map. Then the conversion
@@ -930,9 +984,10 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
 
 ## 12. Open unknowns (not to be guessed at implementation time)
 
-- **The tech report is unreadable**: `DeepSeek_V41_Tech_Report.pdf` is a
-  Git-LFS pointer (`sha256 ba68e2e4…`, 1,809,802 bytes). Anything only in it —
-  including any reconciliation of 748 B vs 763.2 B — is unknown.
+- **The tech report is unreadable, and 1017 does not ship it**: the base repo's
+  `DeepSeek_V41_Tech_Report.pdf` is a Git-LFS pointer (`sha256 ba68e2e4…`,
+  1,809,802 bytes), and 1017 has no PDF at all. Anything only in it — including
+  any reconciliation of 748 B vs 763.2 B — is unknown.
 - **`bias_vl` semantics**: when the vision-gate bias is applied, and whether a
   text-only forward should use it, is not stated in anything read.
 - **"SWA Bounded Replay"** appears only in card prose; no reference code.
@@ -959,12 +1014,14 @@ fidelity upgrade at the end, they are on the critical path from Phase 1.
 Modelled on `adding-a-model.md`, with every box unticked and the blockers named.
 The preserve decision (§6) is taken; these are the consequences.
 
-- [ ] Chat template derived from `encoding/` and proven against its tests —
-      **blocker for every other item**
+- [ ] Chat template for 1017 reconciled with `encoding/` — either upstream's
+      2026-10-16 file or a re-derivation — and proven against `test_encoding.py`
+      — **blocker for every other item**
 - [ ] Storage and throughput settled (≈ 1.1 TB peak and seconds-per-token unless
       the expert set is largely resident, §6.5 — or a different host)
 - [ ] Gating, pinned sha, geometry, rope block, tie-embeddings and EOS ids read
-      from the source — **done, §1**
+      from the source — **done, §1 and §1.1** (1017 sha `1bae0e10…`; the
+      architecture is identical to the 2026-09-10 checkpoint)
 - [ ] `--plan` classifies every tensor, and every scale shape is reported and
       read as a per-32 block count rather than reshaped into affine groups
       (§6.3)

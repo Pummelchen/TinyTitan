@@ -11,6 +11,15 @@ TinyTitan would have to build, at what size, under which precision policy — is
 [`deepseek-v41-flash-port.md`](deepseek-v41-flash-port.md). Read that for
 decisions; read this for facts.
 
+**Revision note, 2026-10-17.** The plan now targets
+[`deepseek-ai/DeepSeek-V4.1-Flash-1017`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017).
+Everything recorded here was read from the 2026-09-10 `…-Flash` checkpoint, and
+that fact base still stands: 1017's text and vision geometry, its 48-shard
+510.3 GB layout, its 763,205,315,794 declared parameters and its dtype mix are
+identical to the base's. What differs is prompt encoding — 1017 ships no Jinja
+template, while the base gained one on 2026-10-16 — and the benchmark scores.
+`deepseek-v41-flash-port.md` §1.1 carries the measured delta.
+
 **Provenance.** Every value was read from the published checkpoint or from the
 official `inference/` reference code shipped in the same repository. Retrieval
 was by HTTP: the HF API (`/api/models/...?blobs=true`), the recursive file tree,
