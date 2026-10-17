@@ -746,6 +746,32 @@ today (install plus the one ~10.6 GB shard in flight), or **≈ 1.02 TB** if a f
 local snapshot has to exist first, which is the case this section's table
 assumes.
 
+**Could this reach 5 tok/s on a 24 GB Mac, as the 125B does?** No, and the
+like-for-like arithmetic says by how much. The 125B reaches 4.7 tok/s here
+because its experts are small and its cache hits three quarters of the time:
+
+| | Qwen3.8-Flash-Next 4-bit | V4.1-Flash-1017 |
+| --- | ---: | ---: |
+| activations per token | 480 (10 of 512 × 48 layers) | **240** (6 of 384 × 40) |
+| one expert record | 2.77 MB | **18.8 MB** |
+| all-miss traffic per token | 1.33 GB | **4.5 GB** |
+| cache coverage at ~8 GiB | 75.7% measured hit | ≈ 2.9%; ~15% with skew |
+| bytes actually read per token | 293–368 MB | **≈ 3.8–4.4 GB** |
+| decode on this Mac | **4.7 tok/s measured** | ⇒ ≈ **0.3–0.4 tok/s** |
+
+Five tokens a second therefore needs **≈ 19 GB/s** of expert reads. This host's
+measured wall is 3.6 GB/s (four-thread ceiling; 1.36 GB/s sustained), so the
+target is ~5× above the ceiling and ~14× above what the drive delivers. At the
+ceiling with every byte paid for, 4.4 GB/token is 0.8 tok/s; with real hit rates
+it is ~0.3. Reaching 5 tok/s on the streaming path would require ≤ 720 MB/token,
+i.e. an ~84% hit rate, which needs a cache covering most of the 288.8 GB expert
+set — a different machine, not a better kernel.
+
+The other route is residency: 288.8 GB of experts plus the 22 GB core is ≈ 311 GB,
+so a ≥ 384 GB Mac holds it and decode becomes compute-bound (comfortably above
+5 tok/s). On this 24 GB Mac the **core alone is 22 GB**, before any cache, KV or
+OS — which is why §11's question 4 outranks every optimization in §6.7.
+
 ### 6.6 What the catalog should say
 
 There is no 4-bit build and no 8-bit build. There is one install, at the
