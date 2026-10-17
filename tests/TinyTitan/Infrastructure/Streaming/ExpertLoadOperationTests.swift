@@ -101,6 +101,47 @@ import Testing
         #expect(firstToken.value != secondToken.value)
     }
 
+    @Test func timelineModeDecidesWhetherLayersBlockEachOther() async throws {
+        let context = try MetalContext()
+
+        // Shared mode is today's wiring: every layer gets the same object, so
+        // one unfinished read gates every later release in the model.
+        let shared = try #require(
+            ExpertIOEventCoordinator.makeTimelines(
+                device: context.device, numLayers: 4, mode: .shared))
+        #expect(shared.count == 4)
+        for timeline in shared {
+            #expect(timeline === shared[0])
+        }
+
+        // Per-layer mode gives each layer its own prefix, so a completed read
+        // releases while an unrelated layer is still loading.
+        let perLayer = try #require(
+            ExpertIOEventCoordinator.makeTimelines(
+                device: context.device, numLayers: 4, mode: .perLayer))
+        #expect(perLayer.count == 4)
+        var identities: [ObjectIdentifier] = []
+        for timeline in perLayer {
+            #expect(!identities.contains(ObjectIdentifier(timeline)))
+            identities.append(ObjectIdentifier(timeline))
+        }
+
+        let blockedToken = try perLayer[0].reserve()
+        let readyToken = try perLayer[1].reserve()
+        let blockedOperation = ExpertLoadOperation(
+            completionToken: blockedToken,
+            eventCoordinator: perLayer[0])
+        let readyOperation = ExpertLoadOperation(
+            completionToken: readyToken,
+            eventCoordinator: perLayer[1])
+
+        readyOperation.finish(.success(()))
+        #expect(readyToken.event.signaledValue == readyToken.value)
+        #expect(blockedToken.event.signaledValue == 0)
+        blockedOperation.finish(.success(()))
+        #expect(blockedToken.event.signaledValue == blockedToken.value)
+    }
+
     @Test func failedBatchSignalsTerminalStatusInsteadOfDeadlocking() throws {
         struct ExpectedFailure: Error {}
         let context = try MetalContext()

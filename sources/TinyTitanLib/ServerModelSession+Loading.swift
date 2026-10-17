@@ -80,7 +80,8 @@ extension ServerModelSession {
             forceLogitsHead: true,
             decodeExpertExecution: try RuntimeDecodeExpertExecution.environmentValue(),
             expertIOSynchronization: try RuntimeExpertIOSynchronization.environmentValue(),
-            expertIOSubmission: try RuntimeExpertIOSubmission.environmentValue())
+            expertIOSubmission: try RuntimeExpertIOSubmission.environmentValue(),
+            expertIOTimeline: try RuntimeExpertIOTimeline.environmentValue())
         let slotOverride = ProcessInfo.processInfo.environment["TINYTITAN_EXPERT_CACHE_SLOTS"]
             .flatMap(Int.init)
         // Precedence: --expert-cache-slots flag, then the env override, then a
@@ -186,6 +187,7 @@ extension ServerModelSession {
             expecting: expectedArch,
             streamingMode: .pread(slotCount: loadSlots),
             expertCachePolicy: loadRuntime.modelExpertCachePolicy,
+            expertIOTimeline: loadRuntime.expertIOTimeline,
             integrityPolicy: integrityPolicy)
         let runtime = try RuntimeConfiguration(
             expertCacheSlots: loadSlots,
@@ -207,6 +209,7 @@ extension ServerModelSession {
             decodeExpertExecution: loadRuntime.decodeExpertExecution,
             expertIOSynchronization: loadRuntime.expertIOSynchronization,
             expertIOSubmission: loadRuntime.expertIOSubmission,
+            expertIOTimeline: loadRuntime.expertIOTimeline,
             kvCachePrecision: kvCachePrecision,
             ropeScalingMode: ropeScalingMode,
             yarnContextTokens: ropeScalingMode == .yarn
@@ -261,6 +264,7 @@ extension ServerModelSession {
                 expecting: sidecarArch,
                 streamingMode: .pread(slotCount: StreamingMTPMemoryPlan.expertSlots),
                 expertCachePolicy: runtime.modelExpertCachePolicy,
+                expertIOTimeline: runtime.expertIOTimeline,
                 integrityPolicy: requestedIntegrityPolicy
                     ?? .resolved(directoryURL: mtpModelDirectory))
             let decoder = try StreamingMTPDecoder(

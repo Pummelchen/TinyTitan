@@ -197,7 +197,7 @@ extension Model {
             device: device,
             slotCount: effectiveSlotCount,
             cachePolicy: expertCachePolicy,
-            eventCoordinator: expertIOEventCoordinator,
+            eventCoordinator: expertIOTimelines?[L],
             metalStagingPool: metalStagingPool,
             metalIOService: metalIOService)
         // A newly opened layer is not wired yet; the next pin walks again.

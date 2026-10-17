@@ -197,7 +197,10 @@ public struct Model {
     /// while still letting accessors mutate layer state via a serial queue.
     let streamersBox: StreamersBox
     let streamersQueue: DispatchQueue
-    let expertIOEventCoordinator: ExpertIOEventCoordinator?
+    /// One completion timeline per slot, in the mode this model was loaded with
+    /// (see `ExpertIOEventCoordinator.makeTimelines`).
+    let expertIOTimeline: RuntimeExpertIOTimeline
+    let expertIOTimelines: [ExpertIOEventCoordinator]?
 
     /// unchecked-invariant: every access goes through `streamersQueue`, the
     /// serial queue on the owning Model. The box exists so Model can stay a
@@ -235,6 +238,7 @@ public struct Model {
         config: ArchConfig,
         streamingMode: ExpertStreamingMode,
         expertCachePolicy: ExpertCachePolicy,
+        expertIOTimeline: RuntimeExpertIOTimeline = .shared,
         integrityPolicy: ModelIntegrityPolicy,
         residentBuffer: ResidentBuffer,
         residentIndex: ResidentIndex,
@@ -260,7 +264,11 @@ public struct Model {
         self.sharedTargetWeights = sharedTargetWeights
         self.streamersBox = StreamersBox(numLayers: packedExpertsLayout.numLayers)
         self.streamersQueue = DispatchQueue(label: "TinyTitan.expert-streamers")
-        self.expertIOEventCoordinator = ExpertIOEventCoordinator(device: device)
+        self.expertIOTimeline = expertIOTimeline
+        self.expertIOTimelines = ExpertIOEventCoordinator.makeTimelines(
+            device: device,
+            numLayers: packedExpertsLayout.numLayers,
+            mode: expertIOTimeline)
     }
 
     /// The Qwen3.8-Flash-Next draft head's own tensors.
@@ -326,6 +334,7 @@ public struct Model {
             config: config,
             streamingMode: streamingMode,
             expertCachePolicy: expertCachePolicy,
+            expertIOTimeline: expertIOTimeline,
             integrityPolicy: integrityPolicy,
             residentBuffer: residentBuffer,
             residentIndex: residentIndex,

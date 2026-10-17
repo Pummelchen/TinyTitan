@@ -80,6 +80,27 @@ public enum RuntimeExpertIOSubmission: String, Codable, Sendable {
     }
 }
 
+/// How many completion timelines the event-driven expert I/O path uses.
+///
+/// `.shared` is the shipped wiring: one timeline for the whole model, which is
+/// what makes an out-of-order completion safe but also lets one slow read gate
+/// every later release. `.perLayer` keeps the same rule inside one layer, where
+/// the streamer issues its values in order anyway.
+public enum RuntimeExpertIOTimeline: String, Codable, Sendable {
+    case shared
+    case perLayer = "per-layer"
+
+    public static func environmentValue(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> RuntimeExpertIOTimeline {
+        guard let raw = environment["TINYTITAN_EXPERT_IO_TIMELINE"] else { return .shared }
+        guard let value = RuntimeExpertIOTimeline(rawValue: raw) else {
+            throw RuntimeConfigurationError.invalidExpertIOTimeline(raw)
+        }
+        return value
+    }
+}
+
 /// Storage precision for the autoregressive attention key/value cache.
 /// Quantized modes use affine groups of 64 values and keep their scale and
 /// bias alongside each token row; model weights are unaffected.
@@ -107,6 +128,7 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
     case invalidDecodeExpertExecution(String)
     case invalidExpertIOSynchronization(String)
     case invalidExpertIOSubmission(String)
+    case invalidExpertIOTimeline(String)
 
     public var description: String {
         switch self {
@@ -133,6 +155,8 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
             return "unsupported expert I/O synchronization '\(value)'; allowed: host, event"
         case .invalidExpertIOSubmission(let value):
             return "unsupported expert I/O submission '\(value)'; allowed: deferred, immediate"
+        case .invalidExpertIOTimeline(let value):
+            return "unsupported expert I/O timeline '\(value)'; allowed: shared, per-layer"
         }
     }
 }

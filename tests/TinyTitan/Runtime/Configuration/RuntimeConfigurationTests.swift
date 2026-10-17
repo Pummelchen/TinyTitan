@@ -139,6 +139,20 @@ import Testing
         }
     }
 
+    @Test func expertIOTimelineEnvironmentIsFailClosed() throws {
+        // The shipped behaviour is one model-wide timeline; splitting it is opt-in.
+        #expect(try RuntimeExpertIOTimeline.environmentValue([:]) == .shared)
+        #expect(
+            try RuntimeExpertIOTimeline.environmentValue([
+                "TINYTITAN_EXPERT_IO_TIMELINE": "per-layer"
+            ]) == .perLayer)
+        #expect(throws: RuntimeConfigurationError.self) {
+            try RuntimeExpertIOTimeline.environmentValue([
+                "TINYTITAN_EXPERT_IO_TIMELINE": "typo"
+            ])
+        }
+    }
+
     @Test(arguments: [32, 64, 128, 256, 512, 1_024, 2_048, 4_096])
     func productionPrefillSupportsPublicChunkSizes(_ chunkTokens: Int) throws {
         let runtime = try RuntimeConfiguration(prefillChunkTokens: chunkTokens)

@@ -28,6 +28,7 @@ extension Model {
         expecting: ArchConfig = .qwen36_35B_A3B,
         streamingMode: ExpertStreamingMode = .pread(slotCount: 32),
         expertCachePolicy: ExpertCachePolicy = PreadExpertStreamer.cachePolicyDefault,
+        expertIOTimeline: RuntimeExpertIOTimeline = .shared,
         integrityPolicy: ModelIntegrityPolicy? = nil,
         loadStats: UnsafeMutablePointer<ModelLoadStats>? = nil
     ) throws -> Model {
@@ -227,6 +228,7 @@ extension Model {
             config: expecting,
             streamingMode: streamingMode,
             expertCachePolicy: expertCachePolicy,
+            expertIOTimeline: expertIOTimeline,
             integrityPolicy: resolvedIntegrityPolicy,
             residentBuffer: residentBuffer,
             residentIndex: residentIndex,

@@ -375,6 +375,7 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     public let decodeExpertExecution: RuntimeDecodeExpertExecution
     public let expertIOSynchronization: RuntimeExpertIOSynchronization
     public let expertIOSubmission: RuntimeExpertIOSubmission
+    public let expertIOTimeline: RuntimeExpertIOTimeline
     public let kvCachePrecision: KVCachePrecision
     public let ropeScalingMode: RuntimeRoPEScalingMode
     public let yarnContextTokens: Int
@@ -390,6 +391,7 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         decodeExpertExecution: RuntimeDecodeExpertExecution = .hitFixup,
         expertIOSynchronization: RuntimeExpertIOSynchronization = .host,
         expertIOSubmission: RuntimeExpertIOSubmission = .deferred,
+        expertIOTimeline: RuntimeExpertIOTimeline = .shared,
         kvCachePrecision: KVCachePrecision = .int8,
         ropeScalingMode: RuntimeRoPEScalingMode = .none,
         yarnContextTokens: Int = RuntimeConfiguration.defaultYaRNContextTokens
@@ -413,6 +415,7 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         self.decodeExpertExecution = decodeExpertExecution
         self.expertIOSynchronization = expertIOSynchronization
         self.expertIOSubmission = expertIOSubmission
+        self.expertIOTimeline = expertIOTimeline
         self.kvCachePrecision = kvCachePrecision
         self.ropeScalingMode = ropeScalingMode
         self.yarnContextTokens = yarnContextTokens

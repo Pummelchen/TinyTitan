@@ -13,7 +13,7 @@ public struct ExpertIOCompletionToken: @unchecked Sendable {
     public let statusOffset: Int
 }
 
-/// Owns one shared Metal timeline for all expert reads in a model.
+/// Owns one shared Metal timeline for the expert reads assigned to it.
 ///
 /// Out-of-order operations are deliberately held until every preceding value
 /// is terminal. Advancing a timeline directly from N to N+2 would also release
@@ -36,6 +36,29 @@ public final class ExpertIOEventCoordinator: @unchecked Sendable {
         event.label = "TinyTitan expert I/O completion"
         self.device = device
         self.event = event
+    }
+
+    /// One timeline per entry, indexed by layer, in the mode the runtime was
+    /// given. `.shared` returns the same coordinator in every slot, which is
+    /// what the shipped path builds; `.perLayer` allocates one each, so a slow
+    /// read can only gate the values issued before it in its own layer.
+    static func makeTimelines(
+        device: MTLDevice,
+        numLayers: Int,
+        mode: RuntimeExpertIOTimeline
+    ) -> [ExpertIOEventCoordinator]? {
+        guard numLayers > 0, let first = ExpertIOEventCoordinator(device: device) else {
+            return nil
+        }
+        guard mode == .perLayer else {
+            return Array(repeating: first, count: numLayers)
+        }
+        var timelines = [first]
+        for _ in 1..<numLayers {
+            guard let next = ExpertIOEventCoordinator(device: device) else { return nil }
+            timelines.append(next)
+        }
+        return timelines
     }
 
     func reserve() throws -> ExpertIOCompletionToken {
