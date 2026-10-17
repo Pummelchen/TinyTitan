@@ -197,6 +197,69 @@ traps that one named still bite and are folded in below.
 
 ## Where the work stands
 
+**#224 closed 2026-10-17, recorded as §5bn — 52 live arms answered the operator's
+combination question, and the answer is a no.** The two levers §5ba–§5bm that did
+not measure slower than the shipped default (`TINYTITAN_GPU_KEEPWARM_US`, +0.48 %
+§5bl; `TINYTITAN_DECODE_EXPERT_EXECUTION=gpu-residency`, +2.07 % §5bj) had never
+run one beside the other. Batch 1 was 4 bracketed rounds × 7 arms, batch 2 6 rounds
+× 4, one artifact (`e8535a85…`, clean tree at `b6da2d7`, mains, one model process,
+qwen38 4-bit at the shipped `cache=11.88G slots=96` tier, 384 tokens greedy), all 52
+exit 0 and every one byte-identical (`c172890d`), including all seven with both
+knobs live. Both falsifiers were written before measuring and both returned no:
+the drift-free contrast `both − kw` inside the same round is +1.58, +1.76, −1.81,
+−10.02, +0.21, −9.80 — **mean −3.01 %, best positive +1.76 %, against control bands
+of 3.2–11.4 %** — and batch 2's three type-B rounds give the stacked arm *more*
+`wait_ms` (+10.18 %) and *more* `body_ms` (+7.65 %) per token than keep-warm alone.
+**They are one mechanism**: two knobs that poke the same GPU queue do not compound,
+and the number to carry is "+0.48 % from keep-warm alone", never `both`'s +1.38 %.
+
+**The finding that outranks the clock: `gpu-residency` changes no executed work.**
+Grouping all 52 arms by kind, the three counters that cannot move unless the
+assignment moves are equal to the unit in every arm — `expert_evictions` 31 293,
+`expert_reloads` 22 986, ring `begins` 18 001 — and every kind's `expert_misses`,
+`expert_read_mib`, `hit_fixup_layers` and `prefetch_adopted_per_token` sits inside
+the *base arms' own* spread. The source says why:
+`RealForwardRunner+DecodeMoE.swift:128-182` reads the device's lists back, sorts,
+checks the superset property, adds three `gpu_classified_*` counters, and then its
+own comment executes the CPU partition regardless, because the GPU's list cannot see
+prefetch adoptions and running it would re-fetch an expert already resident. Its
+marginal allocation is **zero bytes** (the seven classification buffers and the
+residency table are built with no mode branch — `BuildScratch.swift:104-126`,
+`PreadExpertStreamer.swift:239-248`), so §5bj's four affected sentences are amended
+in place, and the mode's only executed delta is one 1-lane dispatch per layer per
+token — keep-warm's mechanism at a third of its density.
+
+**Four method points this batch cost, so the next session does not pay them again.**
+(1) Two arms were withdrawn *on counters, not on clock*: batch-1 `r3_base2` at 2.319
+tok/s and batch-2 `r5_p4` at 2.783, each with its round mates' work counters and
+2–3× the host-only durations — that is this host thread being descheduled under deep
+swap, not a knob. One of them moved the single-batch verdict by the whole size of the
+effect (−0.30 % ↔ +2.12 %), which is why the falsifiers and not the means carry it.
+(2) The slow controls that fell just *under* the 1.20× screen (1.175×, 1.124×) were
+deliberately not withdrawn: lowering a contamination threshold after seeing the data
+is threshold shopping. (3) Batch 2 ran in a bad regime (swap 8 682 → 10 778 MB,
+controls 3.81–4.98 against batch 1's 4.85–5.57), so **no clock crosses the two
+batches** — only within-round pairing is quoted, per the standing rule. (4) The
+keep-warm dose is now at least three doses across 52 arms (achieved period 1 313–2 042
+µs as `Thread.sleep`'s quantisation moved with the swap level), so §5bl's deviation 1 —
+the best dose was never runnable — still stands. Also filed and deliberately **not
+edited**: `moe.metal:117` says "Only eight positions are touched" where qwen38's
+`topKExperts` is 10 (`ModelTypes.swift:282`); the kernel is correct (`:134` loops to
+the passed `top_k`), so it is a one-word doc fix that belongs on its own commit after
+the campaign, not inside a measurement that every later arm is hashed against.
+
+**What is left on this line is unchanged.** The 52.8 ms `phase1_hit →
+phase1_miss_fixup` gap: §5bm closed its bytes at 0.09 ms and §5bn closes its knobs,
+so nothing switchable remains on it. Earlier-bytes and the 26.8/16.1 ms gap pairs
+stay open and are bounded by landing slots (`free=0.99`) and the operator's 12 GiB
+cap, not by a control. No knob on the decode expert path is left unpriced, the
+shipped default is unchanged, and both levers stay opt-in and documented.
+**Landed and published:** this commit carries §5bn, the four §5bj amendments and
+this entry on `main`; the wiki's Runtime-controls page carries both knobs and the
+combination result, published as `5357c33` on `master`. The wiki's Project-tracker
+narrative deliberately does not gain a §5bn row — it has never carried §5ba–§5bm
+either, and the knob measurements belong on the page a user actually reads.
+
 **#223 closed 2026-10-17, recorded as §5bm — an offline screen, no model run, no clock.** The
 one direction §5bl left standing on the 52.8 ms `phase1_hit → miss_fixup` gap was *fewer bytes
 per miss*, and every closure on that gap had inherited the premise unexamined: §5w proved a miss

@@ -8009,7 +8009,13 @@ All twenty arms — 8 + 12, three execution modes, two batches — hash to `c172
 to §5bb, §5bh and §5bi's 384-token output. `barrier` recomputes the hit experts it did not overlap, so a differing hash
 there would have been a correctness finding outranking every number above; it does not differ. `gpu-residency` runs a
 different partition *authority* — the device decides, the host only checks the superset — and produces the same tokens,
-which is the strongest statement this page can make that the two partitions agree. Note that `expert_hits` does vary
+which is the strongest statement this page can make that the two partitions agree. *Amended by §5bn the same day: "the
+device decides" is false, so this sentence's premise goes with it. `RealForwardRunner+DecodeMoE.swift:130-182` reads the
+GPU's lists back, sorts them, checks the superset, adds them into three counters — and then calls the* same
+`DecodeExpertPartition.populate(topK:missIndices:plan.misses:…)` *the default branch calls, under its own comment
+"Execute the CPU partition regardless. It is the authority, and it is the only one that reflects adoption"
+(:175-177). There is never a second executed partition to agree with; the hash equality instead proves what §5bn's
+52-arm counter table proves — that the added classification changed no byte of the run.* Note that `expert_hits` does vary
 arm-to-arm (157 195–157 455) while the output does not: the routing is fixed, which experts happened to be resident
 when needed is not, so no two arms share a byte-exact I/O state. That is a reason the clock is noisy, not a reason to
 distrust the hash.
@@ -8020,14 +8026,23 @@ distrust the hash.
 `barrier` is retired as a live option — it is worth its documented weight (−7.5 %) and nothing else. `gpu-residency` is
 the first non-default arm in this campaign measured *not slower* than the shipped default, with a replicating but tiny
 mechanism (−0.079 ms/token of exposed read, ≈0.04 % of a token) and a clock that will not support a promotion decision.
+*Amended by §5bn: "not slower" and "replicating" do not survive two further batches — 24 more paired arms put the same
+knob between −0.30 % and +2.12 % depending on whether one contaminated arm is withdrawn, inside control bands of
+3.2–13.5 %, and the −0.079 ms/token mechanism is 0.04 % of a token, an order inside that noise. The arm is now "not
+measurably different from the default", which is what this sentence's own hedge already said.*
 It stays opt-in and un-promoted: the bar here is a number that survives re-pairing, and +4 % did not. Promoting it
 would also put a new fail-closed throw (`ModelError.internalInconsistency`, when the GPU's miss list ever fails to
 contain the plan's) on the default path of a shipping engine, and it allocates per-layer residency buffers whose memory
 cost this section did not measure — on a 24 GB host under a 12 GiB cap, an unmeasured allocation is not a free win.
+*Amended by §5bn: measured now, and the marginal cost is zero bytes. `RealForwardRunner+BuildScratch.swift:104-126`
+(seven classification buffers, 248 B of payload) and `PreadExpertStreamer.swift:239-248` (the residency table,
+512 × 16 B = 8 KiB) are built with no `decodeExpertExecution` branch anywhere in the path, so every shipped run already
+pays for them whether or not the knob is on. The fail-closed throw is the caveat that survives, not the memory.*
 
 What it leaves, named so it is not re-found: the one surviving reading of all of §5ba–§5bj is that decode is bounded by
 the *token's own critical path*, not by the feed. Nothing tried here — better synchronisation (event −12.5 %,
-per-layer −12.9 %), better prefetch (ring depth, horizon, per-layer), better partition authority (+0.04 % real) or worse
+per-layer −12.9 %), better prefetch (ring depth, horizon, per-layer), better partition *readback* (+0.04 % of a token's
+counters, not its clock — §5bn re-pairs that clock in 24 further arms and cannot price it either way) or worse
 (I/O overlap −7.5 %) — has moved the clock by an amount that both replicated and was large. The gap between what the
 device ledger says a token should take and what it takes has been measured from four sides now and priced from none.
 
@@ -8421,3 +8436,197 @@ independent routes to 1 843 200 agree. (5) The claim "the tail includes the padd
 `stride − phase1Bytes` in `PreadExpertStreamer+IO.swift:166-180` and the whole-stride fallback in
 `expert_io.c:88-93`, both read this session; the residency comment there ("Residency still publishes
 only after the tail lands") is why the padding reaches the buffer at all.
+
+## 5bn. #224 puts the campaign's two non-negative levers in one process: 52 arms say the combination buys nothing, and the same 52 say `gpu-residency` executed work byte-for-byte identical to the shipped default (2026-10-17)
+
+**Question.** §5bj priced `TINYTITAN_DECODE_EXPERT_EXECUTION=gpu-residency` at +2.07 % pooled and §5bl priced
+`TINYTITAN_GPU_KEEPWARM_US` at +0.48 % position-balanced. Those are the only two arms in §5ba–§5bm that did not measure
+slower than the shipped default, and the operator's standing ask — *"maybe we find a combination which will improve
+decode tok/s"* — names the one cell neither section tested: both levers live in one process. Nothing else in this
+campaign has ever run two non-default knobs together.
+
+**Design.** Batch 1 (`/tmp/c224/b1/`, 06:52–07:29Z) is 4 rounds × 7 arms: `base, X, base, Y, base, Z, base` with
+(X, Y, Z) rotating over (kw, gpu, both) by one position per round, so every candidate is bracketed by two shipped
+controls inside its own round and no candidate is always first — 28 arms. Batch 2 (`/tmp/c224/b2/`, 07:34:38–08:13:49Z)
+is the confirmation batch, written before batch 1's magnitudes were believed: 6 rounds × 4 arms = 24, odd rounds
+`base, gpu, base, gpu` (Q1: does `gpu-residency` replicate §5bj?) and even rounds `base, kw, base, both` (Q2: does
+adding residency to keep-warm buy anything?). Both batches ran one artifact (`.build/release/TinyTitanCLI` sha256
+`e8535a85…e86cb2b6`, rebuilt at `b6da2d7` and re-hashed before arm 1, which is how the parked binary's
+mtime-vs-commit loose end got closed), a clean tree, mains power, one model process, qwen38 4-bit with no `--ram`
+flag — `TinyTitanCLI` still cannot take one — so every arm loaded the shipped `cache=11.88G slots=96` tier, 384 tokens
+greedy at `--max-context 262144`. **52 arms, and no number in this section is compared across the two batches.**
+
+**Falsifiers, written first.** (1) *combination:* `both` is a finding only if its median bracket delta exceeds the
+median base-to-base band **and** is positive in at least 3 of 4 rounds. (2) *one lever or two:* if `both` ≤ max(kw, gpu),
+the two arms are one mechanism and the combination family closes.
+
+### Batch 1: the clock, and the round that ate it
+
+| round | kw Δ | gpu Δ | both Δ | both−kw | both−gpu | round mean of the three |
+|---|---|---|---|---|---|---|
+| r1 | +5.40 | +0.14 | +6.98 | +1.58 | +6.84 | +4.17 |
+| r2 | −0.63 | +0.05 | +1.12 | +1.76 | +1.07 | +0.18 |
+| r3 | **+44.92** | −0.78 | **+41.74** | −3.18 | +42.53 | +28.63 |
+| r4 | −2.15 | −3.54 | −3.95 | −1.81 | −0.41 | −3.21 |
+
+**r3 is withdrawn, and it is the finding that matters most of this batch.** `r3_base2` finished at 2.319 tok/s against
+its round mates' 5.567/5.372/5.505. Its *work* counters are its neighbours' work: 31 293 evictions and 22 986 reloads —
+identical in all 52 arms of both batches — `io_host_waits=11 618`, ring `free=0.99`, and the same output text. Its
+*host-side durations* tripled: `wait_ms` 231.572 against ~80, `body_ms` 393.107 against ~164, `cache_plan_ms` 12.184
+against 3.4, `router_readback_ms` 0.0818 against 0.012, `cb1_ms` 19.163 against 3.6, `embed_ms` 2.322 against 0.017,
+`io_hidden_pct` 97.54 against 99.95. Same bytes, same routing, three times the wall in the operations that only wait:
+that is this host thread being descheduled, not a knob. Two of r3's three brackets contain it and they would have
+reported **+41 %** and **+45 %** — an order above anything §5ba–§5bm ever measured. Withdrawn, which is what the
+falsifier was written for.
+
+With r3's poisoned brackets out, and the 15 surviving controls spanning 4.849–5.567 tok/s (sd 0.220 = 4.1 % of the
+mean, 14.81 % end to end):
+
+| arm | clean bracket deltas | mean | median |
+|---|---|---|---|
+| kw | +5.40, −0.63, −2.15 | +0.87 % | −0.63 % |
+| gpu | +0.14, +0.05, −0.78, −3.54 | −1.03 % | −0.36 % |
+| both | +6.98, +1.12, −3.95 | +1.38 % | +1.12 % |
+
+Mid-batch I read the additivity durations' sign backwards and reported rate and duration as contradicting each other.
+They do not: `body_ms` excess −1.16/−1.29/−1.17 and `wait_ms` −0.70/−0.91/−2.24 against a rate excess of
++1.44/+1.70/+1.74 is agreement in 3/3 rounds (`both` saves more than the sum of its parts). The correction is the kind
+of thing the counters exist to catch — and the super-additivity is ~1.2 % of a token's body time measured against
+per-round `gpu` deltas that flip sign (+0.14, +0.05, −0.78, −3.54), so the prediction it is being tested against is
+itself noise. It is not a lever.
+
+### Batch 2: written for confirmation, delivered by a machine that had stopped cooperating
+
+| round | type | base1 | base2 | band | arm 2 | arm 4 | paired verdict |
+|---|---|---|---|---|---|---|---|
+| r1 | A | 4.277 | 4.882 | 13.2 % | gpu 4.998 | gpu 5.122 | gpu **+10.49 %** |
+| r2 | B | 4.747 | 4.979 | 4.8 % | kw 5.161 (+6.13) | both 4.644 (−4.50) | both−kw **−10.02 %** |
+| r3 | A | 4.743 | 4.144 | 13.5 % | gpu 4.812 | gpu 4.339 | gpu **+2.97 %** |
+| r4 | B | 3.809 | 3.964 | 4.0 % | kw 3.816 (−1.81) | both 3.824 (−1.61) | both−kw **+0.21 %** |
+| r5 | A | 3.821 | 3.944 | 3.2 % | gpu 4.097 | gpu **2.783** | gpu **−11.40 %** as run |
+| r6 | B | 4.108 | 3.956 | 3.8 % | kw 4.500 (+11.61) | both 4.059 (+0.67) | both−kw **−9.80 %** |
+
+Deltas are against the round's own control mean; the candidate percentages in parentheses are each candidate against
+that same mean. One arm is withdrawn on the same mechanical screen used for batch 1's r3 — *body_ms* over 1.20× the
+mean of its three round mates while its work stays inside the all-arm ranges: **`r5_p4`** at `body_ms` 331.603 against
+its mates' 240.315/223.157/232.441, with `expert_misses` 28 391, `expert_read_mib` 74 970.0, 31 293 evictions, 22 986
+reloads, `io_host_waits` 11 535 and the same output text as always, while `io_queue_ms` went 0.678 → 2.241,
+`expert_load_p99_ms` 8 → 16 ms and `io_hidden_pct` fell to 98.98. No other arm in 52 crosses the bar.
+
+That withdrawal is also the honest answer to Q1, and it is why Q1 is not answered. Scored as run, the seven paired
+`gpu` observations across both batches (+0.14, +0.05, −0.78, −3.54, +10.49, +2.97, −11.40) mean **−0.30 %**, 4/7
+positive. Scored with `r5_p4` out and the round's surviving arm kept, they mean **+2.12 %** — within 0.05 points of
+§5bj's published +2.07 %. **One contaminated arm moves the verdict by the entire size of the effect.** Batch 2's
+type-A control bands (13.2 %, 13.5 %) are two to four times the largest gain this campaign has ever credibly measured,
+so #224 neither replicates §5bj nor refutes it, and §5bj's own hedge ("a clock that will not support a promotion
+decision") is now the load-bearing part of it.
+
+Machine context, sampled per arm and recorded because it decides how much of the above is readable: swap climbed
+8 682 → 10 778 MB through batch 2 against batch 1's 8 460 → 9 820 MB, system free held at 76–79 %, and batch 2's
+controls ran 3.809–4.979 tok/s where batch 1's ran 4.849–5.567. The keep-warm dose is a third dose again: achieved
+period 1 326–1 568 µs with 58 353–70 481 dispatches/request, i.e. every batch 2 keep-warm arm ran the *coarse* dose
+§5bl could not schedule deliberately.
+
+### The verdict the two falsifiers actually return
+
+**(1) The combination is not a finding, in either batch.** Batch 1's `both` on the three usable rounds is
++6.98/+1.12/−3.95 — 2 of 3 positive, mean +1.38 %. Batch 2's `both` against its round's control mean is
+−4.50/−1.61/+0.67 — 1 of 3 positive, median −1.61 % against a median band of 4.0 %. Both fail.
+
+**(2) The two arms are one mechanism, and the family closes as a no.** The drift-free form of the question is `both`
+minus `kw` in the same round, and all six contrasts are: +1.58, +1.76, −1.81 (batch 1) and −10.02, +0.21, −9.80
+(batch 2) — **mean −3.01 %, best positive +1.76 %, against control bands of 3.2–11.4 %**. The counters say the same
+thing with a cleaner sign in batch 2's three type-B rounds: `wait_ms` +10.18 % and `body_ms` +7.65 % (3/3 positive),
+so the stacked arm spends *more* host wait and *more* body time per token than keep-warm alone, every round it ran.
+`both` vs `gpu` looked better in batch 1 (+2.50 %) but that is keep-warm's own margin, not a synergy. **Adding
+`gpu-residency` to keep-warm buys nothing that keep-warm did not already buy** — which is the operator's question
+answered: the combination exists, it is bit-identical, and it does not compound.
+
+### What the mode executes: 52 arms of counters, and the source that explains them
+
+Grouping all 52 arms by what was switched on gives the campaign's cleanest statement about `gpu-residency`:
+
+| counter | base (28 arms) | kw (7) | gpu (10) | both (7) |
+|---|---|---|---|---|
+| `expert_evictions` | 31 293 | 31 293 | 31 293 | 31 293 |
+| `expert_reloads` | 22 986 | 22 986 | 22 986 | 22 986 |
+| ring `begins` | 18 001 | 18 001 | 18 001 | 18 001 |
+| `expert_misses` mean (range) | 28 726 (28 259–29 047) | 28 948 (28 424–29 383) | 28 646 (28 391–28 963) | 28 834 (28 328–29 127) |
+| `expert_read_mib` mean | 75 854 | 76 440 | 75 644 | 76 139 |
+| `hit_fixup_layers` = `io_host_waits` mean | 11 617 | 11 669 | 11 600 | 11 638 |
+| `prefetch_adopted_per_token` mean | 18.69 | 18.11 | 18.89 | 18.40 |
+
+Every kind's range sits inside the *base arms' own* spread, and the three counters that cannot move unless the
+assignment moves are equal to the unit in all 52. The mode changes no executed work — not one streamed byte, not one
+fixup, not one adopted prefetch. The source says why, and §5bj did not read it closely enough:
+`RealForwardRunner+DecodeMoE.swift:125-129` enters the residency branch only for `.hitFixup` or `.gpuResidency`;
+inside, the GPU's lists are read back (`:130-145`), sorted (`:152-153`), checked for the superset property
+(`:167-171`) and summed into the three `gpu_classified_*` counters (`:173-175`) — and then
+`:175-182`'s own comment takes over: *"Execute the CPU partition regardless. It is the authority, and it is the only one
+that reflects adoption; running the GPU's partition would re-fetch an expert already resident."* Both branches end in
+the *same* `DecodeExpertPartition.populate(topK:missIndices:plan.misses:…)` call with the *same* arguments. The device
+classifies; the host decides. The one executed delta is `RealForwardRunner+DecodeLayers.swift:69-71`, which encodes
+`moe_classify_expert_residency` (`:195-208`) **only** when `decodeExpertExecution == .gpuResidency`: one 1-lane
+dispatch per MoE layer per token (`moe.metal:132` — `if (lane != 0) return;`, then a serial loop over `top_k` = 10
+positions at `:134`), 48/token → 18 432/request, riding an existing commit+wait. That is keep-warm's mechanism
+(§5bk, §5bl) at roughly a third of its density (keep-warm ran 58 353–70 481 dispatches/request in this batch's own
+arms), which is the reason two knobs that poke the same queue do not compound.
+
+**Marginal memory: zero bytes.** §5bj refused to promote the arm partly because "it allocates per-layer residency
+buffers whose memory cost this section did not measure". They are not its allocations. The seven classification
+buffers (`residencyHitCount`, `…HitPositions`, `…MissCount`, `…MissPositions`, `…MissExperts`, `…ResolvedSlots`,
+`…ResolvedGenerations`) are built at `RealForwardRunner+BuildScratch.swift:104-126` and the residency table at
+`PreadExpertStreamer.swift:239-248`, in code with no `decodeExpertExecution` branch anywhere in the path — 248 B of
+payload and 512 × 16 B = 8 KiB respectively, already paid by every shipped run whether the knob is on or not. Turning
+it on allocates nothing more. The caveat that survives is not memory but reach: the fail-closed
+`ModelError.internalInconsistency` throw at `RealForwardRunner+DecodeMoE.swift:167-171` sits inside the
+`decodeExpertExecution == .gpuResidency` guard, so it is unreachable unless the knob is on — which is exactly why §5bj's
+"on the default path" objection is about *promoting* the mode, not about shipping it opt-in. On the shipped default the
+branch at `:183-188` populates the partition and cannot throw.
+
+### Deviations, all of them
+
+1. **Batch 2 was not a good batch and is not quoted as one.** Its bands are 2–4× the effect; one arm withdrawn; Q1
+   reported as a range over a single withdrawal decision (+2.12 % / −0.30 %) instead of a number. The pre-registered
+   falsifiers, not the pooled means, are what the verdict rests on.
+2. **Batch 2's type-A rounds carry two controls for two arms**, so those arms are scored against the round's control
+   pair rather than a strict flanking bracket, as §5bl's batch 2 was. Batch 1's 7-arm rounds are properly bracketed.
+3. **The keep-warm dose is not one dose, now across three batches.** Achieved period was 2 028–2 042 µs
+   (34 860–35 977 dispatches/request) in batch 1's r1–r3 arms, 1 313–1 382 µs (54 779–59 440) in batch 1's r3_p4 and
+   both r4 arms, and 1 326–1 568 µs (58 353–70 481) in all six batch 2 keep-warm arms. `Thread.sleep`'s quantisation
+   moved with the session and the swap level, so "kw" is at least three different doses across the 52 arms and §5bl's
+   deviation 1 (the best dose was never runnable) still stands.
+4. **The clock is withdrawn across batches, not just across rounds.** Batch 1 controls 4.849–5.567, batch 2 controls
+   3.809–4.979: no figure in either table is comparable to the other's, and none is compared here.
+5. **Counters were transcribed** (`wait_ms`, `body_ms`, `io_ms`, `cache_plan_ms`, `io_host_waits`,
+   `router_readback_ms`, `io_queue_ms`, achieved period, dispatches, `gpu_classified_*`, and the eight work counters
+   grouped above), which closes §5bl's deviation 2.
+6. `--ram 12` is again absent from every command line because `TinyTitanCLI` takes neither `--ram` nor `--ram-budget`;
+   every arm printed the shipped host derivation (`cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G`,
+   `budget=12288MiB`). Same wording defect §5bh, §5bi, §5bj and §5bl each record.
+7. **One stale comment found in the path and deliberately not edited.** `sources/TinyTitan/Metal/MoE/moe.metal:117`
+   says "Only eight positions are touched"; qwen38's `topKExperts` is 10 (`ModelTypes.swift:282`), and the kernel is
+   correct because it loops to the passed `top_k` (`moe.metal:134`). It is filed, not fixed, because that file is
+   compiled into the shipped artifact and editing it mid-campaign would change the binary every later arm in §5ba–§5bn
+   is measured against. A one-word doc fix belongs on its own commit after the campaign, not inside a measurement.
+
+**Provenance.** Machine Mac15,3 Apple M3, 24 GB (25,769,803,776 bytes), macOS 27.0.1, Apple Swift 6.4, AC power
+(`pmset -g batt`: "Now drawing from 'AC Power'"), `lipo -archs` → `arm64`. Tree clean at
+`b6da2d7395c415c90406aebe663926b83f2e2c83` for both batches; artifact sha256 `e8535a85…e86cb2b6`, rebuilt at that
+commit and re-hashed before arm 1; binary mtime 06:49:20Z (local 08:49:20, five minutes before batch 1's first arm).
+Model
+`models/qwen3.8-flash-next_125B_A6B_4Bit`, tier `cache=11.88G slots=96`, `prefetch=1`. One model process at a time, no
+`--allow-busy-gpu`, nothing else started in the window. **Gates: none re-run for the batches** — no source file was
+modified for this section, only this document and §5bj's four markers. All 52 arms exited 0 and every one hashed to
+`c172890df88cdbbfa0627bd320d16614`, the §5bb/§5bh/§5bi/§5bj/§5bl 384-token greedy output, including all seven arms
+with both knobs live.
+
+### What it leaves
+
+The combination family closes unadopted: the shipped default is unchanged, both knobs stay opt-in, and the number to
+carry is **"+0.48 % from keep-warm alone, and stacking residency on it measured −3.01 %"** — not `both`'s own +1.38 %.
+`gpu-residency` is now re-measured twice more and its clock has never been narrower than the bands that contain it, so
+the campaign's position on it is §5bj's own: opt-in, un-promoted, and no longer worth a fifth batch. What is left on
+this line is what §5bl already named — the 52.8 ms `phase1_hit → phase1_miss_fixup` gap — and §5bm closed its bytes at
+the format. The earlier-bytes and the 26.8/16.1 ms gap pairs remain, and both are bounded by slots and the RAM tier,
+not by a knob.
