@@ -1066,6 +1066,13 @@ The preserve decision (§6) is taken; these are the consequences.
       — **blocker for every other item**
 - [ ] Storage and throughput settled (≈ 1.1 TB peak and seconds-per-token unless
       the expert set is largely resident, §6.5 — or a different host)
+- [ ] Container I/O shape built for throughput (§6.7): one fixed-stride blob per
+      (layer, expert) with the E8M0 scales inline; miss reads issued from the
+      gate's top-k before the hit phase ends
+- [ ] Expert order from a routing trace, recorded as a manifest permutation —
+      **A/B it before claiming the gain** (§6.7 marks it inferred)
+- [ ] Expert-cache policy settled for the target host: no cache below ~32 GB of
+      RAM, MTP/DSpark off by default (§6.7)
 - [ ] Gating, pinned sha, geometry, rope block, tie-embeddings and EOS ids read
       from the source — **done, §1 and §1.1** (1017 sha `1bae0e10…`; the
       architecture is identical to the 2026-09-10 checkpoint)
