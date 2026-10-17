@@ -207,8 +207,10 @@ qwen38 4-bit at the shipped `cache=11.88G slots=96` tier, 384 tokens greedy), al
 exit 0 and every one byte-identical (`c172890d`), including all seven with both
 knobs live. Both falsifiers were written before measuring and both returned no:
 the drift-free contrast `both − kw` inside the same round is +1.58, +1.76, −1.81,
-−10.02, +0.21, −9.80 — **mean −3.01 %, best positive +1.76 %, against control bands
-of 3.2–11.4 %** — and batch 2's three type-B rounds give the stacked arm *more*
+−10.63, +0.21, −10.94 — **mean −3.31 %, best positive +1.76 %, against control bands
+of 3.2–11.4 %** (the direct arm ratio gives −3.70 %, best +0.62 %: no estimator in
+this design puts the pair above its own bands) — and batch 2's three type-B rounds
+give the stacked arm *more*
 `wait_ms` (+10.18 %) and *more* `body_ms` (+7.65 %) per token than keep-warm alone.
 **They are one mechanism**: two knobs that poke the same GPU queue do not compound,
 and the number to carry is "+0.48 % from keep-warm alone", never `both`'s +1.38 %.

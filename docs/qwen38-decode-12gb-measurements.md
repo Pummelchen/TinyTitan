@@ -8500,15 +8500,19 @@ itself noise. It is not a lever.
 | round | type | base1 | base2 | band | arm 2 | arm 4 | paired verdict |
 |---|---|---|---|---|---|---|---|
 | r1 | A | 4.277 | 4.882 | 13.2 % | gpu 4.998 | gpu 5.122 | gpu **+10.49 %** |
-| r2 | B | 4.747 | 4.979 | 4.8 % | kw 5.161 (+6.13) | both 4.644 (−4.50) | both−kw **−10.02 %** |
+| r2 | B | 4.747 | 4.979 | 4.8 % | kw 5.161 (+6.13) | both 4.644 (−4.50) | both−kw **−10.63 %** |
 | r3 | A | 4.743 | 4.144 | 13.5 % | gpu 4.812 | gpu 4.339 | gpu **+2.97 %** |
 | r4 | B | 3.809 | 3.964 | 4.0 % | kw 3.816 (−1.81) | both 3.824 (−1.61) | both−kw **+0.21 %** |
 | r5 | A | 3.821 | 3.944 | 3.2 % | gpu 4.097 | gpu **2.783** | gpu **−11.40 %** as run |
-| r6 | B | 4.108 | 3.956 | 3.8 % | kw 4.500 (+11.61) | both 4.059 (+0.67) | both−kw **−9.80 %** |
+| r6 | B | 4.108 | 3.956 | 3.8 % | kw 4.500 (+11.61) | both 4.059 (+0.67) | both−kw **−10.94 %** |
 
 Deltas are against the round's own control mean; the candidate percentages in parentheses are each candidate against
-that same mean. One arm is withdrawn on the same mechanical screen used for batch 1's r3 — *body_ms* over 1.20× the
-mean of its three round mates while its work stays inside the all-arm ranges: **`r5_p4`** at `body_ms` 331.603 against
+that same mean, and the `paired verdict` column is the difference of those two percentages — the estimator batch 1's
+`both−kw` column uses. These two type-B rows were first printed as the direct arm ratio (`4.644/5.161 − 1 = −10.02`,
+`4.059/4.500 − 1 = −9.80`); the correction puts all six contrasts on one estimator, and deviation 9 shows the verdict
+is the same under either. One arm is withdrawn on the same mechanical screen used for batch 1's r3 — *body_ms* over
+1.20× the mean of its three round mates while its work stays inside the all-arm ranges: **`r5_p4`** at `body_ms`
+331.603 against
 its mates' 240.315/223.157/232.441, with `expert_misses` 28 391, `expert_read_mib` 74 970.0, 31 293 evictions, 22 986
 reloads, `io_host_waits` 11 535 and the same output text as always, while `io_queue_ms` went 0.678 → 2.241,
 `expert_load_p99_ms` 8 → 16 ms and `io_hidden_pct` fell to 98.98. No other arm in 52 crosses the bar.
@@ -8534,8 +8538,11 @@ period 1 326–1 568 µs with 58 353–70 481 dispatches/request, i.e. every bat
 −4.50/−1.61/+0.67 — 1 of 3 positive, median −1.61 % against a median band of 4.0 %. Both fail.
 
 **(2) The two arms are one mechanism, and the family closes as a no.** The drift-free form of the question is `both`
-minus `kw` in the same round, and all six contrasts are: +1.58, +1.76, −1.81 (batch 1) and −10.02, +0.21, −9.80
-(batch 2) — **mean −3.01 %, best positive +1.76 %, against control bands of 3.2–11.4 %**. The counters say the same
+minus `kw` in the same round, and all six contrasts are: +1.58, +1.76, −1.81 (batch 1) and −10.63, +0.21, −10.94
+(batch 2) — **mean −3.31 %, best positive +1.76 %, against control bands of 3.2–11.4 %**. That mean is not an artifact
+of the estimator: scored as the direct arm ratio the same six are −2.75, +0.62, −0.44, −10.02, +0.21, −9.80, a mean of
+**−3.70 %** whose best positive is **+0.62 %**, so on both readings every contrast sits inside its own band and neither
+reading makes the pair look additive. The counters say the same
 thing with a cleaner sign in batch 2's three type-B rounds: `wait_ms` +10.18 % and `body_ms` +7.65 % (3/3 positive),
 so the stacked arm spends *more* host wait and *more* body time per token than keep-warm alone, every round it ran.
 `both` vs `gpu` looked better in batch 1 (+2.50 %) but that is keep-warm's own margin, not a synergy. **Adding
@@ -8609,6 +8616,16 @@ branch at `:183-188` populates the partition and cannot throw.
    correct because it loops to the passed `top_k` (`moe.metal:134`). It is filed, not fixed, because that file is
    compiled into the shipped artifact and editing it mid-campaign would change the binary every later arm in §5ba–§5bn
    is measured against. A one-word doc fix belongs on its own commit after the campaign, not inside a measurement.
+8. **Batch 2's type-B rounds did not rotate their candidates.** `kw` ran at position 2 and `both` at position 4 in all
+   three rounds, so whatever a fixed slot in the round is worth on this machine lands entirely inside that column.
+   Batch 1's usable `kw`/`both` pairs sit at different positions in different rounds (p2/p6, p6/p4, p2/p6), so no single
+   position effect can hide across its three contrasts. Read batch 2's −10.63 and −10.94 as "stacking did not help, and
+   the size of the drop is this design's blind spot", not as a measured cost.
+9. **Two batch-2 numbers changed estimator after the first form went in.** `r2` and `r6` were printed as the direct arm
+   ratio and now carry the difference of the round's two bracketed deltas, so all six contrasts share one estimator:
+   the mean moves from −3.01 % to **−3.31 %**, the best positive stays +1.76 %, and scoring all six as the direct ratio
+   gives −3.70 % with a best positive of +0.62 %. Every one of the three readings is negative and inside the bands, so
+   no verdict here depends on the choice; the record is here because a published number changed.
 
 **Provenance.** Machine Mac15,3 Apple M3, 24 GB (25,769,803,776 bytes), macOS 27.0.1, Apple Swift 6.4, AC power
 (`pmset -g batt`: "Now drawing from 'AC Power'"), `lipo -archs` → `arm64`. Tree clean at
@@ -8624,7 +8641,7 @@ with both knobs live.
 ### What it leaves
 
 The combination family closes unadopted: the shipped default is unchanged, both knobs stay opt-in, and the number to
-carry is **"+0.48 % from keep-warm alone, and stacking residency on it measured −3.01 %"** — not `both`'s own +1.38 %.
+carry is **"+0.48 % from keep-warm alone, and stacking residency on it measured −3.31 %"** — not `both`'s own +1.38 %.
 `gpu-residency` is now re-measured twice more and its clock has never been narrower than the bands that contain it, so
 the campaign's position on it is §5bj's own: opt-in, un-promoted, and no longer worth a fifth batch. What is left on
 this line is what §5bl already named — the 52.8 ms `phase1_hit → phase1_miss_fixup` gap — and §5bm closed its bytes at
