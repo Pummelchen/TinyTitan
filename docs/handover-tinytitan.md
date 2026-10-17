@@ -192,10 +192,60 @@ traps that one named still bite and are folded in below.
 > **refuse to run** on any other harness, including one whose version cannot be
 > read. A refusal never throws: it writes one line to stderr and returns, so DSH
 > boots, every other plugin loads, and removing ours leaves nothing to undo. stderr
-> is not a preference — the harness prints a plugin's log records only when the boot
+> is not a preference — the harness prints a plugin's log record only when the boot
 > itself fails, so a host-logger line would be invisible (tracker, plugins section).
+>
+> **Amended 2026-10-17: the two sentences above name `0.2.0-rc.2` because that is
+> what they were written against; the pin is now `0.2.1-rc.2`** — `0.2.1-alpha.2`
+> between them, from 2026-10-11. Nothing about the enforcement changed: the release
+> is still one, exact, refused on sight, and read from the harness package rather
+> than assumed. What moved is the four sites that carry it — both
+> `SUPPORTED_DSH_VERSION` constants, `dsh-tinytitan`'s three harness
+> `peerDependencies`, the launcher's `DSH_VERSION` default and both plugin READMEs.
+> See the #230 entry under "Where the work stands" for why it moved and what was
+> re-verified on the way.
 
 ## Where the work stands
+
+**#230 closed 2026-10-17 — the systemwide harness moved to `0.2.1-rc.2` and the pin
+moved with it, test-first.** The operator upgraded the harness they run in their own
+`~/.dsh` (not the pinned private one under `~/.tinytitan`, which the launcher owns and
+nothing here touched) and the web boot answered `Failed to load plugins / 22 entries did
+not activate`. The gate did its job: `dsh-tinytitan` declares exact peers, rc.2 is not
+the release they name, so profile startup denies the plugin instead of letting it write
+into a harness home it was not written against. Four pin sites and two READMEs moved to
+`0.2.1-rc.2`, and the lockfile mirror with them — 3 lines. **Written first, and it failed
+first:** `0.2.1-alpha.2` moved into `OTHER_VERSIONS` in both plugin suites (4 titan + 3
+lan failures, exit 1 each), because that list is what "one supported release" means —
+the old release is now a refusal, not a permission. Then 157/157 and 141/141, exit 0,
+and `shell` (29 scripts, system bash 3.2.57), `shellcheck` 0.11.0, `docs` (87 documents,
+18 gates) and `javascript` (eslint 10.11.0 / prettier 3.9.9) all exit 0 on the final tree.
+
+**The boot is verified, not assumed, and the verification is functional.** Against a
+real rc.2 install the skip line is gone; what replaces it is the preset doing its job on
+rc.2's own shipped composition — `standard.patch.yml` parsed through the plugin's loader
+(22 rows), the compaction row repointed at `dsh-tinytitan/backend`, the chat-noise rows
+stripped, and the `optional-ralph` group **appended**, because rc.2 ships no ralph row
+either, so the alpha.2-era adaptation still holds. The installed copy in the operator's
+`~/.dsh/profiles/web/node_modules` was refreshed from this tree with the Oct-4 copy kept
+as `dsh-tinytitan.pre-rc2.bak`.
+
+**Three things this move did not settle, and one claim I retracted.** (1) The boot now
+reports **1** entry not activating, not 22 — the one left is a `webhook` insert in
+`~/.dsh/profiles/web/cordis.patch.yml` pointing at `@deepseek-ai/dsh-webhook`, which is
+not installed. That is a different defect and the operator did not approve touching
+their profile, so it is untouched. (2) The 22-entry report is therefore **not
+reproducible** on a fresh boot. The leading explanation is their own long-lived harness
+process (PID 39037, alive since Oct 5) with `patchReload: "live"` re-mounting the old
+plugin against rc.2's renamed packages — but that is a hypothesis, and the test is the
+operator restarting their harness, which they should do and I will not. (3) 13 dangling
+links in the legacy `.dsh-module-fallback` farm stay as they are; rc.2 resolves through
+installation scope and does not read them. **Retracted:** the launcher comment first
+said `/dsh-lan/*` answers on this pin. It does not say that any more — `dsh-lan-manager`
+is certified by its passing suite, not by a boot I did not run, and its only harness
+peer is the range `@deepseek-ai/cordis ^4.0.2`, so the exact-version gate has nothing to
+deny it on. Also disclosed: the first boot attempt measured nothing — `dsh web` selects
+its own profile, so `--profile web` was rejected before it booted.
 
 **#224 closed 2026-10-17, recorded as §5bn — 52 live arms answered the operator's
 combination question, and the answer is a no.** The two levers §5ba–§5bm that did
