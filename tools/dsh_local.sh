@@ -87,17 +87,21 @@ else
   MODELS_DIR="$REPO_ROOT/models"
 fi
 
-# Pinned on purpose; see the header. 0.2.1-alpha.2 is the version the plugin was
-# tested against — verified live, not assumed: `tools/dsh_local.sh ensure`
-# completes against it, the plugin mounts on its web server, and `/dsh-lan/*`
-# answers (with `dsh-llm:createUserMessage`, so prompts use upstream's own
-# factory rather than the fallback).
+# Pinned on purpose; see the header. 0.2.1-rc.2 is the version the plugins are
+# verified against — verified live, not assumed: a booted rc.2 web profile mounts
+# `dsh-tinytitan`, and its preset generates from rc.2's own shipped `standard`
+# (22 rows read, the compaction row repointed at this plugin's backend, and the
+# `optional-ralph` group appended because rc.2 ships no ralph row of its own).
+# What is NOT re-checked on this pin is `dsh-lan-manager`'s live `/dsh-lan/*`
+# answer — that claim is its passing suite, not a boot; its only harness peer is
+# the range `@deepseek-ai/cordis ^4.0.2`, so the exact-version gate has nothing
+# to deny it on either.
 #
-# It is a **pre-release**, and npm knows that: `latest` and `next` both still
-# point at an older tag, and this one sits under its own pre-release tag.
+# It is a **pre-release**, and npm knows that: `latest` still points at
+# 0.2.0-rc.2 and this one is reached through the `next` tag.
 # The pin is exact, so that costs nothing here — but nothing gets it by accident
 # either, which is the point of pinning.
-DSH_VERSION="${TINYTITAN_DSH_VERSION:-0.2.1-alpha.2}"
+DSH_VERSION="${TINYTITAN_DSH_VERSION:-0.2.1-rc.2}"
 # The notice version the pinned harness gates its first-run modal on. Held here
 # next to the pin it belongs to: they move together.
 WELCOME_NOTICE_VERSION="2026-08-13.1"
