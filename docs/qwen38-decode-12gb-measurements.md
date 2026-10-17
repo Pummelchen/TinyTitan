@@ -7541,3 +7541,165 @@ wall, priced for decomposition.
    them layer-trace lines); nothing here is evidence that a CI run executed a model. The two new suites are model-free
    and CI does run those. HEAD `7facfe0`'s CI run is the campaign's live evidence, and #215's run `38981220287` shows
    **cancelled** because my own push tripped `cancel-in-progress` — reported, not hidden.
+
+## 5bh. #218 puts the missing number on the v4.2 kill: the event arm delivers its stated mechanism in full — 18,384 host waits to zero, the wake bubble to 0.0000 — and loses 14.27 % because it hands the wait to one model-wide timeline that cannot release out of order (2026-10-17)
+
+**Question.** `docs/v4.2-expert-streaming-engine.md:326-327` records "**Not promoted:** immediate submission, event
+pread, contiguous pool, GPU classifier, and aging LFU (no end-to-end win under the representative run)", and line 58
+keeps the default deferred "because immediate submission was slower in the representative real-model A/B". Neither
+line gives a number. Both knobs are still shipped and still flag-selectable
+(`sources/TinyTitan/Runtime/Configuration/RuntimeConfigurationTypes.swift:53-81`), and they are the operator's
+constant-feeder idea almost word for word: submit the read before the compute needs it, and let the GPU release the
+already-encoded compute when the bytes land, instead of waking the host to encode it again. A kill with no published
+measurement is the same defect §5ba found on the 2026-09-05 §8 page, so this section measures it.
+
+**Premise, checked before measuring.** `EngineConfiguration` does not carry either flag — they are read off the
+environment inside the load path, so the question "does `TinyTitanCLI` honour them at all" was live. The chain is
+`Run.swift:117` → `Engine.swift:74` → `ServerModelSession.load` →
+`ServerModelSession+Loading.swift:82-83`, which builds the load-time `RuntimeConfiguration` with
+`expertIOSynchronization: try RuntimeExpertIOSynchronization.environmentValue()` and
+`expertIOSubmission: try RuntimeExpertIOSubmission.environmentValue()`. Confirmed against the machine as well: the
+`.event` arms print `io_host_waits=0`, which that path and no other produces.
+
+**Method.** Eight arms, two interleaved rounds, mirrored order, shipped arm first **and** last in each round —
+`base, imm, evt, base` then `base, evt, imm, base`. qwen38 4-bit, 384 new tokens, greedy, `--max-context 262144`,
+`TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1`, mains power, one model process at a time, no `--ram` flag (the
+host derivation on this 24 GB Mac prints `cache=11.88G slots=96`, inside the operator's 12 GiB cap). The falsifier was
+written down first: *`.immediate` is a win only if the `moe_phase1_hit → moe_phase1_miss_fixup` interval falls in both
+rounds; if only the label moves while the enclosing span grows, the −29 ms/token seen in the smoke was that label, not
+a bubble.*
+
+### The clock, against its own bracket
+
+| round | base (first) | imm | evt | base (last) | bracket mean | drift |
+| --- | --- | --- | --- | --- | --- | --- |
+| r1 | 4.961 | 4.878 | 4.362 | 5.031 | 4.9960 | +1.41 % |
+| r2 | 5.028 | 5.078 | 4.271 | 5.121 | 5.0745 | +1.85 % |
+
+Paired against the bracket of its own round: `.immediate` is **−2.36 % then +0.07 %** — the direction flips, so this
+page cannot call it a win and does not need to; the kill stands, now with a magnitude and a mechanism. `.event` is
+**−12.69 % then −15.83 %**, mean **−14.27 %**, same direction both rounds and seven times the drift band. Neither arm
+is close to the +6.51 % / +8.76 % that §5bb's shipped predictive ring earns, and neither is worth a default change.
+
+### The labels are not comparable across arms, and that is the finding
+
+The `.event` run prints **no `moe_phase2_routed` row at all**. Phase 1's fixup and phase 2 are one already-submitted
+command under that path, so its trace reads `moe_phase1_hit → moe_phase1_miss_fixup_phase2 → attn_norm_qkv` where the
+default reads three rows. A line-for-line A/B would have set the default's 55.200 ms/token against the event arm's
+77.566 ms/token — intervals that do not contain the same work. The comparable is the **label-independent span** from
+`moe_phase1_hit` to `attn_norm_qkv`, summed over whichever rows the arm happens to print:
+
+| arm | span ms/token | vs round bracket | `io_ms` | Δ | `wait_ms` | Δ | bookkeeping | Δ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| r1 base (mean) | 57.939 | — | 69.671 | — | 93.573 | — | 19.506 | — |
+| r1 imm | 60.415 | **+2.476** | 80.176 | +10.505 | 95.498 | +1.926 | 11.894 | −7.612 |
+| r1 evt | 78.649 | **+20.710** | 94.482 | +24.811 | 195.452 | +101.880 | −80.899 | −100.405 |
+| r2 base (mean) | 56.347 | — | 67.901 | — | 92.613 | — | 19.371 | — |
+| r2 imm | 62.706 | **+6.359** | 81.778 | +13.878 | 87.839 | −4.774 | 10.112 | −9.259 |
+| r2 evt | 80.129 | **+23.782** | 96.228 | +28.328 | 200.280 | +107.667 | −82.640 | −102.011 |
+
+So the falsifier **fires**. `.immediate` does cut the bubble it names — `io_completion_to_fixup_ms` falls in both
+rounds, −14.3 % and −25.2 %, and the `hit → miss_fixup` row fell 55.200 → 35.520 in the smoke — but the span that row
+lives inside **grows in both rounds**, because the row immediately after it grows more: `miss_fixup → moe_phase2_routed`
+goes 1.614 → 23.217. Immediate submission converts roughly 8-9 ms/token of host bookkeeping into 10-14 ms/token inside
+`io_ms`: handing the fixup to the queue earlier does not skip the queue, it joins it behind the demand burst the fixup
+was waiting for, and the extra time is charged to the I/O scope instead of the host. That is the whole of it — the
+bubble was real, it was 1.5 ms/layer, and it was already off the critical path.
+
+### `.event` gives back exactly what it promised and still loses
+
+Both rounds, identically: `io_completion_to_fixup_ms` = **0.0000**, `io_host_waits` = **0**,
+`io_host_waits_avoided` = **18,384** = 48 layers × 383 tokens — every host wait in the run, on every layer of every
+token. The v4.2 claim (`docs/v4.2-expert-streaming-engine.md:68-96`, "This removes the successful-I/O task
+wake/encode/commit bubble") is not merely true, it is *completely* delivered, and the arm is 14.27 % slower anyway.
+The `wait_ms` column says where the loss is: 93.6 → ~198 ms/token, +102 and +108 against the bracket. The wait moved
+onto the device; it was not removed.
+
+The reason is in the code, and it is deliberate. `ExpertIOEventCoordinator.swift:18-20` — "Out-of-order operations are
+deliberately held until every preceding value is terminal. Advancing a timeline directly from N to N+2 would also
+release a GPU wait for N+1, potentially before that batch's bytes were valid" — and `publish()` advances
+`event.signaledValue` only through a **contiguous prefix** of terminal values
+(`ExpertIOEventCoordinator.swift:85-90`). There is exactly one such timeline per model: `Model.swift:263` constructs a
+single `ExpertIOEventCoordinator` and hands the same object to every layer's streamer
+(`PreadExpertStreamer.swift:120`), which reserves from it at `PreadExpertStreamer+Plan.swift:184`, and the decoder
+pre-encodes `routedCB.encodeWaitForEvent(token.event, value: token.value)` at
+`RealForwardRunner+DecodeMoE.swift:374`. A single monotonic counter cannot express "N+1 landed but N has not", so one
+slow read holds the releases of every batch issued after it, across all 48 layers. Removing 48 × 1.5 ms of host wake
+buys a device wait that cannot pass the slowest in-flight read, and at this byte rate that is a bad trade by 14 %.
+
+The ordering rule is not a defect — it is what makes the path safe, and it is why a shared `MTLSharedEvent` behaves
+this way. It is the *granularity* that costs: the safety argument holds per-bucket, so one event per layer would keep
+it while a slow read in layer 7 stopped holding layer 12's release. See "What this leaves", below.
+
+### The screen #217 shipped refuses the event arm, and refusing is right
+
+`benchmark/tinytitan_host_path_split.py` run on these captures (exit codes measured without a pipe):
+
+- **base** → exit 1. family 2 36.305 is *below* the absolute bound 37.169, so "a host-path arm is worth pricing — but
+  not inside the loop: bookkeeping is only 19.698". r2 agrees (36.362 vs 36.946, bookkeeping 19.824).
+- **imm** → exit 1. family 2 35.068 *exceeds* the bound 29.352 by 5.716, so the screen rules the host off it — which is
+  precisely what the paired counters then show.
+- **evt** → **exit 2, `NOT MEASURED`**: `body=209.035` is smaller than `wait=195.452 + io=94.482`, breaking the nesting
+  the split is built on.
+
+That refusal is the first real subject §5bg's guard was written for, and the inequality is not a counter bug. Once the
+wait is expressed on the device queue, the same wall interval legitimately belongs to both scopes, so `wait` and `io`
+overlap and "body = wait + io + bookkeeping" stops being a partition. The screen was built to stop rather than print
+−80.9 ms/token of bookkeeping as if it were a measurement; it did. Do not read the negative column above as a quantity
+of host time — read it as the marker that this arm's scopes are concurrent.
+
+### Numerics
+
+All eight arms hash to `c172890df88cdbbfa0627bd320d16614`, identical to §5bb's 384-token output. Both mechanisms are
+output-invariant, so nothing on this page is a quality question; these are speed decisions. The contrast is worth
+keeping in view: the *genuine* v4.2 rejections are a different class — multi-command staged Metal I/O "produced
+different tokens; it is not safe to ship" (`docs/v4.2-expert-streaming-engine.md:319-325`) — and that one would not be
+up for re-pricing on a clock at all.
+
+### What this leaves, and what it closes
+
+The feeder idea is not dead, but the cheap version of it is closed. The engine **already** feeds continuously —
+`prefetch_issued_per_token=39.30`, `prefetch_adopted_per_token=18.60`, drive duty ≈24 % of the token (§5bb) — and both
+shipped knobs that tried to make the *handoff* asynchronous cost more than the bubble they remove. What survives here
+is a mechanism, not a guess: **the model-wide timeline, not the device wait, is what makes `.event` lose.** Splitting
+that timeline per layer keeps the contiguous-prefix safety argument where it is needed — within a layer, values still
+reach the timeline in issue order — while a late read stops gating unrelated releases. It is a small change at one
+construction site (`Model.swift:263`) plus the coordinator's per-bucket counters. Registered as the next task; not
+shipped, not a default, and it earns nothing here until priced the same way.
+
+Untouched and still unpriced, named so the next session does not re-find it: `TINYTITAN_DECODE_EXPERT_EXECUTION`
+(`hit-fixup` default | `barrier` | `gpu-residency`), and `gpu_classified_*`, which reads 0 in every arm above.
+
+**Provenance.** Machine Mac15,3 Apple M3, 24 GB (25,769,803,776 bytes), macOS 27.0.1, Apple Swift 6.4
+(swiftlang-6.4.0.34.1 clang-2100.3.34.1), AC power. Measured artifact is `12ddb80`'s code — `git diff --stat
+12ddb80..HEAD` is `docs/qwen38-decode-12gb-measurements.md | 6 +++++-`, documentation only, and the tree was clean for
+the whole batch; the binary postdates no source change. Model `models/qwen3.8-flash-next_125B_A6B_4Bit`, tier
+`cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G`, `prefetch=1`, no runtime code changed by this unit.
+
+**Exact arm command** (env prefix varied per arm; `${2:+…}` leaves the shipped flag unset for base):
+
+```bash
+TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1 \
+  [TINYTITAN_EXPERT_IO_SUBMISSION=immediate] [TINYTITAN_EXPERT_IO_SYNC=event] \
+  .build/release/TinyTitanCLI --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0 --max-context 262144
+```
+
+Every arm exit 0; footer for r1_base1 ends `[stop=maxTokens prefill=10tok/2.99s new=384tok decode=77.41s tok/s=4.961]`.
+Per-arm machine state was sampled beside the clock: free memory 77-79 % across all eight, swap used
+7,893-8,201 MB — no arm ran under materially different pressure.
+
+**Deviations, all of them.**
+
+1. Three n=32 smokes ran `base → imm → evt` in one order with no control. They are premise and label checks only and
+   carry **no** wall conclusion; their `hit → miss_fixup` −29 ms/token reading is exactly what the paired run refuted.
+2. Round 1's first arm sits 1.41 % below round 1's last. Deltas are therefore taken against the round's bracket *mean*,
+   not against the first arm, which is what keeps `.imm`'s r1 −2.36 % and r2 +0.07 % from being read as a trend.
+3. `--ram 12` was not passed. The host derivation on this Mac produces the 11.88 G / 96-slot tier by itself, which is
+   within the cap; passing it would have measured the same thing by a different route.
+4. No golden baseline: this unit changes no runtime code, and output invariance is proven directly by eight matching
+   hashes on the model that matters.
+5. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated.
+6. Nothing here ran in CI and no CI run executed a model. The eight logs are on disk under `/tmp/bh218/` and will not
+   survive the machine; the numbers above are transcribed from them.
