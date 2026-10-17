@@ -16,13 +16,29 @@ import TinyTitan
 /// crashed instead of reporting which allocation failed.
 enum BenchHarnessError: Error, CustomStringConvertible {
     case metalObjectUnavailable(String)
+    case badConfiguration(String)
 
     var description: String {
         switch self {
         case .metalObjectUnavailable(let what):
             return "could not create the Metal \(what) for this benchmark"
+        case .badConfiguration(let why):
+            return "refusing to run: \(why)"
         }
     }
+}
+
+/// Read an optional integer knob, refusing rather than reading as "off" when the
+/// operator set it to something that is not a number: a benchmark arm that
+/// silently disappears on a typo reports the control as a measurement.
+private func envIntFlag(_ name: String) throws -> Int? {
+    guard let raw = ProcessInfo.processInfo.environment[name] else { return nil }
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return nil }
+    guard let value = Int(trimmed) else {
+        throw BenchHarnessError.badConfiguration("\(name) must be an integer, got \"\(raw)\"")
+    }
+    return value
 }
 
 /// A command buffer from the queue, or a named error.
@@ -320,15 +336,33 @@ extension TinyTitanBench {
         // TINYTITAN_BENCH_HEAD_CADENCE_MS: one launch per command buffer with
         // a wall-clock gap between them, mimicking decode's once-per-token
         // cadence instead of back-to-back steady state.
-        if let cadenceMs =
-            ProcessInfo.processInfo.environment["TINYTITAN_BENCH_HEAD_CADENCE_MS"]
-            .flatMap(Int.init)
-        {
+        // TINYTITAN_BENCH_HEAD_KEEPWARM_US: run a one-threadgroup dispatch on a
+        // second queue throughout those gaps, to test whether the cadence
+        // penalty is GPU power state at all, and whether a stream can hold it.
+        let cadenceMs = try envIntFlag("TINYTITAN_BENCH_HEAD_CADENCE_MS")
+        let keepWarmUs = try envIntFlag("TINYTITAN_BENCH_HEAD_KEEPWARM_US")
+        if keepWarmUs != nil, cadenceMs == nil {
+            throw BenchHarnessError.badConfiguration(
+                "TINYTITAN_BENCH_HEAD_KEEPWARM_US needs TINYTITAN_BENCH_HEAD_CADENCE_MS: "
+                    + "back-to-back launches leave no idle window to hold warm")
+        }
+        if let cadenceMs {
+            let keepWarm: GPUKeepWarmStream?
+            if let keepWarmUs {
+                keepWarm = try GPUKeepWarmStream(
+                    device: device, pso: pso, columns: n,
+                    rowBytes: rowBytes, groupBytes: groupCount * 2,
+                    input: x, intervalUs: keepWarmUs)
+                try keepWarm?.calibrate()
+            } else {
+                keepWarm = nil
+            }
             try runHeadCadence(
                 queue: context.queue, pso: pso, w: w, s: s, biases: bb, x: x, y: y,
                 rows: rowsVar, n: nVar, threadgroups: threadgroups,
                 iterations: iterations, cadenceMs: cadenceMs,
-                bytes: bytes, kernel: kernel, bits: bits)
+                bytes: bytes, kernel: kernel, bits: bits,
+                keepWarm: keepWarm, keepWarmUs: keepWarmUs)
             return
         }
         let cb = try requireCommandBuffer(context.queue)
@@ -384,11 +418,20 @@ extension TinyTitanBench {
         cadenceMs: Int,
         bytes: UInt64,
         kernel: String,
-        bits: Int
+        bits: Int,
+        keepWarm: GPUKeepWarmStream?,
+        keepWarmUs: Int?
     ) throws {
         var rowsVar = rows
         var nVar = n
         var gpuSeconds: Double = 0
+        var samples: [Double] = []
+        guard iterations >= 2 else {
+            throw BenchHarnessError.badConfiguration(
+                "the cadence arm needs at least 2 iterations: it discards the first and divides by iterations-1"
+            )
+        }
+        keepWarm?.start()
         for i in 0..<iterations {
             let cb = try requireCommandBuffer(queue)
             guard let enc = cb.makeComputeCommandEncoder() else {
@@ -408,16 +451,33 @@ extension TinyTitanBench {
             enc.endEncoding()
             cb.commit()
             cb.waitUntilCompleted()
-            if i > 0 { gpuSeconds += cb.gpuEndTime - cb.gpuStartTime }
+            if i > 0 {
+                let seconds = cb.gpuEndTime - cb.gpuStartTime
+                gpuSeconds += seconds
+                samples.append(seconds)
+            }
             if i + 1 < iterations {
                 Thread.sleep(forTimeInterval: Double(cadenceMs) / 1000)
             }
         }
+        let spinDispatches = keepWarm.map { $0.stop() } ?? 0
+        let spinProbe = keepWarm?.probeMicroseconds ?? 0
         let per = gpuSeconds / Double(iterations - 1)
+        let sorted = samples.sorted()
+        let median =
+            sorted.count.isMultiple(of: 2)
+            ? (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2
+            : sorted[sorted.count / 2]
         print(
             "kernel=\(kernel) bits=\(bits) n=\(n) iterations=\(iterations) "
                 + "cadence_ms=\(cadenceMs) "
+                + "keepwarm_us=\(keepWarmUs.map(String.init) ?? "off") "
+                + "keepwarm_dispatches=\(spinDispatches) "
+                + "keepwarm_probe_us=\(String(format: "%.1f", spinProbe)) "
                 + "per_launch=\(String(format: "%.1f", per * 1_000_000))us "
+                + "median=\(String(format: "%.1f", median * 1_000_000))us "
+                + "min=\(String(format: "%.1f", sorted[0] * 1_000_000))us "
+                + "max=\(String(format: "%.1f", sorted[sorted.count - 1] * 1_000_000))us "
                 + "achieved=\(String(format: "%.1f", Double(bytes) / per / 1e9)) GB/s")
     }
 }

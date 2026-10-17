@@ -8086,3 +8086,139 @@ mode) ran before the batches and exited 0, which is what established that `gpu-r
 8. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated. Nothing here ran
    in CI and no CI run executed a model. The logs are under `/tmp/bj220/` and `/tmp/bj220b/` and will not survive the
    machine; every number above is transcribed from them.
+
+## 5bk. #221 tests the one premise §5e closed by assertion — that nothing in the engine controls GPU clock state — and a stream of dispatches too small to matter buys 5.88 % of pure device-execution time in both rounds, which is the first lever this campaign has found that does not touch bytes (2026-10-17)
+
+### The seam
+
+§5e measured the head GEMV at 9.42 ms back-to-back and 12.73 ms with 50 ms
+between launches, attributed the difference to "GPU-state (DVFS/power between
+launches)", and closed the lever in one clause: *"nothing in the engine controls
+GPU clock state, so this is a measured bound, not an actionable lever."* The
+4 ms figure was the **head's** and the bound it implied for the token was
++1.8 %. Neither half of that closing sentence was a measurement. The premise is
+an assertion about a thing nobody tried, and the arithmetic priced only one
+kernel of the many that live inside the same idle cadence — §5w's ledger says
+113.00 ms/token of GPU busy spread over ~48 000 dispatches per 512 tokens, all
+of them launched into the same 101.98 ms of per-token device idle.
+
+The falsifier written down before measuring: **if the penalty is device state
+and a cheap stream can hold that state, a concurrent stream of near-empty
+dispatches must make the measured kernel's `gpuEndTime − gpuStartTime` shorter,
+not longer.** If instead the stream only competes for execution resources, the
+same quantity must grow. A result that moves neither has not tested the premise.
+
+### The instrument
+
+`benchmark`-free: this is a bench arm, and it is the only thing in `sources/`
+that moved. `sources/TinyTitanBench/GPUKeepWarmStream.swift` (new, 138 lines)
+owns a **second `MTLCommandQueue`** and a background thread that encodes
+`affine_quant_gemv_simd` over an eight-row weight slice — one threadgroup, 256
+threads, 20 KiB of weights — commits it, waits, and sleeps.
+`TINYTITAN_BENCH_HEAD_KEEPWARM_US` sets the nominal period, bounded
+100…20 000 µs; the arm prints `keepwarm_dispatches` and
+`keepwarm_probe_us` so the record carries the *achieved* rate, not the requested
+one. `TINYTITAN_BENCH_HEAD_CADENCE_MS` and the new flag now parse through one
+`envIntFlag`, and a value that is not an integer **refuses** (exit 133, four
+refusals verified: keep-warm without cadence, `abc` for either knob, 999999 µs
+out of range) instead of reading as "off" — the AUD-307 shape, in the one place
+this campaign still had it. The cadence arm also refuses `iterations < 2`, since
+it discards the first sample and divides by `iterations − 1`, and prints median,
+min and max as well as the mean.
+
+The measured quantity is on-device: `gpuEndTime − gpuStartTime` of the *measured*
+launch. Host submission latency is outside it by construction, so this arm cannot
+be a launch-path effect.
+
+### The numbers
+
+One arm of `head_affine8` at the qwen38 shape (248 320 × 2560, 8-bit, 635 MB of
+weights in ~676 MB of buffers), 40 iterations, 50 ms cadence, controls first **and** last in
+each round, treatments mirrored between them. Medians of 39 samples, µs/token-
+equivalent of one launch:
+
+| arm | nominal period | dispatches issued | round 1 | round 2 | Δ vs that round's control mean |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `base` (position 1) | — | 0 | 10 407.0 | 10 602.7 | — |
+| `base_again` (position 5) | — | 0 | 10 950.1 | 10 907.0 | — |
+| `kw200` | 200 µs | 3 897 / 3 874 | **10 029.0** | **10 145.0** | **−650 / −610 (−6.08 % / −5.67 %)** |
+| `kw1000` | 1000 µs | 1 134 / 1 156 | 10 453.5 | 10 450.8 | −225 / −304 (−2.11 % / −2.83 %) |
+| `kw5000` | 5000 µs | 328 / 325 | 10 672.6 | 11 195.7 | −6 / +441 (−0.06 % / +4.10 %) |
+
+The two controls of a round differ by 543.1 µs (round 1) and 304.3 µs (round 2),
+so the drift inside a twelve-second round is 2.8–5.2 % and no single-arm number
+from this page is worth anything. Against that, `kw200` is **the fastest of all
+five arms in both rounds**, and it beats *both* controls of *both* rounds; its
+two paired deltas differ by 40 µs. `kw1000` is negative in both rounds.
+`kw5000` splits sign. Mean over rounds: **−630 µs (−5.88 %) at 200 µs,
+−265 µs (−2.47 %) at 1000 µs, +217 µs (+2.0 %) at 5000 µs** — a dose
+response with the densest arm strongest, which is what holding a decaying state
+looks like and what a warm-up ramp does not produce: `kw5000` sat at position 2
+in round 2 and was the *slowest* arm of that round, 441 µs over the round's
+own leading control.
+
+Three secondary readings, all from the printed counters. **(1) The nominal
+period is not the achieved one**: 3 897 dispatches inside a ~2.42 s window is
+one every 616 µs, not every 200 µs, because each iteration encodes, commits,
+waits and sleeps; the achieved rate is what the table carries. **(2) The stream
+is not free and won anyway**: at 24.6 µs per dispatch the dense arm burns
+~96 ms of device time in a ~2.4 s window, ~4 % of the device, and the measured
+kernel still got 5.9 % faster — contention would have moved that number the
+other way. **(3) The ambient state is visible in the calibration probe** (one
+synchronous spin taken before the stream starts): 47.3 µs in the first arm of
+the session and 15.7–24.8 µs in every later one, a 2–3× swing on an identical
+20 KiB dispatch, which is the same device-state effect seen from the other end.
+
+### What it is worth, and what it is not
+
+The back-to-back arm run in the same window as these ten measured
+9.172 ms/launch (200 iterations, 73.6 GB/s), so today's cadence penalty is
++1.24 to +1.78 ms, **not** §5e's +3.31 ms; the campaign's rule that qwen38
+clocks are never compared across batches applies to this bench too. `kw200`
+recovers 0.63 ms of that ~1.5 ms — about **40 % of the penalty that is on the
+table today**, and it leaves 0.86–0.97 ms still above steady state. Transferred to
+§5w's device ledger at the measured *percentage* (−5.88 % of 113.00 ms of GPU
+busy = −6.64 ms/token, 217.34 → 210.70) that is **+3.2 % decode**, which would
+be the largest single effect this campaign has measured and is precisely why it
+is not claimed: the 5.88 % was read on one 635 MB streaming GEMV, and the roles
+in that 113 ms differ in length by three orders of magnitude, so there is no
+arithmetic route from a kernel's clock penalty to a token's. The number is a
+**reason to run the live arm**, and the live arm is the only thing that can
+price it. `--ram 12`, 96 slots, `TINYTITAN_GPU_KEEPWARM_US` opt-in, base and
+keep-warm mirrored, output hashed.
+
+### Deviations
+
+1. **This is a bench arm, not an engine arm.** Nothing under `sources/TinyTitan`
+   moved, so no decode token changed and no runtime default did. The result is a
+   premise falsified in one direction, not a throughput gain.
+2. **No unit test exists for the instrument.** `TinyTitanBench` is an executable
+   target and the suite cannot import it; `tests/` has no `TinyTitanBench`
+   directory and adding a library target to hold one knob would be a larger
+   change than the probe. What *is* verified is the four refusals and one
+   steady-state arm, each run with the exit code recorded, and the fact that the
+   reproduction lands within 3 % of §5e's published back-to-back figure
+   (9.172 against 9.42 ms). Disclosed rather than worked around.
+3. **n=2 rounds, and `kw200` ran at position 3 in both.** The mirroring reversed
+   the three treatments, which put the dense arm in the middle twice. Round 2's
+   position-2 arm contradicts a monotone ramp, but the position was not fully
+   controlled and the next batch must place `kw200` at position 2 or 4.
+4. **The spread of a single arm's samples is not a Gaussian I measured**: each
+   arm's min-to-max range is 4.4–7.2 ms wide, seven to eleven times the paired
+   delta being read off it. The medians are what the deltas use; the ranges are
+   printed so a reader can see how much of each arm is unexplained.
+5. **Gates run on this exact tree**: `tools/lint.sh format` (ok, 618 Swift files),
+   `swiftlint` (0.65.1, `--strict` clean), `sendable`, `force-cast`, `func-length`,
+   `file-length` (largest 499), `unbounded-read`, `arch-path`, `stdout-clean`,
+   `docs` (87 documents against 18 gates, 222 ledger commit references resolved)
+   and CI's `Check Markdown links` step run verbatim from `.github/workflows/ci.yml`
+   (220 local links, 0 broken, exit 0). `swift build -c release` clean. The
+   `sendable` gate **failed on the first run** and was right: the
+   `unchecked-invariant:` note was written below the class declaration, and the
+   gate requires it in the comment block above — the note moved, the gate and the
+   build were re-run. No suite was re-run because no runtime file changed.
+6. **Mains power, no model process, nothing terminated**; the machine free-RAM
+   sample at start was 85 %. No model was loaded and no bytes were read from the
+   install by this section, so no golden baseline and no `--ram` decision applies.
+7. The logs are `/tmp/bk221/` and do not survive the machine; every figure above
+   is transcribed from the printed arm lines.
