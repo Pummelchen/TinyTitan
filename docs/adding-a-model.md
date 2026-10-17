@@ -155,8 +155,9 @@ tools/install_models.sh <key>            # 4-bit
 tools/install_models.sh <key>-8bit       # 8-bit
 ```
 
-The installer streams one source shard at a time (about 11 GB in flight for a
-35B-A3B) and deletes each after use; it does **not** stage the full checkpoint.
+The installer streams up to twenty source shards at once (about 90 GB in
+flight for a 35B-A3B, plus a few finished shards waiting for the converter) and
+deletes each after use; it does **not** stage the full checkpoint.
 
 **An interrupted conversion is not resumable the way it looks.** Each source
 shard is deleted once converted, and the snapshot's index and `config.json` are

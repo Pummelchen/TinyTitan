@@ -497,12 +497,18 @@ install_one() {
     # The converted snapshot and the install exist at the same time, so each
     # destination has to hold a copy: the catalogue's size for the install, a
     # quarter more on the staging volume for the quantized snapshot's overhead,
-    # and a flat 12 GB for the shard stream, the manifest and the receipt. A
+    # and the shards being streamed. A Qwen3.5-MoE conversion keeps twenty
+    # fetchers busy (~90 GB in flight for a 35B-A3B) and a few finished shards
+    # waiting for the converter; with both widths' snapshots also on the
+    # volume, 104 GB is the upper bound on everything the source shards can
+    # occupy. Every other source streams one shard at a time (12 GB). A
     # snapshot that is already on disk is not fetched again, so it is not
     # counted twice. An unreadable df is not a limit: require_gb says nothing
     # then, which is the same rule the runtime's own guard follows.
     if [[ "${TINYTITAN_SKIP_DISK_CHECK:-0}" != "1" ]]; then
       local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
+      local stream_gb=12
+      [[ "$source" == convert_qwen35moe ]] && stream_gb=104
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
         while IFS=: read -r _kind probe; do
@@ -510,7 +516,8 @@ install_one() {
         done < <(row_staging_dirs "$name")
         [[ -d "$MODELS/$dir" ]] && install_exists=1
         require_gb "the staging volume ($WORK)" "$WORK" \
-          "$(awk -v s="$size_gb" -v have="$snap_exists" 'BEGIN { printf "%d", have ? 2 : s * 1.25 + 12 }')" \
+          "$(awk -v s="$size_gb" -v have="$snap_exists" -v stream="$stream_gb" \
+               'BEGIN { printf "%d", have ? 2 : s * 1.25 + stream }')" \
           || work_ok=0
         require_gb "the models volume ($MODELS)" "$MODELS" \
           "$(awk -v s="$size_gb" -v have="$install_exists" 'BEGIN { printf "%d", have ? 2 : s + 3 }')" \

@@ -11,9 +11,10 @@ with the routed experts fused per layer. So this is prepare_qwen38.py's job
 shard -- with this family's renames and slot policy, and without Qwen3.8's
 n-gram table, PLE constants and indexer.
 
-Disk footprint while running: two source shards (~7 GB) plus the output
-(about 19.5 GB at 4-bit, 37.8 GB at 8-bit). The install TinyTitanRepack writes
-afterwards is a second copy of the output.
+Disk footprint while running: up to twenty source shards (~90 GB), a few
+completed ones waiting to convert, plus the output (about 19.5 GB at 4-bit,
+37.8 GB at 8-bit). The install TinyTitanRepack writes afterwards is a second
+copy of the output.
 
     python3.13 tools/prepare_agentworld.py --plan            # no download
     python3.13 tools/prepare_agentworld.py --bits 4 \\
@@ -503,10 +504,13 @@ _in_flight: "set[subprocess.Popen]" = set()
 _in_flight_lock = threading.Lock()
 
 # One ranged request per chunk. The host truncates long transfers, so a chunk
-# bounds what a failure costs; 64 MiB is small enough that a retry is cheap and
-# large enough not to spend the run on request overhead.
-CHUNK_BYTES = 64 * 1024 * 1024
-CHUNK_TIMEOUT = 300
+# bounds what a failure costs; 32 MiB is small enough that a retry is cheap and
+# large enough not to spend the run on request overhead. At 900 s a chunk only
+# needs 37 KB/s to finish, below the slowest leg measured on this link; the old
+# 64 MiB/300 s pair needed 224 KB/s, which some legs never reached, so a chunk
+# could not complete at all. The speed limit still aborts a dead connection.
+CHUNK_BYTES = 32 * 1024 * 1024
+CHUNK_TIMEOUT = 900
 CHUNK_ATTEMPTS = 8
 # Abort a transfer that has effectively stopped. A dead connection does not
 # always error: one was observed sitting in `S` with its chunk file static for
@@ -727,13 +731,16 @@ def _sleep_unless_stopped(seconds: float) -> bool:
 
 
 # How far ahead to download, and with how many connections. The host throttles
-# per connection, so this is the lever on how long a conversion takes: one
-# connection measured ~205 KB/s while a second beside it added ~490 KB/s, and
-# four reached ~900 KB/s combined. Depth 3 holds about four 5.3 GB shards on
-# disk (~22 GB) and leaves the main thread free to convert one while the others
-# arrive. Raising it spends disk on bandwidth the link may not have.
+# per connection -- measured 70-365 KB/s each -- so this is the lever on how
+# long a conversion takes: three connections gave ~1.7 MB/s, and ten alone gave
+# the same ~1.7; ten more alongside those raised the combined rate to
+# 2.46 MB/s while networkQuality still found ~11 Mbps spare, so the CDN cap is
+# per connection and the link is not yet the limit. Twenty fetchers take that
+# measured +47% and hold up to twenty source shards (~90 GB at 4.5 GB each).
+# Depth only caps the completed shards waiting for the converter, whose pass
+# over one is far shorter than its download.
 PREFETCH_DEPTH = 3
-FETCHERS = 3
+FETCHERS = 20
 
 
 def prefetch_shards(
