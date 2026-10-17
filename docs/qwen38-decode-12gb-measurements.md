@@ -7667,6 +7667,14 @@ reach the timeline in issue order — while a late read stops gating unrelated r
 construction site (`Model.swift:263`) plus the coordinator's per-bucket counters. Registered as the next task; not
 shipped, not a default, and it earns nothing here until priced the same way.
 
+**Correction, same night, and it belongs here rather than quietly above: §5bi priced that split and the mechanism claim
+in this paragraph is wrong.** `per-layer` delivered the predicted half of its falsifier — `io_host_waits` still 0,
+`io_completion_to_fixup_ms` still 0.0000 on all four arms — and left `wait_ms` at 198.990/195.993, i.e. +3.09 then
+−1.52 ms/token against `.event`, nowhere near the ~100 ms it had to travel to base's 94. One stall per layer is not
+shorter than one shared stall, because each still cannot pass its own layer's slowest in-flight read. **The device wait
+is the cost; the timeline granularity was never it.** The −14.27 % above stands; what this paragraph added — the
+promising explanation of it — did not survive being measured.
+
 Untouched and still unpriced, named so the next session does not re-find it: `TINYTITAN_DECODE_EXPERT_EXECUTION`
 (`hit-fixup` default | `barrier` | `gpu-residency`), and `gpu_classified_*`, which reads 0 in every arm above.
 
@@ -7702,4 +7710,158 @@ Per-arm machine state was sampled beside the clock: free memory 77-79 % across a
    hashes on the model that matters.
 5. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated.
 6. Nothing here ran in CI and no CI run executed a model. The eight logs are on disk under `/tmp/bh218/` and will not
+   survive the machine; the numbers above are transcribed from them.
+
+## 5bi. #219 tests §5bh's one surviving mechanism: 48 timelines instead of one keeps the event arm's counters perfect, does not shorten its wait by a single millisecond, and loses 12.90 % (2026-10-17)
+
+**Question.** §5bh closed with a claim rather than a measurement — that the `.event` arm's loss was the *granularity*
+of the model-wide `MTLSharedEvent`, not the device wait itself, because one contiguous-prefix timeline cannot express
+"N+1 landed but N has not". If that is right, giving every layer streamer its own timeline should keep the arm's
+mechanism (`io_host_waits=0`, `io_completion_to_fixup_ms=0.0000`) and pull `wait_ms` back from ~198 toward base's ~94.
+If it is wrong, the split changes nothing and §5bh's closing paragraph was a story. Only the second outcome can close
+the idea, so this section buys the split and measures it.
+
+**What shipped.** `TINYTITAN_EXPERT_IO_TIMELINE=shared|per-layer` (`RuntimeConfigurationTypes.swift:89-102`, unset ⇒
+`shared`, unknown value ⇒ throws and the load refuses), threaded through `RuntimeConfiguration` to `Model.swift:267-271`,
+which builds the timelines through one new factory — `ExpertIOEventCoordinator.makeTimelines(device:numLayers:mode:)`
+at `ExpertIOEventCoordinator.swift:45` — and hands layer `L` slot `L` at `Model+LayerStreamers.swift:200`. `shared`
+returns the same object in every slot, which is the one-coordinator-per-model topology the shipped engine already ran;
+`per-layer` allocates one coordinator each. The sidecar `Model` built for a draft head inherits the mode
+(`Model.swift:337`) rather than silently reverting to `shared`. Default is `shared`, nothing is promoted, and the seam
+is opt-in only.
+
+**Method.** Eight arms, two interleaved rounds, mirrored order, shipped arm first **and** last — `base, evt, evtpl,
+base` then `base, evtpl, evt, base`, so the two event arms swap places across the rounds and neither owns a slot in the
+machine's drift. Same model, prompt, 384 greedy tokens, `--max-context 262144`, runner and kernel stats, mains power,
+one model process, no `--ram` flag (host derivation gives `cache=11.88G slots=96`, inside the 12 GiB cap). The
+falsifier was written down before the first arm: *with `.per-layer`, `io_host_waits` must stay **0** **and** `wait_ms`
+must fall from ~198 toward base's ~94; if the counters stay perfect and `wait_ms` does not move, the shared timeline
+was not the cost.*
+
+### The clock, against its own bracket
+
+| round | base (first) | evt | evtpl | base (last) | bracket mean | drift |
+| --- | --- | --- | --- | --- | --- | --- |
+| r1 | 4.925 | 4.371 | 4.308 | 5.051 | 4.9880 | +2.56 % |
+| r2 | 4.961 | 4.349 | 4.369 | 4.988 | 4.9745 | +0.54 % |
+
+Paired against the bracket of its own round: `.event` **−12.37 % then −12.57 %** (mean −12.47 %), `.per-layer`
+**−13.63 % then −12.17 %** (mean −12.90 %). The comparison that matters is not either of those against base — it is
+the two event arms against **each other**, in the same round: `evtpl − evt` is **−0.063 tok/s** in r1 and **+0.020** in
+r2. The direction flips, and the mean of −0.022 is 0.49 % of the rate — one fifth of round 1's own +2.56 % drift band.
+Splitting the timeline buys nothing measurable.
+
+### The falsifier fired: perfect mechanism, unchanged wait
+
+| arm | `wait_ms` | Δ vs round base | `io_ms` | Δ | `body_ms` | `io_host_waits` | avoided | `c2f_ms` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| r1 base (mean) | 93.736 | — | 70.249 | — | 182.971 | 11,620 | 6,764 | 1.4886 |
+| r1 evt | 195.900 | +102.164 | 94.835 | +24.586 | 208.752 | 0 | 18,384 | 0.0000 |
+| r1 evtpl | 198.990 | **+105.254** | 95.604 | +25.355 | 212.036 | 0 | 18,384 | 0.0000 |
+| r2 base (mean) | 94.363 | — | 69.329 | — | 183.504 | 11,615 | 6,770 | 1.5712 |
+| r2 evtpl | 195.993 | **+101.630** | 96.080 | +26.751 | 208.657 | 0 | 18,384 | 0.0000 |
+| r2 evt | 197.512 | +103.149 | 96.082 | +26.753 | 210.000 | 0 | 18,384 | 0.0000 |
+
+The first half of the falsifier holds on every event arm in both rounds: 48 timelines release 18,384 host waits to
+zero exactly as one timeline did, and the wake bubble is still `0.0000`. The second half fails outright. `wait_ms` for
+`.per-layer` is 198.990 and 195.993 — against `.event`'s 195.900 and 197.512 that is **+3.090 then −1.519 ms/token**,
+a shuffle inside the counter noise, nowhere near the ~100 ms it had to travel. Per-layer `io_ms` is also unchanged
+(+0.769 and −0.002 against its own round's `.event`), so the split did not even move work between the two scopes.
+
+That is the answer, and it overturns §5bh's closing paragraph: **the model-wide contiguous-prefix rule was never the
+cost.** The cost is the wait itself. Once the release is a device-side `encodeWaitForEvent`, the decode queue stalls
+until the bytes land, and making 48 independent stalls out of one shared stall does not make any of them shorter — each
+still cannot pass its own layer's slowest in-flight read. The prefix rule was a real constraint that was not being
+hit; §5bh inferred a cause from a mechanism that was merely adjacent to the number.
+
+The feeder counters say the same thing from the other side. Both event arms *do* feed more than the default —
+`prefetch_adopted_per_token` is 20.65-20.70 against base's 18.60-18.88 (+1.95/token) and `prefetch_issued_per_token`
+39.64-39.68 against 39.32-39.38 — and both are ~12 % slower. Adopting more prefetched experts is worth nothing when
+the token then waits on the device for them. That combination — strictly better prefetch, strictly worse clock — is
+the strongest form of the §5bb finding that the engine's problem is not feed *volume*.
+
+### The screen refuses both event arms, and this time that is the whole point
+
+`benchmark/tinytitan_host_path_split.py` exit codes, measured without a pipe: **base** `r1_base1` → 0 ("a host-path
+change inside the layer loop can address at most 19.341 ms/token of its 38.981"), the other three bases → 1 (family 2
+below the absolute bound, bookkeeping only ~18.6-19.3, so price it off the loop). All four event arms — `evt` and
+`evtpl`, both rounds → **2, `NOT MEASURED`**: e.g. `body=212.036` is smaller than `wait=198.990 + io=95.604`, breaking
+the nesting the split is built on. Same reason §5bh gave for `evt`: once the wait lives on the device, `wait` and `io`
+legitimately overlap, so `body = wait + io + bookkeeping` stops being a partition. The negative bookkeeping in the
+`evtpl` columns is the marker of concurrent scopes, not a quantity of host time.
+
+### Numerics
+
+All eight arms hash to `c172890df88cdbbfa0627bd320d16614`, identical to §5bb and §5bh's 384-token output. The four
+`.per-layer` runs are the first time that code executed at all, and it is output-invariant on arrival, as expected of a
+change to *who* the timeline is rather than *what* is read. The shipped path is proved inert from the other side: the
+four base arms here now run through the new factory's `shared` branch, and their round means are 93.736 and 94.363
+`wait_ms` against §5bh's 93.573 and 92.613 through the old single-coordinator construction — the same token, the same
+counters, no new host time. Nothing on this page is a quality question.
+
+### What this closes
+
+Both shipped seams of the asynchronous-handoff idea are now priced and dead: `.event` costs 12.47 % and the 48-way
+split of its timeline recovers 0.00 % of it. That retypes §5bh's "what this leaves" from *unpriced promising lever* to
+*tested and rejected mechanism*, and it narrows the remaining search: if the wait is the cost, the only feeder work
+that can pay is work that removes bytes from under the wait — earlier landing, fewer bytes, or a different place for
+the compute — not better bookkeeping about when they land. The `.per-layer` seam stays in the tree as opt-in,
+un-promoted, and now with a number attached so nobody pays for it twice. The `TINYTITAN_EXPERT_IO_SYNC=event` path it
+rides on is likewise still opt-in and still loses.
+
+Untouched and still unpriced, named so the next session does not re-find it: `TINYTITAN_DECODE_EXPERT_EXECUTION`
+(`hit-fixup` default | `barrier` | `gpu-residency`), and `gpu_classified_*`, which reads 0 in every arm above.
+
+**Provenance.** Machine Mac15,3 Apple M3, 24 GB (25,769,803,776 bytes), macOS 27.0.1, Apple Swift 6.4
+(swiftlang-6.4.0.34.1 clang-2100.3.34.1), AC power (`pmset -g batt` re-checked in the pipeline immediately before the
+batch: "Now drawing from 'AC Power'"). Measured artifact is `c262da7`'s code; the tree was clean from the commit to the
+last arm and no source file changed after the binary was built (see deviation 1). Model
+`models/qwen3.8-flash-next_125B_A6B_4Bit`, tier `cache=11.88G slots=96 resident_floor=3.72G estimate=15.60G`,
+`prefetch=1`. Gates on the committed tree: the full serial package suite, `swift test --no-parallel`, clean — 1,784
+tests across seven test bundles (828 + 408 + 157 + 189 + 41 + 63 + 98 in 256 suites), zero failures; the non-passing
+lines are the ordinary gated skips (`LibraryContractTests`, `ToolCallingTests`, the real-install and oracle tests, the
+pinned Qwen4Exp config test, one tile-boundary kernel test), none of which this change reaches. Within it
+`RuntimeConfigurationTests` 10 passed and `ExpertLoadOperationTests` 9 passed; `tools/lint.sh` (all eighteen checks) ok.
+
+**Exact arm command** (env prefix varied per arm; both event flags are unset for base, and `.per-layer` is only
+meaningful on the event path):
+
+```bash
+TINYTITAN_RUNNER_STATS=1 TINYTITAN_KERNEL_STATS=1 \
+  [TINYTITAN_EXPERT_IO_SYNC=event] [TINYTITAN_EXPERT_IO_TIMELINE=per-layer] \
+  .build/release/TinyTitanCLI --model models/qwen3.8-flash-next_125B_A6B_4Bit \
+  --prompt "Write a detailed essay about the history of computing." \
+  --max-new 384 --temperature 0 --max-context 262144
+```
+
+Every arm exit 0; footer for r1_base1 ends `[stop=maxTokens prefill=10tok/3.90s new=384tok decode=77.97s tok/s=4.925]`,
+for r2_evtpl `[stop=maxTokens prefill=10tok/2.90s new=384tok decode=87.90s tok/s=4.369]`. Per-arm machine state was
+sampled beside the clock: free memory 77-80 % across all eight, swap used 7,730.88-8,023.94 MB. The `evtpl` arm drew
+its round's **highest** swap in r1 (8,023.94 MB) and its **lowest** in r2 (7,853.25 MB) — the spread is 293 MB, 3.8 % of
+the whole range, and it follows the round rather than the arm, so no arm here ran under materially different pressure.
+
+**Deviations, all of them.**
+
+1. The release binary's timestamp is 01:45:21Z and the commit's is 01:50:00Z; the batch started at 01:50:00Z. The
+   build therefore precedes its own commit stamp by four and a half minutes, which is the pipeline's order (build →
+   tests → lint → commit → batch), not an uncommitted change: no file under `sources/` was touched between the build
+   and the commit, so the artifact is `c262da7`'s code.
+2. The pipeline's pre-commit clean-suite gate read a 98-test/10-suite run that had been in flight from the previous
+   unit (`MemoryBudgetTests`, `TaskMemoryTests` and friends), not a run filtered to the two suites this change touches;
+   that gate therefore proved the tree was healthy, not that *these* tests were re-run before committing. They had been
+   (10 and 9 passed), and after the batch the full serial package suite was run over the committed tree and is clean, as
+   recorded in Provenance. The sequence is: build → touched suites + in-flight suite → lint → commit → batch → full
+   suite. Nothing in that order can put an unmeasured binary under a clock, but it is not the order the guide implies.
+3. This unit **does** change runtime code, unlike §5bh. It changes no default and no numerics — the `shared` path is
+   the pre-existing single-coordinator construction, and eight hashes prove the `per-layer` path emits the same tokens
+   — but it is not a measurement-only unit, so it carries tests and a commit rather than only a table.
+4. `.per-layer` allocates 48 `MTLSharedEvent`s per model load instead of one. That is not counted anywhere and was not
+   measured; it is a memory and allocator cost paid at load, off the decode path, and nothing in these eight arms
+   reached a load failure or an allocation warning.
+5. `--ram 12` was not passed; the host derivation on this Mac produces the 11.88 G / 96-slot tier by itself, within the
+   cap.
+6. No golden baseline: `tools/golden-baseline.sh` targets the installed 8-bit Ornith build, which is not what this
+   campaign measures, and output invariance here is proven directly by eight matching hashes on the model that matters.
+7. `--allow-busy-gpu` was not used, no second model process was started, and nothing was terminated.
+8. Nothing here ran in CI and no CI run executed a model. The eight logs are on disk under `/tmp/bi219/` and will not
    survive the machine; the numbers above are transcribed from them.
