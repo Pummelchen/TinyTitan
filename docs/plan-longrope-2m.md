@@ -1,0 +1,75 @@
+# Plan: a 2M context window (LongRoPE) — why it is not implemented here
+
+**Status: plan, not implemented.** Requested 2026-10-18: "implement a 2M context
+window based on <https://arxiv.org/abs/2402.13753>". The method is understood and
+the engine changes are scoped below, but a 2,097,152-token window cannot be held
+by this 24 GB machine at any KV precision, and the paper's search cannot run
+where the result cannot be served. This note exists so the next session starts
+from the arithmetic instead of re-deriving it.
+
+## What LongRoPE does
+
+The paper (Ding et al., 2024) extends LLaMA2/Mistral to **2 048k** tokens with
+three pieces:
+
+1. **Non-uniform positional interpolation.** Per-dimension rescale factors
+   `λ_i` plus a position threshold `n̂`: the rotation angle for dimension `i` at
+   position `n` is `n / β^i` for `n < n̂` and `n / (β^i · λ_i)` for `n ≥ n̂`,
+   with `λ` found by a search that minimises loss on long documents. This alone
+   gives an **8× extension without fine-tuning** — and 262 144 × 8 =
+   **2 097 152**, exactly the request.
+2. **Progressive extension.** Fine-tune at 256k, then interpolate again to 2M.
+3. **Re-adjust at 8k** to recover short-context quality.
+
+## What it costs in memory
+
+Qwen3.8-Flash-Next's geometry, from the installed manifest: 48 layers, of which
+**12 are full attention** (the other 36 are linear/GDN with constant state),
+`numFullKVHeads = 2`, `fullHeadDim = 256`.
+
+| KV precision | bytes/token | at 1M | **at 2M** |
+| --- | ---: | ---: | ---: |
+| 8-bit | 12 KB | 12.6 GB | **24.6 GB** |
+| 4-bit | 6 KB | 6.3 GB | **12.3 GB** |
+
+The model's own resident estimate is **15.6 GB**, and the expert cache and OS sit
+on top of that. So 2M needs **28–40 GB before any expert cache** — it does not
+fit in 24 GB at either precision. The engine's YaRN rungs stop at
+`1 048 576` (`RuntimeConfiguration.supportedYaRNContextTokens`), and even that rung
+is marginal here at 4-bit KV.
+
+## The engine gap
+
+RoPE is currently a scalar-theta kernel
+(`sources/TinyTitan/Metal/Primitives/rope.metal`):
+
+```
+exponent = -2 * pair / frequency_divisor
+angle    = position * pow(theta, exponent)
+```
+
+LongRoPE needs a **per-pair frequency table** and a **position threshold**, so the
+angle above `n̂` uses `1/λ_i` extra scaling. That is a kernel-interface change
+affecting every model's attention (prefill and decode), which is why it is not
+being made speculatively for a window that cannot be served here.
+
+## Scoped implementation, in dependency order
+
+| # | Change | Verifiable on this Mac? |
+| --- | --- | --- |
+| 1 | Per-dimension RoPE table + `n̂` in the kernels, with a CPU reference test (arbitrary `λ`, both branches of `n̂`) | **yes** — synthetic tensors |
+| 2 | A `longrope` rope mode that reads `λ` from the model directory and folds it into the table | yes, unit-level |
+| 3 | The search harness: minimise long-document loss over `λ`, per the paper | **no** — needs the 2M KV itself (≥ 40 GB host) |
+| 4 | `2 097 152` added to the YaRN rungs, behind a KV memory guard that refuses below ~40 GB | yes, the refusal |
+
+Steps 1–2 are mechanism; 3–4 are what make it a product. **A 2M rung without a
+searched `λ` would be a promise the tree cannot validate**: naive 8× scaling of a
+model trained at 256K produces fluent text with broken long-range attention, and
+no gate here could tell the difference.
+
+## Decision
+
+- On this host the honest ceiling is **1M with 4-bit KV**, and the decode rate at
+  that context is far below the 262K figure in the README.
+- A 2M window is a **≥ 40 GB target**. Start at step 1 on that machine, or on this
+  one only when a synthetic-reference test is the deliverable, not a 2M run.
