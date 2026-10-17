@@ -568,9 +568,14 @@ def resolve_url(shard: str) -> str:
 
     The signed URL expires (about an hour), so a long download must resolve a
     new one rather than reuse the first.
+
+    Retried like the shard fetch itself: this is a `curl -sIL` HEAD, and a
+    single transient failure here used to escape as a `CalledProcessError` and
+    end the whole run. That cost a 19 GB staging tree on 2026-10-17, after the
+    chunked range fetches — which do retry — had survived two network drops.
     """
     out = subprocess.run(
-        ["curl", "-sIL", "--http1.1", f"{BASE}/{shard}"], capture_output=True, text=True, check=True
+        ["curl", "-sIL", *RETRY, f"{BASE}/{shard}"], capture_output=True, text=True, check=True
     ).stdout
     locations = [
         line.split(":", 1)[1].strip()
