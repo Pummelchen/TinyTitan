@@ -211,10 +211,10 @@ bench measured best was never run in the engine (`Thread.sleep` achieves ~2 ms
 when asked 200 µs, where §5bk achieved 616 µs, so a true sub-ms spinner needs
 `mach_wait_until`), and this batch transcribed no runner-stats gap counters, so
 it priced the wall consequence without touching the mechanism claim.
-**Landed and published:** `248f795` (engine), `8d46b15` (park note), `7971271`
-(§5bl) are on `origin/main`, and the knob is documented on the wiki's
-Runtime-controls page. CI 39002656047 / CodeQL 39002656025 were in flight on
-`7971271` at the time of writing — check them before assuming the head is green.
+**Landed and published:** `248f795` (engine), `8d46b15` (park note) and `7971271`
+(§5bl) are on `origin/main`; CI 39002656047 and CodeQL 39002656025 both came back
+**success** on that head. The knob is documented on the wiki's Runtime-controls
+page, published as `2faa854` on `master`.
 
 Every measured cell below carries the date it was measured and the command that
 re-measures it. That is the point of the format: this table was a hand-copied
