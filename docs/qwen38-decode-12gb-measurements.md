@@ -7274,3 +7274,266 @@ table.
    `/tmp/az209/*.md` are throwaway copies of markdown this repository already published. Machine: M3 MacBook Pro,
    24 GiB, macOS 27.0.1, Xcode 27 / Swift 6.4, HEAD `03c2d03`, on AC power. None of it is evidence that a CI run
    executed the suites.
+
+## 5bg. #217 closes §5w's open seam from one page's own counters: the host has 40.046 ms/token that is not a blocked wait, family 2's 43.006 exceeds even that, and the 20.944 inside the loop is the same ~20 ms §5ay needed from a paired difference (2026-10-17)
+
+**Question.** §5w partitioned a ~217-219 ms/token decode into ~113 ms of GPU busy time and ~102 ms of GPU idle in
+named gap pairs, and left one pair open: `shared_expert → moe_phase1_*`, **42.835 ms/token**, called "the open seam"
+and "where the next session should start" (`docs/qwen38-decode-12gb-measurements.md:1738`). §5x priced it by
+arithmetic — 22.9 µs of host time per command-buffer commit × 6 commits × 48 layers = 6.59 ms/token, 15% of the
+family — and closed it by elimination. Elimination is not measurement, and the standing instruction here is not to
+rely on old tests. This section measures the same seam on one capture arm, from the counters the shipped build already
+prints, with no new instrumentation and no second arm.
+
+### The nesting is a property of the code, not an assumption about it
+
+The three envelope timers are not siblings. Read the scopes, not the footer order:
+
+| term | opened | closed | what it contains |
+| --- | --- | --- | --- |
+| `body_ms` | `RealForwardRunner+DecodeLayers.swift:46` `let tBodyStart` | `RealForwardRunner+DecodeMoE.swift:472` `totalBodyNanos &+= now - tBodyStart` | every other term below |
+| `wait_ms` | `+DecodeLayers.swift:222` `let tWait` | `+DecodeLayers.swift:261-262` | the blocked router readback |
+| `io_ms` | `+DecodeMoE.swift:243` `let tIoStart` | `+DecodeMoE.swift:307` | the blocked miss pread, `io_queue_ms`, `io_completion_to_fixup_ms` |
+
+`+DecodeLayers.swift:334` passes `bodyStart: tBodyStart` into the expert stage, so the same reading of the clock that
+opens the body is the one that closes it after the io await — which is what makes `io` a *sub*-interval rather than a
+term beside it. Therefore
+
+    bookkeeping = body − wait − io
+
+is the only host time inside a layer iteration that is neither blocked on the router nor blocked on the drive, and so
+the only host time a bookkeeping change inside the loop could remove.
+
+That is one of the two identities the footer supports, and the first version of this page had only the first. The
+other is that a token is longer than the 48 bodies stacked end to end, and the difference is not mystery time — it is
+where five of the footer's counters are accumulated. `RealForwardRunner+Decode.swift` runs the token as preamble
+(opened `:75`, closed `:156`), embed (`:157`→`:197`), gather (`:201`→`:203`), then `decodeLayerLoop(...)` at `:214`,
+then the head (`:276`→`:309`/`:281`). Every one of those four opens and closes **outside** the call that contains the
+48 bodies, once per token; the three `loop_*` timers are the same shape one level up, in the generation loop
+(`RawCompletion.swift:305,340,362`). So
+
+    off the loop = wall − body
+
+is their envelope, and pricing them against `bookkeeping` — which the first draft did — sums a per-token set into a
+per-layer one. The counters classify by scope, read off the sites:
+
+| scope | counters | site |
+| --- | --- | --- |
+| inside each body | `cb1_ms` | `+DecodeLayers.swift:269` — and it subtracts `waitNanos`, so it is measured beside the wait |
+| | `router_readback_ms`, `cache_plan_ms` | `+DecodeMoE.swift:50`, `:67` |
+| | `cb2_ms` | `+DecodeMoEFinalize.swift:89` |
+| | `rdadvise_ms` | `+Diagnostics.swift:31` |
+| once per token, outside | `pre_ms`, `embed_ms`, `gather_ms`, `head_ms`, `head_fused_ms` | `+Decode.swift:156,197,203,309,281` |
+| | `loop_sample_ms`, `loop_progress_ms`, `loop_other_ms` | `RawCompletion.swift:305,340,362` |
+
+Adding the two envelopes once, at the end, gives the absolute bound: `host off waits = bookkeeping + (wall − body)` is
+every millisecond of the token that is not a blocked wait — the loosest possible host-side explanation for GPU idle.
+Anything the footer calls `_ms` that is neither is inside one of the two waits, nested in a term already counted, or a
+percentile rather than a total.
+
+### The screen ships, because the identity is the durable part
+
+`benchmark/tinytitan_host_path_split.py` (15 tests in `benchmark/test_tinytitan_host_path_split.py`) reads the
+`TinyTitan runner` line, the `TinyTitan gap` lines and the decode footer. It deliberately does **not** parse the layer
+trace: `TINYTITAN_LAYER_TRACE` prints only `position < 3 || position % 16 == 0`, which is 33 of 512 positions, so a
+trace-derived mean is a sample of a biased subset while the footer is the whole run. Statuses: `0` family 2 exceeds
+even the absolute bound, so no host-path change reaches it; `1` host time off the blocked waits reaches family 2, so
+an arm is worth pricing — with a different sentence depending on whether that time is inside the loop or only outside
+it; `2` the page cannot be read — a required line is absent, or one of the two identities fails. Its verbatim output on
+the capture arm:
+
+```
+body          : 199.960 ms/token  (the whole layer iteration)
+wait          : 105.340 ms/token  (blocked on the router readback, inside body)
+io            : 73.676 ms/token  (blocked on the miss pread, inside body)
+bookkeeping   : 20.944 ms/token  (body - wait - io: host work in the loop that is neither)
+family 2      : 43.006 ms/token  (shared_expert->moe_phase1_hit, shared_expert->moe_phase1_2_routed)
+named in body : 18.653 ms/token  (5 counters; 89.1% of the in-body envelope)
+wall          : 219.062 ms/token  (one token of decode end to end)
+off the loop  : 19.102 ms/token  (wall - body: the token outside the layer bodies)
+named off loop: 16.999 ms/token  (8 counters; 89.0% of that envelope)
+host off waits: 40.046 ms/token  (bookkeeping + off the loop: every millisecond that is not a blocked wait)
+nested in io  : io_queue_ms=0.361, io_completion_to_fixup_ms=1.607 (not added to a split)
+nested in pre : pre_release_ms=0.002, pre_pin_ms=0.237, pre_reserve_ms=0.002 (not added to a split)
+percentiles   : expert_load_p50_ms=2.000, expert_load_p95_ms=8.000, expert_load_p99_ms=16.000 (not added to a split)
+identity      : body = wait + bookkeeping + named in body: the two differ by 10.9% of the envelope
+identity      : wall = body + off the loop, named off loop: the two differ by 11.0% of the envelope
+VERDICT: a host-path change inside the layer loop can address at most 20.944 ms/token of its 43.006 (49%, 9.6% of the token)
+            the absolute bound is worse: 40.046 ms/token is everything that is not a blocked wait, and family 2's 43.006 exceeds even that by 2.960. The rest is queue serialization behind the same bytes family 1 names, and the host is not on it
+```
+
+Three things in that block are reported rather than smoothed. The two named sets **under**-cover their envelopes by
+almost exactly the same amount — 89.1% and 89.0% — and neither over-counts. That is the screen's own evidence that the
+scopes it assigns are the scopes the counters accumulate in: a mis-assigned counter shows up as one envelope over- and
+the other under-, not as two clean eighths. The 2.291 ms/token left unnamed inside the body and the 2.103 outside it
+are host time the footer does not have a counter for, and they stay unnamed. And `family 2` here is **43.006 ms/token**
+against §5w's 42.835, 0.4% apart. That is a counter agreeing across batches, which the campaign's cross-batch rule
+permits; no token *rate* from one batch is compared with a rate from another anywhere in this section.
+
+### Result: the seam closes on measurement, and §5x's arithmetic was the right arithmetic
+
+The falsifier was written before measuring: **if this page's own family-2 gap is *not* bounded by its own removable
+host time — i.e. if bookkeeping reaches family 2 — then the GPU idles behind live host work, a host-path arm is worth
+pricing, and the screen exits `1`.** It did not fire. Bookkeeping is 20.944 ms/token against 43.006: **49%**, and
+**9.6% of the token** (0.436 ms of the 0.896 ms per layer). So §5w's "start here" is answered from the same page's
+counters: at most half of the seam is host-addressable even if the surgery were free, and the remainder is queue
+serialization behind the bytes family 1 already owns — `moe_phase1_hit → moe_phase1_miss_fixup`, 55.447 ms/token here,
+which §5w showed is priced by the drive at `bytes ÷ 3.92 GB/s` within 6.4%.
+
+Correcting the scope classification (defect 5 below) moved the host side of that comparison *up*, from 20.944 to
+40.046 ms/token, so it could only have made the falsifier easier to fire. It is still 2.960 ms/token short: the seam
+fails the loosest test the host can be given, not merely the narrow one it was originally tested against. The honest
+statement of the result is therefore the stronger of the two — **no host-path change available on this page can
+account for family 2**, because 43.006 ms/token of GPU idle is more than all 40.046 ms/token that is not already a
+blocked wait — and the 49% figure is what is addressable from *inside* the layer loop, where a bookkeeping change
+would have to live to be cheap.
+
+The largest single bookkeeping item makes the closure sharper than §5x's did. `rdadvise_ms=7.876` is 37.6% of the
+whole envelope, and §5m already A/B'd it on this family at this budget: `--rdadvise default` measured **+2.2%** over
+`off` because hiding fell from **99.8-99.9% to 84.3-84.9%** when the policy was removed. So the biggest removable term
+is not free to remove — deleting it costs the hiding that keeps `io_ms` off the token. Even the *whole* envelope,
+taken out at no cost, is 9.6% of the token, and the one part of it ever priced live is negative. That is the closure:
+not "the host path is unmeasured" but "the host path is measured, is 20.944 ms/token, and its largest term pays for
+itself".
+
+### A third side of §5ay's 20 ms — and what the agreement does not prove
+
+§5ay needed about 20 ms of host bookkeeping to reconcile its paired table, and got it from a *difference*: at 48 slots
+family 2 falls to 19.930/20.386 ms/token from 42.835, so "the deeper queue buried about 20 ms of host bookkeeping per
+round" — "the same 20 ms measured from opposite sides" (`docs/qwen38-decode-12gb-measurements.md:5909`). This section
+measures the **absolute** envelope on a single arm, without any pairing, and gets **20.944**. Three sides — the paired
+48-vs-96 difference, §5ay's gap-column arithmetic, and this `body − wait − io` subtraction — land within about a
+millisecond of each other.
+
+What the agreement is *not*: 20.944 is the total removable host time, whereas §5ay's ~20 ms was a change in one gap
+family between two slot tiers. Those are different quantities that happen to be near-equal, and the campaign has
+already been burned once by a numerical agreement read as a mechanistic one (§5af retiring 3.92 GB/s as a *rate*).
+The defensible reading is narrower: the envelope bounds §5ay's absorption claim, since a tier difference cannot exceed
+the host time available to be absorbed, and 20.5 ≤ 20.944 is consistent. That bound is measured here for the first
+time; before this page it was an inference.
+
+### Five defects, and which side was wrong on each
+
+1. **The wall regex assumed the footer's field order.** Written as `decode=<s>s new=<n>tok`, it never matched, because
+   the CLI footer prints `new=512tok decode=112.16s`. The symptom was a missing `% of the token` line — the screen
+   would have printed a verdict with no denominator. The two fields are now matched independently, and the fixture
+   also proves that `TinyTitan kernel total_gpu_ms=... gpu_share_of_decode=59.7%` (log line 1558) does *not* satisfy
+   the pattern, since it carries a `decode=` field that is not a duration.
+2. **My own per-layer summary mis-read the trace.** An `awk` slice at substr offset 10 instead of 9 dropped the
+   leading digit of `body_us` and produced an impossible body(588 µs) < wait(2234 µs). The temptation was to conclude
+   the engine's timers disagree. Instead the scopes were read, which is where the nesting table above comes from:
+   body ⊇ wait ⊇ io. Corrected, the trace gives per-layer body ≈ 4,588 µs against the footer's 199.960/48 = 4,166 µs,
+   and the difference between those is the trace's position sampling, not an engine inconsistency — which is the
+   reason the screen reads the footer.
+3. **My hand-sum of the first draft's named-terms row was wrong: 24.051 written, 24.047 is what the fixture's digits
+   give.** The test moved to the re-derived value and the correction is recorded inside the test's own comment, so a
+   future reader cannot re-make it. That row no longer exists — defect 5 replaced it — but the arithmetic lesson did
+   not: every sum in the corrected version was computed in a `python3` heredoc from the fixture's own digits, not
+   added by hand, which is the third time this campaign has caught itself hand-adding and getting it wrong.
+4. **One test name contradicted its assertion.** `..._close_the_identity_within_two_percent` was renamed to
+   `..._are_reported_against_the_envelope`. The identity is nothing like 2%, and the assertion never tested a
+   threshold; the *name* was the wrong side, so the name moved and no assertion was touched. Defect 5 then renamed it
+   a second time, to `test_each_named_set_is_reported_against_its_own_envelope`, and changed its assertion — that one
+   was no longer a naming problem but a wrong claim.
+5. **The screen classified five counters by footer position instead of by scope, and I found it while checking a
+   sentence I had written about the wrong thing.** The first version summed eleven counters into one `named terms`
+   row, got 24.047 against a 20.944 envelope, read the 14.8% over-count as *overlap*, and this page asserted in prose
+   that `pre_ms`'s window sits inside `cache_plan_ms`'s. Before defending that sentence I went to read the two
+   accumulation sites: `pre_ms` closes at `+Decode.swift:156`, which is *before* `decodeLayerLoop` is even called at
+   `:214`, while `cache_plan_ms` closes at `+DecodeMoE.swift:67`, inside a body. Neither window contains the other —
+   they are in different scopes, once-per-token versus 48-times-per-token. So the over-count was not overlap, it was
+   5.394 ms/token of per-token timers (24.047 − 18.653) added into a per-layer envelope, and the doc's mechanism claim
+   was false in exactly the way a scope error is false. The fix is the two-envelope classification above; the
+   corrected screen reproduces every old number that was right (`body`, `wait`, `io`, `bookkeeping` 20.944, family 2
+   43.006) and replaces the 14.8% over-count with two ~11% under-counts. The lesson recorded here is the one the
+   campaign keeps re-learning: a mechanism sentence must be read out of the code before it is written down, because a
+   plausible mechanism is how a misclassification survives into the published page.
+
+Inventory of test-file changes in this unit: one new file (`test_tinytitan_host_path_split.py`), no pre-existing test
+file edited, and inside the new one — 9 tests at the first GREEN, **15** at the second; the two renames above; the
+24.047 correction; rows read by `cell()` label instead of by padded column width (which is why three formatter
+failures in the first cycle cannot come back); and six tests added for what the first draft had no evidence for —
+the off-loop set not being bookkeeping, the two coverage figures, the absolute bound, the footer refusal, the
+body-longer-than-wall refusal, and the middle verdict. The two refusal/verdict branches that went in *ahead* of their
+tests were then mutation-checked rather than left asserted: deleting the footer refusal makes
+`test_a_page_with_no_decode_footer_cannot_be_bounded` fail (with an *error* — `bookkeeping / wall` divides by `None`,
+so the refusal also guards a crash), and collapsing the `host_off_waits < fam` test to always-true makes exactly the
+two verdict tests fail and no other.
+
+### Sibling-defect sweep of the same shape
+
+The misclassification was found in a screen written this week, so the question the standing instruction asks is what
+else reads a counter by its name rather than by where it accumulates. Three neighbours checked. §5w's own ledger
+partitions GPU-side intervals, not host totals, and it treats `wait` and `io` as sub-intervals of the body it names,
+so it is scope-correct as written. The shipped price-pair screen (`benchmark/tinytitan_price_pair.py`) reads only
+paired wall figures and never sums a footer term into an envelope, so it has no scope to get wrong. And the byte
+counters cannot enter either split by construction: `_ms_terms` accepts a key only if it ends in `_ms`, so
+`rdadvise_mib` and `expert_read_mib` (`ServerModelSession+Diagnostics.swift:339,341`) are filtered out before
+classification — which is the one part of this that does not depend on the table above being kept current. The shape is
+not systemic here, but it is the reason this screen now prints both envelopes instead of one: a counter added to the
+footer will be mis-assigned by the same route, and two ~89% coverages make that visible on the page rather than in a
+mechanism claim.
+
+### What this does not say
+
+It does not say the 43.006 − 40.046 = 2.960 ms/token is nothing — it says the host is not on it. Neither does it claim
+the bound is tight in the operator's favour: `host off waits` is built from the two *envelopes*, not from the named
+counters, so the 2.291 ms/token unnamed inside the body and the 2.103 unnamed outside it are already counted in the
+40.046. The bound therefore does not under-count host work by leaving the missing 4.394 out; if anything it
+over-counts, because some of that time is the GPU waiting to be fed rather than the host doing something. It does not
+rule out a structural change to where the wait happens: a device-side hit path already exists in measurement form
+(`decodeExpertExecution == .gpuResidency`, `+DecodeMoE.swift:128-182`), and the reason it cannot become the
+authoritative partition is recorded in the code at `+DecodeMoE.swift:175-177` — the GPU classifies against the
+residency table as it stood *before* the cache plan adopts prefetched experts, so running the GPU's partition would
+re-fetch an expert already resident. Any arm that wants to use it must first give the GPU the adoption, which is a
+design change and not a flag. And nothing here is a tok/s claim: this is one arm's own counters against one arm's own
+wall, priced for decomposition.
+
+### Deviations, gates and provenance
+
+1. **A protocol deviation cost the first attempt.** The launch line chained `date -u -t $(date +%s)`, which BSD `date`
+   rejects; exit 1 short-circuited the `&&` chain and the CLI never ran, so no output files were written. Relaunched
+   with `date -u '+...'`. Disclosed because a silent chain failure is exactly the shape that fakes a run.
+2. **Binary provenance.** At capture time `find sources -newer .build/release/TinyTitanCLI` named
+   `RuntimeConfiguration.swift` — a comment-only change in `03c2d03` — so release was rebuilt (119.59 s) and the run
+   then provably matched HEAD. The tree at capture was clean at `7facfe0` except the files this unit touches — two new
+   `benchmark/` scripts and this document — none of which is in the binary's dependency closure, so no number here is
+   published from a dirty tree.
+3. **Machine state at preflight:** on AC power, `memory_pressure -Q` acceptable, swap 6.307 GB, no other model
+   process; one model process for the whole capture.
+4. **The response hash is not §5bc's.** stdout md5 `1225f6270b9a4425ab6cf0560add9f81` differs from the essay recipe
+   earlier sections hashed. This arm used the capture arm's own prompt, so it is a *different recipe*, not a numerics
+   change — and the distinction is stated rather than assumed, because a hash difference is the one signal this
+   campaign treats as outranking any speed number. No golden baseline was run for this unit: nothing in it touches the
+   runtime, and both suites are model-free.
+5. **Suites and gates.** Four runs of the suite are on the record, and the counts below are quoted from those runs
+   rather than reconstructed. First: the suite did not exist, so it died at `ModuleNotFoundError: No module named
+   'tinytitan_host_path_split'`. Second: `F.FF.....` → `Ran 9 tests … FAILED (failures=3)`, and all three were *shape*
+   assertions over correct numbers — `'9.6% of the token' not found`, `'family 2    : 43.006 ms/token' not found` —
+   because the tests read columns by padded width; that failure mode cannot come back, since rows are now read by
+   `cell()` label. Third: after the scope correction and the six new tests, `Ran 13 tests … FAILED (failures=4)`, two
+   of which are the ones that could only fail on a misclassified screen —
+   `test_each_named_set_is_reported_against_its_own_envelope` (`'89.1%' not found`: the old screen printed one
+   `named terms` row and no coverage figure) and `test_a_layer_loop_longer_than_the_token_it_belongs_to_is_a_refusal`
+   (`1 != 2`: the old screen had no body-exceeds-wall refusal). Fourth: `Ran 15 tests … FAILED (failures=2)`, the two
+   verdict tests (`..._when_only_the_absolute_bound_reaches`, `..._when_family_two_drops_below_bookkeeping`). Final:
+   `python3 -m unittest test_tinytitan_host_path_split` → **Ran 15 tests … OK**. The two branches that went in *ahead*
+   of their tests had no such proof at the time — the footer test passed on arrival — so they were mutation-checked,
+   re-run on copies under `/tmp` so the working file was never touched and nothing needed reverting: deleting the
+   footer refusal gives `FAILED (errors=1)` and the one error is
+   `test_a_page_with_no_decode_footer_cannot_be_bounded` — an *error*, because `bookkeeping / wall` then divides by
+   `None`, so that refusal guards a crash as well as a verdict; collapsing the absolute-bound branch to always-true
+   gives `FAILED (failures=2)` and the two are exactly the middle-verdict test and the falsifier test, no others. The
+   unmutated copy reports `Ran 15 tests … OK` as the control.
+   `tools/lint.sh python` → `ok (ruff 0.16.7, check and format clean, 209 scripts parse under 3.13)`, and the pinned
+   `ruff check` / `ruff format --check` on the two new files → `All checks passed!` / `2 files already formatted`.
+   `tools/lint.sh docs` **failed first**: `ci.yml names test_tinytitan_host_path_split and no
+   benchmark/test_tinytitan_host_path_split.py is tracked` — AUD-211 reading the tracked set, so the suite had to be
+   `git add`ed before the gate could see it; after that it reports `ok (87 documents against 18 gates …, 222 ledger
+   commit reference(s) resolved; 104/108 python suites registered in CI …)`. The CI markdown-link ruby step, run
+   locally over this tree, → `Checked 220 local link(s); 0 broken.` No golden baseline was run: this unit changes no
+   runtime code and both suites are model-free.
+6. **Not evidence.** The model run happened here and its log is on disk at `/tmp/bg217/err.txt` (1,569 lines, 1,536 of
+   them layer-trace lines); nothing here is evidence that a CI run executed a model. The two new suites are model-free
+   and CI does run those. HEAD `7facfe0`'s CI run is the campaign's live evidence, and #215's run `38981220287` shows
+   **cancelled** because my own push tripped `cancel-in-progress` — reported, not hidden.

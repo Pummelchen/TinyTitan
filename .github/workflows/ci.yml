@@ -956,6 +956,21 @@ jobs:
         # handed to a shell. Fixtures are the shapes the real `ioreg` reader
         # returned, including the 0 that lands after a load stops; nothing here
         # calls `ioreg`, loads a model, or needs macOS.
+        # test_tinytitan_host_path_split answers §5w's open seam -- the
+        # `shared_expert -> moe_phase1_*` GPU idle -- from one arm's own footer,
+        # by scope rather than by name. `body - wait - io` is the host time
+        # inside a layer iteration that is not a blocked wait, and holds five
+        # counters; `wall - body` is the envelope for the eight the runner
+        # accumulates once per token, outside `decodeLayerLoop`
+        # (+Decode.swift:214). Summing the two gives the absolute bound: every
+        # millisecond that is not a wait. The test pins both identities at ~89%
+        # named coverage, because the first draft put `pre_ms` and `gather_ms`
+        # into the per-layer envelope and read the resulting over-count as
+        # overlap -- a scope error that only two envelopes can show. It refuses
+        # a page with no footer (the bound would silently narrow, and the old
+        # code divided by `None`), a body longer than its token, and reports an
+        # unclassified counter rather than dropping it. Fixture is one real
+        # 512-token capture arm; no model, no server, nothing fetched.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -989,7 +1004,8 @@ jobs:
             test_flat_pair_cache_sim test_continuous_feeder_sim \
             test_heat_split_sim test_predictive_feeder_sim \
             test_tinytitan_usecap_ab test_tinytitan_price_pair \
-            test_tinytitan_round_budget test_tinytitan_gpu_contention
+            test_tinytitan_round_budget test_tinytitan_gpu_contention \
+            test_tinytitan_host_path_split
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
