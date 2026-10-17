@@ -258,9 +258,11 @@ cap, not by a control. No knob on the decode expert path is left unpriced, the
 shipped default is unchanged, and both levers stay opt-in and documented.
 **Landed and published:** this commit carries §5bn, the four §5bj amendments and
 this entry on `main`; the wiki's Runtime-controls page carries both knobs and the
-combination result, published as `5357c33` on `master`. The wiki's Project-tracker
-narrative deliberately does not gain a §5bn row — it has never carried §5ba–§5bm
-either, and the knob measurements belong on the page a user actually reads.
+combination result, published as `e766bf9` on `master`. `5357c33` was that page's
+first form, printed before the estimator correction above, and `e766bf9` is the
+one carrying −3.31 %. The wiki's Project-tracker narrative deliberately does not
+gain a §5bn row — it has never carried §5ba–§5bm either, and the knob
+measurements belong on the page a user actually reads.
 
 **#223 closed 2026-10-17, recorded as §5bm — an offline screen, no model run, no clock.** The
 one direction §5bl left standing on the 52.8 ms `phase1_hit → miss_fixup` gap was *fewer bytes
