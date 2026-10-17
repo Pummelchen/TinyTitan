@@ -8691,3 +8691,35 @@ the campaign's position on it is §5bj's own: opt-in, un-promoted, and no longer
 this line is what §5bl already named — the 52.8 ms `phase1_hit → phase1_miss_fixup` gap — and §5bm closed its bytes at
 the format. The earlier-bytes and the 26.8/16.1 ms gap pairs remain, and both are bounded by slots and the RAM tier,
 not by a knob.
+
+## 5bo. The read-ahead advice is a measured no-op, and the control was already there (2026-10-17)
+
+Asked to add a server `--rdadvise` switch and re-test predictor adoption. The first half
+needed no code: the policy is already reachable from the server through
+`TINYTITAN_RDADVISE_POLICY` (`off | bounded | adaptive | default`, parsed by
+`RDAdvicePolicyMode.parse` at `ServerModelSession+Loading.swift:192-195`). This record exists
+so the next session does not re-derive it — an earlier attempt used `TINYTITAN_RDADVISE`, saw
+the counter unchanged, and concluded the lever was unreachable.
+
+**Method.** 128 greedy tokens, one fresh server per arm on port 8099, rate from the engine's
+own `decode_tok_s` footer, arms interleaved because the baseline drifts: six `default` runs
+spanned **4.41–5.29 tok/s** (12 %), which is the detection floor for anything below ~5 %.
+
+| policy | `rdadvise_ms` | `rdadvise_calls` | tok/s (paired means) |
+| --- | ---: | ---: | ---: |
+| `default` | 6.6–7.9 | 9 041–9 064 | 4.83 (6 runs) |
+| `off` | **0.000** | **0** | 4.81 (6 runs; one 4.080 outlier) |
+| `bounded` | 4.3–4.4 | 6 136–6 430 | 5.08 (2 runs) |
+
+**Verdict: no effect.** The advice genuinely costs ~7 ms of host time per token and removing
+it entirely changes the rate by less than the drift — the token is I/O-bound and absorbs the
+saving, exactly as §5w's partition predicts (43 ms of host against a 53 ms byte wait). A
+server-side `--rdadvise` flag would be churn for a no-op; the real gap is that the env is
+undocumented in the server's `--help`.
+
+**The predictor half was not re-run, and should not be.** The space is already measured in
+`qwen38-prefetch-predictor-study.md`: L+2 lookahead adopted 19.0 reads/token (the reads did
+arrive) and still lost 3.7 %; the mixed-horizon ring lost 9.7 %; temporal predictors score
+0.000 precision because the previous token's experts are always resident. Every extra
+speculative read is issued into the same saturated device, so its queue cost cancels the bytes
+it removes. Re-implementing one would re-run a refuted patch.
