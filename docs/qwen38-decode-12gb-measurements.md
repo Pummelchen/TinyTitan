@@ -1741,6 +1741,10 @@ not the same run and are not treated as one.
   real attempt needs a different shape: not fewer syscalls but bookkeeping issued a layer
   ahead of the wait. That is an implementation question, not a measurement, and it is where
   the next session should start.
+  *Closed by §5bg on measurement, not elimination: the host holds 20.944 ms/token inside a
+  layer iteration and 40.046 ms/token that is not a blocked wait at all, so 43.006 exceeds
+  even the absolute bound by 2.960 — and the largest removable in-body term is the one §5m
+  already priced negative. Do not reopen it without a counter this page does not have.*
 - **`io_hidden_pct` is unfit for any future overlap claim.** Keep the counter — it is the
   right instrument for host blocking, and `io_host_waits_avoided=8964` of 15,564 waits is
   a real achievement — but a percentage that moves 0.06 points across a 12.2% clock change
@@ -7400,7 +7404,7 @@ itself".
 
 §5ay needed about 20 ms of host bookkeeping to reconcile its paired table, and got it from a *difference*: at 48 slots
 family 2 falls to 19.930/20.386 ms/token from 42.835, so "the deeper queue buried about 20 ms of host bookkeeping per
-round" — "the same 20 ms measured from opposite sides" (`docs/qwen38-decode-12gb-measurements.md:5909`). This section
+round" — "the same 20 ms measured from opposite sides" (`docs/qwen38-decode-12gb-measurements.md:5914`). This section
 measures the **absolute** envelope on a single arm, without any pairing, and gets **20.944**. Three sides — the paired
 48-vs-96 difference, §5ay's gap-column arithmetic, and this `body − wait − io` subtraction — land within about a
 millisecond of each other.
