@@ -8349,3 +8349,75 @@ token is GPU idle in named gaps; §5bk said the device executes those gaps' laun
 warm; §5bl says feeding them at 2 ms does not buy a user-visible token. The remaining candidate is not
 a second queue at all — it is the 52.8 ms `phase1_hit → phase1_miss_fixup` gap, which is bytes, not
 clock state.
+
+## 5bm. #223 reads the premise every closure on that gap took on faith — that a miss's 2.7689 MB is all bytes the kernel needs — and the installed layout says 99.852 % of it is, so "fewer bytes per miss" closes at the format, and the 4 096 B that is left is the alignment the split depends on (2026-10-17)
+
+§5w closed *faster bytes* (the burst delivers at 97 % of the wall; §5af's verdict is 3.3–3.4 GB/s and
+"no process count, burst split or address set moves the wall by more than the control's own noise") and
+named *earlier bytes* and *fewer bytes* as what remained. Both of those readings inherit one unexamined
+fact. §5w established that `expert_read_mib / expert_misses` is **2.7689 MB in all five arms, exactly
+`expertStride`** — which proves the engine reads a whole stride per miss. It does not prove the stride is
+all payload. A miss could be costing bytes nobody consumes: interior padding between the packed tensors, a
+per-expert header, or a rounding-up of the last slice. That is the cheapest remaining lever in this
+campaign — one number, no model — and it had never been read.
+
+**Method.** Offline, model-free, no process started and no clock taken. Parsed
+`models/qwen3.8-flash-next_125B_A6B_4Bit/packed_experts/layout.json` (54 046 742 B) in full — **all 24 576
+experts**, 48 layers × 512, not a sample — against the manifest's `expertStride`, and re-derived the
+reader's range arithmetic from the tree rather than trusting the summary that prompted the parse.
+
+**What one stride is.** `expertStride = 2 768 896 = 169 × 16 384` pages, and `layer_NN.bin` is exactly
+512 × that. Nine roles per expert, tiling from offset 0:
+
+| role | dtype | shape | bytes | offset |
+| --- | --- | --- | ---: | ---: |
+| `gate` | U32, 4-bit | [640, 2560] | 819 200 | 0 |
+| `gate_scales`, `gate_biases` | BF16 | [640, 40] | 51 200 each | 819 200, 870 400 |
+| `up` | U32, 4-bit | [640, 2560] | 819 200 | 921 600 |
+| `up_scales`, `up_biases` | BF16 | [640, 40] | 51 200 each | 1 740 800, 1 792 000 |
+| `down` | U32, 4-bit | [2560, 640] | 819 200 | 1 843 200 |
+| `down_scales`, `down_biases` | BF16 | [2560, 10] | 51 200 each | 2 662 400, 2 713 600 |
+
+3 × 819 200 + 6 × 51 200 = **2 764 800 B of payload**. Scanned over every expert: distinct payload totals
+`{2 764 800}`, distinct paddings `{4 096}`, **interior holes 0**, `size != stride` 0, `offset !=
+expert × stride` 0, roles-per-expert `{9}`. The blob has no header, no metadata prefix (that lives
+out-of-band in `layout.json`) and no gap between tensors. Payload is **99.852 %** of the stride; the
+unconsumed part is one trailing 4 096 B page-round-up.
+
+**What that is worth.** At §5w's 73.51 demand misses/token the engine reads 203.54 MB per token and
+consumes 203.24 MB: **0.301 MB/token of padding**, which at the wall (3.35 GB/s) is **0.090 ms of the
+52.803 ms gap** — 0.17 % of the line, 0.04 % of the token. §5bl's +0.48 % was at least inside a
+measurable band; this is two orders below one.
+
+**What it closes.** *Fewer bytes per miss* is closed at the format level, not by a benchmark. And the
+4 096 B is not recoverable in the way it looks: `offset == expert × stride` — true in 24 576 of 24 576
+cases — is what lets a reader address a sub-range at all, and the split that §5c shipped is a sub-range
+read. `phase1Bytes` is the manifest's `down` offset (`Model+LayerStreamers.swift:142-153`), the front
+fetch is `[0, 1 843 200)` and the tail `[1 843 200, stride)`, i.e. **1 843 200 + 925 696 = 2 768 896**:
+the tail *includes* the padding. Cutting it would save 0.09 ms/token and break the "the assembled slot is
+the same bytes a whole-region fetch writes" property that `splitMissesResidentWithIdenticalBytes` pins
+(`tests/TinyTitan/Infrastructure/Streaming/PreadExpertStreamerTests+Reading.swift:123`). Recorded as
+measured-and-refused.
+
+**What it does not close, and one reading it sharpens.** The 52.8 ms line still has two live directions —
+earlier bytes (bounded by landing slots, `free=0.99`, and by the RAM tier) and the second and third gap
+pairs (26.766 and 16.070 ms/token). And this screen says something about the split that §5c's own
+description invites a reader to over-read: if the whole stride predicts the wait (51.93 ms at 3.92,
+ratio 1.017) but the *front range alone* predicts only 34.6 ms, then the gap is not "the device waits for
+gate+up" — it is the drive being busy for the whole delivery regardless of which part lands first. That is
+the signature of a drive-bound pipeline, and it is consistent with the early fixup being in force. The
+front/tail split cannot buy the third of the gap a "down is only needed by phase 2" reading would promise.
+
+**Deviations, all of them.** (1) Layout arithmetic only: no read was issued, no process started, no
+timing taken, so nothing here is a level and no qwen38 clock is compared to any other. (2) The
+bytes-per-token figures reuse §5w's counters (73.51 misses, 203.55 MB/token, captured on `8c61f14`);
+the verdict is a *ratio* — 4 096 / 2 768 896 — so it is insensitive to that provenance, and the ms
+conversion is labelled with both walls (3.35 and 3.92 GB/s) rather than picking the flattering one.
+(3) The scan covers the installed qwen3.8 4-bit layout. Another family has its own stride and needs its
+own arithmetic; nothing here claims a format-wide property. (4) `expertStride` was read from the
+manifest, not derived; the payload total was derived from `layout.json`'s per-role `size` fields, and
+`layout.json` was also the source of the `down` offset that the reader calls `phase1Bytes` — the two
+independent routes to 1 843 200 agree. (5) The claim "the tail includes the padding" follows from
+`stride − phase1Bytes` in `PreadExpertStreamer+IO.swift:166-180` and the whole-stride fallback in
+`expert_io.c:88-93`, both read this session; the residency comment there ("Residency still publishes
+only after the tail lands") is why the padding reaches the buffer at all.

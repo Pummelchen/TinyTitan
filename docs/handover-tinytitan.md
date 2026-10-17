@@ -197,6 +197,18 @@ traps that one named still bite and are folded in below.
 
 ## Where the work stands
 
+**#223 closed 2026-10-17, recorded as §5bm — an offline screen, no model run, no clock.** The
+one direction §5bl left standing on the 52.8 ms `phase1_hit → miss_fixup` gap was *fewer bytes
+per miss*, and every closure on that gap had inherited the premise unexamined: §5w proved a miss
+reads exactly `expertStride`, which is not the same as the stride being all payload. Scanned
+**all 24 576 experts** of the installed qwen38 4-bit layout: stride 2 768 896 = **2 764 800 B of
+payload + 4 096 B of page padding**, zero interior holes, `offset == expert × stride` in every
+case, no header and no metadata inside the blob. So the entire bytes lever is worth **0.09 ms** of
+the 52.8 — and the 4 096 B is the alignment the §5c sub-range split reads *through*, so taking it
+back trades a byte-equality property its own test pins for a saving two orders below this
+machine's run-to-run band. What that leaves on the gap is *earlier bytes*, bounded by landing
+slots (`free=0.99`) and by the operator's 12 GiB cap, and nothing in the format.
+
 **#222 closed 2026-10-17, recorded as §5bl — the batch finished, nothing here
 awaits data.** Task #222 priced `TINYTITAN_GPU_KEEPWARM_US` live on qwen38 4-bit
 at this Mac's derived `cache=11.88G slots=96` tier (no budget flag was passed, and
