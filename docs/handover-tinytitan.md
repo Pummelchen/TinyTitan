@@ -199,7 +199,8 @@ traps that one named still bite and are folded in below.
 
 **#222 closed 2026-10-17, recorded as §5bl — the batch finished, nothing here
 awaits data.** Task #222 priced `TINYTITAN_GPU_KEEPWARM_US` live on qwen38 4-bit
-at `--ram 12`, 96 slots, mains, one model process: twenty arms, both sentinels
+at this Mac's derived `cache=11.88G slots=96` tier (no budget flag was passed, and
+the CLI takes none), mains, one model process: twenty arms, both sentinels
 (`BATCH1DONE`, `BATCH2DONE`) present, every arm exit 0 and every response text
 the same md5 (`c172890d`), so the second command queue is proven numerics-neutral
 at ~35 000 dispatches per request. The clock says **+0.48 %** on the
@@ -210,11 +211,10 @@ bench measured best was never run in the engine (`Thread.sleep` achieves ~2 ms
 when asked 200 µs, where §5bk achieved 616 µs, so a true sub-ms spinner needs
 `mach_wait_until`), and this batch transcribed no runner-stats gap counters, so
 it priced the wall consequence without touching the mechanism claim.
-The remaining work is mechanical: `248f795`, `8d46b15` and the §5bl commit are
-local and **unpushed** because CI 38999848021 / CodeQL 38999848468 were in flight
-on `36273da` — push when the lane is clear, then sync the wiki's Runtime-controls
-page with the new knob and the Qwen3.8 decode row (#163, still open and still an
-operator decision, not another run).
+**Landed and published:** `248f795` (engine), `8d46b15` (park note), `7971271`
+(§5bl) are on `origin/main`, and the knob is documented on the wiki's
+Runtime-controls page. CI 39002656047 / CodeQL 39002656025 were in flight on
+`7971271` at the time of writing — check them before assuming the head is green.
 
 Every measured cell below carries the date it was measured and the command that
 re-measures it. That is the point of the format: this table was a hand-copied
@@ -359,7 +359,14 @@ if the date is old.
 ## What is open
 
 The [Project Tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker)
-is the authority. On 2026-10-04 it holds one Open row:
+is the authority. As of 2026-10-17 it holds **two** rows, and neither can be
+closed by an automated step on this machine. The second is **TT-049** — the wiki
+Benchmarks page's Qwen3.8-Flash-Next 4-bit decode row, still published at the
+2026-08-30 6.82 tok/s. It is Blocked on the operator, not on measurement: this
+Mac's own desktop holds the GPU above the benchmark protocol's 15 % preflight
+(§5v measured 61 % with the machine idle and 69.6 % mean through a decode run),
+and a contended median is not a publishable level. Closing it needs the apps that
+hold the GPU shut, or a host that can satisfy the preflight.
 
 1. **TT-048 — re-verify a fresh KAT-Coder-V2.5-Dev install.** Issue #19: the
    converter's per-expert duplicate guard was keyed on the source tensor name

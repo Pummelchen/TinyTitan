@@ -8240,7 +8240,9 @@ request rather than quietly running a control that reads as the arm. Commit `248
 note `8d46b15`. The default is unchanged, as required.
 
 **Method.** Twenty arms, one artifact, clean tree at `248f795`, mains power, one model process,
-qwen38 4-bit at `--ram 12` and the shipped 96-slot tier, 384 tokens greedy at `--max-context 262144`.
+qwen38 4-bit with **no `--ram` flag** — which on this 24 GiB Mac derives the shipped
+`cache=11.88G slots=96` tier, printed by every arm's load line — 384 tokens greedy at
+`--max-context 262144`.
 Batch 1 (`/tmp/kw222/b1/`, 03:57–04:07Z) is the dose axis mirrored — r1
 `base, kw@200us, kw@2000us, base`, r2 `base, kw@2000us, kw@200us, base` — with the shipped control
 first *and* last in both rounds, so each candidate is read from two different positions. Batch 2 (`/tmp/kw222/b2/`, 04:07–04:22Z) is the confirmation batch written before batch 1's
@@ -8327,6 +8329,14 @@ is, it is not a numerics risk, and that is the property §8-style rejections usu
    assertion, and the first GREEN nearly went unnoticed because a trailing `echo` masked `swift test`'s
    exit code in a pipeline — the verdict was read from the log, then re-run with the exit code taken
    directly.
+7. **`--ram 12` was not passed, and `TinyTitanCLI` cannot take it** — `--ram` is the launcher's flag and
+   `--ram-budget` the server's. The driver's own header comment says "at --ram 12", so the batch was
+   described by an intention rather than by its command line; what every arm actually printed at load is
+   `TinyTitan ram profile cache=11.88G slots=96 … (cache budget, not a process target)`, the host
+   derivation on this 24 GiB Mac, which is the shipped tier and inside the operator's cap. A re-run that
+   tried to honour the header would fail on the unknown flag rather than silently measure a different
+   tier, which is why this is a wording defect and not a comparability one. Same fact §5bh, §5bi and
+   §5bj each record as their own deviation.
 
 ### What it leaves
 
