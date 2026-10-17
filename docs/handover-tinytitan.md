@@ -227,14 +227,16 @@ rc.2's own shipped composition — `standard.patch.yml` parsed through the plugi
 (22 rows), the compaction row repointed at `dsh-tinytitan/backend`, the chat-noise rows
 stripped, and the `optional-ralph` group **appended**, because rc.2 ships no ralph row
 either, so the alpha.2-era adaptation still holds. The installed copy in the operator's
-`~/.dsh/profiles/web/node_modules` was refreshed from this tree with the Oct-4 copy kept
-as `dsh-tinytitan.pre-rc2.bak`.
+`~/.dsh/profiles/web/node_modules` was refreshed from this tree; the Oct-4 copy kept as
+`dsh-tinytitan.pre-rc2.bak` was later pruned by pnpm during the webhook install recorded
+below, and the old pins remain recoverable from git at `d137a9e`.
 
 **Three things this move did not settle, and one claim I retracted.** (1) The boot now
 reports **1** entry not activating, not 22 — the one left is a `webhook` insert in
 `~/.dsh/profiles/web/cordis.patch.yml` pointing at `@deepseek-ai/dsh-webhook`, which is
 not installed. That is a different defect and the operator did not approve touching
-their profile, so it is untouched. (2) The 22-entry report is therefore **not
+their profile, so it was left untouched **then** — settled later the same day, see the
+amendment below. (2) The 22-entry report is therefore **not
 reproducible** on a fresh boot. The leading explanation is their own long-lived harness
 process (PID 39037, alive since Oct 5) with `patchReload: "live"` re-mounting the old
 plugin against rc.2's renamed packages — but that is a hypothesis, and the test is the
@@ -246,6 +248,28 @@ is certified by its passing suite, not by a boot I did not run, and its only har
 peer is the range `@deepseek-ai/cordis ^4.0.2`, so the exact-version gate has nothing to
 deny it on. Also disclosed: the first boot attempt measured nothing — `dsh web` selects
 its own profile, so `--profile web` was rejected before it booted.
+
+**Amended 2026-10-17, after the operator asked for the whole harness to work.** The
+webhook row is settled: `dsh plugin --profile web add @deepseek-ai/dsh-webhook@0.2.1-rc.2`
+exited 0 — that is the version rc.2 publishes, its peers name `0.2.1-rc.2` and cordis
+`~4.0.5`, and the harness bundles cordis 4.0.5, so the exact-version gate has nothing to
+deny. A fresh `dsh web --no-open --port 0` on the real profile now prints **no warning at
+all**: zero entries fail, not one. Backups `package.json.bak-webhook-20261017` and
+`pnpm-lock.yaml.bak-webhook-20261017` sit beside the patched profile manifests, and the
+install added three `minimumReleaseAgeExclude` entries to the profile's
+`pnpm-workspace.yaml`. The private launcher harness was still on `0.2.1-alpha.2` with
+alpha.2-pinned plugin copies, so `tools/dsh_local.sh ensure` was run: exit 0, the private
+marker is now `0.2.1-rc.2`, both private plugin copies (`dsh-tinytitan`,
+`dsh-lan-manager`) read `0.2.1-rc.2`, and a boot of the private web profile prints only
+its URL — no skip line, which is also the first boot check of `dsh-lan-manager` that the
+paragraph above said this record did not have. npm 11.20 reported six install scripts
+"not yet covered by allowScripts" on that private reinstall; this was checked, not
+assumed — node-pty's darwin-arm64 `pty.node` and `spawn-helper` ship prebuilt in the
+tarball (the blocked postinstall only chmods the helper, already 0755), `node-pty` loads
+through Node, and koffi's darwin-arm64 binary is present, so the warning is immaterial
+here. The operator's long-lived systemwide process (PID 39037, port 3080) still runs code
+loaded before any of this; only a restart of **their** process picks the new plugin up,
+and that restart is still theirs to make.
 
 **#224 closed 2026-10-17, recorded as §5bn — 52 live arms answered the operator's
 combination question, and the answer is a no.** The two levers §5ba–§5bm that did
