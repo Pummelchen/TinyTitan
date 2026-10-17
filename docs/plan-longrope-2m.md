@@ -1,18 +1,11 @@
-# A 2M context window (LongRoPE): what shipped, what did not
+# Plan: a 2M context window (LongRoPE) — why it is not implemented here
 
-**Status (2026-10-18): the 2M rung is implemented and tested; the LongRoPE
-non-uniform rescale search is not.** The engine now accepts
-`--rope-scaling yarn --max-context 2097152` on any host. 256K stays the native
-default and `1 048 576` stays the YaRN default, because the engine serves
-machines other than the one it is built on and choosing the window is the
-operator's call. What is *not* implemented is the paper's per-dimension `λ`
-search, which is the part that buys quality at 8× rather than just a position
-range. On a 24 GB host a 2M window does not fit either (arithmetic below), so the
-rung exists for larger machines and refuses through the normal memory guard
-rather than silently clamping.
-
-Requested 2026-10-18: "implement a 2M context window based on
-<https://arxiv.org/abs/2402.13753>".
+**Status: plan, not implemented.** Requested 2026-10-18: "implement a 2M context
+window based on <https://arxiv.org/abs/2402.13753>". The method is understood and
+the engine changes are scoped below, but a 2,097,152-token window cannot be held
+by this 24 GB machine at any KV precision, and the paper's search cannot run
+where the result cannot be served. This note exists so the next session starts
+from the arithmetic instead of re-deriving it.
 
 ## What LongRoPE does
 

@@ -10,7 +10,7 @@ import Testing
         #expect(
             RuntimeConfiguration.supportedContextTokens.last
                 == RuntimeConfiguration.nativeMaximumContextTokens)
-        #expect(RuntimeConfiguration.supportedYaRNContextTokens == [524_288, 1_048_576, 2_097_152])
+        #expect(RuntimeConfiguration.supportedYaRNContextTokens == [524_288, 1_048_576])
     }
 
     /// The expert-cache floor is the list's own smallest rung, and the list is

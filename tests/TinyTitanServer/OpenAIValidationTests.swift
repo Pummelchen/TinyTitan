@@ -624,21 +624,6 @@ struct ServerArgumentTests {
             "--max-context", "524288",
         ])
         #expect(halfMillion.maxContext == 524_288)
-        // The 2M rung (LongRoPE scale: 8x the native 262144). The host's memory
-        // is not this parser's business — it is the loader's to refuse.
-        let twoMillion = try ServerArguments.parse([
-            "--model", "model.ssdai", "--rope-scaling", "yarn",
-            "--max-context", "2097152",
-        ])
-        #expect(twoMillion.maxContext == 2_097_152)
-        // A value between rungs is still refused, and the message now names every
-        // rung instead of the two the literal used to carry.
-        #expect(throws: ServerArgumentError.self) {
-            try ServerArguments.parse([
-                "--model", "model.ssdai", "--rope-scaling", "yarn",
-                "--max-context", "1572864",
-            ])
-        }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
                 "--model", "model.ssdai", "--max-context", "524288",
@@ -778,20 +763,13 @@ struct ServerArgumentTests {
 
         let betweenRungs = message("100000")
         #expect(betweenRungs.contains(rungs))
-        // Not a token count at all, or above the ceiling: a different cause, so a
-        // different sentence, and one that states the ceiling it actually checked.
-        // The ceiling is derived rather than literal because it moved to 2097152
-        // with the 2M rung — the old "2000000" probe is now a *rung* violation,
-        // not an over-the-ceiling one.
-        let aboveCeiling = String(RuntimeConfiguration.maximumContextTokens + 1)
-        for value in ["abc", aboveCeiling] {
+        // Not a token count at all: a different cause, so a different sentence,
+        // and one that states the ceiling it actually checked.
+        for value in ["abc", "2000000"] {
             let refusal = message(value)
-            #expect(refusal.contains("\(RuntimeConfiguration.maximumContextTokens)"))
+            #expect(refusal.contains("1048576"))
             #expect(!refusal.contains(rungs))
         }
-        // A value between the native rungs is still refused as a rung violation
-        // even though it now sits inside the raised ceiling.
-        #expect(message("2000000").contains(rungs))
         // The help may not promise a range the gate refuses inside of. It is
         // generated against the same list so the two cannot drift apart.
         #expect(ServerArguments.usage.contains(rungs))
