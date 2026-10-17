@@ -110,6 +110,13 @@ or any arm that raises `io_hidden_pct` and throughput together.
 Published decode is **6.82 tok/s** (147 ms/token) on the 24 GiB M3. The target
 is 20 tok/s, 50 ms/token — a 2.9x cut.
 
+**No longer published, 2026-10-17.** That figure was the wiki's v4.7 batch of
+2026-08-30; the wiki withdrew it on the day it re-measured this model, and the
+current build at the shipped 96-slot default is **5.40 tok/s** median over §5bn's
+control arms (`docs/qwen38-decode-12gb-measurements.md`, and the wiki's Benchmarks
+page). Nothing in this document changes: 147 ms/token was already the wrong
+starting point, and the ~12 tok/s floor is bytes ÷ bandwidth either way.
+
 This document leads with the constraint rather than a list of optimizations,
 because the constraint decides which optimizations can matter. The short
 version: **engineering can plausibly reach ~12 tok/s and cannot reach 20.**

@@ -1202,6 +1202,16 @@ independently: 4.08–5.07 tok/s at the shipped 96-slot default, against 6.82. T
 note states the batch, the contradiction, that range and its protocol, points at
 TT-049, and pastes nothing into the table.
 
+**Amended 2026-10-17:** the last clause of that sentence is what the page no longer
+does. Two days and one operator decision later the 125B row was withdrawn outright and
+replaced by §5bn's and §5r's CLI arms published as their own labelled protocol
+(median **5.40 tok/s** over 15 surviving controls), because §5bd had by then shown
+that the gate0 bar this note refused to override is not a statement about this host at
+all. What §5s did on 2026-10-15 — refuse to paste a number into a table it could not
+certify, and open a row instead — stands as the right call; the row it left behind is
+the part that has since moved. See §5t's amendment for the closing and §5bd's verdict
+bullet for the instrument finding.
+
 Two claims were caught and corrected while drafting that note, and are recorded
 because both were plausible: that the README's `5.46` predated the table (it
 postdates it by six days — the `5.46` in README on 2026-08-08 is a different
@@ -1222,6 +1232,14 @@ building) was right for a stronger reason than the arithmetic. The other is
 *published*, which remains true of the wiki row, it is a superseded concept
 document, and §5r's 4.08–5.07 already displaces it for any live decision. Neither
 file is guarded by a gate, so both readings are documents, not proofs.
+
+**Amended 2026-10-17:** the first of those three reasons expired with the row it
+pointed at — the wiki no longer publishes `6.82` — so that line carries its own dated
+note naming **5.40 tok/s** and §5bn. `docs/ngram-table-sharing-plan.md` needed nothing:
+it had already been retargeted onto §5r and the README's 8-bit row, and it still reads
+correctly. `docs/release-notes-v5.20.md` also names the row as left in place with
+TT-049 open, and is deliberately **not** edited: release notes are a record of what was
+true at the tag, not a page to keep current.
 
 
 
@@ -1307,6 +1325,16 @@ the shipped default under contention does not reach it. What it does not license
 is replacing it: the replacement must come from the same command without
 `--allow-busy-gpu`, on a GPU under 15%, and that window has never been available
 on this Mac while its desktop is running. TT-049 stays open for that arm.
+
+**Amended 2026-10-17:** TT-049 closed without that arm. §5bd established that the
+bar is not a statement about this host at all — the reader's floor *is* the
+desktop's own compositing — and the operator then chose to publish the CLI protocol
+instead of a gate0 median: the wiki's Benchmarks page withdrew the `6.82` row and
+now carries §5bn's controls and §5r's arms as their own labelled protocol, with
+this section's contended `5.713` explicitly named as not a level (wiki `c2591e7`,
+its gate0 sentence re-worded in place by `5e13783`, the page's head).
+A gate0-certified row for this model still needs a preflight that measures
+TinyTitan's own occupancy rather than the desktop's.
 
 ## 5u. The 32K context cap re-measured on v5.20 — §5o's winning arm is gone (2026-10-15)
 
@@ -6861,7 +6889,12 @@ printed work that was never done, and it is the reason §5bd quotes the probe's 
 - #163 is a **decision**, not another run: the wiki's Qwen3.8 row needs either a window with the
   GPU-drawing apps quit, which is the operator's machine to make, or a row published with a floor/run
   pair beside it, which this tool makes cheap to produce. It has not been refreshed on the strength
-  of §5bd alone.
+  of §5bd alone. **Amended the same day:** the decision arrived, and it was a third route neither of
+  those two — the operator chose to publish the campaign's greedy 384-token CLI arms as their own
+  labelled protocol rather than force a gate0 median out of this host or wait for a quiet window.
+  #163/TT-049 closed with wiki `c2591e7`, whose gate0 sentence was re-worded in place by `5e13783`;
+  §5t carries the closing amendment. "Decision, not another run" was the right reading, and §5bd's
+  own figures are still not published as a level.
 
 **Not settled.** Nothing about decode tok/s moved; no lever was opened or closed here. The floor
 drifts with what this session is doing, which is the same noise source the paired-benchmarking record
@@ -6873,6 +6906,12 @@ shortest path is one gate0 batch taken while nothing draws to the GPU, with a fl
 before and after; if the operator would rather publish with the contention labelled, §5bd's tool is
 the label. Either way §5bc's amendment — the feeder question is slot 0 and §5ar's withholding list —
 is unchanged by anything here.
+
+**Amended 2026-10-17:** the wiki row was refreshed on neither of those two paths — the operator took
+the CLI protocol line described in §5s's and §5t's amendments instead — so both remain available and
+neither is now tied to an open task. A gate0-certified level for this model is still unwritten, and
+the only thing that would make it writable on this Mac is a preflight that measures TinyTitan's own
+occupancy rather than the desktop's.
 
 **Provenance.** Commit `05b9ff9` (tree clean for the two shipped-tool rows; the 2026-10-16 probe rows
 were taken from a dirty tree carrying the not-yet-committed gauge and are labelled as a
@@ -8639,6 +8678,11 @@ modified for this section, only this document and §5bj's four markers. All 52 a
 with both knobs live.
 
 ### What it leaves
+
+That batch's controls became the project's published qwen38 levels: the wiki's Benchmarks page withdrew its
+2026-08-30 `6.82` row and carries §5bn's and §5r's arms as a protocol of their own (median **5.40 tok/s** over
+the 15 surviving controls; wiki `c2591e7`, head `5e13783`; §5s, §5t and §5bd each carry the dated amendment).
+That is a *use* of the control arms, not a second verdict — the combination family is still unadopted here.
 
 The combination family closes unadopted: the shipped default is unchanged, both knobs stay opt-in, and the number to
 carry is **"+0.48 % from keep-warm alone, and stacking residency on it measured −3.31 %"** — not `both`'s own +1.38 %.

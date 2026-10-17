@@ -264,6 +264,26 @@ one carrying −3.31 %. The wiki's Project-tracker narrative deliberately does n
 gain a §5bn row — it has never carried §5ba–§5bm either, and the knob
 measurements belong on the page a user actually reads.
 
+**#163 closed 2026-10-17 — the wiki now publishes measured levels for this model.**
+The operator chose to publish the campaign's own CLI protocol rather than wait for a
+gate0 window this Mac's desktop will not give it, so `Benchmarks.md` loses its
+**6.82 tok/s** row (v4.7, 2026-08-30 — above the `5.5` the same page quotes as that
+model's peak) and gains a section of its own: greedy 384-token `TinyTitanCLI` at the
+shipped 96-slot default, **median 5.40 tok/s** over §5bn's 15 surviving control runs
+(mean 5.34, 4.85–5.57, sd 4.1 % of mean), with §5bn's second batch (12 controls,
+median 4.13) and §5r's five runs (median 4.63) printed beside it as the same
+configuration measured three times. The page carries the two rules that make those
+three lines one band — the first arm after a load is systematically slow, and a
+qwen38 clock does not travel between batches — plus the reason the table's own
+instrument stays unpublished here (§5bd's floor-is-the-desktop finding, and §5t's
+contended 5.713 median). **Published as wiki `c2591e7`**, which also removes TT-049
+from `Project-Tracker` and leaves one open row; the page's head is now `5e13783`, a
+same-day in-place re-word of that section's gate0 sentence — it said "needs a
+different Mac", which is stronger than §5bd measured, and now says the preflight has
+to measure TinyTitan's own occupancy. Every number on that page reproduces
+from `/tmp/c224/b1/manifest.tsv` and `/tmp/c224/b2/manifest.tsv` while this session
+lives; the campaign record is §5bn and §5r.
+
 **#223 closed 2026-10-17, recorded as §5bm — an offline screen, no model run, no clock.** The
 one direction §5bl left standing on the 52.8 ms `phase1_hit → miss_fixup` gap was *fewer bytes
 per miss*, and every closure on that gap had inherited the premise unexamined: §5w proved a miss
@@ -438,14 +458,17 @@ if the date is old.
 ## What is open
 
 The [Project Tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker)
-is the authority. As of 2026-10-17 it holds **two** rows, and neither can be
-closed by an automated step on this machine. The second is **TT-049** — the wiki
-Benchmarks page's Qwen3.8-Flash-Next 4-bit decode row, still published at the
-2026-08-30 6.82 tok/s. It is Blocked on the operator, not on measurement: this
-Mac's own desktop holds the GPU above the benchmark protocol's 15 % preflight
-(§5v measured 61 % with the machine idle and 69.6 % mean through a decode run),
-and a contended median is not a publishable level. Closing it needs the apps that
-hold the GPU shut, or a host that can satisfy the preflight.
+is the authority. As of 2026-10-17 it holds **one** row, and it cannot be closed by
+an automated step on this machine. **TT-049** closed the same day: the wiki
+Benchmarks page no longer publishes the 2026-08-30 6.82 tok/s for
+Qwen3.8-Flash-Next 4-bit — that row is withdrawn, and the page carries the current
+build's measured CLI levels as a protocol of their own (wiki `c2591e7`, head
+`5e13783`, §5bn's controls and §5r). The gate0 obstacle is unchanged and is *why* the
+row was not refreshed in its own table: this Mac's own desktop holds the GPU above the
+benchmark protocol's 15 % preflight (§5v measured 61 % with the machine idle and
+69.6 % mean through a decode run, §5bd found the reader's floor *is* the desktop's),
+and a contended median is not a publishable level. A gate0-certified row needs a
+preflight that measures TinyTitan's own occupancy rather than the desktop's.
 
 1. **TT-048 — re-verify a fresh KAT-Coder-V2.5-Dev install.** Issue #19: the
    converter's per-expert duplicate guard was keyed on the source tensor name
