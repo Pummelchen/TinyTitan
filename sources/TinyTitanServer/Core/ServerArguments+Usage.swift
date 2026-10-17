@@ -37,7 +37,8 @@ extension ServerArguments {
                                  installed model manifest).
           --max-context <tokens> One of the native rungs:
                                  \(ServerArguments.supportedContextRungsHelp).
-                                 Default 262144. With YaRN: 524288 or 1048576
+                                 Default 262144. With YaRN:
+                                 \(ServerArguments.supportedYaRNContextRungsHelp)
                                  (default 1048576).
           --rope-scaling <mode>  Context scaling: none or yarn (default none).
           --queue-limit <count>  Maximum queued requests (default 4).

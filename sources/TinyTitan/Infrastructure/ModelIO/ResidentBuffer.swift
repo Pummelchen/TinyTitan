@@ -59,7 +59,12 @@ final class ResidentBuffer {
             throw ModelError.posixFailed(call: "mmap", errno: errno)
         }
 
-        _ = posix_madvise(base, mappedLen, POSIX_MADV_RANDOM)
+        // Default is the historical `POSIX_MADV_RANDOM`; the knob exists so
+        // `willneed`/`sequential`/`none` can be A/B'd without editing code.
+        MemoryAdvice.apply(
+            MemoryAdvice.residentAdvice(environment: ProcessInfo.processInfo.environment),
+            base: base,
+            length: mappedLen)
 
         // Pin the resident range so the expert slot cache cannot evict it
         // from the page cache. Measured on the 4-bit M3: at 64 slots/layer an

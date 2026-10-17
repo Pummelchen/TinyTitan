@@ -19,11 +19,22 @@ import TinyTitanValidationSupport
         #expect(abs(fourX.inverseFrequencies[16] - 0.0002569351) < 1e-10)
         #expect(abs(twoX.inverseFrequencies[31] - 8.2740855e-8) < 1e-12)
         #expect(abs(fourX.inverseFrequencies[31] - 4.1370427e-8) < 1e-12)
+        // The 2M rung is the LongRoPE-scale 8x over the native 262144. Its last
+        // interpolated frequency is exactly half of the 4x rung's, and the
+        // attention factor follows 0.1*ln(factor)+1.
+        let eightX = YaRNRoPEParameters(
+            headDim: 256, partialRotaryFactor: 0.25, theta: 10_000_000,
+            targetContextTokens: 2_097_152)
+        #expect(eightX.factor == 8)
+        #expect(abs(eightX.attentionFactor - 1.2079442) < 1e-6)
+        #expect(abs(eightX.inverseFrequencies[31] - fourX.inverseFrequencies[31] / 2) < 1e-12)
     }
 
-    @Test(arguments: [524_287, 1_048_575])
+    @Test(arguments: [524_287, 1_048_575, 2_097_151])
     func scalarKernelMatchesCPUAtExtendedPositions(_ position: Int) throws {
-        let target = position < 1_000_000 ? 524_288 : 1_048_576
+        let target =
+            position < 1_000_000
+            ? 524_288 : (position < 2_000_000 ? 1_048_576 : 2_097_152)
         let parameters = YaRNRoPEParameters(
             headDim: 256, partialRotaryFactor: 0.25, theta: 10_000_000,
             targetContextTokens: target)

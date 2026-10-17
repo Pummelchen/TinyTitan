@@ -12,9 +12,16 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     /// `.max()` of the list and inventing a fallback for a branch that cannot
     /// happen.
     public static let nativeMaximumContextTokens = 262_144
-    public static let supportedYaRNContextTokens = [524_288, 1_048_576]
+    /// The YaRN rungs. `2_097_152` is the LongRoPE-scale window: at the native
+    /// 262 144 it is exactly the 8x that arXiv 2402.13753 reports without
+    /// fine-tuning, and `YaRNRoPEParameters` derives factor 8 from the two
+    /// numbers. It is offered because the engine serves hosts other than the one
+    /// it was built on — the KV cost at 2M (12 KB/token on this family, 24.6 GB
+    /// at 8-bit) is the operator's to weigh, and the memory guard refuses rather
+    /// than silently clamping. `docs/plan-longrope-2m.md` carries the arithmetic.
+    public static let supportedYaRNContextTokens = [524_288, 1_048_576, 2_097_152]
     public static let defaultYaRNContextTokens = 1_048_576
-    public static let maximumContextTokens = 1_048_576
+    public static let maximumContextTokens = 2_097_152
     // 112 exists because the useful range ends between 96 and 128 on a 24 GiB
     // machine: 96 measured an 85.4% hit rate, 128 reaches 89.8% but needs
     // ~17 GB of cache and swaps, costing 68%. Without a value in between

@@ -110,6 +110,14 @@ public struct ServerArguments: Equatable, Sendable {
             .map(String.init).joined(separator: ", ")
     }
 
+    /// The accepted YaRN rungs, spelled from the gate that enforces them. It was
+    /// a literal in the refusal until 2026-10-18, which is how the 2M rung
+    /// landed with a message still naming two values.
+    static var supportedYaRNContextRungsHelp: String {
+        RuntimeConfiguration.supportedYaRNContextTokens
+            .map(String.init).joined(separator: ", ")
+    }
+
     /// The accepted prefill chunk sizes, spelled from the gate that enforces
     /// them -- the hand-written list in the help text is how
     /// `expertCacheSlotsHelp` above came to be derived instead of typed.
@@ -426,7 +434,7 @@ public struct ServerArguments: Equatable, Sendable {
             }
             guard RuntimeConfiguration.supportedYaRNContextTokens.contains(maxContext) else {
                 throw ServerArgumentError.invalid(
-                    "YaRN --max-context must be 524288 or 1048576")
+                    "YaRN --max-context must be one of \(Self.supportedYaRNContextRungsHelp)")
             }
         } else {
             guard RuntimeConfiguration.supportedContextTokens.contains(maxContext) else {

@@ -131,6 +131,13 @@ extension Args {
             .map(String.init).joined(separator: ", ")
     }
 
+    /// The accepted YaRN context rungs, spelled from the validator that enforces
+    /// them — the help said "524288 or 1048576" until the 2M rung landed.
+    static var yarnContextRungsHelp: String {
+        RuntimeConfiguration.supportedYaRNContextTokens
+            .map(String.init).joined(separator: ", ")
+    }
+
     public static let usage = """
         TinyTitanCLI — Qwen3.5-MoE 35B-A3B text generation
 
@@ -144,7 +151,7 @@ extension Args {
         options:
           --max-new <int>           Generated-token limit (default 1024).
           --max-context <int>       Native context limit, 1...262144 (default 262144).
-                                    With YaRN: 524288 or 1048576 (default 1048576).
+                                    With YaRN: \(Args.yarnContextRungsHelp) (default 1048576).
           --rope-scaling <mode>     Context scaling: none or yarn (default none).
           --temperature <float>     Sampling temperature (0 = greedy). Default is
                                     the family's: 1.0 for Qwen3.8-Flash-Next,
