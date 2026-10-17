@@ -101,6 +101,34 @@ public enum RuntimeExpertIOTimeline: String, Codable, Sendable {
     }
 }
 
+/// Nominal period, in microseconds, of the opt-in GPU keep-warm stream.
+///
+/// Off unless the operator names it. A value that is not an integer inside the
+/// bound is refused rather than ignored: an experimental knob that silently
+/// disappears on a typo reports the control as a measurement, which is the shape
+/// this campaign has been closing wherever it found it.
+public enum RuntimeGPUKeepWarm {
+    public static let minimumIntervalUs = 100
+    public static let maximumIntervalUs = 20_000
+
+    public static func environmentValue(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> Int? {
+        guard let raw = environment["TINYTITAN_GPU_KEEPWARM_US"] else { return nil }
+        guard let value = Int(raw) else {
+            throw RuntimeConfigurationError.invalidGPUKeepWarmInterval(raw)
+        }
+        try validate(value)
+        return value
+    }
+
+    public static func validate(_ intervalUs: Int) throws {
+        guard intervalUs >= minimumIntervalUs, intervalUs <= maximumIntervalUs else {
+            throw RuntimeConfigurationError.invalidGPUKeepWarmInterval("\(intervalUs)")
+        }
+    }
+}
+
 /// Storage precision for the autoregressive attention key/value cache.
 /// Quantized modes use affine groups of 64 values and keep their scale and
 /// bias alongside each token row; model weights are unaffected.
@@ -129,6 +157,7 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
     case invalidExpertIOSynchronization(String)
     case invalidExpertIOSubmission(String)
     case invalidExpertIOTimeline(String)
+    case invalidGPUKeepWarmInterval(String)
 
     public var description: String {
         switch self {
@@ -157,6 +186,9 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
             return "unsupported expert I/O submission '\(value)'; allowed: deferred, immediate"
         case .invalidExpertIOTimeline(let value):
             return "unsupported expert I/O timeline '\(value)'; allowed: shared, per-layer"
+        case .invalidGPUKeepWarmInterval(let value):
+            return
+                "unsupported GPU keep-warm interval '\(value)'; allowed: \(RuntimeGPUKeepWarm.minimumIntervalUs)...\(RuntimeGPUKeepWarm.maximumIntervalUs) microseconds, or unset"
         }
     }
 }

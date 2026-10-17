@@ -23,6 +23,13 @@ extension ServerModelSession {
         // wait is a safety net if the two ever disagree.
         let slot = try await acquireSlot()
         defer { releaseSlot(slot) }
+        // §5bk: an opt-in second command queue that hands the device a
+        // micro-dispatch through the gaps between the engine's own launches.
+        // Inert unless the operator names TINYTITAN_GPU_KEEPWARM_US, and a value
+        // outside the bound refuses the request rather than running a control
+        // that reads as the arm.
+        let keepWarm = try GPUKeepWarmRunner.startIfEnabled(context: context)
+        defer { keepWarm?.stop() }
         // Stage-split measurement (TINYTITAN_RUNNER_STATS): snapshot the runner's
         // lifetime counters so the footer can report this request's delta.
         let runnerSnapshot = RunnerCounterSnapshot(

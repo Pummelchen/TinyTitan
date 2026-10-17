@@ -126,6 +126,32 @@ import Testing
         }
     }
 
+    /// The keep-warm knob is off by default and fail-closed on anything that is
+    /// not a bounded integer: an operator who sets `200.0` or `abc` and gets a
+    /// silently disabled arm would read a control as a measurement.
+    @Test func gpuKeepWarmEnvironmentIsOffByDefaultAndFailClosed() throws {
+        #expect(try RuntimeGPUKeepWarm.environmentValue([:]) == nil)
+        #expect(
+            try RuntimeGPUKeepWarm.environmentValue([
+                "TINYTITAN_GPU_KEEPWARM_US": "200"
+            ]) == 200)
+        #expect(
+            try RuntimeGPUKeepWarm.environmentValue([
+                "TINYTITAN_GPU_KEEPWARM_US": "\(RuntimeGPUKeepWarm.minimumIntervalUs)"
+            ]) == RuntimeGPUKeepWarm.minimumIntervalUs)
+        #expect(
+            try RuntimeGPUKeepWarm.environmentValue([
+                "TINYTITAN_GPU_KEEPWARM_US": "\(RuntimeGPUKeepWarm.maximumIntervalUs)"
+            ]) == RuntimeGPUKeepWarm.maximumIntervalUs)
+        for rejected in ["abc", "200.0", "0", "99", "20001", "999999", "-200", ""] {
+            #expect(throws: RuntimeConfigurationError.self) {
+                try RuntimeGPUKeepWarm.environmentValue([
+                    "TINYTITAN_GPU_KEEPWARM_US": rejected
+                ])
+            }
+        }
+    }
+
     @Test func expertIOSubmissionEnvironmentIsFailClosed() throws {
         #expect(try RuntimeExpertIOSubmission.environmentValue([:]) == .deferred)
         #expect(
