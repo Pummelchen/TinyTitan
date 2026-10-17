@@ -319,5 +319,123 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.assertIn("staging:", result.stdout)
 
 
+class DownloadWordingTests(unittest.TestCase):
+    """A run downloads, and its output has to say so.
+
+    Every catalogue row has always fetched the model's pinned bf16 release
+    before converting it, but the line printed when that fetch starts said only
+    `converting`, the status table described a row with an internal branch name
+    (`convert_qwen35moe`), and the menu's size column was labelled `on disk`.
+    Read together, those told a person the release had to be downloaded by hand
+    first. The behaviour is unchanged; these pin the words that describe it.
+    """
+
+    def run_tool(self, *args: str):
+        root = pathlib.Path(tempfile.mkdtemp(prefix="tt-wording-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for name in ("work", "models", "bin"):
+            (root / name).mkdir()
+        repack = root / "bin" / "TinyTitanRepack"
+        repack.write_text('#!/bin/sh\necho "FAKE-REPACK $*"\n')
+        repack.chmod(0o755)
+        env = dict(
+            os.environ,
+            TINYTITAN_WORK_DIR=str(root / "work"),
+            TINYTITAN_MODELS_DIR=str(root / "models"),
+            TINYTITAN_BIN_DIR=str(root / "bin"),
+            TINYTITAN_PYTHON="/usr/bin/true",
+            TINYTITAN_SKIP_DISK_CHECK="1",
+        )
+        return subprocess.run(
+            ["bash", str(SCRIPT), *args],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    def test_a_run_says_it_downloads_before_it_converts(self) -> None:
+        result = self.run_tool("ornith15")
+        output = result.stdout + result.stderr
+        self.assertIn("downloading and converting", output)
+        self.assertIn("70 GB", output)
+
+    def test_status_names_the_download_not_the_branch(self) -> None:
+        result = self.run_tool()
+        output = result.stdout + result.stderr
+        self.assertIn("not installed", output)
+        self.assertIn("download + convert", output)
+        self.assertIn("Nothing needs fetching by hand", output)
+        self.assertNotIn("convert_qwen35moe", output)
+
+    def test_help_says_the_command_downloads(self) -> None:
+        result = self.run_tool("--help")
+        output = result.stdout + result.stderr
+        self.assertIn("download, convert and install one width", output)
+        self.assertIn("What a run costs", output)
+
+    def test_the_menu_says_its_sizes_are_installed_sizes(self) -> None:
+        result = run_menu("\n")
+        output = result.stdout + result.stderr
+        self.assertIn("Sizes are installed sizes", output)
+
+
+class ConverterPathTests(unittest.TestCase):
+    """A converter is found from any directory, not only the repo root.
+
+    `./install_models.sh` run from `tools/` — a natural place, since the script
+    sits there — passed `tools/prepare_agentworld.py` to Python. That resolves
+    against the caller's working directory, so it opened
+    `tools/tools/prepare_agentworld.py` and died before fetching a byte. The
+    release installer cds to the checkout before calling this script, which is
+    why the bug survived every release.
+    """
+
+    def test_the_converter_path_is_absolute_and_exists_from_tools(self) -> None:
+        root = pathlib.Path(tempfile.mkdtemp(prefix="tt-converter-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for name in ("work", "models", "bin"):
+            (root / name).mkdir()
+        repack = root / "bin" / "TinyTitanRepack"
+        repack.write_text("#!/bin/sh\nexit 0\n")
+        repack.chmod(0o755)
+        # The resolver probes every interpreter with `-c`; only the converter
+        # call is recorded, and it fails so nothing reaches the repack.
+        argv_log = root / "argv"
+        fake_python = root / "python"
+        fake_python.write_text(
+            "#!/bin/sh\n"
+            'case "$1" in -c) exit 0 ;; esac\n'
+            f'printf "%s\\n" "$@" > "{argv_log}"\n'
+            "exit 1\n"
+        )
+        fake_python.chmod(0o755)
+        env = dict(
+            os.environ,
+            TINYTITAN_WORK_DIR=str(root / "work"),
+            TINYTITAN_MODELS_DIR=str(root / "models"),
+            TINYTITAN_BIN_DIR=str(root / "bin"),
+            TINYTITAN_PYTHON=str(fake_python),
+            TINYTITAN_SKIP_DISK_CHECK="1",
+        )
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "ornith15"],
+            env=env,
+            cwd=ROOT / "tools",
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        arguments = argv_log.read_text().splitlines()
+        converters = [a for a in arguments if a.endswith("prepare_agentworld.py")]
+        self.assertTrue(converters, arguments)
+        path = pathlib.Path(converters[0])
+        self.assertTrue(path.is_absolute(), f"resolved against the caller's cwd: {path}")
+        self.assertTrue(path.is_file(), path)
+
+
 if __name__ == "__main__":
     unittest.main()

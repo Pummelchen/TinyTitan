@@ -308,7 +308,7 @@ Commands
 
   tools/install_models.sh                 what is installed, and what staging is kept
   tools/install_models.sh --choose        the install menu (the one real choice)
-  tools/install_models.sh <name>          install one width
+  tools/install_models.sh <name>          download, convert and install one width
   tools/install_models.sh <name> both     4-bit and 8-bit from one download
   tools/install_models.sh --all-4bit      every 4-bit model
   tools/install_models.sh --all-8bit      every 8-bit model
@@ -332,6 +332,15 @@ Where things go
   volume cannot hold it, naming both numbers and both ways out (free space, or
   TINYTITAN_WORK_DIR on another volume). TINYTITAN_SKIP_DISK_CHECK=1 starts
   anyway. A resumed conversion does not need the room again.
+
+What a run costs
+
+  The sizes in the menu are the space an install occupies. Installing also
+  downloads the model's own bf16 release and stages it under
+  $TINYTITAN_WORK_DIR: about 70 GB for a 35B-A3B, which serves both widths,
+  and 360 GB per width for Qwen3.8-Flash-Next. A draft head fetches only its
+  own shards. The disk guard above names both volumes and both numbers before
+  anything starts.
 
 Coverage
 
@@ -374,17 +383,36 @@ Sources
 USAGE
 }
 
+# What a catalogue `source` means, in words a person reads. The branch names are
+# this script's own, and `convert` alone reads as "converts a file you already
+# fetched" — which is exactly how people read it. Every row downloads first.
+source_label() {
+  case "$1" in
+    convert|convert_qwen35|convert_qwen35moe)
+      printf 'download + convert' ;;
+    convert_qwen36_mtp|convert_qwen38_mtp|prepare_ornith_mtp)
+      printf 'download + convert (draft head)' ;;
+    repack)
+      printf 'download + install' ;;
+    *)
+      printf '%s' "$1" ;;
+  esac
+}
+
 status() {
-  printf '%-20s %-8s %-10s %s\n' MODEL WIDTH STATE SOURCE
+  printf '%-20s %-8s %-13s %s\n' MODEL WIDTH STATE 'INSTALLS BY'
   for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
     IFS='|' read -r name dir width source _ _ <<<"$row"
     if [[ -d "$MODELS/$dir" ]]; then
       state="installed"
     else
-      state="-"
+      state="not installed"
     fi
-    printf '%-20s %-8s %-10s %s\n' "$name" "${width}-bit" "$state" "$source"
+    printf '%-20s %-8s %-13s %s\n' "$name" "${width}-bit" "$state" "$(source_label "$source")"
   done
+  echo
+  echo "Nothing needs fetching by hand: installing a row downloads that model's"
+  echo "pinned bf16 release and converts it here."
   echo
   local staged
   staged="$(staging_size)"
@@ -394,7 +422,7 @@ status() {
     echo "  second width needs no download; it is removed automatically at that point"
   fi
   echo "tools/install_models.sh --choose        the install menu: pick a model"
-  echo "tools/install_models.sh <name>          install one width"
+  echo "tools/install_models.sh <name>          download, convert and install one width"
   echo "tools/install_models.sh <name> both     4-bit and 8-bit from one download"
   echo "tools/install_models.sh clean           drop staging that cannot be reused"
   echo "tools/install_models.sh --help          sources, disk sizes and env vars"
@@ -518,10 +546,10 @@ install_one() {
         local endpoint_arg=""
         if [[ -n "${HF_ENDPOINT:-}" ]]; then endpoint_arg="--endpoint=${HF_ENDPOINT}"; fi
         if [[ ! -f "$WORK/qwen38-affine-${width}bit/model.safetensors.index.json" ]]; then
-          echo "converting $name -> $WORK/qwen38-affine-${width}bit"
+          echo "downloading and converting $name (360 GB fetch) -> $WORK/qwen38-affine-${width}bit"
           # A run killed mid-conversion resumes: finished output shards are kept
           # and the checkpoint shards they came from are not fetched again.
-          "$python" tools/prepare_qwen38.py --bits "$width" \
+          "$python" "$ROOT/tools/prepare_qwen38.py" --bits "$width" \
               --output "$WORK/qwen38-affine-${width}bit" \
               --work "$WORK/qwen38-shards" ${endpoint_arg:+"$endpoint_arg"} || return 1
         fi
@@ -549,8 +577,8 @@ install_one() {
         # tools/prepare_qwen38_mtp.py, then imported as a draft-head sidecar.
         [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
         if [[ ! -f "$WORK/qwen38-mtp-affine/model.safetensors.index.json" ]]; then
-          echo "converting $name -> $WORK/qwen38-mtp-affine"
-          "$python" tools/prepare_qwen38_mtp.py --bits "$width" \
+          echo "downloading the draft head (31 tensors) and converting $name -> $WORK/qwen38-mtp-affine"
+          "$python" "$ROOT/tools/prepare_qwen38_mtp.py" --bits "$width" \
               --output "$WORK/qwen38-mtp-affine" || return 1
         fi
         echo "installing $name -> models/$dir"
@@ -562,8 +590,8 @@ install_one() {
         # shards of Qwen's original, converted as a qwen3_5_mtp sidecar.
         [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
         if [[ ! -f "$WORK/qwen36-mtp-affine/model.safetensors.index.json" ]]; then
-          echo "converting $name -> $WORK/qwen36-mtp-affine"
-          "$python" tools/prepare_agentworld.py --model qwen36 --draft-head --bits "$width" \
+          echo "downloading the draft head (two shards) and converting $name -> $WORK/qwen36-mtp-affine"
+          "$python" "$ROOT/tools/prepare_agentworld.py" --model qwen36 --draft-head --bits "$width" \
               --output "$WORK/qwen36-mtp-affine" --work "$WORK/qwen36-mtp-shards" || return 1
         fi
         echo "installing $name -> models/$dir"
@@ -595,8 +623,8 @@ install_one() {
           snap="$WORK/${preset}-affine"
         fi
         if [[ ! -f "$snap/model.safetensors.index.json" ]]; then
-          echo "converting $preset -> $WORK/${preset}-affine-{4,8}bit"
-          "$python" tools/prepare_agentworld.py --model "$preset" --bits 4 8 \
+          echo "downloading and converting $preset (~70 GB fetch, both widths) -> $WORK/${preset}-affine-{4,8}bit"
+          "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" --bits 4 8 \
               --output "$WORK/${preset}-affine" \
               --work "$WORK/${preset}-shards" || return 1
           snap="$WORK/${preset}-affine-${width}bit"
@@ -624,8 +652,8 @@ install_one() {
           fi
         done
         if [[ ! -f "$WORK/ornith-mtp-affine/model.safetensors.index.json" ]]; then
-          echo "converting $name -> $WORK/ornith-mtp-affine"
-          "$python" tools/prepare_ornith_mtp.py --bits "$width" \
+          echo "downloading shard 16 and converting $name -> $WORK/ornith-mtp-affine"
+          "$python" "$ROOT/tools/prepare_ornith_mtp.py" --bits "$width" \
               --source-shard "$src/model-00016-of-00016.safetensors" \
               --source-config "$src/config.json" --source-index "$src/model.safetensors.index.json" \
               --output "$WORK/ornith-mtp-affine" || return 1
@@ -671,8 +699,8 @@ install_one() {
             rm -rf "$stage"
             mv "$MODELS/$dir" "$stage"
           else
-            echo "converting Qwen 3.5 ${size_key} ${width}-bit -> $stage"
-            "$python" tools/prepare_qwen35.py --size "$size_key" --bits "$width" \
+            echo "downloading and converting Qwen 3.5 ${size_key} ${width}-bit -> $stage"
+            "$python" "$ROOT/tools/prepare_qwen35.py" --size "$size_key" --bits "$width" \
                 --output "$stage" \
                 --work "$WORK/${preset}-shards" || return 1
           fi
@@ -800,12 +828,15 @@ choose_model() {
   echo
   echo "Which model? This is the only choice; the rest is automatic."
   echo
-  printf '  %-4s %-32s %-6s %-10s %s\n' "#" "model" "bits" "on disk" "what it is for"
+  printf '  %-4s %-32s %-6s %-10s %s\n' "#" "model" "bits" "installed" "what it is for"
   for (( index = 0; index < count; index++ )); do
     IFS='|' read -r key label bits gb note <<<"${TINYTITAN_MODEL_CHOICES[$index]}"
     printf '  %2d)  %-32s %-6s %7s GB  %s\n' \
       "$((index + 1))" "$label" "${bits}-bit" "$gb" "$note"
   done
+  echo
+  echo "  Sizes are installed sizes: installing also downloads the model's bf16"
+  echo "  release first and stages it separately — --help has the numbers."
   echo
   printf 'Choice [1-%d] (Enter for %s): ' "$count" "$default_label"
   # An EOF is not an answer. Treating it as "Enter" started the recommended
