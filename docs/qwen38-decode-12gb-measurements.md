@@ -8723,3 +8723,26 @@ arrive) and still lost 3.7 %; the mixed-horizon ring lost 9.7 %; temporal predic
 0.000 precision because the previous token's experts are always resident. Every extra
 speculative read is issued into the same saturated device, so its queue cost cancels the bytes
 it removes. Re-implementing one would re-run a refuted patch.
+
+## 5bp. Cross-request overlap is memory-gated on a 24 GB host, not flag-gated (2026-10-17)
+
+Asked whether more overlap could still buy a percentage. The intra-token answer is §5w and
+§5bo (the byte wait is `bytes ÷ 3.92 GB/s`, and removing host work does not move the rate).
+The untested half was **cross-request** overlap, and it does not fit.
+
+`--max-concurrent-sequences` is accepted at any power of two, but `BatchedMemoryBudget`
+clamps it to what the machine can hold and says so at load:
+
+| cache tier | per-slot | batch budget | outcome |
+| --- | ---: | ---: | --- |
+| default 96 slots (`cache=11.88G`) | 3 375 MiB | **0 MiB** | `serving 1 at once` |
+| `--ram-budget 8G` (`cache=3.96G`) | 3 375 MiB | 4 096 MiB | still 1 |
+| `--ram-budget 4G` (`cache=0.99G`, 8 slots) | 3 375 MiB | ≥ 6 750 MiB | **width 2 loads, then every request fails** `status=500 error=expert cache cannot place` |
+
+So the third row is the load-bearing one: a width can pass the load-time budget and still be
+unservable, because two sequences' expert unions do not fit an 8-slot cache. Batching this
+model needs a host where `cache + N × 3.3 GB` fits — 48–64 GB, not 24 — and it is not a flag
+change.
+
+Recorded for honesty: a probe printed `single(8 slots, 64 tok) 10.67 tok/s`; that request had
+returned the 500 above, so the figure is an error path's wall clock and not a measurement.
