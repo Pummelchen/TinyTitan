@@ -51,10 +51,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # init and analyze must be the same codeql-action version: a mixed pair is
-      # refused at run time ("Loaded a configuration file for version '4.38.3',
-      # but running version '4.38.2'"), so bump both lines in one commit.
+      # refused at run time ("Loaded a configuration file for version '4.39.0',
+      # but running version '4.38.3'"), so bump both lines in one commit. The
+      # Dependabot group `codeql-action` in .github/dependabot.yml is what keeps
+      # a version PR from splitting the pair again.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: swift
           build-mode: manual
@@ -115,6 +117,6 @@ jobs:
           swift build --target TinyTitanCLICore --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: "/language:swift"

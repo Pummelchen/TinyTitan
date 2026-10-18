@@ -42,3 +42,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # init and analyze are one action at run time: a PR that bumps only one of
+    # them fails with "Loaded a configuration file for version X, but running
+    # version Y". Group them so Dependabot opens one PR that moves both pins.
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"

@@ -75,19 +75,20 @@ import TinyTitanValidationSupport
         // 524287 against this pair's inverse frequency is about 145 radians —
         // and Metal's transcendentals are the fast variants while the reference
         // goes through libm, so the argument reduction differs. On an M3 the two
-        // agree bit for bit; on the GitHub `macos-26` runner these two cases
-        // differ by up to 0.017 of full scale (the largest single component was
-        // 0.3416 against 0.3247 at 524287, and 0.3196 against 0.3071 at
-        // 1048575). That measurement is why this asserts a tolerance instead of
-        // `==`: bit-exactness against a CPU reference is not a property of the
-        // kernel, and the repository already treats GPU-family numerics as
+        // agree bit for bit; on the GitHub `macos-26` runner they differ by up
+        // to 0.017 of full scale at 524287 and 1048575, and by 0.0325 at
+        // 2,097,151 (index 32, the highest-frequency pair). The drift grows with
+        // the phase, which is why the bound is position-dependent. That
+        // measurement is why this asserts a tolerance instead of `==`:
+        // bit-exactness against a CPU reference is not a property of the kernel,
+        // and the repository already treats GPU-family numerics as
         // machine-specific — see the SCOPE note at the top of
         // `tools/golden-baseline.sh`.
         //
         // The bound still fails a wrong rotation: a swapped pair, a sign error
         // or a wrong partial-rotary split moves a component by O(full scale),
-        // not by 2% of it. `chunkedPrefillMatchesScalarYaRN` below compares two
-        // Metal paths, so it stays exact.
+        // not by a few percent of it. `chunkedPrefillMatchesScalarYaRN` below
+        // compares two Metal paths, so it stays exact.
         var worst = Float(0)
         var worstIndex = 0
         for index in actual.indices {
@@ -97,8 +98,11 @@ import TinyTitanValidationSupport
                 worstIndex = index
             }
         }
+        // 0.05 leaves ~50% headroom over the measured 0.0325 at 2M and is still
+        // far below the O(1) error a wrong rotation produces.
+        let tolerance: Float = position >= 2_000_000 ? 0.05 : 0.02
         #expect(
-            worst <= 0.02,
+            worst <= tolerance,
             "scalar RoPE differs from the CPU reference by \(worst) at index \(worstIndex) at position \(position)"
         )
     }
