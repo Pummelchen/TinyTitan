@@ -151,6 +151,23 @@ trades a declared memory budget for an undeclared one, which is a policy call
 for the owner, not a benchmark result. It remains available as
 `TINYTITAN_BOUNDED_IO=0`.
 
+### The knobs do not behave differently under concurrency
+
+Re-screened at the new default width (four sequences, aggregate tok/s, 4-bit
+base 15.78):
+
+| arm | aggregate | vs base | 8-bit | vs base |
+| --- | ---: | ---: | ---: | ---: |
+| Per-layer I/O timeline | 16.07, 16.05 | **+1.7%** | 8.94, 8.85 | **−1.0%** |
+| Use cap 3 | 15.64, 15.74 | −0.5% | not run | — |
+| Immediate submission | 15.78, 15.77 | 0.0% | not run | — |
+
+The per-layer timeline looked like the second real lever — four sequences sharing
+one completion timeline should make a single slow read gating every layer worse
+— and it gains 1.7% at 4-bit. At 8-bit it loses 1.0%, the same split the
+single-stream screen found, so it does not clear the bar either. The other two
+are flat.
+
 ## Status at 2026-10-19 00:00
 
 **Nothing has cleared the bar after ~22 configurations.** The decode path on this
