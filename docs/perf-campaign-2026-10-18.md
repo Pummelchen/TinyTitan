@@ -139,7 +139,10 @@ context, the only configuration where the width actually builds:
 | 4 sequential, one server | 33.0 s | 15.51 tok/s |
 | 4 concurrent, width 4 | 31.6 s | 16.18 tok/s |
 
-**+4.3%, which is inside this machine's noise.** Batching is not a lever on this
+**+4.3%, which is inside this machine's noise.** The driver now measures this
+denominator itself (`--sequential-baseline`), and a second cell puts the fair
+ratio at **1.17x** (concurrent 18.42, sequential 15.74) — the range across runs
+is 1.04-1.17x, not the 1.37x the biased metric showed. Batching is not a lever on this
 engine at this RAM budget; the expert cache already holds the throughput, and
 every slot the batcher asks for is a slot the cache cannot have. The default is
 back to 1 and the tests are back to pinning it.

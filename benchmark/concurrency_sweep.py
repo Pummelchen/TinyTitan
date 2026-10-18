@@ -97,6 +97,8 @@ def run_cell(
     rounds: int,
     prompt_text: str,
     extra_env: dict[str, str],
+    max_context: int | None,
+    sequential_baseline: bool,
 ):
     rows = []
     for round_index in range(1, rounds + 1):
@@ -117,7 +119,8 @@ def run_cell(
                     # Room for every sequence plus the queue behind it.
                     "--queue-limit",
                     str(max(sequences, (sequences + 1) // 2)),
-                ],
+                ]
+                + (["--max-context", str(max_context)] if max_context else []),
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 cwd=ROOT,
@@ -135,6 +138,24 @@ def run_cell(
                 print(f"s{sequences} r{round_index} SERVER FAILED")
                 continue
             name = model_id(port)
+            sequential = None
+            if sequential_baseline:
+                started_at = time.time()
+                sequential_tokens = 0
+                for _ in range(sequences):
+                    holder: dict = {}
+                    one_request(port, name, max_tokens, holder, threading.Barrier(1), prompt_text)
+                    sequential_tokens += (
+                        (holder.get("payload") or {}).get("usage", {}).get("completion_tokens", 0)
+                    )
+                sequential_wall = time.time() - started_at
+                sequential = {
+                    "wall_s": sequential_wall,
+                    "tokens": sequential_tokens,
+                    "aggregate_tok_s": sequential_tokens / sequential_wall
+                    if sequential_wall
+                    else 0.0,
+                }
             results = [dict() for _ in range(sequences)]
             barrier = threading.Barrier(sequences)
             started = time.time()
@@ -162,15 +183,24 @@ def run_cell(
                 "tokens": tokens,
                 "aggregate_tok_s": tokens / wall if wall else 0.0,
                 "errors": errors,
+                "sequential": sequential,
             }
             # The engine's own per-request rate, for the latency side of the trade.
             text = log.read_text(encoding="utf-8", errors="replace")
             rates = [float(m) for m in re.findall(r"decode_tok_s=([\d.]+)", text)]
             row["decode_tok_s"] = rates
             rows.append(row)
+            fair = ""
+            if sequential:
+                ratio = (
+                    row["aggregate_tok_s"] / sequential["aggregate_tok_s"]
+                    if sequential["aggregate_tok_s"]
+                    else 0.0
+                )
+                fair = f"  | sequential {sequential['aggregate_tok_s']:6.2f}  fair {ratio:5.2f}x"
             print(
                 f"s{sequences} r{round_index}  aggregate {row['aggregate_tok_s']:6.2f} tok/s  "
-                f"wall {wall:6.1f}s  tokens {tokens:4d}  per-request {rates}"
+                f"wall {wall:6.1f}s  tokens {tokens:4d}  per-request {rates}{fair}"
             )
         finally:
             process.terminate()
@@ -190,6 +220,15 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=128)
     parser.add_argument("--port", type=int, default=8094)
     parser.add_argument("--prompt-file", default=None)
+    parser.add_argument("--max-context", type=int, default=None)
+    parser.add_argument(
+        "--sequential-baseline",
+        action="store_true",
+        help="also run N requests one after another on the same warm server. This is "
+        "the honest denominator: a fresh server's first request pays a cold expert "
+        "cache, so comparing one cold request against N (one cold + N-1 warm) "
+        "attributes the cache warming to batching",
+    )
     parser.add_argument(
         "--env",
         action="append",
@@ -215,6 +254,8 @@ def main() -> int:
             arguments.rounds,
             prompt_text,
             dict(item.split("=", 1) for item in arguments.env),
+            arguments.max_context,
+            arguments.sequential_baseline,
         )
 
     baseline = [
