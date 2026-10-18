@@ -96,6 +96,7 @@ def run_cell(
     max_tokens: int,
     rounds: int,
     prompt_text: str,
+    extra_env: dict[str, str],
 ):
     rows = []
     for round_index in range(1, rounds + 1):
@@ -120,7 +121,11 @@ def run_cell(
                 stdout=handle,
                 stderr=subprocess.STDOUT,
                 cwd=ROOT,
-                env={**__import__("os").environ, "TINYTITAN_RUNNER_STATS": "1"},
+                env={
+                    **__import__("os").environ,
+                    "TINYTITAN_RUNNER_STATS": "1",
+                    **extra_env,
+                },
             )
         try:
             if not wait_ready(port, process, 300):
@@ -185,6 +190,13 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=128)
     parser.add_argument("--port", type=int, default=8094)
     parser.add_argument("--prompt-file", default=None)
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="K=V",
+        help="server environment override, repeatable (e.g. --env TINYTITAN_BOUNDED_IO=0)",
+    )
     parser.add_argument("--out", required=True)
     arguments = parser.parse_args()
 
@@ -202,6 +214,7 @@ def main() -> int:
             arguments.max_tokens,
             arguments.rounds,
             prompt_text,
+            dict(item.split("=", 1) for item in arguments.env),
         )
 
     baseline = [

@@ -137,6 +137,20 @@ than an invariant. The admission rule is `admittedCount < width + queueLimit`
 Committed with the assertion updated to `defaults.maxConcurrentSequences`, and
 the conformance note's admitted count corrected from 5 to 8.
 
+### The knee is four, and the page cache helps under it
+
+Raising the width further is not worth it: 8 sequences measure 16.70 tok/s
+aggregate against 15.78 at 4 (+5.8%) while each client's wall time doubles
+(61.4 s against 32.5 s for 128 tokens). Four is the knee, which is what shipped.
+
+With four sequences in flight the page cache finally pays at 4-bit too:
+**16.05 tok/s aggregate against 15.78 (+1.7%)**, consistent across both rounds
+(16.04, 16.06). That is the one measurement that makes the footprint trade look
+attractive at both widths — and it is still not a default I can flip: it
+trades a declared memory budget for an undeclared one, which is a policy call
+for the owner, not a benchmark result. It remains available as
+`TINYTITAN_BOUNDED_IO=0`.
+
 ## Status at 2026-10-19 00:00
 
 **Nothing has cleared the bar after ~22 configurations.** The decode path on this
