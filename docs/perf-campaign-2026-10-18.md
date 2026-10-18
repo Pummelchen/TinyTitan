@@ -178,6 +178,26 @@ one completion timeline should make a single slow read gating every layer worse
 single-stream screen found, so it does not clear the bar either. The other two
 are flat.
 
+### What is already optimised, and why the rest is not reachable
+
+Two things that look like candidates are already done:
+
+- **Multi-turn prompt cache.** A 1,656-token prompt prefills in 32.16 s, and the
+  follow-up turn with the assistant reply and a new question prefills in
+  **1.34 s** -- 24x cheaper, because the stored KV covers the conversation
+  prefix. The agent-loop shape, which resends a growing transcript, is the case
+  this optimises and it works.
+- **Prefill expert reads are already minimal.** The routed tile is 8 experts
+  wide (capped at 16, `PrefillRoutedTileScheduler`), and 256 experts at 8 per
+  tile means each expert's weights are read once per layer: 18.1 GB predicted
+  from the geometry against 16.7 GiB measured. There is no re-read to remove.
+  Prefill is GPU-bound at 94.5% occupancy; the only lever left there is a faster
+  kernel, not a schedule.
+
+What is *not* reachable at this RAM budget is batching, because the KV
+reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
+2,048 MiB. That is a KV-reservation-policy change, not a knob.
+
 ## Status at 2026-10-19 00:00
 
 **Nothing has cleared the bar after ~22 configurations.** The decode path on this
