@@ -114,28 +114,35 @@ with several clients, not a latency lever for one. The worst-case client still
 finishes sooner than it would queued: four serialised requests need ~43 s, and
 concurrently they all finish by 32.3 s.
 
-### The default is now four, and it took a retraction to get there
+### Concurrency: a retraction, and a measurement trap
 
-The default was `--max-concurrent-sequences 1`, and the code says why: "the
-batched path holds one KV cache and scratch buffer per sequence, so the memory
-bill and the per-answer slowdown are opt-in, not a surprise on a default launch."
+I shipped a default of four concurrent sequences (`51b180d`), claimed +32%/+24%
+aggregate, and **reverted it**. Two things were wrong.
 
-That bill is not paid at load on this host: RSS is 2,414,064 KB at width 1 and
-2,413,952 KB at width 4, the derived expert slots are identical (160 at 4-bit,
-96 at 8-bit), and four concurrent 1.6k-token requests complete with no error. A
-lone client measures +0.17% (2/4 — noise), so width 4 costs a single user
-nothing, and four clients finish 1.3x the work in the same wall time.
+**The width does not build at the default context.** `BatchedMemoryBudget` sizes
+each slot for `--max-context`; at the default 262,144 tokens that is 2,782 MiB
+per slot against a 2,048 MiB budget, so the load prints
+"batch width 4 exceeds the memory budget ... serving 1 at once" and the server
+serves one generation at a time exactly as before. At 32K context it builds, and
+at 8-bit it does not even then (per-slot 402 MiB against a **0 MiB** budget,
+because the expert cache has taken the rest of RAM).
 
-The first attempt to land it looked like a failure: `fourConcurrentRequestsAllComplete`
-reported a 429 `queueFull`. Run in isolation, it does not reproduce — the 429 in
-that log belongs to the *shedding* test beside it, which keeps one client and
-sheds the rest by design. The only real failure was the assertion
-`maxConcurrentGenerations == 1`, which pins the old serialised behaviour rather
-than an invariant. The admission rule is `admittedCount < width + queueLimit`
-(`ServerCoordinator.swift:54`), so width 4 admits four and queues four more.
+**The aggregate metric was biased by cold-cache amortisation.** Each cell started
+a fresh server, so the 1-sequence cell measured one cold request while the
+4-sequence cell measured one cold request and three warm ones. The "1.32x" was
+the expert cache warming up, not batching. The fair comparison is four sequential
+requests on a warm server against four concurrent ones — Ornith 4-bit, 32K
+context, the only configuration where the width actually builds:
 
-Committed with the assertion updated to `defaults.maxConcurrentSequences`, and
-the conformance note's admitted count corrected from 5 to 8.
+| arm | wall | aggregate |
+| --- | ---: | ---: |
+| 4 sequential, one server | 33.0 s | 15.51 tok/s |
+| 4 concurrent, width 4 | 31.6 s | 16.18 tok/s |
+
+**+4.3%, which is inside this machine's noise.** Batching is not a lever on this
+engine at this RAM budget; the expert cache already holds the throughput, and
+every slot the batcher asks for is a slot the cache cannot have. The default is
+back to 1 and the tests are back to pinning it.
 
 ### The knee is four, and the page cache helps under it
 
@@ -205,10 +212,10 @@ list.
 
 ## Commits
 
-- **`runtime: four generations run at once by default`** — the first change of
-  the night to clear the bar. Aggregate **+32% at 4-bit and +24% at 8-bit** for
-  four concurrent clients, single-stream neutral (+0.17%, 2/4), resident memory
-  identical, and 4-way long-context verified.
+**Nothing has shipped.** `51b180d` (four generations by default) was reverted in
+the same night: the width does not build at the default context, and the
+aggregate gain it claimed was cold-cache amortisation, not batching — +4.3% in
+the fair sequential-vs-concurrent comparison, which is noise.
 
-Everything else in the table above is recorded and **not** shipped, because it
-measured below +0.5% on both widths or was a loss on one.
+Everything in the tables above is recorded and not shipped, because it measured
+below +0.5% on both widths or was a loss on one.
