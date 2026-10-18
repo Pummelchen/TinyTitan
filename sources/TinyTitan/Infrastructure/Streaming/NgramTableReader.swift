@@ -156,8 +156,92 @@ public final class NgramTableReader: @unchecked Sendable {
         }
     }
 
+    /// Gathers independent batches, fanning the reads across `threads` callers.
+    ///
+    /// Batch `i` lands at `destination + i * chunkStride`, which is how a caller
+    /// laying one row block per sequence position expects it.
+    ///
+    /// One row is a 320 B random read, so a gather's cost is round-trips rather
+    /// than bandwidth. On a 412-token prefill of the 125B install the reads
+    /// took 660 ms serially, 184 ms on four readers, 109 ms on eight and 111 ms
+    /// on sixteen -- so eight is the knee, and the default. A single-threaded
+    /// prefill does those reads one after another before layer 0, so the latency
+    /// is exposed rather than hidden behind GPU work.
+    ///
+    /// `pread` does not move the shared file offset, so concurrent readers need
+    /// no lock. The workers write disjoint regions of `destination`, so no byte
+    /// is shared. The first failure is recorded and rethrown after every worker
+    /// has stopped; the remaining rows of a failed batch are abandoned, which is
+    /// the same partial state a serial gather leaves.
+    public func gatherConcurrently(
+        batches: [[UInt32]],
+        chunkStride: Int,
+        into destination: UnsafeMutableRawPointer,
+        threads: Int = 8
+    ) throws {
+        let usable = max(1, min(threads, batches.count))
+        guard usable > 1 else {
+            for (index, rows) in batches.enumerated() {
+                try gather(
+                    rows: rows,
+                    into: destination.advanced(by: index * chunkStride))
+            }
+            return
+        }
+        let chunk = (batches.count + usable - 1) / usable
+        // `concurrentPerform` returns only after every iteration has finished,
+        // so the buffer outlives the closure; Swift cannot see that through the
+        // call and unsafe pointers are not `Sendable`, which is what this
+        // binding records.
+        nonisolated(unsafe) let destination = destination
+        let failure = GatherFailure()
+        DispatchQueue.concurrentPerform(iterations: usable) { worker in
+            let lower = worker * chunk
+            let upper = min(lower + chunk, batches.count)
+            guard lower < upper else { return }
+            for index in lower..<upper where !failure.isSet {
+                do {
+                    try gather(
+                        rows: batches[index],
+                        into: destination.advanced(by: index * chunkStride))
+                } catch {
+                    failure.record(error)
+                }
+            }
+        }
+        if let error = failure.error { throw error }
+    }
+
     /// Bytes one token's gather moves, for budgeting. At the production
     /// geometry this is 16 x 320 B = 5 KiB per token — three orders of
     /// magnitude under a routed-expert token's traffic.
     public func gatherBytes(headCount: Int) -> Int { headCount * rowBytes }
+
+    /// First failure across the gather workers, if any.
+    ///
+    /// unchecked-invariant: `stored` is the only mutable state, and every read
+    /// and write of it happens under `lock`. `lock` is a `let`, so no caller can
+    /// swap it out from under a concurrent `record`.
+    private final class GatherFailure: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Error?
+
+        var isSet: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored != nil
+        }
+
+        var error: Error? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+
+        func record(_ error: Error) {
+            lock.lock()
+            if stored == nil { stored = error }
+            lock.unlock()
+        }
+    }
 }

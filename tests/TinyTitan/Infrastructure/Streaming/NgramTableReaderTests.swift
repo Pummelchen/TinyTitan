@@ -113,6 +113,68 @@ struct NgramTableReaderTests {
         // And the reader reports its own geometry consistently.
         #expect(r.gatherBytes(headCount: 16) == 16 * r.rowBytes)
     }
+
+    /// A concurrent gather must land the same bytes as the serial one: same
+    /// rows, same order, one block per batch. The workers write disjoint
+    /// regions, so the only way this fails is a wrong batch stride or a race,
+    /// and a wrong stride would otherwise show up as a plausible embedding.
+    @Test("Concurrent gather matches the serial one byte for byte")
+    func concurrentMatchesSerial() throws {
+        let url = try Self.makeTable()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let r = try Self.reader(url)
+        let batches: [[UInt32]] = [
+            [7, 0, 63], [1, 2, 3], [63, 62, 61],
+            [31, 31, 31], [8, 16, 32], [0, 0, 63],
+        ]
+        let stride = batches[0].count * r.rowBytes
+        let total = batches.count * stride
+        var serial = [UInt8](repeating: 0xAA, count: total)
+        var parallel = [UInt8](repeating: 0xAA, count: total)
+        try serial.withUnsafeMutableBytes { buffer in
+            let base = try #require(buffer.baseAddress)
+            for (i, rows) in batches.enumerated() {
+                try r.gather(
+                    rows: rows, into: base.advanced(by: i * stride))
+            }
+        }
+        try parallel.withUnsafeMutableBytes { buffer in
+            try r.gatherConcurrently(
+                batches: batches, chunkStride: stride,
+                into: try #require(buffer.baseAddress), threads: 4)
+        }
+        #expect(serial == parallel)
+        // Spot-check the addressing rather than trusting the bytewise match,
+        // which two identically wrong loops would also satisfy.
+        for (i, rows) in batches.enumerated() {
+            for lane in 0..<Self.rowDim {
+                let at = i * stride + lane * MemoryLayout<Float16>.stride
+                let value = parallel.withUnsafeBytes {
+                    $0.loadUnaligned(fromByteOffset: at, as: Float16.self)
+                }
+                #expect(
+                    value == Float16(rows[0]),
+                    "batch \(i) lane \(lane) should hold row \(rows[0])")
+            }
+        }
+    }
+
+    /// One batch degenerates to the serial path; an empty input is a no-op.
+    @Test("Concurrent gather handles the degenerate sizes")
+    func concurrentDegenerateSizes() throws {
+        let url = try Self.makeTable()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let r = try Self.reader(url)
+        var out = [Float16](repeating: 0, count: Self.rowDim)
+        try out.withUnsafeMutableBytes { buffer in
+            let base = try #require(buffer.baseAddress)
+            try r.gatherConcurrently(
+                batches: [], chunkStride: r.rowBytes, into: base)
+            try r.gatherConcurrently(
+                batches: [[9]], chunkStride: r.rowBytes, into: base)
+        }
+        #expect(out[0] == Float16(9))
+    }
 }
 
 extension NgramTableReaderTests {

@@ -78,16 +78,29 @@ extension RealForwardRunner {
         guard let ple = pleBlock, let hash = pleHash, let table = ngramTable
         else { return }
         let rowBytes = hash.headCount * table.rowBytes
-        for (index, token) in tokens.enumerated() {
+        // Two passes. Resolving a position's rows consumes the hash window, so
+        // the addresses are inherently ordered even though the reads are not.
+        var batches = [[UInt32]]()
+        batches.reserveCapacity(tokens.count)
+        for token in tokens {
             pleContext.insert(token, at: 0)
             if pleContext.count > hash.ngramSize {
                 pleContext.removeLast(pleContext.count - hash.ngramSize)
             }
-            try table.gather(
-                rows: hash.rows(context: pleContext),
-                into: ple.embedding.contents()
-                    .advanced(by: index * rowBytes))
+            batches.append(hash.rows(context: pleContext))
         }
+        // Each row is a 320 B random read, so the cost of the gather is latency
+        // and independent positions can be fetched concurrently: 660 ms serial
+        // against 109 ms at the default depth for a 412-token prompt.
+        let tGather = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        try table.gatherConcurrently(
+            batches: batches,
+            chunkStride: rowBytes,
+            into: ple.embedding.contents())
+        // Counted in `gather_ms` alongside decode's gather: before this the
+        // prefill side was invisible, so its cost could only be extrapolated
+        // from a micro-benchmark rather than read off a run.
+        totalGatherNanos &+= clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - tGather
     }
 
     /// Encodes the n-gram block over a whole prefill chunk.
