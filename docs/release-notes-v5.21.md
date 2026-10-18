@@ -137,10 +137,15 @@ Measured on this commit, release build, 125B 4-bit install:
 - `swift build`, all products, clean.
 - `swift test --no-parallel`: 1,787 tests in 256 suites across all seven bundles,
   exit 0.
-- `tools/lint.sh`: every check green except two this host cannot run — the
-  converter gate (no `numpy`) and the python gate (ruff 0.17.1 installed against
-  the pinned 0.16.7). Both are reported not checked, not forced; CI's clean clone
-  is the authority for them.
+- `tools/lint.sh`: every check green. ruff ran at the pinned 0.16.7 from pipx
+  (a Homebrew 0.17.1 earlier in `PATH` shadows it, so the run pins the path);
+  the converter gate reports `SKIPPED by ALLOW_MISSING_CONVERTER_DEPS=1` — this
+  host has no `numpy` — and is named here rather than forced, as the release
+  standard requires. CI's clean clone, which installs the converter stack, is the
+  authority for that probe.
+- **CI green on this commit** (`c7e882b`, run 39139662120: `test`,
+  `thread-sanitizer` and `supply-chain` all success), which is the gate
+  `tools/ci-green.sh` asks for and what a local gate run cannot be.
 - Clean scratch release build with a clean warning scan; every staged executable
   asserted exactly `arm64`.
 
