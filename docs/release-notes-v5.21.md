@@ -132,6 +132,16 @@ Measured on this commit, release build, 125B 4-bit install:
   no table from a previous release was re-run here — the v5.20 decode figures are
   not restated, because they were measured on v5.20's commit, not this one.
 
+### Golden baselines
+
+Three installed targets were checked and produced output identical to their
+stored baselines: `ornith-4`, `ornith-8`, `qwen38-4`.
+
+Thirteen were **not checked**, because there is no install under `models/` and
+none may be fetched to make a gate pass: `qwen36-4`, `qwen36-8`, `qwen38-8`,
+`agentworld-4`, `agentworld-8`, `katcoder-4`, `katcoder-8`, `qwen35-2b-4`,
+`qwen35-2b-8`, `qwen35-4b-4`, `qwen35-4b-8`, `qwen35-9b-4`, `qwen35-9b-8`.
+
 ### Checks
 
 - `swift build`, all products, clean.
