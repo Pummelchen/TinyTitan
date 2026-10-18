@@ -243,9 +243,10 @@ struct DynamicServingHTTPTests {
     }
 
     /// Four clients at once against the default queue limit: every one is
-    /// admitted and answered, one generation at a time. The width is the
-    /// *parsed* default rather than a literal, so a launched server and this
-    /// test cannot disagree about what "default" means.
+    /// admitted and answered, and with the default width of four they generate
+    /// together rather than queueing. The width is the *parsed* default rather
+    /// than a literal, so a launched server and this test cannot disagree about
+    /// what "default" means.
     @Test func fourConcurrentRequestsAllComplete() async throws {
         let log = RoutingEventLog()
         let backend = RoutedStubModel(
@@ -270,7 +271,7 @@ struct DynamicServingHTTPTests {
             #expect(statuses == [200, 200, 200, 200])
         }
         #expect(log.requests.count == 4)
-        #expect(log.maxConcurrentGenerations == 1)
+        #expect(log.maxConcurrentGenerations == defaults.maxConcurrentSequences)
     }
 
     /// With a width of four, four generations run at once through one server;
@@ -433,11 +434,15 @@ struct DynamicServingArgumentTests {
         #expect(try parse(["--model", "/m"]).queueLimit + 1 >= 4)
     }
 
-    /// The batched width is opt-in and a power of two, so an agentic workload can
-    /// ask for many while a typo is still refused. What a machine really builds
-    /// is clamped by the memory budget at load, not by this argument.
+    /// The batched width is a power of two, so an agentic workload can ask for
+    /// many while a typo is still refused. What a machine really builds is
+    /// clamped by the memory budget at load, not by this argument.
+    ///
+    /// The default is four, not one: resident memory is identical at both
+    /// widths on the reference host, a lone client measures no slower, and four
+    /// concurrent clients finish 1.3x the work in the same wall time.
     @Test func concurrentSequenceCountIsAPowerOfTwoUpToTheEngineCeiling() throws {
-        #expect(try parse(["--model", "/m"]).maxConcurrentSequences == 1)
+        #expect(try parse(["--model", "/m"]).maxConcurrentSequences == 4)
         for good in ["1", "2", "4", "8", "16", "256"] {
             #expect(
                 try parse(["--model", "/m", "--max-concurrent-sequences", good])

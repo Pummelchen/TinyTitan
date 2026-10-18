@@ -169,7 +169,7 @@ public struct ServerArguments: Equatable, Sendable {
         // batched path holds one KV cache and scratch buffer per sequence, so
         // the memory bill and the per-answer slowdown are opt-in, not a
         // surprise on a default launch.
-        var maxConcurrentSequences = 1
+        var maxConcurrentSequences = 4
         var promptCacheMode: ServerPromptCacheMode = .multiPrefix
         var promptCacheMaximumEntries = 4
         // Derived, not constant: `--prompt-cache-memory-mib` below still

@@ -212,8 +212,8 @@ nothing in the suite requires the transport of a server that speaks HTTP and SSE
 ## One caveat about the scorecard itself
 
 The suite runs **all 17 tests in parallel** (`runAllTests` maps over
-`testTemplates` with `Promise.all`). This server admits one generation at a time
-with four queued — `queueLimit + 1`, default 5 — and sheds the rest with 429
+`testTemplates` with `Promise.all`). This server admits four generations at once
+with four queued — `width + queueLimit`, default 8 — and sheds the rest with 429
 (`ServerCoordinator.swift`; the first run's log showed
 `status=429 error=ServerRequestError.queueFull`).
 
