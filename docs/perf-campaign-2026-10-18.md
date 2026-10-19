@@ -9,6 +9,36 @@ warm-up run, `--max-tokens 128`, greedy, output sha256 compared across arms).
 consistent. Anything below that is recorded here as tested and not shipped —
 a number, not an opinion.
 
+## Every lever tried, and what it actually gave
+
+Measured on Ornith 35B-A3B, 4-bit and 8-bit, on the 24 GiB M3. "n/m" is positive
+rounds out of paired rounds. A blank cell was not measured.
+
+| lever | 4-bit | 8-bit | status |
+| --- | ---: | ---: | --- |
+| **Disk prompt cache, session resume** | **32.25 -> 2.48 s (13x)** | **56.31 -> 4.07 s (13.8x)** | **works; opt-in for privacy** |
+| Multi-turn prompt cache (already shipped) | 32.16 -> 1.33 s | not measured | already the default behaviour |
+| Page-cache path (`BOUNDED_IO=0`) | +0.5% (2/4), −2.1% (1/6), **+1.7% under 4 sequences** | **+5.2%** (2/3) | not shipped: trades a declared memory budget for an undeclared one |
+| Concurrency width 4 | +4.3% fair | — | **reverted**: clamps to 1 at 262K context, and the apparent 1.32x was cold-cache bias |
+| Read advice off | −4.7% (1/4) | −3.2% (1/3) | loss on both |
+| Immediate submission | −6.5% (0/4) | +0.1% (2/3) | loss / wash |
+| Per-layer I/O timeline | +0.3% (2/3), +1.7% under 4 seq | −1.1% (0/3) | no win on both |
+| Expert slots 128 / 64 | −0.6% / −0.3% | −20.7% / −8.6% | the derived count is the optimum |
+| KV cache 16-bit / 4-bit | −0.8% / −2.1%, output differs | not measured | loss, and not output-invariant |
+| Metal I/O backend | −0.7% (0/3) | not measured | loss |
+| Prefill chunk 512 / 1024 / 2048 (base 4096) | +23% / +9% / 0% prefill | not measured | 4096 is already optimal |
+| Expert use cap 3 | −0.4% (0/3) | −0.6% (0/3) | wash |
+| GPU keep-warm 500 / 2000 us | −0.5% (1/3) | not measured | wash |
+| No pinning | −0.8% (0/3) | not measured | pinning pays |
+| Max context 8K | −0.5% (1/3) | not measured | neutral |
+| Prefetch ring **off** (control) | −8.1% (0/3) | not measured | confirms the shipped default is worth 8-17% |
+| `sync=event` (control) | −29.2% (0/3) | not measured | confirms the shipped sync is right |
+| Startup to first answer | 4.7 s | not measured | no problem (the 90-125 s I chased was a buffered-log artifact) |
+
+**Net shipped: nothing.** The one candidate that looked like a win was reverted
+after measurement showed it was an artifact, and the two real levers (disk
+prompt cache, page cache) are policy decisions rather than code changes.
+
 ## Why the protocol looks like this
 
 Three properties of this machine decide the method, and they are measured rather
