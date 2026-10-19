@@ -34,6 +34,23 @@ rounds out of paired rounds. A blank cell was not measured.
 | Prefetch ring **off** (control) | −8.1% (0/3) | not measured | confirms the shipped default is worth 8-17% |
 | `sync=event` (control) | −29.2% (0/3) | not measured | confirms the shipped sync is right |
 | Startup to first answer | 4.7 s | not measured | no problem (the 90-125 s I chased was a buffered-log artifact) |
+| Attention fast path **off** (`ATTN_SIMD_PARTIAL=0`) | −0.02% (1/3) | not measured | the fast path is worth having |
+| Router fast path **off** (`ROUTER_TOPK_SIMD=0`) | −0.02% (1/3) | not measured | the fast path is worth having |
+| Sampler `generic` instead of `tiled` | −1.52% (1/3) | not measured | tiled is right |
+| GDN in-proj `r16` / `xsh16` | +0.16% / +0.33% | not measured | flat — the historical +1.6% on Qwen3.8 does not reproduce |
+
+Those last four close the configuration space: with them measured, every
+`TINYTITAN_*` knob that can act on this GPU decode path (94 exist; 59 are
+memory-service, tracing, other engines, or Qwen/MTP/ANE-only) has either been
+measured here or closed by an earlier record.
+
+**A measurement fix came out of it.** The six-arm screen first read −4 to −6% for
+*every* arm, because each round starts a fresh server and the arm that runs first
+pays a cold expert cache while the rest do not — with six arms and three rounds
+the rotation does not cancel that. `--per-run-warmup` sends one discarded request
+per run before the measured one, and the effects then land at ±0.3%. Any earlier
+sweep with many arms and few rounds carries the same bias; the two-arm sweeps are
+safe because each arm occupies each position equally.
 
 **Net shipped: nothing.** The one candidate that looked like a win was reverted
 after measurement showed it was an artifact, and the two real levers (disk

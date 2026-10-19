@@ -124,6 +124,7 @@ def run_arm(
     tag: str,
     ram_budget: str | None = None,
     extra_args: list[str] | None = None,
+    warmup_only: bool = False,
 ):
     log = ROOT / f".build/minor-wins-{tag}.log"
     log.unlink(missing_ok=True)
@@ -151,9 +152,30 @@ def run_arm(
     try:
         if not wait_ready(port, process, log, 300):
             return {"error": "server failed"}
+        model_name = served_model_id(port)
+        if warmup_only:
+            # Same shape, one token, discarded: it exists to put every arm on a
+            # warm expert cache before anything is measured.
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=1800)
+            connection.request(
+                "POST",
+                "/v1/chat/completions",
+                json.dumps(
+                    {
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": prompt_text}],
+                        "max_tokens": 1,
+                        "temperature": 0,
+                    }
+                ),
+                {"Content-Type": "application/json"},
+            )
+            connection.getresponse().read()
+            connection.close()
+            time.sleep(1)
         body = json.dumps(
             {
-                "model": served_model_id(port),
+                "model": model_name,
                 "messages": [{"role": "user", "content": prompt_text}],
                 "max_tokens": max_tokens,
                 "temperature": 0,
@@ -227,6 +249,14 @@ def main() -> int:
         "which is the condition the knobs in the history actually paid in",
     )
     parser.add_argument(
+        "--per-run-warmup",
+        action="store_true",
+        help="send one discarded request per run before the measured one. Each run "
+        "starts a fresh server, so without this the first arm of a round pays a "
+        "cold expert cache while the rest do not; with few rounds and many arms "
+        "the rotation does not cancel that",
+    )
+    parser.add_argument(
         "--no-warmup",
         action="store_true",
         help="skip the discarded first run; it exists because the first server in "
@@ -282,6 +312,19 @@ def main() -> int:
         order = arms[round_index % len(arms) :] + arms[: round_index % len(arms)]
         for position, (arm, env_extra, sargs) in enumerate(order):
             tag = f"{label}-r{round_index}-{arm}"
+            if arguments.per_run_warmup:
+                run_arm(
+                    "warmup",
+                    prompt_text,
+                    path,
+                    {},
+                    arguments.port,
+                    1,
+                    f"{tag}-pre",
+                    arguments.ram_budget,
+                    arguments.server_arg + sargs,
+                    warmup_only=True,
+                )
             metrics = run_arm(
                 arm,
                 prompt_text,
