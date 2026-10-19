@@ -268,9 +268,30 @@ noise, on both sides of one.
 and its dense `model_weights.bin` **89.8%** -- better than Ornith's 97.4%, so the
 residency-side saving is real on that model too.
 
-So the project is justified on both gates. What it still needs is the format and
-streamer work: per-expert frames, decompression into the slot buffer behind the
-ring, and the uncompressed path kept readable.
+**The codec is LZFSE, not zstd**, and the engine needs no new dependency for it.
+Measured on the same 128 MiB expert sample:
+
+| codec | ratio | decode | note |
+| --- | ---: | ---: | --- |
+| `lzfse` (system) | **91.7%** | **896 MiB/s** | zero dependencies |
+| `zstd -1` | 90.8% | 1,113 MiB/s | needs a SwiftPM dependency |
+| `lz4` (system) | 98.7% | 20,904 MiB/s | 1.3% saving, not worth the plumbing |
+| `zlib` (system) | 91.1% | 272 MiB/s | too slow to decode |
+
+LZFSE gives up 0.9 points against zstd and 24% of decode rate, and buys the
+project out of a dependency: at ~0.9 GiB/s one core decodes the ~65 MiB a token
+reads in ~73 ms, which two threads halve -- the configuration the paced test
+measured free. Encoding runs at **205 MiB/s**, so repacking Ornith's 16.9 GiB is
+~85 seconds and lands at **15.5 GiB**.
+
+`ExpertBlobCodec` is in the tree with a round-trip test that pins the contract
+the streamer will rely on: the geometry says how long a blob must be, and a blob
+that decodes to anything else is refused rather than leaving a slot with the
+previous expert's weights in its tail.
+
+What is left is the format and streamer work: per-expert frames in the repacker,
+decompression into the slot buffer behind the ring, and the uncompressed path
+kept readable.
 
 ### The compression verdict was wrong about the CPU, and the correction matters
 
