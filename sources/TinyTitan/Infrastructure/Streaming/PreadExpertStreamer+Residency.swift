@@ -230,58 +230,6 @@ extension PreadExpertStreamer {
         }.sorted()
     }
 
-    /// Starts a bounded, raw speculative read. The destination buffers are not
-    /// cache slots, so an incorrect prediction cannot evict an authoritative
-    /// expert. Demand work is always scheduled at higher priority.
-    public func beginPrefetch(
-        experts: [Int],
-        destinations: [UnsafeMutableRawPointer]
-    ) throws
-        -> ExpertLoadOperation
-    {
-        guard experts.count == destinations.count else {
-            throw ModelError.internalInconsistency(
-                detail: "prefetch experts and destinations differ in count")
-        }
-        // A compressed layer cannot be prefetched by this path: it reads a whole
-        // stride at an expert's offset, and a compressed expert is a set of
-        // shorter frames at index-supplied offsets. Returning an empty operation
-        // is the correct behaviour until the ring learns to decode -- reading
-        // here would put raw frame bytes where the consumer expects weights.
-        guard compressedFrames == nil else {
-            let operation = ExpertLoadOperation()
-            operation.finish(.success(()))
-            return operation
-        }
-        let offsets = try experts.map { expert -> UInt64 in
-            guard expert >= 0 && expert < layout.expertsPerLayer else {
-                throw ModelError.internalInconsistency(detail: "invalid prefetched expert")
-            }
-            return layout.streamOffset + layout.expertOffset(layer: 0, expert: expert)
-        }
-        let safeDestinations = PrefetchDestinations(destinations)
-        let operation = ExpertLoadOperation()
-        ExpertIOScheduler.shared.submit(priority: .speculative) {
-            [self, operation, safeDestinations] in
-            operation.markInFlight()
-            do {
-                if let boundedReader {
-                    try boundedReader.fetch(offsets: offsets, into: safeDestinations.values)
-                } else {
-                    for (offset, destination) in zip(offsets, safeDestinations.values) {
-                        try readFull(
-                            into: destination, fileOffset: offset,
-                            count: Int(layout.expertStride))
-                    }
-                }
-                operation.finish(.success(()))
-            } catch {
-                operation.finish(.failure(error))
-            }
-        }
-        return operation
-    }
-
     func finishPlanExecution(
         _ plan: ExpertCachePlan,
         succeeded: Bool,

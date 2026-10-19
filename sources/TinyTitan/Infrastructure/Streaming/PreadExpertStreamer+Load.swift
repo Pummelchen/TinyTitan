@@ -58,9 +58,25 @@ extension PreadExpertStreamer {
     /// two frames (gate|up, then the tail) and a whole layer has one, so the
     /// decoded size comes from `phase1Bytes` and the stride rather than from the
     /// blob.
-    private func readCompressedExpert(
+    func readCompressedExpert(
         frames: [ExpertBlobIndex.Blob], slot: Int
     ) throws {
+        try decodeCompressedExpert(
+            frames: frames, into: slotPointers[slot])
+    }
+
+    /// Decodes one expert's frames into `destination`, which must hold the
+    /// layer's stride.
+    ///
+    /// The staging buffer is shared by the demand path and the prefetch ring,
+    /// which run on different threads, so the read-and-decode pair holds a lock
+    /// of its own: two decodes sharing one buffer would interleave their frames
+    /// and hand back a slot of mixed weights.
+    func decodeCompressedExpert(
+        frames: [ExpertBlobIndex.Blob], into destination: UnsafeMutableRawPointer
+    ) throws {
+        compressedScratchLock.lock()
+        defer { compressedScratchLock.unlock() }
         guard let scratch = compressedScratch else {
             throw StreamerError.sizeMismatch(expected: 1, actual: 0)
         }
@@ -88,7 +104,7 @@ extension PreadExpertStreamer {
             }
             try ExpertBlobCodec.decompress(
                 source: scratch, count: packedBytes,
-                into: slotPointers[slot].advanced(by: written),
+                into: destination.advanced(by: written),
                 expected: expected)
             written += expected
         }

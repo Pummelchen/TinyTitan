@@ -129,6 +129,9 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// layers read straight into the slot and never touch it.
     let compressedScratch: UnsafeMutableRawPointer?
     let compressedScratchBytes: Int
+    /// Serialises the read-and-decode pairs that share `compressedScratch`
+    /// between the demand path and the prefetch ring.
+    let compressedScratchLock = NSLock()
     let slotBuffers: [MTLBuffer]
     let slotBufferOffsets: [UInt64]
     let residencyTable: MTLBuffer

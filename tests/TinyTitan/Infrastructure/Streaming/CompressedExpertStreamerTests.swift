@@ -122,6 +122,39 @@ struct CompressedExpertStreamerTests {
         }
     }
 
+    /// The prefetch ring reads ahead into buffers that are not cache slots, and
+    /// adoption copies from them. For a compressed layer the ring therefore has
+    /// to hold *decoded* weights, or adoption would copy frame bytes into a slot.
+    @Test("Prefetch decodes a compressed expert into its destination")
+    func prefetchDecodes() throws {
+        let (url, frames) = try Self.writeCompressedLayer(split: Self.split)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+        let layout = StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: try FileManager.default
+                .attributesOfItem(atPath: url.path)[.size] as! UInt64,
+            expertsPerLayer: Self.experts,
+            expertStride: UInt64(Self.stride),
+            phase1Bytes: UInt64(Self.split),
+            compressedFrames: frames)
+        let streamer = try PreadExpertStreamer(
+            layout: layout, device: device, slotCount: 2)
+
+        let destination = UnsafeMutableRawPointer.allocate(
+            byteCount: Self.stride, alignment: 4096)
+        defer { destination.deallocate() }
+        // Poisoned, so a prefetch that did nothing cannot pass by accident.
+        destination.initializeMemory(as: UInt8.self, repeating: 0xAA, count: Self.stride)
+        let operation = try streamer.beginPrefetch(
+            experts: [2], destinations: [destination])
+        try operation.wait()
+        let bytes = [UInt8](
+            UnsafeRawBufferPointer(start: destination, count: Self.stride))
+        #expect(bytes == Self.blob(2, Self.stride))
+    }
+
     private static func bytes(of buffer: MTLBuffer, offset: UInt64, count: Int) -> [UInt8] {
         let base = buffer.contents().advanced(by: Int(offset))
         return [UInt8](UnsafeRawBufferPointer(start: base, count: count))
