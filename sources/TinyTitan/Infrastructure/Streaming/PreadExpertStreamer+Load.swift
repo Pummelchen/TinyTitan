@@ -3,6 +3,16 @@ import Synchronization
 import TinyTitanFormat
 import Metal
 
+/// One phase's read ranges, wrapped so it can cross to the reader's queue.
+/// unchecked-invariant: the pointers are the scratch buffers the caller keeps
+/// alive across `readPhases`; the batches are immutable and each is used by
+/// exactly one fetch.
+struct RangeBatch: @unchecked Sendable {
+    let offsets: [UInt64]
+    let counts: [Int]
+    let destinations: [UnsafeMutableRawPointer]
+}
+
 // Reading one expert into a slot, raw or compressed.
 //
 // Split out of `PreadExpertStreamer.swift` under the 500-line-per-file rule when
@@ -117,9 +127,8 @@ extension PreadExpertStreamer {
                 CompressedScratchPool.shared.giveBack(item.pointer, bytes: item.bytes)
             }
         }
-        var offsets: [UInt64] = []
-        var counts: [Int] = []
-        var readDestinations: [UnsafeMutableRawPointer] = []
+        var face = (offsets: [UInt64](), counts: [Int](), destinations: [UnsafeMutableRawPointer]())
+        var tail = (offsets: [UInt64](), counts: [Int](), destinations: [UnsafeMutableRawPointer]())
         var scratchByExpert: [UnsafeMutableRawPointer] = []
         var packed: [[ExpertBlobIndex.Blob]] = []
         for expert in experts {
@@ -137,19 +146,22 @@ extension PreadExpertStreamer {
             // ~1.2 ms for the same bytes in phase-sized ranges. The blocks
             // still decode independently; only the I/O granularity is coarser.
             var cursor = 0
-            for range in packedPhaseRanges(pack) {
-                offsets.append(layout.streamOffset + range.offset)
-                counts.append(range.count)
-                readDestinations.append(scratch.advanced(by: cursor))
+            for (index, range) in packedPhaseRanges(pack).enumerated() {
+                let destination = scratch.advanced(by: cursor)
+                if index == 0 {
+                    face.offsets.append(layout.streamOffset + range.offset)
+                    face.counts.append(range.count)
+                    face.destinations.append(destination)
+                } else {
+                    tail.offsets.append(layout.streamOffset + range.offset)
+                    tail.counts.append(range.count)
+                    tail.destinations.append(destination)
+                }
                 cursor += range.count
             }
             scratchByExpert.append(scratch)
             packed.append(pack)
         }
-        let tRead = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        try readRanges(
-            offsets: offsets, counts: counts, into: readDestinations, reader: reader)
-        let tFront = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         var work: [CompressedBlockWork] = []
         for (position, pack) in packed.enumerated() {
             work.append(
@@ -157,23 +169,94 @@ extension PreadExpertStreamer {
                     pack, scratch: scratchByExpert[position],
                     destination: destinations[position]))
         }
-        try decodeBlocks(work, phase: 0)
-        let tPublished = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        firstStage?()
-        try decodeBlocks(work, phase: 1)
-        let tTail = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        // Fronts and tails load at the same time on different readers, and the
+        // front decode runs while the tails are still arriving. That is the
+        // overlap the layer window needs: read (1.5 ms) and decode (0.9 ms)
+        // serialised were already past the 1.8 ms a raw layer takes.
+        let tStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        try readPhases(
+            face: RangeBatch(
+                offsets: face.offsets, counts: face.counts,
+                destinations: face.destinations),
+            tail: RangeBatch(
+                offsets: tail.offsets, counts: tail.counts,
+                destinations: tail.destinations),
+            reader: reader
+        ) { phase in
+            try decodeBlocks(work, phase: phase)
+            if phase == 0 { firstStage?() }
+        }
         if ProcessInfo.processInfo.environment["TINYTITAN_COMPRESSED_TRACE"] == "1" {
             FileHandle.standardError.write(
                 Data(
                     String(
-                        format:
-                            "[comp] experts=%d blocks=%d read=%.2f front=%.2f tail=%.2f ms\n",
+                        format: "[comp] experts=%d blocks=%d total=%.2f ms\n",
                         experts.count, work.count,
-                        Double(tFront - tRead) / 1e6,
-                        Double(tPublished - tFront) / 1e6,
-                        Double(tTail - tPublished) / 1e6
+                        Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - tStart) / 1e6
                     ).utf8))
         }
+    }
+
+    /// Loads the front and tail ranges at the same time, decoding fronts as
+    /// soon as they land and tails after the tail read completes.
+    ///
+    /// A reader serialises its batches, so one reader cannot overlap its own
+    /// read with its own decode. Two can: the front ranges go on the demand
+    /// reader, the tails on the tail reader, and `decodePhase(0)` runs while the
+    /// tails are still in flight. That is what keeps a wave inside the 1.8 ms a
+    /// layer has.
+    func readPhases(
+        face: RangeBatch,
+        tail: RangeBatch,
+        reader: ParallelExpertReader?,
+        decodePhase: (Int) throws -> Void
+    ) throws {
+        let frontReader = reader ?? boundedReader
+        guard !tail.offsets.isEmpty, let tailReader, let frontReader else {
+            try readRanges(
+                offsets: face.offsets + tail.offsets,
+                counts: face.counts + tail.counts,
+                into: face.destinations + tail.destinations, reader: reader)
+            try decodePhase(0)
+            try decodePhase(1)
+            return
+        }
+        let frontError = Mutex<Error?>(nil)
+        let tailError = Mutex<Error?>(nil)
+        let frontDone = DispatchGroup()
+        let tailDone = DispatchGroup()
+        frontDone.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try frontReader.fetch(
+                    offsets: face.offsets, byteCounts: face.counts,
+                    into: face.destinations)
+            } catch {
+                frontError.withLock { if $0 == nil { $0 = error } }
+            }
+            frontDone.leave()
+        }
+        tailDone.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try tailReader.fetch(
+                    offsets: tail.offsets, byteCounts: tail.counts,
+                    into: tail.destinations)
+            } catch {
+                tailError.withLock { if $0 == nil { $0 = error } }
+            }
+            tailDone.leave()
+        }
+        // The tail fetch may still be writing into the scratch when an error
+        // unwinds, so it is always awaited before the caller's buffers return
+        // to the pool.
+        defer { tailDone.wait() }
+        frontDone.wait()
+        if let error = frontError.withLock({ $0 }) { throw error }
+        try decodePhase(0)
+        tailDone.wait()
+        if let error = tailError.withLock({ $0 }) { throw error }
+        try decodePhase(1)
     }
 
     /// The packed byte runs to read for one expert: one contiguous range per

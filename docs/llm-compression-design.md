@@ -168,11 +168,22 @@ The pipeline above is now built and measured; it is still not a win:
 | per-decode buffers, parallel plan decode | 4.2 | -- |
 | v3 block-parallel frames (256 KiB, 8 blocks/expert) | 4.7 | -- |
 | phase-1 publish wired into the async plan (`io_hidden` 9% -> 99.5%) | 4.9 | -- |
-| prefetch ring issued before the demand fetch, own reader, depth 8 | 5.1 | **-38.8%** |
+| prefetch ring issued before the demand fetch, own reader, depth 8 | 5.1 | -38.8% |
+| concurrent front/tail reads on separate readers | 5.2 | **-40.7%** |
 
-The A/B: raw 15.87 vs compressed 9.71 tok/s over three paired rounds, identical
-text. So the pipeline recovered 23% of the compressed arm's speed and fully hid
-the I/O, but the gap is unchanged in kind.
+The last A/B: raw 16.62 vs compressed 9.85 tok/s over three paired rounds,
+identical text. The overlap step is inside the noise of the machine drifting up
+across the session (raw also moved 15.87 -> 16.62), so the pipeline recovered
+~24% of the compressed arm's speed and hid the I/O, but the ratio did not move.
+
+**Why no amount of scheduling closes it.** One layer of raw experts is a 1.65 ms
+DMA read that the CPU does not touch, so it hides completely. One layer of
+compressed experts is ~1.5 ms of the same kind of read *plus* ~0.5-0.9 ms of CPU
+decode; overlap the two and the critical path is still ~1.5 ms, and the layer has
+1.6-1.8 ms. There is no time to win: the 9% byte saving is paid back as CPU work
+that the same orchestration thread would otherwise spend keeping the GPU fed.
+Prefetching cannot fix it either -- a prefetched layer still costs the same ~2 ms
+of read-plus-decode, which is not shorter than the raw read it replaces.
 
 **The wall is the per-layer window, not the codec or the scheduler.** The raw
 path's read is 1.65 ms per layer and fits inside the 1.8 ms the layer takes, so
@@ -251,7 +262,7 @@ a project in its own right and would still be capped by the byte saving.
 
 The v3 format, the block decoder, the phase publish and the separate prefetch
 reader are committed as the pipeline's foundation. The target of +5% decode is
-**not met**: -38.8% on Ornith 4-bit and -33% on 8-bit. The measured ceiling says
+**not met**: -40.7% on Ornith 4-bit and -33% on 8-bit. The measured ceiling says
 the CPU pipeline cannot reach it on the 8-bit or 125B installs at all, and on
 Ornith 4-bit only by getting the whole per-layer load under the 1.65 ms the raw
 read takes. The research-backed route is GPU-side decompression, which is a new

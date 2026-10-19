@@ -122,6 +122,10 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// demand reader blocks the next layer's demand read. This one is only used
     /// by `beginPrefetch`.
     let prefetchReader: ParallelExpertReader?
+    /// The tail-phase reader. Fronts and tails of one wave load at the same
+    /// time on different readers, because a reader serialises its own batches;
+    /// this is what lets the front decode overlap the tail read.
+    let tailReader: ParallelExpertReader?
     let metalReader: MetalExpertReader?
     let eventCoordinator: ExpertIOEventCoordinator?
     let metalStagingPool: MetalExpertStagingPool?
@@ -340,6 +344,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
             }
             self.boundedReader = nil
             self.prefetchReader = nil
+            self.tailReader = nil
         } else if ProcessInfo.processInfo.environment["TINYTITAN_BOUNDED_IO"] != "0" {
             self.metalReader = nil
             do {
@@ -360,6 +365,14 @@ public final class PreadExpertStreamer: @unchecked Sendable {
                         expertStride: Int(layout.expertStride),
                         threads: 4,
                         bypassCache: true)
+                self.tailReader =
+                    layout.compressedFrames == nil
+                    ? nil
+                    : try? ParallelExpertReader(
+                        path: layout.path,
+                        expertStride: Int(layout.expertStride),
+                        threads: 4,
+                        bypassCache: true)
             } catch {
                 unwind()
                 throw error
@@ -368,6 +381,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
             self.metalReader = nil
             self.boundedReader = nil
             self.prefetchReader = nil
+            self.tailReader = nil
         }
 
         self.slotPointers = pointers
