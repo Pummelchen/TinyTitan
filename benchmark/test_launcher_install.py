@@ -299,6 +299,30 @@ class MissingOffersTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
 
+class PromptCacheDiskFlagTests(unittest.TestCase):
+    """The prompt-cache disk tier is a pair, and the pair is checked while parsing.
+
+    Both refusals run before any model is resolved, which is what lets them be
+    tested without an installed model -- and what makes the message arrive
+    before the launcher has done a catalogue lookup.
+    """
+
+    def test_budget_without_a_directory_is_refused(self) -> None:
+        result = run_launcher("--prompt-cache-disk-mib", "512")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--prompt-cache-disk-mib needs --prompt-cache-disk", result.stderr)
+
+    def test_a_non_numeric_budget_is_refused_by_name(self) -> None:
+        result = run_launcher(
+            "--prompt-cache-disk",
+            "/tmp/tinytitan-test-pcache",
+            "--prompt-cache-disk-mib",
+            "512 MiB",
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unknown --prompt-cache-disk-mib: 512 MiB", result.stderr)
+
+
 class MenuSelectionTests(unittest.TestCase):
     """Picking an uninstalled row from the menu fetches it, then continues."""
 

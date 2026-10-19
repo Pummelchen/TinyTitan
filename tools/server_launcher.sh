@@ -277,6 +277,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# The prompt-cache disk tier is a pair: a budget without a directory has nothing
+# to size. Refused here, during parsing, so the message arrives before any model
+# is resolved and the case is testable without an installed model.
+if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" && -z "$PROMPT_CACHE_DISK_ARG" ]]; then
+  echo "--prompt-cache-disk-mib needs --prompt-cache-disk <dir>" >&2
+  exit 2
+fi
+if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
+  case "$PROMPT_CACHE_DISK_MIB_ARG" in
+    '' | *[!0-9]*)
+      echo "unknown --prompt-cache-disk-mib: $PROMPT_CACHE_DISK_MIB_ARG (a whole number of MiB)" >&2
+      exit 2 ;;
+  esac
+fi
+
 # Old five-argument form without a model: `... <api> <mode> <bits> ...`
 # inserts the default model so the positions below line up. Kept because the
 # benchmark harness and older notes call it that way.
@@ -1342,17 +1357,10 @@ case "$CACHE_ARG" in
 esac
 gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" --kv-bits "$kv_bits")
 # The disk tier is opt-in and forwarded verbatim; the server owns the budget and
-# the eviction, and refuses a malformed directory or size itself.
-if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" && -z "$PROMPT_CACHE_DISK_ARG" ]]; then
-  echo "--prompt-cache-disk-mib needs --prompt-cache-disk <dir>" >&2
-  exit 2
-fi
+# the eviction. Both values were validated during parsing.
 if [[ -n "$PROMPT_CACHE_DISK_ARG" ]]; then
   gpu_runtime+=(--prompt-cache-disk "$PROMPT_CACHE_DISK_ARG")
   if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
-    case "$PROMPT_CACHE_DISK_MIB_ARG" in
-      '' | *[!0-9]*) echo "unknown --prompt-cache-disk-mib: $PROMPT_CACHE_DISK_MIB_ARG (a whole number of MiB)" >&2; exit 2 ;;
-    esac
     gpu_runtime+=(--prompt-cache-disk-mib "$PROMPT_CACHE_DISK_MIB_ARG")
   fi
 fi
