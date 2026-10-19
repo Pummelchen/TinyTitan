@@ -222,20 +222,29 @@ largest single number of the night, Ornith 4-bit, a 1,656-token prompt:
 | turn 2, same server (memory cache) | 1.33 s |
 | the same conversation, **after a server restart** (disk cache) | **2.48 s** |
 
+Confirmed at 8-bit with the same shape:
+
+| case | prefill |
+| --- | ---: |
+| turn 1, cold | 56.31 s |
+| turn 2, same server | 2.55 s |
+| the same conversation, after a restart | **4.07 s** (13.8x) |
+
 Resuming a session across a restart therefore costs 2.5 s instead of 32.2 s --
 **13x less time to first token** -- because the stored KV is reloaded from disk
 instead of recomputed. Two entries were written to the directory, so the write
 path and the read path both work.
 
-This is not shipped as a default, and should not be: enabling it writes model
-state to a directory and carries a disk budget (8 GiB by default). It is a
+This is not shipped as a default, and **should not be one without a decision**,
+for a reason that is not performance: the persisted state is derived from the
+prompt, so defaulting it on writes conversation-derived data to disk on every
+user's machine. It also carries a disk budget (8 GiB by default). It is a
 one-flag win for any workload that restarts sessions with a shared prefix, which
 is the coding-agent case:
 
     --prompt-cache-disk ~/.tinytitan/prompt-cache --prompt-cache-disk-mib 512
 
-Measured at 4-bit only; the mechanism is precision-independent, but the 8-bit
-figure is not measured and is not claimed.
+Measured at both widths: 32.25 -> 2.48 s at 4-bit, 56.31 -> 4.07 s at 8-bit.
 
 ## Status at 2026-10-19 00:00
 
