@@ -56,85 +56,194 @@ extension VerifiedInstallTool {
             throw RepackError.configurationInvalid(
                 detail: "packed expert layout layer count mismatch")
         }
+        if let compression = layout.compression, compression != "lzfse" {
+            throw RepackError.configurationInvalid(
+                detail: "packed_experts/layout.json declares unknown compression "
+                    + "\"\(compression)\"")
+        }
         // The routed-expert width the expert bytes below have to agree with. A
         // dense install never reaches it: its layers hold no experts, and the
         // resident index is what describes its weights.
         let declaredExpertBits = manifest.quant?.routedExpert.weightBits
-        let expectedLayerSize = UInt64(layout.expertsPerLayer) * layout.expertStride
+        let (expectedLayerSize, overflow) = UInt64(layout.expertsPerLayer)
+            .multipliedReportingOverflow(by: layout.expertStride)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(
+                detail: "packed expert layer size overflows")
+        }
         for layer in layout.layers {
-            guard layer.layer >= 0 && layer.layer < layout.numLayers else {
-                throw RepackError.configurationInvalid(
-                    detail: "packed expert layer index out of range")
-            }
-            guard layer.experts.count == layout.expertsPerLayer else {
-                throw RepackError.configurationInvalid(
-                    detail: "packed_experts/\(layer.file) expert count mismatch")
-            }
-            try SSDAIPathValidator.validateBasename(
-                layer.file, field: "packed_experts/layout.json layers[\(layer.layer)].file")
-            // A layer with no routed experts has no file, and writing one
-            // empty `layer_NN.bin` per layer to satisfy this loop would be
-            // worse than the check: the dense Qwen 3.5 installs are exactly
-            // this shape, 24 layouts and no packed experts at all. The
-            // expected size is what makes this safe rather than a hole --
-            // `expectedLayerSize` is 0 only when the layer is empty, so a
-            // layer that should carry bytes still fails on a missing file
-            // below, with a non-zero expected size to compare against.
-            if expectedLayerSize == 0 {
-                continue
-            }
-            let relativePath = "packed_experts/\(layer.file)"
-            guard let manifestEntry = manifest.files[relativePath] else {
-                throw RepackError.configurationInvalid(detail: "manifest missing \(relativePath)")
-            }
+            try validateLayer(
+                layer, access: access, manifest: manifest, layout: layout,
+                expectedLayerSize: expectedLayerSize,
+                declaredExpertBits: declaredExpertBits)
+        }
+    }
+
+    /// One layer: its file size, and every expert's own arithmetic.
+    ///
+    /// Split out of `validatePackedExpertLayout` so the compressed and raw
+    /// cases each read as one check rather than as branches inside a loop.
+    private static func validateLayer(
+        _ layer: Layer,
+        access: SSDAIDirectoryAccess,
+        manifest: Manifest,
+        layout: PackedExpertsLayout,
+        expectedLayerSize: UInt64,
+        declaredExpertBits: Int?
+    ) throws {
+        guard layer.layer >= 0 && layer.layer < layout.numLayers else {
+            throw RepackError.configurationInvalid(
+                detail: "packed expert layer index out of range")
+        }
+        guard layer.experts.count == layout.expertsPerLayer else {
+            throw RepackError.configurationInvalid(
+                detail: "packed_experts/\(layer.file) expert count mismatch")
+        }
+        try SSDAIPathValidator.validateBasename(
+            layer.file, field: "packed_experts/layout.json layers[\(layer.layer)].file")
+        // A layer with no routed experts has no file, and writing one empty
+        // `layer_NN.bin` per layer to satisfy this loop would be worse than the
+        // check: the dense Qwen 3.5 installs are exactly this shape, 24 layouts
+        // and no packed experts at all. The expected size is what makes this
+        // safe rather than a hole -- `expectedLayerSize` is 0 only when the
+        // layer is empty, so a layer that should carry bytes still fails on a
+        // missing file below, with a non-zero expected size to compare against.
+        if expectedLayerSize == 0 {
+            return
+        }
+        let relativePath = "packed_experts/\(layer.file)"
+        guard let manifestEntry = manifest.files[relativePath] else {
+            throw RepackError.configurationInvalid(detail: "manifest missing \(relativePath)")
+        }
+        let actualSize = try access.fileSize(relativePath)
+        if layout.compression == nil {
             guard manifestEntry.size == expectedLayerSize else {
                 throw RepackError.configurationInvalid(
                     detail:
                         "\(relativePath) manifest size \(manifestEntry.size) != \(expectedLayerSize)"
                 )
             }
-            let actualSize = try access.fileSize(relativePath)
             guard actualSize == expectedLayerSize else {
                 throw RepackError.configurationInvalid(
                     detail: "\(relativePath) size \(actualSize) != \(expectedLayerSize)")
             }
-            guard let declaredExpertBits else {
-                throw RepackError.configurationInvalid(detail: "manifest.json has no quant block")
+        } else {
+            try validateCompressedLayer(
+                layer, access: access, manifest: manifest, layout: layout,
+                relativePath: relativePath, manifestEntry: manifestEntry,
+                actualSize: actualSize, expectedLayerSize: expectedLayerSize)
+        }
+        guard let declaredExpertBits else {
+            throw RepackError.configurationInvalid(detail: "manifest.json has no quant block")
+        }
+        var seenExperts = Set<Int>()
+        for (index, expert) in layer.experts.enumerated() {
+            let expertID = expert.expert ?? index
+            guard expertID >= 0 && expertID < layout.expertsPerLayer else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(relativePath) expert id out of range")
             }
-            var seenExperts = Set<Int>()
-            for (index, expert) in layer.experts.enumerated() {
-                let expertID = expert.expert ?? index
-                guard expertID >= 0 && expertID < layout.expertsPerLayer else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) expert id out of range")
-                }
-                guard seenExperts.insert(expertID).inserted else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) duplicate expert \(expertID)")
-                }
-                guard expert.size == layout.expertStride else {
-                    throw RepackError.configurationInvalid(
-                        detail: "\(relativePath) expert \(expertID) size mismatch")
-                }
-                guard expert.offset % SSDAIFormatV1.alignmentBytes == 0 else {
-                    throw RepackError.configurationInvalid(
-                        detail:
-                            "\(relativePath) expert \(expertID) offset is not aligned to \(SSDAIFormatV1.alignmentBytes) bytes"
-                    )
-                }
+            guard seenExperts.insert(expertID).inserted else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(relativePath) duplicate expert \(expertID)")
+            }
+            guard expert.size == layout.expertStride else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(relativePath) expert \(expertID) size mismatch")
+            }
+            guard expert.offset % SSDAIFormatV1.alignmentBytes == 0 else {
+                throw RepackError.configurationInvalid(
+                    detail:
+                        "\(relativePath) expert \(expertID) offset is not aligned to \(SSDAIFormatV1.alignmentBytes) bytes"
+                )
+            }
+            // A compressed layer's file does not contain the raw offsets the
+            // layout still records -- the frames do -- so the range check is
+            // the reader's (each frame's end), done by `validateCompressedLayer`.
+            if layout.compression == nil {
                 guard expert.offset <= actualSize,
                     expert.size <= actualSize - expert.offset
                 else {
                     throw RepackError.configurationInvalid(
                         detail: "\(relativePath) expert \(expertID) range exceeds file size")
                 }
-                try PackedExpertBytes.validate(
-                    expert,
-                    stride: layout.expertStride,
-                    declaredWeightBits: declaredExpertBits,
-                    in: relativePath,
-                    rank: expertID)
             }
+            try PackedExpertBytes.validate(
+                expert,
+                stride: layout.expertStride,
+                declaredWeightBits: declaredExpertBits,
+                in: relativePath,
+                rank: expertID)
+        }
+    }
+
+    /// A compressed layer: its index, every frame inside the file, and the sizes
+    /// the manifest claims.
+    ///
+    /// The frames are not decompressed here. Their bytes are already covered by
+    /// the file's SHA-256 in the manifest, and a decode that disagrees with the
+    /// geometry is what the reader refuses; re-decoding 17 GB to prove what the
+    /// hash already proved would make verification cost as much as the install.
+    private static func validateCompressedLayer(
+        _ layer: Layer,
+        access: SSDAIDirectoryAccess,
+        manifest: Manifest,
+        layout: PackedExpertsLayout,
+        relativePath: String,
+        manifestEntry: ManifestFileEntry,
+        actualSize: UInt64,
+        expectedLayerSize: UInt64
+    ) throws {
+        guard manifestEntry.size == actualSize else {
+            throw RepackError.configurationInvalid(
+                detail: "\(relativePath) size \(actualSize) != manifest \(manifestEntry.size)")
+        }
+        guard actualSize > 0, actualSize < expectedLayerSize else {
+            throw RepackError.configurationInvalid(
+                detail:
+                    "\(relativePath) compressed size \(actualSize) is not smaller than the "
+                    + "raw \(expectedLayerSize) bytes; the install is not compressed")
+        }
+        let indexPath =
+            "packed_experts/" + ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
+        guard let indexEntry = manifest.files[indexPath], indexEntry.size > 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "manifest missing the index \(indexPath) of a compressed layer")
+        }
+        let indexSize = try access.fileSize(indexPath)
+        guard indexSize == indexEntry.size else {
+            throw RepackError.configurationInvalid(
+                detail: "\(indexPath) size \(indexSize) != manifest \(indexEntry.size)")
+        }
+        guard
+            let cap = ExpertBlobIndex.maximumIndexBytes(
+                expertsPerLayer: layout.expertsPerLayer)
+        else {
+            throw RepackError.configurationInvalid(
+                detail: "\(indexPath) cannot be sized for \(layout.expertsPerLayer) experts")
+        }
+        guard indexSize <= cap else {
+            throw RepackError.configurationInvalid(
+                detail: "\(indexPath) is \(indexSize) bytes; an index for "
+                    + "\(layout.expertsPerLayer) experts is at most \(cap)")
+        }
+        let indexData = try access.readPrefix(indexPath, maxBytes: cap)
+        let split = ExpertBlobIndex.phase1Bytes(
+            downOffset: layer.experts.first?.tensors["down"]?.offset,
+            expertStride: layout.expertStride)
+        let entries: [ExpertBlobIndex.Entry]
+        do {
+            entries = try ExpertBlobIndex.decode(
+                indexData, expectedCount: layout.expertsPerLayer,
+                expectedFrames: split == nil ? 1 : 2)
+        } catch {
+            throw RepackError.configurationInvalid(detail: "\(indexPath): \(error)")
+        }
+        let end = ExpertBlobIndex.maximumEnd(entries)
+        guard end > 0, end <= actualSize else {
+            throw RepackError.configurationInvalid(
+                detail: "\(indexPath) addresses \(end) bytes, past the "
+                    + "\(actualSize)-byte layer file")
         }
     }
 }

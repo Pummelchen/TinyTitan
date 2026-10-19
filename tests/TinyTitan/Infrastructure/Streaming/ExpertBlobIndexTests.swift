@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+import TinyTitanFormat
 
 /// The seek index a compressed expert layer cannot do without: an uncompressed
 /// layer is `n * stride`, a compressed one is wherever its blobs landed, and a
@@ -97,6 +98,34 @@ struct ExpertBlobIndexTests {
             _ = try ExpertBlobIndex.decode(
                 ExpertBlobIndex.encode(entries, framesPerExpert: 2),
                 expectedCount: 2, expectedFrames: 2)
+        }
+    }
+
+    /// The streamer sizes a compressed layer's file check from this, so it has
+    /// to be the last byte any frame addresses -- not the sum of the lengths,
+    /// which would disagree as soon as two experts' frames are adjacent.
+    @Test("The highest frame end is the layer's stream size")
+    func maximumEndIsTheHighestFrame() {
+        let entries = [
+            ExpertBlobIndex.Entry(frames: [
+                .init(offset: 0, length: 100), .init(offset: 100, length: 50),
+            ]),
+            ExpertBlobIndex.Entry(frames: [
+                .init(offset: 150, length: 25), .init(offset: 175, length: 75),
+            ]),
+        ]
+        #expect(ExpertBlobIndex.maximumEnd(entries) == 250)
+        #expect(ExpertBlobIndex.maximumEnd(entries.map(\.frames)) == 250)
+    }
+
+    /// A wrapping `offset + length` would read as "inside the file" to every
+    /// later `end <= streamSize` guard, so it is refused at decode.
+    @Test("A frame that wraps the address space is refused")
+    func refusesWrappingFrame() {
+        let entries = [ExpertBlobIndex.Entry(frames: [.init(offset: UInt64.max - 4, length: 16)])]
+        let data = ExpertBlobIndex.encode(entries, framesPerExpert: 1)
+        #expect(throws: ExpertBlobIndex.Failure.self) {
+            _ = try ExpertBlobIndex.decode(data, expectedCount: 1, expectedFrames: 1)
         }
     }
 

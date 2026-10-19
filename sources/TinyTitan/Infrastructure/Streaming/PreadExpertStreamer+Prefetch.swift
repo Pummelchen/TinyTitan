@@ -1,5 +1,7 @@
 import Foundation
+import TinyTitanFormat
 import Metal
+import Synchronization
 
 // Speculative expert reads: the ring, and the compressed arm that decodes into
 // its destinations.
@@ -25,7 +27,11 @@ extension PreadExpertStreamer {
         // A compressed layer prefetches by decoding into the destination
         // buffers, so adoption stays the same memcpy the raw path uses. The
         // decode happens on this scheduler thread, off the decode critical path,
-        // which is where the cost has to be if it is to be free.
+        // which is where the cost has to be if it is to be free -- and it runs
+        // in parallel across the predicted experts. Serially, one top-k set is
+        // ~15 MB at ~0.9 GB/s = ~17 ms, longer than the ~6 ms a layer takes, so
+        // the ring never finished in time and adoption measured 0.06 per token
+        // against the raw path's 21.75.
         if let frames = compressedFrames {
             let operation = ExpertLoadOperation()
             // The same wrapper the raw path uses: raw pointers are not `Sendable`
@@ -36,12 +42,8 @@ extension PreadExpertStreamer {
             ) { [self, operation, safeDestinations] in
                 operation.markInFlight()
                 do {
-                    for (expert, destination) in zip(
-                        experts, safeDestinations.values)
-                    {
-                        try decodeCompressedExpert(
-                            frames: frames[expert], into: destination)
-                    }
+                    try decodePrefetchedExperts(
+                        experts, frames: frames, into: safeDestinations.values)
                     operation.finish(.success(()))
                 } catch {
                     operation.finish(.failure(error))
@@ -76,6 +78,34 @@ extension PreadExpertStreamer {
             }
         }
         return operation
+    }
+
+    /// Decode a predicted expert set into the ring's buffers, in parallel.
+    ///
+    /// The ring is the only place where more than one expert's decode has to
+    /// finish by a deadline (the next layer), so it is the place where one core
+    /// is not enough.
+    private func decodePrefetchedExperts(
+        _ experts: [Int],
+        frames: [[ExpertBlobIndex.Blob]],
+        into destinations: [UnsafeMutableRawPointer]
+    ) throws {
+        if experts.count <= 1 {
+            if let expert = experts.first, let destination = destinations.first {
+                try decodeCompressedExpert(frames: frames[expert], into: destination)
+            }
+            return
+        }
+        let firstError = Mutex<Error?>(nil)
+        DispatchQueue.concurrentPerform(iterations: experts.count) { index in
+            do {
+                try decodeCompressedExpert(
+                    frames: frames[experts[index]], into: destinations[index])
+            } catch {
+                firstError.withLock { if $0 == nil { $0 = error } }
+            }
+        }
+        if let error = firstError.withLock({ $0 }) { throw error }
     }
 
 }

@@ -50,19 +50,37 @@ package struct SSDAILayerV1: Codable, Equatable, Sendable {
     }
 }
 
+/// How an install stores its routed-expert blobs.
+///
+/// Absent from `layout.json` means raw: expert `n` is `n * expertStride` bytes
+/// and the layer file is exactly `expertsPerLayer * expertStride` long. Present
+/// means each expert is one or two LZFSE frames addressed by a
+/// `layer_NN.idx` sidecar, and the layer file is the compressed length instead.
+package enum SSDAIExpertCompression: String, Codable, Sendable {
+    case lzfse
+}
+
 package struct SSDAIPackedExpertsLayoutV1: Codable, Equatable, Sendable {
     package let expertStride: UInt64
     package let numLayers: Int
     package let expertsPerLayer: Int
+    /// `nil` for a raw install; `lzfse` for a compressed one.
+    ///
+    /// Optional so every install written before compression existed decodes
+    /// unchanged. A reader that does not know the value refuses the install at
+    /// decode rather than reading frames as weights.
+    package let compression: SSDAIExpertCompression?
     package let layers: [SSDAILayerV1]
 
     package init(
         expertStride: UInt64, numLayers: Int, expertsPerLayer: Int,
+        compression: SSDAIExpertCompression? = nil,
         layers: [SSDAILayerV1]
     ) {
         self.expertStride = expertStride
         self.numLayers = numLayers
         self.expertsPerLayer = expertsPerLayer
+        self.compression = compression
         self.layers = layers
     }
 }
@@ -102,6 +120,14 @@ package enum SSDAIV1StructuralValidator {
                 throw TinyTitanFormatError.invalid(
                     field: "layout",
                     reason: "invalid dimensions or stride")
+            }
+            // There are no blobs to compress, so a compression marker on a
+            // dense install is a contradiction: either the marker or the empty
+            // expert list is wrong, and both are the install's own claim.
+            guard layout.compression == nil else {
+                throw TinyTitanFormatError.invalid(
+                    field: "layout.compression",
+                    reason: "a dense install has no expert blobs to compress")
             }
             return
         }
@@ -248,10 +274,39 @@ package enum SSDAIV1StructuralValidator {
         guard expectedLayerSize > 0 else { return }
         for layer in layout.layers {
             let path = "packed_experts/\(layer.file)"
-            guard manifestFileSizes[path] == expectedLayerSize else {
+            guard let size = manifestFileSizes[path] else {
                 throw TinyTitanFormatError.invalid(
                     field: "manifest.files.\(path)",
                     reason: "missing or wrong layer size")
+            }
+            if layout.compression == nil {
+                guard size == expectedLayerSize else {
+                    throw TinyTitanFormatError.invalid(
+                        field: "manifest.files.\(path)",
+                        reason: "missing or wrong layer size")
+                }
+                continue
+            }
+            // A compressed layer's size is the sum of its frames, so the raw
+            // product is no longer the contract. What is still checkable from
+            // the manifest alone: the layer is smaller than the raw product
+            // (that is the entire point, and the writer refuses a layer that
+            // grew), and the index that addresses it is listed and non-empty.
+            // The frames themselves are checked against the file by the reader
+            // (and by `--verify-install`), which is where they can be read.
+            let indexName = ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
+            let indexPath = "packed_experts/\(indexName)"
+            guard size > 0, size < expectedLayerSize else {
+                throw TinyTitanFormatError.invalid(
+                    field: "manifest.files.\(path)",
+                    reason:
+                        "compressed layer size \(size) is not smaller than the raw "
+                        + "\(expectedLayerSize) bytes; the install is not compressed")
+            }
+            guard let indexSize = manifestFileSizes[indexPath], indexSize > 0 else {
+                throw TinyTitanFormatError.invalid(
+                    field: "manifest.files.\(indexPath)",
+                    reason: "a compressed layer needs its index in the manifest")
             }
         }
     }

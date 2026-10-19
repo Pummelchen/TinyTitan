@@ -131,20 +131,15 @@ extension Model {
         // product is validated here rather than there -- a wrapped one would make
         // `streamSize` small, pass the streamer's own file-size check, and leave
         // every derived offset pointing outside the layer file.
-        let (streamSize, streamSizeOverflow) = UInt64(packedExpertsLayout.expertsPerLayer)
-            .multipliedReportingOverflow(by: packedExpertsLayout.expertStride)
-        guard !streamSizeOverflow else {
-            throw ModelError.internalInconsistency(
-                detail: "packed expert layer \(L) declares \(packedExpertsLayout.expertsPerLayer) "
-                    + "experts of \(packedExpertsLayout.expertStride) bytes, which overflows "
-                    + "the stream size")
-        }
         let phase1Bytes = Self.phase1Bytes(
             forLayer: L, layout: packedExpertsLayout)
         let compressedFrames = try Self.compressedFrames(
             beside: url,
             expertsPerLayer: packedExpertsLayout.expertsPerLayer,
             phase1Bytes: phase1Bytes)
+        let streamSize = try Self.streamSize(
+            forLayer: L, layout: packedExpertsLayout,
+            compressedFrames: compressedFrames)
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
@@ -205,6 +200,37 @@ extension Model {
         if streamersBox.keepWired {
             streamersBox.streamers[L]?.setSlotsPinned(true)
         }
+    }
+
+    /// The byte length of one layer's stream.
+    ///
+    /// A compressed layer is shorter than `expertsPerLayer * expertStride`: its
+    /// bytes are the frames its index addresses, so that is its stream size.
+    /// Sizing it from the raw product would fail the streamer's own file-size
+    /// check on every compressed install -- a compressed file is about 92% of
+    /// the raw one, never larger.
+    static func streamSize(
+        forLayer layer: Int,
+        layout: PackedExpertsLayout,
+        compressedFrames: [[ExpertBlobIndex.Blob]]?
+    ) throws -> UInt64 {
+        if let compressedFrames {
+            let end = ExpertBlobIndex.maximumEnd(compressedFrames)
+            guard end > 0 else {
+                throw ModelError.internalInconsistency(
+                    detail: "packed expert layer \(layer) has an empty compressed index")
+            }
+            return end
+        }
+        let (rawSize, overflow) = UInt64(layout.expertsPerLayer)
+            .multipliedReportingOverflow(by: layout.expertStride)
+        guard !overflow else {
+            throw ModelError.internalInconsistency(
+                detail: "packed expert layer \(layer) declares "
+                    + "\(layout.expertsPerLayer) experts of "
+                    + "\(layout.expertStride) bytes, which overflows the stream size")
+        }
+        return rawSize
     }
 
     /// Test hook: how many layer files have been opened so far.
@@ -284,8 +310,17 @@ extension Model {
         expertsPerLayer: Int,
         phase1Bytes: UInt64?
     ) throws -> [[ExpertBlobIndex.Blob]]? {
-        let indexURL = url.deletingPathExtension().appendingPathExtension("idx")
-        guard let indexData = try? Data(contentsOf: indexURL) else { return nil }
+        let indexName = ExpertBlobIndex.sidecarName(forLayerFile: url.lastPathComponent)
+        let indexURL = url.deletingLastPathComponent().appendingPathComponent(indexName)
+        guard FileManager.default.fileExists(atPath: indexURL.path) else { return nil }
+        guard let cap = ExpertBlobIndex.maximumIndexBytes(expertsPerLayer: expertsPerLayer)
+        else {
+            throw ModelError.internalInconsistency(
+                detail: "\(indexName) cannot be sized: layer declares \(expertsPerLayer) experts")
+        }
+        // Bounded, and through the model directory's O_NOFOLLOW chain: a 12 KiB
+        // metadata file has no business allocating whatever length it declares.
+        let indexData = try BoundedMetadataRead.read(fileAt: indexURL, maxBytes: cap)
         return try ExpertBlobIndex.decode(
             indexData,
             expectedCount: expertsPerLayer,
@@ -304,10 +339,9 @@ extension Model {
         forLayer layer: Int,
         layout: PackedExpertsLayout
     ) -> UInt64? {
+        guard layer >= 0, layer < layout.layers.count else { return nil }
         let downOffset = layout.layers[layer].experts.first?.subTensors["down"]?.offset
-        guard let downOffset, downOffset > 0, downOffset < layout.expertStride else {
-            return nil
-        }
-        return downOffset
+        return ExpertBlobIndex.phase1Bytes(
+            downOffset: downOffset, expertStride: layout.expertStride)
     }
 }

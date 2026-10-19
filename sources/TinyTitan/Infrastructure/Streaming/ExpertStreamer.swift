@@ -1,4 +1,5 @@
 import Foundation
+import TinyTitanFormat
 
 enum StreamerError: Error, CustomStringConvertible {
     case openFailed(path: String, errno: Int32)
@@ -49,9 +50,13 @@ public struct StreamLayout: Sendable {
     /// bytes at `expertOffset(...)`. Present means those offsets address the
     /// *index* instead: each expert is one or two LZFSE frames, and a split
     /// layer has one frame per half so the reader keeps its phase-1 overlap.
-    public let compressedFrames: [[ExpertBlobIndex.Blob]]?
+    ///
+    /// `package` rather than `public`: the frame type lives in
+    /// `TinyTitanFormat`, whose types are package-scoped, and nothing outside
+    /// this package builds a `StreamLayout`.
+    package let compressedFrames: [[ExpertBlobIndex.Blob]]?
 
-    public init(
+    package init(
         path: String,
         streamOffset: UInt64,
         streamSize: UInt64,

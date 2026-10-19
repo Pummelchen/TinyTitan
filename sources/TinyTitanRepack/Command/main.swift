@@ -10,6 +10,11 @@ private let usage = """
                       --output <model.ssdai> [--overwrite] [--draft-head] [--share-ngram-table]
       TinyTitanRepack --discard-partial --output <model.ssdai>
       TinyTitanRepack --verify-install --input-ssdai <model.ssdai>  (--input-gturbo still accepted)
+      TinyTitanRepack --compress-experts --input-ssdai <raw model.ssdai>
+                      --output <compressed model.ssdai> [--overwrite]
+          Experimental. Saves ~9% of the expert bytes, but measured -42% decode
+          on Ornith 4-bit (docs/perf-campaign-2026-10-18.md); for measurement
+          only, not a faster install.
       TinyTitanRepack --help
 
     The installer streams the selected Qwen 3.6 or text-only Ornith 1.5 checkpoint
@@ -38,6 +43,7 @@ private struct Arguments {
     var verifyInstall = false
     var inputSSDAI: String?
     var inputSnapshot: String?
+    var compressExperts = false
     var localModelID: String?
     var draftHead = false
     var shareNgramTable = false
@@ -61,6 +67,9 @@ private struct Arguments {
                 index += 1
             case "--verify-install":
                 parsed.verifyInstall = true
+                index += 1
+            case "--compress-experts":
+                parsed.compressExperts = true
                 index += 1
             case "--model":
                 guard index + 1 < values.count else {
@@ -124,26 +133,10 @@ private struct Arguments {
             return parsed
         }
         if parsed.inputSnapshot != nil || parsed.localModelID != nil {
-            guard parsed.inputSnapshot != nil else {
-                throw ParseError.missingRequired("--input-snapshot")
-            }
-            guard parsed.localModelID != nil else {
-                throw ParseError.missingRequired("--model-id")
-            }
-            guard parsed.output != nil else {
-                throw ParseError.missingRequired("--output")
-            }
-            guard !parsed.modelExplicit,
-                parsed.inputSSDAI == nil,
-                !parsed.resume,
-                !parsed.discardPartial,
-                !parsed.verifyInstall
-            else {
-                throw ParseError.invalidMode(
-                    "local snapshot import accepts only --input-snapshot, --model-id, --output, --draft-head, --share-ngram-table, and --overwrite"
-                )
-            }
-            return parsed
+            return try parsed.validatingLocalSnapshot()
+        }
+        if parsed.compressExperts {
+            return try parsed.validatingCompressExperts()
         }
         if parsed.verifyInstall {
             guard parsed.inputSSDAI != nil else {
@@ -161,6 +154,47 @@ private struct Arguments {
             }
         }
         return parsed
+    }
+
+    /// A local snapshot import names its own source and model id, and takes no
+    /// flag from the download, discard or verification modes.
+    private func validatingLocalSnapshot() throws -> Arguments {
+        guard inputSnapshot != nil else {
+            throw ParseError.missingRequired("--input-snapshot")
+        }
+        guard localModelID != nil else {
+            throw ParseError.missingRequired("--model-id")
+        }
+        guard output != nil else {
+            throw ParseError.missingRequired("--output")
+        }
+        guard !modelExplicit, inputSSDAI == nil, !resume, !discardPartial,
+            !verifyInstall
+        else {
+            throw ParseError.invalidMode(
+                "local snapshot import accepts only --input-snapshot, --model-id, --output, --draft-head, --share-ngram-table, and --overwrite"
+            )
+        }
+        return self
+    }
+
+    /// `--compress-experts` is a standalone mode: it reads an installed model
+    /// and writes another one, so every flag that describes a fresh install or a
+    /// verification contradicts it.
+    private func validatingCompressExperts() throws -> Arguments {
+        guard inputSSDAI != nil else {
+            throw ParseError.missingRequired("--input-ssdai")
+        }
+        guard output != nil else {
+            throw ParseError.missingRequired("--output")
+        }
+        guard !verifyInstall, !resume, !discardPartial, !modelExplicit,
+            inputSnapshot == nil, localModelID == nil, !draftHead, !shareNgramTable
+        else {
+            throw ParseError.invalidMode(
+                "--compress-experts accepts only --input-ssdai, --output and --overwrite")
+        }
+        return self
     }
 }
 
@@ -205,6 +239,34 @@ private func run(_ values: [String]) async -> Int32 {
             return 0
         } catch {
             printError("discard failed: \(error)")
+            return 1
+        }
+    }
+
+    if arguments.compressExperts, let input = arguments.inputSSDAI,
+        let output = arguments.output
+    {
+        do {
+            let result = try CompressExpertsTool.run(
+                options: CompressExpertsOptions(
+                    inputSSDAI: input, output: output, overwrite: arguments.overwrite),
+                progress: { progress in
+                    let ratio = Double(progress.compressedBytes) / Double(max(progress.rawBytes, 1))
+                    print(
+                        "[\(progress.layer + 1)/\(progress.layerCount)] \(progress.file): "
+                            + "\(progress.rawBytes) -> \(progress.compressedBytes) bytes "
+                            + String(format: "(%.1f%%)", ratio * 100)
+                            + String(format: " %.1f s", progress.elapsedSeconds))
+                })
+            print(
+                "Compressed \(result.layerCount) expert layers: "
+                    + "\(result.rawBytes) -> \(result.compressedBytes) bytes "
+                    + "(indices \(result.indexBytes) bytes)")
+            print("Model: \(result.outputDirectory)")
+            print("Receipt: \(result.receiptPath)")
+            return 0
+        } catch {
+            printError("compression failed: \(error)")
             return 1
         }
     }

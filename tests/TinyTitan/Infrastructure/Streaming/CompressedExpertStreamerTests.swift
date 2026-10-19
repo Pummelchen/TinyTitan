@@ -3,6 +3,7 @@ import Metal
 import Testing
 
 @testable import TinyTitan
+import TinyTitanFormat
 
 /// A streamer reading a *compressed* layer.
 ///
@@ -62,8 +63,7 @@ struct CompressedExpertStreamerTests {
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
-            streamSize: try FileManager.default
-                .attributesOfItem(atPath: url.path)[.size] as! UInt64,
+            streamSize: try Self.fileSize(url),
             expertsPerLayer: Self.experts,
             expertStride: UInt64(Self.stride),
             phase1Bytes: UInt64(Self.split),
@@ -87,8 +87,7 @@ struct CompressedExpertStreamerTests {
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
-            streamSize: try FileManager.default
-                .attributesOfItem(atPath: url.path)[.size] as! UInt64,
+            streamSize: try Self.fileSize(url),
             expertsPerLayer: Self.experts,
             expertStride: UInt64(Self.stride),
             phase1Bytes: nil,
@@ -111,8 +110,7 @@ struct CompressedExpertStreamerTests {
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
-            streamSize: try FileManager.default
-                .attributesOfItem(atPath: url.path)[.size] as! UInt64,
+            streamSize: try Self.fileSize(url),
             expertsPerLayer: Self.experts + 1,
             expertStride: UInt64(Self.stride),
             phase1Bytes: UInt64(Self.split),
@@ -133,8 +131,7 @@ struct CompressedExpertStreamerTests {
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
-            streamSize: try FileManager.default
-                .attributesOfItem(atPath: url.path)[.size] as! UInt64,
+            streamSize: try Self.fileSize(url),
             expertsPerLayer: Self.experts,
             expertStride: UInt64(Self.stride),
             phase1Bytes: UInt64(Self.split),
@@ -153,6 +150,65 @@ struct CompressedExpertStreamerTests {
         let bytes = [UInt8](
             UnsafeRawBufferPointer(start: destination, count: Self.stride))
         #expect(bytes == Self.blob(2, Self.stride))
+    }
+
+    /// The batched decode path is what the runner actually uses for a token's
+    /// experts; the per-expert path above is the one-shot API. They read through
+    /// different code (`executeCompressedMisses` versus `loadExpertUnlocked`),
+    /// and a plan that took the raw backend was a live failure on a real install
+    /// -- it read `n * stride` from a 92%-sized file. So both are pinned.
+    @Test("A compressed plan decodes every miss into its own slot")
+    func planDecodesCompressedExperts() throws {
+        let (url, frames) = try Self.writeCompressedLayer(split: Self.split)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+        let layout = StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: try Self.fileSize(url),
+            expertsPerLayer: Self.experts,
+            expertStride: UInt64(Self.stride),
+            phase1Bytes: UInt64(Self.split),
+            compressedFrames: frames)
+        let streamer = try PreadExpertStreamer(
+            layout: layout, device: device, slotCount: 4)
+        let experts = [0, 2, 3]
+        let results = try streamer.executeExpertCachePlan(
+            try streamer.planExpertsCached(experts: experts))
+        #expect(results.count == experts.count)
+        for (result, expert) in zip(results, experts) {
+            let bytes = Self.bytes(
+                of: result.buffer, offset: result.offset, count: Self.stride)
+            #expect(bytes == Self.blob(expert, Self.stride))
+        }
+    }
+
+    @Test("The asynchronous plan path decodes a compressed layer too")
+    func asyncPlanDecodesCompressedExperts() throws {
+        let (url, frames) = try Self.writeCompressedLayer(split: Self.split)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+        let layout = StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: try Self.fileSize(url),
+            expertsPerLayer: Self.experts,
+            expertStride: UInt64(Self.stride),
+            phase1Bytes: UInt64(Self.split),
+            compressedFrames: frames)
+        let streamer = try PreadExpertStreamer(
+            layout: layout, device: device, slotCount: 2)
+        let operation = try streamer.beginExpertCachePlan(
+            try streamer.planExpertsCached(experts: [1]))
+        try operation.wait()
+        let slot = try streamer.loadExpert(layer: 0, expert: 1)
+        let bytes = Self.bytes(of: slot.buffer, offset: slot.offset, count: Self.stride)
+        #expect(bytes == Self.blob(1, Self.stride))
+    }
+
+    private static func fileSize(_ url: URL) throws -> UInt64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try #require((attributes[.size] as? NSNumber)?.uint64Value)
     }
 
     private static func bytes(of buffer: MTLBuffer, offset: UInt64, count: Int) -> [UInt8] {

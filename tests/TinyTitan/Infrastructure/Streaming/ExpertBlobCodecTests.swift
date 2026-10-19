@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import TinyTitan
+import TinyTitanFormat
 
 /// The compressed-expert format's codec, pinned.
 ///

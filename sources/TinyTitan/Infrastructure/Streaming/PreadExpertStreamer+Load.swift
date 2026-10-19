@@ -1,4 +1,5 @@
 import Foundation
+import TinyTitanFormat
 import Metal
 
 // Reading one expert into a slot, raw or compressed.
@@ -75,24 +76,36 @@ extension PreadExpertStreamer {
     func decodeCompressedExpert(
         frames: [ExpertBlobIndex.Blob], into destination: UnsafeMutableRawPointer
     ) throws {
-        compressedScratchLock.lock()
-        defer { compressedScratchLock.unlock() }
-        guard let scratch = compressedScratch else {
-            throw StreamerError.sizeMismatch(expected: 1, actual: 0)
+        let needed = frames.reduce(0) { $0 + Int($1.length) }
+        guard needed > 0, needed <= compressedScratchBytes else {
+            throw StreamerError.sizeMismatch(
+                expected: UInt64(compressedScratchBytes), actual: UInt64(needed))
         }
+        // One buffer per decode, not one per streamer: the plan decodes its
+        // misses in parallel, and a shared buffer would put them all behind one
+        // lock (measured at 3.2 tok/s against the raw path's 10.0).
+        let scratch = CompressedScratchPool.shared.borrow(bytes: needed)
+        defer { CompressedScratchPool.shared.giveBack(scratch, bytes: needed) }
+        try readPackedFrames(frames, into: scratch)
+        try decodePackedFrames(frames, from: scratch, into: destination)
+    }
+
+    /// The decode half: frames already sitting in `scratch`, in order.
+    ///
+    /// Separated from the read so the plan can batch one storage call for a
+    /// whole group of experts and then decode them in parallel, which is the
+    /// shape the raw path's batched `fetch` already has.
+    func decodePackedFrames(
+        _ frames: [ExpertBlobIndex.Blob],
+        from scratch: UnsafeMutableRawPointer,
+        into destination: UnsafeMutableRawPointer
+    ) throws {
         let stride = Int(layout.expertStride)
         let split = layout.phase1Bytes.map(Int.init)
         var written = 0
+        var packedOffset = 0
         for (index, blob) in frames.enumerated() {
             let packedBytes = Int(blob.length)
-            guard packedBytes <= compressedScratchBytes else {
-                throw StreamerError.sizeMismatch(
-                    expected: UInt64(compressedScratchBytes), actual: UInt64(blob.length))
-            }
-            try readFull(
-                into: scratch,
-                fileOffset: layout.streamOffset + blob.offset,
-                count: packedBytes)
             let expected: Int
             if frames.count == 2, index == 0 {
                 expected = split ?? 0
@@ -103,14 +116,50 @@ extension PreadExpertStreamer {
                 throw StreamerError.sizeMismatch(expected: 1, actual: 0)
             }
             try ExpertBlobCodec.decompress(
-                source: scratch, count: packedBytes,
+                source: scratch.advanced(by: packedOffset), count: packedBytes,
                 into: destination.advanced(by: written),
                 expected: expected)
+            packedOffset += packedBytes
             written += expected
         }
         guard written == stride else {
             throw StreamerError.sizeMismatch(
                 expected: UInt64(stride), actual: UInt64(written))
+        }
+    }
+
+    /// Reads all of one expert's frames in a single batched call.
+    ///
+    /// Through the bounded reader where it exists, so a compressed layer keeps
+    /// the same `F_NOCACHE` footprint contract as a raw one -- the frames are
+    /// read, not left in the unified buffer cache. Only an install that opted
+    /// out of bounded I/O (`TINYTITAN_BOUNDED_IO=0`) falls back to the plain
+    /// descriptor.
+    func readPackedFrames(
+        _ frames: [ExpertBlobIndex.Blob], into scratch: UnsafeMutableRawPointer
+    ) throws {
+        var offsets: [UInt64] = []
+        var counts: [Int] = []
+        var destinations: [UnsafeMutableRawPointer] = []
+        offsets.reserveCapacity(frames.count)
+        counts.reserveCapacity(frames.count)
+        destinations.reserveCapacity(frames.count)
+        var cursor = 0
+        for frame in frames {
+            offsets.append(layout.streamOffset + frame.offset)
+            counts.append(Int(frame.length))
+            destinations.append(scratch.advanced(by: cursor))
+            cursor += Int(frame.length)
+        }
+        if let boundedReader {
+            try boundedReader.fetch(
+                offsets: offsets, byteCounts: counts, into: destinations)
+            return
+        }
+        for index in frames.indices {
+            try readFull(
+                into: destinations[index], fileOffset: offsets[index],
+                count: counts[index])
         }
     }
 

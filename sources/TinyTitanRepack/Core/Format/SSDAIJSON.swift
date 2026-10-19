@@ -324,6 +324,25 @@ enum SSDAIJSON {
             withJSONObject: obj,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
     }
+
+    /// Re-writes an installed `layout.json` as a compressed one.
+    ///
+    /// The expert entries are deliberately left alone: their `offset`/`size`/
+    /// `tensors` describe the *raw* geometry, which is what the index was built
+    /// from, and the streamer ignores the offsets when a sidecar is present.
+    /// Only the top-level marker changes, so a 22 MB layout can be rewritten
+    /// without re-deriving 256 experts per layer.
+    static func markCompressed(layoutData: Data) throws -> Data {
+        guard var object = try JSONSerialization.jsonObject(with: layoutData) as? [String: Any]
+        else {
+            throw RepackError.configurationInvalid(
+                detail: "packed_experts/layout.json is not a JSON object")
+        }
+        object["compression"] = SSDAIExpertCompression.lzfse.rawValue
+        return try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
 }
 
 extension RepackPlan {

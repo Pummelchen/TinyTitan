@@ -29,6 +29,11 @@ struct PackedExpertsLayout: Decodable {
     let expertStride: UInt64
     let numLayers: Int
     let expertsPerLayer: Int
+    /// `lzfse` when the layer files hold frames and `.idx` sidecars, absent for
+    /// a raw install. The verifier decodes it as a plain string: an unknown
+    /// value is refused inside the check rather than failing the decode with a
+    /// message about JSON.
+    let compression: String?
     let layers: [Layer]
 }
 

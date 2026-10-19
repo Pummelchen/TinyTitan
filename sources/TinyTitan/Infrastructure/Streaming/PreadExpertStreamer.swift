@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TinyTitanFormat
 import Metal
 import Synchronization
 
@@ -125,13 +126,11 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// means raw blobs at `n * expertStride`. A split layer carries two frames
     /// per expert, one per half, so the phase-1 overlap survives compression.
     let compressedFrames: [[ExpertBlobIndex.Blob]]?
-    /// Compressed bytes are read here first and decoded into the slot; raw
-    /// layers read straight into the slot and never touch it.
-    let compressedScratch: UnsafeMutableRawPointer?
+    /// The largest packed form of one expert — all of its frames — which is
+    /// how large a staging buffer has to be. The buffers themselves come from
+    /// `CompressedScratchPool`, one per concurrent decode, so a plan's misses
+    /// decode in parallel instead of queueing behind one lock.
     let compressedScratchBytes: Int
-    /// Serialises the read-and-decode pairs that share `compressedScratch`
-    /// between the demand path and the prefetch ring.
-    let compressedScratchLock = NSLock()
     let slotBuffers: [MTLBuffer]
     let slotBufferOffsets: [UInt64]
     let residencyTable: MTLBuffer
@@ -193,15 +192,15 @@ public final class PreadExpertStreamer: @unchecked Sendable {
                     expected: UInt64(layout.expertsPerLayer),
                     actual: UInt64(frames.count))
             }
-            let largest = frames.flatMap { $0 }.map(\.length).max() ?? 0
+            let largest =
+                frames.map { entry in
+                    entry.reduce(0) { $0 + Int($1.length) }
+                }.max() ?? 0
             guard largest > 0 else {
                 throw StreamerError.sizeMismatch(expected: 1, actual: 0)
             }
-            self.compressedScratch = .allocate(
-                byteCount: Int(largest), alignment: 4096)
-            self.compressedScratchBytes = Int(largest)
+            self.compressedScratchBytes = largest
         } else {
-            self.compressedScratch = nil
             self.compressedScratchBytes = 0
         }
         let pageSize = Int(getpagesize())
@@ -363,7 +362,6 @@ public final class PreadExpertStreamer: @unchecked Sendable {
 
     deinit {
         close(fd)
-        compressedScratch?.deallocate()
     }
 
     public func loadExpertsCached(experts: [Int]) throws

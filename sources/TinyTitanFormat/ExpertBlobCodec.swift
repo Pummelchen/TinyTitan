@@ -3,9 +3,10 @@ import Foundation
 
 /// Compresses and decompresses one stored expert blob.
 ///
-/// This is the format-side half of the compressed-expert work: nothing calls it
-/// on the hot path yet, and it exists so the codec choice is pinned by a test
-/// rather than by a benchmark script in `/tmp`.
+/// The format-side half of the compressed-expert work, in the format target
+/// because both sides use it: the repacker's writer
+/// (`CompressedExpertLayerWriter`) produces frames, and the runtime's streamer
+/// decodes them into a slot.
 ///
 /// **Why LZFSE and not zstd.** Measured on 128 MiB of a real expert layer:
 /// `lzfse` **91.7% at 896 MiB/s** decode, `zstd -1` 90.8% at 1,113, `lz4` 98.7%
@@ -17,12 +18,12 @@ import Foundation
 ///
 /// Encoding runs at ~205 MiB/s, so repacking Ornith's 16.9 GiB of expert blobs
 /// takes about 85 seconds and lands at 15.5 GiB.
-public enum ExpertBlobCodec {
-    public enum Failure: Error, CustomStringConvertible {
+package enum ExpertBlobCodec {
+    package enum Failure: Error, CustomStringConvertible {
         case encodeFailed
         case decodeFailed(expected: Int, got: Int)
 
-        public var description: String {
+        package var description: String {
             switch self {
             case .encodeFailed:
                 return "LZFSE refused the expert blob"
@@ -34,14 +35,14 @@ public enum ExpertBlobCodec {
 
     /// Ratio the format's planning numbers were taken at, so a reader that sees
     /// a dramatically different figure knows the file is not what it claims.
-    public static let measuredRatio = 0.917
+    package static let measuredRatio = 0.917
 
     /// Compresses `count` bytes at `source`.
     ///
     /// The destination is sized by `compression_encode_buffer`'s own bound rather
     /// than a guess: an incompressible blob must not be truncated, which would
     /// produce a file that decodes to something the header disagrees with.
-    public static func compress(
+    package static func compress(
         source: UnsafeRawPointer,
         count: Int
     ) throws -> Data {
@@ -65,7 +66,7 @@ public enum ExpertBlobCodec {
     /// `expected` comes from the install's geometry, not from the blob, so a
     /// truncated or swapped blob is a decode failure rather than a short read
     /// that leaves the tail of a slot holding the previous expert's weights.
-    public static func decompress(
+    package static func decompress(
         _ packed: Data,
         into destination: UnsafeMutableRawPointer,
         expected: Int
@@ -82,7 +83,7 @@ public enum ExpertBlobCodec {
 
     /// The read path's entry point: the compressed bytes are already in a
     /// staging buffer, so this avoids copying them into a `Data` first.
-    public static func decompress(
+    package static func decompress(
         source: UnsafeRawPointer,
         count: Int,
         into destination: UnsafeMutableRawPointer,

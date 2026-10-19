@@ -151,7 +151,13 @@ extension PreadExpertStreamer {
         }
 
         if !plan.misses.isEmpty {
-            if let metalReader {
+            // A compressed layer has no byte range per expert: every backend
+            // below copies a range, and a frame's bytes are not the weights.
+            // The decode goes straight into the same slots instead, so the
+            // residency and buffer bookkeeping below is unchanged.
+            if compressedFrames != nil {
+                try executeCompressedMisses(plan)
+            } else if let metalReader {
                 try executeMetalReads(plan, reader: metalReader)
             } else if let boundedReader {
                 try executeBoundedReads(plan, reader: boundedReader, firstStage: firstStage)
@@ -191,6 +197,25 @@ extension PreadExpertStreamer {
                 eventCoordinator: eventCoordinator,
                 backendSignalsEvent: false)
             operation.finish(.success(()))
+            return operation
+        }
+        // Compressed layers decode on the CPU, so they take the scheduler path
+        // even when Metal I/O is configured: handing MTLIO a frame offset would
+        // copy frame bytes into a slot.
+        if compressedFrames != nil {
+            let operation = ExpertLoadOperation(
+                completionToken: token,
+                eventCoordinator: eventCoordinator,
+                backendSignalsEvent: false)
+            ExpertIOScheduler.shared.submit { [self, operation] in
+                operation.markInFlight()
+                do {
+                    _ = try executeExpertCachePlan(plan)
+                    operation.finish(.success(()))
+                } catch {
+                    operation.finish(.failure(error))
+                }
+            }
             return operation
         }
         if let metalReader {
