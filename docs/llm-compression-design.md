@@ -226,6 +226,27 @@ Both point the same way: decompression has to leave the critical path entirely -
 on the GPU -- and the model has to have 25-30% of redundant bytes to win, which
 BF16 does and a 4-bit install does not.
 
+## MTLIO compressed reads: verified, and slower than our own decoder
+
+Apple exposes LZFSE containers through Metal I/O: `MTLIOCreateCompressionContext`
+writes one, and `newIOHandleWithURL:compressionMethod:` reads it while the driver
+decompresses. This was the obvious GPU-side hope, and the addressing works: a
+4 MiB container read at offsets 0, 64 KiB, 1 MiB and 1 MiB+1000 returned the exact
+source bytes, i.e. **reads are addressed in uncompressed space**, so a layer could
+be a drop-in container and the existing expert offsets would still apply.
+
+The throughput kills it. Loading eight expert-sized ranges (13.0 MB) from a
+64 KiB-chunk container took **15.2 ms**, and splitting them across eight command
+buffers changed nothing (15.5 ms): the driver decodes at ~0.85 GB/s, on one
+thread. A 1 MiB chunk size was worse (23.3 ms). Our own block decoder reaches
+**5.6 GB/s on eight workers**, so MTLIO's path would be roughly six times slower
+than the CPU pipeline it was meant to replace. MTLIO compression is an asset
+pipeline, not a decode accelerator.
+
+With that measured, there is no public GPU decompression path left: the
+GPU-decode route would mean writing an LZFSE (or rANS) decoder in Metal, which is
+a project in its own right and would still be capped by the byte saving.
+
 ## Status
 
 The v3 format, the block decoder, the phase publish and the separate prefetch
