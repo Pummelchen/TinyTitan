@@ -39,11 +39,12 @@ export const GOALS_SERVICE = "goals";
 /**
  * Rounds an auto-created goal may run before the harness blocks it.
  *
- * Much smaller than the service's own default (256): this cap exists to bound
- * prompts a person did not mark as long-running work, not to bound a migration
- * someone deliberately asked for with `/goal`.
+ * Effectively unbounded, so an unattended goal keeps working through the night
+ * instead of stopping at a small round budget. A profile that turns `autoGoal`
+ * on can lower it with `autoGoalRounds` when it wants prompts a person did not
+ * mark as long-running work to stay bounded.
  */
-export const DEFAULT_AUTO_GOAL_ROUNDS = 12;
+export const DEFAULT_AUTO_GOAL_ROUNDS = 99999;
 
 /**
  * The plain text of a message's content.

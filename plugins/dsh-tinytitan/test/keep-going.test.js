@@ -119,7 +119,8 @@ test("a direct human prompt creates and arms a goal with the configured cap", ()
   assert.ok(lines.some((line) => line.includes("armed goal-1")));
 });
 
-test("the default cap bounds a prompt nobody marked as long-running", () => {
+test("the default cap keeps an unattended goal going without a small budget", () => {
+  assert.equal(DEFAULT_AUTO_GOAL_ROUNDS, 99999);
   const goals = goalsService();
   const ctx = context({ [GOALS_SERVICE]: goals });
   installAutoGoal({ ctx, resolved: { autoGoal: true }, log: () => {} });

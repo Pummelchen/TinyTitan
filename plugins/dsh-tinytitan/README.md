@@ -137,7 +137,7 @@ by naming the field with `true`; installing the bundle never does it for you.
 | `setDefaultWhenUnset`       | `true`                                                                                                                                          | select that preset only while the profile has selected none                                                                                                                                                                                                                                                                  |
 | `compactionHeadroomTokens`  | unset (the harness's `65536`)                                                                                                                   | the compaction engine's headroom in the generated preset — see below                                                                                                                                                                                                                                                         |
 | `autoGoal`                  | `false`                                                                                                                                         | arm a goal from every direct human prompt, so the harness keeps working until the model completes it — the `/goal <prompt>` behaviour without typing `/goal`                                                                                                                                                                 |
-| `autoGoalRounds`            | `12`                                                                                                                                            | the round cap an auto-created goal gets. Much smaller than the goal service's own `256`, which `/goal` keeps for work a person deliberately marks as long-running                                                                                                                                                            |
+| `autoGoalRounds`            | `99999`                                                                                                                                         | the round cap an auto-created goal gets. Effectively unbounded, so an unattended run is not stopped by a small budget; set a lower number to bound prompts a person did not mark as long-running                                                                                                                             |
 | `autonomy`                  | `false`                                                                                                                                         | the preset half of "work it until it is done": append the autonomy policy to the preset's `persona`, so the model chooses the best technical solution instead of asking, and mount the fresh-agent `ralph` loop — enabling the shipped row, or appending the harness's ralph bundle when the standard ships none — see below |
 | `autonomyRounds`            | `64`                                                                                                                                            | the `maxRounds` the enabled `ralph` row carries; the harness enforces its own ceiling on a call override                                                                                                                                                                                                                     |
 | `autonomySuppressQuestions` | `false`                                                                                                                                         | also remove the `ask_user_question` tool from the preset, so the model cannot ask. Off by default because plan mode's own instructions use that tool                                                                                                                                                                         |
@@ -216,7 +216,7 @@ the session a person is driving turns a prompt into an objective.
 - id: dsh-tinytitan
   config:
     autoGoal: true
-    autoGoalRounds: 24 # default 12
+    autoGoalRounds: 24 # lower than the effectively unbounded 99999 default
 ```
 
 Two things to know before switching it on:
@@ -283,8 +283,9 @@ Two honest limits. **Ralph's rounds are child sessions, not successor root
 sessions**: the session you are looking at stays the one you are in, and the
 recap across rounds is the bounded report plus the workspace, not your
 conversation. And **none of this is unbounded**: ralph stops at `maxRounds`, an
-auto-goal stops at `autoGoalRounds`, a `max-tokens` turn still disarms a goal,
-and provider errors, quota and disk remain real ceilings.
+auto-goal stops at `autoGoalRounds` (99999 unless you lower it), a `max-tokens`
+turn still disarms a goal, and provider errors, quota and disk remain real
+ceilings.
 
 ```yaml
 - id: dsh-tinytitan

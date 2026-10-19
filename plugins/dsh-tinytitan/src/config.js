@@ -182,11 +182,11 @@ function resolveRouteTokenCount(field, value) {
 /**
  * Rounds an auto-created goal may run before the harness blocks it.
  *
- * Only read when `autoGoal` is on. The cap is deliberately much smaller than the
- * goal service's own default (256): it bounds prompts a person did not mark as
- * long-running work, while `/goal` keeps the harness default for the ones they
- * did. A positive integer is required — the value is a promise about how much
- * unattended work a stray prompt may buy, so it is never derived or guessed.
+ * Only read when `autoGoal` is on. The default is effectively unbounded, so an
+ * unattended goal is not stopped by a small round budget; a profile can lower it
+ * to bound prompts a person did not mark as long-running work. A positive
+ * integer is required — the value is a promise about how much unattended work a
+ * stray prompt may buy, so it is never derived or guessed.
  */
 function resolveAutoGoalRounds(value) {
   if (value === undefined || value === null || value === "") return DEFAULT_AUTO_GOAL_ROUNDS;
