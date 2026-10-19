@@ -245,6 +245,37 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Compression, re-measured on Ornith (the Qwen verdict was for Qwen)
+
+A user zipped the Ornith 35B 4-bit install and got **20 GB -> 18 GB, ~10%**. That
+matches the recorded verdict's 89.56% for `zstd -12`, so the record holds -- but
+the per-file breakdown differs enough to be worth writing down, and one file is a
+trap:
+
+| file | gzip -1 | note |
+| --- | ---: | --- |
+| `model_weights.bin` (1.79 GiB, dense) | **97.4%** | 2.6% -- the dense bf16 backbone barely compresses |
+| `packed_experts/layer_00.bin` | **73.0%** | **not representative** |
+| `packed_experts/layer_07.bin` | 91.4% | typical |
+| `packed_experts/layer_20.bin` | 91.4% | typical |
+| `packed_experts/layer_39.bin` | 91.2% | typical |
+
+Layer 0 compresses far better than the rest; sampling it alone would have said
+"27% is available" when the corpus gives 8.6%. That is the same mistake shape as
+the naive-LFU simulation: one sample standing in for a population.
+
+**Why 8.6% still does not go in the read path.** Deflate decompresses at ~490
+MiB/s per core and **1,422 MiB/s across four**. A 4-bit decode token reads
+~65 MiB of experts, so:
+
+- reading 8.6% fewer bytes saves ~2 ms of a ~16 ms read,
+- decompressing those 65 MiB costs **~44 ms even on four cores**,
+- and the wait it would be replacing is **35-45 ms**.
+
+It swaps one bottleneck for another while spending four cores that share memory
+bandwidth with the GPU. Where the bytes *are* worth compressing: transport and
+install (20 -> 18 GB) and the 102 GB n-gram table (71-77%).
+
 ### Placement is where the smart reader can still win
 
 The reader is already predictive: it runs the *next* layer's router on the current
