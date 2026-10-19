@@ -245,6 +245,37 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Shared prefix reuse: found the wall, and it is a design wall
+
+The idea worth chasing was serving a *prompt-only* prefix from the cache, so two
+sessions that share a prompt pay one prefill. Built behind
+`TINYTITAN_PROMPT_PREFIX_CACHE=1`: capture the inference state at the prompt
+boundary, publish a prompt-only entry, match it on the direct-prefix branch. It
+compiled and it worked as far as it went -- the second request **hit**
+(`prompt_cache hit tier=ram cached_tokens=1656`) -- but the wall clock did not
+move: 35.0 / 33.9 / 35.4 s across three identical prompts, `cached=0` reported to
+the client.
+
+The reason is in the contract, not the cache:
+
+    // The continuation API requires cached < prompt count (it must
+    // prefill at least one token), so resume as a full prefill
+    ServerModelSession+PromptCache.swift:262-272
+
+and in `runRawCompletion`, which throws `invalidContinuation` unless
+`0 < count < promptIds.count`. That guard is **not arbitrary**: prefilling the
+last prompt token is what produces the logits the first generated token is
+sampled from. A state captured at the prompt boundary carries KV and the GDN
+recurrent state, but not those logits, so a zero-token resume has nothing to
+sample from.
+
+So the fix is not in the cache. It is to **persist the boundary logits in the
+snapshot** -- one row, `vocab x bf16` = ~0.5 MB for a 248k vocabulary -- then
+allow `cached == prompt count` and sample directly from the restored row. That
+touches the snapshot descriptor (a versioned format), the capture path, the
+restore path and the resume guard: a scoped project, not a knob, and not
+something to land at the end of a long session. The prototype was reverted.
+
 ### Two engines do not beat one engine
 
 The natural idea -- split the engine in two so each serves a request and the
