@@ -64,7 +64,10 @@ extension CompressExpertsTool {
         for (file, result) in layerResults {
             files["packed_experts/\(file)"] = entry(
                 size: result.compressedBytes, sha256: result.sha256)
-            let indexName = ExpertBlobIndex.sidecarName(forLayerFile: file)
+            let indexName =
+                input.codec == .rans
+                ? ExpertRANSIndex.sidecarName(forLayerFile: file)
+                : ExpertBlobIndex.sidecarName(forLayerFile: file)
             files["packed_experts/\(indexName)"] = entry(
                 size: result.indexBytes, sha256: result.indexSha256)
         }

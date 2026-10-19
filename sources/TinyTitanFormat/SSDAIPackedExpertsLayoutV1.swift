@@ -57,7 +57,12 @@ package struct SSDAILayerV1: Codable, Equatable, Sendable {
 /// means each expert is one or two LZFSE frames addressed by a
 /// `layer_NN.idx` sidecar, and the layer file is the compressed length instead.
 package enum SSDAIExpertCompression: String, Codable, Sendable {
+    /// Whole-phase blocks as independent LZFSE frames, decoded on the CPU.
     case lzfse
+    /// Tensor-role blocks entropy-coded with static rANS, decoded on the GPU.
+    /// The payload is not byte-addressable by raw offset; the `.ridx` sidecar
+    /// carries the model and the block map.
+    case rans
 }
 
 package struct SSDAIPackedExpertsLayoutV1: Codable, Equatable, Sendable {
@@ -294,7 +299,13 @@ package enum SSDAIV1StructuralValidator {
             // grew), and the index that addresses it is listed and non-empty.
             // The frames themselves are checked against the file by the reader
             // (and by `--verify-install`), which is where they can be read.
-            let indexName = ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
+            let indexName: String
+            switch layout.compression {
+            case .rans:
+                indexName = ExpertRANSIndex.sidecarName(forLayerFile: layer.file)
+            default:
+                indexName = ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
+            }
             let indexPath = "packed_experts/\(indexName)"
             guard size > 0, size < expectedLayerSize else {
                 throw TinyTitanFormatError.invalid(

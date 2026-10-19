@@ -285,13 +285,32 @@ context, so streams are independent; each thread runs its own state machine and
 the slot -> (symbol, frequency, cumulative) table is one 8-byte load per symbol.
 A raw fallback for an incompressible plane would recover the last 0.2%.
 
-**What it takes to ship.** The decode is now off the CPU, but the engine side is
-still a project: a container that maps each expert's blocks (the current v3 index
-already has the shape), MTLIO loading the compressed bytes into a GPU buffer
-(no CPU copy -- the same MTLIO path this note already measured), the kernel above
-decoding into the expert slot, and the A/B. The ceiling is the 9.8% byte saving:
-with decode fully hidden that is +6-8% on Ornith 4-bit, and more on 8-bit/125B
-where the layer window is three to four times the decode.
+**The install exists.** `TinyTitanRepack --compress-experts --codec rans` writes
+each layer as a rANS payload plus a `.ridx` sidecar (one model per block index,
+one block map per expert, blocks back to back so the runtime needs one read an
+expert), `layout.json` says `"compression": "rans"`, the manifest lists the
+sidecars, and `--verify-install` certifies them. Converting Ornith 4-bit:
+
+| | |
+| --- | ---: |
+| expert payload, 40 layers | 18.119 -> **16.036 GB** |
+| sidecars | 3.99 MB |
+| **ratio** | **0.8852 (11.48% smaller)** |
+| GPU check, layers 0/20/39 | 0 mismatched bytes of 5.3 MB each |
+| GPU decode, 3-expert wave | 4.0-4.3 GB/s, 1.23-1.33 ms |
+| GPU decode, 9 experts | 6.7 GB/s, 2.39 ms |
+
+The convert is 11.5% rather than the prototype's 9.8% because the model is fitted
+over all 256 experts of a layer and each BF16 tensor gets its own pair of planes.
+The 3-expert wave decodes inside the 1.6-1.8 ms layer, which is the number the
+engine needs.
+
+**What is left is the runtime path**, not the format: load the expert's payload
+into a GPU buffer with MTLIO (no CPU copy), run the kernel into the slot, and
+double-buffer so layer N+1's payload load overlaps layer N's decode. Then the
+paired A/B. The ceiling is the 11.5% byte saving: with the decode hidden that is
++8-10% on Ornith 4-bit, and more on 8-bit/125B where the layer window is three to
+four times the decode.
 
 ## Status
 

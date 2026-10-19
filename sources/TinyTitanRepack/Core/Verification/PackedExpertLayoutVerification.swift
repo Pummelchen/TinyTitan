@@ -56,7 +56,9 @@ extension VerifiedInstallTool {
             throw RepackError.configurationInvalid(
                 detail: "packed expert layout layer count mismatch")
         }
-        if let compression = layout.compression, compression != "lzfse" {
+        if let compression = layout.compression,
+            compression != "lzfse", compression != "rans"
+        {
             throw RepackError.configurationInvalid(
                 detail: "packed_experts/layout.json declares unknown compression "
                     + "\"\(compression)\"")
@@ -204,8 +206,12 @@ extension VerifiedInstallTool {
                     "\(relativePath) compressed size \(actualSize) is not smaller than the "
                     + "raw \(expectedLayerSize) bytes; the install is not compressed")
         }
+        let rans = layout.compression == "rans"
         let indexPath =
-            "packed_experts/" + ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
+            "packed_experts/"
+            + (rans
+                ? ExpertRANSIndex.sidecarName(forLayerFile: layer.file)
+                : ExpertBlobIndex.sidecarName(forLayerFile: layer.file))
         guard let indexEntry = manifest.files[indexPath], indexEntry.size > 0 else {
             throw RepackError.configurationInvalid(
                 detail: "manifest missing the index \(indexPath) of a compressed layer")
@@ -214,6 +220,26 @@ extension VerifiedInstallTool {
         guard indexSize == indexEntry.size else {
             throw RepackError.configurationInvalid(
                 detail: "\(indexPath) size \(indexSize) != manifest \(indexEntry.size)")
+        }
+        if rans {
+            let cap = UInt64(
+                ExpertRANSIndex.headerBytes
+                    + Int(ExpertRANSIndex.maximumBlockCount) * 512
+                    + layout.expertsPerLayer * Int(ExpertRANSIndex.maximumBlockCount)
+                    * ExpertRANSIndex.blockBytes)
+            guard indexSize <= cap else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(indexPath) is \(indexSize) bytes; the cap is \(cap)")
+            }
+            let data = try access.readPrefix(indexPath, maxBytes: cap)
+            do {
+                _ = try ExpertRANSIndex.decode(
+                    data, expectedExperts: layout.expertsPerLayer,
+                    expertStride: layout.expertStride, payloadSize: actualSize)
+            } catch {
+                throw RepackError.configurationInvalid(detail: "\(indexPath): \(error)")
+            }
+            return
         }
         guard
             let cap = ExpertBlobIndex.maximumIndexBytes(

@@ -44,6 +44,7 @@ private struct Arguments {
     var inputSSDAI: String?
     var inputSnapshot: String?
     var compressExperts = false
+    var codec: CompressExpertsCodec = .frames
     var localModelID: String?
     var draftHead = false
     var shareNgramTable = false
@@ -71,6 +72,16 @@ private struct Arguments {
             case "--compress-experts":
                 parsed.compressExperts = true
                 index += 1
+            case "--codec":
+                guard index + 1 < values.count else {
+                    throw ParseError.missingValue(flag)
+                }
+                guard let codec = CompressExpertsCodec(rawValue: values[index + 1]) else {
+                    throw ParseError.invalidMode(
+                        "unknown codec \"\(values[index + 1])\"; supported: frames, rans")
+                }
+                parsed.codec = codec
+                index += 2
             case "--model":
                 guard index + 1 < values.count else {
                     throw ParseError.missingValue(flag)
@@ -249,7 +260,8 @@ private func run(_ values: [String]) async -> Int32 {
         do {
             let result = try CompressExpertsTool.run(
                 options: CompressExpertsOptions(
-                    inputSSDAI: input, output: output, overwrite: arguments.overwrite),
+                    inputSSDAI: input, output: output, overwrite: arguments.overwrite,
+                    codec: arguments.codec),
                 progress: { progress in
                     let ratio = Double(progress.compressedBytes) / Double(max(progress.rawBytes, 1))
                     print(

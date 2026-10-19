@@ -23,15 +23,28 @@ import TinyTitanFormat
 /// ceiling. The tool exists so the result stays reproducible; do not convert an
 /// install expecting it to get faster until that pipeline exists.
 /// `docs/llm-compression-design.md` has the budget and the fixes.
+/// Which codec the converted install carries.
+public enum CompressExpertsCodec: String, Sendable {
+    /// LZFSE frames, decoded on the CPU (the first format).
+    case frames
+    /// Static rANS blocks, decoded by a Metal kernel (the GPU format).
+    case rans
+}
+
 public struct CompressExpertsOptions: Sendable {
     public let inputSSDAI: String
     public let output: String
     public let overwrite: Bool
+    public let codec: CompressExpertsCodec
 
-    public init(inputSSDAI: String, output: String, overwrite: Bool) {
+    public init(
+        inputSSDAI: String, output: String, overwrite: Bool,
+        codec: CompressExpertsCodec = .frames
+    ) {
         self.inputSSDAI = inputSSDAI
         self.output = output
         self.overwrite = overwrite
+        self.codec = codec
     }
 }
 
@@ -63,11 +76,13 @@ public enum CompressExpertsTool {
         let layoutData: Data
         let layers: [LayerPlan]
         let rawLayerBytes: UInt64
+        let codec: CompressExpertsCodec
     }
 
     struct LayerPlan {
         let file: String
         let geometry: CompressedExpertLayerGeometry
+        let ransBlocks: [RANSBlockSpec]
     }
 
     /// Files an install may carry that are not payload of the copy: the two
@@ -83,11 +98,13 @@ public enum CompressExpertsTool {
     ) throws -> CompressExpertsResult {
         try prepareOutput(options)
         do {
-            let input = try loadInput(options.inputSSDAI)
+            let input = try loadInput(options.inputSSDAI, codec: options.codec)
             try copyPayload(from: input.root, to: options.output)
             let layerResults = try compressLayers(
                 input: input, output: options.output, progress: progress)
-            let layoutBytes = try SSDAIJSON.markCompressed(layoutData: input.layoutData)
+            let layoutBytes = try SSDAIJSON.markCompressed(
+                layoutData: input.layoutData,
+                compression: input.codec == .rans ? .rans : .lzfse)
             try writeLayout(layoutBytes, to: options.output)
             try writeManifest(
                 input: input, output: options.output,
@@ -148,7 +165,9 @@ public enum CompressExpertsTool {
     }
 
     /// Read the manifest and layout, and check the raw contract they claim.
-    static func loadInput(_ root: String) throws -> Input {
+    static func loadInput(
+        _ root: String, codec: CompressExpertsCodec = .frames
+    ) throws -> Input {
         let manifestData = try Posix.readBoundedData(
             root + "/manifest.json",
             maximumBytes: VerifiedInstallTool.metadataMaxBytes)
@@ -211,11 +230,13 @@ public enum CompressExpertsTool {
                     geometry: CompressedExpertLayerGeometry(
                         expertStride: layout.expertStride,
                         expertsPerLayer: layout.expertsPerLayer,
-                        splitBytes: split)))
+                        splitBytes: split),
+                    ransBlocks: RANSExpertLayerGeometry.blocks(for: layer)))
         }
         return Input(
             root: root, manifest: manifest, files: files, layout: layout,
-            layoutData: layoutData, layers: layers, rawLayerBytes: rawLayerBytes)
+            layoutData: layoutData, layers: layers, rawLayerBytes: rawLayerBytes,
+            codec: codec)
     }
 
     /// Write the layer files, in layout order.
@@ -230,8 +251,29 @@ public enum CompressExpertsTool {
         for (index, layer) in input.layers.enumerated() {
             let source = input.root + "/packed_experts/" + layer.file
             let destination = output + "/packed_experts/" + layer.file
-            let result = try CompressedExpertLayerWriter.write(
-                sourcePath: source, destinationPath: destination, geometry: layer.geometry)
+            let result: CompressedExpertLayerResult
+            switch input.codec {
+            case .frames:
+                result = try CompressedExpertLayerWriter.write(
+                    sourcePath: source, destinationPath: destination,
+                    geometry: layer.geometry)
+            case .rans:
+                let index = (destination as NSString).deletingPathExtension + ".ridx"
+                let rans = try RANSExpertLayerWriter.write(
+                    sourcePath: source, destinationPath: destination,
+                    indexPath: index,
+                    geometry: RANSExpertLayerGeometry(
+                        expertStride: layer.geometry.expertStride,
+                        expertsPerLayer: layer.geometry.expertsPerLayer,
+                        blocks: layer.ransBlocks))
+                result = CompressedExpertLayerResult(
+                    compressedBytes: rans.compressedBytes,
+                    indexBytes: rans.indexBytes,
+                    sha256: rans.sha256,
+                    indexSha256: rans.indexSha256,
+                    blocksPerExpert: rans.blockCount,
+                    blockBytes: 0)
+            }
             results.append((layer.file, result))
             progress(
                 CompressExpertsProgress(
