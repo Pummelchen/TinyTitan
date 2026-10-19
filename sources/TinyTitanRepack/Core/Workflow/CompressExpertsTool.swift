@@ -17,7 +17,7 @@ import TinyTitanFormat
 /// **It is not a speed win, and that is measured.** Ornith 4-bit converts at
 /// 91.1% of the expert bytes (18.12 -> 16.50 GB, 94.6 s for 40 layers) and
 /// decodes at 7.91 tok/s against the raw install's 13.76 -- a 42.5% loss, because
-/// a token misses ~190 MB of experts and LZFSE decodes at ~0.9 GB/s per core.
+/// a token misses ~204 MB of experts and LZFSE decodes at ~0.9 GB/s per core.
 /// The tool exists so that result stays reproducible; do not convert an install
 /// expecting it to get faster. `docs/perf-campaign-2026-10-18.md` has the A/B.
 public struct CompressExpertsOptions: Sendable {

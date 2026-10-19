@@ -208,7 +208,7 @@ extension PreadExpertStreamer {
     /// one storage call per few experts (a per-expert fetch of ~1.2 MB measured
     /// 8 ms against the raw path's batched 2 ms), and they decode in parallel
     /// on separate staging buffers (serial decoding measured 3.2 tok/s against
-    /// the raw path's 10.0). A token misses ~190 MB on Ornith 4-bit, so this is
+    /// the raw path's 10.0). A token misses ~204 MB on Ornith 4-bit, so this is
     /// the path's whole cost.
     func executeCompressedMisses(_ plan: ExpertCachePlan) throws {
         guard let frames = compressedFrames else { return }

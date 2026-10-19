@@ -403,12 +403,20 @@ prompt/greedy/128 new tokens, the two installs alternating order and sharing
 lossless; the format is correct, the speed is not).
 
 **Why the estimate was wrong, in one number.** The plan assumed a token reads
-~65 MiB of experts. Measured on this install: 2,654 misses over 21 tokens =
-**127 misses/token x ~1.5 MB packed = ~190 MB/token**, because the 10.55 GB
-cache holds 4 slots per layer while the router asks for 8. LZFSE decodes at
-~0.9 GB/s per core, so one token's decode is **~211 ms of CPU** against a
-~100 ms token. The churn test that cleared the CPU assumption paced 1.6 MiB
-every 1.8 ms -- one expert per layer -- and the engine misses four to six.
+~65 MiB of experts. Measured on this install: 2,654 misses over 21 forward
+passes = **126 misses/token x ~1.61 MB packed = ~204 MB/token**, because the
+10.55 GB cache holds 4 slots per layer while the router asks for 8. LZFSE
+decodes at ~0.9 GB/s per core, so one token's decode is **~226 ms of CPU**
+against a ~100 ms token. The churn test that cleared the CPU assumption paced
+1.6 MiB every 1.8 ms -- one expert per layer -- and the engine misses four to
+six.
+
+Worse, the saving inverted: the raw arm missed 111 experts/token (196 MB), the
+compressed arm 126 (204 MB packed). The prefetch ring, which normally fills
+slots ahead of demand, could not keep up with decode (adoption 0.7/token against
+21.75), so the compressed install read *more* bytes than the raw one. Even with
+the hit rates equalised it would have read 8.4% fewer -- about 5 ms of a ~100 ms
+token, against ~226 ms of decode CPU that the ring has to hide to get it.
 
 The fixes that were tried, all measured, none close:
 

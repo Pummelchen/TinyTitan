@@ -11,7 +11,7 @@ import Foundation
 /// **Why a pool at all.** The first version of the compressed path reused one
 /// buffer under a lock. On Ornith 4-bit that put every expert decode in the
 /// token behind one mutex and one core, and decode fell from 10.0 to 3.2 tok/s —
-/// exactly the single-core LZFSE bound for the ~283 MB a token misses. A
+/// exactly the single-core LZFSE bound for the ~204 MB a token misses. A
 /// per-decode buffer is what lets the misses decode in parallel.
 /// unchecked-invariant: `free` and the borrow/give-back pairing are guarded by
 /// `lock`, and a buffer is removed from `free` before it is handed out, so no

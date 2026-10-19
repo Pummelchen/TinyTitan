@@ -281,7 +281,7 @@ exactly as before.
 
 This format is **not a recommended install shape**: on Ornith 4-bit it measured
 13.76 -> 7.91 tok/s decode (-42.5%) despite saving 8.9% of the expert bytes,
-because a token misses about 190 MB of experts and LZFSE decodes at ~0.9 GB/s
+because a token misses about 204 MB of experts and LZFSE decodes at ~0.9 GB/s
 per core — see `docs/perf-campaign-2026-10-18.md`. The reader and the
 `--compress-experts` converter exist so the result is reproducible, not because
 a compressed install is faster; keep an install raw unless you are measuring it.
