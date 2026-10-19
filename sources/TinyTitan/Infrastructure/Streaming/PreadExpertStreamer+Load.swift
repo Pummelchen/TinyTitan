@@ -395,7 +395,11 @@ extension PreadExpertStreamer {
         // the frames are laid out back to back and are shorter than the stride.
         // The guard for that path is each frame's own end, checked below.
         let regionOffset: UInt64
-        if let frames = compressedFrames {
+        if ransResources != nil {
+            // The payload is not at raw offsets; the sidecar's block ranges are
+            // checked when the layer opens.
+            regionOffset = 0
+        } else if let frames = compressedFrames {
             let expertFrames = frames[expert]
             let end = expertFrames.map { $0.offset + UInt64($0.length) }.max() ?? 0
             guard end <= layout.streamSize else {
@@ -433,7 +437,9 @@ extension PreadExpertStreamer {
             generation: slotGeneration[slot])
         let started = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         do {
-            if let frames = compressedFrames {
+            if ransResources != nil {
+                try decodeRANSExpert(expert: expert, slot: slot)
+            } else if let frames = compressedFrames {
                 try readCompressedExpert(
                     frames: frames[expert], slot: slot)
             } else {

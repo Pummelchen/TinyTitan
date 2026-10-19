@@ -240,6 +240,28 @@ package enum ExpertRANSIndex {
         return Layout(scaleBits: scaleBits, models: models, blocks: experts)
     }
 
+    /// Streams per block, sized so one GPU thread decodes about 2 KiB.
+    package static func streams(symbolCount: Int) -> Int {
+        max(1, min(256, symbolCount / 2048))
+    }
+
+    /// The phase each block index belongs to, derived from the layer's tensors.
+    ///
+    /// The writer lays blocks out by sorted tensor name, so the runtime can
+    /// recompute the same order from `layout.json`: `down` tensors are phase 1
+    /// (the tail the GPU reads second), everything else phase 0.
+    package static func phases(for layer: SSDAILayerV1) -> [UInt8] {
+        guard let expert = layer.experts.first else { return [] }
+        var phases: [UInt8] = []
+        for name in expert.tensors.keys.sorted() {
+            guard let tensor = expert.tensors[name] else { continue }
+            let phase: UInt8 = name.hasPrefix("down") ? 1 : 0
+            phases.append(phase)
+            if tensor.dtype == "BF16" { phases.append(phase) }
+        }
+        return phases
+    }
+
     /// Where a layer file's rANS sidecar lives: `layer_00.bin` -> `layer_00.ridx`.
     package static func sidecarName(forLayerFile file: String) -> String {
         (file as NSString).deletingPathExtension + ".ridx"

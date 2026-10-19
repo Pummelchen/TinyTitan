@@ -58,6 +58,10 @@ public struct StreamLayout: Sendable {
     /// The decoded size of one block in a v3 index, or 0 for a legacy (v2)
     /// index whose entries are whole-phase frames.
     package let compressedBlockBytes: UInt64
+    /// The rANS sidecar, when the layer is entropy-coded for the GPU.
+    package let rans: ExpertRANSIndex.Layout?
+    /// Phase 0/1 per block index, recomputed from the layer's tensors.
+    package let ransPhases: [UInt8]
 
     package init(
         path: String,
@@ -68,7 +72,9 @@ public struct StreamLayout: Sendable {
         expertOffsets: [UInt64]? = nil,
         phase1Bytes: UInt64? = nil,
         compressedFrames: [[ExpertBlobIndex.Blob]]? = nil,
-        compressedBlockBytes: UInt64 = 0
+        compressedBlockBytes: UInt64 = 0,
+        rans: ExpertRANSIndex.Layout? = nil,
+        ransPhases: [UInt8] = []
     ) {
         self.path = path
         self.streamOffset = streamOffset
@@ -79,6 +85,8 @@ public struct StreamLayout: Sendable {
         self.phase1Bytes = phase1Bytes
         self.compressedFrames = compressedFrames
         self.compressedBlockBytes = compressedBlockBytes
+        self.rans = rans
+        self.ransPhases = ransPhases
     }
 
     /// The byte offset of one expert within this layer's file.

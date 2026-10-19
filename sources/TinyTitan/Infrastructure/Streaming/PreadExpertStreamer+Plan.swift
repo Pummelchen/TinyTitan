@@ -155,7 +155,9 @@ extension PreadExpertStreamer {
             // below copies a range, and a frame's bytes are not the weights.
             // The decode goes straight into the same slots instead, so the
             // residency and buffer bookkeeping below is unchanged.
-            if compressedFrames != nil {
+            if ransResources != nil {
+                try executeRANSPlan(plan, firstStage: firstStage)
+            } else if compressedFrames != nil {
                 try executeCompressedMisses(plan, firstStage: firstStage)
             } else if let metalReader {
                 try executeMetalReads(plan, reader: metalReader)
@@ -202,6 +204,9 @@ extension PreadExpertStreamer {
         // Compressed layers decode on the CPU, so they take the scheduler path
         // even when Metal I/O is configured: handing MTLIO a frame offset would
         // copy frame bytes into a slot.
+        if ransResources != nil {
+            return submitRANSPlan(plan, token: token)
+        }
         if compressedFrames != nil {
             // `publishesFirstStage` is what lets the runner encode phase 1 for
             // the misses while the tails decode: it awaits `firstStageCompletion`
@@ -294,4 +299,26 @@ extension PreadExpertStreamer {
         return operation
     }
 
+    /// Submits a rANS plan: phase 1 is published when the front blocks land, so
+    /// the runner can encode gate|up while the tails decode.
+    private func submitRANSPlan(
+        _ plan: ExpertCachePlan, token: ExpertIOCompletionToken?
+    ) -> ExpertLoadOperation {
+        let operation = ExpertLoadOperation(
+            completionToken: token,
+            eventCoordinator: eventCoordinator,
+            backendSignalsEvent: false,
+            publishesFirstStage: true)
+        ExpertIOScheduler.shared.submit { [self, operation] in
+            operation.markInFlight()
+            do {
+                _ = try executeExpertCachePlan(
+                    plan, firstStage: operation.publishFirstStage)
+                operation.finish(.success(()))
+            } catch {
+                operation.finish(.failure(error))
+            }
+        }
+        return operation
+    }
 }

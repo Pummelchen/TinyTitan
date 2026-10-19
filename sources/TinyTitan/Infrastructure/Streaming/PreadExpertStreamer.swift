@@ -122,6 +122,8 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// demand reader blocks the next layer's demand read. This one is only used
     /// by `beginPrefetch`.
     let prefetchReader: ParallelExpertReader?
+    /// GPU decode resources when the layer is rANS-coded.
+    let ransResources: RANSLayerResources?
     /// The tail-phase reader. Fronts and tails of one wave load at the same
     /// time on different readers, because a reader serialises its own batches;
     /// this is what lets the front decode overlap the tail read.
@@ -192,6 +194,13 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         self.slotCount = slotCount
         self.compressedFrames = layout.compressedFrames
         self.compressedBlockBytes = layout.compressedBlockBytes
+        if let rans = layout.rans {
+            self.ransResources = try RANSLayerResources(
+                layout: rans, phases: layout.ransPhases, device: device,
+                payloadPath: layout.path)
+        } else {
+            self.ransResources = nil
+        }
         self.cachePolicy = cachePolicy
         self.expertUseCountCap = expertUseCountCap
         self.eventCoordinator = eventCoordinator

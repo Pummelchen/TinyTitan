@@ -24,6 +24,20 @@ extension PreadExpertStreamer {
             throw ModelError.internalInconsistency(
                 detail: "prefetch experts and destinations differ in count")
         }
+        // A rANS layer's payload is not at raw offsets, and the ring stages
+        // raw pointers rather than slot buffers, so speculation has no decode
+        // path here. Failing the operation keeps its slots from being adopted:
+        // a completed-but-unwritten buffer would copy garbage into a slot,
+        // which is exactly the corruption this guard prevents.
+        if ransResources != nil {
+            let operation = ExpertLoadOperation()
+            operation.markInFlight()
+            operation.finish(
+                .failure(
+                    ModelError.internalInconsistency(
+                        detail: "rANS prefetch is not implemented")))
+            return operation
+        }
         // A compressed layer prefetches by decoding into the destination
         // buffers, so adoption stays the same memcpy the raw path uses. The
         // decode happens on this scheduler thread, off the decode critical path,

@@ -73,7 +73,6 @@ public struct RANSExpertLayerResult: Sendable, Equatable {
 public enum RANSExpertLayerWriter {
     package static let scaleBits: UInt8 = 14
     package static let modelTotal = 1 << Int(scaleBits)
-    package static let streamTargetBytes = 2048
 
     public static func write(
         sourcePath: String,
@@ -181,7 +180,7 @@ public enum RANSExpertLayerWriter {
 
     /// Streams per block, sized so one GPU thread decodes about 2 KiB.
     package static func streams(count: Int) -> Int {
-        max(1, min(256, count / streamTargetBytes))
+        ExpertRANSIndex.streams(symbolCount: count)
     }
 
     package static func normalized(_ counts: [Int], total: Int) -> [UInt16] {

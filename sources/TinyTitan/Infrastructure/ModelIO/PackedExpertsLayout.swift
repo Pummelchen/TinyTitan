@@ -48,6 +48,8 @@ struct PackedExpertsLayout: Sendable {
     let expertStride: UInt64
     let numLayers: Int
     let expertsPerLayer: Int
+    /// `nil` for a raw install; `lzfse` or `rans` for a compressed one.
+    let compression: SSDAIExpertCompression?
     let layers: [LayerLayout]
 
     /// Resolve `(layer, expert)` -> `ExpertEntry`. O(1).
@@ -139,6 +141,7 @@ enum PackedExpertsLayoutReader {
             expertStride: wire.expertStride,
             numLayers: wire.numLayers,
             expertsPerLayer: wire.expertsPerLayer,
+            compression: wire.compression,
             layers: layers)
     }
 

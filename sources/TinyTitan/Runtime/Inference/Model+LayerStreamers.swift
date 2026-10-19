@@ -133,25 +133,29 @@ extension Model {
         // every derived offset pointing outside the layer file.
         let phase1Bytes = Self.phase1Bytes(
             forLayer: L, layout: packedExpertsLayout)
+        let (rans, ransPhases) = try Self.ransLayoutAndPhases(
+            forLayer: L, layout: packedExpertsLayout, url: url)
         let compressed = try Self.compressedLayout(
             beside: url,
             expertsPerLayer: packedExpertsLayout.expertsPerLayer,
             expertStride: packedExpertsLayout.expertStride,
             phase1Bytes: phase1Bytes)
-        let streamSize = try Self.streamSize(
-            forLayer: L, layout: packedExpertsLayout,
-            compressed: compressed)
-        let layout = StreamLayout(
-            path: url.path,
-            streamOffset: 0,
-            streamSize: streamSize,
-            expertsPerLayer: packedExpertsLayout.expertsPerLayer,
-            expertStride: packedExpertsLayout.expertStride,
-            expertOffsets: compressed == nil
-                ? packedExpertsLayout.layers[L].experts.map(\.offset) : nil,
-            phase1Bytes: phase1Bytes,
-            compressedFrames: compressed?.entries.map(\.frames),
-            compressedBlockBytes: compressed?.blockBytes ?? 0)
+        let streamSize: UInt64
+        if rans != nil {
+            // The rANS payload is the layer file itself; its bytes are not at
+            // raw offsets, so the stream is sized by the file.
+            streamSize =
+                try FileManager.default
+                .attributesOfItem(atPath: url.path)[.size] as? UInt64 ?? 0
+        } else {
+            streamSize = try Self.streamSize(
+                forLayer: L, layout: packedExpertsLayout,
+                compressed: compressed)
+        }
+        let layout = Self.streamLayout(
+            url: url, packed: packedExpertsLayout, layer: L,
+            streamSize: streamSize, phase1Bytes: phase1Bytes,
+            compressed: compressed, rans: rans, ransPhases: ransPhases)
         let slotCount: Int
         switch streamingMode {
         case .pread(let configuredSlotCount):
@@ -307,6 +311,74 @@ extension Model {
     /// match the layer's -- expert count, and where the split falls -- so a
     /// sidecar written for another layer or the other split is refused at load
     /// rather than decoded into slots.
+    /// The byte layout the streamer opens one layer with.
+    static func streamLayout(
+        url: URL, packed: PackedExpertsLayout, layer: Int,
+        streamSize: UInt64, phase1Bytes: UInt64?,
+        compressed: ExpertBlobIndex.Layout?, rans: ExpertRANSIndex.Layout?,
+        ransPhases: [UInt8]
+    ) -> StreamLayout {
+        StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: streamSize,
+            expertsPerLayer: packed.expertsPerLayer,
+            expertStride: packed.expertStride,
+            expertOffsets: compressed == nil && rans == nil
+                ? packed.layers[layer].experts.map(\.offset) : nil,
+            phase1Bytes: phase1Bytes,
+            compressedFrames: compressed?.entries.map(\.frames),
+            compressedBlockBytes: compressed?.blockBytes ?? 0,
+            rans: rans, ransPhases: ransPhases)
+    }
+
+    /// The rANS sidecar and per-block phases, or `(nil, [])` for a raw layer.
+    static func ransLayoutAndPhases(
+        forLayer layer: Int, layout: PackedExpertsLayout, url: URL
+    ) throws -> (ExpertRANSIndex.Layout?, [UInt8]) {
+        guard layout.compression == .rans else { return (nil, []) }
+        let rans = try ransLayout(
+            beside: url, expertsPerLayer: layout.expertsPerLayer,
+            expertStride: layout.expertStride)
+        return (rans, ransPhases(for: layout.layers[layer]))
+    }
+
+    /// Phase 0/1 per block index, in the writer's block order (sorted tensor
+    /// name, BF16 tensors contributing a mantissa and an exponent block).
+    static func ransPhases(for layer: LayerLayout) -> [UInt8] {
+        guard let expert = layer.experts.first else { return [] }
+        var phases: [UInt8] = []
+        for name in expert.subTensors.keys.sorted() {
+            guard let tensor = expert.subTensors[name] else { continue }
+            let phase: UInt8 = name.hasPrefix("down") ? 1 : 0
+            phases.append(phase)
+            if tensor.dtype == "BF16" { phases.append(phase) }
+        }
+        return phases
+    }
+
+    /// Reads and validates a layer's rANS sidecar.
+    static func ransLayout(
+        beside url: URL,
+        expertsPerLayer: Int,
+        expertStride: UInt64
+    ) throws -> ExpertRANSIndex.Layout {
+        let name = ExpertRANSIndex.sidecarName(forLayerFile: url.lastPathComponent)
+        let indexURL = url.deletingLastPathComponent().appendingPathComponent(name)
+        let cap = UInt64(
+            ExpertRANSIndex.headerBytes
+                + Int(ExpertRANSIndex.maximumBlockCount) * 512
+                + expertsPerLayer * Int(ExpertRANSIndex.maximumBlockCount)
+                * ExpertRANSIndex.blockBytes)
+        let data = try BoundedMetadataRead.read(fileAt: indexURL, maxBytes: cap)
+        let payloadSize =
+            try FileManager.default
+            .attributesOfItem(atPath: url.path)[.size] as? UInt64 ?? 0
+        return try ExpertRANSIndex.decode(
+            data, expectedExperts: expertsPerLayer,
+            expertStride: expertStride, payloadSize: payloadSize)
+    }
+
     static func compressedLayout(
         beside url: URL,
         expertsPerLayer: Int,

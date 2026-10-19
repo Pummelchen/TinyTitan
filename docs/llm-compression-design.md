@@ -305,12 +305,31 @@ over all 256 experts of a layer and each BF16 tensor gets its own pair of planes
 The 3-expert wave decodes inside the 1.6-1.8 ms layer, which is the number the
 engine needs.
 
-**What is left is the runtime path**, not the format: load the expert's payload
-into a GPU buffer with MTLIO (no CPU copy), run the kernel into the slot, and
-double-buffer so layer N+1's payload load overlaps layer N's decode. Then the
-paired A/B. The ceiling is the 11.5% byte saving: with the decode hidden that is
-+8-10% on Ornith 4-bit, and more on 8-bit/125B where the layer window is three to
-four times the decode.
+**The runtime path exists and is bit-exact, but is not yet fast.** The streamer
+now reads a rANS layer's sidecar, stages each wave's payload into a shared
+MTLBuffer, and decodes gate|up blocks before publishing phase 1 and down blocks
+after it. The rANS install answers identically to the raw one on the same prompt
+(" Paris. / A. True / B. False / Answer: A" for both), so the data path is right.
+
+Measured, it is **2.1-2.3 tok/s against 15-16 raw**, and the cause is measured,
+not guessed:
+
+- `waitUntilCompleted` per phase takes 8-10 ms, then 14-18 ms, though the same
+  kernel is 1.3 ms in isolation. A separate command queue still queues behind
+  the engine's deeply-submitted compute, so a synchronous per-layer GPU wait is
+  charged the device's backlog. The decode must be enqueued ahead and awaited
+  later, not waited on in place.
+- The prediction ring cannot run: it stages raw pointers, not slot buffers, so
+  it is disabled for rANS and the hit rate falls from 0.60 to 0.40 -- the demand
+  path then decodes ~40% more experts than the raw path reads.
+
+The next two steps, in order: (1) an asynchronous double buffer -- enqueue the
+next layer's payload read and kernel during the current layer, await one layer
+later, with a rANS-aware prefetch that decodes predicted experts into ring
+buffers on the GPU; (2) move the per-stream length tables into the sidecar, since
+reading them at layer open costs 18 s of prefill (3,840 preads a layer). The
+11.5% saving is still the ceiling: +8-10% on 4-bit if the decode is hidden, more
+on 8-bit/125B.
 
 ## Status
 
