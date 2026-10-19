@@ -198,6 +198,18 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Startup is not a problem, and the first measurement said it was
+
+I chased a 90-125 s "load time" for an hour before checking what a user actually
+sees. The port answers `/v1/models` **1.6 s** after launch, a first request on a
+cold server completes in **3.1 s**, and start-to-first-answer is **4.7 s**.
+
+The 90-125 s figures were an artifact of the measurement, not the engine: they
+waited for the `ready at` banner in a *redirected* log, and Swift's stdout is
+block-buffered there, so the line only appears when the process flushes or dies.
+Polling HTTP readiness instead gives the honest number. Nothing to optimise on
+this axis, and no claim made from the bad number.
+
 ## Status at 2026-10-19 00:00
 
 **Nothing has cleared the bar after ~22 configurations.** The decode path on this
