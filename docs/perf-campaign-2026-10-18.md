@@ -418,6 +418,16 @@ slots ahead of demand, could not keep up with decode (adoption 0.7/token against
 the hit rates equalised it would have read 8.4% fewer -- about 5 ms of a ~100 ms
 token, against ~226 ms of decode CPU that the ring has to hide to get it.
 
+**The ceiling is the layer, not the codec.** Decoding parallelizes across
+experts, but a layer only misses four to six of them, and layers are strictly
+serial: layer L+1's experts cannot be chosen until L's router has produced its
+logits. So the fan-out is ~5 experts, not 8 cores. One layer's ~10 MB therefore
+costs ~2.2 ms (5 cores) to ~2.7 ms (4) on top of its read, and 40 serial layers
+add **~90-110 ms a token** -- against the ~5 ms the byte saving is worth. The
+engine could hide that only if it decoded a whole layer ahead of the GPU, which
+is exactly what the one-slot ring cannot do; a depth-8 ring gets adoption up but
+multiplies the same work and still measured 5.4 tok/s.
+
 The fixes that were tried, all measured, none close:
 
 - one shared staging buffer behind a lock -> 3.19 tok/s; per-decode buffers from
