@@ -305,31 +305,34 @@ over all 256 experts of a layer and each BF16 tensor gets its own pair of planes
 The 3-expert wave decodes inside the 1.6-1.8 ms layer, which is the number the
 engine needs.
 
-**The runtime path exists and is bit-exact, but is not yet fast.** The streamer
-now reads a rANS layer's sidecar, stages each wave's payload into a shared
-MTLBuffer, and decodes gate|up blocks before publishing phase 1 and down blocks
-after it. The rANS install answers identically to the raw one on the same prompt
-(" Paris. / A. True / B. False / Answer: A" for both), so the data path is right.
+**The runtime path exists and is bit-exact on all three MoE installs, and is
+still a loss.** The streamer decodes rANS layers on the GPU, the prediction ring
+now decodes predicted experts into its own buffers a layer ahead (adoption 0 ->
+32 experts/token, hit rate 0.40 -> 0.48 on 4-bit), and layer open reads its
+stream length tables in parallel (prefill 17.4 -> 5.8 s on 4-bit).
 
-Measured, it is **2.1-2.3 tok/s against 15-16 raw**, and the cause is measured,
-not guessed:
+| install | expert payload | ratio | saving | raw tok/s | rANS tok/s | output |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Ornith 4-bit | 18.12 -> 16.04 GB | 0.8852 | 11.48% | 6.32 | 2.86 | identical |
+| Ornith 8-bit | 34.23 -> 32.00 GB | 0.9350 | 6.50% | 6.56 | 2.20 | identical |
+| Qwen3.8 4-bit | 68.05 -> 60.26 GB | 0.8856 | 11.44% | 5.18 | 1.40 | identical |
 
-- `waitUntilCompleted` per phase takes 8-10 ms, then 14-18 ms, though the same
-  kernel is 1.3 ms in isolation. A separate command queue still queues behind
-  the engine's deeply-submitted compute, so a synchronous per-layer GPU wait is
-  charged the device's backlog. The decode must be enqueued ahead and awaited
-  later, not waited on in place.
-- The prediction ring cannot run: it stages raw pointers, not slot buffers, so
-  it is disabled for rANS and the hit rate falls from 0.60 to 0.40 -- the demand
-  path then decodes ~40% more experts than the raw path reads.
+(16-token runs, `--temperature 0`; the rANS rows use ring depth 8. GPU check on
+layer 20 of each: 0 mismatched bytes of 5.3 / 10.0 / 8.3 MB.)
 
-The next two steps, in order: (1) an asynchronous double buffer -- enqueue the
-next layer's payload read and kernel during the current layer, await one layer
-later, with a rANS-aware prefetch that decodes predicted experts into ring
-buffers on the GPU; (2) move the per-stream length tables into the sidecar, since
-reading them at layer open costs 18 s of prefill (3,840 preads a layer). The
-11.5% saving is still the ceiling: +8-10% on 4-bit if the decode is hidden, more
-on 8-bit/125B.
+The cause is measured and it is not the codec: `waitUntilCompleted` on our
+compute costs **8-10 ms for phase 0 and 14-18 ms for phase 1 in-engine**, while
+the same kernel is 1.5 ms in isolation. The engine's GEMM pipeline keeps the
+device saturated, and a decode submitted from another queue is charged that
+backlog; the prefetch ring has one layer (~1.6 ms) of lead, which is less than
+the 8 ms the device takes to run the kernel. Moving the decode onto the GPU was
+the right direction but this engine already spends its GPU budget on the GEMMs.
+
+What that leaves: the decode must not occupy the same GPU as the GEMM, which
+means either a second GPU engine/queue priority that Metal does not expose, or
+decoding during an idle window the pipeline does not have. On this engine the
+measured conclusion is that a GPU-decoded install is a footprint feature (11.5%
+smaller on the 4-bit and 125B, 6.5% on 8-bit), not a speed one.
 
 ## Status
 

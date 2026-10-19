@@ -10,7 +10,49 @@ import Synchronization
 // rule when compressed prefetch landed. Pure code motion plus the compressed
 // branch, which decodes into the ring buffer so adoption stays the `memcpy` the
 // raw path uses.
+/// Ring buffers handed to the scheduler.
+/// unchecked-invariant: the buffers are retained by the ring until the operation
+/// completes, and each is written by exactly one speculative decode.
+final class RANSPrefetchBuffers: @unchecked Sendable {
+    let values: [MTLBuffer]
+
+    init(_ values: [MTLBuffer]) {
+        self.values = values
+    }
+}
+
 extension PreadExpertStreamer {
+    /// A rANS layer's speculation decodes on the GPU into the ring's buffers,
+    /// one layer ahead, so adoption replaces a demand decode.
+    public func beginPrefetch(experts: [Int], buffers: [MTLBuffer]) throws
+        -> ExpertLoadOperation
+    {
+        guard let resources = ransResources else {
+            return try beginPrefetch(
+                experts: experts, destinations: buffers.map { $0.contents() })
+        }
+        guard experts.count == buffers.count else {
+            throw ModelError.internalInconsistency(
+                detail: "prefetch experts and buffers differ in count")
+        }
+        let operation = ExpertLoadOperation()
+        let safeBuffers = RANSPrefetchBuffers(buffers)
+        ExpertIOScheduler.shared.submit(priority: .speculative) {
+            [self, operation, safeBuffers] in
+            operation.markInFlight()
+            do {
+                try decodeRANSInto(
+                    experts: experts, outputs: safeBuffers.values,
+                    offsets: [UInt64](repeating: 0, count: experts.count),
+                    resources: resources, firstStage: nil)
+                operation.finish(.success(()))
+            } catch {
+                operation.finish(.failure(error))
+            }
+        }
+        return operation
+    }
+
     /// Starts a bounded, raw speculative read. The destination buffers are not
     /// cache slots, so an incorrect prediction cannot evict an authoritative
     /// expert. Demand work is always scheduled at higher priority.

@@ -45,16 +45,36 @@ extension PreadExpertStreamer {
         resources: RANSLayerResources,
         firstStage: (() -> Void)?
     ) throws {
+        try decodeRANSInto(
+            experts: experts,
+            outputs: slots.map { slotBuffers[$0] },
+            offsets: slots.map { slotBufferOffsets[$0] },
+            resources: resources, firstStage: firstStage)
+    }
+
+    /// The general form: any output buffers and base offsets. The ring's GPU
+    /// prefetch uses it with dedicated buffers, so a predicted expert is
+    /// decoded a layer ahead and adopted instead of decoded on demand.
+    func decodeRANSInto(
+        experts: [Int],
+        outputs: [MTLBuffer],
+        offsets: [UInt64],
+        resources: RANSLayerResources,
+        firstStage: (() -> Void)?
+    ) throws {
         precondition(
-            experts.count == slots.count,
-            "each rANS expert needs one slot")
+            experts.count == outputs.count && experts.count == offsets.count,
+            "each rANS expert needs one output")
         guard !experts.isEmpty else { return }
         guard experts.count <= resources.maximumWave else {
             throw ModelError.internalInconsistency(
                 detail: "rANS wave of \(experts.count) exceeds \(resources.maximumWave)")
         }
 
-        var offsets: [UInt64] = []
+        // One staging buffer is shared with the ring's speculative decode.
+        ransStagingLock.lock()
+        defer { ransStagingLock.unlock() }
+        var sourceOffsets: [UInt64] = []
         var counts: [Int] = []
         var destinations: [UnsafeMutableRawPointer] = []
         let payloadBase = resources.payload.contents()
@@ -63,13 +83,13 @@ extension PreadExpertStreamer {
                 throw ModelError.internalInconsistency(
                     detail: "rANS sidecar has no payload for expert \(expert)")
             }
-            offsets.append(range.offset)
+            sourceOffsets.append(range.offset)
             counts.append(range.count)
             destinations.append(
                 payloadBase.advanced(by: position * resources.payloadStride))
         }
         let tRead = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        try readRanges(offsets: offsets, counts: counts, into: destinations)
+        try readRanges(offsets: sourceOffsets, counts: counts, into: destinations)
         let tReadDone = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         // One expert's descriptors live in their own aligned region.
         let descriptorStride = resources.layout.models.count * 256 * 32
@@ -92,8 +112,7 @@ extension PreadExpertStreamer {
                     region[index * 8] = payloadOffset
                     region[index * 8 + 1] = plan.tableOffset
                     region[index * 8 + 2] =
-                        plan.outputOffset
-                        + UInt32(slotBufferOffsets[slots[position]])
+                        plan.outputOffset + UInt32(offsets[position])
                     region[index * 8 + 3] = plan.stride
                     region[index * 8 + 4] = plan.symbolCount
                     region[index * 8 + 5] = plan.streamIndex
@@ -110,7 +129,7 @@ extension PreadExpertStreamer {
                 encoder.setBuffer(resources.tables, offset: 0, index: 1)
                 encoder.setBuffer(
                     resources.descriptors, offset: position * descriptorStride, index: 2)
-                encoder.setBuffer(slotBuffers[slots[position]], offset: 0, index: 3)
+                encoder.setBuffer(outputs[position], offset: 0, index: 3)
                 encoder.setBuffer(resources.slotTables, offset: 0, index: 4)
                 encoder.dispatchThreads(
                     MTLSize(width: plans.count, height: 1, depth: 1),

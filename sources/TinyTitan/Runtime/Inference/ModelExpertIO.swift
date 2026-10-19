@@ -192,9 +192,7 @@ extension Model {
         -> ExpertLoadOperation
     {
         let streamer = try openStreamer(for: layer)
-        return try streamer.beginPrefetch(
-            experts: experts,
-            destinations: buffers.map { $0.contents() })
+        return try streamer.beginPrefetch(experts: experts, buffers: buffers)
     }
 
     func pinRoutedExperts(for plan: RoutedExpertFetchPlan) throws -> RoutedExpertLease {

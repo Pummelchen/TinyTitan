@@ -124,6 +124,9 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     let prefetchReader: ParallelExpertReader?
     /// GPU decode resources when the layer is rANS-coded.
     let ransResources: RANSLayerResources?
+    /// Serialises the demand and speculative decodes that share the staging
+    /// buffer and descriptors.
+    let ransStagingLock = NSLock()
     /// The tail-phase reader. Fronts and tails of one wave load at the same
     /// time on different readers, because a reader serialises its own batches;
     /// this is what lets the front decode overlap the tail read.

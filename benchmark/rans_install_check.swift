@@ -24,7 +24,10 @@ let layerName = String(format: "layer_%02d", layerIndex)
 let payloadPath = "\(install)/packed_experts/\(layerName).bin"
 let indexPath = "\(install)/packed_experts/\(layerName).ridx"
 let rawPath = "\(rawInstall)/packed_experts/\(layerName).bin"
-let stride = 1_769_472
+// Read the expert stride from the raw install's manifest.
+let rawManifest = try JSONSerialization.jsonObject(
+    with: Data(contentsOf: URL(fileURLWithPath: rawInstall + "/manifest.json")))
+let stride = Int((rawManifest as? [String: Any])?["expertStride"] as? Int ?? 1_769_472)
 
 func now() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 
