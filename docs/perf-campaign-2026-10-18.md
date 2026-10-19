@@ -278,6 +278,29 @@ Cross-session transfer is the point: the pins were learned on the 20261011 trace
 and scored on 20261015, so this is not an in-sample artifact (the in-sample
 version of the same arm reads 84.61%).
 
+**Engine result: neither the pins nor the policy change survives.** Built both
+behind flags and paired them on Ornith, holdout prompt, 64 new tokens:
+
+| arm | 4-bit (3 rounds) | 4-bit (6 rounds) | 8-bit (6 rounds) |
+| --- | ---: | ---: | ---: |
+| pin file, 48 pins | +0.13% mean / −1.05% median (1/3) | — | — |
+| LRU policy | +4.55% median (2/3) | **+0.84% median (4/6)** | **−0.36% median (3/6)** |
+| LRU + pins | +4.19% median (2/3) | — | — |
+
+The pin file loads (`expert_pins loaded layers=40 pins=1920`) and changes
+nothing: it pins the top-48 by frequency, which capped-LFU with a recency tie
+break already keeps. LRU looked like a 4.5% win at three rounds and came back to
++0.84% at six, then lost the 8-bit leg. Both engine changes were reverted; the
+simulator and the pin-derivation tool stayed.
+
+**And the simulation was wrong first.** Its LFU column had no recency tie-break,
+so a pure count rank evicted the expert it had just admitted whenever everything
+sat at count 1 — which is where it read 58.2% against LRU's 83.0% and produced a
++33.8-point oracle gap. Modelling the engine's actual tie-break moved LFU to
+**81.7%**, LRU to 83.05%, Belady to 92.08% and the pins to 84.2-85.1%, and shrank
+the gap to **10.4 points**. That corrected gap is the honest size of the
+placement headroom, and the engine returned 0-1.3 points of it.
+
 What that is worth in time is not yet measured. The simulation ranks policies; it
 cannot predict the engine's absolute hit rate, because the runtime's ring
 converts misses into hits and reports 81-85% at the same slot count where the

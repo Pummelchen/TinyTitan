@@ -43,7 +43,9 @@ def load_trace(path: pathlib.Path) -> dict[int, list[list[int]]]:
     with opener(path, "rt", encoding="utf-8") as handle:
         for line in handle:
             parts = line.split()
-            if len(parts) < 12:
+            # position, layer, then however many experts the model routes to
+            # (top-8 on Ornith, top-10 on Qwen3.8), so the width is not a constant.
+            if len(parts) < 3:
                 continue
             position, layer = int(parts[0]), int(parts[1])
             layers[layer][position] = [int(x) for x in parts[2:]]
@@ -53,12 +55,20 @@ def load_trace(path: pathlib.Path) -> dict[int, list[list[int]]]:
 def replay(
     sequence: list[list[int]], slots: int, policy: str, pinned: set[int] | None = None
 ) -> tuple[int, int]:
-    """(hits, requests) for one layer under one policy."""
+    """(hits, requests) for one layer under one policy.
+
+    `lfu` models the engine's policy, not a textbook one: the engine breaks an
+    equal-count tie by *last use*, and without that tie-break a pure count rank
+    evicts the expert it just admitted whenever everything sits at count 1 --
+    which is where a simulation of naive LFU loses ~25 points to LRU and the
+    shipped engine does not.
+    """
     pinned = pinned or set()
-    cache: dict[int, int] = {}  # expert -> last use (LRU) or count (LFU)
+    resident: set[int] = set()
+    count: dict[int, int] = {}
+    last: dict[int, int] = {}
     hits = 0
 
-    # Belady needs each expert's future occurrences.
     future: dict[int, list[int]] = collections.defaultdict(list)
     if policy == "belady":
         for position, experts in enumerate(sequence):
@@ -68,41 +78,36 @@ def replay(
 
     for position, experts in enumerate(sequence):
         for expert in experts:
-            if expert in cache:
+            if expert in resident:
                 hits += 1
-                if policy in ("lru", "pin"):
-                    cache[expert] = position
-                elif policy == "lfu":
-                    cache[expert] += 1
+                count[expert] = count.get(expert, 0) + 1
+                last[expert] = position
                 continue
-            # A miss: admit unless the cache is full.
-            if len(cache) >= slots and expert not in pinned:
+            if len(resident) >= slots:
+                candidates = [e for e in resident if e not in pinned]
+                if not candidates:
+                    continue
                 if policy == "belady":
-                    # Evict the resident whose next use is farthest away.
                     victim, farthest = None, -1
-                    for resident in cache:
-                        if resident in pinned:
-                            continue
-                        occurrences = future[resident]
-                        index = cursor[resident]
+                    for e in candidates:
+                        occurrences = future[e]
+                        index = cursor[e]
                         while index < len(occurrences) and occurrences[index] <= position:
                             index += 1
-                        cursor[resident] = index
+                        cursor[e] = index
                         nxt = occurrences[index] if index < len(occurrences) else 10**9
                         if nxt > farthest:
-                            victim, farthest = resident, nxt
-                    if victim is not None:
-                        del cache[victim]
-                else:
-                    candidates = [e for e in cache if e not in pinned]
-                    if not candidates:
-                        continue
-                    if policy == "lfu":
-                        victim = min(candidates, key=lambda e: cache[e])
-                    else:
-                        victim = min(candidates, key=lambda e: cache[e])
-                    del cache[victim]
-            cache[expert] = position if policy in ("lru", "pin") else 1
+                            victim, farthest = e, nxt
+                elif policy == "lru" or policy == "pin":
+                    victim = min(candidates, key=lambda e: last[e])
+                else:  # lfu, with the engine's recency tie-break
+                    victim = min(candidates, key=lambda e: (count[e], last[e]))
+                if victim is None:
+                    continue
+                resident.discard(victim)
+            resident.add(expert)
+            count[expert] = count.get(expert, 0) + 1
+            last[expert] = position
     return hits, sum(len(experts) for experts in sequence)
 
 
