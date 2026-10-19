@@ -289,7 +289,22 @@ the streamer will rely on: the geometry says how long a blob must be, and a blob
 that decodes to anything else is refused rather than leaving a slot with the
 previous expert's weights in its tail.
 
-What is left is the format and streamer work: per-expert frames in the repacker,
+### The format constraint the plan missed: two frames per expert
+
+The streamer can split an expert read at the `down` tensor's offset, so the GPU
+starts on gate|up while the tail is still in flight. Both installed models use
+it: `down` sits at **67%** of the stride on Ornith (1,179,648 of 1,769,472) and on
+Qwen3.8 (1,843,200 of 2,768,896), so `phase1Bytes` is interior and the split is
+live.
+
+A single compressed blob cannot be split — decoding needs the whole frame — so a
+compressed layer must store **two frames per expert**, one for gate|up and one
+for the tail, each independently decodable, and the index must address both.
+`ExpertBlobIndex` currently holds one entry per expert; it needs a second, or a
+frame count. That is the next change, and it is the reason the format work is not
+a straight swap of `pread` for `decompress`.
+
+The rest of the plan is unchanged: per-expert frames in the repacker,
 decompression into the slot buffer behind the ring, and the uncompressed path
 kept readable.
 
