@@ -245,6 +245,30 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Two engines do not beat one engine
+
+The natural idea -- split the engine in two so each serves a request and the
+waits overlap -- was measured rather than argued. One server on a 12 GiB budget
+serving two prompts one after another, against two servers on 6 GiB each serving
+the same two prompts concurrently:
+
+| arm | wall | expert slots per engine |
+| --- | ---: | ---: |
+| one engine, 12 GiB, two requests sequentially | 23.3 s | 128 |
+| two engines, 6 GiB each, concurrently | 23.2 s | **48** |
+
+**1.00x.** Splitting the engine halves the expert cache (128 -> 48 slots each), so
+each engine streams more and waits longer, which cancels the parallelism it
+bought. This is the same reason in-process batching measured 1.04-1.17x and not
+2x: decode is bound by expert bytes per token and the latency of individual
+reads, not by idle compute. Two engines do not create bandwidth, and they split
+the one thing that was helping.
+
+Parameters for the same reason: 4-bit decode moves ~64 MiB of expert bytes per
+token (8-bit ~154 MiB) against a 3.6 GB/s device, so the engine uses ~1-1.5 GB/s
+-- there is bandwidth, but a token's reads are serialised behind each other and
+behind the layer dependency.
+
 ### Startup is not a problem, and the first measurement said it was
 
 I chased a 90-125 s "load time" for an hour before checking what a user actually
