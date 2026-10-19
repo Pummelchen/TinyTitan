@@ -13,6 +13,9 @@ import Foundation
 /// token behind one mutex and one core, and decode fell from 10.0 to 3.2 tok/s —
 /// exactly the single-core LZFSE bound for the ~283 MB a token misses. A
 /// per-decode buffer is what lets the misses decode in parallel.
+/// unchecked-invariant: `free` and the borrow/give-back pairing are guarded by
+/// `lock`, and a buffer is removed from `free` before it is handed out, so no
+/// two decoders can hold the same pointer.
 final class CompressedScratchPool: @unchecked Sendable {
     static let shared = CompressedScratchPool()
 
