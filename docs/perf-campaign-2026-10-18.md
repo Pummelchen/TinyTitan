@@ -316,9 +316,11 @@ list.
 **The strongest decode result of the night is the page cache at 8-bit**, settled
 over six paired rounds: **+4.47% median, 6/6 positive** (mean +4.19%), with
 `io_ms` falling and the response unchanged. It is negative at 4-bit (−2.1%, 1/6)
-and positive there only under concurrency (+1.7%), so the honest shape is a
-bit-width-dependent trade rather than a default: 8-bit installs move twice the
-expert bytes per token, which is what the cache has to absorb.
+and positive there only under concurrency (+1.7%). And it does **not** carry to a
+long prompt: on a 1.6K-token prompt at 8-bit the decode delta is −0.21% mean /
++0.91% median (2/3) and **prefill moves +0.3%** (56.5 s against 56.3 s), because
+the prefill working set is 17 GB and no cache that fits in RAM can hold it. So
+the honest shape is narrow: short-prompt decode at 8-bit, ~4.5%.
 
 **Nothing has shipped.** `51b180d` (four generations by default) was reverted in
 the same night: the width does not build at the default context, and the
