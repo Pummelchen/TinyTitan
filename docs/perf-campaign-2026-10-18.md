@@ -18,7 +18,7 @@ rounds out of paired rounds. A blank cell was not measured.
 | --- | ---: | ---: | --- |
 | **Disk prompt cache, session resume** | **32.25 -> 2.48 s (13x)** | **56.31 -> 4.07 s (13.8x)** | **works; opt-in for privacy** |
 | Multi-turn prompt cache (already shipped) | 32.16 -> 1.33 s | not measured | already the default behaviour |
-| Page-cache path (`BOUNDED_IO=0`) | +0.5% (2/4), −2.1% (1/6), **+1.7% under 4 sequences** | **+5.2%** (2/3) | not shipped: trades a declared memory budget for an undeclared one |
+| Page-cache path (`BOUNDED_IO=0`) | +0.5% (2/4), −2.1% (1/6), **+1.7% under 4 sequences** | **+4.47% (6/6)** | not shipped: trades a declared memory budget for an undeclared one |
 | Concurrency width 4 | +4.3% fair | — | **reverted**: clamps to 1 at 262K context, and the apparent 1.32x was cold-cache bias |
 | Read advice off | −4.7% (1/4) | −3.2% (1/3) | loss on both |
 | Immediate submission | −6.5% (0/4) | +0.1% (2/3) | loss / wash |
@@ -312,6 +312,13 @@ list.
 4. Anything that clears 4-bit is confirmed at 8-bit before commit.
 
 ## Commits
+
+**The strongest decode result of the night is the page cache at 8-bit**, settled
+over six paired rounds: **+4.47% median, 6/6 positive** (mean +4.19%), with
+`io_ms` falling and the response unchanged. It is negative at 4-bit (−2.1%, 1/6)
+and positive there only under concurrency (+1.7%), so the honest shape is a
+bit-width-dependent trade rather than a default: 8-bit installs move twice the
+expert bytes per token, which is what the cache has to absorb.
 
 **Nothing has shipped.** `51b180d` (four generations by default) was reverted in
 the same night: the width does not build at the default context, and the
