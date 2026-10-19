@@ -377,6 +377,57 @@ intrinsic: at the intensity the model needs, background decompression measured
 free. Where the bytes *are* worth compressing: transport and
 install (20 -> 18 GB) and the 102 GB n-gram table (71-77%).
 
+### Compressed expert blobs, built and measured: 13.76 -> 7.91 tok/s
+
+The A1 project is now complete on both sides and measured, and the answer is no.
+The format, the writer (`CompressedExpertLayerWriter`), the loader and the
+streamer's decode path all exist and are tested; `TinyTitanRepack
+--compress-experts` converts an installed raw model into a compressed copy
+without re-downloading it. Converting Ornith 4-bit took **94.6 s** for 40 layers
+and produced **18,119,393,280 -> 16,504,463,711 bytes** (91.1%, 8.9% saved) plus
+246 KB of indices -- exactly the ratio the plan predicted.
+
+**The A/B is what kills it.** `benchmark/compressed_experts_ab.py`, paired, three
+measured rounds after one warm-up round, fresh CLI process each time, same
+prompt/greedy/128 new tokens, the two installs alternating order and sharing
+`model_weights.bin` through a hard link:
+
+| round | raw tok/s | compressed tok/s |
+| ---: | ---: | ---: |
+| 1 | 14.31 | 8.20 |
+| 2 | 13.59 | 7.87 |
+| 3 | 13.76 | 7.91 |
+| **median** | **13.76** | **7.91** |
+
+**-42.5% decode**, with byte-identical responses in all six runs (LZFSE is
+lossless; the format is correct, the speed is not).
+
+**Why the estimate was wrong, in one number.** The plan assumed a token reads
+~65 MiB of experts. Measured on this install: 2,654 misses over 21 tokens =
+**127 misses/token x ~1.5 MB packed = ~190 MB/token**, because the 10.55 GB
+cache holds 4 slots per layer while the router asks for 8. LZFSE decodes at
+~0.9 GB/s per core, so one token's decode is **~211 ms of CPU** against a
+~100 ms token. The churn test that cleared the CPU assumption paced 1.6 MiB
+every 1.8 ms -- one expert per layer -- and the engine misses four to six.
+
+The fixes that were tried, all measured, none close:
+
+- one shared staging buffer behind a lock -> 3.19 tok/s; per-decode buffers from
+  a pool, plan misses decoded in parallel -> 4.19;
+- batched frame reads through the bounded reader (a per-expert `pread` measured
+  8 ms against the raw path's batched 2 ms) -> 3.5-3.6 on 16 tokens;
+- the prefetch ring decoding its predictions in parallel -> 4.19, adoption still
+  0.7/token against the raw path's 21.75;
+- a deeper ring (`TINYTITAN_PREFETCH_LAYER_DEPTH`, depth 8 everywhere) -> 5.39
+  tok/s, hit rate 0.81. Still 2.5x behind raw.
+
+**Verdict: keep the install raw.** The `--compress-experts` converter stays as
+an opt-in measurement tool and the read path stays because it is inert without
+an `.idx` sidecar, but no install should be converted for speed and no default
+changes. The deeper-ring idea is not the rescue either: it is the same knob that
+measured a loss on the raw path (§5al), so paying for it to make a slower format
+less slow is not a trade this engine makes.
+
 ### Placement is where the smart reader can still win
 
 The reader is already predictive: it runs the *next* layer's router on the current

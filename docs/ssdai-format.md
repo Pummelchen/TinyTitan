@@ -261,6 +261,31 @@ layer has `layer`, `file`, and an `experts` array; each expert has `offset`,
 records. A decode step reads the nine sub-tensor slices of the experts it
 routed to and touches no other file.
 
+### A compressed layer (experimental, measured a loss)
+
+`layout.json` may carry a top-level `"compression": "lzfse"`. When it does, each
+`layer_NN.bin` holds LZFSE frames instead of raw blobs, and a `layer_NN.idx`
+sidecar beside it addresses them: a 12-byte header (`TTXI`, version 2, frames per
+expert, expert count) and then `(offset u64, length u32)` per frame. A layer that
+splits at the `down` tensor (both installed 35B families do) stores **two frames
+per expert** — gate|up, then the tail — because a frame cannot be split once
+written and the split is what lets the GPU start on phase 1 while the tail is
+still in flight. A layer without a split stores one frame per expert.
+
+The expert entries in `layout.json` are unchanged: they still describe the raw
+geometry, and the streamer ignores their offsets when a sidecar is present. The
+manifest lists the compressed size of `layer_NN.bin` and an entry for each
+`layer_NN.idx`, which is what `SSDAIPackedExpertsLayoutV1.crossValidate` requires
+for `compression` to be valid. An install without the marker is raw and reads
+exactly as before.
+
+This format is **not a recommended install shape**: on Ornith 4-bit it measured
+13.76 -> 7.91 tok/s decode (-42.5%) despite saving 8.9% of the expert bytes,
+because a token misses about 190 MB of experts and LZFSE decodes at ~0.9 GB/s
+per core — see `docs/perf-campaign-2026-10-18.md`. The reader and the
+`--compress-experts` converter exist so the result is reproducible, not because
+a compressed install is faster; keep an install raw unless you are measuring it.
+
 ### A layer with no routed experts
 
 `expertsPerLayer` is 0 for a model with no MoE layers, and the dense Qwen 3.5

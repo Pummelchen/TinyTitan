@@ -5,11 +5,6 @@ the evidence is in `docs/perf-campaign-2026-10-18.md`.
 
 ## A. Build now — measured headroom, no further justification needed
 
-- **Compressed expert blobs (`zstd -1`).** 90.8% ratio at 1,113 MiB/s per core,
-  decompression measured free at one and two threads, expected **3-5%** decode.
-  Path: per-expert frames, decompress into the slot buffer behind the prefetch
-  ring, keep the uncompressed format readable, then A/B at both widths. Cost: a
-  17 GB repack plus streamer and format work.
 - **Page cache as an opt-in profile for 8-bit installs.** **+4.47% median over six
   paired rounds, 6/6 positive** — but short-prompt only, and -2.1% at 4-bit, so a
   preset rather than a default. `TINYTITAN_BOUNDED_IO=0` already exists; the work
@@ -18,13 +13,10 @@ the evidence is in `docs/perf-campaign-2026-10-18.md`.
   token on a resumed session). Left: a size/GC policy check against its 2 GiB
   budget, and one long-session confirmation at 8-bit.
 
-## B. One measurement before committing to A1
+## B. Closed since this list was written
 
-- **Bursty versus steady decompression.** The churn test that cleared the CPU
-  assumption was a steady stream; real decompression is one expert per layer.
-  Expected to be gentler (same average bandwidth, idle gaps) but unmeasured.
-- **Per-file ratio on the 125B install**, to confirm the 90.8% generalises rather
-  than being an Ornith number.
+B1 and B2 were superseded by building A1 end to end and running it: the real
+answer is a 42% loss, not a 3-5% win (see E).
 
 ## C. Scoped projects — known wall or unknown payoff
 
@@ -47,6 +39,15 @@ the evidence is in `docs/perf-campaign-2026-10-18.md`.
   speed.
 
 ## E. Closed — do not spend time here again
+
+- **Compressed expert blobs.** Built, tested and measured: 8.9% fewer expert
+  bytes (Ornith 4-bit, 18.12 -> 16.50 GB) but **13.76 -> 7.91 tok/s decode,
+  -42.5%** over three paired rounds, identical text. A token misses ~190 MB here
+  (127 misses x ~1.5 MB), not the ~65 MiB the estimate assumed, so LZFSE's
+  ~0.9 GB/s/core is 211 ms of a 100 ms token. Parallel decode, batched reads,
+  parallel ring decode and a depth-8 ring were each measured; none came close.
+  `TinyTitanRepack --compress-experts` and the `.idx` read path stay as
+  opt-in/reproducible, not recommended.
 
 - More knob sweeps: ~40 configurations, and only the two items in A clear +0.5% on
   both widths.
