@@ -231,15 +231,16 @@ extension VerifiedInstallTool {
         let split = ExpertBlobIndex.phase1Bytes(
             downOffset: layer.experts.first?.tensors["down"]?.offset,
             expertStride: layout.expertStride)
-        let entries: [ExpertBlobIndex.Entry]
+        let decoded: ExpertBlobIndex.Layout
         do {
-            entries = try ExpertBlobIndex.decode(
+            decoded = try ExpertBlobIndex.decodeLayout(
                 indexData, expectedCount: layout.expertsPerLayer,
-                expectedFrames: split == nil ? 1 : 2)
+                phase0Bytes: split ?? layout.expertStride,
+                phase1Bytes: split.map { layout.expertStride - $0 })
         } catch {
             throw RepackError.configurationInvalid(detail: "\(indexPath): \(error)")
         }
-        let end = ExpertBlobIndex.maximumEnd(entries)
+        let end = ExpertBlobIndex.maximumEnd(decoded.entries)
         guard end > 0, end <= actualSize else {
             throw RepackError.configurationInvalid(
                 detail: "\(indexPath) addresses \(end) bytes, past the "

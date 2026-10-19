@@ -156,7 +156,7 @@ extension PreadExpertStreamer {
             // The decode goes straight into the same slots instead, so the
             // residency and buffer bookkeeping below is unchanged.
             if compressedFrames != nil {
-                try executeCompressedMisses(plan)
+                try executeCompressedMisses(plan, firstStage: firstStage)
             } else if let metalReader {
                 try executeMetalReads(plan, reader: metalReader)
             } else if let boundedReader {
@@ -203,14 +203,21 @@ extension PreadExpertStreamer {
         // even when Metal I/O is configured: handing MTLIO a frame offset would
         // copy frame bytes into a slot.
         if compressedFrames != nil {
+            // `publishesFirstStage` is what lets the runner encode phase 1 for
+            // the misses while the tails decode: it awaits `firstStageCompletion`
+            // and re-encodes the fixup. Without it the whole read-and-decode sat
+            // in front of the GPU -- measured as 0% io overlap and ~3 ms a layer.
+            // The phase split exists in this format precisely so this can fire.
             let operation = ExpertLoadOperation(
                 completionToken: token,
                 eventCoordinator: eventCoordinator,
-                backendSignalsEvent: false)
+                backendSignalsEvent: false,
+                publishesFirstStage: layout.phase1Bytes != nil)
             ExpertIOScheduler.shared.submit { [self, operation] in
                 operation.markInFlight()
                 do {
-                    _ = try executeExpertCachePlan(plan)
+                    _ = try executeExpertCachePlan(
+                        plan, firstStage: operation.publishFirstStage)
                     operation.finish(.success(()))
                 } catch {
                     operation.finish(.failure(error))

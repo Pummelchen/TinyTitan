@@ -117,6 +117,11 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// difference, so "a 35B model in 1 GB" stops being true. A footprint you can
     /// account for is the product; throughput is what is being traded for it.
     let boundedReader: ParallelExpertReader?
+    /// The prefetch ring's own reader. A reader serialises batches (its batch
+    /// lock waits for the current one), so a speculative read issued through the
+    /// demand reader blocks the next layer's demand read. This one is only used
+    /// by `beginPrefetch`.
+    let prefetchReader: ParallelExpertReader?
     let metalReader: MetalExpertReader?
     let eventCoordinator: ExpertIOEventCoordinator?
     let metalStagingPool: MetalExpertStagingPool?
@@ -126,6 +131,8 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// means raw blobs at `n * expertStride`. A split layer carries two frames
     /// per expert, one per half, so the phase-1 overlap survives compression.
     let compressedFrames: [[ExpertBlobIndex.Blob]]?
+    /// Decoded bytes per block in a v3 index; 0 for a legacy whole-phase index.
+    let compressedBlockBytes: UInt64
     /// The largest packed form of one expert — all of its frames — which is
     /// how large a staging buffer has to be. The buffers themselves come from
     /// `CompressedScratchPool`, one per concurrent decode, so a plan's misses
@@ -180,6 +187,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         self.layout = layout
         self.slotCount = slotCount
         self.compressedFrames = layout.compressedFrames
+        self.compressedBlockBytes = layout.compressedBlockBytes
         self.cachePolicy = cachePolicy
         self.expertUseCountCap = expertUseCountCap
         self.eventCoordinator = eventCoordinator
@@ -331,14 +339,27 @@ public final class PreadExpertStreamer: @unchecked Sendable {
                 throw error
             }
             self.boundedReader = nil
+            self.prefetchReader = nil
         } else if ProcessInfo.processInfo.environment["TINYTITAN_BOUNDED_IO"] != "0" {
             self.metalReader = nil
             do {
+                // A compressed layer's wave is 2-5 ranges of 0.6-1.6 MB, so
+                // four threads leave the disk under-driven: measured 1.7-2.2
+                // GB/s against the raw path's 3.4. Eight threads put every
+                // range of a wave in flight at once.
                 self.boundedReader = try ParallelExpertReader(
                     path: layout.path,
                     expertStride: Int(layout.expertStride),
-                    threads: 4,
+                    threads: layout.compressedFrames == nil ? 4 : 8,
                     bypassCache: true)
+                self.prefetchReader =
+                    layout.compressedFrames == nil
+                    ? nil
+                    : try? ParallelExpertReader(
+                        path: layout.path,
+                        expertStride: Int(layout.expertStride),
+                        threads: 4,
+                        bypassCache: true)
             } catch {
                 unwind()
                 throw error
@@ -346,6 +367,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         } else {
             self.metalReader = nil
             self.boundedReader = nil
+            self.prefetchReader = nil
         }
 
         self.slotPointers = pointers

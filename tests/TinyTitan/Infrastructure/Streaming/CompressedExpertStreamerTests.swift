@@ -152,6 +152,76 @@ struct CompressedExpertStreamerTests {
         #expect(bytes == Self.blob(2, Self.stride))
     }
 
+    /// A v3 layer: each phase cut into independent blocks, so one expert's
+    /// decode is several parallel jobs instead of one serial frame.
+    private static let largeStride = 20_000
+    private static let largeSplit = 13_400
+
+    private static func writeBlockCompressedLayer(
+        blockBytes: Int
+    ) throws -> (url: URL, layout: ExpertBlobIndex.Layout) {
+        var file = Data()
+        var entries: [ExpertBlobIndex.Entry] = []
+        for expert in 0..<experts {
+            var blocks: [ExpertBlobIndex.Blob] = []
+            let raw = [UInt8](repeating: UInt8(expert), count: largeStride)
+            for range in [0..<largeSplit, largeSplit..<largeStride] {
+                var offset = range.lowerBound
+                while offset < range.upperBound {
+                    let count = min(blockBytes, range.upperBound - offset)
+                    let chunk = Array(raw[offset..<offset + count])
+                    let frame = try chunk.withUnsafeBytes { buffer in
+                        try ExpertBlobCodec.compress(
+                            source: try #require(buffer.baseAddress), count: buffer.count)
+                    }
+                    blocks.append(
+                        .init(offset: UInt64(file.count), length: UInt32(frame.count)))
+                    file.append(frame)
+                    offset += count
+                }
+            }
+            entries.append(.init(frames: blocks))
+        }
+        let data = ExpertBlobIndex.encode(entries, blockBytes: UInt64(blockBytes))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("block-layer-\(UUID().uuidString).bin")
+        try file.write(to: url)
+        let layout = try ExpertBlobIndex.decodeLayout(
+            data, expectedCount: experts, phase0Bytes: UInt64(largeSplit),
+            phase1Bytes: UInt64(largeStride - largeSplit))
+        return (url, layout)
+    }
+
+    @Test("A block-framed layer decodes every expert, through the plan path")
+    func blockFramedLayerLoads() throws {
+        let (url, layout) = try Self.writeBlockCompressedLayer(blockBytes: 4096)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(layout.blockBytes == 4096)
+        // 13,400 front bytes and 6,600 tail bytes at 4 KiB: 4 + 2 blocks.
+        #expect(layout.entries.allSatisfy { $0.frames.count == 6 })
+        let device = try MetalContext().device
+        let streamLayout = StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: try Self.fileSize(url),
+            expertsPerLayer: Self.experts,
+            expertStride: UInt64(Self.largeStride),
+            phase1Bytes: UInt64(Self.largeSplit),
+            compressedFrames: layout.entries.map(\.frames),
+            compressedBlockBytes: layout.blockBytes)
+        let streamer = try PreadExpertStreamer(
+            layout: streamLayout, device: device, slotCount: 4)
+        let experts = [0, 1, 2, 3]
+        let results = try streamer.executeExpertCachePlan(
+            try streamer.planExpertsCached(experts: experts))
+        for (result, expert) in zip(results, experts) {
+            let bytes = Self.bytes(
+                of: result.buffer, offset: result.offset, count: Self.largeStride)
+            #expect(
+                bytes == [UInt8](repeating: UInt8(expert), count: Self.largeStride))
+        }
+    }
+
     /// The batched decode path is what the runner actually uses for a token's
     /// experts; the per-expert path above is the one-shot API. They read through
     /// different code (`executeCompressedMisses` versus `loadExpertUnlocked`),

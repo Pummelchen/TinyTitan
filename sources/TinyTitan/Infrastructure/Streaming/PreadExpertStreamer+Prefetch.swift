@@ -80,32 +80,20 @@ extension PreadExpertStreamer {
         return operation
     }
 
-    /// Decode a predicted expert set into the ring's buffers, in parallel.
+    /// Decode a predicted expert set into the ring's buffers.
     ///
-    /// The ring is the only place where more than one expert's decode has to
-    /// finish by a deadline (the next layer), so it is the place where one core
-    /// is not enough.
+    /// One storage call for the whole set, then every block decodes in
+    /// parallel: this is the same path the demand wave uses, and it matters for
+    /// the same reason -- the ring's reads are issued from a scheduler thread
+    /// and a per-expert fetch would queue behind the reader's batch lock.
     private func decodePrefetchedExperts(
         _ experts: [Int],
         frames: [[ExpertBlobIndex.Blob]],
         into destinations: [UnsafeMutableRawPointer]
     ) throws {
-        if experts.count <= 1 {
-            if let expert = experts.first, let destination = destinations.first {
-                try decodeCompressedExpert(frames: frames[expert], into: destination)
-            }
-            return
-        }
-        let firstError = Mutex<Error?>(nil)
-        DispatchQueue.concurrentPerform(iterations: experts.count) { index in
-            do {
-                try decodeCompressedExpert(
-                    frames: frames[experts[index]], into: destinations[index])
-            } catch {
-                firstError.withLock { if $0 == nil { $0 = error } }
-            }
-        }
-        if let error = firstError.withLock({ $0 }) { throw error }
+        try decodeCompressedSet(
+            experts: experts, frames: frames, into: destinations,
+            reader: prefetchReader)
     }
 
 }

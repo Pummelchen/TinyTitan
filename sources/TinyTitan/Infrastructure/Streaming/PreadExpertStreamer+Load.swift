@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import TinyTitanFormat
 import Metal
 
@@ -52,115 +53,255 @@ extension PreadExpertStreamer {
 
     /// Fill `slot` with `expert` and update bookkeeping. Callers hold
     /// `cacheLock`.
-    /// Reads one compressed expert: a read per frame into the staging buffer,
-    /// then a decode into the slot at that frame's offset.
+    /// Reads and decodes one compressed expert into its slot.
     ///
-    /// The frame count is the layer's shape, not the expert's: a split layer has
-    /// two frames (gate|up, then the tail) and a whole layer has one, so the
-    /// decoded size comes from `phase1Bytes` and the stride rather than from the
-    /// blob.
+    /// The decode sizes come from the layer's geometry, not from the blobs: a
+    /// split layer's phase 0 is `phase1Bytes` and its tail is the rest, and a v3
+    /// index further splits each phase into `compressedBlockBytes` blocks.
     func readCompressedExpert(
         frames: [ExpertBlobIndex.Blob], slot: Int
     ) throws {
-        try decodeCompressedExpert(
-            frames: frames, into: slotPointers[slot])
+        try decodeCompressedEntry(frames, into: slotPointers[slot])
     }
 
-    /// Decodes one expert's frames into `destination`, which must hold the
-    /// layer's stride.
-    ///
-    /// The staging buffer is shared by the demand path and the prefetch ring,
-    /// which run on different threads, so the read-and-decode pair holds a lock
-    /// of its own: two decodes sharing one buffer would interleave their frames
-    /// and hand back a slot of mixed weights.
-    func decodeCompressedExpert(
-        frames: [ExpertBlobIndex.Blob], into destination: UnsafeMutableRawPointer
+    /// One expert: read every block, then decode the phases into `destination`.
+    func decodeCompressedEntry(
+        _ pack: [ExpertBlobIndex.Blob], into destination: UnsafeMutableRawPointer
     ) throws {
-        let needed = frames.reduce(0) { $0 + Int($1.length) }
-        guard needed > 0, needed <= compressedScratchBytes else {
+        let bytes = pack.reduce(0) { $0 + Int($1.length) }
+        guard bytes > 0, bytes <= compressedScratchBytes else {
             throw StreamerError.sizeMismatch(
-                expected: UInt64(compressedScratchBytes), actual: UInt64(needed))
+                expected: UInt64(compressedScratchBytes), actual: UInt64(bytes))
         }
-        // One buffer per decode, not one per streamer: the plan decodes its
-        // misses in parallel, and a shared buffer would put them all behind one
-        // lock (measured at 3.2 tok/s against the raw path's 10.0).
-        let scratch = CompressedScratchPool.shared.borrow(bytes: needed)
-        defer { CompressedScratchPool.shared.giveBack(scratch, bytes: needed) }
-        try readPackedFrames(frames, into: scratch)
-        try decodePackedFrames(frames, from: scratch, into: destination)
-    }
-
-    /// The decode half: frames already sitting in `scratch`, in order.
-    ///
-    /// Separated from the read so the plan can batch one storage call for a
-    /// whole group of experts and then decode them in parallel, which is the
-    /// shape the raw path's batched `fetch` already has.
-    func decodePackedFrames(
-        _ frames: [ExpertBlobIndex.Blob],
-        from scratch: UnsafeMutableRawPointer,
-        into destination: UnsafeMutableRawPointer
-    ) throws {
-        let stride = Int(layout.expertStride)
-        let split = layout.phase1Bytes.map(Int.init)
-        var written = 0
-        var packedOffset = 0
-        for (index, blob) in frames.enumerated() {
-            let packedBytes = Int(blob.length)
-            let expected: Int
-            if frames.count == 2, index == 0 {
-                expected = split ?? 0
-            } else {
-                expected = stride - written
-            }
-            guard expected > 0 else {
-                throw StreamerError.sizeMismatch(expected: 1, actual: 0)
-            }
-            try ExpertBlobCodec.decompress(
-                source: scratch.advanced(by: packedOffset), count: packedBytes,
-                into: destination.advanced(by: written),
-                expected: expected)
-            packedOffset += packedBytes
-            written += expected
-        }
-        guard written == stride else {
-            throw StreamerError.sizeMismatch(
-                expected: UInt64(stride), actual: UInt64(written))
-        }
-    }
-
-    /// Reads all of one expert's frames in a single batched call.
-    ///
-    /// Through the bounded reader where it exists, so a compressed layer keeps
-    /// the same `F_NOCACHE` footprint contract as a raw one -- the frames are
-    /// read, not left in the unified buffer cache. Only an install that opted
-    /// out of bounded I/O (`TINYTITAN_BOUNDED_IO=0`) falls back to the plain
-    /// descriptor.
-    func readPackedFrames(
-        _ frames: [ExpertBlobIndex.Blob], into scratch: UnsafeMutableRawPointer
-    ) throws {
+        let scratch = CompressedScratchPool.shared.borrow(bytes: bytes)
+        defer { CompressedScratchPool.shared.giveBack(scratch, bytes: bytes) }
         var offsets: [UInt64] = []
         var counts: [Int] = []
         var destinations: [UnsafeMutableRawPointer] = []
-        offsets.reserveCapacity(frames.count)
-        counts.reserveCapacity(frames.count)
-        destinations.reserveCapacity(frames.count)
         var cursor = 0
-        for frame in frames {
+        for frame in pack {
             offsets.append(layout.streamOffset + frame.offset)
             counts.append(Int(frame.length))
             destinations.append(scratch.advanced(by: cursor))
             cursor += Int(frame.length)
+        }
+        try readRanges(offsets: offsets, counts: counts, into: destinations)
+        let work = try blockWork(
+            pack, scratch: scratch, destination: destination)
+        try decodeBlocks(work, phase: 0)
+        try decodeBlocks(work, phase: 1)
+    }
+
+    /// A whole set of experts: one storage call for all of it, then every block
+    /// of every expert decodes in parallel.
+    ///
+    /// This is the demand wave and the prefetch ring's arm in one place. Both
+    /// need the same two properties: one read (the reader serialises concurrent
+    /// batches, so N independent fetches would queue) and independent blocks
+    /// (a frame is one serial LZFSE stream, so the latency floor is a block, not
+    /// an expert). `firstStage` runs after the phase-0 blocks land and before
+    /// the tails decode, which is the overlap the GPU needs.
+    func decodeCompressedSet(
+        experts: [Int],
+        frames: [[ExpertBlobIndex.Blob]],
+        into destinations: [UnsafeMutableRawPointer],
+        firstStage: (() -> Void)? = nil,
+        reader: ParallelExpertReader? = nil
+    ) throws {
+        precondition(
+            experts.count == destinations.count,
+            "each compressed expert needs one destination")
+        var borrowed: [(pointer: UnsafeMutableRawPointer, bytes: Int)] = []
+        defer {
+            for item in borrowed {
+                CompressedScratchPool.shared.giveBack(item.pointer, bytes: item.bytes)
+            }
+        }
+        var offsets: [UInt64] = []
+        var counts: [Int] = []
+        var readDestinations: [UnsafeMutableRawPointer] = []
+        var scratchByExpert: [UnsafeMutableRawPointer] = []
+        var packed: [[ExpertBlobIndex.Blob]] = []
+        for expert in experts {
+            let pack = frames[expert]
+            let bytes = pack.reduce(0) { $0 + Int($1.length) }
+            guard bytes > 0, bytes <= compressedScratchBytes else {
+                throw StreamerError.sizeMismatch(
+                    expected: UInt64(compressedScratchBytes), actual: UInt64(bytes))
+            }
+            let scratch = CompressedScratchPool.shared.borrow(bytes: bytes)
+            borrowed.append((scratch, bytes))
+            // One read per phase, not per block: the blocks of a phase are
+            // contiguous, and 256 KiB reads pay the disk's per-read latency --
+            // measured 2.5-3.4 ms for a 2-expert wave split by block against
+            // ~1.2 ms for the same bytes in phase-sized ranges. The blocks
+            // still decode independently; only the I/O granularity is coarser.
+            var cursor = 0
+            for range in packedPhaseRanges(pack) {
+                offsets.append(layout.streamOffset + range.offset)
+                counts.append(range.count)
+                readDestinations.append(scratch.advanced(by: cursor))
+                cursor += range.count
+            }
+            scratchByExpert.append(scratch)
+            packed.append(pack)
+        }
+        let tRead = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        try readRanges(
+            offsets: offsets, counts: counts, into: readDestinations, reader: reader)
+        let tFront = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        var work: [CompressedBlockWork] = []
+        for (position, pack) in packed.enumerated() {
+            work.append(
+                contentsOf: try blockWork(
+                    pack, scratch: scratchByExpert[position],
+                    destination: destinations[position]))
+        }
+        try decodeBlocks(work, phase: 0)
+        let tPublished = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        firstStage?()
+        try decodeBlocks(work, phase: 1)
+        let tTail = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        if ProcessInfo.processInfo.environment["TINYTITAN_COMPRESSED_TRACE"] == "1" {
+            FileHandle.standardError.write(
+                Data(
+                    String(
+                        format:
+                            "[comp] experts=%d blocks=%d read=%.2f front=%.2f tail=%.2f ms\n",
+                        experts.count, work.count,
+                        Double(tFront - tRead) / 1e6,
+                        Double(tPublished - tFront) / 1e6,
+                        Double(tTail - tPublished) / 1e6
+                    ).utf8))
+        }
+    }
+
+    /// The packed byte runs to read for one expert: one contiguous range per
+    /// phase, in the same order as its blocks.
+    func packedPhaseRanges(
+        _ pack: [ExpertBlobIndex.Blob]
+    ) -> [(offset: UInt64, count: Int)] {
+        let phase0 = layout.phase1Bytes ?? layout.expertStride
+        let phase1 = layout.phase1Bytes.map { layout.expertStride - $0 }
+        let phase0Blocks: Int
+        let phase1Blocks: Int
+        if compressedBlockBytes == 0 {
+            phase0Blocks = pack.isEmpty ? 0 : 1
+            phase1Blocks = pack.count > 1 ? 1 : 0
+        } else {
+            phase0Blocks = ExpertBlobIndex.blockCount(
+                phaseBytes: phase0, blockBytes: compressedBlockBytes)
+            phase1Blocks =
+                phase1.map {
+                    ExpertBlobIndex.blockCount(
+                        phaseBytes: $0, blockBytes: compressedBlockBytes)
+                } ?? 0
+        }
+        var ranges: [(UInt64, Int)] = []
+        var index = 0
+        for blocks in [phase0Blocks, phase1Blocks] where blocks > 0 {
+            guard index + blocks <= pack.count else { return ranges }
+            let offset = pack[index].offset
+            let count = pack[index..<(index + blocks)]
+                .reduce(0) { $0 + Int($1.length) }
+            ranges.append((offset, count))
+            index += blocks
+        }
+        return ranges
+    }
+
+    /// One block's read/decode geometry inside an expert.
+    struct CompressedBlockWork {
+        let scratch: UnsafeMutableRawPointer
+        let packedOffset: Int
+        let packedCount: Int
+        let destination: UnsafeMutableRawPointer
+        let destinationOffset: Int
+        let expected: Int
+        let phase: Int
+    }
+
+    /// Expands one expert's blocks into the work the decoder runs.
+    func blockWork(
+        _ pack: [ExpertBlobIndex.Blob],
+        scratch: UnsafeMutableRawPointer,
+        destination: UnsafeMutableRawPointer
+    ) throws -> [CompressedBlockWork] {
+        let phase0 = layout.phase1Bytes ?? layout.expertStride
+        let phase1 = layout.phase1Bytes.map { layout.expertStride - $0 }
+        var work: [CompressedBlockWork] = []
+        work.reserveCapacity(pack.count)
+        var packedOffset = 0
+        for (index, blob) in pack.enumerated() {
+            guard
+                let target = ExpertBlobIndex.blockDestination(
+                    index: index, phase0Bytes: phase0, phase1Bytes: phase1,
+                    blockBytes: compressedBlockBytes)
+            else {
+                throw StreamerError.sizeMismatch(
+                    expected: UInt64(pack.count), actual: UInt64(index))
+            }
+            work.append(
+                CompressedBlockWork(
+                    scratch: scratch,
+                    packedOffset: packedOffset,
+                    packedCount: Int(blob.length),
+                    destination: destination,
+                    destinationOffset: Int(target.offset),
+                    expected: Int(target.expected),
+                    phase: target.phase))
+            packedOffset += Int(blob.length)
+        }
+        return work
+    }
+
+    /// Decodes one phase's blocks in parallel; an empty phase returns at once.
+    func decodeBlocks(
+        _ work: [CompressedBlockWork], phase: Int
+    ) throws {
+        let phaseWork = work.filter { $0.phase == phase }
+        guard !phaseWork.isEmpty else { return }
+        let firstError = Mutex<Error?>(nil)
+        DispatchQueue.concurrentPerform(iterations: phaseWork.count) { index in
+            let item = phaseWork[index]
+            do {
+                try ExpertBlobCodec.decompress(
+                    source: item.scratch.advanced(by: item.packedOffset),
+                    count: item.packedCount,
+                    into: item.destination.advanced(by: item.destinationOffset),
+                    expected: item.expected)
+            } catch {
+                firstError.withLock { if $0 == nil { $0 = error } }
+            }
+        }
+        if let error = firstError.withLock({ $0 }) { throw error }
+    }
+
+    /// Reads ranges through the bounded reader, or in parallel on the plain fd.
+    func readRanges(
+        offsets: [UInt64], counts: [Int], into destinations: [UnsafeMutableRawPointer],
+        reader: ParallelExpertReader? = nil
+    ) throws {
+        if let reader {
+            try reader.fetch(offsets: offsets, byteCounts: counts, into: destinations)
+            return
         }
         if let boundedReader {
             try boundedReader.fetch(
                 offsets: offsets, byteCounts: counts, into: destinations)
             return
         }
-        for index in frames.indices {
-            try readFull(
-                into: destinations[index], fileOffset: offsets[index],
-                count: counts[index])
+        let firstError = Mutex<Error?>(nil)
+        DispatchQueue.concurrentPerform(iterations: offsets.count) { index in
+            do {
+                try readFull(
+                    into: destinations[index], fileOffset: offsets[index],
+                    count: counts[index])
+            } catch {
+                firstError.withLock { if $0 == nil { $0 = error } }
+            }
         }
+        if let error = firstError.withLock({ $0 }) { throw error }
     }
 
     func loadExpertUnlocked(layer: Int, expert: Int, slot: Int) throws

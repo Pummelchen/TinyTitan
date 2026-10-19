@@ -239,6 +239,44 @@ extension RealForwardRunner {
             }
         }
 
+        // The ring is issued here, before the demand fetch awaits, rather than
+        // after it. It is aimed at the next layer, whose prediction is already
+        // in hand from this layer's router probe, so every millisecond the
+        // demand path spends fetching and decoding is lead time the ring can
+        // use. Issued at the old point -- after the await -- a compressed
+        // layer's read-and-decode (~3 ms for a predicted set) never finished
+        // before the next layer was planned, so adoption measured 0.11/token
+        // against the raw path's 21.75.
+        if let predictivePrefetch, L + 1 < cfg.numLayers {
+            // The ring is one read a layer, aimed at the next layer, from the
+            // profile's depth -- unless `TINYTITAN_PREFETCH_LAYER_DEPTH` names
+            // this link, which is the layer-selective arm §5al screened and left
+            // for a live paired run to settle. Every other allocation of the
+            // same budget measured here lost: a second rank of the same layer
+            // (per-expert operations, -3.3%), the same read aimed two layers
+            // ahead (-2.8%), a second horizon beside it (-1.4%), the probe-weight
+            // margin gate (-4.2%) and a lower disk tier (-0.6%). Each is recorded
+            // in docs/qwen38-prefetch-predictor-study.md and Lever 5/8 of
+            // benchmark/internal-speeds/v2-qwen38-4bit-telemetry.txt.
+            let target = L + 1
+            let prediction = predictedNextLayer
+            let resident = Set(try model.routedExpertResidentIDs(layer: target))
+            // The whole ranked prediction goes in; `begin` drops the experts
+            // that are already resident or already in flight and then fills
+            // whatever ring slots are free, in rank order.
+            //
+            // Truncating to top-M here first (v4.3) spent the budget before
+            // the residency filter ran. About 85% of the top-M predictions are
+            // already cached, so the filter starved the ring instead of aiming
+            // it: on a 191-position qwen38 trace, top-4 issued 0.94 reads per
+            // layer and covered 23% of the demand misses, where filtering
+            // first issues 2.59 and covers 46%. The ring size stays the cap on
+            // reads in flight; only the order of cap and filter changed.
+            try predictivePrefetch.begin(
+                model: model, layer: target,
+                experts: prediction,
+                resident: resident, currentLayer: L)
+        }
         // Routed-expert pread — overlaps the shared MLP GPU work above.
         let tIoStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let blobs: [TensorView]
@@ -318,36 +356,6 @@ extension RealForwardRunner {
                     totalExposedIoNanos &+= tIoStart + layerIo - overlapEnd
                 }
             }
-        }
-        if let predictivePrefetch, L + 1 < cfg.numLayers {
-            // The ring is one read a layer, aimed at the next layer, from the
-            // profile's depth -- unless `TINYTITAN_PREFETCH_LAYER_DEPTH` names
-            // this link, which is the layer-selective arm §5al screened and left
-            // for a live paired run to settle. Every other allocation of the
-            // same budget measured here lost: a second rank of the same layer
-            // (per-expert operations, -3.3%), the same read aimed two layers
-            // ahead (-2.8%), a second horizon beside it (-1.4%), the probe-weight
-            // margin gate (-4.2%) and a lower disk tier (-0.6%). Each is recorded
-            // in docs/qwen38-prefetch-predictor-study.md and Lever 5/8 of
-            // benchmark/internal-speeds/v2-qwen38-4bit-telemetry.txt.
-            let target = L + 1
-            let prediction = predictedNextLayer
-            let resident = Set(try model.routedExpertResidentIDs(layer: target))
-            // The whole ranked prediction goes in; `begin` drops the experts
-            // that are already resident or already in flight and then fills
-            // whatever ring slots are free, in rank order.
-            //
-            // Truncating to top-M here first (v4.3) spent the budget before
-            // the residency filter ran. About 85% of the top-M predictions are
-            // already cached, so the filter starved the ring instead of aiming
-            // it: on a 191-position qwen38 trace, top-4 issued 0.94 reads per
-            // layer and covered 23% of the demand misses, where filtering
-            // first issues 2.59 and covers 46%. The ring size stays the cap on
-            // reads in flight; only the order of cap and filter changed.
-            try predictivePrefetch.begin(
-                model: model, layer: target,
-                experts: prediction,
-                resident: resident, currentLayer: L)
         }
         decodeRoutedBufsScratch.removeAll(keepingCapacity: true)
         decodeRoutedOffsetsScratch.removeAll(keepingCapacity: true)

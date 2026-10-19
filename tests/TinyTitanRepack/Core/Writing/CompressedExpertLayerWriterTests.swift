@@ -52,7 +52,7 @@ struct CompressedExpertLayerWriterTests {
                 expertStride: UInt64(Self.stride),
                 expertsPerLayer: Self.experts,
                 splitBytes: UInt64(Self.split)))
-        #expect(result.framesPerExpert == 2)
+        #expect(result.blocksPerExpert == 2)
         #expect(result.compressedBytes < UInt64(Self.experts * Self.stride))
 
         let packed = try Data(contentsOf: destination)
@@ -60,24 +60,30 @@ struct CompressedExpertLayerWriterTests {
         let indexURL = directory.appendingPathComponent("layer_00.idx")
         let indexData = try Data(contentsOf: indexURL)
         #expect(UInt64(indexData.count) == result.indexBytes)
-        let entries = try ExpertBlobIndex.decode(
-            indexData, expectedCount: Self.experts, expectedFrames: 2)
-        #expect(ExpertBlobIndex.maximumEnd(entries) == result.compressedBytes)
+        let layout = try ExpertBlobIndex.decodeLayout(
+            indexData, expectedCount: Self.experts,
+            phase0Bytes: UInt64(Self.split),
+            phase1Bytes: UInt64(Self.stride - Self.split))
+        #expect(ExpertBlobIndex.maximumEnd(layout.entries) == result.compressedBytes)
 
         for expert in 0..<Self.experts {
             var restored = [UInt8](repeating: 0, count: Self.stride)
-            let halves = [0..<Self.split, Self.split..<Self.stride]
-            var cursor = 0
-            for (frame, range) in zip(entries[expert].frames, halves) {
-                let start = Int(frame.offset)
-                let frameData = packed.subdata(in: start..<start + Int(frame.length))
+            let phase0 = UInt64(Self.split)
+            let phase1 = UInt64(Self.stride - Self.split)
+            for (index, block) in layout.entries[expert].frames.enumerated() {
+                let target = try #require(
+                    ExpertBlobIndex.blockDestination(
+                        index: index, phase0Bytes: phase0, phase1Bytes: phase1,
+                        blockBytes: layout.blockBytes))
+                let start = Int(block.offset)
+                let frameData = packed.subdata(in: start..<start + Int(block.length))
                 try restored.withUnsafeMutableBytes { buffer in
                     try ExpertBlobCodec.decompress(
                         frameData,
-                        into: try #require(buffer.baseAddress).advanced(by: cursor),
-                        expected: range.count)
+                        into: try #require(buffer.baseAddress)
+                            .advanced(by: Int(target.offset)),
+                        expected: Int(target.expected))
                 }
-                cursor += range.count
             }
             #expect(restored == Self.expertBytes(expert))
         }
@@ -96,11 +102,12 @@ struct CompressedExpertLayerWriterTests {
                 expertStride: UInt64(Self.stride),
                 expertsPerLayer: Self.experts,
                 splitBytes: nil))
-        #expect(result.framesPerExpert == 1)
-        let entries = try ExpertBlobIndex.decode(
+        #expect(result.blocksPerExpert == 1)
+        let layout = try ExpertBlobIndex.decodeLayout(
             try Data(contentsOf: directory.appendingPathComponent("layer_01.idx")),
-            expectedCount: Self.experts, expectedFrames: 1)
-        #expect(entries.allSatisfy { $0.frames.count == 1 })
+            expectedCount: Self.experts, phase0Bytes: UInt64(Self.stride),
+            phase1Bytes: nil)
+        #expect(layout.entries.allSatisfy { $0.frames.count == 1 })
     }
 
     @Test("A source that is not the layout's shape is refused")

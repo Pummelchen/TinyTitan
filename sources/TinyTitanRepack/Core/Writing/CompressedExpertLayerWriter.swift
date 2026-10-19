@@ -14,11 +14,22 @@ public struct CompressedExpertLayerGeometry: Sendable, Equatable {
     /// `nil` means the whole expert is one frame. A split has to be strictly
     /// interior, exactly as the streamer requires it.
     public let splitBytes: UInt64?
+    /// Independent block size every phase is cut into.
+    ///
+    /// A compressed stream decodes on one core, so one big frame per phase
+    /// becomes the layer's latency floor (1.2 ms for Ornith's 1.18 MB front).
+    /// 256 KiB measured 0.1% *better* in ratio than whole-phase frames on
+    /// Ornith layer 20, and gives each expert 8 independently decodable blocks.
+    public let blockBytes: UInt64
 
-    public init(expertStride: UInt64, expertsPerLayer: Int, splitBytes: UInt64?) {
+    public init(
+        expertStride: UInt64, expertsPerLayer: Int, splitBytes: UInt64?,
+        blockBytes: UInt64 = 256 * 1024
+    ) {
         self.expertStride = expertStride
         self.expertsPerLayer = expertsPerLayer
         self.splitBytes = splitBytes
+        self.blockBytes = blockBytes
     }
 
     /// One or two, matching `ExpertBlobIndex`'s own limit.
@@ -53,6 +64,12 @@ public struct CompressedExpertLayerGeometry: Sendable, Equatable {
                         + "\(expertStride)-byte stride")
             }
         }
+        guard blockBytes >= 4096, blockBytes <= (1 << 20),
+            blockBytes & (blockBytes - 1) == 0
+        else {
+            throw RepackError.configurationInvalid(
+                detail: "block size \(blockBytes) must be a power of two in 4 KiB...1 MiB")
+        }
     }
 }
 
@@ -61,7 +78,8 @@ public struct CompressedExpertLayerResult: Sendable, Equatable {
     public let indexBytes: UInt64
     public let sha256: String
     public let indexSha256: String
-    public let framesPerExpert: Int
+    public let blocksPerExpert: Int
+    public let blockBytes: UInt64
 }
 
 /// Writes a raw expert layer as LZFSE frames, plus the index that addresses them.
@@ -146,63 +164,74 @@ public enum CompressedExpertLayerWriter {
         var written: UInt64 = 0
         let ranges = geometry.frameRanges.map { Int($0.lowerBound)..<Int($0.upperBound) }
         for expert in 0..<geometry.expertsPerLayer {
-            let frames = try compressExpert(
+            let blocks = try compressExpert(
                 fd: fd, sourcePath: sourcePath, expert: expert,
-                ranges: ranges, buffer: buffer, outFD: outFD,
+                ranges: ranges, blockBytes: Int(geometry.blockBytes),
+                buffer: buffer, outFD: outFD,
                 destinationPath: destinationPath, written: &written, hasher: &hasher)
-            entries.append(.init(frames: frames))
+            entries.append(.init(frames: blocks))
         }
         try Posix.fsync(outFD, path: destinationPath)
         let indexData = ExpertBlobIndex.encode(
-            entries, framesPerExpert: geometry.framesPerExpert)
+            entries, blockBytes: geometry.blockBytes)
         try writeIndex(indexData, to: indexPath)
         return CompressedExpertLayerResult(
             compressedBytes: written,
             indexBytes: UInt64(indexData.count),
             sha256: hasher.finalizeHexString(),
             indexSha256: Self.sha256(of: indexData),
-            framesPerExpert: geometry.framesPerExpert)
+            blocksPerExpert: entries.first?.frames.count ?? 0,
+            blockBytes: geometry.blockBytes)
     }
 
-    /// Reads, compresses and writes the frames of one expert.
+    /// Reads, compresses and writes the blocks of one expert.
+    ///
+    /// Each phase is read once and then cut into `blockBytes` blocks, so the
+    /// source read stays the sequential phase it was and only the compressed
+    /// output gains the parallelism.
     private static func compressExpert(
         fd: Int32,
         sourcePath: String,
         expert: Int,
         ranges: [Range<Int>],
+        blockBytes: Int,
         buffer: UnsafeMutableRawPointer,
         outFD: Int32,
         destinationPath: String,
         written: inout UInt64,
         hasher: inout Sha256Stream
     ) throws -> [ExpertBlobIndex.Blob] {
-        var frames: [ExpertBlobIndex.Blob] = []
-        frames.reserveCapacity(ranges.count)
+        var blocks: [ExpertBlobIndex.Blob] = []
         let base = UInt64(expert) * UInt64(ranges.reduce(0) { $0 + $1.count })
         for range in ranges {
             try Posix.preadAll(
                 fd: fd, path: sourcePath, buf: buffer, count: range.count,
                 offset: base + UInt64(range.lowerBound))
-            let packed = try ExpertBlobCodec.compress(
-                source: UnsafeRawPointer(buffer), count: range.count)
-            guard packed.count > 0, packed.count <= Int(UInt32.max) else {
-                throw RepackError.configurationInvalid(
-                    detail: "expert \(expert) frame compressed to \(packed.count) bytes")
-            }
-            try packed.withUnsafeBytes { raw in
-                guard let baseAddress = raw.baseAddress else {
+            var offset = 0
+            while offset < range.count {
+                let count = min(blockBytes, range.count - offset)
+                let packed = try ExpertBlobCodec.compress(
+                    source: UnsafeRawPointer(buffer).advanced(by: offset), count: count)
+                guard packed.count > 0, packed.count <= Int(UInt32.max) else {
                     throw RepackError.configurationInvalid(
-                        detail: "expert \(expert) frame has no bytes")
+                        detail: "expert \(expert) block compressed to \(packed.count) bytes")
                 }
-                try Posix.pwriteAll(
-                    fd: outFD, path: destinationPath, buf: baseAddress,
-                    count: raw.count, offset: written)
-                hasher.update(raw)
+                try packed.withUnsafeBytes { raw in
+                    guard let baseAddress = raw.baseAddress else {
+                        throw RepackError.configurationInvalid(
+                            detail: "expert \(expert) block has no bytes")
+                    }
+                    try Posix.pwriteAll(
+                        fd: outFD, path: destinationPath, buf: baseAddress,
+                        count: raw.count, offset: written)
+                    hasher.update(raw)
+                }
+                blocks.append(.init(offset: written, length: UInt32(packed.count)))
+                written += UInt64(packed.count)
+                offset += count
             }
-            frames.append(.init(offset: written, length: UInt32(packed.count)))
-            written += UInt64(packed.count)
         }
-        return frames
+        return blocks
     }
 
     private static func writeIndex(_ data: Data, to path: String) throws {

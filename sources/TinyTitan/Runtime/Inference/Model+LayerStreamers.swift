@@ -133,23 +133,25 @@ extension Model {
         // every derived offset pointing outside the layer file.
         let phase1Bytes = Self.phase1Bytes(
             forLayer: L, layout: packedExpertsLayout)
-        let compressedFrames = try Self.compressedFrames(
+        let compressed = try Self.compressedLayout(
             beside: url,
             expertsPerLayer: packedExpertsLayout.expertsPerLayer,
+            expertStride: packedExpertsLayout.expertStride,
             phase1Bytes: phase1Bytes)
         let streamSize = try Self.streamSize(
             forLayer: L, layout: packedExpertsLayout,
-            compressedFrames: compressedFrames)
+            compressed: compressed)
         let layout = StreamLayout(
             path: url.path,
             streamOffset: 0,
             streamSize: streamSize,
             expertsPerLayer: packedExpertsLayout.expertsPerLayer,
             expertStride: packedExpertsLayout.expertStride,
-            expertOffsets: compressedFrames == nil
+            expertOffsets: compressed == nil
                 ? packedExpertsLayout.layers[L].experts.map(\.offset) : nil,
             phase1Bytes: phase1Bytes,
-            compressedFrames: compressedFrames)
+            compressedFrames: compressed?.entries.map(\.frames),
+            compressedBlockBytes: compressed?.blockBytes ?? 0)
         let slotCount: Int
         switch streamingMode {
         case .pread(let configuredSlotCount):
@@ -212,10 +214,10 @@ extension Model {
     static func streamSize(
         forLayer layer: Int,
         layout: PackedExpertsLayout,
-        compressedFrames: [[ExpertBlobIndex.Blob]]?
+        compressed: ExpertBlobIndex.Layout?
     ) throws -> UInt64 {
-        if let compressedFrames {
-            let end = ExpertBlobIndex.maximumEnd(compressedFrames)
+        if let compressed {
+            let end = ExpertBlobIndex.maximumEnd(compressed.entries)
             guard end > 0 else {
                 throw ModelError.internalInconsistency(
                     detail: "packed expert layer \(layer) has an empty compressed index")
@@ -305,11 +307,12 @@ extension Model {
     /// match the layer's -- expert count, and where the split falls -- so a
     /// sidecar written for another layer or the other split is refused at load
     /// rather than decoded into slots.
-    static func compressedFrames(
+    static func compressedLayout(
         beside url: URL,
         expertsPerLayer: Int,
+        expertStride: UInt64,
         phase1Bytes: UInt64?
-    ) throws -> [[ExpertBlobIndex.Blob]]? {
+    ) throws -> ExpertBlobIndex.Layout? {
         let indexName = ExpertBlobIndex.sidecarName(forLayerFile: url.lastPathComponent)
         let indexURL = url.deletingLastPathComponent().appendingPathComponent(indexName)
         guard FileManager.default.fileExists(atPath: indexURL.path) else { return nil }
@@ -321,11 +324,12 @@ extension Model {
         // Bounded, and through the model directory's O_NOFOLLOW chain: a 12 KiB
         // metadata file has no business allocating whatever length it declares.
         let indexData = try BoundedMetadataRead.read(fileAt: indexURL, maxBytes: cap)
-        return try ExpertBlobIndex.decode(
+        let phase0Bytes = phase1Bytes ?? expertStride
+        return try ExpertBlobIndex.decodeLayout(
             indexData,
             expectedCount: expertsPerLayer,
-            expectedFrames: phase1Bytes == nil ? 1 : 2
-        ).map(\.frames)
+            phase0Bytes: phase0Bytes,
+            phase1Bytes: phase1Bytes.map { expertStride - $0 })
     }
 
     /// Where a layer's expert blob splits, or nil when it does not.

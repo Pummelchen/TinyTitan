@@ -55,6 +55,9 @@ public struct StreamLayout: Sendable {
     /// `TinyTitanFormat`, whose types are package-scoped, and nothing outside
     /// this package builds a `StreamLayout`.
     package let compressedFrames: [[ExpertBlobIndex.Blob]]?
+    /// The decoded size of one block in a v3 index, or 0 for a legacy (v2)
+    /// index whose entries are whole-phase frames.
+    package let compressedBlockBytes: UInt64
 
     package init(
         path: String,
@@ -64,7 +67,8 @@ public struct StreamLayout: Sendable {
         expertStride: UInt64,
         expertOffsets: [UInt64]? = nil,
         phase1Bytes: UInt64? = nil,
-        compressedFrames: [[ExpertBlobIndex.Blob]]? = nil
+        compressedFrames: [[ExpertBlobIndex.Blob]]? = nil,
+        compressedBlockBytes: UInt64 = 0
     ) {
         self.path = path
         self.streamOffset = streamOffset
@@ -74,6 +78,7 @@ public struct StreamLayout: Sendable {
         self.expertOffsets = expertOffsets
         self.phase1Bytes = phase1Bytes
         self.compressedFrames = compressedFrames
+        self.compressedBlockBytes = compressedBlockBytes
     }
 
     /// The byte offset of one expert within this layer's file.

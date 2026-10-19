@@ -448,6 +448,14 @@ The fixes that were tried, all measured, none close:
 - a deeper ring (`TINYTITAN_PREFETCH_LAYER_DEPTH`, depth 8 everywhere) -> 5.39
   tok/s, hit rate 0.81. Still 2.5x behind raw.
 
+A second pipeline (v3 block-parallel frames, phase-1 publish, ring issued before
+the demand fetch with its own reader) improved the compressed arm from 7.91 to
+**9.71 tok/s** against raw's 15.87 -- -38.8% instead of -42.5%. The I/O is now
+fully hidden (`io_hidden_pct=99.5`) and blocks decode at 5.9 GB/s; the wall is
+that one layer's compressed load is ~2.4 ms against a 1.8 ms layer, while the
+raw read (1.65 ms) fits inside it. `docs/llm-compression-design.md` has the
+budget.
+
 **Verdict: keep the install raw.** The `--compress-experts` converter stays as
 an opt-in measurement tool and the read path stays because it is inert without
 an `.idx` sidecar, but no install should be converted for speed and no default

@@ -202,93 +202,31 @@ extension PreadExpertStreamer {
         for index in plan.misses { try readPlanMiss(plan, index: index) }
     }
 
-    /// Decode every miss of a compressed plan into its slot.
+    /// Decode every miss of a compressed plan into its slots, one wave a layer.
     ///
-    /// Two things make this affordable, both measured: the misses are read in
-    /// one storage call per few experts (a per-expert fetch of ~1.2 MB measured
-    /// 8 ms against the raw path's batched 2 ms), and they decode in parallel
-    /// on separate staging buffers (serial decoding measured 3.2 tok/s against
-    /// the raw path's 10.0). A token misses ~204 MB on Ornith 4-bit, so this is
-    /// the path's whole cost.
-    func executeCompressedMisses(_ plan: ExpertCachePlan) throws {
+    /// The wave is the layer's whole miss set, and it is handed to
+    /// `decodeCompressedSet`, which reads it in one storage call and decodes
+    /// every block in parallel -- fronts, the phase-1 publish, then the tails.
+    /// Measured on Ornith 4-bit: four-experts-at-a-time with per-frame ranges
+    /// took 5-13 ms to read and 1.8 ms per expert to decode, against a raw path
+    /// that reads 3-4 experts at 3.4 GB/s in ~2 ms.
+    func executeCompressedMisses(
+        _ plan: ExpertCachePlan,
+        firstStage: (() -> Void)? = nil
+    ) throws {
         guard let frames = compressedFrames else { return }
-        let batch = 4
+        let wave = 8
         var start = 0
         while start < plan.misses.count {
-            let end = min(start + batch, plan.misses.count)
-            try decodeCompressedBatch(
-                plan, misses: Array(plan.misses[start..<end]), frames: frames)
+            let end = min(start + wave, plan.misses.count)
+            let misses = Array(plan.misses[start..<end])
+            try decodeCompressedSet(
+                experts: misses.map { plan.experts[$0] },
+                frames: frames,
+                into: misses.map { slotPointers[plan.assignedSlots[$0]] },
+                firstStage: start == 0 ? firstStage : nil)
             start = end
         }
-    }
-
-    /// One batched read for `misses`, then a parallel decode into their slots.
-    private func decodeCompressedBatch(
-        _ plan: ExpertCachePlan,
-        misses: [Int],
-        frames: [[ExpertBlobIndex.Blob]]
-    ) throws {
-        struct Prepared {
-            let frames: [ExpertBlobIndex.Blob]
-            let scratch: UnsafeMutableRawPointer
-            let bytes: Int
-            let slot: Int
-        }
-        var prepared: [Prepared] = []
-        prepared.reserveCapacity(misses.count)
-        var offsets: [UInt64] = []
-        var counts: [Int] = []
-        var destinations: [UnsafeMutableRawPointer] = []
-        var borrowed: [(pointer: UnsafeMutableRawPointer, bytes: Int)] = []
-        defer {
-            for item in borrowed {
-                CompressedScratchPool.shared.giveBack(item.pointer, bytes: item.bytes)
-            }
-        }
-        for index in misses {
-            let expert = plan.experts[index]
-            let pack = frames[expert]
-            let bytes = pack.reduce(0) { $0 + Int($1.length) }
-            guard bytes > 0, bytes <= compressedScratchBytes else {
-                throw StreamerError.sizeMismatch(
-                    expected: UInt64(compressedScratchBytes), actual: UInt64(bytes))
-            }
-            let scratch = CompressedScratchPool.shared.borrow(bytes: bytes)
-            borrowed.append((scratch, bytes))
-            var cursor = 0
-            for frame in pack {
-                offsets.append(layout.streamOffset + frame.offset)
-                counts.append(Int(frame.length))
-                destinations.append(scratch.advanced(by: cursor))
-                cursor += Int(frame.length)
-            }
-            prepared.append(
-                Prepared(
-                    frames: pack, scratch: scratch, bytes: bytes,
-                    slot: plan.assignedSlots[index]))
-        }
-        if let boundedReader {
-            try boundedReader.fetch(
-                offsets: offsets, byteCounts: counts, into: destinations)
-        } else {
-            for index in offsets.indices {
-                try readFull(
-                    into: destinations[index], fileOffset: offsets[index],
-                    count: counts[index])
-            }
-        }
-        let batch = prepared
-        let firstError = Mutex<Error?>(nil)
-        DispatchQueue.concurrentPerform(iterations: batch.count) { index in
-            do {
-                try decodePackedFrames(
-                    batch[index].frames, from: batch[index].scratch,
-                    into: slotPointers[batch[index].slot])
-            } catch {
-                firstError.withLock { if $0 == nil { $0 = error } }
-            }
-        }
-        if let error = firstError.withLock({ $0 }) { throw error }
     }
 
     func readPlanMiss(_ plan: ExpertCachePlan, index: Int) throws {

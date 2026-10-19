@@ -158,8 +158,47 @@ Success criteria: `io_hidden_pct >= 95`, expert misses back to the raw arm's cou
 result is +4-8% depending on install; if it does not, the per-layer budget above
 says exactly which of read, decode, or latency-gap ate the saving.
 
+## What was built, and what it measured
+
+The pipeline above is now built and measured; it is still not a win:
+
+| step | compressed tok/s (16-token run) | A/B vs raw |
+| --- | ---: | ---: |
+| one shared scratch buffer behind a lock (first build) | 3.2 | -42.5% |
+| per-decode buffers, parallel plan decode | 4.2 | -- |
+| v3 block-parallel frames (256 KiB, 8 blocks/expert) | 4.7 | -- |
+| phase-1 publish wired into the async plan (`io_hidden` 9% -> 99.5%) | 4.9 | -- |
+| prefetch ring issued before the demand fetch, own reader, depth 8 | 5.1 | **-38.8%** |
+
+The A/B: raw 15.87 vs compressed 9.71 tok/s over three paired rounds, identical
+text. So the pipeline recovered 23% of the compressed arm's speed and fully hid
+the I/O, but the gap is unchanged in kind.
+
+**The wall is the per-layer window, not the codec or the scheduler.** The raw
+path's read is 1.65 ms per layer and fits inside the 1.8 ms the layer takes, so
+it is hidden completely (`io_hidden_pct=100`). The compressed wave costs ~1.5 ms
+of read plus ~0.9 ms of decode; even with the phase split, the read and decode
+are serial inside one wave, so the layer sees ~2.4 ms of work against a 1.8 ms
+window. Decoding is not the problem any more (10 blocks of a wave decode in
+0.55 ms, 5.9 GB/s); the *load* is 0.7 ms too long, and the prefetch ring has
+exactly one layer of lead -- 1.8 ms -- to hide a 2.4 ms job.
+
+**What the literature says the fix is.** ZipMoE (ICML 2026) makes the same
+observation and wins on *high-precision* weights: it splits BF16 into
+low-entropy exponent chunks (lossless, 68-74% of the original) and hides
+parallel CPU decompression behind I/O with a per-layer DAG; its baselines are
+I/O-stalled offloaders, not an engine that already hides I/O. FlashMoE reports
+decompression at 41 GB/s on the GPU ("essentially free"). Both point the same
+way: decompression has to leave the critical path entirely -- on the GPU, or
+behind a window much larger than one layer's 1.8 ms. For a 4-bit install the
+prize is only 8.4% of the expert bytes, so a CPU decoder that must share the
+window with the read cannot pay for itself.
+
 ## Status
 
-The pipeline above is not built. The converter and the `.idx` read path stay as
-opt-in, reproducible tools; today's honest number is the A/B's -42.5%, and this
-note explains why that number is about the implementation rather than the idea.
+The v3 format, the block decoder, the phase publish and the separate prefetch
+reader are committed as the pipeline's foundation. The target of +5% decode is
+**not met**: -38.8%. The next lever is GPU-side decompression (Metal), which the
+literature reports at tens of GB/s; a CPU pipeline on this engine would need the
+per-layer window to grow or the load to fall under 1.65 ms, and neither is
+available.
