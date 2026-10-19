@@ -210,6 +210,33 @@ block-buffered there, so the line only appears when the process flushes or dies.
 Polling HTTP readiness instead gives the honest number. Nothing to optimise on
 this axis, and no claim made from the bad number.
 
+### The disk prompt cache works, and it is worth 13x on a resumed session
+
+The prompt cache is memory-only by default (`prompt_cache_disk=off`), so the
+value of `--prompt-cache-disk <dir>` had never been measured here. It is the
+largest single number of the night, Ornith 4-bit, a 1,656-token prompt:
+
+| case | prefill |
+| --- | ---: |
+| turn 1, cold | **32.25 s** |
+| turn 2, same server (memory cache) | 1.33 s |
+| the same conversation, **after a server restart** (disk cache) | **2.48 s** |
+
+Resuming a session across a restart therefore costs 2.5 s instead of 32.2 s --
+**13x less time to first token** -- because the stored KV is reloaded from disk
+instead of recomputed. Two entries were written to the directory, so the write
+path and the read path both work.
+
+This is not shipped as a default, and should not be: enabling it writes model
+state to a directory and carries a disk budget (8 GiB by default). It is a
+one-flag win for any workload that restarts sessions with a shared prefix, which
+is the coding-agent case:
+
+    --prompt-cache-disk ~/.tinytitan/prompt-cache --prompt-cache-disk-mib 512
+
+Measured at 4-bit only; the mechanism is precision-independent, but the 8-bit
+figure is not measured and is not claimed.
+
 ## Status at 2026-10-19 00:00
 
 **Nothing has cleared the bar after ~22 configurations.** The decode path on this
