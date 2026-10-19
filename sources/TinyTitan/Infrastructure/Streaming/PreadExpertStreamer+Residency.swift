@@ -243,6 +243,16 @@ extension PreadExpertStreamer {
             throw ModelError.internalInconsistency(
                 detail: "prefetch experts and destinations differ in count")
         }
+        // A compressed layer cannot be prefetched by this path: it reads a whole
+        // stride at an expert's offset, and a compressed expert is a set of
+        // shorter frames at index-supplied offsets. Returning an empty operation
+        // is the correct behaviour until the ring learns to decode -- reading
+        // here would put raw frame bytes where the consumer expects weights.
+        guard compressedFrames == nil else {
+            let operation = ExpertLoadOperation()
+            operation.finish(.success(()))
+            return operation
+        }
         let offsets = try experts.map { expert -> UInt64 in
             guard expert >= 0 && expert < layout.expertsPerLayer else {
                 throw ModelError.internalInconsistency(detail: "invalid prefetched expert")

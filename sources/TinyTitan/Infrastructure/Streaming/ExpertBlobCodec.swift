@@ -70,16 +70,31 @@ public enum ExpertBlobCodec {
         into destination: UnsafeMutableRawPointer,
         expected: Int
     ) throws {
-        guard expected > 0, !packed.isEmpty else {
+        try packed.withUnsafeBytes { source in
+            guard let base = source.baseAddress else {
+                throw Failure.decodeFailed(expected: expected, got: 0)
+            }
+            try decompress(
+                source: base, count: source.count,
+                into: destination, expected: expected)
+        }
+    }
+
+    /// The read path's entry point: the compressed bytes are already in a
+    /// staging buffer, so this avoids copying them into a `Data` first.
+    public static func decompress(
+        source: UnsafeRawPointer,
+        count: Int,
+        into destination: UnsafeMutableRawPointer,
+        expected: Int
+    ) throws {
+        guard expected > 0, count > 0 else {
             throw Failure.decodeFailed(expected: expected, got: 0)
         }
-        let written = packed.withUnsafeBytes { source -> Int in
-            guard let base = source.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-            return compression_decode_buffer(
-                destination.assumingMemoryBound(to: UInt8.self), expected,
-                base, packed.count,
-                nil, COMPRESSION_LZFSE)
-        }
+        let written = compression_decode_buffer(
+            destination.assumingMemoryBound(to: UInt8.self), expected,
+            source.assumingMemoryBound(to: UInt8.self), count,
+            nil, COMPRESSION_LZFSE)
         guard written == expected else {
             throw Failure.decodeFailed(expected: expected, got: written)
         }

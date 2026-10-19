@@ -43,6 +43,14 @@ public struct StreamLayout: Sendable {
     /// stride, which the streamer refuses anything else for.
     public let phase1Bytes: UInt64?
 
+    /// Per-expert compressed frames, when this layer's blobs are compressed.
+    ///
+    /// `nil` means the layer is stored raw and every expert is `expertStride`
+    /// bytes at `expertOffset(...)`. Present means those offsets address the
+    /// *index* instead: each expert is one or two LZFSE frames, and a split
+    /// layer has one frame per half so the reader keeps its phase-1 overlap.
+    public let compressedFrames: [[ExpertBlobIndex.Blob]]?
+
     public init(
         path: String,
         streamOffset: UInt64,
@@ -50,7 +58,8 @@ public struct StreamLayout: Sendable {
         expertsPerLayer: Int,
         expertStride: UInt64,
         expertOffsets: [UInt64]? = nil,
-        phase1Bytes: UInt64? = nil
+        phase1Bytes: UInt64? = nil,
+        compressedFrames: [[ExpertBlobIndex.Blob]]? = nil
     ) {
         self.path = path
         self.streamOffset = streamOffset
@@ -59,6 +68,7 @@ public struct StreamLayout: Sendable {
         self.expertStride = expertStride
         self.expertOffsets = expertOffsets
         self.phase1Bytes = phase1Bytes
+        self.compressedFrames = compressedFrames
     }
 
     /// The byte offset of one expert within this layer's file.
