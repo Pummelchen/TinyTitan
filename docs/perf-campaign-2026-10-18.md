@@ -275,6 +275,9 @@ is the coding-agent case:
     --prompt-cache-disk ~/.tinytitan/prompt-cache --prompt-cache-disk-mib 512
 
 Measured at both widths: 32.25 -> 2.48 s at 4-bit, 56.31 -> 4.07 s at 8-bit.
+`tools/server_launcher.sh` now forwards both flags (`--prompt-cache-disk` and
+`--prompt-cache-disk-mib`), so the launcher path can reach it without running the
+server by hand; it stays off unless an operator asks.
 
 ## Status at 2026-10-19 00:00
 

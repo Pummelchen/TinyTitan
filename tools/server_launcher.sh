@@ -99,6 +99,14 @@
 #   --prompt-cache <multi-prefix|off>  prompt-state reuse (default multi-prefix,
 #              a 256 MiB cache). `off` is for the cache A/B harnesses, which
 #              have to be able to ask for the arm they measure.
+#   --prompt-cache-disk <dir>  also persist prompt state there, so a session that
+#              stops and starts again with the same prefix skips recomputing it.
+#              Measured 2026-10-19 on Ornith 35B-A3B: a 1,656-token conversation
+#              resumed after a restart prefills in 2.5 s at 4-bit and 4.1 s at
+#              8-bit, against 32 s and 56 s cold -- 13x less time to first token.
+#              Off by default because that state is derived from the prompt, so
+#              it is written to disk only where an operator asked for it.
+#   --prompt-cache-disk-mib <n>  budget for that directory (server default 8192).
 #   --mtp-model <dir>   attach a native speculative draft head. GPU only (the
 #              draft shares the target's embedding and head), and not a catalog
 #              entry, because a sidecar has no weights for the catalog to
@@ -187,6 +195,7 @@ if [[ "${TINYTITAN_LAUNCHER_ASSUME_TTY:-0}" == "1" ]]; then INTERACTIVE=1; fi
 CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
 RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
+PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""
 # --install: fetch a model that is not on disk yet instead of stopping. The
 # default is to ask, because the download is 20-220 GB; a pipe or a dry run
 # never downloads on its own, and `--install` is how a caller says yes ahead of
@@ -242,6 +251,8 @@ while [[ $# -gt 0 ]]; do
     # launcher has to be able to turn it off; `multi-prefix` (the default) is
     # the 256 MiB cache every published number was taken with.
     --prompt-cache) CACHE_ARG="${2:?--prompt-cache needs multi-prefix or off}"; shift 2 ;;
+    --prompt-cache-disk) PROMPT_CACHE_DISK_ARG="${2:?--prompt-cache-disk needs a directory}"; shift 2 ;;
+    --prompt-cache-disk-mib) PROMPT_CACHE_DISK_MIB_ARG="${2:?--prompt-cache-disk-mib needs a number}"; shift 2 ;;
     # The native speculative draft head. It is not a catalog entry (a sidecar
     # has no weights of its own for the catalog to describe), and it is the
     # only way to reach the speculative path, so a harness that measures MTP
@@ -1330,6 +1341,21 @@ case "$CACHE_ARG" in
   *) echo "unknown --prompt-cache: $CACHE_ARG (multi-prefix or off)" >&2; exit 2 ;;
 esac
 gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" --kv-bits "$kv_bits")
+# The disk tier is opt-in and forwarded verbatim; the server owns the budget and
+# the eviction, and refuses a malformed directory or size itself.
+if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" && -z "$PROMPT_CACHE_DISK_ARG" ]]; then
+  echo "--prompt-cache-disk-mib needs --prompt-cache-disk <dir>" >&2
+  exit 2
+fi
+if [[ -n "$PROMPT_CACHE_DISK_ARG" ]]; then
+  gpu_runtime+=(--prompt-cache-disk "$PROMPT_CACHE_DISK_ARG")
+  if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
+    case "$PROMPT_CACHE_DISK_MIB_ARG" in
+      '' | *[!0-9]*) echo "unknown --prompt-cache-disk-mib: $PROMPT_CACHE_DISK_MIB_ARG (a whole number of MiB)" >&2; exit 2 ;;
+    esac
+    gpu_runtime+=(--prompt-cache-disk-mib "$PROMPT_CACHE_DISK_MIB_ARG")
+  fi
+fi
 if [[ -n "$max_context" ]]; then
   gpu_runtime+=(--max-context "$max_context" --rope-scaling "$rope_scaling")
 elif [[ "$rope_scaling" == "none" ]]; then
