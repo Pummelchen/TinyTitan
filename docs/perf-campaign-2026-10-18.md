@@ -404,19 +404,28 @@ lossless; the format is correct, the speed is not).
 
 **Why the estimate was wrong, in one number.** The plan assumed a token reads
 ~65 MiB of experts. Measured on this install: 2,654 misses over 21 forward
-passes = **126 misses/token x ~1.61 MB packed = ~204 MB/token**, because the
-10.55 GB cache holds 4 slots per layer while the router asks for 8. LZFSE
-decodes at ~0.9 GB/s per core, so one token's decode is **~226 ms of CPU**
-against a ~100 ms token. The churn test that cleared the CPU assumption paced
-1.6 MiB every 1.8 ms -- one expert per layer -- and the engine misses four to
-six.
+passes = **126 misses/token x ~1.61 MB packed = ~204 MB/token**. Each layer
+holds 160 of its 256 experts in cache (10.55 GiB / 40 / 1.77 MB), and the
+router's 8 picks still miss ~40% of the time, so it is ~3.2 misses a layer --
+the churn test that cleared the CPU assumption paced one expert per layer.
 
 Worse, the saving inverted: the raw arm missed 111 experts/token (196 MB), the
 compressed arm 126 (204 MB packed). The prefetch ring, which normally fills
 slots ahead of demand, could not keep up with decode (adoption 0.7/token against
-21.75), so the compressed install read *more* bytes than the raw one. Even with
-the hit rates equalised it would have read 8.4% fewer -- about 5 ms of a ~100 ms
-token, against ~226 ms of decode CPU that the ring has to hide to get it.
+21.75), so the compressed install read *more* bytes than the raw one.
+
+**The -42.5% is a pipeline result, not a codec result.** The same day's benchmark
+(`benchmark/expert_decode_bench.swift`, real frames) decodes LZFSE at 1.02 GB/s
+on one core and **5.61 GB/s on eight**, and a layer's ~3-expert miss set in
+**1.47 ms inside a 1.8 ms layer**. The compressed path never got near that: it
+decoded both frames before returning (dropping the phase-1 overlap the raw path
+has), serialised a read with a 4-expert decode per batch, and ran behind a
+one-slot ring -- an effective ~1 GB/s, i.e. ~200 ms a token. With the overlap
+restored, the ceiling is the byte saving itself: **+7.7% Ornith 4-bit, +5.0%
+8-bit, +4.5% Qwen3.8 4-bit**, computed from measured miss rates and decode
+throughput. `docs/llm-compression-design.md` has the budget model, the codec
+comparison (deflate's 0.27 GB/s/core cannot even reach the 3.4 GB/s read) and
+the bounded prototype that would test it.
 
 **The ceiling is the layer, not the codec.** Decoding parallelizes across
 experts, but a layer only misses four to six of them, and layers are strictly
