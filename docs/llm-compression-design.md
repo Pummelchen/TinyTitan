@@ -258,6 +258,41 @@ With that measured, there is no public GPU decompression path left: the
 GPU-decode route would mean writing an LZFSE (or rANS) decoder in Metal, which is
 a project in its own right and would still be capped by the byte saving.
 
+## A GPU-decodable codec: 9.8% at 6 GB/s
+
+The online path was never going to work, so the codec was redesigned around the
+GPU. The result is `benchmark/gpu_rans_prototype.swift`, measured on Ornith 4-bit
+layer 20:
+
+- **ratio 0.9017-0.9020** (9.8-9.83% smaller), decoded **bit-exact** on both CPU
+  and GPU, 162 blocks checked byte for byte.
+- **6.0-6.1 GB/s** on the GPU at 9+ experts; a 3-expert wave (5.3 MB) decodes in
+  1.2-2.0 ms, against the 1.6 ms a 4-bit layer takes. 8-bit (5.8 ms window) and
+  125B (7.6 ms) have ample room.
+
+**Why this codec.** Two measurements decide it. The 4-bit weight bytes are 89% of
+an expert and sit at 7.48 bits/byte -- an entropy bound of 0.936 that no codec
+beats. The BF16 scales/biases are the other 11%: interleaved, a 64 KiB pair
+measures 5.58 bits/byte (0.698), but its **byte planes** measure 7.89 (mantissa)
+and **1.36** (exponent), together 0.579. That is ZipMoE's bit-field observation,
+and it is where the last 2 points come from. Splitting the planes is free: the
+decoder writes every other byte.
+
+**The format** is one static order-0 model per tensor role (gate/up/down weights,
+and each mantissa/exponent plane), 14-bit normalized frequencies, and 32-256
+interleaved streams per block so a GPU thread decodes ~2 KiB. rANS has no
+context, so streams are independent; each thread runs its own state machine and
+the slot -> (symbol, frequency, cumulative) table is one 8-byte load per symbol.
+A raw fallback for an incompressible plane would recover the last 0.2%.
+
+**What it takes to ship.** The decode is now off the CPU, but the engine side is
+still a project: a container that maps each expert's blocks (the current v3 index
+already has the shape), MTLIO loading the compressed bytes into a GPU buffer
+(no CPU copy -- the same MTLIO path this note already measured), the kernel above
+decoding into the expert slot, and the A/B. The ceiling is the 9.8% byte saving:
+with decode fully hidden that is +6-8% on Ornith 4-bit, and more on 8-bit/125B
+where the layer window is three to four times the decode.
+
 ## Status
 
 The v3 format, the block decoder, the phase publish and the separate prefetch
