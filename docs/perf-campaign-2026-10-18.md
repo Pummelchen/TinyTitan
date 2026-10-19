@@ -245,6 +245,42 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### The compression verdict was wrong about the CPU, and the correction matters
+
+The recorded verdict rejected compression on decompression cost. Its arithmetic
+assumed the decompressor sits on the critical path *and* that the cores are doing
+something else. The second half is false, and the first half is a scheduling
+choice rather than a constraint:
+
+- **The CPU is idle during decode.** Measured over a 128-token run: 4.36 s of CPU
+  against 11.0 s of wall = **0.40 of 8 cores**, 5% of the machine.
+- **A faster codec gives nearly the same ratio.** On a 256 MiB expert sample:
+  `zstd -1` **90.8% at 1,113 MiB/s per core**, `-3` 90.3% at 1,067, `-12` 90.1% at
+  985, `lz4` 100% at 5,120. The levels barely differ in ratio; level 1 is 13%
+  faster than level 12 and is the right one here.
+- **At the intensity the model needs, the churn is free.** Six decompressor
+  threads (~6.6 GB/s of memory traffic) cost **-29% decode** (11.95 -> 8.34,
+  12.48 -> 8.93 tok/s), but one thread (11.35) and two (11.21) are inside the
+  11.09 tok/s baseline's noise. The model needs about 1 GB/s of output for
+  65 MiB/token at 16 tok/s.
+
+What that is worth: a 4-bit token reads ~65 MiB of experts, so a 90.8% ratio
+saves ~6 MiB. At the measured read cost that is **~2-4 ms of a 74-86 ms token,
+or roughly 3-5%** -- above the campaign's bar, and it does not need the cores the
+host path uses.
+
+Per layer the arithmetic is comfortable: ~1.6 MiB to decompress at 1.1 GB/s is
+1.5 ms on one core, ~0.4 ms across four, against a layer that takes ~1.8 ms.
+The prefetch ring already gives one layer of lead, so the decompression can ride
+behind it rather than in front of the GPU.
+
+This is a real candidate and a project rather than a knob: repack the expert
+blobs as zstd frames (17 GiB -> ~15.5), decompress in the streamer's read path
+into the slot buffer, keep the uncompressed format readable, then A/B. The one
+thing the churn test cannot tell us is whether *bursty per-layer* decompression
+is as benign as a steady background stream; that is the first thing the
+prototype should measure.
+
 ### Compression, re-measured on Ornith (the Qwen verdict was for Qwen)
 
 A user zipped the Ornith 35B 4-bit install and got **20 GB -> 18 GB, ~10%**. That
@@ -272,8 +308,10 @@ MiB/s per core and **1,422 MiB/s across four**. A 4-bit decode token reads
 - decompressing those 65 MiB costs **~44 ms even on four cores**,
 - and the wait it would be replacing is **35-45 ms**.
 
-It swaps one bottleneck for another while spending four cores that share memory
-bandwidth with the GPU. Where the bytes *are* worth compressing: transport and
+It swaps one bottleneck for another **if the decompressor sits in front of the
+GPU on the critical path**. The section above shows the cost is scheduling, not
+intrinsic: at the intensity the model needs, background decompression measured
+free. Where the bytes *are* worth compressing: transport and
 install (20 -> 18 GB) and the 102 GB n-gram table (71-77%).
 
 ### Placement is where the smart reader can still win
