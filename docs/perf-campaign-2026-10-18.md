@@ -245,6 +245,45 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Placement is where the smart reader can still win
+
+The reader is already predictive: it runs the *next* layer's router on the current
+residual and issues ranked reads (42.7 issued / 23.3 adopted per token). The
+reading side is exhausted -- compression 0% with a codec fast enough (lz4), 89.6%
+with one too slow (zstd -12 at 0.96 GB/s/core against a 45 ms wait), and the SSD
+runs at 1.4-2 GB/s of 3.6 so a layout permutation has nothing to win.
+
+What had not been measured is **placement**: which experts to *keep*. New
+simulator, `benchmark/expert_placement_sim.py`, replays a committed route trace
+(48 layers x 521 positions x top-10) against four policies at the shipped 96
+slots:
+
+| policy | hit rate |
+| --- | ---: |
+| naive all-time LFU | 66.89% |
+| LRU | 80.13% |
+| oracle (Belady) | **88.75%** |
+| static hot set, 48 pins, learned in-sample | 84.61% |
+| static hot set, 48 pins, **learned on another session** | **83.28%** |
+| static hot set, 72 pins, learned on another session | **85.05%** |
+
+Read against **LRU**, not against the naive LFU, because the shipped policy is
+LFU *with a count reset at the prefill-to-decode handover* and a recency tie
+break -- the reset is exactly what stops the stale-popularity pathology that
+makes plain LFU look 13 points worse here. Against LRU the oracle gap is 8.6
+points, and a static per-layer hot set learned from a **different session**
+recovers **37%** of it at 48 pins and **57%** at 72 pins (+3.2 and +4.9 points).
+
+Cross-session transfer is the point: the pins were learned on the 20261011 trace
+and scored on 20261015, so this is not an in-sample artifact (the in-sample
+version of the same arm reads 84.61%).
+
+What that is worth in time is not yet measured. The simulation ranks policies; it
+cannot predict the engine's absolute hit rate, because the runtime's ring
+converts misses into hits and reports 81-85% at the same slot count where the
+simulation says 67-80%. The next step is an engine arm, not a simulation: a pin
+file the streamer honours, then a paired A/B at both bit widths.
+
 ### Shared prefix reuse: found the wall, and it is a design wall
 
 The idea worth chasing was serving a *prompt-only* prefix from the cache, so two
