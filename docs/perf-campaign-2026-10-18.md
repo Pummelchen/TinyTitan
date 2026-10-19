@@ -245,6 +245,15 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### The disk prompt cache evicts at its budget
+
+Verified functionally rather than by reading the code: a server started with
+`--prompt-cache-disk-mib 100` took two ~80 MiB states and kept **one, 73 MiB** --
+the older entry was evicted, so the budget is enforced rather than nominal
+(`ServerPromptStateStore.saveSync` -> `evictDiskIfNeeded`, LRU by modification
+date, and a snapshot larger than the budget is refused outright). The launcher's
+default is 2,048 MiB, which holds roughly 25 states of this size.
+
 ### Both gates for compressed experts passed
 
 **B1 -- bursty decompression is free too.** The steady churn test could not say
