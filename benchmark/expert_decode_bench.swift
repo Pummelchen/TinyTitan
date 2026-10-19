@@ -151,6 +151,81 @@ func layerLatency(workers: Int, experts: Int) -> Double {
     return best
 }
 
+// Can the SSD read and the decode overlap? The design's ceiling assumes they
+// can: read the packed bytes while decoding the previous wave. This measures the
+// three cases on the same data -- read alone (F_NOCACHE), decode alone (8
+// workers), and both at once -- so a policy can be judged on measurement rather
+// than on the hope that two resources leave each other alone.
+func sequentialRead(path: String, chunk: Int) -> (seconds: Double, bytes: Int) {
+    let fd = open(path, O_RDONLY)
+    _ = fcntl(fd, F_NOCACHE, 1)
+    let buffer = UnsafeMutableRawPointer.allocate(byteCount: chunk, alignment: 4096)
+    defer {
+        buffer.deallocate()
+        close(fd)
+    }
+    let started = now()
+    var total = 0
+    while true {
+        let got = pread(fd, buffer, chunk, off_t(total))
+        if got <= 0 { break }
+        total += got
+    }
+    return (Double(now() - started) / 1e9, total)
+}
+
+func decodePass(workers: Int) -> Double {
+    let chunk = (frames.count + workers - 1) / workers
+    let started = now()
+    input.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+        guard let base = raw.baseAddress else { return }
+        DispatchQueue.concurrentPerform(iterations: workers) { worker in
+            let destination = UnsafeMutableRawPointer.allocate(
+                byteCount: maxOutput, alignment: 4096)
+            defer { destination.deallocate() }
+            let start = worker * chunk
+            let end = min(start + chunk, frames.count)
+            guard start < end else { return }
+            for index in start..<end {
+                _ = decode(frames[index], src: base, dst: destination)
+            }
+        }
+    }
+    return Double(now() - started) / 1e6
+}
+
+var readBest = Double.infinity
+var readBytes = 0
+for _ in 0..<3 {
+    let result = sequentialRead(path: args[1], chunk: 4 << 20)
+    readBytes = result.bytes
+    readBest = min(readBest, result.seconds)
+}
+let decodeBest = (0..<3).map { _ in decodePass(workers: 8) }.min() ?? 0
+
+var overlapBest = Double.infinity
+var overlapRead = 0.0
+for _ in 0..<3 {
+    let started = now()
+    let group = DispatchGroup()
+    group.enter()
+    var seconds = 0.0
+    DispatchQueue.global(qos: .userInitiated).async {
+        seconds = sequentialRead(path: args[1], chunk: 4 << 20).seconds
+        group.leave()
+    }
+    _ = decodePass(workers: 8)
+    group.wait()
+    overlapBest = min(overlapBest, Double(now() - started) / 1e6)
+    overlapRead = seconds
+}
+print(
+    String(
+        format:
+            "read-only %.0f ms (%.2f GB/s)  decode-only %.0f ms  both-at-once %.0f ms (read part %.0f ms)  bytes=%d MB",
+        readBest * 1000, Double(readBytes) / readBest / 1e9, decodeBest, overlapBest,
+        overlapRead * 1000, readBytes / 1_000_000))
+
 for experts in [3, 8, 10] {
     for workers in [4, 8] {
         print(

@@ -50,6 +50,14 @@ is across frames — the format's independent per-phase frames are what make the
 8-worker number reachable at all. Second, the wave must be about a layer's miss
 count (3-6 here), not one expert at a time, or dispatch overhead dominates.
 
+**Read and decode do not contend.** The same benchmark reads the layer's 415 MB
+with `F_NOCACHE` while the 8-worker decode runs: 85 ms total, which is the
+decode-only time, with the read finishing 25 ms into it (the pages were resident,
+so that read ran at 20 GB/s; the engine's own stats put the real uncached rate at
+~3.4 GB/s). The pipeline bound is `max(read, decode)`, not their sum — so at the
+real rate the projected 204 MB read (~60 ms a token) dominates the 8-worker decode
+(~38 ms), and the byte saving is what a correct pipeline collects.
+
 ## The budget model
 
 Per layer, with `m` misses, stride `s`, ratio `r = 0.911`:
