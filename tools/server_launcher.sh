@@ -99,14 +99,16 @@
 #   --prompt-cache <multi-prefix|off>  prompt-state reuse (default multi-prefix,
 #              a 256 MiB cache). `off` is for the cache A/B harnesses, which
 #              have to be able to ask for the arm they measure.
-#   --prompt-cache-disk <dir>  also persist prompt state there, so a session that
+#   --prompt-cache-disk <dir>  persist prompt state there, so a session that
 #              stops and starts again with the same prefix skips recomputing it.
+#              On by default, under the checkout at `.cache/prompt-cache`.
 #              Measured 2026-10-19 on Ornith 35B-A3B: a 1,656-token conversation
 #              resumed after a restart prefills in 2.5 s at 4-bit and 4.1 s at
 #              8-bit, against 32 s and 56 s cold -- 13x less time to first token.
 #              Off by default because that state is derived from the prompt, so
 #              it is written to disk only where an operator asked for it.
-#   --prompt-cache-disk-mib <n>  budget for that directory (server default 8192).
+#   --prompt-cache-disk-mib <n>  budget for that directory (default 2048 here).
+#   --no-prompt-cache-disk  leave nothing on disk; state stays in RAM only.
 #   --mtp-model <dir>   attach a native speculative draft head. GPU only (the
 #              draft shares the target's embedding and head), and not a catalog
 #              entry, because a sidecar has no weights for the catalog to
@@ -115,7 +117,8 @@
 #
 # What the server runs: every installed model is reachable by name through
 # the API (--models-dir), one resident at a time; GPU models are pinned to
-# native 262,144-token context, a 256 MiB multi-prefix prompt cache, 8-bit KV
+# native 262,144-token context, a 256 MiB multi-prefix prompt cache plus a
+# 2 GiB persisted one under `.cache/prompt-cache`, 8-bit KV
 # and MTP off. Everything tuned per model and quantization -- the expert-cache
 # budget, prefetch, the prefill chunk, sampling -- comes from the install's own
 # ModelProfile row, so the launcher never overrides a measured optimum.
@@ -195,7 +198,7 @@ if [[ "${TINYTITAN_LAUNCHER_ASSUME_TTY:-0}" == "1" ]]; then INTERACTIVE=1; fi
 CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
 RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
-PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""
+PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""; PROMPT_CACHE_DISK_OFF=0
 # --install: fetch a model that is not on disk yet instead of stopping. The
 # default is to ask, because the download is 20-220 GB; a pipe or a dry run
 # never downloads on its own, and `--install` is how a caller says yes ahead of
@@ -251,6 +254,7 @@ while [[ $# -gt 0 ]]; do
     # launcher has to be able to turn it off; `multi-prefix` (the default) is
     # the 256 MiB cache every published number was taken with.
     --prompt-cache) CACHE_ARG="${2:?--prompt-cache needs multi-prefix or off}"; shift 2 ;;
+    --no-prompt-cache-disk) PROMPT_CACHE_DISK_OFF=1; shift ;;
     --prompt-cache-disk) PROMPT_CACHE_DISK_ARG="${2:?--prompt-cache-disk needs a directory}"; shift 2 ;;
     --prompt-cache-disk-mib) PROMPT_CACHE_DISK_MIB_ARG="${2:?--prompt-cache-disk-mib needs a number}"; shift 2 ;;
     # The native speculative draft head. It is not a catalog entry (a sidecar
@@ -290,6 +294,17 @@ if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
       echo "unknown --prompt-cache-disk-mib: $PROMPT_CACHE_DISK_MIB_ARG (a whole number of MiB)" >&2
       exit 2 ;;
   esac
+fi
+
+# The resume cache is on by default, under the checkout. Measured 2026-10-19 on
+# Ornith 35B-A3B: a 1,656-token conversation resumed after a restart prefills in
+# 2.5 s at 4-bit and 4.1 s at 8-bit, against 32 s and 56 s cold. The directory is
+# this project's own, so nothing is written outside it; --no-prompt-cache-disk
+# keeps state in RAM only. A caller who named neither flag gets both defaults;
+# a caller who named a budget without a directory was refused above.
+if [[ "$PROMPT_CACHE_DISK_OFF" != 1 && -z "$PROMPT_CACHE_DISK_ARG" && -z "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
+  PROMPT_CACHE_DISK_ARG="$BASE_DIR/.cache/prompt-cache"
+  PROMPT_CACHE_DISK_MIB_ARG=2048
 fi
 
 # Old five-argument form without a model: `... <api> <mode> <bits> ...`
@@ -1604,6 +1619,15 @@ if [[ ! -e "$MODEL_DIR" ]]; then
 fi
 
 echo "Starting TinyTitanServer ($MODEL_NAME ${MODEL_QUANT}-bit, $model_word, $mode_word, thinking $think_word) on port $PORT..."
+
+# The server writes into the resume cache's directory, so it has to exist first.
+# Created here and not during argument parsing: a --dry-run must leave no trace.
+if [[ -n "$PROMPT_CACHE_DISK_ARG" ]]; then
+  mkdir -p "$PROMPT_CACHE_DISK_ARG" || {
+    echo "cannot create the prompt-cache directory: $PROMPT_CACHE_DISK_ARG" >&2
+    exit 1
+  }
+fi
 
 # --web runs the engine in **fast mode**: TINYTITAN_STRIP_CLI_PROMPT enables the
 # same CLI-strip the "<model>-fast" alias selects, for every request. The harness

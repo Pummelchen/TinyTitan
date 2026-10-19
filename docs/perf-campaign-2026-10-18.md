@@ -275,9 +275,12 @@ is the coding-agent case:
     --prompt-cache-disk ~/.tinytitan/prompt-cache --prompt-cache-disk-mib 512
 
 Measured at both widths: 32.25 -> 2.48 s at 4-bit, 56.31 -> 4.07 s at 8-bit.
-`tools/server_launcher.sh` now forwards both flags (`--prompt-cache-disk` and
-`--prompt-cache-disk-mib`), so the launcher path can reach it without running the
-server by hand; it stays off unless an operator asks.
+`tools/server_launcher.sh` now forwards both flags **and turns the tier on by
+default**, at `<checkout>/.cache/prompt-cache` with a 2048 MiB budget — the
+directory is the project's own, so nothing is written outside it.
+`--no-prompt-cache-disk` keeps state in RAM only, `--prompt-cache-disk <dir>`
+relocates it, and a `--dry-run` creates nothing. The server binary still defaults
+to off; this is a launcher decision.
 
 ## Status at 2026-10-19 00:00
 
