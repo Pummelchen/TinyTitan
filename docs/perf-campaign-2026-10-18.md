@@ -245,6 +245,24 @@ What is *not* reachable at this RAM budget is batching, because the KV
 reservation costs 2,782 MiB per slot at the 262K default and the batch budget is
 2,048 MiB. That is a KV-reservation-policy change, not a knob.
 
+### Both gates for compressed experts passed
+
+**B1 -- bursty decompression is free too.** The steady churn test could not say
+whether the real shape (one expert frame every layer) behaves the same, so
+`benchmark/decompress_churn.py` paces two libzstd decompressors at 1.6 MiB every
+1.8 ms through ctypes, with no process spawn:
+`paced/clean = 1.148x` and `0.969x` across two interleaved rounds -- inside the
+noise, on both sides of one.
+
+**B2 -- the ratio generalises to the 125B.** Qwen3.8-Flash-Next 4-bit:
+`layer_00` **90.9%**, `layer_10` **91.4%** at `zstd -1` (Ornith measured 90.8-91.4),
+and its dense `model_weights.bin` **89.8%** -- better than Ornith's 97.4%, so the
+residency-side saving is real on that model too.
+
+So the project is justified on both gates. What it still needs is the format and
+streamer work: per-expert frames, decompression into the slot buffer behind the
+ring, and the uncompressed path kept readable.
+
 ### The compression verdict was wrong about the CPU, and the correction matters
 
 The recorded verdict rejected compression on decompression cost. Its arithmetic

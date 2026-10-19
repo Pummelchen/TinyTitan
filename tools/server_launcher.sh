@@ -199,6 +199,7 @@ CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
 RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
 PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""; PROMPT_CACHE_DISK_OFF=0
+PAGE_CACHE=0
 # --install: fetch a model that is not on disk yet instead of stopping. The
 # default is to ask, because the download is 20-220 GB; a pipe or a dry run
 # never downloads on its own, and `--install` is how a caller says yes ahead of
@@ -248,6 +249,7 @@ while [[ $# -gt 0 ]]; do
     --thinking) THINKING_ARG="${2:?--thinking needs a level}"; shift 2 ;;
     --ram)      RAM_ARG="${2:?--ram needs a GB size}"; shift 2 ;;
     --context)  CONTEXT_ARG="${2:?--context needs a value}"; shift 2 ;;
+    --page-cache) PAGE_CACHE=1; shift ;;
     --kv)       KV_ARG="${2:?--kv needs 4, 8 or 16}"; shift 2 ;;
     --yarn)     YARN=1; shift ;;
     # The benchmark harnesses measure the prompt cache as a variable, so the
@@ -1522,6 +1524,15 @@ print_setup() {
   echo ""
   echo "Model: $MODEL_DIR"
   echo "Thinking: $think_word | RAM: $ram_note | At once: $concurrency | Port: $PORT | Ctrl-C to stop"
+  if [[ "$PAGE_CACHE" == 1 ]]; then
+    if [[ "$MODEL_QUANT" != 8 ]]; then
+      warn_red "  --page-cache measured -2.1% at ${MODEL_QUANT}-bit; it is a win only on 8-bit installs."
+      warn_red "  It also lets the expert reader grow beyond the declared RAM budget."
+    else
+      warn_red "  --page-cache: letting the expert reader use the page cache (+4.47% measured at 8-bit)."
+      warn_red "  The memory footprint is no longer declared; watch swap on this machine."
+    fi
+  fi
   if (( ram_over_rule )); then
     warn_red "WARNING: ${ram_gb} GB of RAM is over the ${ram_rule_gb} GB this launcher"
     warn_red "         recommends for this Mac (50%). Expect swapping, a less stable"
@@ -1637,8 +1648,16 @@ fi
 # several thousand — which is the difference between an answer in seconds and the
 # page sitting on "Deep diving...". The engine logs a strip report per request,
 # so what was removed is visible rather than assumed.
+# The page-cache opt-in is set on the launch line, not exported earlier: the plan
+# block runs in a subshell, so an export there never reached this child.
 if (( WEB )); then
-  TINYTITAN_STRIP_CLI_PROMPT=1 "${server_cmd[@]+"${server_cmd[@]}"}" &
+  if [[ "$PAGE_CACHE" == 1 ]]; then
+    TINYTITAN_BOUNDED_IO=0 TINYTITAN_STRIP_CLI_PROMPT=1 "${server_cmd[@]+"${server_cmd[@]}"}" &
+  else
+    TINYTITAN_STRIP_CLI_PROMPT=1 "${server_cmd[@]+"${server_cmd[@]}"}" &
+  fi
+elif [[ "$PAGE_CACHE" == 1 ]]; then
+  TINYTITAN_BOUNDED_IO=0 "${server_cmd[@]+"${server_cmd[@]}"}" &
 else
   "${server_cmd[@]+"${server_cmd[@]}"}" &
 fi
