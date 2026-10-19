@@ -194,11 +194,44 @@ behind a window much larger than one layer's 1.8 ms. For a 4-bit install the
 prize is only 8.4% of the expert bytes, so a CPU decoder that must share the
 window with the read cannot pay for itself.
 
+## The 8-bit install, and why the target cannot be met on this matrix
+
+Converted Ornith 8-bit to the same v3 format: **34,225,520,640 -> 32,630,820,322**
+bytes, only **95.3%** -- a 4.7% saving, less than half the 4-bit install's 9%.
+8-bit affine weights have more entropy per byte. Measured decode: raw 5.87 tok/s
+against compressed 3.96 (-33%) on 16 tokens, so the wider 5.8 ms layer window
+does not rescue it either.
+
+That leaves the ceiling arithmetic, which is what actually closes this:
+
+| install | byte saving | read share of the token | ceiling if *all* decode were hidden |
+| --- | ---: | ---: | ---: |
+| Ornith 4-bit | 9.0% | ~80% | ~7.2% (needs a load <= 1.65 ms; it is 2.4) |
+| Ornith 8-bit | 4.7% | ~56% | ~2.6% |
+| Qwen3.8 4-bit | ~8.5% | ~50% | ~4.3% |
+
+A 4-bit install can clear +5% only if the load fits the window entirely; the
+8-bit and 125B cannot clear it even then, because their expert read is a smaller
+share of the token and (for 8-bit) there are fewer redundant bytes. The 125B was
+not converted: it needs ~150 GB and the volume has 112 GB free.
+
+## What the literature says the fix is -- and what it costs
+
+ZipMoE (ICML 2026) makes the same observation and wins on *high-precision*
+weights: it splits BF16 into low-entropy exponent chunks (lossless, 68-74% of
+the original) and hides parallel CPU decompression behind I/O with a per-layer
+DAG; its baselines are I/O-stalled offloaders, not an engine that already hides
+I/O. FlashMoE reports decompression at 41 GB/s on the GPU ("essentially free").
+Both point the same way: decompression has to leave the critical path entirely --
+on the GPU -- and the model has to have 25-30% of redundant bytes to win, which
+BF16 does and a 4-bit install does not.
+
 ## Status
 
 The v3 format, the block decoder, the phase publish and the separate prefetch
 reader are committed as the pipeline's foundation. The target of +5% decode is
-**not met**: -38.8%. The next lever is GPU-side decompression (Metal), which the
-literature reports at tens of GB/s; a CPU pipeline on this engine would need the
-per-layer window to grow or the load to fall under 1.65 ms, and neither is
-available.
+**not met**: -38.8% on Ornith 4-bit and -33% on 8-bit. The measured ceiling says
+the CPU pipeline cannot reach it on the 8-bit or 125B installs at all, and on
+Ornith 4-bit only by getting the whole per-layer load under the 1.65 ms the raw
+read takes. The research-backed route is GPU-side decompression, which is a new
+project and would still be capped by the 9% byte saving.
