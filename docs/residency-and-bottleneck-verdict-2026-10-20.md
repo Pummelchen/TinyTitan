@@ -798,3 +798,24 @@ idle. What this buys:
 The cold tier becomes: **tiered converter + an unpack step in the I/O path**.
 The dual-width dispatch stays as a later optimisation if the unpack cost turns
 out to matter.
+
+### The expansion step measured: 0.27 ms per token, not 4-8 ms (2026-10-20)
+
+`benchmark/two_bit_expand_bench.swift` measures the 2-bit to 4-bit transform on
+one expert's weights (3 x 512 x 2048 values) at 1, 2, 4 and 8 threads:
+
+| threads | per expert | throughput | per token (~3.2 misses) |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.172 ms | 13.7 GB/s | 0.55 ms |
+| 2 | 0.140 ms | 16.9 GB/s | 0.45 ms |
+| 4 | 0.084 ms | 28.1 GB/s | **0.27 ms** |
+| 8 | 0.090 ms | 26.3 GB/s | 0.29 ms |
+
+The earlier estimate assumed 1-4 GB/s; the real transform is 14-28 GB/s
+because it is a byte shuffle with no arithmetic dependency. **0.27 ms is 0.6 %
+of a 45 ms token**, against the 11-13 ms the byte saving is worth, so the
+expansion cost is not a consideration at all.
+
+This settles the design: the cold tier is a tiered converter plus this
+transform on the I/O path, with the dual-width dispatch no longer needed for
+the first measurable version.
