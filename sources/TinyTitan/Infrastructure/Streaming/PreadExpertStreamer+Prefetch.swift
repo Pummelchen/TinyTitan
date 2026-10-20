@@ -154,6 +154,9 @@ extension PreadExpertStreamer {
                         guard maps.indices.contains(entry.expert),
                             !maps[entry.expert].isEmpty
                         else { continue }
+                        if ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_TRACE"] == "1" {
+                            FileHandle.standardError.write(Data("[expand] site=prefetch layer=\((layout.path as NSString).lastPathComponent) expert=\(entry.expert)\n".utf8))
+                        }
                         TwoBitExpand.expandExpertInPlace(
                             slot: safeDestinations.values[index],
                             tensors: maps[entry.expert])

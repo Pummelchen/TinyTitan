@@ -141,6 +141,9 @@ extension PreadExpertStreamer {
             plan.assignedGenerations.count == plan.experts.count,
             "expert cache plan generation count mismatch")
 
+        if ProcessInfo.processInfo.environment["TINYTITAN_FETCH_TRACE"] == "1" {
+            FileHandle.standardError.write(Data("[plan] file=\((layout.path as NSString).lastPathComponent) layer=\(plan.layer) misses=\(plan.misses.count) experts=\(plan.experts.count)\n".utf8))
+        }
         let started = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         var succeeded = false
         defer {

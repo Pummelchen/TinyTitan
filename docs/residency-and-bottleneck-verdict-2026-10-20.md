@@ -969,3 +969,46 @@ or the prefill tile plan that spans layers.
 
 The converter is clean (byte-identical files), single layers are clean, seven
 layers are clean. Whatever this is, it needs eight.
+
+## Cold-tier verdict: 2-bit fails numerically, not mechanically (2026-10-20)
+
+The tiered install is built (22 % fewer expert bytes), the format and reader
+accept it, the converter is byte-exact, and the expansion was verified on 1,521
+tensor regions across 169 dumped slots. It still cannot run.
+
+**The differential that settles it.** Same prompt, same build, baseline 4-bit
+versus eight tiered layers, comparing each layer's residual:
+
+| layer | max difference vs baseline |
+| ---: | ---: |
+| 0 | 1.74 |
+| 1 | 7.0e3 |
+| 2 | 1.6e4 |
+| 6 | 6.0e4 |
+| 7 | 6.6e4, and 2,311 values non-finite |
+| 8-39 | inf |
+
+Routing corroborates it: the baseline keeps 120-158 distinct expert groups per
+layer, while the tiered run collapses to **one group from layer 8** — the
+signature of a degenerate hidden state, not of a bad slot.
+
+So the perturbation enters at layer 0 (the first tiered layer) at a magnitude
+consistent with 2-bit quantisation (0.47 added error on weights), and this
+model amplifies it until the residual crosses the fp16 ceiling and overflows.
+Everything mechanical measured clean because it is clean: prefetch, cache,
+offsets, nibble order, conversion. **The cold tier is too lossy for this
+model**, and that also explains why the failure threshold moved with layer
+count, with cold count, and with which experts were cold.
+
+### What it would take to reopen
+
+1. **3-bit cold experts** (0.21 added error, half the perturbation). The
+   expansion trick still applies — store 3-bit, expand to 4-bit with
+   `q4 = 2*q3` and `scale/2` — so no 3-bit kernel is needed, only a packing
+   change in the converter and expander. Byte saving is 11-22 %.
+2. **A compensated 2-bit form** (low-rank or codebook residual), which is a
+   research project rather than a repack.
+3. **Activation rescaling** in the model itself, which is a different product.
+
+Until one of those is tried, `tools/tiered_repack.py` and the expansion path
+stay as an opt-in tool and a tested capability, not a shipped format.

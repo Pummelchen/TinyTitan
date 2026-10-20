@@ -297,6 +297,10 @@ extension RealForwardRunner {
         }
 
         let routedTileScheduler = PrefillRoutedTileScheduler(config: schedulerConfig)
+        if ProcessInfo.processInfo.environment["TINYTITAN_TILE_TRACE"] == "1" {
+            FileHandle.standardError.write(Data(
+                "[tiles] layer=\(L) tiles=\(routes.tiles.count) groups=\(routes.groups.count) pairs=\(routes.sortedPairs.count)\n".utf8))
+        }
         for (tileIndex, tile) in routes.tiles.enumerated() {
             let expertIDs = try PrefillStreamedTileBinding.expertIDs(
                 forTile: tileIndex,
