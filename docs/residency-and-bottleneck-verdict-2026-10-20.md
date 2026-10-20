@@ -84,3 +84,27 @@ pages; decode is 4.6x slower. **Residency at 4-bit is rejected.**
 
 Arms and harness: `/tmp/tt_ab.sh` (short), `/tmp/tt_ab_long.sh` (long); logs
 `/tmp/tt-ab-*.log`, `/tmp/tt-lng-*.log`. No repository code was modified.
+
+## Prefill tile experiment (implemented)
+
+Two env overrides were added to `RealForwardRunner.prefillRoutedTileSchedulerConfig`
+(`TINYTITAN_PREFILL_TILE_EXPERTS`, `TINYTITAN_PREFILL_TILE_DEPTH`), and the
+default pipeline depth moved from 1 to 2. 2.2K prompt, same host, one request
+per server, four order-rotated pairs:
+
+| arm | prefill s | |
+| --- | ---: | --- |
+| 8 experts, depth 1 (old default) | 51.54, 52.73, 51.18, 51.14 | mean 51.65 |
+| 8 experts, depth 2 (new default) | 48.85, 50.98, 49.53, 50.45 | mean 49.95 |
+| 16 experts, depth 1 | 51.05 | noise, rejected |
+| 16 experts, depth 2 | 51.81 | rejected |
+
+**Depth 2 is kept: −3.3 % to first token, 4/4 pairs faster, and the nine
+`PrefillRoutedTileScheduler` tests pass.** Tile width 16 is not kept. The
+change is scheduling-only; it does not affect output and is untested at 8-bit
+(the override makes that A/B one environment variable).
+
+Prefill is still ~50 s at roughly 8 % of fp16 peak, so this is a 3 % bite out of
+the dominant term. The next instrument needed is a per-phase prefill breakdown
+(route / shared expert / routed MoE / attention), which the runner does not
+currently print.
