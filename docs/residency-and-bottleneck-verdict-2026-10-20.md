@@ -757,3 +757,44 @@ before the change, same prompt and build).
 
 Remaining for the streamer step: record each cached expert's `bits` so the MoE
 dispatch can pick a pipeline. The read half is done.
+
+## A cheaper path than the dispatch split: expand cold experts on load (2026-10-20)
+
+The dual-width dispatch is the expensive part of the cold tier: the routed
+pipeline is compiled one width at a time and the reduction kernel computes `y`
+from exactly `topK` experts, so a mixed layer would need two dispatches, two
+argument buffers, and either padding each group to `topK` (doubling the GEMV
+work) or new `k`-compiled reduce kernels.
+
+There is a cheaper decomposition. Store cold experts at 2-bit, and **expand
+them to the 4-bit slot on load**:
+
+    q4 = 5 * q2                 (0..3 -> 0, 5, 10, 15 — exact)
+    scale' = scale / 5          (bf16, ~2e-3 relative error)
+    bias'  = bias               (unchanged)
+
+Then `q4 * scale' + bias' == q2 * scale + bias`, so the existing 4-bit kernels
+run unchanged on an expanded slot. The scale division is the only added error,
+and at ~0.2 % it is inside the quantisation noise the tier already carries.
+
+Cost, per expert, at CPU unpack rates (the cores are idle during decode —
+0.4 of 8 measured):
+
+| unpack rate | per expert | per token (~3.2 misses) |
+| --- | ---: | ---: |
+| 1 GB/s | 2.4 ms | 7.5 ms |
+| 2 GB/s | 1.2 ms | 3.8 ms |
+| 4 GB/s | 0.6 ms | 1.9 ms |
+
+Against a 45 ms token and a projected 25–30 % byte saving (~11–13 ms), the
+2 GB/s case nets roughly 7–9 ms, and the work runs on cores that are otherwise
+idle. What this buys:
+
+- no second pipeline, no second argument buffer, no reduction change;
+- no padding waste — the GEMV still processes `topK` real experts;
+- the 2-bit kernels validated this session remain useful for the *converter*
+  and as a cross-check, not as a second dispatch path.
+
+The cold tier becomes: **tiered converter + an unpack step in the I/O path**.
+The dual-width dispatch stays as a later optimisation if the unpack cost turns
+out to matter.
