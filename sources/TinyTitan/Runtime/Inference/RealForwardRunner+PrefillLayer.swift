@@ -199,6 +199,7 @@ extension RealForwardRunner {
 
         let prefillProfile = ProcessInfo.processInfo.environment["TURBO_FIELDFARE_PHASES"] != nil
         var prefillRouteNanos: UInt64 = 0
+        var prefillAttentionNanos: UInt64 = 0
         var prefillTileNanos: UInt64 = 0
         var prefillTailNanos: UInt64 = 0
         var prefillActiveExperts: UInt64 = 0
@@ -211,6 +212,7 @@ extension RealForwardRunner {
                 snapshotGDNAfterFirstToken: snapshotGDNAfterFirstToken,
                 aneChunk: aneChunk, pairRoutedMoE: pairRoutedMoE,
                 prefillRouteNanos: &prefillRouteNanos,
+                prefillAttentionNanos: &prefillAttentionNanos,
                 prefillTileNanos: &prefillTileNanos,
                 prefillTailNanos: &prefillTailNanos,
                 prefillActiveExperts: &prefillActiveExperts,
@@ -225,6 +227,8 @@ extension RealForwardRunner {
             let trace: String =
                 "[prefill phases over \(t) tokens, \(prefillTotal / 1_000_000) ms total]\n"
                 + "  route readback + GPU: \(String(format: "%.1f", Double(prefillRouteNanos) / 1e6)) ms\n"
+                + "    of which attention + norms: \(String(format: "%.1f", Double(prefillAttentionNanos) / 1e6)) ms\n"
+                + "    of which router + readback: \(String(format: "%.1f", Double(prefillRouteNanos - prefillAttentionNanos) / 1e6)) ms\n"
                 + "  expert fetch + tiles: \(String(format: "%.1f", Double(prefillTileNanos) / 1e6)) ms\n"
                 + "  tail + residual:      \(String(format: "%.1f", Double(prefillTailNanos) / 1e6)) ms\n"
                 + "  active experts/layer: \(String(format: "%.2f", perLayer))"
@@ -271,6 +275,7 @@ extension RealForwardRunner {
         aneChunk: ANEPrefillAttention?,
         pairRoutedMoE: Bool,
         prefillRouteNanos: inout UInt64,
+        prefillAttentionNanos: inout UInt64,
         prefillTileNanos: inout UInt64,
         prefillTailNanos: inout UInt64,
         prefillActiveExperts: inout UInt64,
@@ -349,6 +354,9 @@ extension RealForwardRunner {
             out: scratch.routedX,
             sublayer: .mlp, layer: L,
             tokens: t, eps: eps)
+        // The phase timer started before the attention block, so the split
+        // between attention-plus-norms and the router is taken here.
+        prefillAttentionNanos &+= clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - prefillLayerStart
         if pairRoutedMoE, t == 2 {
             try await encodeRoutedMoEVerifyPair(
                 cb: &cb, layer: L, views: views, scratch: scratch,
