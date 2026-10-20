@@ -66,6 +66,15 @@ extension PreadExpertStreamer {
             throw ModelError.internalInconsistency(
                 detail: "prefetch experts and destinations differ in count")
         }
+        // Diagnostic kill switch: a finished-failure operation is never
+        // adopted, so the ring falls back to demand reads.
+        if ProcessInfo.processInfo.environment["TINYTITAN_NO_PREFETCH"] == "1" {
+            let operation = ExpertLoadOperation()
+            operation.markInFlight()
+            operation.finish(.failure(ModelError.internalInconsistency(
+                detail: "prefetch disabled by TINYTITAN_NO_PREFETCH")))
+            return operation
+        }
         // A rANS layer's payload is not at raw offsets, and the ring stages
         // raw pointers rather than slot buffers, so speculation has no decode
         // path here. Failing the operation keeps its slots from being adopted:
