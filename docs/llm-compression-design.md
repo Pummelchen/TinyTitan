@@ -318,7 +318,9 @@ stream length tables in parallel (prefill 17.4 -> 5.8 s on 4-bit).
 | Qwen3.8 4-bit | 68.05 -> 60.26 GB | 0.8856 | 11.44% | 5.18 | 1.40 | identical |
 
 (16-token runs, `--temperature 0`; the rANS rows use ring depth 8. GPU check on
-layer 20 of each: 0 mismatched bytes of 5.3 / 10.0 / 8.3 MB.)
+layer 20 of each: 0 mismatched bytes of 5.3 / 10.0 / 8.3 MB.) The three converted
+installs were removed after measurement to reclaim disk; they are reproducible
+from the raw installs with `TinyTitanRepack --compress-experts --codec rans`.
 
 The cause is measured and it is not the codec: `waitUntilCompleted` on our
 compute costs **8-10 ms for phase 0 and 14-18 ms for phase 1 in-engine**, while
