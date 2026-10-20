@@ -186,6 +186,17 @@ extension PreadExpertStreamer {
                     }
                     TwoBitExpand.expandExpertInPlace(
                         slot: destinations[index], tensors: maps[expert])
+                    if let directory = ProcessInfo.processInfo
+                        .environment["TINYTITAN_DUMP_SLOT"] {
+                        let name =
+                            (layout.path as NSString).lastPathComponent
+                        let data = Data(
+                            bytes: destinations[index],
+                            count: Int(layout.expertStride))
+                        try? data.write(
+                            to: URL(fileURLWithPath:
+                                "\(directory)/\(name)-e\(expert).bin"))
+                    }
                 }
             }
             return
