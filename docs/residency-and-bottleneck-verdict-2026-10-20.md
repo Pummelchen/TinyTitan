@@ -570,3 +570,34 @@ Estimate revision: this was planned as format + repacker + kernel; it is now
 repacker + gates + a 2-bit kernel test (the gates must not be opened without a
 test that compares a 2-bit GEMV against a CPU reference, because no shipped
 install exercises them).
+
+## The format already supports per-expert widths; the reader does not (2026-10-20)
+
+`packed_experts/layout.json` already carries, for every expert, its `offset`
+and `size`, and for every tensor its own `bits`, `dtype`, `shape`, `offset`
+and `size`:
+
+    {"expert": 0, "offset": 0, "size": 1769472,
+     "tensors": {"gate": {"bits": 4, ...}, "down": {"bits": 4, ...}, ...}}
+
+So the on-disk schema needs **no change** for a 4-bit-hot / 2-bit-cold install.
+What blocks it is the runtime: `Model+LayerStreamers` and the pread reader
+compute every expert's position as `rank * expertStride`, and the streamer,
+cache plan and ring all assume one expert size.
+
+The minimal design that avoids redesigning the cache:
+
+- the repacker writes **two contiguous regions per layer** — hot at 4-bit with
+  stride H, cold at 2-bit with stride C — and the existing per-expert
+  `offset`/`size` entries describe both;
+- the reader takes `(offset, size)` per expert instead of a single stride (a
+  table, or two readers, one per region);
+- slot **capacity** stays at the 4-bit maximum, so a 2-bit expert fills half a
+  slot; that wastes RAM capacity but costs nothing in bytes read, and avoids
+  reworking slot sizing, the ring and the cache plan;
+- kernels already accept a per-dispatch width constant, validated at 2-bit in
+  five paths.
+
+Remaining work in order: variable-size reader, two-region repacker, then the
+measurement. It is a contained core change, not a format project — the schema
+work that this plan originally budgeted for does not exist.
