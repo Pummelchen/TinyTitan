@@ -351,7 +351,9 @@ extension Model {
         let experts = layout.layers[layer].experts
         guard let target = experts.first?.subTensors else { return [] }
         return experts.map { expert in
-            guard expert.subTensors["gate"]?.bits == 2 else { return [] }
+            guard let stored = expert.subTensors["gate"]?.bits,
+                stored == 2 || stored == 3
+            else { return [] }
             return expert.subTensors.compactMap { name, tensor -> ExpertBlobTensor? in
                 guard let wide = target[name] else { return nil }
                 return ExpertBlobTensor(
@@ -359,6 +361,7 @@ extension Model {
                     sourceSize: Int(tensor.size),
                     targetOffset: Int(wide.offset),
                     targetSize: Int(wide.size),
+                    bits: stored,
                     expands: name == "gate" || name == "up" || name == "down",
                     rescales: name.hasSuffix("_scales"))
             }

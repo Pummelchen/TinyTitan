@@ -1012,3 +1012,26 @@ count, with cold count, and with which experts were cold.
 
 Until one of those is tried, `tools/tiered_repack.py` and the expansion path
 stay as an opt-in tool and a tested capability, not a shipped format.
+
+## 3-bit cold tier: works at eight layers, fails at forty (2026-10-20)
+
+Implemented the 3-bit storage with the same expansion trick: eight 3-bit values
+pack into exactly three bytes (no word crossings), expanded to 4-bit with
+`q4 = 2*q3` and `scale/2`. Round-trip error is at most one 4-bit step, half of
+2-bit's two.
+
+| install | tiered layers | result |
+| --- | ---: | --- |
+| 3-bit, 50 % hot | 8 | **runs**, 24.5 tok/s |
+| 3-bit, 50 % hot | 40 | **NaN** |
+| 2-bit, 50 % hot | 8 | NaN |
+
+So the failure is cumulative noise against the model's fp16 headroom, not a
+width threshold: half the per-weight error buys twice as many tolerable layers,
+and no lossy cold tier survives being applied to the whole model.
+
+**The cold tier is closed.** 2-bit fails at eight layers, 3-bit at forty; the
+only widths that would survive are 4-bit (no saving) or a compensated form
+(low-rank/codebook residual) that is a research project rather than a repack.
+`tools/tiered_repack.py --cold-bits 2|3` and the expansion path stay as a
+tested capability and a measurement tool.

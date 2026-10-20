@@ -32,7 +32,7 @@ import shutil
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "benchmark"))
-from two_bit_pack import remap_4bit_to_2bit  # noqa: E402
+from two_bit_pack import remap_4bit_to_2bit, remap_4bit_to_3bit  # noqa: E402
 
 ALIGN = 16_384
 
@@ -46,7 +46,7 @@ def sha256_of(path: pathlib.Path) -> str:
 
 
 def tier_layer(
-    source: bytes, experts: list[dict], hot: set[int], layer: int
+    source: bytes, experts: list[dict], hot: set[int], layer: int, cold_bits: int = 2
 ) -> tuple[bytes, list[dict]]:
     """Rewrite one layer. Returns the new file bytes and the new expert entries."""
     out = bytearray()
@@ -78,14 +78,17 @@ def tier_layer(
                 if "bits" in tensor:
                     new_tensors[name]["bits"] = tensor["bits"]
             else:
-                remapped = remap_4bit_to_2bit(data)
+                if cold_bits == 3:
+                    remapped = remap_4bit_to_3bit(data)
+                else:
+                    remapped = remap_4bit_to_2bit(data)
                 new_blob += remapped
                 new_tensors[name] = {
                     "offset": len(new_blob) - len(remapped),
                     "size": len(remapped),
                     "dtype": tensor["dtype"],
                     "shape": tensor["shape"],
-                    "bits": 2,
+                    "bits": cold_bits,
                 }
         # Page-align every expert so a slot read never shares a page with the
         # previous expert's payload.
@@ -107,6 +110,8 @@ def main() -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--hot-profile", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--cold-bits", type=int, default=2, choices=(2, 3),
+                    help="width of the cold tier: 2 or 3 bits")
     ap.add_argument("--layers", default="all",
                     help="'all' or a comma-separated list of layer indices to tier")
     args = ap.parse_args()
@@ -152,7 +157,9 @@ def main() -> int:
             new_layers.append(layer)
         else:
             hot = set(profile["layers"][str(index)]["hot"])
-            data, entries = tier_layer(source_path.read_bytes(), layer["experts"], hot, index)
+            data, entries = tier_layer(
+                source_path.read_bytes(), layer["experts"], hot, index,
+                cold_bits=args.cold_bits)
             destination.write_bytes(data)
             new_layers.append({"layer": index, "file": layer["file"], "experts": entries})
         if index in tiered:

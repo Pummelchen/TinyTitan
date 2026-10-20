@@ -49,6 +49,9 @@ package struct ExpertBlobTensor {
     let sourceSize: Int
     let targetOffset: Int
     let targetSize: Int
+    /// Stored width of a weight tensor: 2 or 3 for a cold tier, 0 otherwise.
+    /// The expansion maps q2 -> 5q and q3 -> 2q, with the paired scale divisor.
+    let bits: Int
     /// Weight tensors are expanded; scale and bias tensors are moved.
     let expands: Bool
     /// Scale tensors are divided by five, matching `adjustedScale`.
@@ -74,7 +77,11 @@ extension TwoBitExpand {
         for tensor in tensors.sorted(by: { $0.sourceOffset > $1.sourceOffset }) {
             let source = bytes + tensor.sourceOffset
             let destination = bytes + tensor.targetOffset
-            if tensor.expands {
+            if tensor.expands, tensor.bits == 3 {
+                expand3BitReversed(
+                    source: source, destination: destination,
+                    groupCount: tensor.sourceSize / 3)
+            } else if tensor.expands {
                 // Backwards, because a doubling expansion overlaps itself --
                 // including when the tensor stays at offset 0.
                 expandReversed(
@@ -84,7 +91,9 @@ extension TwoBitExpand {
                 if destination != source {
                     memmove(destination, source, tensor.sourceSize)
                 }
-                rescaleBF16InPlace(destination, bytes: tensor.sourceSize)
+                rescaleBF16InPlace(
+                    destination, bytes: tensor.sourceSize,
+                    divisor: tensor.bits == 3 ? 2 : 5)
             } else if destination != source {
                 memmove(destination, source, tensor.sourceSize)
             }
@@ -128,16 +137,44 @@ extension TwoBitExpand {
         }
     }
 
+    /// Expands a range of 3-bit groups (eight values per three bytes) to packed
+    /// 4-bit, backwards so the doubling expansion cannot clobber unread input.
+    private static func expand3BitReversed(
+        source: UnsafeMutablePointer<UInt8>,
+        destination: UnsafeMutablePointer<UInt8>,
+        groupCount: Int
+    ) {
+        var group = groupCount
+        while group > 0 {
+            group -= 1
+            let base = group * 3
+            let word =
+                UInt32(source[base])
+                | (UInt32(source[base + 1]) << 8)
+                | (UInt32(source[base + 2]) << 16)
+            var packed: UInt32 = 0
+            for slot in 0..<8 {
+                let value = 2 * ((word >> (slot * 3)) & 0x7)
+                packed |= value << (slot * 4)
+            }
+            let out = group * 4
+            destination[out] = UInt8(truncatingIfNeeded: packed)
+            destination[out + 1] = UInt8(truncatingIfNeeded: packed >> 8)
+            destination[out + 2] = UInt8(truncatingIfNeeded: packed >> 16)
+            destination[out + 3] = UInt8(truncatingIfNeeded: packed >> 24)
+        }
+    }
+
     /// Divides bf16 scale values by five in place.
     private static func rescaleBF16InPlace(
-        _ pointer: UnsafeMutablePointer<UInt8>, bytes: Int
+        _ pointer: UnsafeMutablePointer<UInt8>, bytes: Int, divisor: Float
     ) {
         let count = bytes / 2
         let halves = UnsafeMutableRawPointer(pointer)
             .assumingMemoryBound(to: UInt16.self)
         for index in 0..<count {
             let bits = UInt32(halves[index]) << 16
-            let value = Float(bitPattern: bits) / 5
+            let value = Float(bitPattern: bits) / divisor
             // Truncation costs at most one bf16 ulp on a scale the quantiser
             // already rounded; rounding here would only add code to audit.
             halves[index] = UInt16(truncatingIfNeeded: value.bitPattern >> 16)

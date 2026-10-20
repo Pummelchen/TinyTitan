@@ -56,3 +56,49 @@ def expanded_q4(data: bytes) -> np.ndarray:
         out.extend((5 * ((byte >> 6) & 0x3), 5 * ((byte >> 4) & 0x3),
                     5 * ((byte >> 2) & 0x3), 5 * (byte & 0x3)))
     return np.array(out, dtype=np.int64)
+
+
+# --- 3-bit cold tier -------------------------------------------------------
+#
+# A 3-bit value expands to 4-bit with q4 = 2*q3 and scale/2, so
+# (2*q3)*(s/2) + b == q3*s + b. Eight values fill exactly three bytes
+# (8 x 3 bits = 24), which keeps every group byte-aligned and avoids the
+# word-crossing that made 6-bit unattractive.
+
+def remap_4bit_to_3bit(data: bytes) -> bytes:
+    """Remap a packed 4-bit weight stream to packed 3-bit.
+
+    `len(data)` must be a multiple of 4: four 4-bit bytes carry eight values,
+    which become three 3-bit bytes.
+    """
+    if len(data) % 4:
+        raise ValueError("4-bit stream length must be a multiple of 4 bytes")
+    source = np.frombuffer(data, dtype=np.uint8)
+    values = np.empty(source.size * 2, dtype=np.uint8)
+    values[0::2] = source & 0x0F          # element 2k is the low nibble
+    values[1::2] = source >> 4
+    # round(q4/2), clamped to 7: q4=15 would round to 8, which does not
+    # fit three bits; 14 is one step away, the same error as any other
+    # rounding boundary.
+    q3 = np.minimum(7, (values.astype(np.uint16) + 1) // 2).astype(np.uint8)
+    groups = q3.reshape(-1, 8)
+    # Eight 3-bit values fill one 24-bit little-endian word: value i occupies
+    # bits [3i, 3i+3), so a group is exactly three bytes with no crossings.
+    word = np.zeros(groups.shape[0], dtype=np.uint32)
+    for index in range(8):
+        word |= groups[:, index].astype(np.uint32) << (3 * index)
+    packed = np.empty((groups.shape[0], 3), dtype=np.uint8)
+    packed[:, 0] = word & 0xFF
+    packed[:, 1] = (word >> 8) & 0xFF
+    packed[:, 2] = (word >> 16) & 0xFF
+    return packed.tobytes()
+
+
+def expanded_3bit_q4(data: bytes) -> np.ndarray:
+    """The 4-bit values a 3-bit stream expands to: 2*q3, low pair first."""
+    out = []
+    for index in range(0, len(data), 3):
+        word = data[index] | (data[index + 1] << 8) | (data[index + 2] << 16)
+        for slot in range(8):
+            out.append(2 * ((word >> (slot * 3)) & 0x7))
+    return np.array(out, dtype=np.int64)
