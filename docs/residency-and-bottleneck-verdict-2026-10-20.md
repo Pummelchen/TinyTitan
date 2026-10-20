@@ -878,3 +878,23 @@ So the converter is now file plumbing — read a cold expert's four tensors,
 LUT the weights, copy scales/biases, write the blob and the layout entry,
 update the manifest hashes — plus the hot experts copied verbatim. The last
 compute-shaped risk in the project is gone.
+
+### The tiered converter exists and produces a loadable install (2026-10-20)
+
+`tools/tiered_repack.py` walks a 4-bit install, copies hot experts verbatim,
+remaps cold ones with the tested LUT, page-aligns every expert, rewrites
+`layout.json` with per-expert `offset`/`size`/`bits`, hard-links the resident
+weights and the untiered layers, and updates the manifest's file sizes and
+hashes — including the entry for `layout.json` itself, which the engine checks
+and which the first run missed (it failed loudly: "tensor
+packed_experts/layout.json size 7777182 does not match expected 22493846").
+
+A no-tier build (`--layers 999`, every layer hard-linked) loads and answers, so
+the manifest/layout rewrite is accepted by the engine's own verification. The
+tiered path still needs the expansion call site: the streamer can read a short
+expert (proven), but nothing expands it into the slot yet, so a tiered layer
+would hand the 4-bit kernel half-valid bytes.
+
+Remaining: pass the blob's per-tensor offsets to the streamer and run
+`TwoBitExpand` (plus the scale division) after a short read; then run the
+converter for real and measure.
