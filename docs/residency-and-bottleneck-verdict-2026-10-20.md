@@ -849,3 +849,32 @@ The converter remains the last piece and is a compute job as much as a coding
 one: ~6,000 cold experts x ~3M values to dequantise from 4-bit and requantise
 to 2-bit, which is minutes-to-tens-of-minutes of numpy rather than an
 interactive loop.
+
+## Converter core: keep the scales, remap the values (2026-10-20)
+
+The tiered converter looked like a compute job — dequantise 4-bit weights,
+requantise to 2-bit, mint new group scales — until the expansion's arithmetic
+is read backwards. Because the runtime expands a cold expert with
+`q4' = 5 * q2` and `scale' = scale / 5`, the converter can keep the expert's
+**existing scales and biases** and only remap values:
+
+    q2 = round(q4 / 5)
+
+| q4 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
+| --- | - | - | - | - | - | - | - | - | - | - | -- | -- | -- | -- | -- | -- |
+| q2 | 0 | 0 | 0 | 1 | 1 | 1 | 1 | 1 | 2 | 2 | 2 | 2 | 2 | 3 | 3 | 3 |
+
+Expanding reproduces `5 * q2`, and the induced error is at most 2 units of the
+4-bit scale — half a 2-bit step. No float maths, no new scales, no bf16
+encoding: it is a byte lookup table from two 4-bit-packed bytes to one
+2-bit-packed byte.
+
+`benchmark/two_bit_pack.py` implements it and `test_two_bit_pack.py` pins three
+things: every 4-bit value maps to its nearest quarter, a random 4 KiB stream
+round-trips through the expansion, and an odd-length stream is refused. 3/3
+pass.
+
+So the converter is now file plumbing — read a cold expert's four tensors,
+LUT the weights, copy scales/biases, write the blob and the layout entry,
+update the manifest hashes — plus the hot experts copied verbatim. The last
+compute-shaped risk in the project is gone.
