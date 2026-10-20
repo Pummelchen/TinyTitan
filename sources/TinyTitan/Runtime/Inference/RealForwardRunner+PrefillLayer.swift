@@ -371,6 +371,15 @@ extension RealForwardRunner {
                 tailNanos: &prefillTailNanos,
                 activeExperts: &prefillActiveExperts)
         }
+        // Debug: dump every layer's residual when asked, so a bisect can name
+        // the layer where a run leaves the finite range. Off by default.
+        if activationDumpActive(position: startPosition),
+            ProcessInfo.processInfo
+                .environment["TINYTITAN_ACT_DUMP_ALL_LAYERS"] == "1" {
+            dumpActivationPrivate(
+                "L\(L)_post_moe", scratch.hidden,
+                count: t * D, position: startPosition)
+        }
         // The stage above awaits its own command buffers, so the layer's output
         // hidden is complete here. This is the number a reference dump compares
         // against (`layerN`), which is what localizes a wrong stage to a layer.
