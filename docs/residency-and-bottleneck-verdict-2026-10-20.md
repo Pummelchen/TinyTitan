@@ -487,3 +487,30 @@ warm/hot experts at 4-bit and put *cold* experts at 2-bit, where the error
 lands on weights that are rarely selected; or a codebook scheme (AQLM-style
 vector quantisation) whose 2-bit is not uniform affine. Both need the routing
 frequency data the trace work already produced.
+
+## Hot/cold split, measured on Ornith's own routing (2026-10-20)
+
+`TINYTITAN_ROUTE_TRACE` recorded a 2.2K-token prompt plus 128 decode tokens
+(2,632 positions x 40 layers, 105,280 route lines) from the installed 4-bit
+model. `benchmark/route_skew.py` turns it into the only table that matters for
+the hybrid:
+
+| hot fraction | experts at 4-bit | activation mass on hot | on cold | effective bits | bytes vs 4-bit |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0.20 | 51 | 0.667 | 0.333 | 2.700 | −40.0 % |
+| 0.25 | 64 | 0.730 | 0.270 | 2.812 | −37.5 % |
+| 0.40 | 102 | 0.870 | 0.130 | 3.150 | −30.0 % |
+| 0.50 | 128 | 0.925 | 0.075 | 3.375 | −25.0 % |
+| 0.60 | 153 | 0.961 | 0.039 | 3.600 | −20.0 % |
+
+Effective bits include the format's real overhead: 4-bit at group 64 is 4.5
+bits/weight, 2-bit at group 128 is 2.25.
+
+The routing is strongly skewed — 64 of 256 experts (25 %) carry 73 % of all
+selections — so the hybrid has a real operating point. **The recommended split
+is 40–50 % hot: 25–30 % fewer expert bytes with only 9–15 % of activations
+running through 2-bit weights**, where the probe measured 0.47 added error.
+Tighter splits save more but put a third of activations on the weakest format.
+
+This is the design decision the plan was waiting for, and it needed no runtime
+change — only a trace and the committed routing.
