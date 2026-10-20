@@ -89,7 +89,9 @@ struct PrefillChunkScratchLayout: Sendable, Equatable {
     var routePartialElements: Int { chunkTokens * topK * hiddenSize }
     var routeIDElements: Int { chunkTokens * topK }
     var routeWeightElements: Int { routeIDElements }
-    var sharedExpertScratchElements: Int { sharedIntermediate }
+    /// One chunk of gate/up/act rows, not one row: the batched shared-expert
+    /// path writes the full `chunkTokens x sharedIntermediate` GEMM output.
+    var sharedExpertScratchElements: Int { chunkTokens * sharedIntermediate }
     var routedGateUpActElements: Int { 3 * routedPairMicrobatchRows * routedIntermediate }
     var routedDownOutputElements: Int { routedPairMicrobatchRows * hiddenSize }
 

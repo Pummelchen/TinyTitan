@@ -243,3 +243,24 @@ What is missing is only plumbing:
 Shapes: gate/up `512 x 2048`, down `2048 x 512`, T up to the 4,096 chunk.
 At the qmm kernel's measured ~364 GFLOPS the three projections are 1.26 TFLOP
 → **~3.5 s against 9.12 s**, a 5.6 s (14 %) prefill win before any blocking.
+
+### Batched shared expert (kept)
+
+`PrefillSharedExpert` now runs gate/up/down through the prefill affine matmul
+(`TINYTITAN_PREFILL_SHARED_GEMM`, on by default) with one elementwise
+activation between them, instead of the decode GEMV once per token.
+
+| | shared-expert GPU | prefill wall |
+| --- | ---: | ---: |
+| per-token GEMV (before) | 9.12 s | 40.51 s |
+| **batched GEMM** | **4.60 s** | **34.61 s** |
+
+**−50 % on the shared expert, −14.5 % on the whole prefill**, and a four-prompt
+battery (arithmetic, German, code, capital) is 4/4 identical against the old
+path. Scratch grows by 3 x chunkTokens x 512 halfs (12 MB at the 4,096 chunk).
+
+Two function constants are load-bearing here and were both wrong on the first
+build, which is why the first measurement produced a refusal instead of an
+answer: index 78 (`FC_PREFILL_AFFINE_BITS`) defaults to 4, not 8, and index 77
+(`FC_PREFILL_ACT_SILU`) defaults to gelu, not this model's silu. A batched path
+must set both from the projection's width and the architecture's activation.

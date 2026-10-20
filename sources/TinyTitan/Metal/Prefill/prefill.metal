@@ -1530,3 +1530,20 @@ kernel void attention_prefill_full_tensorops_2d_validity_v2(
 }
 
 #endif
+
+/// Elementwise shared-expert activation: act = hidden_activation(gate) * up.
+/// Used by the batched prefill path, where gate and up are full T x N GEMM
+/// outputs rather than one row. The activation is the same helper the fused
+/// per-token kernel uses, so the two paths cannot drift.
+kernel void prefill_shared_act_block(
+    device const half* gate  [[buffer(0)]],
+    device const half* up    [[buffer(1)]],
+    device half*       act   [[buffer(2)]],
+    constant uint&     count [[buffer(3)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= count) return;
+    const float g = float(gate[gid]);
+    const float u = float(up[gid]);
+    act[gid] = half(prefill_hidden_activation(g) * u);
+}
