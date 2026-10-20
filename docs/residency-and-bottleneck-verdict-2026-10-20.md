@@ -196,3 +196,25 @@ per-layer dequantise into a half scratch followed by the existing
 `prefill_dequant_affine_qmm_f16_block`. Neither is a knob; both need the
 kernel work the attention phase needed. Estimated prize: 6-7 s of the 40 s
 prefill, on top of the 19.5 % already taken.
+
+### Reader threads on the raw path: not a win (2026-10-20)
+
+The raw expert reader runs four threads while the compressed path runs eight.
+A six-line override made the count testable; 4 vs 8 on the 2.2K prompt:
+
+| threads | prefill s | |
+| --- | ---: | --- |
+| 8 | 38.90, 42.17 | mean 40.54 |
+| 4 | 40.36, 42.33 | mean 41.34 |
+
+The first pair is 3.6 % in favour of eight, the second is 0.4 %, and the whole
+run drifted 3.4 s between rounds, so the effect does not clear this machine's
+noise. Reverted; the raw path stays at four. The 11 s of host time in the
+routed phase is therefore not reader-thread starvation.
+
+The shared-expert repack shortcut was also bounded and rejected before
+building it: the existing batched `prefill_dequant_affine_qmm_f16_block` is
+itself a scalar per-output loop (prefill.metal:564) running at ~364 GFLOPS on
+QKV, so applying it to the shared expert would give 6.9 s against the current
+9.12 s — about 2 s for a format repack and a new activation path. A tiled
+simdgroup GEMM is the only shape of fix worth the work there.
