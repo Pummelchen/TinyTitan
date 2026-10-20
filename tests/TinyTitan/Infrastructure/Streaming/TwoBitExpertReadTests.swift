@@ -86,4 +86,22 @@ import Testing
             #expect((out1 & 0xF) == values[3] * 5)
         }
     }
+
+    /// The expansion is only useful if the arithmetic survives it: an expanded
+    /// 4-bit value against the divided scale must reproduce the 2-bit product,
+    /// which is what lets the existing 4-bit kernels run a cold expert.
+    @Test func expandedValuesReproduceTheTwoBitProduct() {
+        let scales: [Float] = [0.03125, 0.1, 1.0, 7.5]
+        let biases: [Float] = [0, -0.5, 2.25]
+        for q2 in 0...3 {
+            let q4 = Float(q2 * 5)
+            for scale in scales {
+                for bias in biases {
+                    let original = Float(q2) * scale + bias
+                    let expanded = q4 * TwoBitExpand.adjustedScale(scale) + bias
+                    #expect(abs(original - expanded) <= max(1e-6, abs(original) * 1e-5))
+                }
+            }
+        }
+    }
 }

@@ -832,3 +832,20 @@ to exactly `5x` the 2-bit values.
 That closes the runtime mechanism the hybrid needs. What remains is the tiered
 converter and calling the transform after a short read (plus applying the
 scale division), both ordinary work against validated pieces.
+
+### Converter scope narrowed: no receipt needed under the default policy (2026-10-20)
+
+`Model+Loading` reads `verified-install.json` only when the integrity policy is
+`sizeCheckTrustedReceipt`; under the default policy the receipt is `nil` and
+each layer file is verified against the manifest's own sha256. So a prototype
+converter must update `manifest.files[...]` sizes and hashes, but it does not
+have to mint a receipt.
+
+The expansion's arithmetic is also pinned now: `TwoBitExpertReadTests` checks
+`q2*scale + bias == (5*q2)*(scale/5) + bias` across scales and biases, in
+addition to the byte-level expansion. Three tests, all passing.
+
+The converter remains the last piece and is a compute job as much as a coding
+one: ~6,000 cold experts x ~3M values to dequantise from 4-bit and requantise
+to 2-bit, which is minutes-to-tens-of-minutes of numpy rather than an
+interactive loop.
