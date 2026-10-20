@@ -264,3 +264,23 @@ build, which is why the first measurement produced a refusal instead of an
 answer: index 78 (`FC_PREFILL_AFFINE_BITS`) defaults to 4, not 8, and index 77
 (`FC_PREFILL_ACT_SILU`) defaults to gelu, not this model's silu. A batched path
 must set both from the projection's width and the architecture's activation.
+
+### Eight-token blocking of the qmm kernel: no change (2026-10-20)
+
+QKV, GDN and the batched shared expert all run through
+`prefill_dequant_affine_qmm_f16_block`, ~13 s of the 34.6 s prefill. A variant
+gave each thread one output row and eight consecutive tokens, reading every
+weight once per eight tokens instead of once per token, with the same
+per-(token, output) accumulation order. Against the shipped build:
+
+| | prefill s | shared expert | GDN | QKV |
+| --- | ---: | ---: | ---: | ---: |
+| eight-token blocking | 35.07 | 4.78 | 9.15 | 3.56 |
+| shipped | 34.61 | 4.60 | 9.10 | 3.46 |
+
+Every figure is inside the noise, so the variant was reverted. The kernel is
+**compute-bound, not weight-traffic-bound**: cutting its weight reads eightfold
+bought nothing, which means the scalar per-element dequantisation and dot
+product is the cost. The lever left on those 13 s is vectorising that inner
+loop (four or eight int8 values per load, group-aligned so a load cannot cross
+a group), not blocking over tokens.
