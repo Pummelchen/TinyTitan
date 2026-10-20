@@ -920,3 +920,28 @@ With that, the expansion call site has no unknowns left:
    the target map from a hot expert, and divide each group scale by five;
 3. the kernels run unchanged, because their `ExpertOffsets` describe exactly
    that 4-bit slot.
+
+### Tiered bisect: the corruption is in prefill, and the threshold is eight (2026-10-20)
+
+| tiered layers | set | result |
+| ---: | --- | --- |
+| 1 | 0, 5, 7, 9 individually | run |
+| 5 | 0-4 | run |
+| 6 | 0-5 | run |
+| 6 | 0,1,2,3,4,5,7 | run |
+| **7** | 0-6 | **run** |
+| **8** | 0-7 | **NaN** |
+| 10, 20, 40 | prefixes | NaN |
+
+So it is the **count**, not a layer: adding layer 7 to a working six-layer set
+is fine, and the same layer in a seven-layer set is fine, but eight tiered
+layers corrupt. That is a boundary at eight, which is `topK` and also the
+prefill tile width — the two places to audit.
+
+A **one-token request fails the same way**, so the corruption is in prefill,
+not in decode or the ring: prefill reads every expert of every layer through
+the tile path, and somewhere in that path an eighth tiered layer tips a buffer
+or an assumption.
+
+The converter is exonerated by byte-identity between the full install's layer
+files and the single-layer installs' files.
