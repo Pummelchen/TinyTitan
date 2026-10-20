@@ -374,3 +374,16 @@ vs 33.47) and is the reason a control is now mandatory before any claim.
    a tiered repacker and an int2 kernel (the original plan's P1).
 5. **Route-ahead**: deferred while I/O is hidden; only pays at 8-bit or a cold
    cache.
+
+### GDN is already batched (2026-10-20)
+
+The 8.5 s GDN term is not another per-token host loop. `encodeDeltaStepPrefill`
+issues **one** dispatch for the whole chunk (`rows`), grid
+`(numVHeads, valueHeadDim / 4)`, and the delta-rule scan runs inside the
+kernel. The scan is serial by the algorithm, not by the host loop, so the
+shared-expert/attention fix does not apply.
+
+GDN's remaining cost is therefore two things already bounded: the qmm
+projections (the same kernel as QKV and the shared expert) and the serial
+scan, which would need a chunked parallel form — an algorithm change, not a
+scheduling one. GDN is off the cheap list.
