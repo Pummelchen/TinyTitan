@@ -945,3 +945,27 @@ or an assumption.
 
 The converter is exonerated by byte-identity between the full install's layer
 files and the single-layer installs' files.
+
+### Eight is the number of *streamers on the non-uniform path*, not of cold loads (2026-10-20)
+
+Three more bisects:
+
+| set | cold per tiered layer | result |
+| --- | ---: | --- |
+| 8 layers, contiguous (0-7) | 127 | NaN |
+| 8 layers, spread (0,5,10,...,35) | 127 | NaN |
+| **8 layers, spread, 90 % hot** | **25** | **NaN** |
+| 7 layers, any set tested | 127 | run |
+
+So contiguity does not matter and neither does the number of cold experts: 200
+cold loads across eight layers fails exactly as 1,016 does. The trigger is
+**eight layers whose stream layout is non-uniform** — eight streamers taking
+the range-fetch path in one process.
+
+That points away from the data and away from volume, and toward a per-model
+resource that is allocated once and somehow distinguishes these eight from
+seven: the shared `ExpertIOScheduler`, a fixed-size structure indexed by layer,
+or the prefill tile plan that spans layers.
+
+The converter is clean (byte-identical files), single layers are clean, seven
+layers are clean. Whatever this is, it needs eight.
