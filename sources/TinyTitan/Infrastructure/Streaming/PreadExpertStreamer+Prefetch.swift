@@ -71,8 +71,10 @@ extension PreadExpertStreamer {
         if ProcessInfo.processInfo.environment["TINYTITAN_NO_PREFETCH"] == "1" {
             let operation = ExpertLoadOperation()
             operation.markInFlight()
-            operation.finish(.failure(ModelError.internalInconsistency(
-                detail: "prefetch disabled by TINYTITAN_NO_PREFETCH")))
+            operation.finish(
+                .failure(
+                    ModelError.internalInconsistency(
+                        detail: "prefetch disabled by TINYTITAN_NO_PREFETCH")))
             return operation
         }
         // A rANS layer's payload is not at raw offsets, and the ring stages
@@ -123,13 +125,15 @@ extension PreadExpertStreamer {
             guard expert >= 0 && expert < layout.expertsPerLayer else {
                 throw ModelError.internalInconsistency(detail: "invalid prefetched expert")
             }
-            let size = layout.expertSizes.flatMap {
-                $0.indices.contains(expert) ? Int($0[expert]) : nil
-            } ?? Int(layout.expertStride)
+            let size =
+                layout.expertSizes.flatMap {
+                    $0.indices.contains(expert) ? Int($0[expert]) : nil
+                } ?? Int(layout.expertStride)
             return (
                 expert,
                 layout.streamOffset + layout.expertOffset(layer: 0, expert: expert),
-                size)
+                size
+            )
         }
         let safeDestinations = PrefetchDestinations(destinations)
         let operation = ExpertLoadOperation()
@@ -155,7 +159,10 @@ extension PreadExpertStreamer {
                             !maps[entry.expert].isEmpty
                         else { continue }
                         if ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_TRACE"] == "1" {
-                            FileHandle.standardError.write(Data("[expand] site=prefetch layer=\((layout.path as NSString).lastPathComponent) expert=\(entry.expert)\n".utf8))
+                            FileHandle.standardError.write(
+                                Data(
+                                    "[expand] site=prefetch layer=\((layout.path as NSString).lastPathComponent) expert=\(entry.expert)\n"
+                                        .utf8))
                         }
                         TwoBitExpand.expandExpertInPlace(
                             slot: safeDestinations.values[index],

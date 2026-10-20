@@ -25,9 +25,22 @@ def run_profile(trace_text: str, hot: float, experts: int = 256) -> dict:
         out = pathlib.Path(tmp) / "hot.json"
         trace.write_text(trace_text)
         result = subprocess.run(
-            [PYTHON, str(SCRIPT), "--trace", str(trace), "--hot", str(hot),
-             "--experts", str(experts), "--out", str(out)],
-            capture_output=True, text=True)
+            [
+                PYTHON,
+                str(SCRIPT),
+                "--trace",
+                str(trace),
+                "--hot",
+                str(hot),
+                "--experts",
+                str(experts),
+                "--out",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if result.returncode != 0:
             raise AssertionError(f"exit {result.returncode}: {result.stderr}")
         return json.loads(out.read_text())
@@ -67,9 +80,20 @@ class HotExpertsTests(unittest.TestCase):
             trace.write_text("0 0 1 2\n")
             for bad in ("0", "1"):
                 result = subprocess.run(
-                    [PYTHON, str(SCRIPT), "--trace", str(trace),
-                     "--hot", bad, "--out", str(pathlib.Path(tmp) / "x.json")],
-                    capture_output=True, text=True)
+                    [
+                        PYTHON,
+                        str(SCRIPT),
+                        "--trace",
+                        str(trace),
+                        "--hot",
+                        bad,
+                        "--out",
+                        str(pathlib.Path(tmp) / "x.json"),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("between 0 and 1", result.stdout)
 

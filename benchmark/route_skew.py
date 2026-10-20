@@ -29,11 +29,9 @@ def main() -> int:
     ap.add_argument("--cold-bits", type=float, default=2.25)
     args = ap.parse_args()
 
-    counts: dict[int, collections.Counter[int]] = collections.defaultdict(
-        collections.Counter
-    )
+    counts: dict[int, collections.Counter[int]] = collections.defaultdict(collections.Counter)
     selections: collections.Counter[int] = collections.Counter()
-    for line in pathlib.Path(args.trace).open():
+    for line in pathlib.Path(args.trace).open(encoding="utf-8"):
         parts = line.split()
         if len(parts) < 3:
             continue

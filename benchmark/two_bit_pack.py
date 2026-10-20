@@ -53,8 +53,14 @@ def expanded_q4(data: bytes) -> np.ndarray:
     """The 4-bit values a 2-bit stream expands to: `5 * q2`, low pair first."""
     out = []
     for byte in data:
-        out.extend((5 * ((byte >> 6) & 0x3), 5 * ((byte >> 4) & 0x3),
-                    5 * ((byte >> 2) & 0x3), 5 * (byte & 0x3)))
+        out.extend(
+            (
+                5 * ((byte >> 6) & 0x3),
+                5 * ((byte >> 4) & 0x3),
+                5 * ((byte >> 2) & 0x3),
+                5 * (byte & 0x3),
+            )
+        )
     return np.array(out, dtype=np.int64)
 
 
@@ -64,6 +70,7 @@ def expanded_q4(data: bytes) -> np.ndarray:
 # (2*q3)*(s/2) + b == q3*s + b. Eight values fill exactly three bytes
 # (8 x 3 bits = 24), which keeps every group byte-aligned and avoids the
 # word-crossing that made 6-bit unattractive.
+
 
 def remap_4bit_to_3bit(data: bytes) -> bytes:
     """Remap a packed 4-bit weight stream to packed 3-bit.
@@ -75,7 +82,7 @@ def remap_4bit_to_3bit(data: bytes) -> bytes:
         raise ValueError("4-bit stream length must be a multiple of 4 bytes")
     source = np.frombuffer(data, dtype=np.uint8)
     values = np.empty(source.size * 2, dtype=np.uint8)
-    values[0::2] = source & 0x0F          # element 2k is the low nibble
+    values[0::2] = source & 0x0F  # element 2k is the low nibble
     values[1::2] = source >> 4
     # round(q4/2), clamped to 7: q4=15 would round to 8, which does not
     # fit three bits; 14 is one step away, the same error as any other

@@ -180,7 +180,7 @@ extension RealForwardRunner {
         let routeTileExpertCount: Int
         if let slotCount = model.routedExpertCacheSlotCount() {
             guard
-                let fitted = Self.prefillRoutedTileSchedulerConfig.fitting(
+                let fitted = Self.Defaults.prefillRoutedTileSchedulerConfig.fitting(
                     slotCount: slotCount)
             else {
                 throw PrefillError.chunkedUnsupported(
@@ -189,7 +189,7 @@ extension RealForwardRunner {
             schedulerConfig = fitted
             routeTileExpertCount = fitted.tileExperts
         } else {
-            schedulerConfig = Self.prefillRoutedTileSchedulerConfig
+            schedulerConfig = Self.Defaults.prefillRoutedTileSchedulerConfig
             routeTileExpertCount = schedulerConfig.tileExperts
         }
         let routes = try PrefillMoEGrouping.groupTokenExpertPairs(
@@ -298,8 +298,10 @@ extension RealForwardRunner {
 
         let routedTileScheduler = PrefillRoutedTileScheduler(config: schedulerConfig)
         if ProcessInfo.processInfo.environment["TINYTITAN_TILE_TRACE"] == "1" {
-            FileHandle.standardError.write(Data(
-                "[tiles] layer=\(L) tiles=\(routes.tiles.count) groups=\(routes.groups.count) pairs=\(routes.sortedPairs.count)\n".utf8))
+            FileHandle.standardError.write(
+                Data(
+                    "[tiles] layer=\(L) tiles=\(routes.tiles.count) groups=\(routes.groups.count) pairs=\(routes.sortedPairs.count)\n"
+                        .utf8))
         }
         for (tileIndex, tile) in routes.tiles.enumerated() {
             let expertIDs = try PrefillStreamedTileBinding.expertIDs(

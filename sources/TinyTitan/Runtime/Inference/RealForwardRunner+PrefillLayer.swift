@@ -285,12 +285,6 @@ extension RealForwardRunner {
         let prefillLayerStart = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         model.beginOpeningRoutedExpertStreamer(layer: L)
         let views = layerViews[L]
-        let isLinear = cfg.layerIsLinear(L)
-        let isFull = cfg.fullAttentionLayerMask[L] == 1
-        let headDim = isFull ? cfg.fullHeadDim : cfg.headDim
-        let numKVHeads = isFull ? cfg.numFullKVHeads : cfg.numKVHeads
-        let qDim = cfg.numHeads * headDim
-        let kvDim = numKVHeads * headDim
 
         if cfg.ple.layerIndices.contains(L) {
             try encodePLEPrefill(
@@ -312,32 +306,12 @@ extension RealForwardRunner {
             cb: &cb, blockInput: scratch.normed,
             layer: L, startPosition: startPosition,
             tokens: t, eps: eps)
-        if isLinear {
-            try encodeLinearAttentionPrefill(
-                cb: cb, layer: L, views: views, scratch: scratch,
-                tokenCount: t, hiddenSize: D,
-                snapshotGDNAfterFirstToken: snapshotGDNAfterFirstToken,
-                useTwoRowProjection: useTwoRowProjection,
-                slot: slot)
-        } else if let ane = aneChunk, ane.coveredLayers.contains(L) {
-            // The indexer's selection is computed above for this layer whether
-            // it runs here or on the GPU; the ANE has to be fed the same
-            // choice, or it attends to keys the model drops.
-            try await runANEFullAttentionPrefill(
-                ane: ane, cb: &cb, layer: L, scratch: scratch,
-                tokenCount: t, hiddenSize: D,
-                startPosition: startPosition, kvDim: kvDim,
-                selection: qsaSelection)
-        } else {
-            try encodeFullAttentionPrefill(
-                cb: cb, layer: L, views: views, scratch: scratch,
-                tokenCount: t, hiddenSize: D, startPosition: startPosition,
-                isFull: isFull, headDim: headDim, numKVHeads: numKVHeads,
-                qDim: qDim, kvDim: kvDim, rmsEps: eps,
-                useTwoRowProjection: useTwoRowProjection,
-                keepMask: qsaSelection,
-                slot: slot)
-        }
+        try await encodePrefillAttentionBranch(
+            cb: &cb, layer: L, views: views, scratch: scratch,
+            tokenCount: t, hiddenSize: D, startPosition: startPosition, eps: eps,
+            useTwoRowProjection: useTwoRowProjection,
+            snapshotGDNAfterFirstToken: snapshotGDNAfterFirstToken,
+            aneChunk: aneChunk, qsaSelection: qsaSelection, slot: slot)
         // Plain pre-norm residual block: hidden += attention branch,
         // then one post-attention norm feeds router, shared expert,
         // and routed phase 1 (routedX doubles as moeX).
@@ -371,11 +345,79 @@ extension RealForwardRunner {
                 tailNanos: &prefillTailNanos,
                 activeExperts: &prefillActiveExperts)
         }
+        dumpPrefillLayerOutputs(
+            layer: L, scratch: scratch, tokenCount: t, hiddenSize: D,
+            startPosition: startPosition)
+    }
+
+    /// One layer's attention branch for a prefill chunk: linear attention,
+    /// ANE-covered full attention, or the GPU full-attention kernel. Extract of
+    /// `runPrefillLayer`; the branch order and arguments are unchanged.
+    private func encodePrefillAttentionBranch(
+        cb: inout MTLCommandBuffer,
+        layer L: Int,
+        views: LayerPrefillQKVViews,
+        scratch: PrefillChunkScratchBuffers,
+        tokenCount t: Int,
+        hiddenSize D: Int,
+        startPosition: Int,
+        eps: Float,
+        useTwoRowProjection: Bool,
+        snapshotGDNAfterFirstToken: Bool,
+        aneChunk: ANEPrefillAttention?,
+        qsaSelection: QSASelection?,
+        slot: Int
+    ) async throws {
+        let isLinear = cfg.layerIsLinear(L)
+        let isFull = cfg.fullAttentionLayerMask[L] == 1
+        let headDim = isFull ? cfg.fullHeadDim : cfg.headDim
+        let numKVHeads = isFull ? cfg.numFullKVHeads : cfg.numKVHeads
+        let qDim = cfg.numHeads * headDim
+        let kvDim = numKVHeads * headDim
+        if isLinear {
+            try encodeLinearAttentionPrefill(
+                cb: cb, layer: L, views: views, scratch: scratch,
+                tokenCount: t, hiddenSize: D,
+                snapshotGDNAfterFirstToken: snapshotGDNAfterFirstToken,
+                useTwoRowProjection: useTwoRowProjection,
+                slot: slot)
+        } else if let ane = aneChunk, ane.coveredLayers.contains(L) {
+            // The indexer's selection is computed above for this layer whether
+            // it runs here or on the GPU; the ANE has to be fed the same
+            // choice, or it attends to keys the model drops.
+            try await runANEFullAttentionPrefill(
+                ane: ane, cb: &cb, layer: L, scratch: scratch,
+                tokenCount: t, hiddenSize: D,
+                startPosition: startPosition, kvDim: kvDim,
+                selection: qsaSelection)
+        } else {
+            try encodeFullAttentionPrefill(
+                cb: cb, layer: L, views: views, scratch: scratch,
+                tokenCount: t, hiddenSize: D, startPosition: startPosition,
+                isFull: isFull, headDim: headDim, numKVHeads: numKVHeads,
+                qDim: qDim, kvDim: kvDim, rmsEps: eps,
+                useTwoRowProjection: useTwoRowProjection,
+                keepMask: qsaSelection,
+                slot: slot)
+        }
+    }
+
+    /// The activation-dump half of `runPrefillLayer`: every layer's post-MoE
+    /// residual when the all-layers switch is on, then this layer's final
+    /// hidden. Off by default; extract of the same function.
+    private func dumpPrefillLayerOutputs(
+        layer L: Int,
+        scratch: PrefillChunkScratchBuffers,
+        tokenCount t: Int,
+        hiddenSize D: Int,
+        startPosition: Int
+    ) {
         // Debug: dump every layer's residual when asked, so a bisect can name
         // the layer where a run leaves the finite range. Off by default.
         if activationDumpActive(position: startPosition),
             ProcessInfo.processInfo
-                .environment["TINYTITAN_ACT_DUMP_ALL_LAYERS"] == "1" {
+                .environment["TINYTITAN_ACT_DUMP_ALL_LAYERS"] == "1"
+        {
             dumpActivationPrivate(
                 "L\(L)_post_moe", scratch.hidden,
                 count: t * D, position: startPosition)

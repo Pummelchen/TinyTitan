@@ -14,9 +14,7 @@ class TwoBitPackTests(unittest.TestCase):
     def test_every_four_bit_value_maps_to_its_nearest_quarter(self) -> None:
         # Build the 4-bit stream low-nibble-first: values 0..15 in order.
         values = list(range(16))
-        stream = bytes(
-            (values[i] & 0xF) | ((values[i + 1] & 0xF) << 4)
-            for i in range(0, 16, 2))
+        stream = bytes((values[i] & 0xF) | ((values[i + 1] & 0xF) << 4) for i in range(0, 16, 2))
         two_bit = remap_4bit_to_2bit(stream)
         expanded = expanded_q4(two_bit)
         expected = np.rint(np.array(values) / 5.0).astype(np.int64) * 5

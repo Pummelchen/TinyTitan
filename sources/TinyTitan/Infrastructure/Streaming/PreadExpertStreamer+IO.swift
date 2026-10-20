@@ -186,20 +186,25 @@ extension PreadExpertStreamer {
                     }
                     let tag = "bounded"
                     if ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_TRACE"] == "1" {
-                        FileHandle.standardError.write(Data("[expand] site=\(tag) layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n".utf8))
+                        FileHandle.standardError.write(
+                            Data(
+                                "[expand] site=\(tag) layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n"
+                                    .utf8))
                     }
                     TwoBitExpand.expandExpertInPlace(
                         slot: destinations[index], tensors: maps[expert])
                     if let directory = ProcessInfo.processInfo
-                        .environment["TINYTITAN_DUMP_SLOT"] {
+                        .environment["TINYTITAN_DUMP_SLOT"]
+                    {
                         let name =
                             (layout.path as NSString).lastPathComponent
                         let data = Data(
                             bytes: destinations[index],
                             count: Int(layout.expertStride))
                         try? data.write(
-                            to: URL(fileURLWithPath:
-                                "\(directory)/\(name)-e\(expert).bin"))
+                            to: URL(
+                                fileURLWithPath:
+                                    "\(directory)/\(name)-e\(expert).bin"))
                     }
                 }
             }
@@ -282,9 +287,13 @@ extension PreadExpertStreamer {
             fileOffset: try fileOffset(plan: plan, index: index),
             count: Int(payload))
         if let maps = layout.expertTensors,
-            maps.indices.contains(expert), !maps[expert].isEmpty {
+            maps.indices.contains(expert), !maps[expert].isEmpty
+        {
             if ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_TRACE"] == "1" {
-                FileHandle.standardError.write(Data("[expand] site=cached layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n".utf8))
+                FileHandle.standardError.write(
+                    Data(
+                        "[expand] site=cached layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n"
+                            .utf8))
             }
             TwoBitExpand.expandExpertInPlace(
                 slot: slotPointers[slot], tensors: maps[expert])

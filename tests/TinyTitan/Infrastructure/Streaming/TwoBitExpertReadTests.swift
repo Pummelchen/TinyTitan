@@ -38,7 +38,10 @@ import Testing
             path: url.path, expertStride: stride, threads: 2, bypassCache: true)
         var destination = [UInt8](repeating: 0, count: stride)
         destination.withUnsafeMutableBytes { raw in
-            let pointer = raw.baseAddress!
+            guard let pointer = raw.baseAddress else {
+                Issue.record("destination buffer has no base address")
+                return
+            }
             #expect(throws: Never.self) {
                 try reader.fetch(
                     offsets: [offset], byteCounts: [short.count], into: [pointer])
@@ -58,15 +61,23 @@ import Testing
             path: url.path, expertStride: stride, threads: 2, bypassCache: true)
         var staged = [UInt8](repeating: 0, count: short.count)
         staged.withUnsafeMutableBytes { raw in
-            let pointer = raw.baseAddress!
+            guard let pointer = raw.baseAddress else {
+                Issue.record("staging buffer has no base address")
+                return
+            }
             try? reader.fetch(offsets: [offset], byteCounts: [short.count], into: [pointer])
         }
 
         var expanded = [UInt8](repeating: 0, count: short.count * 2)
         staged.withUnsafeBufferPointer { src in
             expanded.withUnsafeMutableBufferPointer { dst in
+                guard let source = src.baseAddress, let destination = dst.baseAddress
+                else {
+                    Issue.record("expansion buffers have no base address")
+                    return
+                }
                 TwoBitExpand.expand(
-                    source: src.baseAddress!, destination: dst.baseAddress!,
+                    source: source, destination: destination,
                     byteCount: short.count)
             }
         }
@@ -126,23 +137,31 @@ import Testing
         putBF16(1.0, at: 8); putBF16(-2.0, at: 10)
 
         let tensors = [
-            ExpertBlobTensor(sourceOffset: 0, sourceSize: 4,
-                             targetOffset: 0, targetSize: 8, bits: 2,
-                             expands: true, rescales: false),
-            ExpertBlobTensor(sourceOffset: 4, sourceSize: 4,
-                             targetOffset: 8, targetSize: 4, bits: 0,
-                             expands: false, rescales: true),
-            ExpertBlobTensor(sourceOffset: 8, sourceSize: 4,
-                             targetOffset: 12, targetSize: 4, bits: 0,
-                             expands: false, rescales: false),
+            ExpertBlobTensor(
+                sourceOffset: 0, sourceSize: 4,
+                targetOffset: 0, targetSize: 8, bits: 2,
+                expands: true, rescales: false),
+            ExpertBlobTensor(
+                sourceOffset: 4, sourceSize: 4,
+                targetOffset: 8, targetSize: 4, bits: 0,
+                expands: false, rescales: true),
+            ExpertBlobTensor(
+                sourceOffset: 8, sourceSize: 4,
+                targetOffset: 12, targetSize: 4, bits: 0,
+                expands: false, rescales: false),
         ]
         TwoBitExpand.expandExpertInPlace(slot: slot, tensors: tensors)
 
         var expected = [UInt8](repeating: 0, count: 8)
         weight.withUnsafeBufferPointer { src in
             expected.withUnsafeMutableBufferPointer { dst in
+                guard let source = src.baseAddress, let destination = dst.baseAddress
+                else {
+                    Issue.record("expected buffers have no base address")
+                    return
+                }
                 TwoBitExpand.expand(
-                    source: src.baseAddress!, destination: dst.baseAddress!,
+                    source: source, destination: destination,
                     byteCount: weight.count)
             }
         }

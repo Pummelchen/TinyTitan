@@ -207,7 +207,10 @@ extension Model {
 
     public func fetchRoutedExperts(plan: RoutedExpertFetchPlan) async throws -> [TensorView] {
         if ProcessInfo.processInfo.environment["TINYTITAN_FETCH_TRACE"] == "1" {
-            FileHandle.standardError.write(Data("[fetch] plan layer=\(plan.layer) misses=\(plan.misses.count) experts=\(plan.experts.count)\n".utf8))
+            FileHandle.standardError.write(
+                Data(
+                    "[fetch] plan layer=\(plan.layer) misses=\(plan.misses.count) experts=\(plan.experts.count)\n"
+                        .utf8))
         }
         return try await beginFetchRoutedExperts(plan: plan).completion()
     }
@@ -247,7 +250,8 @@ extension Model {
 
     public func fetchRoutedExperts(layer: Int, experts: [Int]) async throws -> [TensorView] {
         if ProcessInfo.processInfo.environment["TINYTITAN_FETCH_TRACE"] == "1" {
-            FileHandle.standardError.write(Data("[fetch] batch layer=\(layer) n=\(experts.count)\n".utf8))
+            FileHandle.standardError.write(
+                Data("[fetch] batch layer=\(layer) n=\(experts.count)\n".utf8))
         }
         let streamer = try openStreamer(for: layer)
         return try await withCheckedThrowingContinuation { continuation in

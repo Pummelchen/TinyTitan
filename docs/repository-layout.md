@@ -617,6 +617,23 @@ caller's locals. The nested closures became methods taking the layer's locals
 every declaration they touch was already internal, so nothing widened and no
 behaviour changed.
 
+`RealForwardRunner.swift` (514 → 490) needed the rule again when the prefill
+diagnostic work pushed it past 500: its runner-wide tuning constants — the five
+RDADVISE caps and the prefill tile scheduler config, with the env overrides and
+their measured comments — moved verbatim into
+`RealForwardRunner+Defaults.swift` as `RealForwardRunner.Defaults`. The seven
+call sites gained the `Defaults.` path; no declaration widened and no value
+changed.
+
+Two prefill functions were extracted in the same pass, both pure code motion
+with the branch order, arguments and comments unchanged:
+`PrefillAttention.encodeCausal` (137 lines) gave its kernel-selection block to a
+`private` `selectPipeline` returning a `PipelineSelection`, and
+`runPrefillLayer` (130 lines) gave its attention branch and activation-dump
+tail to `encodePrefillAttentionBranch` and `dumpPrefillLayerOutputs`. Both were
+the only functions over the 120-line ratchet that were not already baselined,
+so `tools/func-length-baseline.txt` gained no row.
+
 ## Generated and local files
 `models/`, `.build/`, `.swiftpm/`, `benchmark/mock/`,
 `benchmark/benchmark-results/`, `.qwen/` (the wiki clone), `.claude/` and

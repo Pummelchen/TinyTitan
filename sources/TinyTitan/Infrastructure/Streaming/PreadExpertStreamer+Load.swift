@@ -454,9 +454,13 @@ extension PreadExpertStreamer {
                     fileOffset: layout.streamOffset + regionOffset,
                     count: Int(payload))
                 if let maps = layout.expertTensors,
-                    maps.indices.contains(expert), !maps[expert].isEmpty {
+                    maps.indices.contains(expert), !maps[expert].isEmpty
+                {
                     if ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_TRACE"] == "1" {
-                        FileHandle.standardError.write(Data("[expand] site=single layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n".utf8))
+                        FileHandle.standardError.write(
+                            Data(
+                                "[expand] site=single layer=\((layout.path as NSString).lastPathComponent) expert=\(expert)\n"
+                                    .utf8))
                     }
                     TwoBitExpand.expandExpertInPlace(
                         slot: slotPointers[slot], tensors: maps[expert])

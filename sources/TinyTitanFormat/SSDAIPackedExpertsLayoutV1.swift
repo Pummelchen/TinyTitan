@@ -208,7 +208,8 @@ package enum SSDAIV1StructuralValidator {
                 guard expert.size > 0, expert.size <= layout.expertStride else {
                     throw TinyTitanFormatError.invalid(
                         field: "expert[\(logical)]",
-                        reason: "expert size \(expert.size) is not within 1...\(layout.expertStride)")
+                        reason:
+                            "expert size \(expert.size) is not within 1...\(layout.expertStride)")
                 }
                 let (rangeEnd, overflowed) = expert.offset.addingReportingOverflow(expert.size)
                 guard !overflowed else {

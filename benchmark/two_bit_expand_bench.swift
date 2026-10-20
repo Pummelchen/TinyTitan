@@ -25,7 +25,7 @@ func expand(_ src: UnsafePointer<UInt8>, _ dst: UnsafeMutablePointer<UInt8>, _ b
     }
 }
 
-let values = 3 * 512 * 2048          // gate/up/down of one routed expert
+let values = 3 * 512 * 2048  // gate/up/down of one routed expert
 let inBytes = values / 4
 let outBytes = values / 2
 let src = UnsafeMutablePointer<UInt8>.allocate(capacity: inBytes)
@@ -51,7 +51,9 @@ for threads in [1, 2, 4, 8] {
     }
     let moved = Double(inBytes + outBytes)
     let gbs = moved / (best / 1e9) / 1e9
-    print(String(format: "threads %d  %.3f ms  %.2f GB/s  per-token(3.2 experts) %.2f ms",
-                 threads, best / 1e6, gbs, best / 1e6 * 3.2))
+    print(
+        String(
+            format: "threads %d  %.3f ms  %.2f GB/s  per-token(3.2 experts) %.2f ms",
+            threads, best / 1e6, gbs, best / 1e6 * 3.2))
 }
 src.deallocate(); dst.deallocate()

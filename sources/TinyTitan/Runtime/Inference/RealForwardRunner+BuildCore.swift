@@ -168,9 +168,9 @@ extension RealForwardRunner {
         bp.rdadvisePolicyMode = runtimeConfiguration.rdadvisePolicy
         bp.rdadviseAdaptiveState = RDAdviceAdaptivePolicyState(
             config: RDAdviceAdaptivePolicyConfig(
-                missCap: Self.rdadviseAdaptiveMissCap,
-                byteCap: Self.rdadviseAdaptiveByteCap,
-                slowCallNanos: Self.rdadviseAdaptiveSlowCallNanos))
+                missCap: Self.Defaults.rdadviseAdaptiveMissCap,
+                byteCap: Self.Defaults.rdadviseAdaptiveByteCap,
+                slowCallNanos: Self.Defaults.rdadviseAdaptiveSlowCallNanos))
         bp.rdadviseEnabled = runtimeConfiguration.rdadviseEnabled
         bp.kv = try KVCacheManager(
             device: context.device,

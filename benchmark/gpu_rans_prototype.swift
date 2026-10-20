@@ -191,8 +191,18 @@ guard args.count >= 2 else {
 }
 let layer = try Data(contentsOf: URL(fileURLWithPath: args[1]), options: .mappedIfSafe)
 let stride = 1_769_472
-let expertCount = args.count > 2 ? Int(args[2])! : 3
-let layerPointer = layer.withUnsafeBytes { $0.baseAddress! }
+let expertCount: Int
+if args.count > 2 {
+    guard let parsed = Int(args[2]) else {
+        fatalError("expert count must be an integer")
+    }
+    expertCount = parsed
+} else {
+    expertCount = 3
+}
+guard let layerPointer = layer.withUnsafeBytes({ $0.baseAddress }) else {
+    fatalError("layer file mapped to no base address")
+}
 
 // Pass 1: one model per tensor role, over every expert in the layer.
 var roleCounts = [[Int]](repeating: [Int](repeating: 0, count: maxSymbol), count: specs.count)
@@ -260,8 +270,13 @@ print(
 
 guard let device = MTLCreateSystemDefaultDevice(), let commandQueue = device.makeCommandQueue()
 else { exit(1) }
-let pipeline = try device.makeComputePipelineState(
-    function: device.makeLibrary(source: shader, options: nil).makeFunction(name: "rans_decode")!)
+guard
+    let decodeFunction = try device.makeLibrary(source: shader, options: nil)
+        .makeFunction(name: "rans_decode")
+else {
+    fatalError("shader function rans_decode is missing")
+}
+let pipeline = try device.makeComputePipelineState(function: decodeFunction)
 
 var payload: [UInt8] = []
 var streamBases: [UInt32] = []
@@ -271,7 +286,7 @@ for block in encoded {
 }
 var tables: [UInt32] = []
 var tableOffsets: [UInt32] = []
-for (role, _) in specs.enumerated() {
+for role in specs.indices {
     tableOffsets.append(UInt32(tables.count))
     let block = encoded[role]
     tables.append(contentsOf: block.cum)
@@ -280,7 +295,7 @@ for (role, _) in specs.enumerated() {
 // One slot->(symbol, frequency, cumulative) table per role, eight bytes a slot.
 var slotInfo: [UInt32] = []
 var slotOffsets: [UInt32] = []
-for (role, _) in specs.enumerated() {
+for role in specs.indices {
     let block = encoded[role]
     slotOffsets.append(UInt32(slotInfo.count / 2))
     var symbol = 0
@@ -311,20 +326,44 @@ for (index, block) in encoded.enumerated() {
 }
 var initialOutput = [UInt8](repeating: 0, count: expertCount * stride)
 
-let payloadBuffer = device.makeBuffer(
-    bytes: payload, length: payload.count, options: .storageModeShared)!
-let tableBuffer = device.makeBuffer(
-    bytes: tables, length: tables.count * 4, options: .storageModeShared)!
-let descBuffer = device.makeBuffer(
-    bytes: streamDesc, length: streamDesc.count * 4, options: .storageModeShared)!
-let slotBuffer = device.makeBuffer(
-    bytes: slotInfo, length: slotInfo.count * 4, options: .storageModeShared)!
-let outputBuffer = device.makeBuffer(
-    bytes: initialOutput, length: initialOutput.count, options: .storageModeShared)!
+guard
+    let payloadBuffer = device.makeBuffer(
+        bytes: payload, length: payload.count, options: .storageModeShared)
+else {
+    fatalError("payload buffer allocation failed")
+}
+guard
+    let tableBuffer = device.makeBuffer(
+        bytes: tables, length: tables.count * 4, options: .storageModeShared)
+else {
+    fatalError("table buffer allocation failed")
+}
+guard
+    let descBuffer = device.makeBuffer(
+        bytes: streamDesc, length: streamDesc.count * 4, options: .storageModeShared)
+else {
+    fatalError("descriptor buffer allocation failed")
+}
+guard
+    let slotBuffer = device.makeBuffer(
+        bytes: slotInfo, length: slotInfo.count * 4, options: .storageModeShared)
+else {
+    fatalError("slot buffer allocation failed")
+}
+guard
+    let outputBuffer = device.makeBuffer(
+        bytes: initialOutput, length: initialOutput.count, options: .storageModeShared)
+else {
+    fatalError("output buffer allocation failed")
+}
 
 func runGPU() -> Double {
-    let commandBuffer = commandQueue.makeCommandBuffer()!
-    let encoder = commandBuffer.makeComputeCommandEncoder()!
+    guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+        fatalError("command buffer allocation failed")
+    }
+    guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+        fatalError("compute encoder allocation failed")
+    }
     encoder.setComputePipelineState(pipeline)
     encoder.setBuffer(payloadBuffer, offset: 0, index: 0)
     encoder.setBuffer(tableBuffer, offset: 0, index: 1)
@@ -345,10 +384,9 @@ let gpuSeconds = (0..<5).map { _ in runGPU() }.min() ?? 0
 let outputPointer = outputBuffer.contents().bindMemory(
     to: UInt8.self, capacity: initialOutput.count)
 var gpuMismatch = 0
-for index in 0..<(expertCount * stride) {
-    if outputPointer[index] != layerPointer.load(fromByteOffset: index, as: UInt8.self) {
-        gpuMismatch += 1
-    }
+for index in 0..<(expertCount * stride)
+where outputPointer[index] != layerPointer.load(fromByteOffset: index, as: UInt8.self) {
+    gpuMismatch += 1
 }
 print(
     String(

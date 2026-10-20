@@ -299,7 +299,8 @@ extension Model {
                         guard let tensor = expert.subTensors[name] else {
                             throw ModelError.indexCorrupt(
                                 detail:
-                                    "routed layer \(layer.layer) expert \(expert.expert) is missing role \(name)")
+                                    "routed layer \(layer.layer) expert \(expert.expert) is missing role \(name)"
+                            )
                         }
                         // A tiered layer keeps hot experts at the wide width and
                         // cold ones at 2-bit, so the byte extent follows the

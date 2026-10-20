@@ -193,7 +193,7 @@ package enum ExpertRANSIndex {
             blocks.reserveCapacity(blockCount)
             // Payload offsets are absolute in the layer file; one expert's
             // blocks are contiguous relative to *its own* first block.
-            var expectedOffset: UInt64? = nil
+            var expectedOffset: UInt64?
             for index in 0..<blockCount {
                 let payloadOffset = read(UInt64.self, bytes, at: cursor)
                 let payloadLength = read(UInt32.self, bytes, at: cursor + 8)

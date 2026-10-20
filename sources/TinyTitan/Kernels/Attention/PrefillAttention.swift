@@ -141,61 +141,11 @@ final class PrefillAttention {
     ) throws {
         validate(params)
 
-        let requestsTensorOps =
-            path == .fullTensorOps2DPreferred
-            || path == .fullTensorOps2DValidityV2
-        // The pinned model uses 512/16/2 only for full attention; its
-        // sliding-window layers use 256/16/8. A future model that reuses this
-        // shape for sliding attention must add a full-visibility check here.
-        let tensorOpsShape =
-            requestsTensorOps
-            && params.kvBits == 16
-            && kvRingCapacity == 0
-            && params.headDim == 512
-            && params.numQHeads == 16
-            && params.numKVHeads == 2
-            && params.scale == 1.0
-        let tensorOpsPipeline = tensorOpsShape ? psoFullTensorOps2DValidityV2 : nil
-        let useTensorOps = tensorOpsPipeline != nil
-        // On by default since 2026-10-20: 40.51 s against 50.31 s prefill on a
-        // 2.2K chunk, with a 4/4 identical answer battery. The summation order
-        // differs from the scalar kernel, so TINYTITAN_PREFILL_ATTN_Q8=0 is the
-        // fallback for byte-identity work.
-        let useQ8 =
-            keepMask == nil
-            && kvRingCapacity == 0
-            && params.headDim % 32 == 0
-            && params.headDim / 32 <= 8
-            && psoCausalQ8 != nil
-            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_ATTN_Q8"] != "0"
-        let pipeline: MTLComputePipelineState
-        if let tensorOpsPipeline {
-            pipeline = tensorOpsPipeline
-        } else if tensorOpsShape && path == .fullTensorOps2DValidityV2 {
-            // K7: the caller explicitly requested the TensorOps path — fail
-            // loudly with the recorded reason instead of crashing or silently
-            // running a different kernel. Only auto-selected paths fall back.
-            throw PrefillAttentionError.tensorOpsUnavailable(
-                reason: tensorOpsUnavailableReason.isEmpty
-                    ? "TensorOps pipeline failed to compile"
-                    : tensorOpsUnavailableReason)
-        } else {
-            // Explicit mode also falls back for incompatible shapes. Benchmark
-            // fixtures must use 512/16/2 to prove that TensorOps ran.
-            // The tiled QSA kernel is only better when there is a selection
-            // to iterate: with none, `iterations` is the whole visible range
-            // and its per-tile bookkeeping buys nothing.
-            let wantQSATiled =
-                keepMask != nil
-                && ProcessInfo.processInfo.environment["TINYTITAN_QSA_TILED"] != "0"
-            if wantQSATiled, let qsa = psoCausalQSATiled, kvRingCapacity == 0 {
-                pipeline = qsa
-            } else if useQ8, let q8 = psoCausalQ8 {
-                pipeline = q8
-            } else {
-                pipeline = causalTiledPipeline(kvRingCapacity: kvRingCapacity)
-            }
-        }
+        let selection = try selectPipeline(
+            path: path, params: params, kvRingCapacity: kvRingCapacity, keepMask: keepMask)
+        let pipeline = selection.pipeline
+        let useTensorOps = selection.useTensorOps
+        let useQ8 = selection.useQ8
         let headDim = Int(params.headDim)
         let threadWidth = max(1, pipeline.threadExecutionWidth)
         let threadCount =
@@ -261,6 +211,80 @@ final class PrefillAttention {
             groups,
             threadsPerThreadgroup: MTLSize(width: threadCount, height: 1, depth: 1))
         enc.endEncoding()
+    }
+
+    /// Which kernel a causal dispatch runs, and the two shape flags its thread
+    /// and group arithmetic needs. Extract of `encodeCausal`'s selection block:
+    /// the rules, comments and precedence are unchanged.
+    private struct PipelineSelection {
+        let pipeline: MTLComputePipelineState
+        let useTensorOps: Bool
+        let useQ8: Bool
+    }
+
+    private func selectPipeline(
+        path: RuntimePrefillAttentionPath,
+        params: PrefillAttentionParams,
+        kvRingCapacity: UInt32,
+        keepMask: MTLBuffer?
+    ) throws -> PipelineSelection {
+        let requestsTensorOps =
+            path == .fullTensorOps2DPreferred
+            || path == .fullTensorOps2DValidityV2
+        // The pinned model uses 512/16/2 only for full attention; its
+        // sliding-window layers use 256/16/8. A future model that reuses this
+        // shape for sliding attention must add a full-visibility check here.
+        let tensorOpsShape =
+            requestsTensorOps
+            && params.kvBits == 16
+            && kvRingCapacity == 0
+            && params.headDim == 512
+            && params.numQHeads == 16
+            && params.numKVHeads == 2
+            && params.scale == 1.0
+        let tensorOpsPipeline = tensorOpsShape ? psoFullTensorOps2DValidityV2 : nil
+        let useTensorOps = tensorOpsPipeline != nil
+        // On by default since 2026-10-20: 40.51 s against 50.31 s prefill on a
+        // 2.2K chunk, with a 4/4 identical answer battery. The summation order
+        // differs from the scalar kernel, so TINYTITAN_PREFILL_ATTN_Q8=0 is the
+        // fallback for byte-identity work.
+        let useQ8 =
+            keepMask == nil
+            && kvRingCapacity == 0
+            && params.headDim % 32 == 0
+            && params.headDim / 32 <= 8
+            && psoCausalQ8 != nil
+            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_ATTN_Q8"] != "0"
+        let pipeline: MTLComputePipelineState
+        if let tensorOpsPipeline {
+            pipeline = tensorOpsPipeline
+        } else if tensorOpsShape && path == .fullTensorOps2DValidityV2 {
+            // K7: the caller explicitly requested the TensorOps path — fail
+            // loudly with the recorded reason instead of crashing or silently
+            // running a different kernel. Only auto-selected paths fall back.
+            throw PrefillAttentionError.tensorOpsUnavailable(
+                reason: tensorOpsUnavailableReason.isEmpty
+                    ? "TensorOps pipeline failed to compile"
+                    : tensorOpsUnavailableReason)
+        } else {
+            // Explicit mode also falls back for incompatible shapes. Benchmark
+            // fixtures must use 512/16/2 to prove that TensorOps ran.
+            // The tiled QSA kernel is only better when there is a selection
+            // to iterate: with none, `iterations` is the whole visible range
+            // and its per-tile bookkeeping buys nothing.
+            let wantQSATiled =
+                keepMask != nil
+                && ProcessInfo.processInfo.environment["TINYTITAN_QSA_TILED"] != "0"
+            if wantQSATiled, let qsa = psoCausalQSATiled, kvRingCapacity == 0 {
+                pipeline = qsa
+            } else if useQ8, let q8 = psoCausalQ8 {
+                pipeline = q8
+            } else {
+                pipeline = causalTiledPipeline(kvRingCapacity: kvRingCapacity)
+            }
+        }
+        return PipelineSelection(
+            pipeline: pipeline, useTensorOps: useTensorOps, useQ8: useQ8)
     }
 
     private func validate(_ params: PrefillAttentionParams) {

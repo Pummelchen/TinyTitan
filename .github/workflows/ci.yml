@@ -173,7 +173,12 @@ jobs:
         # converter suites do, and pins the three statuses apart: 0 every tensor
         # compared and matched, 1 one drifted and the report names which, 2 one
         # could not be compared. No model, no install, no real shard.
-        # Measured on this Mac with the five suites together: 115 tests, 42.7 s.
+        # The sixth is `test_two_bit_pack.py`, the tiered converter's 4-bit to
+        # 2-bit remap: a pure numpy round trip pinning that every 4-bit value
+        # maps to its nearest 2-bit level (k*5), that a random stream halves in
+        # length and expands back to the same levels, and that a stream that is
+        # not a multiple of four bytes is refused. No model, no install.
+        # Measured on this Mac with the six suites together: 118 tests, 42.3 s.
         # A venv because the runner does not carry the converter's three
         # dependencies. No real shard is ever fetched.
         run: |
@@ -183,7 +188,7 @@ jobs:
           cd benchmark
           /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
             test_prepare_agentworld test_tinytitan_quant_fidelity \
-            test_reconcile_snapshot_verdict
+            test_reconcile_snapshot_verdict test_two_bit_pack
       - name: Installer and launcher gates (private DSH isolation, model-menu and launcher choices)
         # The installer and `tools/dsh_local.sh` promise a factory-new Mac stays
         # untouched: one private root, no PATH or shell-rc edit, and npm, pnpm and
@@ -392,8 +397,7 @@ jobs:
         # bytes through numpy,
         # every one of them is stdlib-only, measured on this host
         # 2026-10-10 as 37 suites and 739 tests in 35.6 s with no model, no server,
-        # no Xcode and
-        # no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
+        # no Xcode and no third-party import (test_tsan_storm_exit stubs `xcode-select` and the
         # testing helper, so it exercises the storm's verdict without a built bundle,
         # test_memory_command_names runs each memory driver's own dispatch with a
         # bogus command word, which needs no port at all,
@@ -971,6 +975,10 @@ jobs:
         # code divided by `None`), a body longer than its token, and reports an
         # unclassified counter rather than dropping it. Fixture is one real
         # 512-token capture arm; no model, no server, nothing fetched.
+        # `test_hot_experts` joined on 2026-10-20: 3 tests in 0.15 s, stdlib-only,
+        # running the tiered repacker's profile generator over a synthetic trace
+        # in a temp directory. It is registered here because it was committed in
+        # b24d12f with no CI step naming it, so it ran on one laptop only.
         run: |
           cd benchmark
           python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
@@ -1002,7 +1010,7 @@ jobs:
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
             test_flat_pair_cache_sim test_continuous_feeder_sim \
-            test_heat_split_sim test_predictive_feeder_sim \
+            test_heat_split_sim test_predictive_feeder_sim test_hot_experts \
             test_tinytitan_usecap_ab test_tinytitan_price_pair \
             test_tinytitan_round_budget test_tinytitan_gpu_contention \
             test_tinytitan_host_path_split

@@ -190,7 +190,7 @@ extension RealForwardRunner {
                     requested: requestedMisses,
                     bytes: estimatedBytes)
             }
-            if requestedMisses > Self.rdadviseBoundedMissCap {
+            if requestedMisses > Self.Defaults.rdadviseBoundedMissCap {
                 return ExpertIOAdviceResult.skipped(
                     requested: requestedMisses,
                     bytes: estimatedBytes)
@@ -226,7 +226,7 @@ extension RealForwardRunner {
             // Skip window is inclusive of `position`, matching the adaptive
             // policy (`position <= skipUntilPosition`), so both policies
             // suppress advice for the same token window after a slow call.
-            if result.maxCallNanos > Self.rdadviseBoundedMaxCallNanos {
+            if result.maxCallNanos > Self.Defaults.rdadviseBoundedMaxCallNanos {
                 rdadviseSkipUntilPosition = max(rdadviseSkipUntilPosition, position)
             }
         case .adaptive:

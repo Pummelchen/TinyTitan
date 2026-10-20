@@ -27,6 +27,10 @@ struct RANSStreamPlan {
 }
 
 /// The per-device pipeline and queue, compiled and created once.
+///
+/// unchecked-invariant: `pipelines` and `queues` are the only mutable state and
+/// every read or write of either happens while holding `lock`; the class holds no
+/// other stored state, so the unchecked conformance cannot be observed unsafely.
 private final class RANSGPU: @unchecked Sendable {
     static let shared = RANSGPU()
     private let lock = NSLock()
@@ -245,10 +249,11 @@ final class RANSLayerResources: @unchecked Sendable {
         let base = Int(block.payloadOffset)
         var lengths = [UInt8](repeating: 0, count: lengthBytes)
         let complete = lengths.withUnsafeMutableBytes { raw -> Bool in
+            guard let destination = raw.baseAddress else { return false }
             var filled = 0
             while filled < lengthBytes {
                 let got = pread(
-                    fd, raw.baseAddress!.advanced(by: filled), lengthBytes - filled,
+                    fd, destination.advanced(by: filled), lengthBytes - filled,
                     off_t(base) + off_t(filled))
                 if got < 0 {
                     if errno == EINTR { continue }

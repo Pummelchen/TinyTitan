@@ -54,7 +54,7 @@ def tier_layer(
     for entry in experts:
         expert_id = entry["expert"]
         tensors = sorted(entry["tensors"].items(), key=lambda kv: kv[1]["offset"])
-        blob = source[entry["offset"]:entry["offset"] + entry["size"]]
+        blob = source[entry["offset"] : entry["offset"] + entry["size"]]
         # The runtime derives one ExpertOffsets struct per layer from expert 0
         # (ModelExpertIO.routedExpertOffsets). After expansion every slot holds
         # the 4-bit layout, but that struct is read from expert 0's entry, so
@@ -65,7 +65,7 @@ def tier_layer(
         new_tensors: dict[str, dict] = {}
         new_blob = bytearray()
         for name, tensor in tensors:
-            data = blob[tensor["offset"]:tensor["offset"] + tensor["size"]]
+            data = blob[tensor["offset"] : tensor["offset"] + tensor["size"]]
             if is_hot or tensor.get("bits") != 4:
                 # Hot weights and every scale/bias are copied unchanged.
                 new_blob += data
@@ -96,12 +96,14 @@ def tier_layer(
         out += b"\x00" * (aligned - len(out))
         offset = len(out)
         out += new_blob
-        entries.append({
-            "expert": expert_id,
-            "offset": offset,
-            "size": len(new_blob),
-            "tensors": new_tensors,
-        })
+        entries.append(
+            {
+                "expert": expert_id,
+                "offset": offset,
+                "size": len(new_blob),
+                "tensors": new_tensors,
+            }
+        )
     return bytes(out), entries
 
 
@@ -110,17 +112,23 @@ def main() -> int:
     ap.add_argument("--model", required=True)
     ap.add_argument("--hot-profile", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--cold-bits", type=int, default=2, choices=(2, 3),
-                    help="width of the cold tier: 2 or 3 bits")
-    ap.add_argument("--layers", default="all",
-                    help="'all' or a comma-separated list of layer indices to tier")
+    ap.add_argument(
+        "--cold-bits",
+        type=int,
+        default=2,
+        choices=(2, 3),
+        help="width of the cold tier: 2 or 3 bits",
+    )
+    ap.add_argument(
+        "--layers", default="all", help="'all' or a comma-separated list of layer indices to tier"
+    )
     args = ap.parse_args()
 
     model = pathlib.Path(args.model)
     out = pathlib.Path(args.out)
     manifest = json.loads((model / "manifest.json").read_text())
     layout = json.loads((model / "packed_experts" / "layout.json").read_text())
-    profile = json.loads(pathlib.Path(args.hot_profile).read_text())
+    profile = json.loads(pathlib.Path(args.hot_profile).read_text(encoding="utf-8"))
 
     tiered = set(range(len(layout["layers"])))
     if args.layers != "all":
@@ -158,15 +166,15 @@ def main() -> int:
         else:
             hot = set(profile["layers"][str(index)]["hot"])
             data, entries = tier_layer(
-                source_path.read_bytes(), layer["experts"], hot, index,
-                cold_bits=args.cold_bits)
+                source_path.read_bytes(), layer["experts"], hot, index, cold_bits=args.cold_bits
+            )
             destination.write_bytes(data)
             new_layers.append({"layer": index, "file": layer["file"], "experts": entries})
         if index in tiered:
             entry = manifest["files"][f"packed_experts/{layer['file']}"]
             entry["size"] = destination.stat().st_size
             entry["sha256"] = sha256_of(destination)
-            print(f"layer {index:02d}: {entry['size']/1e6:.1f} MB")
+            print(f"layer {index:02d}: {entry['size'] / 1e6:.1f} MB")
 
     layout["layers"] = new_layers
     layout_bytes = json.dumps(layout, separators=(",", ":")).encode()

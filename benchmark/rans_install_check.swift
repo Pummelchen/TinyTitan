@@ -18,8 +18,18 @@ guard args.count >= 4 else {
 }
 let install = args[1]
 let rawInstall = args[2]
-let layerIndex = Int(args[3])!
-let expertCount = args.count > 4 ? Int(args[4])! : 3
+guard let layerIndex = Int(args[3]) else {
+    fatalError("layer index must be an integer")
+}
+let expertCount: Int
+if args.count > 4 {
+    guard let parsed = Int(args[4]) else {
+        fatalError("expert count must be an integer")
+    }
+    expertCount = parsed
+} else {
+    expertCount = 3
+}
 let layerName = String(format: "layer_%02d", layerIndex)
 let payloadPath = "\(install)/packed_experts/\(layerName).bin"
 let indexPath = "\(install)/packed_experts/\(layerName).ridx"
@@ -132,8 +142,13 @@ let shader = """
 guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
     exit(1)
 }
-let pipeline = try device.makeComputePipelineState(
-    function: device.makeLibrary(source: shader, options: nil).makeFunction(name: "rans_decode")!)
+guard
+    let decodeFunction = try device.makeLibrary(source: shader, options: nil)
+        .makeFunction(name: "rans_decode")
+else {
+    fatalError("shader function rans_decode is missing")
+}
+let pipeline = try device.makeComputePipelineState(function: decodeFunction)
 
 // Tables per role: cum[257] + freq[256], and the packed slot table.
 var tables: [UInt32] = []
@@ -188,21 +203,45 @@ for expert in 0..<expertCount {
     }
 }
 
-let payloadBuffer = device.makeBuffer(
-    bytes: [UInt8](payload), length: payload.count, options: .storageModeShared)!
-let tableBuffer = device.makeBuffer(
-    bytes: tables, length: tables.count * 4, options: .storageModeShared)!
-let descBuffer = device.makeBuffer(
-    bytes: descs, length: descs.count * 4, options: .storageModeShared)!
-let slotBuffer = device.makeBuffer(
-    bytes: slotInfo, length: slotInfo.count * 4, options: .storageModeShared)!
+guard
+    let payloadBuffer = device.makeBuffer(
+        bytes: [UInt8](payload), length: payload.count, options: .storageModeShared)
+else {
+    fatalError("payload buffer allocation failed")
+}
+guard
+    let tableBuffer = device.makeBuffer(
+        bytes: tables, length: tables.count * 4, options: .storageModeShared)
+else {
+    fatalError("table buffer allocation failed")
+}
+guard
+    let descBuffer = device.makeBuffer(
+        bytes: descs, length: descs.count * 4, options: .storageModeShared)
+else {
+    fatalError("descriptor buffer allocation failed")
+}
+guard
+    let slotBuffer = device.makeBuffer(
+        bytes: slotInfo, length: slotInfo.count * 4, options: .storageModeShared)
+else {
+    fatalError("slot buffer allocation failed")
+}
 var output = [UInt8](repeating: 0, count: expertCount * stride)
-let outputBuffer = device.makeBuffer(
-    bytes: output, length: output.count, options: .storageModeShared)!
+guard
+    let outputBuffer = device.makeBuffer(
+        bytes: output, length: output.count, options: .storageModeShared)
+else {
+    fatalError("output buffer allocation failed")
+}
 
 func run() -> Double {
-    let cb = queue.makeCommandBuffer()!
-    let encoder = cb.makeComputeCommandEncoder()!
+    guard let cb = queue.makeCommandBuffer() else {
+        fatalError("command buffer allocation failed")
+    }
+    guard let encoder = cb.makeComputeCommandEncoder() else {
+        fatalError("compute encoder allocation failed")
+    }
     encoder.setComputePipelineState(pipeline)
     encoder.setBuffer(payloadBuffer, offset: 0, index: 0)
     encoder.setBuffer(tableBuffer, offset: 0, index: 1)
@@ -222,8 +261,8 @@ _ = run()
 let seconds = (0..<5).map { _ in run() }.min() ?? 0
 let out = outputBuffer.contents().bindMemory(to: UInt8.self, capacity: output.count)
 var mismatch = 0
-for index in 0..<output.count {
-    if out[index] != raw[index] { mismatch += 1 }
+for index in 0..<output.count where out[index] != raw[index] {
+    mismatch += 1
 }
 let totalBytes = expertCount * stride
 print(
