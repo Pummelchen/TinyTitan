@@ -25,8 +25,11 @@ enum TwoBitExpand {
             let v1 = UInt8((byte >> 4) & 0x3) * 5
             let v2 = UInt8((byte >> 2) & 0x3) * 5
             let v3 = UInt8(byte & 0x3) * 5
-            destination[2 * index] = (v0 << 4) | v1
-            destination[2 * index + 1] = (v2 << 4) | v3
+            // A 4-bit byte holds element 2k in the low nibble and 2k+1 in
+            // the high one (`affine_quant_value` shifts by index*4), so the
+            // first 2-bit value of the pair is the low nibble here.
+            destination[2 * index] = (v1 << 4) | v0
+            destination[2 * index + 1] = (v3 << 4) | v2
         }
     }
 
@@ -65,6 +68,9 @@ extension TwoBitExpand {
         tensors: [ExpertBlobTensor]
     ) {
         let bytes = slot.assumingMemoryBound(to: UInt8.self)
+        let checking =
+            ProcessInfo.processInfo.environment["TINYTITAN_EXPAND_CHECK"] == "1"
+        var corruption: String?
         for tensor in tensors.sorted(by: { $0.sourceOffset > $1.sourceOffset }) {
             let source = bytes + tensor.sourceOffset
             let destination = bytes + tensor.targetOffset
@@ -82,6 +88,24 @@ extension TwoBitExpand {
             } else if destination != source {
                 memmove(destination, source, tensor.sourceSize)
             }
+            if checking, tensor.rescales {
+                let halves = UnsafeMutableRawPointer(destination)
+                    .assumingMemoryBound(to: UInt16.self)
+                let count = tensor.sourceSize / 2
+                var bad = 0
+                for index in 0..<count {
+                    let value = Float(bitPattern: UInt32(halves[index]) << 16)
+                    if !value.isFinite { bad += 1 }
+                }
+                if bad > 0 {
+                    corruption =
+                        "role offset \(tensor.targetOffset): \(bad)/\(count) non-finite"
+                }
+            }
+        }
+        if let corruption {
+            FileHandle.standardError.write(
+                Data("[expand] \(corruption)\n".utf8))
         }
     }
 
@@ -99,8 +123,8 @@ extension TwoBitExpand {
             let v1 = UInt8((byte >> 4) & 0x3) * 5
             let v2 = UInt8((byte >> 2) & 0x3) * 5
             let v3 = UInt8(byte & 0x3) * 5
-            destination[2 * index] = (v0 << 4) | v1
-            destination[2 * index + 1] = (v2 << 4) | v3
+            destination[2 * index] = (v1 << 4) | v0
+            destination[2 * index + 1] = (v3 << 4) | v2
         }
     }
 

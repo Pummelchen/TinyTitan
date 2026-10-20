@@ -80,10 +80,11 @@ import Testing
             ]
             let out0 = expanded[2 * index]
             let out1 = expanded[2 * index + 1]
-            #expect((out0 >> 4) == values[0] * 5)
-            #expect((out0 & 0xF) == values[1] * 5)
-            #expect((out1 >> 4) == values[2] * 5)
-            #expect((out1 & 0xF) == values[3] * 5)
+            // 4-bit packs element 2k in the low nibble, 2k+1 in the high one.
+            #expect((out0 & 0xF) == values[0] * 5)
+            #expect((out0 >> 4) == values[1] * 5)
+            #expect((out1 & 0xF) == values[2] * 5)
+            #expect((out1 >> 4) == values[3] * 5)
         }
     }
 
