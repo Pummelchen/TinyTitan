@@ -153,3 +153,24 @@ the scalar kernel for byte-identity work.
 
 With attention at 8.3 s, the routed-expert tiles (22.4 s) are now the largest
 prefill term, ahead of the shared expert (9.1 s) and GDN (9.1 s).
+
+### Routed-tile knobs: two negatives, 2026-10-20
+
+With attention fixed, the routed-tile phase (22.4 s, of which 11.5 s GPU) is
+the largest prefill term. Two scheduler knobs were tested against the 2.2K
+prompt and neither clears the noise:
+
+| knob | prefill s | verdict |
+| --- | ---: | --- |
+| depth 2 (default) | 39.11, 38.99, 39.11 | keep |
+| depth 3 | 39.06 | noise |
+| depth 4 | 38.53 | within noise, not re-tested |
+| depth 6 | 39.60 | worse |
+| tile 16 experts | 40.04, 39.01 | noise/slightly worse |
+| tile 8 (default) | 39.0 | keep |
+
+The tile pipeline already overlaps the host fetch with the previous tile's
+GPU work (`drainOldestPendingTile`), which is why depth is flat: the fetches
+are not the exposed serial term any more. The remaining 11 s of non-GPU time
+in that phase is inside `fetchBindingForTile`, and the GPU half runs at
+~1.3 TFLOPS; both need a profile of the fetch path before any change.
