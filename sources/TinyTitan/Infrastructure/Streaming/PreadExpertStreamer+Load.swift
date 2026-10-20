@@ -394,6 +394,12 @@ extension PreadExpertStreamer {
         // `n * stride`, so the stride-shaped range check does not describe it:
         // the frames are laid out back to back and are shorter than the stride.
         // The guard for that path is each frame's own end, checked below.
+        // A tiered layer's cold experts are shorter than the slot stride, so
+        // the read and its bound use the expert's own payload.
+        let payload: UInt64 =
+            layout.expertSizes.flatMap {
+                $0.indices.contains(expert) ? $0[expert] : nil
+            } ?? layout.expertStride
         let regionOffset: UInt64
         if ransResources != nil {
             // The payload is not at raw offsets; the sidecar's block ranges are
@@ -414,7 +420,7 @@ extension PreadExpertStreamer {
             // type that mixes a layout offset with a region is known not to wrap.
             let (regionEnd, regionOverflow) =
                 regionOffset
-                .addingReportingOverflow(layout.expertStride)
+                .addingReportingOverflow(payload)
             guard !regionOverflow, regionEnd <= layout.streamSize else {
                 throw StreamerError.offsetOutOfRange(regionOffset)
             }
@@ -446,7 +452,12 @@ extension PreadExpertStreamer {
                 try readFull(
                     into: slotPointers[slot],
                     fileOffset: layout.streamOffset + regionOffset,
-                    count: Int(layout.expertStride))
+                    count: Int(payload))
+                if let maps = layout.expertTensors,
+                    maps.indices.contains(expert), !maps[expert].isEmpty {
+                    TwoBitExpand.expandExpertInPlace(
+                        slot: slotPointers[slot], tensors: maps[expert])
+                }
             }
             slotState[slot] = .resident
             publishResidencyUnlocked(
