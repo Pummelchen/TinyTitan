@@ -387,3 +387,15 @@ GDN's remaining cost is therefore two things already bounded: the qmm
 projections (the same kernel as QKV and the shared expert) and the serial
 scan, which would need a chunked parallel form — an algorithm change, not a
 scheduling one. GDN is off the cheap list.
+
+### Sixteen-query attention block: no change (2026-10-20)
+
+Doubling the q8 block from 8 to 16 queries per threadgroup halves its K/V
+reads again. Measured 33.53 / 33.51 s prefill and 7.80 / 7.80 s attention,
+identical to the eight-query block's 33.4-33.5 s and 7.80 s. Reverted.
+
+With this, every GEMM-shaped kernel in the prefill has now been shown to be
+compute-bound rather than traffic-bound: qmm blocking and vectorising (rounds
+10, 11), attention blocking (this round), routed tiles (unchanged by wider
+tiles). The scalar fma chain is the common cause, and fixing it needs tiled
+`simdgroup_matrix` kernels rather than more blocking.
