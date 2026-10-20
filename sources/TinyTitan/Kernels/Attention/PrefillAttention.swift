@@ -163,6 +163,7 @@ final class PrefillAttention {
         // fallback for byte-identity work.
         let useQ8 =
             keepMask == nil
+            && kvRingCapacity == 0
             && params.headDim % 32 == 0
             && params.headDim / 32 <= 8
             && psoCausalQ8 != nil

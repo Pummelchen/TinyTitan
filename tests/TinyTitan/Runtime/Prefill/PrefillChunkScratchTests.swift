@@ -23,7 +23,9 @@ import Testing
         #expect(layout.routePartialElements == 32 * 8 * 2048)
         #expect(layout.routeIDElements == 32 * 8)
         #expect(layout.routeWeightElements == 32 * 8)
-        #expect(layout.sharedExpertScratchElements == 512)
+        // The batched shared-expert path writes a chunk of gate/up/act rows,
+        // not one row: chunkTokens * sharedIntermediate (32 * 512 here).
+        #expect(layout.sharedExpertScratchElements == 32 * 512)
         #expect(layout.routedPairMicrobatchRows == 32)
         #expect(layout.routedGateUpActElements == 3 * 32 * 512)
         #expect(layout.routedDownOutputElements == 32 * 2048)
@@ -39,7 +41,9 @@ import Testing
         #expect(layout.gdnAElements == 32 * 32)
         #expect(layout.sharedScalarGateBufferElements == 32)
 
-        let worksheetT32UpperBound = Int(4.5 * 1_048_576.0)
+        // 4.5 MB worksheet bound plus the batched shared expert's three
+        // chunk rows (3 * 32 * 512 * 2 bytes = 96 KB at T32).
+        let worksheetT32UpperBound = Int(4.6 * 1_048_576.0)
         #expect(layout.totalPersistentBytes <= worksheetT32UpperBound)
     }
 
