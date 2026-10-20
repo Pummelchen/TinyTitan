@@ -175,6 +175,23 @@ public struct Model {
     }
 
     public var routedExpertWeightBits: Int { manifest.quant?.routedExpert.weightBits ?? 4 }
+
+    /// The width one routed expert is actually stored at.
+    ///
+    /// A tiered install keeps hot experts at the manifest width and cold ones
+    /// at 2-bit in the same layer file; `layout.json` records that per tensor,
+    /// so the dispatch can pick a pipeline per expert instead of assuming the
+    /// install-wide value. Returns the manifest width when the layout carries no
+    /// override, which is every install that existed before tiering.
+    public func routedExpertBits(layer: Int, expert: Int) -> Int {
+        guard
+            let entry = try? packedExpertsLayout.expert(layer: layer, expert: expert),
+            let bits = entry.subTensors["gate"]?.bits
+        else {
+            return routedExpertWeightBits
+        }
+        return bits
+    }
     /// The manifest's recorded digest of `model_weights.bin`. The manifest is
     /// itself bound by the install receipt, so this is a trustworthy identity
     /// for anything derived from these weights — the ANE prefill sidecar uses
