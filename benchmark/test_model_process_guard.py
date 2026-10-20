@@ -103,6 +103,7 @@ PYTHON_CALLERS = [
     "benchmark/expert_cache_slots.py",
     "benchmark/tinytitan_gate0_profile.py",
     "benchmark/tinytitan_vs_competitors.py",
+    "benchmark/compressed_experts_ab.py",
 ]
 
 

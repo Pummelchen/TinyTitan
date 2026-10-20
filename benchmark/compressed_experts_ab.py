@@ -36,6 +36,8 @@ import statistics
 import subprocess
 import sys
 
+from tinytitan_profile import pgrep_answer
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLI = ROOT / ".build/release/TinyTitanCLI"
 PROMPT = (
@@ -61,11 +63,10 @@ def preflight(raw: pathlib.Path, compressed: pathlib.Path) -> None:
             f"{compressed} has no .idx sidecars; convert it with "
             "TinyTitanRepack --compress-experts first"
         )
-    busy = subprocess.run(
-        ["pgrep", "-fl", BUSY.pattern], check=False, capture_output=True, text=True
-    ).stdout.strip()
-    if busy:
-        raise RuntimeError(f"a model process is already running:\n{busy}")
+    guard, busy_lines = pgrep_answer(["-fl", BUSY.pattern])
+    if guard != "clear":
+        detail = "\n".join(busy_lines) or "no answer"
+        raise RuntimeError(f"cannot tell whether a model process is running ({guard}):\n{detail}")
 
 
 def measure(model: pathlib.Path, max_new: int, timeout: int) -> dict:
