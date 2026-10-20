@@ -304,6 +304,40 @@ public final class NgramTableReader: @unchecked Sendable {
         }
     }
 
+    /// Splits one position's rows across `threads` readers.
+    ///
+    /// One row is a random read, so a gather's wall time is round-trips rather
+    /// than bytes; the 16 rows of one decode token ran serially and measured
+    /// 14-15 ms/token on the 125B while the same disk was feeding the expert
+    /// stream, where the prefill path's eight-reader gather takes a fraction of
+    /// that. The workers write disjoint destination rows, so nothing is shared.
+    public func gatherConcurrentlyRows(
+        rows: [UInt32],
+        into destination: UnsafeMutableRawPointer,
+        threads: Int = 8
+    ) throws {
+        let usable = max(1, min(threads, rows.count))
+        guard usable > 1 else {
+            try gather(rows: rows, into: destination)
+            return
+        }
+        nonisolated(unsafe) let destination = destination
+        let failure = GatherFailure()
+        DispatchQueue.concurrentPerform(iterations: usable) { worker in
+            let lower = worker * rows.count / usable
+            let upper = (worker + 1) * rows.count / usable
+            guard lower < upper else { return }
+            do {
+                try gather(
+                    rows: Array(rows[lower..<upper]),
+                    into: destination.advanced(by: lower * rowBytes))
+            } catch {
+                failure.record(error)
+            }
+        }
+        if let error = failure.error { throw error }
+    }
+
     /// Gathers independent batches, fanning the reads across `threads` callers.
     ///
     /// Batch `i` lands at `destination + i * chunkStride`, which is how a caller

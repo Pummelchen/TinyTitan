@@ -115,6 +115,11 @@ table shrinks from 102.4 GB to 32.0 GB (31.2 %), the install from 162 GB to
 (inside noise), gather ~3 % cheaper, and the 32-token output byte-identical
 across four arms. Details: `docs/ple-table-4bit-2026-10-20.md`.
 
+The decode gather that reads those rows then got Maya's fan-out too: 16 reads
+over eight workers, **−14 % gather time and +1.7 % decode** at the median on
+the 125B, both pairs the same direction
+(`docs/ple-decode-gather-2026-10-21.md`).
+
 ## C. KV streaming: host-resident cache, VRAM window
 
 Maya: each attention layer's latent KV lives in pinned RAM; N positions stay in

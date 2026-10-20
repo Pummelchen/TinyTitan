@@ -55,6 +55,24 @@ struct NgramTableReaderTests {
         }
     }
 
+    @Test("A token's rows gathered concurrently match the serial gather")
+    func concurrentRowsMatchSerial() throws {
+        let url = try Self.makeTable()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let r = try Self.reader(url)
+        let rows: [UInt32] = [7, 0, 63, 31, 7, 2, 40]
+        var serial = [Float16](repeating: 0, count: rows.count * Self.rowDim)
+        var concurrent = [Float16](repeating: 0, count: rows.count * Self.rowDim)
+        try serial.withUnsafeMutableBytes { buffer in
+            try r.gather(rows: rows, into: try #require(buffer.baseAddress))
+        }
+        try concurrent.withUnsafeMutableBytes { buffer in
+            try r.gatherConcurrentlyRows(
+                rows: rows, into: try #require(buffer.baseAddress), threads: 4)
+        }
+        #expect(serial == concurrent)
+    }
+
     @Test("A row past the end is refused, not read out of bounds")
     func rejectsOutOfRange() throws {
         let url = try Self.makeTable()

@@ -78,6 +78,25 @@ struct NgramTableQ4Tests {
         }
     }
 
+    @Test func concurrentRowsMatchSerialForTheDequantisingGather() throws {
+        let url = try Self.makeQ4Table()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try NgramTableReader(
+            path: url.path, rowDim: Self.rowDim, rowCount: Self.rowCount,
+            bypassCache: false, format: .affine4Group32)
+        let rows: [UInt32] = [2, 0, 3, 1, 2]
+        var serial = [Float16](repeating: 0, count: rows.count * Self.rowDim)
+        var concurrent = [Float16](repeating: 0, count: rows.count * Self.rowDim)
+        try serial.withUnsafeMutableBytes { buffer in
+            try reader.gather(rows: rows, into: try #require(buffer.baseAddress))
+        }
+        try concurrent.withUnsafeMutableBytes { buffer in
+            try reader.gatherConcurrentlyRows(
+                rows: rows, into: try #require(buffer.baseAddress), threads: 3)
+        }
+        #expect(serial == concurrent)
+    }
+
     @Test func foreignMagicIsRefused() throws {
         let url = try Self.makeQ4Table(magic: 0xDEAD_BEEF)
         defer { try? FileManager.default.removeItem(at: url) }

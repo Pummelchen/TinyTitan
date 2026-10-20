@@ -23,8 +23,21 @@ extension RealForwardRunner {
             pleContext.removeLast(pleContext.count - hash.ngramSize)
         }
         let rows = hash.rows(context: pleContext)
-        try table.gather(rows: rows, into: ple.embedding.contents())
+        try table.gatherConcurrentlyRows(
+            rows: rows, into: ple.embedding.contents(),
+            threads: Self.pleGatherThreads)
     }
+
+    /// Readers for one token's n-gram rows. One is the measured-off arm: a
+    /// token's 16 random reads ran serially and cost 14-15 ms on the 125B.
+    static let pleGatherThreads: Int = {
+        guard
+            let raw = ProcessInfo.processInfo
+                .environment["TINYTITAN_PLE_GATHER_THREADS"],
+            let value = Int(raw), value > 0
+        else { return 8 }
+        return min(value, 16)
+    }()
 
     /// Rewinds the n-gram block's carried state after a speculative pass whose
     /// rows were not all accepted.
