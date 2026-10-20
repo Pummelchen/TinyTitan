@@ -5,7 +5,7 @@ import TinyTitanValidationSupport
 @testable import TinyTitan
 
 extension PrefillGroupedRoutedMoETests {
-    @Test(arguments: [4, 8])
+    @Test(arguments: [2, 4, 8])
     func streamedBatchedMatchesReferenceAcrossPartialMicrobatch(weightBits: Int) throws {
         let d = 64
         let f = 64

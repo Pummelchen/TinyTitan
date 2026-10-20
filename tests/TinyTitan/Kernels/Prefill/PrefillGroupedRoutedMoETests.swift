@@ -132,7 +132,7 @@ import TinyTitanValidationSupport
         f: Int,
         weightBits: Int = 4
     ) -> SyntheticExpertPool {
-        precondition([4, 8].contains(weightBits))
+        precondition([2, 4, 8].contains(weightBits))
         precondition(numExperts > 0, "a pool needs at least one expert to have offsets")
         var allBytes: [UInt8] = []
         var offsets: MoEExpertOffsets?

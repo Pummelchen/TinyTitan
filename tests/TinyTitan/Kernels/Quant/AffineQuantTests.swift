@@ -31,7 +31,7 @@ import TinyTitanValidationSupport
         return (bytes, values)
     }
 
-    @Test(arguments: [4, 8])
+    @Test(arguments: [2, 4, 8])
     func gemvDecodesPackedAffine(bits: Int) throws {
         let rows = 3
         let columns = 128
@@ -59,7 +59,7 @@ import TinyTitanValidationSupport
         #expect(RelError.compute(actual: actual, reference: expected) < 0.002)
     }
 
-    @Test(arguments: [4, 8])
+    @Test(arguments: [2, 4, 8])
     func embeddingDecodesPackedAffine(bits: Int) throws {
         let rows = 3
         let columns = 128
