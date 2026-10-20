@@ -174,3 +174,25 @@ GPU work (`drainOldestPendingTile`), which is why depth is flat: the fetches
 are not the exposed serial term any more. The remaining 11 s of non-GPU time
 in that phase is inside `fetchBindingForTile`, and the GPU half runs at
 ~1.3 TFLOPS; both need a profile of the fetch path before any change.
+
+### Next target located: the shared expert is a per-token loop
+
+`prefill_shared_expert` is 9.12 s of GPU time over 40 layers, ~275 GFLOPS —
+five times less efficient than the routed tiles. The cause is in
+`PrefillSharedExpert.encodeBlock` (`Kernels/Prefill/MoE/PrefillSharedExpert.swift:46`):
+
+    for row in 0..<queryCount {
+        try shared.encode(commandBuffer: cb, x: x, xOffset: xOffset + row * ...)
+    }
+
+It calls the decode-path single-token GEMV once per token, so a 2.5K chunk
+issues 2,505 tiny dispatches per layer through the int8 shared-expert runtime
+instead of one GEMM. Each dispatch moves the same ~4 MB of weights and reaches
+roughly 2 GFLOPS, which is why the phase costs what forty decode layers cost.
+
+The fix is a batched int8 GEMM over the token dimension (dequantise a weight
+tile to half in threadgroup memory, `simdgroup_matrix` over 8-token rows), or a
+per-layer dequantise into a half scratch followed by the existing
+`prefill_dequant_affine_qmm_f16_block`. Neither is a knob; both need the
+kernel work the attention phase needed. Estimated prize: 6-7 s of the 40 s
+prefill, on top of the 19.5 % already taken.
