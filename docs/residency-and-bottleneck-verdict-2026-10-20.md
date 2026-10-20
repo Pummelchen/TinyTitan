@@ -514,3 +514,30 @@ Tighter splits save more but put a third of activations on the weakest format.
 
 This is the design decision the plan was waiting for, and it needed no runtime
 change — only a trace and the committed routing.
+
+## Hybrid vs uniform 3-bit: the hybrid dominates (2026-10-20)
+
+The probe's per-width added error and the trace's activation coverage give a
+direct comparison, weighting each expert's error by the share of activations
+that actually reach it:
+
+| format | added error | vs 4-bit | expert bytes vs 4-bit |
+| --- | ---: | ---: | ---: |
+| 4-bit (today) | 0.0969 | 1.00x | 1.000x |
+| uniform 3-bit | 0.2083 | 2.15x | 0.778x |
+| **hybrid, 40 % hot** | **0.1453** | **1.50x** | **0.700x** |
+| **hybrid, 50 % hot** | **0.1248** | **1.29x** | **0.750x** |
+
+Inputs: 2-bit added error 0.4695, 3-bit 0.2083, 3-vs-4 ratio 2.15 from
+`tinytitan_3bit_probe.py`; activation coverage 0.870 / 0.925 from
+`route_skew.py`; bytes include scale/bias (3-bit shown at its *unpadded* stream
+size, 0.778x, which flatters it).
+
+**The hybrid beats uniform 3-bit on both axes at either split** — fewer bytes
+and lower error — and 3-bit was already unattractive because it is not a
+power-of-two packing. So 3-bit is closed as a fallback, not merely deprioritised,
+and the cold-tier format should be built for the 40–50 % hot split.
+
+Caveat: the error metric is mean absolute error relative to mean |w|, and the
+weighting assumes uniform per-token sensitivity. It is a planning proxy; the
+bug-fix suite remains the shipping gate.
