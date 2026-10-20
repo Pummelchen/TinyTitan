@@ -64,6 +64,22 @@ The shape of the TinyTitan version:
    per layer over the **union** of the rows' routes, one grouped MoE pass;
 3. logits per row, and the byte-identity gate at B = 1.
 
+**Measured 2026-10-20 — the first slice, in `TinyTitanBench`.** The head is the
+largest single dense op in decode, and the engine already carries a two-row
+kernel for MTP. `head_affine8_two_rows` runs the same Qwen3.8 head shape
+(248,320 x 2,560, 8-bit) through it:
+
+| arm | per launch | per row | head throughput |
+| --- | ---: | ---: | ---: |
+| `head_affine8` (1 row) | 8,020 us | 8,020 us | 84.2 GB/s |
+| `head_affine8_two_rows` (2 rows) | 8,645 us | **4,322 us** | **+85.6 %** |
+
+The weights are read once for both rows, so a pair costs almost what one row
+costs. At B = 2 that removes ~4-7 ms/token of the head from an Ornith or
+Qwen3.8 decode, 7-12 % of the token, once the server's concurrent path drives
+the batched head. The rest of the plan above is unchanged; this measurement is
+what makes the head worth wiring first, before the layer path is restructured.
+
 Effort is a project, not a knob, and it is the one idea on this list that
 changes a product story ("several agent sessions on one Mac") rather than a
 percentage.
