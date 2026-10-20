@@ -459,3 +459,31 @@ kernel. Reverted.
 Any further prefill gain has to come from doing less arithmetic — 2-bit
 weights halving the bytes and the multiply count, or skipping work — not from
 a better inner loop.
+
+## The 2-bit gate: quality says no to uniform 2-bit (2026-10-20)
+
+`benchmark/tinytitan_3bit_probe.py` already measured 2-bit alongside 3-bit;
+it had never produced that column because it crashed on the first 1-D tensor
+it sampled (`requantize` assumed a matrix). Fixed to accept vectors and
+edge-pad a row to the group boundary, then run against the installed 8-bit
+reference:
+
+| role | n | 2-bit added error | 3-bit added error | 3-vs-4 ratio |
+| --- | ---: | ---: | ---: | ---: |
+| routedExpert | 12 | **0.4695** | 0.2083 | 2.15x |
+| sharedExpert | 2 | 0.5108 | 0.2270 | 2.15x |
+| attention | 2 | 0.2800 | 0.1246 | 2.11x |
+| router | 2 | 0.5756 | 0.2463 | 2.14x |
+
+Each bit removed roughly doubles the quantisation error: 4-bit ~0.097,
+3-bit ~0.208, 2-bit ~0.47 against the 8-bit reference. Packing is fine — 2-bit
+is power-of-two, 20 bytes per 64-weight group including scale and bias,
+**0.556x of 4-bit (44 % saving)** with no word crossings — so the byte case is
+real but the quality case is not.
+
+**Uniform 2-bit is therefore closed before building a format, a repacker or a
+kernel.** What survives is only the mixed form from the original plan: keep
+warm/hot experts at 4-bit and put *cold* experts at 2-bit, where the error
+lands on weights that are rarely selected; or a codebook scheme (AQLM-style
+vector quantisation) whose 2-bit is not uniform affine. Both need the routing
+frequency data the trace work already produced.

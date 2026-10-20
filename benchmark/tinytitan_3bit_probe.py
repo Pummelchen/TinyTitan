@@ -197,16 +197,30 @@ def sample_counts(tensors: list[Tensor]) -> dict[str, int]:
 
 
 def requantize(w: np.ndarray, bits: int) -> np.ndarray:
-    """Quantize to `bits` affine per group of 64 and dequantize, as the format does."""
-    rows, cols = w.shape
-    g = w.reshape(rows, cols // GROUP, GROUP)
+    """Quantize to `bits` affine per group of 64 and dequantize, as the format does.
+
+    Accepts vectors as well as matrices: a 1-D tensor is treated as one row,
+    and a row whose length is not a multiple of the group is edge-padded for
+    the quantisation and sliced back afterwards. Without this the probe died on
+    the first 1-D tensor it sampled, which is why the added-bits column had
+    never been produced for this install.
+    """
+    original = w.shape
+    flat = w.reshape(1, -1) if w.ndim == 1 else w.reshape(-1, original[-1])
+    rows, cols = flat.shape
+    pad = (-cols) % GROUP
+    if pad:
+        flat = np.pad(flat, ((0, 0), (0, pad)), mode="edge")
+    padded_cols = flat.shape[1]
+    g = flat.reshape(rows, padded_cols // GROUP, GROUP)
     lo = g.min(-1, keepdims=True)
     hi = g.max(-1, keepdims=True)
     levels = (1 << bits) - 1
     scale = (hi - lo) / levels
     scale = np.where(scale == 0, 1.0, scale)
     q = np.clip(np.rint((g - lo) / scale), 0, levels)
-    return (q * scale + lo).reshape(rows, cols)
+    out = (q * scale + lo).reshape(rows, padded_cols)[:, :cols]
+    return out.reshape(original)
 
 
 def requantize_error(w: np.ndarray, bits: int) -> float:
