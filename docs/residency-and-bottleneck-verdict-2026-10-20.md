@@ -690,3 +690,30 @@ So the projection stands: a 4/2 hybrid at 0.70-0.75x expert bytes should land
 near 1.33-1.43x decode throughput, 13.8 → 18-20 tok/s on the long prompt, with
 the compute caveat already recorded. This is now the second measured pillar
 under the remaining project, after the split decision.
+
+### Correction: the schema supports mixed widths, the validator does not (2026-10-20)
+
+The previous entry said "no format change needed". That was too optimistic,
+and a test written this round found the exact line. `layout.json` accepts
+per-expert `offset`/`size`/`bits`, but the format validator refuses the shape:
+
+    SSDAIPackedExpertsLayoutV1.swift:203
+    guard expert.offset == expectedOffset, expert.size == layout.expertStride
+    // "offset or size does not match physical rank"
+
+Two checks stand between a tiered install and the runtime:
+
+1. **`SSDAIPackedExpertsLayoutV1`**: offset must equal `rank * expertStride` and
+   size must equal the stride. A compact two-region layout breaks both. It
+   needs to become "ranges are in bounds and do not overlap, size <= stride".
+2. **The manifest's file-size cross-check** (`expertsPerLayer * expertStride`
+   against `files[...].size`) assumes a full-size layer file; a compacted one
+   is smaller.
+
+`MixedExpertWidthLayoutTests` pins the intended behaviour and is marked
+`@Test(.disabled)` with the reason pointing at line 203, so it flips on when
+the validator is relaxed rather than failing the suite meanwhile.
+
+So the cold tier is: two validator relaxations, the tiered converter, and the
+dual-width dispatch — still bounded, but the format work is real and is
+approximately one of the four steps, not zero.
