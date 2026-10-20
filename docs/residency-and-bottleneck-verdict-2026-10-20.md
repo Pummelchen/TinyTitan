@@ -284,3 +284,19 @@ bought nothing, which means the scalar per-element dequantisation and dot
 product is the cost. The lever left on those 13 s is vectorising that inner
 loop (four or eight int8 values per load, group-aligned so a load cannot cross
 a group), not blocking over tokens.
+
+### Vectorised int8 qmm: neutral (2026-10-20)
+
+A four-wide variant of the qmm kernel (`uchar4`/`half4` loads, scale and bias
+hoisted to the group, same accumulation order) measured **33.43 and 33.50 s**
+against a **33.47 s** control with the variant switched off — a dead heat.
+
+The lesson is the measurement one: the 34.61 s "before" was drift, not the
+kernel. Two runs of the same build straddled 0.1 s, and the control had to be
+run to see it. Reverted.
+
+The projection kernel is therefore neither weight-traffic-bound (round 10) nor
+inner-loop-ALU-bound in the way vectorising addresses. Its remaining cost is
+probably the dependent fma chain per thread; hiding that needs a different
+thread mapping (split K across threads with a reduction), which is a larger
+change than a load-width rewrite.
