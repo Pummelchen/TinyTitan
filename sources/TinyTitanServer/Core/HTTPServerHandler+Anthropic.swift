@@ -150,6 +150,10 @@ extension ServerHTTPHandler {
                                 // count in `message_start`, which this handler
                                 // has already sent by the time generation runs.
                                 break
+                            case .promptProgress:
+                                // Reading progress is a chat-completions extension; this surface
+                                // has no event for it and the flag is not parsed here.
+                                break
                             case .content(let text):
                                 self.enqueueAnthropicDelta(
                                     .text, text, blockState: blockState,

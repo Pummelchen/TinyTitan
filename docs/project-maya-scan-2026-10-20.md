@@ -165,6 +165,13 @@ it finishes. The engine already emits per-chunk phase timings; exposing a
 `prompt_progress` event (tokens read / total) is small and directly improves the
 agent experience.
 
+**Implemented 2026-10-20.** `"return_progress": true` on a streamed chat
+completion now emits a `chat.completion.chunk` with empty `choices` and
+`{"prompt_progress":{"tokens":done,"total":total}}` for every prefill chunk
+before the first content delta; without the flag the stream is byte-identical
+to before. The flag survives validation and derived requests, and the
+Anthropic and Responses streams ignore the event (they have no shape for it).
+
 ## G. Coarse conversation checkpoints and slots
 
 Maya keeps conversation states on SSD (`MAYA_GLM_SLOTS=4`) so returning to one

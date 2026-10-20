@@ -186,6 +186,22 @@ extension ServerHTTPHandler {
             // the end, and OpenAI's streaming shape has no chunk for it, so
             // there is nothing to send here.
             break
+        case .promptProgress(let done, let total):
+            // Only a request that set `return_progress` reaches this arm. The
+            // chunk keeps the chat.completion.chunk envelope with empty
+            // `choices`, the shape the usage-only chunk already uses, and adds
+            // the progress object beside it; a client that ignores unknown
+            // fields sees nothing it did not expect.
+            enqueueStreamChunk(
+                [
+                    "id": id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": responseModelID,
+                    "choices": [Any](),
+                    "prompt_progress": ["tokens": done, "total": total],
+                ],
+                outbox: outbox, context: context)
         case .content(let text):
             enqueueStreamChunk(
                 chunk(id: id, created: created, delta: ["content": text], finishReason: nil),

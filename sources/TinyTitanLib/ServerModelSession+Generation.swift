@@ -277,8 +277,14 @@ extension ServerModelSession {
                     switch progress {
                     case .prefill(let done, let total):
                         // The runtime reports prefill chunk by chunk; the prompt
-                        // is read when the last chunk lands.
-                        if done >= total { publishPromptProcessed(total) }
+                        // is read when the last chunk lands. A request that
+                        // asked for reading progress gets each chunk before
+                        // that, which is the only signal a long prompt has.
+                        if done >= total {
+                            publishPromptProcessed(total)
+                        } else if request.returnProgress {
+                            onEvent(.promptProgress(done: done, total: total))
+                        }
                     case .token(_, let tokenID, let delta):
                         if let decoder = state.decoder {
                             publish(try decoder.consume(tokenID: tokenID, delta: delta), true)

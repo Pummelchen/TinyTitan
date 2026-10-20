@@ -230,6 +230,10 @@ public actor Session {
             return .token(text)
         case .promptProcessed(let tokens, let cachedTokens):
             return .promptProcessed(tokens: tokens, cachedTokens: cachedTokens)
+        case .promptProgress:
+            // The embedded facade has no streaming-progress surface; its
+            // callers get the promptProcessed event when the prompt is read.
+            return nil
         case .reasoning(let text):
             return .reasoning(text)
         case .toolCall(let call):

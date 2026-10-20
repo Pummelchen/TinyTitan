@@ -8,6 +8,27 @@ import Testing
 
 @Suite("OpenAI request validation")
 struct OpenAIValidationTests {
+    /// `return_progress` is an extension of OpenAI's streaming shape and
+    /// must stay opt-in: absent is false, explicit true survives validation and
+    /// the derived-request builder that used to drop later fields.
+    @Test func returnProgressIsOptInAndSurvivesDerivedRequests() throws {
+        let plain = Data(#"{"model":"m","messages":[{"role":"user","content":"x"}]}"#.utf8)
+        let plainRequest = try JSONDecoder().decode(OpenAIChatRequest.self, from: plain)
+        let plainValidated = try OpenAIRequestValidator.validate(plainRequest, modelID: "m")
+        #expect(plainValidated.returnProgress == false)
+
+        let asked = Data(
+            #"{"model":"m","messages":[{"role":"user","content":"x"}],"return_progress":true}"#.utf8
+        )
+        let askedRequest = try JSONDecoder().decode(OpenAIChatRequest.self, from: asked)
+        let askedValidated = try OpenAIRequestValidator.validate(askedRequest, modelID: "m")
+        #expect(askedValidated.returnProgress == true)
+        #expect(
+            askedValidated
+                .withGenerationConfig(askedValidated.generationConfig)
+                .returnProgress == true)
+    }
+
     @Test func omittedSamplingControlsUseProductionDefaults() throws {
         let data = Data(#"{"model":"m","messages":[{"role":"user","content":"x"}]}"#.utf8)
         let request = try JSONDecoder().decode(OpenAIChatRequest.self, from: data)

@@ -78,6 +78,10 @@ extension ServerHTTPHandler {
             // The Responses stream already carried its input-token count in
             // `response.created`; there is no event for this one.
             break
+        case .promptProgress:
+            // Reading progress is a chat-completions extension; this surface
+            // has no event for it and the flag is not parsed here.
+            break
         case .content(let text):
             enqueueResponsesContentDelta(
                 id: id, text: text, itemState: itemState,

@@ -112,6 +112,8 @@ package struct ValidatedChatRequest: Sendable {
     /// request so the one orchestrator can serve both, rather than a second
     /// decode path existing beside it.
     package let renderedPromptIDs: [Int32]?
+    /// Stream the prompt's reading progress before the first token.
+    package let returnProgress: Bool
 
     package init(
         messages: [GFTokenizer.Message],
@@ -127,7 +129,8 @@ package struct ValidatedChatRequest: Sendable {
         reasoningNotes: [String] = [],
         reasoning: RequestReasoning? = nil,
         jsonSchema: JSONSchemaNode? = nil,
-        renderedPromptIDs: [Int32]? = nil
+        renderedPromptIDs: [Int32]? = nil,
+        returnProgress: Bool = false
     ) {
         self.messages = messages
         self.tools = tools
@@ -143,6 +146,7 @@ package struct ValidatedChatRequest: Sendable {
         self.reasoning = reasoning
         self.jsonSchema = jsonSchema
         self.renderedPromptIDs = renderedPromptIDs
+        self.returnProgress = returnProgress
     }
 
     /// Every derived request is built through here.
@@ -175,7 +179,8 @@ package struct ValidatedChatRequest: Sendable {
             reasoningNotes: reasoningNotes,
             reasoning: reasoning,
             jsonSchema: jsonSchema,
-            renderedPromptIDs: renderedPromptIDs)
+            renderedPromptIDs: renderedPromptIDs,
+            returnProgress: returnProgress)
     }
 
     /// The same request with its generation config replaced.

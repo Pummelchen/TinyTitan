@@ -39,6 +39,14 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
     /// for JSON and gets unconstrained text is worse off than one told no.
     /// `{"type": "text"}`, the API's own default, is accepted.
     package let responseFormat: JSONValue?
+    /// Stream the prompt's reading progress before the first token.
+    ///
+    /// An opt-in because the chunks are an extension of OpenAI's shape: a
+    /// client that did not ask for them must not receive unknown events. When
+    /// set, each prefill chunk emits a `chat.completion.chunk` with empty
+    /// `choices` and a `prompt_progress` object, which strict clients ignore
+    /// exactly as they ignore the usage-only chunk.
+    package let returnProgress: Bool?
 
     /// Explicit, with the two thinking-control extras defaulted, so the protocol
     /// mappers that build a chat request from their own shapes keep compiling
@@ -67,7 +75,8 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         reasoningEffort: String? = nil,
         chatTemplateKwargs: OpenAIChatTemplateKwargs? = nil,
         reasoningBudgetTokens: Int? = nil,
-        responseFormat: JSONValue? = nil
+        responseFormat: JSONValue? = nil,
+        returnProgress: Bool? = nil
     ) {
         self.model = model
         self.messages = messages
@@ -92,6 +101,7 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         self.chatTemplateKwargs = chatTemplateKwargs
         self.reasoningBudgetTokens = reasoningBudgetTokens
         self.responseFormat = responseFormat
+        self.returnProgress = returnProgress
     }
 
     enum CodingKeys: String, CodingKey {
@@ -110,6 +120,7 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         case chatTemplateKwargs = "chat_template_kwargs"
         case reasoningBudgetTokens = "reasoning_budget_tokens"
         case responseFormat = "response_format"
+        case returnProgress = "return_progress"
     }
 }
 

@@ -311,7 +311,8 @@ package enum OpenAIRequestValidator {
             stripCLIPrompt: stripCLIPrompt,
             reasoningNotes: reasoningNotes,
             reasoning: reasoning,
-            jsonSchema: jsonSchema)
+            jsonSchema: jsonSchema,
+            returnProgress: request.returnProgress ?? false)
     }
 
     static func invalid(

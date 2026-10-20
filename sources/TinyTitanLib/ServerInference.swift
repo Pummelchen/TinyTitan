@@ -66,6 +66,10 @@ package enum ServerInferenceEvent: Equatable, Sendable {
     /// from "content is coming". The HTTP surfaces ignore it — their clients
     /// count prompt tokens from the usage block instead.
     case promptProcessed(tokens: Int, cachedTokens: Int)
+    /// Opt-in reading progress: `done` of `total` prompt tokens are prefilled.
+    /// Emitted only for a request that set `return_progress`, once per chunk,
+    /// before the first content event.
+    case promptProgress(done: Int, total: Int)
     case content(String)
     /// Thought text from inside the model's `<think>` block. Kept apart from
     /// `content` so each surface can put it where its clients look for
