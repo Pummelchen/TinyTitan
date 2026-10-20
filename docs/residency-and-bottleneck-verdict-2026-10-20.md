@@ -669,3 +669,24 @@ if the byte model holds — and it is the same change that takes 25–30 % off t
 prefill. This is the prize the tiered converter is for; it is a projection
 because decode's `wait_ms` is GPU command-buffer time, so part of the saving
 may be hidden by compute rather than realised one-for-one.
+
+## The decode byte model, measured rather than assumed (2026-10-20)
+
+The hybrid's decode projection rested on "decode is byte-bound", which came
+from older campaign runs on a different machine state. Re-measured on one
+build with one prompt (~950 chars in, 128 out):
+
+| install | decode tok/s | body ms | wait ms | expert MiB (request) |
+| --- | ---: | ---: | ---: | ---: |
+| 4-bit | **18.34** | 46.5 | 28.3 | 12,231 |
+| 8-bit | **9.27** | 98.2 | 47.9 | 29,950 |
+
+**2.45x the bytes for 2.11x the body time** — the near-linear scaling confirms
+the byte-bound model the hybrid projection depends on. (The byte ratio exceeds
+two because the 8-bit install also runs a smaller cache: 96 slots against 160,
+hit rate 0.80 against 0.99 on this prompt.)
+
+So the projection stands: a 4/2 hybrid at 0.70-0.75x expert bytes should land
+near 1.33-1.43x decode throughput, 13.8 → 18-20 tok/s on the long prompt, with
+the compute caveat already recorded. This is now the second measured pillar
+under the remaining project, after the split decision.
