@@ -300,3 +300,31 @@ inner-loop-ALU-bound in the way vectorising addresses. Its remaining cost is
 probably the dependent fma chain per thread; hiding that needs a different
 thread mapping (split K across threads with a reduction), which is a larger
 change than a load-width rewrite.
+
+## Paired validation of the two kept prefill changes (2026-10-20)
+
+Both changes had been measured across builds, where machine drift had already
+been caught once. Re-measured on one build with the env toggles, alternating
+arms, two rounds each.
+
+### Batched shared expert (`TINYTITAN_PREFILL_SHARED_GEMM`)
+
+| round | off: prefill / shared GPU | on: prefill / shared GPU |
+| ---: | ---: | ---: |
+| 1 | 38.49 s / 8.88 s | 33.39 s / 4.56 s |
+| 2 | 38.55 s / 8.83 s | 33.51 s / 4.57 s |
+
+**−13.3 % prefill, −48.6 % on the shared expert, 2/2 pairs.**
+
+### Eight-query attention (`TINYTITAN_PREFILL_ATTN_Q8`)
+
+| round | off: prefill / attention GPU | on: prefill / attention GPU |
+| ---: | ---: | ---: |
+| 1 | 43.44 s / 17.69 s | 33.46 s / 7.80 s |
+| 2 | 43.36 s / 17.68 s | 33.28 s / 7.81 s |
+
+**−23.2 % prefill, −55.9 % on the full-attention kernel, 2/2 pairs.**
+
+Together the two toggles account for ~15 s of the ~48.5 s both-off prefill:
+**~48.5 s → ~33.4 s (−31 %), paired rather than cross-build.** The earlier
+"50.31 → 34.61" figures are replaced by these.
