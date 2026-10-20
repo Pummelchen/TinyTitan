@@ -218,3 +218,28 @@ itself a scalar per-output loop (prefill.metal:564) running at ~364 GFLOPS on
 QKV, so applying it to the shared expert would give 6.9 s against the current
 9.12 s — about 2 s for a format repack and a new activation path. A tiled
 simdgroup GEMM is the only shape of fix worth the work there.
+
+### Shared expert: the layouts already match (implementation spec)
+
+Last round's "repack costs 2 s" bound is void. The shared expert's weights are
+int8 in row-major rows of `cols`, and its scales/biases are **bf16 per group of
+64** — byte-for-byte the layout `prefill_dequant_affine_qmm_f16_block` already
+expects (`kInt8GroupSize == kPrefillGroupSize == 64`, and `prefill_affine_bits()`
+defaults to 8 when the constant is unset). No repack and no new scale buffers
+are needed.
+
+What is missing is only plumbing:
+
+1. **An elementwise activation kernel**: `act[i] = prefill_hidden_activation(gate[i]) * up[i]`
+   over `T * 512` elements. `prefill.metal` already carries
+   `prefill_hidden_activation` (gelu_pytorch_tanh, with the silu branch), so the
+   kernel is ~10 lines and exact by construction.
+2. **Chunk-sized scratch**: the current path reuses one row's gate/up/act
+   scratch; the batched path needs `T x 512` half buffers for gate and up and
+   `T x 512` for act, allocated with the prefill scratch at the chunk size.
+3. **Wiring** in `PrefillSharedExpert.encodeBlock` behind
+   `TINYTITAN_PREFILL_SHARED_GEMM`, default off until measured.
+
+Shapes: gate/up `512 x 2048`, down `2048 x 512`, T up to the 4,096 chunk.
+At the qmm kernel's measured ~364 GFLOPS the three projections are 1.26 TFLOP
+→ **~3.5 s against 9.12 s**, a 5.6 s (14 %) prefill win before any blocking.
