@@ -541,3 +541,32 @@ and the cold-tier format should be built for the 40–50 % hot split.
 Caveat: the error metric is mean absolute error relative to mean |w|, and the
 weighting assumes uniform per-token sensitivity. It is a planning proxy; the
 bug-fix suite remains the shipping gate.
+
+## The cold tier needs no new Metal kernel (2026-10-20)
+
+Checked before planning the 2-bit implementation, and it changes the size of
+the project. Every kernel that would touch a cold expert is already
+parameterised by width:
+
+| kernel | constant | where set |
+| --- | --- | --- |
+| `affine_quant_gemv_simd` (decode projections) | 100 | `AffineQuantGEMV` |
+| `prefill_dequant_affine_qmm_f16_block` | 78 | `PrefillInt4QMM` |
+| routed MoE phase kernels | **5** (`FC_MOE_WEIGHT_BITS`) | `PrefillGroupedRoutedMoE`, `MoE` |
+| router | 79 | `PrefillRouter` (already 4/8/16) |
+
+The accessors (`affine_quant_value`, `prefill_affine_value`) shift and mask a
+generic `bits`, and row word counts are computed as `columns * bits / 32`, so
+2-bit fits the same arithmetic with no new shader.
+
+What stands between here and a 2-bit cold tier is therefore **nine Swift
+`[4, 8]` preconditions** — `SlotGEMV`, `AffineQuant` x2, `CPUExpertFFN`,
+`PrefillFinalRowHead`, `PrefillPrimitives` x2, `PrefillGroupedRoutedMoE`,
+`MPPPrefillInt4QMM` — plus the two manifest width sets, and then the real work:
+a **tiered repacker** that quantises the cold experts to 2-bit per the routing
+frequency table and writes per-expert widths instead of one stride.
+
+Estimate revision: this was planned as format + repacker + kernel; it is now
+repacker + gates + a 2-bit kernel test (the gates must not be opened without a
+test that compares a 2-bit GEMV against a CPU reference, because no shipped
+install exercises them).
