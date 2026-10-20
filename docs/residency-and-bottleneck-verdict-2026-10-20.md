@@ -399,3 +399,11 @@ compute-bound rather than traffic-bound: qmm blocking and vectorising (rounds
 10, 11), attention blocking (this round), routed tiles (unchanged by wider
 tiles). The scalar fma chain is the common cause, and fixing it needs tiled
 `simdgroup_matrix` kernels rather than more blocking.
+
+### Combined quality check (2026-10-20)
+
+The shipped default (q8 attention and batched shared expert both on) against
+both toggles off, four prompts, greedy: **391 / Die Katze schläft / the
+sum() one-liner / Canberra — 4/4 identical**. The two optimisations compose
+without changing short-answer behaviour, which is the check the individual
+four-prompt batteries could not make.
