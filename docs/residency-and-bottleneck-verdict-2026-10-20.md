@@ -436,3 +436,26 @@ flat, so this is the next real step. Sketch only; no code written.
 Same structure applies to the routed-tile grouped GEMM, which needs a pair
 sort per tile on top; the projection kernel is the cheaper first target and
 de-risks the pattern.
+
+### Tiled projection GEMM: built, correct, not faster (2026-10-20)
+
+The design sketch was implemented and measured rather than assumed. A 32x32
+tile with 128 threads, int8 weights dequantised to threadgroup float during
+staging, `simdgroup_matrix<float,8,8>` accumulation and a float epilogue:
+
+| variant | prefill s | GDN | shared | QKV |
+| --- | ---: | ---: | ---: | ---: |
+| scalar qmm (shipped) | 33.4-33.5 | 8.6 | 4.56 | 3.33 |
+| tiled, K block 32 | 33.97 | 8.75 | 4.62 | 3.40 |
+| tiled, K block 64 (half the barriers) | 34.04 | 8.79 | 4.63 | 3.46 |
+
+Output was numerically sound (same divergence point as the reference on the
+free-form prompt), so the kernel worked; it simply does not beat the scalar
+kernel. Reverted.
+
+**This closes the GEMM line of attack.** Blocking (round 10), vectorising
+(round 11) and now tiling all fail to move the projection kernels, whose
+~364 GFLOPS is evidently this GPU's practical rate for these matrix shapes.
+Any further prefill gain has to come from doing less arithmetic — 2-bit
+weights halving the bytes and the multiply count, or skipping work — not from
+a better inner loop.
