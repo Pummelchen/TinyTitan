@@ -107,11 +107,20 @@ extension PreadExpertStreamer {
             }
             return operation
         }
-        let offsets = try experts.map { expert -> UInt64 in
+        // A tiered layer's cold experts are shorter than the stride. The
+        // prefetch must read their real extent and expand them, or the slot
+        // holds 2-bit bytes that the 4-bit kernels then read as garbage.
+        let plan = try experts.map { expert -> (expert: Int, offset: UInt64, size: Int) in
             guard expert >= 0 && expert < layout.expertsPerLayer else {
                 throw ModelError.internalInconsistency(detail: "invalid prefetched expert")
             }
-            return layout.streamOffset + layout.expertOffset(layer: 0, expert: expert)
+            let size = layout.expertSizes.flatMap {
+                $0.indices.contains(expert) ? Int($0[expert]) : nil
+            } ?? Int(layout.expertStride)
+            return (
+                expert,
+                layout.streamOffset + layout.expertOffset(layer: 0, expert: expert),
+                size)
         }
         let safeDestinations = PrefetchDestinations(destinations)
         let operation = ExpertLoadOperation()
@@ -120,12 +129,25 @@ extension PreadExpertStreamer {
             operation.markInFlight()
             do {
                 if let boundedReader {
-                    try boundedReader.fetch(offsets: offsets, into: safeDestinations.values)
+                    try boundedReader.fetch(
+                        offsets: plan.map(\.offset),
+                        byteCounts: plan.map(\.size),
+                        into: safeDestinations.values)
                 } else {
-                    for (offset, destination) in zip(offsets, safeDestinations.values) {
+                    for (entry, destination) in zip(plan, safeDestinations.values) {
                         try readFull(
-                            into: destination, fileOffset: offset,
-                            count: Int(layout.expertStride))
+                            into: destination, fileOffset: entry.offset,
+                            count: entry.size)
+                    }
+                }
+                if let maps = layout.expertTensors {
+                    for (index, entry) in plan.enumerated() {
+                        guard maps.indices.contains(entry.expert),
+                            !maps[entry.expert].isEmpty
+                        else { continue }
+                        TwoBitExpand.expandExpertInPlace(
+                            slot: safeDestinations.values[index],
+                            tensors: maps[entry.expert])
                     }
                 }
                 operation.finish(.success(()))

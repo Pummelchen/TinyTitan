@@ -270,9 +270,17 @@ extension PreadExpertStreamer {
         // range" and the pread below would take an offset past the end of the
         // mapped file. With this and the open-time check, every sum in this type
         // that mixes a layout offset with a region is known not to wrap.
+        // A tiered layer's cold experts are shorter than the slot stride, so
+        // the bound is the expert's own payload, not the stride; using the
+        // stride rejects the last expert of a compact file.
+        let expert = plan.experts[index]
+        let payload =
+            layout.expertSizes.flatMap {
+                $0.indices.contains(expert) ? $0[expert] : nil
+            } ?? layout.expertStride
         let (regionEnd, regionOverflow) =
             regionOffset
-            .addingReportingOverflow(layout.expertStride)
+            .addingReportingOverflow(payload)
         guard !regionOverflow, regionEnd <= layout.streamSize else {
             throw StreamerError.offsetOutOfRange(regionOffset)
         }
