@@ -104,4 +104,55 @@ import Testing
             }
         }
     }
+
+    /// The in-place rewrite: a compact blob becomes the 4-bit slot layout
+    /// without a second buffer. Processed backwards, so the scale move lands
+    /// before the weight expansion overwrites the bytes it came from.
+    @Test func compactBlobRewritesIntoTheFourBitLayout() {
+        let slot = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 1)
+        defer { slot.deallocate() }
+        let bytes = slot.assumingMemoryBound(to: UInt8.self)
+        for i in 0..<16 { bytes[i] = 0 }
+        // weight: 4 bytes of 2-bit values; scale: 5.0, 10.0; bias: 1.0, -2.0
+        let weight: [UInt8] = [0x1B, 0xE4, 0x4E, 0xB1]
+        for (i, b) in weight.enumerated() { bytes[i] = b }
+        func putBF16(_ value: Float, at index: Int) {
+            let bits = value.bitPattern >> 16
+            bytes[index] = UInt8(truncatingIfNeeded: bits)
+            bytes[index + 1] = UInt8(truncatingIfNeeded: bits >> 8)
+        }
+        putBF16(5.0, at: 4); putBF16(10.0, at: 6)
+        putBF16(1.0, at: 8); putBF16(-2.0, at: 10)
+
+        let tensors = [
+            ExpertBlobTensor(sourceOffset: 0, sourceSize: 4,
+                             targetOffset: 0, targetSize: 8,
+                             expands: true, rescales: false),
+            ExpertBlobTensor(sourceOffset: 4, sourceSize: 4,
+                             targetOffset: 8, targetSize: 4,
+                             expands: false, rescales: true),
+            ExpertBlobTensor(sourceOffset: 8, sourceSize: 4,
+                             targetOffset: 12, targetSize: 4,
+                             expands: false, rescales: false),
+        ]
+        TwoBitExpand.expandExpertInPlace(slot: slot, tensors: tensors)
+
+        var expected = [UInt8](repeating: 0, count: 8)
+        weight.withUnsafeBufferPointer { src in
+            expected.withUnsafeMutableBufferPointer { dst in
+                TwoBitExpand.expand(
+                    source: src.baseAddress!, destination: dst.baseAddress!,
+                    byteCount: weight.count)
+            }
+        }
+        for i in 0..<8 { #expect(bytes[i] == expected[i]) }
+        func bf16(at index: Int) -> Float {
+            let bits = UInt32(bytes[index]) | (UInt32(bytes[index + 1]) << 8)
+            return Float(bitPattern: bits << 16)
+        }
+        #expect(abs(bf16(at: 8) - 1.0) < 1e-3)
+        #expect(abs(bf16(at: 10) - 2.0) < 1e-3)
+        #expect(abs(bf16(at: 12) - 1.0) < 1e-3)
+        #expect(abs(bf16(at: 14) + 2.0) < 1e-3)
+    }
 }
