@@ -175,6 +175,7 @@ package enum SSDAIV1StructuralValidator {
             var logicalIDs = Set<Int>()
             var physicalRanks = Set<Int>()
             var offsets = Set<UInt64>()
+            var expertRanges: [(start: UInt64, end: UInt64)] = []
             let hasExplicitLogicalIDs = layer.experts.map(\.expert)
             guard
                 hasExplicitLogicalIDs.allSatisfy({ $0 == nil })
@@ -197,14 +198,39 @@ package enum SSDAIV1StructuralValidator {
                         field: "layout.layers[\(layer.layer)].experts",
                         reason: "duplicate or invalid expert mapping")
                 }
-                let expectedOffset = try ssdaiCheckedMultiply(
-                    UInt64(physical), layout.expertStride,
-                    field: "expert.offset")
-                guard expert.offset == expectedOffset, expert.size == layout.expertStride else {
+                // A tiered install packs a layer into per-expert extents that
+                // need not fill `expertStride`: hot experts are written at the
+                // 4-bit width and cold ones at 2-bit, so an extent is at most
+                // the stride and the offsets are compact rather than
+                // `rank * stride`. What must still hold is a positive extent no
+                // larger than one slot, and non-overlapping ranges; the
+                // file-size check in `crossValidate` bounds them in the file.
+                guard expert.size > 0, expert.size <= layout.expertStride else {
                     throw TinyTitanFormatError.invalid(
                         field: "expert[\(logical)]",
-                        reason: "offset or size does not match physical rank")
+                        reason: "expert size \(expert.size) is not within 1...\(layout.expertStride)")
                 }
+                let (rangeEnd, overflowed) = expert.offset.addingReportingOverflow(expert.size)
+                guard !overflowed else {
+                    throw TinyTitanFormatError.invalid(
+                        field: "expert[\(logical)]",
+                        reason: "expert range overflows")
+                }
+                let layerCapacity = try ssdaiCheckedMultiply(
+                    UInt64(layout.expertsPerLayer), layout.expertStride,
+                    field: "layout.layerCapacity")
+                guard rangeEnd <= layerCapacity else {
+                    throw TinyTitanFormatError.invalid(
+                        field: "expert[\(logical)]",
+                        reason: "expert range ends past the layer's capacity")
+                }
+                for existing in expertRanges
+                where expert.offset < existing.end && existing.start < rangeEnd {
+                    throw TinyTitanFormatError.invalid(
+                        field: "expert[\(logical)]",
+                        reason: "expert range overlaps another expert")
+                }
+                expertRanges.append((expert.offset, rangeEnd))
                 var tensorRanges: [(start: UInt64, end: UInt64, name: String)] = []
                 for (name, tensor) in expert.tensors {
                     guard tensor.dtype == "U32" || tensor.dtype == "BF16",
@@ -285,7 +311,22 @@ package enum SSDAIV1StructuralValidator {
                     reason: "missing or wrong layer size")
             }
             if layout.compression == nil {
-                guard size == expectedLayerSize else {
+                // A uniform layer fills the stride product exactly. A tiered
+                // layer is compact: every expert's range must end inside the
+                // file, and the file cannot exceed the uniform product it was
+                // sized from.
+                var layerEnd: UInt64 = 0
+                for expert in layer.experts {
+                    let (end, overflowed) = expert.offset.addingReportingOverflow(
+                        expert.size)
+                    guard !overflowed else {
+                        throw TinyTitanFormatError.invalid(
+                            field: "manifest.files.\(path)",
+                            reason: "expert range overflows")
+                    }
+                    layerEnd = max(layerEnd, end)
+                }
+                guard size >= layerEnd, size <= expectedLayerSize else {
                     throw TinyTitanFormatError.invalid(
                         field: "manifest.files.\(path)",
                         reason: "missing or wrong layer size")

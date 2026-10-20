@@ -67,7 +67,7 @@ import Testing
         return dir
     }
 
-    @Test(.disabled("blocked by SSDAIPackedExpertsLayoutV1.swift:203, which enforces offset == rank * stride and size == stride"))
+    @Test
     func mixedWidthsSurviveDecoding() throws {
         let dir = try Self.writeMixedLayout()
         let layout = try PackedExpertsLayoutReader.load(directoryURL: dir)
@@ -84,7 +84,7 @@ import Testing
         #expect(layout.expertStride == 16384)
     }
 
-    @Test(.disabled("same uniform-stride check; flips on with the validator change"))
+    @Test
     func coldExpertOffsetIsAbsoluteWithinTheLayer() throws {
         let dir = try Self.writeMixedLayout()
         let layout = try PackedExpertsLayoutReader.load(directoryURL: dir)

@@ -161,17 +161,20 @@ import Testing
     @Test func laterExpertBlobOffsetRejectsEvenWithValidFirstExpert() throws {
         let dir = try Self.writeToyLayout()
         defer { try? FileManager.default.removeItem(at: dir) }
-        // Expert 1 is physically at rank 1, so its blob must start at
-        // 1 * 16384; a page inside that is a different expert's bytes.
+        // Expert 1 at 20,480 with a 16,384-byte blob ends at 36,864, past the
+        // layer's 2 * 16,384 capacity. Offsets are compact since the tiered
+        // format, but a range may not leave the layer.
         try Self.mutateExpertField(dir, layer: 0, expert: 1, field: "offset", to: 20_480)
-        try Self.rejects(dir, "offset or size does not match physical rank")
+        try Self.rejects(dir, "ends past the layer's capacity")
     }
 
     @Test func laterExpertBlobSizeRejectsEvenWithValidFirstExpert() throws {
         let dir = try Self.writeToyLayout()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try Self.mutateExpertField(dir, layer: 0, expert: 1, field: "size", to: 8192)
-        try Self.rejects(dir, "offset or size does not match physical rank")
+        // A blob larger than one slot is still refused; a smaller one is the
+        // tiered format's normal case (see MixedExpertWidthLayoutTests).
+        try Self.mutateExpertField(dir, layer: 0, expert: 1, field: "size", to: 32_768)
+        try Self.rejects(dir, "is not within 1...16384")
     }
 
     @Test func laterExpertTensorRangePastBlobRejects() throws {

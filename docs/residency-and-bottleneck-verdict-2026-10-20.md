@@ -717,3 +717,26 @@ the validator is relaxed rather than failing the suite meanwhile.
 So the cold tier is: two validator relaxations, the tiered converter, and the
 dual-width dispatch — still bounded, but the format work is real and is
 approximately one of the four steps, not zero.
+
+### Fixed: the validator now accepts compact per-expert extents (2026-10-20)
+
+The two checks recorded as blockers are relaxed:
+
+- `SSDAIPackedExpertsLayoutV1` no longer requires `offset == rank * stride` and
+  `size == stride`. It now requires `0 < size <= stride`, non-overlapping
+  ranges, and that every range ends within the layer's nominal capacity
+  (`expertsPerLayer * stride`). That admits a compact two-region layer while
+  still refusing an expert that overruns the file's declared extent.
+- `crossValidate` accepts a layer file whose size is between the highest
+  expert end and the uniform product, instead of requiring exact equality.
+
+`MixedExpertWidthLayoutTests` is enabled and passes: a layer with a 16 KiB
+4-bit expert and an 8 KiB 2-bit expert decodes with both sizes and widths
+intact, alongside the unchanged uniform layouts. Two existing contract tests
+were updated rather than weakened — the out-of-layer offset is still refused,
+and an oversized blob is still refused; what changed is that a *smaller* blob
+is now the legal tiered case.
+
+Full suite green. The format step of the cold tier is done; the remaining
+work is the tiered converter, the streamer's per-expert size bookkeeping, and
+the dual-width dispatch.
