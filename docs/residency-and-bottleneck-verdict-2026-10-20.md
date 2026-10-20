@@ -652,3 +652,20 @@ Measured on the recorded Ornith trace:
 The JSON carries `layers[L].hot` (sorted expert ids), the counts, the
 per-layer activation share and the header's overall byte ratio — exactly what
 a tiered converter needs to decide which experts to quantise to 2-bit.
+
+## What the hybrid would do for decode (projection, not measurement)
+
+Decode is byte-bound: the 8-bit install moves twice the bytes and runs at
+9.85 tok/s against 4-bit's 16.2 in the campaign. The same byte ratio the hot
+profile reports therefore projects onto decode:
+
+| split | expert bytes vs 4-bit | MB/token (from 196) | tok/s if byte-bound |
+| --- | ---: | ---: | ---: |
+| 40 % hot | 0.700x | 137 | 19.7 |
+| 50 % hot | 0.750x | 147 | 18.4 |
+
+Against the measured 13.8 tok/s on the long prompt that is **+33 % to +43 %**
+if the byte model holds — and it is the same change that takes 25–30 % off the
+prefill. This is the prize the tiered converter is for; it is a projection
+because decode's `wait_ms` is GPU command-buffer time, so part of the saving
+may be hidden by compute rather than realised one-for-one.
