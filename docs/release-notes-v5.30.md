@@ -53,6 +53,18 @@ measured **51.65 s → 49.95 s** over four order-rotated rounds (4/4 faster).
 - `benchmark/tinytitan_3bit_probe.py` no longer crashes on the first 1-D tensor
   it samples; its added-bits column is produced for the first time.
 
+### Checks not run
+
+Golden baselines are re-run only against installs already present under
+`models/`; the release runbook never fetches a model. On the cut host the three
+installed targets were checked, and all three produced output identical to
+their stored baseline: `ornith-4`, `ornith-8` and `qwen38-4`.
+
+Every other target has no install on this machine, so it was **not checked**:
+`qwen36-4`, `qwen36-8`, `qwen38-8`, `agentworld-4`, `agentworld-8`,
+`katcoder-4`, `katcoder-8`, `qwen35-2b-4`, `qwen35-2b-8`, `qwen35-4b-4`,
+`qwen35-4b-8`, `qwen35-9b-4` and `qwen35-9b-8`.
+
 ### Performance
 
 Measured on the 24 GiB M3 with paired arms on the commits listed above, not
