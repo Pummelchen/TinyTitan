@@ -328,3 +328,49 @@ arms, two rounds each.
 Together the two toggles account for ~15 s of the ~48.5 s both-off prefill:
 **~48.5 s → ~33.4 s (−31 %), paired rather than cross-build.** The earlier
 "50.31 → 34.61" figures are replaced by these.
+
+## Session outcome and backlog (2026-10-20)
+
+### Shipped, with paired evidence
+
+| change | evidence | commit |
+| --- | --- | --- |
+| prefill depth 2 | 51.65 → 49.95 s, 4/4 pairs | `0423b71` |
+| q8 prefill attention (+ hoisted dequant) | attention GPU 17.7 → 7.8 s, prefill −23.2 %, 2/2 pairs; ring-gated | `6eaf9e7`, `cd199da`, `b35df2a` |
+| batched shared expert | 8.85 → 4.57 s, prefill −13.3 %, 2/2 pairs | `5092627` |
+| prefill phase trace (attention vs router) | instrument | `25150bc` |
+
+Both-off prefill is ~48.5 s; both-on is ~33.4 s, measured paired. The earlier
+"50.31 → 34.61" cross-build figures are superseded.
+
+### Rejected, each with a control
+
+4-bit residency (2.78 vs 12.86 tok/s), 192 slots, depth 3/4/6, 16-expert
+tiles, token-tiled router, 8 raw reader threads, eight-token qmm blocking,
+vectorised int8 qmm. The last was flat against its own control (33.43/33.50
+vs 33.47) and is the reason a control is now mandatory before any claim.
+
+### Findings that outlive the changes
+
+- `io_hidden_pct` is 99.9 %: the SSD is hidden; `wait_ms` is GPU command-buffer
+  time, and prefill is GPU-bound at ~400 GFLOPS on every GEMM-shaped kernel.
+- The four scalar kernels (qmm, shared expert, routed tiles, router) all ran
+  at 2-8 GFLOPS per token before batching; the attention kernel was the same
+  shape of bug and gave the largest single win.
+- Function constants are load-bearing: 77 (silu) and 78 (affine bits) both
+  default to the wrong value for this model, and 76 (ring) must be compiled
+  per pipeline. A batched path that forgets any of them is silently wrong.
+
+### Backlog, largest first
+
+1. **Routed-tile grouped GEMM**: 11.7 s GPU at ~430 GFLOPS plus ~10 s host
+   fetch. Needs a tiled `simdgroup_matrix` MoE kernel, not a knob.
+2. **GDN**: 8.5 s over 30 layers; projections are qmm (~364 GFLOPS) and the
+   recurrence is serial. A chunked delta-rule scan is an algorithm project.
+3. **qmm thread mapping**: split K across threads with a reduction; rounds 10
+   and 11 bounded blocking and load width as flat, leaving the dependent fma
+   chain as the suspect.
+4. **2-bit routed experts**: halves per-token DRAM bytes; needs format width 2,
+   a tiered repacker and an int2 kernel (the original plan's P1).
+5. **Route-ahead**: deferred while I/O is hidden; only pays at 8-bit or a cold
+   cache.
