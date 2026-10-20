@@ -256,10 +256,21 @@ extension PreadExpertStreamer {
     }
 
     func readPlanMiss(_ plan: ExpertCachePlan, index: Int) throws {
+        let expert = plan.experts[index]
+        let payload =
+            layout.expertSizes.flatMap {
+                $0.indices.contains(expert) ? $0[expert] : nil
+            } ?? layout.expertStride
+        let slot = plan.assignedSlots[index]
         try readFull(
-            into: slotPointers[plan.assignedSlots[index]],
+            into: slotPointers[slot],
             fileOffset: try fileOffset(plan: plan, index: index),
-            count: Int(layout.expertStride))
+            count: Int(payload))
+        if let maps = layout.expertTensors,
+            maps.indices.contains(expert), !maps[expert].isEmpty {
+            TwoBitExpand.expandExpertInPlace(
+                slot: slotPointers[slot], tensors: maps[expert])
+        }
     }
 
     func fileOffset(plan: ExpertCachePlan, index: Int) throws -> UInt64 {
