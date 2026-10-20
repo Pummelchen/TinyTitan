@@ -326,6 +326,8 @@ extension Model {
             expertStride: packed.expertStride,
             expertOffsets: compressed == nil && rans == nil
                 ? packed.layers[layer].experts.map(\.offset) : nil,
+            expertSizes: compressed == nil && rans == nil
+                ? packed.layers[layer].experts.map(\.size) : nil,
             phase1Bytes: phase1Bytes,
             compressedFrames: compressed?.entries.map(\.frames),
             compressedBlockBytes: compressed?.blockBytes ?? 0,

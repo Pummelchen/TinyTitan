@@ -740,3 +740,20 @@ is now the legal tiered case.
 Full suite green. The format step of the cold tier is done; the remaining
 work is the tiered converter, the streamer's per-expert size bookkeeping, and
 the dual-width dispatch.
+
+### Streamer reads per-expert sizes (2026-10-20)
+
+`StreamLayout` now carries `expertSizes` from `layout.json` (offsets were
+already per-expert), and the raw pread path uses the reader's
+`fetch(offsets:byteCounts:into:)` when the sizes are not all the stride:
+
+    fetch_ranges(offsets, sizes)   // tiered layer
+    fetch(offsets)                 // every expert fills the stride
+
+The phase-1 split is skipped for a tiered layer, because its split point is
+per-width and the manifest records one per layer. Uniform installs take the
+old path exactly, which the decode check confirms (18.74 tok/s against 18.34
+before the change, same prompt and build).
+
+Remaining for the streamer step: record each cached expert's `bits` so the MoE
+dispatch can pick a pipeline. The read half is done.

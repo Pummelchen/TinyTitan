@@ -164,6 +164,22 @@ extension PreadExpertStreamer {
         // by splitMissesResidentWithIdenticalBytes). The Metal staging path
         // keeps its whole-region contract -- this split exists for the bounded
         // pread backend, which is the default one.
+        // A tiered layer stores cold experts shorter than the slot capacity, so
+        // the split-read and whole-stride paths below would read past an
+        // expert's payload. When sizes vary, read exactly each expert's bytes
+        // through the range fetch and skip the phase-1 split (its split point
+        // is per-width, not per-layer).
+        let sizesAreUniform =
+            layout.expertSizes?.allSatisfy { $0 == layout.expertStride } ?? true
+        if !sizesAreUniform, let sizes = layout.expertSizes {
+            let counts = plan.misses.map { miss -> Int in
+                let expert = plan.experts[miss]
+                return sizes.indices.contains(expert)
+                    ? Int(sizes[expert]) : Int(layout.expertStride)
+            }
+            try reader.fetch(offsets: offsets, byteCounts: counts, into: destinations)
+            return
+        }
         if let phase1 = layout.phase1Bytes {
             let frontBytes = Int(phase1)
             try reader.fetch(
