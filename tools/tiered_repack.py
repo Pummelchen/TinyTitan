@@ -55,7 +55,13 @@ def tier_layer(
         expert_id = entry["expert"]
         tensors = sorted(entry["tensors"].items(), key=lambda kv: kv[1]["offset"])
         blob = source[entry["offset"]:entry["offset"] + entry["size"]]
-        is_hot = expert_id in hot
+        # The runtime derives one ExpertOffsets struct per layer from expert 0
+        # (ModelExpertIO.routedExpertOffsets). After expansion every slot holds
+        # the 4-bit layout, but that struct is read from expert 0's entry, so
+        # expert 0 must stay at the wide layout or the kernel is handed 2-bit
+        # offsets. One extra 4-bit expert is a negligible cost for removing a
+        # whole class of wrong-offset bug.
+        is_hot = expert_id in hot or expert_id == 0
         new_tensors: dict[str, dict] = {}
         new_blob = bytearray()
         for name, tensor in tensors:

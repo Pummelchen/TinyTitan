@@ -898,3 +898,25 @@ would hand the 4-bit kernel half-valid bytes.
 Remaining: pass the blob's per-tensor offsets to the streamer and run
 `TwoBitExpand` (plus the scale division) after a short read; then run the
 converter for real and measure.
+
+### The last landmine: the kernel's offsets come from expert 0 (2026-10-20)
+
+`ModelExpertIO.routedExpertOffsets(layer:)` builds the single `ExpertOffsets`
+struct a layer's kernels use from **expert 0's** sub-tensor offsets. After
+expansion every slot holds the 4-bit layout, but if expert 0 were cold the
+struct would describe the 2-bit layout and every expert read in that layer
+would land on the wrong bytes.
+
+The converter now pins expert 0 hot (`is_hot = expert_id in hot or
+expert_id == 0`). One extra wide expert per layer is a negligible cost and
+removes the whole class of wrong-offset bug. The alternative — deriving the
+struct from the width-4 map rather than from whichever expert sits first — is
+cleaner and should replace this when the expander lands.
+
+With that, the expansion call site has no unknowns left:
+
+1. read the short expert (done);
+2. move and expand its tensors backwards into the 4-bit slot positions, using
+   the target map from a hot expert, and divide each group scale by five;
+3. the kernels run unchanged, because their `ExpertOffsets` describe exactly
+   that 4-bit slot.
