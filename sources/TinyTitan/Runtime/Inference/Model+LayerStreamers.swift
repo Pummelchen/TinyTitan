@@ -150,7 +150,7 @@ extension Model {
         } else {
             streamSize = try Self.streamSize(
                 forLayer: L, layout: packedExpertsLayout,
-                compressed: compressed)
+                compressed: compressed, url: url)
         }
         let layout = Self.streamLayout(
             url: url, packed: packedExpertsLayout, layer: L,
@@ -218,7 +218,8 @@ extension Model {
     static func streamSize(
         forLayer layer: Int,
         layout: PackedExpertsLayout,
-        compressed: ExpertBlobIndex.Layout?
+        compressed: ExpertBlobIndex.Layout?,
+        url: URL
     ) throws -> UInt64 {
         if let compressed {
             let end = ExpertBlobIndex.maximumEnd(compressed.entries)
@@ -236,7 +237,36 @@ extension Model {
                     + "\(layout.expertsPerLayer) experts of "
                     + "\(layout.expertStride) bytes, which overflows the stream size")
         }
-        return rawSize
+        // A tiered layer is compact: its cold experts are shorter than the
+        // stride, so the file is smaller than the uniform product. Bound it by
+        // the highest expert end and by the product, then stream its real size.
+        guard layout.layers.indices.contains(layer) else {
+            throw ModelError.internalInconsistency(
+                detail: "packed expert layer \(layer) has no layout entry")
+        }
+        var layerEnd: UInt64 = 0
+        for expert in layout.layers[layer].experts {
+            let (end, endOverflow) = expert.offset.addingReportingOverflow(expert.size)
+            guard !endOverflow else {
+                throw ModelError.internalInconsistency(
+                    detail: "packed expert layer \(layer) expert ranges overflow")
+            }
+            layerEnd = max(layerEnd, end)
+        }
+        guard layerEnd <= rawSize else {
+            throw ModelError.internalInconsistency(
+                detail:
+                    "packed expert layer \(layer) expert ranges exceed the stride product")
+        }
+        let fileSize =
+            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size]
+            as? UInt64 ?? rawSize
+        guard fileSize >= layerEnd, fileSize <= rawSize else {
+            throw ModelError.internalInconsistency(
+                detail: "packed expert layer \(layer) file size \(fileSize) is outside "
+                    + "\(layerEnd)...\(rawSize)")
+        }
+        return fileSize
     }
 
     /// Test hook: how many layer files have been opened so far.
@@ -312,6 +342,29 @@ extension Model {
     /// sidecar written for another layer or the other split is refused at load
     /// rather than decoded into slots.
     /// The byte layout the streamer opens one layer with.
+    /// Per-expert expansion maps for a tiered layer. The target offsets come
+    /// from expert 0, which the converter keeps at the wide layout; a cold
+    /// expert lists its own compact source offsets against them.
+    static func expertTensorMaps(
+        forLayer layer: Int, layout: PackedExpertsLayout
+    ) -> [[ExpertBlobTensor]] {
+        let experts = layout.layers[layer].experts
+        guard let target = experts.first?.subTensors else { return [] }
+        return experts.map { expert in
+            guard expert.subTensors["gate"]?.bits == 2 else { return [] }
+            return expert.subTensors.compactMap { name, tensor -> ExpertBlobTensor? in
+                guard let wide = target[name] else { return nil }
+                return ExpertBlobTensor(
+                    sourceOffset: Int(tensor.offset),
+                    sourceSize: Int(tensor.size),
+                    targetOffset: Int(wide.offset),
+                    targetSize: Int(wide.size),
+                    expands: name == "gate" || name == "up" || name == "down",
+                    rescales: name.hasSuffix("_scales"))
+            }
+        }
+    }
+
     static func streamLayout(
         url: URL, packed: PackedExpertsLayout, layer: Int,
         streamSize: UInt64, phase1Bytes: UInt64?,
@@ -328,6 +381,8 @@ extension Model {
                 ? packed.layers[layer].experts.map(\.offset) : nil,
             expertSizes: compressed == nil && rans == nil
                 ? packed.layers[layer].experts.map(\.size) : nil,
+            expertTensors: compressed == nil && rans == nil
+                ? Self.expertTensorMaps(forLayer: layer, layout: packed) : nil,
             phase1Bytes: phase1Bytes,
             compressedFrames: compressed?.entries.map(\.frames),
             compressedBlockBytes: compressed?.blockBytes ?? 0,

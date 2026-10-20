@@ -178,6 +178,16 @@ extension PreadExpertStreamer {
                     ? Int(sizes[expert]) : Int(layout.expertStride)
             }
             try reader.fetch(offsets: offsets, byteCounts: counts, into: destinations)
+            if let maps = layout.expertTensors {
+                for (index, miss) in plan.misses.enumerated() {
+                    let expert = plan.experts[miss]
+                    guard maps.indices.contains(expert), !maps[expert].isEmpty else {
+                        continue
+                    }
+                    TwoBitExpand.expandExpertInPlace(
+                        slot: destinations[index], tensors: maps[expert])
+                }
+            }
             return
         }
         if let phase1 = layout.phase1Bytes {

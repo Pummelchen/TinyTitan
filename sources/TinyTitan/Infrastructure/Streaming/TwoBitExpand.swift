@@ -41,7 +41,7 @@ enum TwoBitExpand {
 /// A cold expert is written compact: its weight tensors are 2-bit and half the
 /// size of the 4-bit slot they expand into. The scales and biases are already
 /// the right size; only the scales change value (`/ 5`).
-struct ExpertBlobTensor {
+package struct ExpertBlobTensor {
     let sourceOffset: Int
     let sourceSize: Int
     let targetOffset: Int

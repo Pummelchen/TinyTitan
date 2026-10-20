@@ -180,7 +180,9 @@ extension ModelLoaderTests {
             tensors["gate"]?["bits"] = 8
             expert["tensors"] = tensors
         }
-        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+        // A lying width is caught by the per-tensor extent check: the bytes no
+        // longer equal shape * width / 8 for the width it declares.
+        try Self.rejectsLaterExpert(dir, "does not match the required schema")
     }
 
     @Test func laterExpertShapeLieFailsAtLoad() throws {
@@ -193,7 +195,7 @@ extension ModelLoaderTests {
             tensors["up"]?["shape"] = [64, 128]
             expert["tensors"] = tensors
         }
-        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+        try Self.rejectsLaterExpert(dir, "does not match the required schema")
     }
 
     @Test func laterExpertMissingRoleFailsAtLoad() throws {
@@ -204,7 +206,9 @@ extension ModelLoaderTests {
             tensors.removeValue(forKey: "down_biases")
             expert["tensors"] = tensors
         }
-        try Self.rejectsLaterExpert(dir, "metadata differs across experts")
+        // The refusal names the expert now that experts are validated one by
+        // one rather than compared with expert 0.
+        try Self.rejectsLaterExpert(dir, "is missing role down_biases")
     }
 
     @Test func validToyInstallStillLoadsAfterTheExpertMutationHelper() throws {

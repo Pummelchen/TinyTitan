@@ -268,7 +268,7 @@ extension Model {
             ("down", config.hiddenSize, config.moeIntermediateSize),
         ]
         for layer in layout.layers {
-            guard let reference = layer.experts.first else {
+            guard !layer.experts.isEmpty else {
                 throw ModelError.indexCorrupt(
                     detail: "routed layer \(layer.layer) has no experts")
             }
@@ -294,32 +294,39 @@ extension Model {
                         nil, sizes.aux, UInt64(MemoryLayout<UInt16>.alignment)
                     ),
                 ]
-                for (name, dtype, shape, bits, size, alignment) in expectedRoles {
-                    guard let expected = reference.subTensors[name] else {
-                        throw ModelError.indexCorrupt(
-                            detail: "routed layer \(layer.layer) is missing role \(name)")
-                    }
-                    let (end, overflow) = expected.offset.addingReportingOverflow(expected.size)
-                    guard expected.dtype == dtype,
-                        expected.shape == shape,
-                        expected.bits == bits,
-                        expected.size == size,
-                        expected.offset % alignment == 0,
-                        !overflow,
-                        end <= reference.size,
-                        end <= UInt64(UInt32.max) + 1
-                    else {
-                        throw ModelError.indexCorrupt(
-                            detail:
-                                "routed layer \(layer.layer) role \(name) does not match the required schema"
-                        )
-                    }
-                    for expert in layer.experts.dropFirst()
-                    where expert.subTensors[name] != expected {
-                        throw ModelError.indexCorrupt(
-                            detail:
-                                "routed layer \(layer.layer) role \(name) metadata differs across experts"
-                        )
+                for (name, dtype, shape, bits, _, alignment) in expectedRoles {
+                    for expert in layer.experts {
+                        guard let tensor = expert.subTensors[name] else {
+                            throw ModelError.indexCorrupt(
+                                detail:
+                                    "routed layer \(layer.layer) expert \(expert.expert) is missing role \(name)")
+                        }
+                        // A tiered layer keeps hot experts at the wide width and
+                        // cold ones at 2-bit, so the byte extent follows the
+                        // tensor's own declared width rather than expert 0's.
+                        // What still has to hold: the dtype and shape agree with
+                        // the architecture, the offset is aligned, the extent is
+                        // exactly shape * width, and it fits inside the blob.
+                        let width = tensor.bits ?? bits ?? 0
+                        let expectedSize: UInt64 =
+                            dtype == "U32"
+                            ? UInt64(shape[0]) * UInt64(shape[1]) * UInt64(width) / 8
+                            : UInt64(shape[0]) * UInt64(shape[1]) * 2
+                        let (end, overflow) = tensor.offset.addingReportingOverflow(
+                            tensor.size)
+                        guard tensor.dtype == dtype,
+                            tensor.shape == shape,
+                            tensor.offset % alignment == 0,
+                            tensor.size == expectedSize,
+                            !overflow,
+                            end <= expert.size,
+                            end <= UInt64(UInt32.max) + 1
+                        else {
+                            throw ModelError.indexCorrupt(
+                                detail:
+                                    "routed layer \(layer.layer) expert \(expert.expert) role \(name) does not match the required schema (width \(width), size \(tensor.size), expected \(expectedSize))"
+                            )
+                        }
                     }
                 }
             }

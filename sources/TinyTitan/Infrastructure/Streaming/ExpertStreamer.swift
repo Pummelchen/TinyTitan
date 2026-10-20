@@ -42,6 +42,11 @@ public struct StreamLayout: Sendable {
     /// slot capacity; a tiered layer's cold experts are shorter than it, so a
     /// read must ask for `size`. `nil` means every expert fills the stride.
     package let expertSizes: [UInt64]?
+    /// Per-expert tensor maps for a tiered layer: present only for a cold
+    /// expert (weights stored at 2-bit), empty for a hot one. The streamer
+    /// runs `TwoBitExpand.expandExpertInPlace` after reading such an expert, so
+    /// the slot ends up in the 4-bit layout the kernels expect.
+    package let expertTensors: [[ExpertBlobTensor]]?
     /// Bytes of the expert blob that decode's phase 1 (gate+up) consumes,
     /// when the manifest records where the `down` tensor starts. `nil` means
     /// whole-region reads; a split needs a boundary strictly inside the
@@ -75,6 +80,7 @@ public struct StreamLayout: Sendable {
         expertStride: UInt64,
         expertOffsets: [UInt64]? = nil,
         expertSizes: [UInt64]? = nil,
+        expertTensors: [[ExpertBlobTensor]]? = nil,
         phase1Bytes: UInt64? = nil,
         compressedFrames: [[ExpertBlobIndex.Blob]]? = nil,
         compressedBlockBytes: UInt64 = 0,
@@ -88,6 +94,7 @@ public struct StreamLayout: Sendable {
         self.expertStride = expertStride
         self.expertOffsets = expertOffsets
         self.expertSizes = expertSizes
+        self.expertTensors = expertTensors
         self.phase1Bytes = phase1Bytes
         self.compressedFrames = compressedFrames
         self.compressedBlockBytes = compressedBlockBytes
