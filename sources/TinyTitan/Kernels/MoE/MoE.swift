@@ -131,7 +131,7 @@ final class MoE {
             "top-\(topKExperts) exceeds the routed argument buffer's "
                 + "expert slots (16)")
         self.maxStreamedExperts = topKExperts
-        precondition([4, 8].contains(routedWeightBits))
+        precondition([2, 4, 8].contains(routedWeightBits))
         // 16 means the router is unquantized bf16; the shader branches on it.
         precondition([4, 8, 16].contains(routerWeightBits))
         let activationConstants: [MetalFunctionConstant] =

@@ -15,7 +15,7 @@ import TinyTitanValidationSupport
         let offsets: MoEExpertOffsets
     }
 
-    @Test(arguments: [8])
+    @Test(arguments: [2, 4, 8])
     func affineRoutedPipelineSupportsQwenBits(bits: Int) throws {
         let blobs = (0..<Self.topK).map { _ in Self.makeConstantBlob(bits: bits) }
         let context = try MetalContext()
