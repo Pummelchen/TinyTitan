@@ -23,6 +23,10 @@ extension ServerModelSession {
         // wait is a safety net if the two ever disagree.
         let slot = try await acquireSlot()
         defer { releaseSlot(slot) }
+        // The routing history this request produced follows the install to the
+        // next start (Project Maya's expert profile). Best effort, after the
+        // response is complete; `TINYTITAN_EXPERT_PROFILE=0` disables it.
+        defer { model.saveExpertUsageProfile() }
         // §5bk: an opt-in second command queue that hands the device a
         // micro-dispatch through the gaps between the engine's own launches.
         // Inert unless the operator names TINYTITAN_GPU_KEEPWARM_US, and a value

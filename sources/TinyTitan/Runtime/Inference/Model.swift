@@ -209,11 +209,17 @@ public struct Model {
     let directoryURL: URL
     let modelDirectory: SSDAIModelDirectory
     let sharedTargetWeights: SharedTargetWeights?
+    /// The routing history this install left behind, if any. Seeds each
+    /// layer's LFU score at open and is updated after every request.
+    let expertUsageProfile: ExpertUsageProfile?
+    let expertProfileURL: URL?
 
     /// Lazy state. Held inside a reference box so `Model` can stay a struct
     /// while still letting accessors mutate layer state via a serial queue.
     let streamersBox: StreamersBox
     let streamersQueue: DispatchQueue
+    /// Serialises profile writes so two requests cannot interleave a rewrite.
+    let profileWriteQueue: DispatchQueue
     /// One completion timeline per slot, in the mode this model was loaded with
     /// (see `ExpertIOEventCoordinator.makeTimelines`).
     let expertIOTimeline: RuntimeExpertIOTimeline
@@ -277,6 +283,15 @@ public struct Model {
         self.manifest = manifest
         self.directoryURL = directoryURL
         self.modelDirectory = modelDirectory
+        self.profileWriteQueue = DispatchQueue(label: "TinyTitan.expert-profile")
+        let profileURL = Self.expertProfileURL(directoryURL: directoryURL)
+        self.expertProfileURL = profileURL
+        self.expertUsageProfile = profileURL.flatMap {
+            ExpertUsageProfile.load(
+                url: $0,
+                layers: packedExpertsLayout.numLayers,
+                expertsPerLayer: packedExpertsLayout.expertsPerLayer)
+        }
         self.promotedBF16 = promotedBF16
         self.sharedTargetWeights = sharedTargetWeights
         self.streamersBox = StreamersBox(numLayers: packedExpertsLayout.numLayers)

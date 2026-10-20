@@ -101,10 +101,41 @@ extension PreadExpertStreamer {
     /// expert decode has used once or twice and decode cannot evict them.
     /// With the counts zeroed, ties fall to LRU order and decode's own
     /// working set takes the slots within a few tokens.
+    ///
+    /// A layer opened with a persisted profile restores that profile's prior
+    /// instead of zero, so the history is not erased by the first prompt.
     public func resetExpertUseCounts() {
         cacheLock.lock()
         defer { cacheLock.unlock() }
-        for i in expertUseCount.indices { expertUseCount[i] = 0 }
+        if let seededExpertUseCounts {
+            expertUseCount = seededExpertUseCounts
+        } else {
+            for i in expertUseCount.indices { expertUseCount[i] = 0 }
+        }
+    }
+
+    /// The current LFU score, for the profile a request leaves behind.
+    public func expertUseCountsSnapshot() -> [Int] {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return expertUseCount
+    }
+
+    /// Fold one request's counts into the prior the next reset will restore.
+    ///
+    /// This is what makes the profile useful inside a long-lived server, not
+    /// only across restarts: after a request the streamer adopts its own
+    /// scores as the next prior, so the next prompt's decode starts from what
+    /// the previous one learned instead of from the process-start snapshot.
+    /// Values are capped at the profile's seed cap so a single request cannot
+    /// freeze the ordering for the life of the process.
+    public func adoptExpertUseCounts(_ counts: [Int]) {
+        guard counts.count == expertUseCount.count else { return }
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        seededExpertUseCounts = counts.map {
+            min(max(0, $0), ExpertUsageProfile.seedCap)
+        }
     }
 
     /// The default eviction-price cap, from `TINYTITAN_EXPERT_USE_CAP`.

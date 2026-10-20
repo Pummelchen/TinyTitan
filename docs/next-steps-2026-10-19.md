@@ -24,9 +24,13 @@ answer is a 42% loss, not a 3-5% win (see E).
   requires `0 < cached < prompt length`, because the last prompt token produces
   the first logits. Fix: persist the boundary logits (~0.5 MB) in the snapshot and
   allow a zero-token resume. Prize: ~33 s per duplicate prompt.
-- **Cross-request expert warm start** — pre-load a predicted hot set when a request
-  arrives, overlapping prefill. The pin file alone measured null, so this needs the
-  *timing* argument rather than the placement one.
+- **Cross-request expert warm start** — **implemented 2026-10-20** as a
+  persisted routing profile (`docs/expert-profile-warm-start-2026-10-20.md`):
+  the decode counts are saved beside the install, seed the cache's LFU score at
+  the next start, and are restored at the prefill-to-decode handover. Measured
+  +40.6 % decode on a repeated 2.2K prompt, +29 % on a different prompt in the
+  same domain, +17 % across domains, with 63-98 % fewer expert reloads. The pin
+  file alone measured null; this is the timing argument it lacked.
 - **Co-activation disk layout** — predicted low value: the SSD runs at 1.4-2 of
   3.6 GB/s, so the wait is not bandwidth-bound. Only worth it with evidence that
   it is.

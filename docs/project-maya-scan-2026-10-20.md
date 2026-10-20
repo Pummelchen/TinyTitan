@@ -134,6 +134,14 @@ cheap experiment is a per-install profile file loaded into the existing LFU
 scores at runner start, plus a bounded read-ahead of the top-N experts during
 load; measure TTFT and decode on a cold process for a repeated agent prompt.
 
+**Implemented 2026-10-20** (the first piece of this scan to ship): the counts
+are saved beside the install, seed the LFU score at open, and are restored at
+the prefill-to-decode handover; a long-lived server adopts the counts as its
+next prior. Measured +40.6 % decode on a repeated 2.2K prompt, +29 % on a
+different prompt in the same domain, +17 % across domains, with 63–98 % fewer
+expert reloads. Details and the paired tables:
+`docs/expert-profile-warm-start-2026-10-20.md`.
+
 ## E. Calibration as a product feature
 
 Maya's `--calibrate` spends 10–15 minutes measuring the real machine — CPU vs

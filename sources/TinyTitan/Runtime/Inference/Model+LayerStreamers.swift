@@ -193,6 +193,7 @@ extension Model {
             device: device,
             slotCount: effectiveSlotCount,
             cachePolicy: expertCachePolicy,
+            seedUseCounts: expertUsageProfile?.seedCounts(layer: L),
             eventCoordinator: expertIOTimelines?[L],
             metalStagingPool: metalStagingPool,
             metalIOService: metalIOService)

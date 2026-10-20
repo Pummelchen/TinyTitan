@@ -165,6 +165,10 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     var slotGeneration: [UInt64]
     var slotPinCount: [Int]
     var expertUseCount: [Int]
+    /// The persisted prior this layer was opened with, restored at the
+    /// prefill-to-decode reset so history outlives one request. `nil` keeps the
+    /// original behaviour: every reset zeroes the score.
+    var seededExpertUseCounts: [Int]?
     var expertLoadCount: [Int]
     var useClock = 0
     var statisticsPlans: UInt64 = 0
@@ -188,6 +192,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         slotCount: Int,
         cachePolicy: ExpertCachePolicy = .lfu,
         expertUseCountCap: Int? = PreadExpertStreamer.expertUseCountCapDefault,
+        seedUseCounts: [Int]? = nil,
         eventCoordinator: ExpertIOEventCoordinator? = nil,
         metalStagingPool: MetalExpertStagingPool? = nil,
         metalIOService: MetalExpertIOService? = nil
@@ -195,6 +200,8 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         precondition(slotCount > 0, "slotCount must be positive")
         self.layout = layout
         self.slotCount = slotCount
+        self.seededExpertUseCounts =
+            seedUseCounts?.count == layout.expertsPerLayer ? seedUseCounts : nil
         self.compressedFrames = layout.compressedFrames
         self.compressedBlockBytes = layout.compressedBlockBytes
         if let rans = layout.rans {
@@ -404,7 +411,9 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         self.slotState = [SlotState](repeating: .empty, count: slotCount)
         self.slotGeneration = [UInt64](repeating: 0, count: slotCount)
         self.slotPinCount = [Int](repeating: 0, count: slotCount)
-        self.expertUseCount = [Int](repeating: 0, count: max(1, layout.expertsPerLayer))
+        self.expertUseCount =
+            seededExpertUseCounts
+            ?? [Int](repeating: 0, count: max(1, layout.expertsPerLayer))
         self.expertLoadCount = [Int](repeating: 0, count: max(1, layout.expertsPerLayer))
     }
 

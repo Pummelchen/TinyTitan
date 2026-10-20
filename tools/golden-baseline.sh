@@ -67,6 +67,14 @@ PY
 }
 OUT_DIR="${OUT_DIR:-$ROOT/benchmark/golden}"
 
+# The expert routing profile is per-machine history: it seeds the cache's LFU
+# score, which changes the order experts land in their slots and therefore the
+# last-bit summation order. A stored golden is one exact text per (machine,
+# build, model), so this gate runs with the profile off; a profile-enabled run
+# differing from it is cache-state, not a regression. See
+# docs/expert-profile-warm-start-2026-10-20.md.
+export TINYTITAN_EXPERT_PROFILE=0
+
 PROMPT="${PROMPT:-Explain what a mutex is and when you would use one.}"
 MAX_NEW="${MAX_NEW:-96}"
 SEED="${SEED:-1234}"
