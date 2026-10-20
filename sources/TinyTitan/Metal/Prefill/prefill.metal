@@ -1107,6 +1107,87 @@ kernel void attention_prefill_causal_tiled(
     }
 }
 
+/// Causal prefill attention, eight queries per threadgroup.
+///
+/// The scalar tiled kernel launches one threadgroup per (query, head) and
+/// re-reads every visible K/V row for each of them, which is ~100 GB of cache
+/// traffic for a 2.5K-token chunk. Here one simdgroup owns one query and the
+/// eight simdgroups of a threadgroup cover eight consecutive queries, so the
+/// same K/V row is read once per threadgroup instead of once per query. The
+/// reduction is a `simd_sum`, so the kernel takes no threadgroup barrier in
+/// the key loop at all.
+constant constexpr uint kPrefillAttnQBlock = 8;
+constant constexpr uint kPrefillAttnMaxDimsPerLane = 8;
+
+kernel void attention_prefill_causal_q8(
+    device const half* Q [[buffer(0)]],
+    device const uchar* K [[buffer(1)]],
+    device const uchar* V [[buffer(2)]],
+    device half* O [[buffer(3)]],
+    constant PrefillAttentionParams& p [[buffer(4)]],
+    device const uchar* keep [[buffer(5)]],
+    constant uint& useKeep [[buffer(6)]],
+    constant uint& keepStride [[buffer(7)]],
+    device const uint* keepIdx [[buffer(8)]],
+    device const uint* keepCount [[buffer(9)]],
+    constant uint& keepIdxStride [[buffer(10)]],
+    uint3 tg [[threadgroup_position_in_grid]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint sg [[simdgroup_index_in_threadgroup]]
+) {
+    const uint q0 = tg.x * kPrefillAttnQBlock;
+    const uint qh = tg.y;
+    if (q0 >= p.queryCount || qh >= p.numQHeads) return;
+    const uint q = q0 + sg;
+    if (q >= p.queryCount) return;
+    // Gated on the host to headDim % 32 == 0 and headDim / 32 <= 8.
+    const uint dims_per_lane = p.headDim / 32u;
+    const uint d0 = lane * dims_per_lane;
+    const uint q_per_kv = p.numQHeads / p.numKVHeads;
+    const uint kvh = qh / q_per_kv;
+    const uint abs_q = p.startPosition + q;
+    uint first = 0u;
+    if (p.slidingWindow != 0u && abs_q + 1u > p.slidingWindow) {
+        first = abs_q + 1u - p.slidingWindow;
+    }
+    const uint last_exclusive = min(p.kvValidCount, abs_q + 1u);
+    device const half* q_row = Q + q * p.qTokenStrideElements + qh * p.headDim;
+    const uint flat = kvh * p.headDim + d0;
+
+    float qreg[kPrefillAttnMaxDimsPerLane];
+    float acc[kPrefillAttnMaxDimsPerLane];
+    for (uint i = 0; i < dims_per_lane; ++i) {
+        qreg[i] = float(q_row[d0 + i]);
+        acc[i] = 0.0f;
+    }
+    float row_max = -INFINITY;
+    float row_sum = 0.0f;
+
+    for (uint key = first; key < last_exclusive; ++key) {
+        const uint phys_key = prefill_kv_slot(key);
+        float partial = 0.0f;
+        for (uint i = 0; i < dims_per_lane; ++i) {
+            const float kv = prefill_load_kv(K, phys_key, flat + i, p);
+            partial = fma(qreg[i], kv, partial);
+        }
+        const float score = simd_sum(partial) * p.scale;
+        const float new_max = max(row_max, score);
+        const float old_scale = row_sum > 0.0f ? fast::exp(row_max - new_max) : 0.0f;
+        const float new_scale = fast::exp(score - new_max);
+        for (uint i = 0; i < dims_per_lane; ++i) {
+            const float vv = prefill_load_kv(V, phys_key, flat + i, p);
+            acc[i] = fma(new_scale, vv, acc[i] * old_scale);
+        }
+        row_sum = row_sum * old_scale + new_scale;
+        row_max = new_max;
+    }
+
+    device half* out_row = O + q * p.oTokenStrideElements + qh * p.headDim;
+    for (uint i = 0; i < dims_per_lane; ++i) {
+        out_row[d0 + i] = row_sum > 0.0f ? half(acc[i] / row_sum) : half(0.0f);
+    }
+}
+
 #if defined(__HAVE_TENSOR__)
 
 constant constexpr int kPrefillTensorOpsOutputs = 8;

@@ -71,6 +71,10 @@ final class PrefillAttention {
     private let context: MetalContext
     private let psoCausalTiled: MTLComputePipelineState
     private let psoCausalQSATiled: MTLComputePipelineState?
+    /// Eight queries per threadgroup, one simdgroup each: the K/V row is read
+    /// once per threadgroup instead of once per query, and the reduction is a
+    /// `simd_sum` with no threadgroup barrier in the key loop.
+    private let psoCausalQ8: MTLComputePipelineState?
     /// One byte, bound whenever no selection is in play; `useKeep` is what
     /// actually turns the mask off.
     private let emptyKeepMask: MTLBuffer
@@ -87,6 +91,8 @@ final class PrefillAttention {
         self.psoCausalQSATiled =
             (try? context.pipeline(
                 "attention_prefill_causal_qsa_tiled"))
+        self.psoCausalQ8 =
+            (try? context.pipeline("attention_prefill_causal_q8"))
         // Four bytes, not one: the kernels declare `keepIdx`/`keepIndices` as
         // `device const uint*`, and Metal's own validation aborts a binding
         // whose length is shorter than the argument it is bound to ("space for
@@ -151,6 +157,15 @@ final class PrefillAttention {
             && params.scale == 1.0
         let tensorOpsPipeline = tensorOpsShape ? psoFullTensorOps2DValidityV2 : nil
         let useTensorOps = tensorOpsPipeline != nil
+        // The eight-query kernel is opt-in until it has been measured against
+        // the scalar one on a real chunk; it needs no selection mask and one
+        // simdgroup per query needs headDim to divide 32 evenly.
+        let useQ8 =
+            keepMask == nil
+            && params.headDim % 32 == 0
+            && params.headDim / 32 <= 8
+            && psoCausalQ8 != nil
+            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_ATTN_Q8"] == "1"
         let pipeline: MTLComputePipelineState
         if let tensorOpsPipeline {
             pipeline = tensorOpsPipeline
@@ -173,6 +188,8 @@ final class PrefillAttention {
                 && ProcessInfo.processInfo.environment["TINYTITAN_QSA_TILED"] != "0"
             if wantQSATiled, let qsa = psoCausalQSATiled, kvRingCapacity == 0 {
                 pipeline = qsa
+            } else if useQ8, let q8 = psoCausalQ8 {
+                pipeline = q8
             } else {
                 pipeline = causalTiledPipeline(kvRingCapacity: kvRingCapacity)
             }
@@ -182,7 +199,7 @@ final class PrefillAttention {
         let threadCount =
             useTensorOps
             ? 128
-            : roundUp(max(threadWidth, headDim), toMultipleOf: threadWidth)
+            : (useQ8 ? 256 : roundUp(max(threadWidth, headDim), toMultipleOf: threadWidth))
         precondition(
             threadCount <= pipeline.maxTotalThreadsPerThreadgroup,
             "tiled prefill attention requires headDim <= maxTotalThreadsPerThreadgroup")
@@ -229,10 +246,15 @@ final class PrefillAttention {
                 width: Int(params.queryCount),
                 height: Int(params.numQHeads) / 8,
                 depth: 1)
-            : MTLSize(
-                width: Int(params.queryCount),
-                height: Int(params.numQHeads),
-                depth: 1)
+            : (useQ8
+                ? MTLSize(
+                    width: (Int(params.queryCount) + 7) / 8,
+                    height: Int(params.numQHeads),
+                    depth: 1)
+                : MTLSize(
+                    width: Int(params.queryCount),
+                    height: Int(params.numQHeads),
+                    depth: 1))
         enc.dispatchThreadgroups(
             groups,
             threadsPerThreadgroup: MTLSize(width: threadCount, height: 1, depth: 1))

@@ -108,3 +108,27 @@ Prefill is still ~50 s at roughly 8 % of fp16 peak, so this is a 3 % bite out of
 the dominant term. The next instrument needed is a per-phase prefill breakdown
 (route / shared expert / routed MoE / attention), which the runner does not
 currently print.
+
+## Prefill attention: eight queries per threadgroup (opt-in)
+
+The scalar causal kernel launches one threadgroup per (query, head) and
+re-reads every visible K/V row for each of them. `attention_prefill_causal_q8`
+gives one simdgroup one query and puts eight consecutive queries in a
+threadgroup, so the K/V row is read once per threadgroup and the reduction is
+a `simd_sum` with no barrier in the key loop. 2.2K prompt, same host:
+
+| | full-attention GPU | prefill wall |
+| --- | ---: | ---: |
+| `attention_prefill_causal_tiled` | 17.84 s | 50.31 s |
+| `attention_prefill_causal_q8` | **11.57 s** | **44.55 s** |
+
+**−35 % on the attention kernel, −11.4 % on time-to-first-token.** The kernel
+is opt-in behind `TINYTITAN_PREFILL_ATTN_Q8=1`: the summation order changes, so
+the completion is no longer byte-identical and the bug-fix quality suite has
+not been run against it. It is gated to `keepMask == nil`, `headDim % 32 == 0`
+and `headDim / 32 <= 8`.
+
+The remaining cost is per-element dequantisation: `prefill_load_kv` does two
+integer divisions and three loads for every element, and the q8 kernel calls it
+once per (lane, key, dim). Hoisting the row pointer and the group index to the
+(lane, key) level is the next measured step.
