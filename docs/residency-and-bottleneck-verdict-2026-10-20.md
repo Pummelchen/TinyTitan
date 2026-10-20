@@ -633,3 +633,22 @@ Revised remaining work, in order:
 4. measurement against the 40–50 % hot split.
 
 Estimate: about a week, with step 3 the only part that touches kernel dispatch.
+
+### Hot-expert profile generator (2026-10-20)
+
+`benchmark/hot_experts.py` is the repacker's missing input: it turns a route
+trace into the per-layer hot list, with the activation share and byte ratio
+that split implies, so the choice is made before any install is written.
+
+    python benchmark/hot_experts.py --trace /tmp/ornith-route.txt --hot 0.5 --out /tmp/hot50.json
+
+Measured on the recorded Ornith trace:
+
+| hot fraction | hot per layer | activation on hot | bytes vs 4-bit |
+| ---: | ---: | ---: | ---: |
+| 0.40 | 103 | 0.870 | 0.700x |
+| 0.50 | 128 | 0.925 | 0.750x |
+
+The JSON carries `layers[L].hot` (sorted expert ids), the counts, the
+per-layer activation share and the header's overall byte ratio — exactly what
+a tiered converter needs to decide which experts to quantise to 2-bit.
