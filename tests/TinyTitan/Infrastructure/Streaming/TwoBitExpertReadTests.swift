@@ -126,14 +126,14 @@ import Testing
         putBF16(1.0, at: 8); putBF16(-2.0, at: 10)
 
         let tensors = [
-            ExpertBlobTensor(bits: 2, sourceOffset: 0, sourceSize: 4,
-                             targetOffset: 0, targetSize: 8,
+            ExpertBlobTensor(sourceOffset: 0, sourceSize: 4,
+                             targetOffset: 0, targetSize: 8, bits: 2,
                              expands: true, rescales: false),
-            ExpertBlobTensor(bits: 0, sourceOffset: 4, sourceSize: 4,
-                             targetOffset: 8, targetSize: 4,
+            ExpertBlobTensor(sourceOffset: 4, sourceSize: 4,
+                             targetOffset: 8, targetSize: 4, bits: 0,
                              expands: false, rescales: true),
-            ExpertBlobTensor(bits: 0, sourceOffset: 8, sourceSize: 4,
-                             targetOffset: 12, targetSize: 4,
+            ExpertBlobTensor(sourceOffset: 8, sourceSize: 4,
+                             targetOffset: 12, targetSize: 4, bits: 0,
                              expands: false, rescales: false),
         ]
         TwoBitExpand.expandExpertInPlace(slot: slot, tensors: tensors)
