@@ -39,8 +39,11 @@ answer is a 42% loss, not a 3-5% win (see E).
 
 - **A forwarding test for the launcher's prompt-cache flags.** The refusals are
   pinned; forwarding is verified only by dry run.
-- **n-gram table compression (71-77%, ~25-30 GB)** for the 125B — footprint, not
-  speed.
+- **n-gram table compression** — **implemented 2026-10-20** as a 4-bit affine
+  table (`tools/quantize_ngram_table.py`, `docs/ple-table-4bit-2026-10-20.md`):
+  102.4 GB → 32.0 GB (31.2 % of fp16), install 162 GB → ~92 GB with the source
+  removed, decode +3 % at the median (noise) and a byte-identical 32-token
+  output. Footprint, not speed, as expected.
 
 ## E. Closed — do not spend time here again
 

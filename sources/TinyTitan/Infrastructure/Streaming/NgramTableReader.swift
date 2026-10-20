@@ -26,6 +26,7 @@ public final class NgramTableReader: @unchecked Sendable {
         case rowOutOfRange(row: UInt32, rowCount: UInt64)
         case readFailed(row: UInt32, errno: Int32)
         case shortRead(row: UInt32, expected: Int, got: Int)
+        case badHeader(detail: String)
 
         public var description: String {
             switch self {
@@ -45,6 +46,8 @@ public final class NgramTableReader: @unchecked Sendable {
                 return "n-gram row \(row) read failed: \(String(cString: strerror(e)))"
             case .shortRead(let row, let expected, let got):
                 return "n-gram row \(row) short read: expected \(expected), got \(got)"
+            case .badHeader(let detail):
+                return "n-gram table header is not usable: \(detail)"
             }
         }
     }
@@ -53,8 +56,26 @@ public final class NgramTableReader: @unchecked Sendable {
     public let path: String
     /// Values per row: `embedDim / totalHeads` (160 in production).
     public let rowDim: Int
+    /// Bytes one **decoded** row occupies in a gather destination: always
+    /// `rowDim * 2`. Callers use this as the destination stride; the bytes a
+    /// 4-bit row occupies on disk are smaller and stay private.
     public let rowBytes: Int
+    /// Bytes one row occupies in the file.
+    private let storedRowBytes: Int
     public let rowCount: UInt64
+    /// How the rows are stored. fp16 is the shipped table; the 4-bit form is
+    /// `tools/quantize_ngram_table.py`'s output (100 B a row at the production
+    /// geometry instead of 320).
+    public enum Format: Sendable, Equatable {
+        case fp16
+        case affine4Group32
+    }
+    public let format: Format
+    /// Where row 0 starts: 0 for the fp16 table, the header size for the 4-bit.
+    private let dataOffset: UInt64
+    static let q4Magic: UInt32 = 0x3451_5454  // "TTQ4"
+    static let q4Version: UInt32 = 1
+    static let q4HeaderBytes: UInt64 = 40
 
     /// - Parameters:
     ///   - rowCount: expected rows, from the manifest's PLE geometry. The file
@@ -65,7 +86,8 @@ public final class NgramTableReader: @unchecked Sendable {
     ///     because a bounded footprint is the point of streaming.
     public init(
         path: String, rowDim: Int, rowCount: UInt64,
-        bypassCache: Bool = true
+        bypassCache: Bool = true,
+        format: Format = .fp16
     ) throws {
         // Thrown, not a precondition: both values come from `ple_constants.json`,
         // which is a file on disk rather than a fact of the build. A corrupt or
@@ -88,15 +110,40 @@ public final class NgramTableReader: @unchecked Sendable {
         // Checked, not wrapping. `rowCount &* bytes` could wrap to a small
         // number, which collapses `expected` and lets the size guard below
         // accept a table built for a completely different geometry.
-        let (rowBytes, byteOverflow) = rowDim.multipliedReportingOverflow(
-            by: MemoryLayout<Float16>.stride)
-        guard !byteOverflow, rowBytes > 0 else {
-            throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
+        let bytes: Int
+        switch format {
+        case .fp16:
+            let (value, overflow) = rowDim.multipliedReportingOverflow(
+                by: MemoryLayout<Float16>.stride)
+            guard !overflow, value > 0 else {
+                close(opened)
+                throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
+            }
+            bytes = value
+        case .affine4Group32:
+            guard rowDim > 0, rowDim % 32 == 0 else {
+                close(opened)
+                throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
+            }
+            let (value, overflow) = (rowDim / 2).addingReportingOverflow(
+                (rowDim / 32) * 4)
+            guard !overflow, value > 0 else {
+                close(opened)
+                throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
+            }
+            bytes = value
         }
-        let bytes = rowBytes
-        let (expected, sizeOverflow) = rowCount.multipliedReportingOverflow(
+        let storedBytes = bytes
+        let headerBytes: UInt64 = format == .fp16 ? 0 : Self.q4HeaderBytes
+        let (bodyBytes, sizeOverflow) = rowCount.multipliedReportingOverflow(
             by: UInt64(bytes))
         guard !sizeOverflow else {
+            close(opened)
+            throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
+        }
+        let (expected, headerOverflow) = headerBytes.addingReportingOverflow(bodyBytes)
+        guard !headerOverflow else {
+            close(opened)
             throw Failure.invalidGeometry(rowDim: rowDim, rowCount: rowCount)
         }
         // The checkpoint pads the table past its last addressable row (the
@@ -107,22 +154,99 @@ public final class NgramTableReader: @unchecked Sendable {
         // separates the two by three orders of magnitude.
         let size = UInt64(st.st_size)
         let surplusLimit: UInt64 = 1 << 20
-        guard size >= expected, size - expected <= surplusLimit,
-            size % UInt64(bytes) == 0
-        else {
+        guard size >= expected, size - expected <= surplusLimit else {
             close(opened)
             throw Failure.sizeMismatch(
                 path: path, expected: expected,
                 actual: size)
         }
+        if format == .affine4Group32 {
+            do {
+                try Self.validateQ4Header(
+                    fd: opened, rowDim: rowDim, rowCount: rowCount, rowBytes: storedBytes)
+            } catch {
+                close(opened)
+                throw error
+            }
+        }
         self.fd = opened
         self.path = path
         self.rowDim = rowDim
-        self.rowBytes = bytes
+        self.rowBytes = rowDim * MemoryLayout<Float16>.stride
+        self.storedRowBytes = storedBytes
         self.rowCount = rowCount
+        self.format = format
+        self.dataOffset = headerBytes
     }
 
     deinit { close(fd) }
+
+    private static func validateQ4Header(
+        fd: Int32, rowDim: Int, rowCount: UInt64, rowBytes: Int
+    ) throws {
+        var header = [UInt8](repeating: 0, count: Int(q4HeaderBytes))
+        let got = header.withUnsafeMutableBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return pread(fd, base, Int(q4HeaderBytes), 0)
+        }
+        guard got == Int(q4HeaderBytes) else {
+            throw Failure.badHeader(detail: "short read of the 40-byte header (\(got) bytes)")
+        }
+        let words = header.withUnsafeBytes { raw -> [UInt32] in
+            var result: [UInt32] = []
+            for offset in stride(from: 0, to: 36, by: 4) {
+                result.append(raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self))
+            }
+            return result
+        }
+        let magic = words[0]
+        let version = words[1]
+        let storedRowDim = Int(words[2])
+        let bits = words[3]
+        let group = words[4]
+        let storedRowBytes = Int(words[5])
+        let storedRowCount = header.withUnsafeBytes {
+            $0.loadUnaligned(fromByteOffset: 24, as: UInt64.self)
+        }
+        let storedHeader = words[8]
+        guard magic == q4Magic, version == q4Version else {
+            throw Failure.badHeader(detail: "magic/version do not match TTQ4 v1")
+        }
+        guard storedRowDim == rowDim, storedRowCount == rowCount,
+            storedRowBytes == rowBytes, bits == 4, group == 32,
+            storedHeader == UInt32(q4HeaderBytes)
+        else {
+            throw Failure.badHeader(
+                detail: "geometry disagrees with the sidecar "
+                    + "(rowDim \(storedRowDim)/\(rowDim), rows "
+                    + "\(storedRowCount)/\(rowCount), rowBytes "
+                    + "\(storedRowBytes)/\(rowBytes), bits \(bits), group \(group))")
+        }
+    }
+
+    /// One 4-bit row: packed nibbles, then a bf16 scale and bias per group of
+    /// 32 values. Little-endian, low nibble first, the converter's layout.
+    private func decodeAffine4(
+        _ source: UnsafeRawPointer, into destination: UnsafeMutableRawPointer
+    ) {
+        let groups = rowDim / 32
+        let packed = source.bindMemory(to: UInt8.self, capacity: rowDim / 2)
+        let scales = source.advanced(by: rowDim / 2)
+            .bindMemory(to: UInt16.self, capacity: groups)
+        let biases = source.advanced(by: rowDim / 2 + groups * 2)
+            .bindMemory(to: UInt16.self, capacity: groups)
+        let out = destination.bindMemory(to: UInt16.self, capacity: rowDim)
+        for group in 0..<groups {
+            let scale = Float(bitPattern: UInt32(scales[group]) << 16)
+            let bias = Float(bitPattern: UInt32(biases[group]) << 16)
+            for lane in 0..<32 {
+                let index = group * 32 + lane
+                let byte = packed[index >> 1]
+                let value = (index & 1) == 0 ? byte & 0x0F : byte >> 4
+                out[index] = Float16(Float(value) * scale + bias).bitPattern
+            }
+        }
+    }
 
     /// Gathers `rows` into `destination`, which must hold
     /// `rows.count * rowDim` fp16 values. Rows land in the order given, which
@@ -131,28 +255,52 @@ public final class NgramTableReader: @unchecked Sendable {
         rows: [UInt32],
         into destination: UnsafeMutableRawPointer
     ) throws {
+        if format == .affine4Group32 {
+            let scratch = UnsafeMutableRawPointer.allocate(
+                byteCount: rowBytes, alignment: 4)
+            defer { scratch.deallocate() }
+            for (i, row) in rows.enumerated() {
+                guard UInt64(row) < rowCount else {
+                    throw Failure.rowOutOfRange(row: row, rowCount: rowCount)
+                }
+                try readExact(
+                    row: row,
+                    offset: dataOffset &+ UInt64(row) &* UInt64(storedRowBytes),
+                    bytes: storedRowBytes, into: scratch)
+                decodeAffine4(
+                    scratch,
+                    into: destination.advanced(by: i * rowBytes))
+            }
+            return
+        }
         for (i, row) in rows.enumerated() {
             guard UInt64(row) < rowCount else {
                 throw Failure.rowOutOfRange(row: row, rowCount: rowCount)
             }
-            let offset = UInt64(row) &* UInt64(rowBytes)
-            let target = destination.advanced(by: i * rowBytes)
-            var moved = 0
-            while moved < rowBytes {
-                let n = pread(
-                    fd, target.advanced(by: moved),
-                    rowBytes - moved, off_t(offset) + off_t(moved))
-                if n < 0 {
-                    if errno == EINTR { continue }
-                    throw Failure.readFailed(row: row, errno: errno)
-                }
-                if n == 0 {
-                    throw Failure.shortRead(
-                        row: row, expected: rowBytes,
-                        got: moved)
-                }
-                moved += n
+            try readExact(
+                row: row,
+                offset: dataOffset &+ UInt64(row) &* UInt64(storedRowBytes),
+                bytes: storedRowBytes,
+                into: destination.advanced(by: i * rowBytes))
+        }
+    }
+
+    private func readExact(
+        row: UInt32, offset: UInt64, bytes: Int, into destination: UnsafeMutableRawPointer
+    ) throws {
+        var moved = 0
+        while moved < bytes {
+            let n = pread(
+                fd, destination.advanced(by: moved),
+                bytes - moved, off_t(offset) + off_t(moved))
+            if n < 0 {
+                if errno == EINTR { continue }
+                throw Failure.readFailed(row: row, errno: errno)
             }
+            if n == 0 {
+                throw Failure.shortRead(row: row, expected: bytes, got: moved)
+            }
+            moved += n
         }
     }
 

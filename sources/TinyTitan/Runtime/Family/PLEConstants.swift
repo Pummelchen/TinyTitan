@@ -15,6 +15,41 @@ public struct PLEConstants: Decodable, Sendable {
     public let headsPerNgram: Int
     public let pleNumHeads: Int
     public let pleHeadDim: Int
+    /// The table file this sidecar addresses, and its storage form.
+    ///
+    /// Optional so every install built before the 4-bit table still decodes:
+    /// absent means `ngram_table.bin`, fp16. `tools/quantize_ngram_table.py
+    /// --update-metadata` writes `ngram_table.q4` and the `int4_affine_group32`
+    /// spelling here, so the loader follows the sidecar rather than a constant.
+    public let tableFile: String?
+    public let tableDtype: String?
+
+    /// Explicit so the two optional table fields keep working for callers
+    /// (and fixtures) that predate them; the synthesised memberwise initializer
+    /// would require both.
+    public init(
+        layerMultipliers: [Int64],
+        ngramHeadsOffsets: [Int64],
+        ngramHeadsVocabSizes: [Int64],
+        eosTokenID: Int32,
+        ngramSize: Int,
+        headsPerNgram: Int,
+        pleNumHeads: Int,
+        pleHeadDim: Int,
+        tableFile: String? = nil,
+        tableDtype: String? = nil
+    ) {
+        self.layerMultipliers = layerMultipliers
+        self.ngramHeadsOffsets = ngramHeadsOffsets
+        self.ngramHeadsVocabSizes = ngramHeadsVocabSizes
+        self.eosTokenID = eosTokenID
+        self.ngramSize = ngramSize
+        self.headsPerNgram = headsPerNgram
+        self.pleNumHeads = pleNumHeads
+        self.pleHeadDim = pleHeadDim
+        self.tableFile = tableFile
+        self.tableDtype = tableDtype
+    }
 
     enum CodingKeys: String, CodingKey {
         case layerMultipliers = "layer_multipliers"
@@ -25,6 +60,8 @@ public struct PLEConstants: Decodable, Sendable {
         case headsPerNgram = "heads_per_ngram"
         case pleNumHeads = "ple_n_heads"
         case pleHeadDim = "ple_head_dim"
+        case tableFile = "table_file"
+        case tableDtype = "table_dtype"
     }
 
     /// The sidecar shares the manifest's bound rather than carrying a second,

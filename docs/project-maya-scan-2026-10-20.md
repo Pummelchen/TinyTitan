@@ -106,6 +106,15 @@ dedicated reader and latency stats — TinyTitan's reader is already separate.
 This is the cheapest large win on the list: disk, download, page-cache pressure,
 and a smaller gather footprint.
 
+**Implemented 2026-10-20.** `tools/quantize_ngram_table.py` writes the 4-bit
+form (40-byte header, 100 B a row: packed nibbles plus a bf16 scale and bias
+per group of 32) and `NgramTableReader` reads it through
+`ple_constants.json`'s `table_file`/`table_dtype`. Measured on the 125B: the
+table shrinks from 102.4 GB to 32.0 GB (31.2 %), the install from 162 GB to
+~92 GB with the source removed, prefill unchanged, decode +3 % at the median
+(inside noise), gather ~3 % cheaper, and the 32-token output byte-identical
+across four arms. Details: `docs/ple-table-4bit-2026-10-20.md`.
+
 ## C. KV streaming: host-resident cache, VRAM window
 
 Maya: each attention layer's latent KV lives in pinned RAM; N positions stay in

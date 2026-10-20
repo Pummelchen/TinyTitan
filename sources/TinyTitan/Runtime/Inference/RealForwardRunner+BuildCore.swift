@@ -341,12 +341,24 @@ extension RealForwardRunner {
                 ngramSize: cfg.ple.ngramSize,
                 headsPerNgram: cfg.ple.headsPerNgram)
             bp.pleHash = constants.makeHash()
+            let tableFormat: NgramTableReader.Format
+            switch constants.tableDtype ?? "float16" {
+            case "float16":
+                tableFormat = .fp16
+            case "int4_affine_group32":
+                tableFormat = .affine4Group32
+            default:
+                throw ModelError.internalInconsistency(
+                    detail: "ple_constants.json names an unknown table_dtype "
+                        + "\(constants.tableDtype ?? "")")
+            }
             bp.ngramTable = try NgramTableReader(
                 path: model.directoryURL.appendingPathComponent(
-                    Qwen38FlashTensors.ngramTableFile
+                    constants.tableFile ?? Qwen38FlashTensors.ngramTableFile
                 ).path,
                 rowDim: constants.pleHeadDim,
-                rowCount: try constants.tableRowCount())
+                rowCount: try constants.tableRowCount(),
+                format: tableFormat)
             bp.pleBlock = try PLEBlock(
                 context: context,
                 dim: cfg.hiddenSize,
