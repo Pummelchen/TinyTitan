@@ -294,7 +294,10 @@ extension PreadExpertStreamer {
     }
 
     /// One block's read/decode geometry inside an expert.
-    struct CompressedBlockWork {
+    /// unchecked-invariant: the two pointers address the call's scratch and
+    /// destination buffers, which outlive the parallel decode that reads this
+    /// value; the work array itself is immutable once `blockWork` returns.
+    struct CompressedBlockWork: @unchecked Sendable {
         let scratch: UnsafeMutableRawPointer
         let packedOffset: Int
         let packedCount: Int
@@ -375,10 +378,11 @@ extension PreadExpertStreamer {
             return
         }
         let firstError = Mutex<Error?>(nil)
+        let safeDestinations = PrefetchDestinations(destinations)
         DispatchQueue.concurrentPerform(iterations: offsets.count) { index in
             do {
                 try readFull(
-                    into: destinations[index], fileOffset: offsets[index],
+                    into: safeDestinations.values[index], fileOffset: offsets[index],
                     count: counts[index])
             } catch {
                 firstError.withLock { if $0 == nil { $0 = error } }

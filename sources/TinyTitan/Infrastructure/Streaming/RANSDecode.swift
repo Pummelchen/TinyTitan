@@ -26,6 +26,22 @@ struct RANSStreamPlan {
     let phase: Int
 }
 
+/// The per-expert stream plans built by the parallel block loop at layer open.
+///
+/// unchecked-invariant: every write to `plans` or `payloadSizes` happens while
+/// holding `lock`, and both are read only after `concurrentPerform` returns, so
+/// the unchecked conformance publishes slices that are complete.
+private final class RANSPlanAccumulator: @unchecked Sendable {
+    let lock = NSLock()
+    var plans: [[RANSStreamPlan]]
+    var payloadSizes: [Int]
+
+    init(expertCount: Int) {
+        plans = Array(repeating: [], count: expertCount)
+        payloadSizes = Array(repeating: 0, count: expertCount)
+    }
+}
+
 /// The per-device pipeline and queue, compiled and created once.
 ///
 /// unchecked-invariant: `pipelines` and `queues` are the only mutable state and
@@ -175,9 +191,7 @@ final class RANSLayerResources: @unchecked Sendable {
         defer { close(fd) }
         // Build the stream plans in parallel: one pread per block is 3,840
         // reads a layer, which measured ~17 s of prefill when done serially.
-        var allPlans = [[RANSStreamPlan]](repeating: [], count: layout.blocks.count)
-        var payloadSizes = [Int](repeating: 0, count: layout.blocks.count)
-        let plansLock = NSLock()
+        let accumulator = RANSPlanAccumulator(expertCount: layout.blocks.count)
         DispatchQueue.concurrentPerform(iterations: layout.blocks.count) { expert in
             let blocks = layout.blocks[expert]
             let runStart = blocks.first.map { Int($0.payloadOffset) } ?? 0
@@ -207,13 +221,13 @@ final class RANSLayerResources: @unchecked Sendable {
                 }
                 payloadBytes += Int(block.payloadLength)
             }
-            plansLock.lock()
-            allPlans[expert] = plans
-            payloadSizes[expert] = payloadBytes
-            plansLock.unlock()
+            accumulator.lock.lock()
+            accumulator.plans[expert] = plans
+            accumulator.payloadSizes[expert] = payloadBytes
+            accumulator.lock.unlock()
         }
-        let maximumPayload = payloadSizes.max() ?? 0
-        self.plans = allPlans
+        let maximumPayload = accumulator.payloadSizes.max() ?? 0
+        self.plans = accumulator.plans
         let stride = max(1, maximumPayload)
         self.payloadStride = stride
         let maximumStreams = maximumWave * layout.models.count * 256
