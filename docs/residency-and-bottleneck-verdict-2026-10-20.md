@@ -601,3 +601,35 @@ The minimal design that avoids redesigning the cache:
 Remaining work in order: variable-size reader, two-region repacker, then the
 measurement. It is a contained core change, not a format project — the schema
 work that this plan originally budgeted for does not exist.
+
+## The cold tier's plumbing already exists; the dispatch is the work (2026-10-20)
+
+Checked the streaming core before planning a variable-size reader, and most of
+it is already there:
+
+- `tinytitan_expert_reader_fetch_ranges(reader, offsets, byte_counts, dests,
+  count)` — absolute offsets **with per-item byte counts**, already used by the
+  phase-1/tail split.
+- `Model.routedExpertPhysicalOffsets(layer:)` returns each expert's offset
+  straight from `layout.json`.
+- `ParallelExpertReader` already wraps both the offset and the range fetches.
+
+So the reader does not need a new primitive, and the repacker's output can be
+consumed with `fetch_ranges(offsets, sizes, …)`.
+
+**What is genuinely missing is the dispatch split.** The routed MoE pipeline is
+compiled with `FC_MOE_WEIGHT_BITS` (constant 5) — one width per pipeline. A
+layer holding both tiers must therefore issue **two routed dispatches per
+layer**, one per pipeline, over the hot and cold pair subsets, with two
+argument buffers and one shared reduction. That, plus slot bookkeeping that
+records each expert's byte count and its tier, is the cold tier.
+
+Revised remaining work, in order:
+
+1. repacker: two contiguous regions per layer (schema unchanged);
+2. streamer: record `(offset, size, bits)` per cached expert, capacity at the
+   4-bit maximum;
+3. MoE: hot/cold pair partition and two phase-1 dispatches into one reduction;
+4. measurement against the 40–50 % hot split.
+
+Estimate: about a week, with step 3 the only part that touches kernel dispatch.
