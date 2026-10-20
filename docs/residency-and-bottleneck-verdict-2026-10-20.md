@@ -819,3 +819,16 @@ expansion cost is not a consideration at all.
 This settles the design: the cold tier is a tiered converter plus this
 transform on the I/O path, with the dual-width dispatch no longer needed for
 the first measurable version.
+
+### Expansion transform shipped and proven on a real file (2026-10-20)
+
+`TwoBitExpand` (Infrastructure/Streaming) is the cold tier's expansion step:
+2-bit to 4-bit packed, `v -> 5v`, with `adjustedScale(_:)` for the paired
+scale division. `TwoBitExpertReadTests` proves both halves on a real layer
+file: a half-slot expert at a non-zero offset is fetched by `(offset, count)`
+with the bytes past the payload untouched, and the expanded stream decodes back
+to exactly `5x` the 2-bit values.
+
+That closes the runtime mechanism the hybrid needs. What remains is the tiered
+converter and calling the transform after a short read (plus applying the
+scale division), both ordinary work against validated pieces.
