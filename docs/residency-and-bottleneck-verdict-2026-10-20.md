@@ -407,3 +407,32 @@ both toggles off, four prompts, greedy: **391 / Die Katze schläft / the
 sum() one-liner / Canberra — 4/4 identical**. The two optimisations compose
 without changing short-answer behaviour, which is the check the individual
 four-prompt batteries could not make.
+
+## Design sketch: tiled GEMM for the projection family (not yet built)
+
+Target: `prefill_dequant_affine_qmm_f16_block`, used by QKV, GDN and the
+shared expert (~13 s of a 33.4 s prefill). Every cheaper lever is measured
+flat, so this is the next real step. Sketch only; no code written.
+
+- **Shape**: 128 threads (4 simdgroups) per threadgroup, output tile
+  `32 tokens x 32 rows`, K blocks of 32 (K is 2048 or 512 here, both divisible).
+- **Staging**: cooperative dequant of the int8 weight block and the half
+  activation block into `threadgroup float` arrays (4 KB each), one barrier per
+  K block. 64 barriers per output tile at K=2048.
+- **Compute**: `simdgroup_matrix<float, 8, 8>` with
+  `simdgroup_multiply_accumulate`, four 8x8 output sub-tiles per simdgroup.
+  Float accumulation avoids the half-epilogue precision loss the current
+  kernel's `half(acc)` hides.
+- **Epilogue**: scale/bias per 64-element group applied after accumulation,
+  then one `half` store per output.
+- **Correctness**: accumulation order changes, so this is not bit-identical to
+  qmm; gate on the four-prompt battery plus a numeric comparison of the
+  prefill logits against the qmm path, not on text identity.
+- **Rollout**: env-gated, default off, paired A/B with the toggle off as its
+  own control (the round-11 lesson), kept only above +10 %.
+- **Risk**: the barrier count and the dequant staging may dominate at these
+  small K blocks; if so, widen to 64 tokens per tile before concluding.
+
+Same structure applies to the routed-tile grouped GEMM, which needs a pair
+sort per tile on top; the projection kernel is the cheaper first target and
+de-risks the pattern.
