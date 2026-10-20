@@ -1153,6 +1153,28 @@ kernel void attention_prefill_causal_q8(
     const uint last_exclusive = min(p.kvValidCount, abs_q + 1u);
     device const half* q_row = Q + q * p.qTokenStrideElements + qh * p.headDim;
     const uint flat = kvh * p.headDim + d0;
+    // The per-element helper recomputed the row pointer, the group count and
+    // the group index for every element. All three are invariant across keys
+    // except the row, so they are hoisted here: one division per lane instead
+    // of two per element.
+    const uint elements_per_row = p.numKVHeads * p.headDim;
+    const uint kv_groups =
+        (elements_per_row + p.kvGroupSize - 1u) / p.kvGroupSize;
+    const uint g0 = flat / p.kvGroupSize;
+    uint group_step[kPrefillAttnMaxDimsPerLane];
+    {
+        uint g = g0;
+        uint group_end = (g0 + 1u) * p.kvGroupSize;
+        for (uint i = 0; i < dims_per_lane; ++i) {
+            if (flat + i >= group_end) {
+                g += 1u;
+                group_end += p.kvGroupSize;
+            }
+            group_step[i] = g - g0;
+        }
+    }
+    const bool kv16 = (p.kvBits == 16u);
+    const bool kv4 = (p.kvBits == 4u);
 
     float qreg[kPrefillAttnMaxDimsPerLane];
     float acc[kPrefillAttnMaxDimsPerLane];
@@ -1166,17 +1188,69 @@ kernel void attention_prefill_causal_q8(
     for (uint key = first; key < last_exclusive; ++key) {
         const uint phys_key = prefill_kv_slot(key);
         float partial = 0.0f;
-        for (uint i = 0; i < dims_per_lane; ++i) {
-            const float kv = prefill_load_kv(K, phys_key, flat + i, p);
-            partial = fma(qreg[i], kv, partial);
+        if (kv16) {
+            device const half* kbase =
+                reinterpret_cast<device const half*>(K)
+                + phys_key * p.kvTokenStrideElements + flat;
+            for (uint i = 0; i < dims_per_lane; ++i) {
+                partial = fma(qreg[i], float(kbase[i]), partial);
+            }
+        } else {
+            device const uchar* krow = K + phys_key * p.kvTokenStrideBytes;
+            device const half* ksc =
+                reinterpret_cast<device const half*>(krow + p.kvValueBytes);
+            device const half* kbi = ksc + kv_groups;
+            for (uint i = 0; i < dims_per_lane; ++i) {
+                const uint element = flat + i;
+                float quantized;
+                if (kv4) {
+                    const uchar packed = krow[element / 2u];
+                    quantized = (element & 1u) == 0u
+                        ? float(uint(packed & 0x0fu))
+                        : float(uint(packed >> 4u));
+                } else {
+                    quantized = float(uint(krow[element]));
+                }
+                const uint g = g0 + group_step[i];
+                partial = fma(
+                    qreg[i],
+                    quantized * float(ksc[g]) + float(kbi[g]),
+                    partial);
+            }
         }
         const float score = simd_sum(partial) * p.scale;
         const float new_max = max(row_max, score);
         const float old_scale = row_sum > 0.0f ? fast::exp(row_max - new_max) : 0.0f;
         const float new_scale = fast::exp(score - new_max);
-        for (uint i = 0; i < dims_per_lane; ++i) {
-            const float vv = prefill_load_kv(V, phys_key, flat + i, p);
-            acc[i] = fma(new_scale, vv, acc[i] * old_scale);
+        if (kv16) {
+            device const half* vbase =
+                reinterpret_cast<device const half*>(V)
+                + phys_key * p.kvTokenStrideElements + flat;
+            for (uint i = 0; i < dims_per_lane; ++i) {
+                acc[i] = fma(new_scale, float(vbase[i]), acc[i] * old_scale);
+            }
+        } else {
+            device const uchar* vrow = V + phys_key * p.kvTokenStrideBytes;
+            device const half* vsc =
+                reinterpret_cast<device const half*>(vrow + p.kvValueBytes);
+            device const half* vbi = vsc + kv_groups;
+            for (uint i = 0; i < dims_per_lane; ++i) {
+                const uint element = flat + i;
+                float quantized;
+                if (kv4) {
+                    const uchar packed = vrow[element / 2u];
+                    quantized = (element & 1u) == 0u
+                        ? float(uint(packed & 0x0fu))
+                        : float(uint(packed >> 4u));
+                } else {
+                    quantized = float(uint(vrow[element]));
+                }
+                const uint g = g0 + group_step[i];
+                acc[i] = fma(
+                    new_scale,
+                    quantized * float(vsc[g]) + float(vbi[g]),
+                    acc[i] * old_scale);
+            }
         }
         row_sum = row_sum * old_scale + new_scale;
         row_max = new_max;

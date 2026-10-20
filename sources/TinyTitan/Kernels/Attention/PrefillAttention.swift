@@ -157,15 +157,16 @@ final class PrefillAttention {
             && params.scale == 1.0
         let tensorOpsPipeline = tensorOpsShape ? psoFullTensorOps2DValidityV2 : nil
         let useTensorOps = tensorOpsPipeline != nil
-        // The eight-query kernel is opt-in until it has been measured against
-        // the scalar one on a real chunk; it needs no selection mask and one
-        // simdgroup per query needs headDim to divide 32 evenly.
+        // On by default since 2026-10-20: 40.51 s against 50.31 s prefill on a
+        // 2.2K chunk, with a 4/4 identical answer battery. The summation order
+        // differs from the scalar kernel, so TINYTITAN_PREFILL_ATTN_Q8=0 is the
+        // fallback for byte-identity work.
         let useQ8 =
             keepMask == nil
             && params.headDim % 32 == 0
             && params.headDim / 32 <= 8
             && psoCausalQ8 != nil
-            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_ATTN_Q8"] == "1"
+            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_ATTN_Q8"] != "0"
         let pipeline: MTLComputePipelineState
         if let tensorOpsPipeline {
             pipeline = tensorOpsPipeline

@@ -132,3 +132,24 @@ The remaining cost is per-element dequantisation: `prefill_load_kv` does two
 integer divisions and three loads for every element, and the q8 kernel calls it
 once per (lane, key, dim). Hoisting the row pointer and the group index to the
 (lane, key) level is the next measured step.
+
+### Hoisted dequant, and promoted to default
+
+`prefill_load_kv` recomputed the row pointer, the group count and the group
+index for every element. Those are invariant across keys, so the q8 kernel now
+hoists them to the (lane, key) level. Same 2.2K prompt:
+
+| | full-attention GPU | prefill wall |
+| --- | ---: | ---: |
+| scalar `causal_tiled` | 17.84 s | 50.31 s |
+| q8, first version | 11.57 s | 44.55 s |
+| **q8 + hoisted dequant** | **8.29 s** | **40.51 s** |
+
+**−54 % on the full-attention kernel and −19.5 % on time-to-first-token**
+against the scalar kernel. A four-prompt battery (arithmetic, German
+translation, code, capital) returned **4/4 identical answers** with the kernel
+on and off, so it is now the default; `TINYTITAN_PREFILL_ATTN_Q8=0` restores
+the scalar kernel for byte-identity work.
+
+With attention at 8.3 s, the routed-expert tiles (22.4 s) are now the largest
+prefill term, ahead of the shared expert (9.1 s) and GDN (9.1 s).
