@@ -25,7 +25,7 @@ evidence exist.
 | T17 profile precedence | done | `--calibration-profile <path>` on the CLI and server loads with the bounded reader, validates, fills only unset `prefillChunkTokens`/`expertCacheSlots` (explicit flags win) and logs the applied line plus the knobs with no runtime switch. CLI + server precedence tests: fill, explicit-wins, switchless-reported, corrupt-refused. |
 | T18 calibration tests | done | Schema round-trip + every refusal (10), keep floor/noise/slower/non-positive/interleaving/merge/refusals (8), CLI precedence fill/explicit/no-profile/corrupt/foreign-machine/wrong-model/wrong-context/switchless (16), server versions of the same (7). Decision tests inject samples, so no test depends on wall-clock luck. Profiles are checked against machine, memory, context and install model before application. |
 | T19 multi-Mac validation | pending (hardware) | — |
-| T20 checkpoint design | pending | — |
+| T20 checkpoint design | done | `docs/interior-checkpoints-design.md`: coarse points (`systemEnd`, `lastTurnStart`, existing `turnEnd`), payload = `InferenceStateSnapshot` plus prefix tokens and domain/content hashes (no logits for interior), 100K int8 arithmetic (~1.06 GB for system-end + last-turn-start, ~2.15 GB with the turn end, ~3.65 GB for a 16K grid), eviction order and restore gates. Explicitly no per-16K default: message-shaped requests only diverge at turn boundaries. |
 | T21 checkpoint format | pending | — |
 | T22 edited-turn resume | pending | — |
 | T23 checkpoint tests | pending | — |
