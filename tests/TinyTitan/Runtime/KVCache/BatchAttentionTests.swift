@@ -11,7 +11,7 @@ import Testing
     private let maxContext = 64
 
     private func makeRunner(
-        _ ctx: MetalContext
+        _ ctx: MetalContext, slots: Int = 2
     ) throws -> (URL, RealForwardRunner) {
         let dir = try QwenToySynthetic.write(weightBits: 4)
         let model = try Model.load(
@@ -20,12 +20,13 @@ import Testing
             forceLogitsHead: true, kvCachePrecision: .int8)
         let runner = try RealForwardRunner(
             model: model, context: ctx, maxContext: maxContext,
-            slots: 2, runtimeConfiguration: runtime)
+            slots: slots, runtimeConfiguration: runtime)
         return (dir, runner)
     }
 
     private func upload(
-        _ ctx: MetalContext, values: [Float16], to destination: MTLBuffer
+        _ ctx: MetalContext, values: [Float16], to destination: MTLBuffer,
+        offset: Int = 0
     ) throws {
         let bytes = values.count * 2
         let source = try #require(
@@ -38,7 +39,7 @@ import Testing
         else { throw MetalError.commandEncoderFailed }
         blit.copy(
             from: source, sourceOffset: 0, to: destination,
-            destinationOffset: 0, size: bytes)
+            destinationOffset: offset, size: bytes)
         blit.endEncoding()
         cb.commit()
         cb.waitUntilCompleted()
@@ -134,6 +135,96 @@ import Testing
                 #expect(
                     abs(Float(got) - Float(want)) < 1e-3,
                     "row \(row) element \(i): \(got) vs \(want)")
+            }
+        }
+    }
+
+    /// T33: the batch stage must stay exact once the rows sit at different
+    /// decode positions and read their own multi-token KV slots. The T5 test
+    /// only covered position 0/seqLen 1, where every slot holds one row and
+    /// the RoPE offset, `seqLen`, and KV read range are all trivial.
+    @Test func batchMatchesPerRowAtDecodePositions() throws {
+        let ctx = try MetalContext()
+        let (dir, runner) = try makeRunner(ctx, slots: 4)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let d = runner.cfg.hiddenSize
+        let qDim = runner.cfg.numHeads * runner.cfg.fullHeadDim
+        let positions = [17, 9, 23, 5]
+
+        func rowValues(slot: Int, position: Int) -> [Float16] {
+            (0..<d).map { i in
+                Float16(
+                    sin(Float(slot * 10_000 + position * 37 + i) * 0.013) * 0.4)
+            }
+        }
+
+        func encodePerRow(slot: Int, position: Int, seqLen: UInt32) throws {
+            try upload(
+                ctx, values: rowValues(slot: slot, position: position),
+                to: runner.hidden)
+            let norm = try runner.model.inputNorm(layer: layer)
+            guard var cb = ctx.queue.makeCommandBuffer() else {
+                throw MetalError.commandEncoderFailed
+            }
+            try runner.encodeResidualEntryDecode(
+                commandBuffer: cb, hidden: runner.hidden,
+                norm: norm, out: runner.normed,
+                sublayer: .attention, layer: layer, eps: 1e-6)
+            try runner.encodeGatedFullAttentionDecode(
+                &cb, layer: layer, position: position, slot: slot,
+                seqLen: seqLen)
+            cb.commit()
+            cb.waitUntilCompleted()
+            #expect(cb.error == nil)
+        }
+
+        // Build each row's own KV history through the per-row path.
+        for (slot, position) in positions.enumerated() {
+            for t in 0..<position {
+                try encodePerRow(slot: slot, position: t, seqLen: UInt32(t + 1))
+            }
+        }
+
+        let scratch = try runner.ensureBatchedDecodeScratch(rows: positions.count)
+        for (slot, position) in positions.enumerated() {
+            try upload(
+                ctx, values: rowValues(slot: slot, position: position),
+                to: scratch.hidden, offset: slot * d * 2)
+        }
+        guard var cb = ctx.queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        try runner.encodeBatchGatedAttention(
+            layer: layer,
+            rows: positions.enumerated().map { ($0.element, $0.offset) },
+            scratch: scratch, commandBuffer: &cb)
+        cb.commit()
+        cb.waitUntilCompleted()
+        #expect(cb.error == nil)
+        let batchOut = try download(
+            ctx, from: scratch.o, bytes: positions.count * d * 2)
+        let batchAttn = try download(
+            ctx, from: scratch.attn, bytes: positions.count * qDim * 2)
+
+        for (slot, position) in positions.enumerated() {
+            try encodePerRow(
+                slot: slot, position: position, seqLen: UInt32(position + 1))
+            let reference = try download(ctx, from: runner.oOut, bytes: d * 2)
+            let referenceAttn = try download(
+                ctx, from: runner.attnOut, bytes: qDim * 2)
+            for i in 0..<d {
+                let got = batchOut[slot * d + i]
+                let want = reference[i]
+                #expect(
+                    abs(Float(got) - Float(want)) < 1e-3,
+                    "row \(slot) element \(i): \(got) vs \(want)")
+            }
+            for i in 0..<qDim {
+                let got = batchAttn[slot * qDim + i]
+                let want = referenceAttn[i]
+                #expect(
+                    abs(Float(got) - Float(want)) < 1e-3,
+                    "row \(slot) attn element \(i): \(got) vs \(want)")
             }
         }
     }

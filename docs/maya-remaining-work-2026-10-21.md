@@ -171,6 +171,21 @@ attention before o_proj; compare each against the per-row path.
 Acceptance: the first wrong tensor is named; no whole-model text run.
 Depends T32. Size M.
 
+**T34 - Re-land the fused decode loop around the verified attention stage.**
+T32/T33 cleared `encodeBatchGatedAttention` (q, K/V, post-gate attention and
+o_proj match the per-row path within fp16 rounding on the real install), so the
+corrupt T6 run came from the loop around it. Rebuild `produceBatchFused` with
+one change at a time and a layer-level gate before any text run: (1) batched
+attention only, per-row FFN and residual add, diff each layer's hidden against
+the serial path for two rows; (2) then the verify-pair FFN with the row-hidden
+handoff to/from the pair scratch diffed at every boundary; (3) only then the
+whole-model text battery. The attention probe must sit directly after
+`encodeBatchRowAttention` and before the FFN, on the same hidden the stage
+consumed.
+Acceptance: layer-level hidden parity, then identical text at 64/128 tokens on
+the four-prompt battery; keep only if the wall clock also beats serial.
+Depends T33, T6. Size L.
+
 **T31 - Final scorecard, gates, commit.** Record each outcome; run
 `swift test --no-parallel`, `tools/lint.sh all`, release build + warning gate;
 commit. Acceptance: all green; tree clean; every task done, rejected with
@@ -181,4 +196,5 @@ evidence, or hardware-blocked. Depends all shipped tasks. Size S.
 T1-T2 first; then T3-T10 (largest value), T11-T14, T15-T19, T20-T24, T25-T27,
 T28-T30, T31. Calibration may run in parallel with fused-decode design, but
 T1/T2 gate every measurement. T19 and T27 cannot be truthfully completed
-without the named hardware.
+without the named hardware. T34 follows T32/T33 and gates the T6 retry; T7/T10
+depend on it.

@@ -172,6 +172,51 @@ Projection/FFN batching on this engine needs a newly designed decode MoE
 pipeline that keeps the prefetch ring across a layer barrier, not a reuse of
 the prefill/verify pipeline. That is a separate engine project.
 
+## T32/T33: the attention stage is exact; the in-loop probe was not
+
+**Status (2026-10-21): the T5 batch-attention stage is numerically exact on the
+real install. The T32 reading that blamed it came from a probe placed after the
+fused layer's FFN handoff, not from a stage comparison.**
+
+An independent layer-3 probe on Ornith 4-bit (int8 KV, real resident weights,
+`BatchedDecodeScratch`) drove `encodeBatchGatedAttention` against the per-row
+gated path with the same hidden rows and the same per-slot KV history. Width 2
+used positions 100 and 60; width 4 used 100, 60, 130 and 20; each slot's KV was
+built through the per-row path before both paths wrote their own position. Max
+absolute differences (`fp16` values):
+
+| Tensor | Width 2 | Width 4 |
+| --- | ---: | ---: |
+| `normed` per row | 0.0 | 0.0 |
+| packed q (q + gate rows) | 2.4e-4 | 2.4e-4 |
+| v projection | 0.0 | 1.5e-5 |
+| post-gate attention | 2.4e-4 | 2.4e-4 |
+| o_proj output | 2.4e-4 | 2.4e-4 |
+| K/V slot bytes written | 0.0 | 0.0 |
+
+No tensor in the q/k/attention/o chain differs beyond fp16 rounding, and the
+KV rows the two paths write are bit-identical. T33's answer is therefore that
+there is no first wrong tensor in this stage.
+
+The T32 probe built into the reverted `produceBatchFused` file reported
+`attn_maxdiff` 0.29-1.45 with `first=1269` on every row, every position and
+every run. The release object from that build shows why that number cannot be
+read as a stage diff: the loop calls `encodeBatchQKV` -> `encodeBatchRowAttention`
+-> `encodeBatchOProj`, then the entry norms, then `encodeRoutedMoEVerifyPair`,
+then blits the FFN result out of the pair scratch back into the row buffers,
+commits and waits, and only then calls `probeBatchAttention`. A probe that runs after the
+FFN's hidden handoff is not comparing the input the batch attention consumed,
+and its constant `first=1269` across unrelated positions is a fixed-offset
+fingerprint rather than a data-dependent divergence. The 0.29-1.45 figures were
+therefore a measurement artefact; the corrupt Ornith text is real, but it lies
+in the reverted loop's wiring around the stage, not in the stage itself.
+
+What now pins the stage in-tree is
+`BatchAttentionTests.batchMatchesPerRowAtDecodePositions`: width 4, four
+different decode positions, per-slot multi-token KV built through the per-row
+path, attention and o_proj compared within 1e-3. It complements the position-0
+test and the one-off real-model probe above.
+
 ## What the measurements say the next attempt must do
 
 - **Give each row its own routed-MoE scratch and carry its pending command
