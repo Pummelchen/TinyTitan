@@ -259,12 +259,23 @@ Evidence, Ornith 4-bit, `RealForwardRunner` test harness:
 | fused vs per-row logits, 3 decode steps from position 0, width 2 | max abs diff **0.0** on every step and row |
 | layer-boundary hidden traces (reference dumps), all 40 layers | bit-identical |
 | server text, 24 tokens, two prompts, width 2 with the env switch | identical to the serial arm, both rows |
+| four-prompt battery, 64 and 128 tokens, byte-identical text | 8/8 prompts identical |
 | wall clock, 24 tokens, two rows | fused 17.5 s against serial 8.2 s per row |
 
+The battery (`.build/t34-fused-battery.py`, which starts one serial server and
+one fused server and compares whole texts) passed every prompt:
+
+| Tokens | Serial per prompt | Fused pair wall | Fused decode | Serial decode |
+| ---: | ---: | ---: | ---: | ---: |
+| 64 | 15.0-16.5 s | 36.1 / 38.1 s | 2.15-2.34 tok/s per row | 5.94-6.20 tok/s |
+| 128 | 26.4-27.6 s | 65.9 / 66.6 s | 2.10-2.30 tok/s per row | 5.94-6.20 tok/s |
+
 The wall clock is the remaining failure: this shape drains the routed command
-and the router readback per row per layer, so it has no overlap. The next T34
-step is carrying each row's pending routed command across layers (and, if it
-pays, one union fetch) without breaking the bit-identical gate above.
+and the router readback per row per layer, so it has no overlap -- decode is
+~2.7x slower per row than serial. The next T34 step is carrying each row's
+pending routed command across layers, which needs per-row `routedX`, `h1`,
+`h2`, `moeActs` and route buffers so one row's in-flight FFN is not overwritten
+by the other's. Carry it without breaking the bit-identical gate above.
 
 ## What the measurements say the next attempt must do
 
