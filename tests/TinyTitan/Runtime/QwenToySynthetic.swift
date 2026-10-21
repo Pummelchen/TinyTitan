@@ -14,9 +14,9 @@ import TinyTitanFormat
 enum QwenToySynthetic {
 
     /// Build the toy directory in a temp dir and return its URL.
-    static func write(weightBits: Int = 4) throws -> URL {
+    static func write(weightBits: Int = 4, qsa: Bool = false) throws -> URL {
         precondition([4, 8].contains(weightBits))
-        let toy = ArchConfig.qwenToy()
+        let toy = qsa ? ArchConfig.qwenToyQSA() : ArchConfig.qwenToy()
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ssdai-qwen-toy-\(UUID().uuidString)")
         let exp = dir.appendingPathComponent("packed_experts")
@@ -190,6 +190,31 @@ enum QwenToySynthetic {
                     affineSpec(
                         "\(prefix).self_attn.v_proj.weight",
                         rows: kvDim, cols: d))
+                if qsa {
+                    let indexRows =
+                        toy.sparseIndexer.numHeads
+                        * toy.sparseIndexer.headDim
+                    let indexPrefix =
+                        "model.language_model.layers.\(L).self_attn.indexer"
+                    specs.append(
+                        affineSpec(
+                            "\(indexPrefix).index_q_proj.weight",
+                            rows: indexRows, cols: d))
+                    specs.append(
+                        affineSpec(
+                            "\(indexPrefix).index_k_proj.weight",
+                            rows: indexRows, cols: d))
+                    specs.append(
+                        bf16Spec(
+                            "\(indexPrefix).q_layernorm",
+                            shape: [UInt32(toy.sparseIndexer.headDim), 0, 0, 0],
+                            count: toy.sparseIndexer.headDim))
+                    specs.append(
+                        bf16Spec(
+                            "\(indexPrefix).k_layernorm",
+                            shape: [UInt32(toy.sparseIndexer.headDim), 0, 0, 0],
+                            count: toy.sparseIndexer.headDim))
+                }
                 specs.append(
                     affineSpec(
                         "\(prefix).self_attn.o_proj.weight",
@@ -422,7 +447,7 @@ enum QwenToySynthetic {
             files[rel] = ["size": layerBytes, "sha256": sha]
         }
 
-        let archDict: [String: Any] = [
+        var archDict: [String: Any] = [
             "hiddenSize": toy.hiddenSize, "ffnIntermediate": toy.intermediateSize,
             "moeIntermediateSize": toy.moeIntermediateSize,
             "numHeads": toy.numHeads, "numKVHeads": toy.numKVHeads,
@@ -439,12 +464,20 @@ enum QwenToySynthetic {
             "hiddenActivation": toy.hiddenActivation,
             "fullAttentionLayerMask": toy.fullAttentionLayerMask.map { Int($0) },
         ]
+        if qsa {
+            archDict["indexerNumHeads"] = toy.sparseIndexer.numHeads
+            archDict["indexerNumKVHeads"] = toy.sparseIndexer.numKVHeads
+            archDict["indexerHeadDim"] = toy.sparseIndexer.headDim
+            archDict["indexerBudget"] = toy.sparseIndexer.budget
+            archDict["indexerCompressRatio"] = toy.sparseIndexer.compressRatio
+        }
         let manifestRoot: [String: Any] = [
             "magic": "SSDAI",
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": ["streamingPresent": true, "turboQuantKV": false, "aneSharedExpert": false],
-            "modelID": "qwen-toy-\(weightBits)bit",
+            "modelID": qsa
+                ? "qwen-toy-qsa-\(weightBits)bit" : "qwen-toy-\(weightBits)bit",
             "arch": archDict,
             "quant": [
                 "embedding": quantSlot(weightBits),
@@ -897,5 +930,52 @@ extension ArchConfig {
             sharedExpertGated: true,
             ropeNeoxSubdim: true,
             linearAttention: .none)
+    }
+}
+
+extension ArchConfig {
+    /// The qwen toy with QSA enabled: two indexer heads of 32 dims, a 2-cell
+    /// budget over 4-cell blocks. Past three visible keys this selects, which
+    /// is what lets the streaming acceptance tests cross the window.
+    static func qwenToyQSA() -> ArchConfig {
+        let base = ArchConfig.qwenToy()
+        return ArchConfig(
+            hiddenSize: base.hiddenSize,
+            intermediateSize: base.intermediateSize,
+            moeIntermediateSize: base.moeIntermediateSize,
+            numHeads: base.numHeads,
+            numKVHeads: base.numKVHeads,
+            numFullKVHeads: base.numFullKVHeads,
+            headDim: base.headDim,
+            fullHeadDim: base.fullHeadDim,
+            vocabSize: base.vocabSize,
+            slidingWindow: base.slidingWindow,
+            finalLogitSoftcap: base.finalLogitSoftcap,
+            ropeTheta: base.ropeTheta,
+            fullRopeTheta: base.fullRopeTheta,
+            partialRotaryFactor: base.partialRotaryFactor,
+            numLayers: base.numLayers,
+            numExperts: base.numExperts,
+            topKExperts: base.topKExperts,
+            tieWordEmbeddings: base.tieWordEmbeddings,
+            attentionKEqV: base.attentionKEqV,
+            fullAttentionLayerMask: base.fullAttentionLayerMask,
+            hiddenActivation: base.hiddenActivation,
+            family: base.family,
+            attnOutputGate: base.attnOutputGate,
+            attentionScale: base.attentionScale,
+            embeddingScaledBySqrtHidden: base.embeddingScaledBySqrtHidden,
+            routerScaled: base.routerScaled,
+            ffnSandwichNorms: base.ffnSandwichNorms,
+            sharedExpertGated: base.sharedExpertGated,
+            ropeNeoxSubdim: base.ropeNeoxSubdim,
+            linearAttention: base.linearAttention,
+            hyperConnections: base.hyperConnections,
+            sparseIndexer: SparseIndexerConfig(
+                numHeads: 2, numKVHeads: 1, headDim: 32,
+                budget: 2, compressRatio: 4),
+            ple: base.ple,
+            routerNormTopK: base.routerNormTopK,
+            quantGroupSize: base.quantGroupSize)
     }
 }

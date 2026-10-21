@@ -39,6 +39,9 @@ extension RealForwardRunner {
         valueSource: MTLBuffer,
         bytesPerToken: Int
     ) throws {
+        kv.beginPrefillWrite(
+            layer: layer, slot: slot,
+            startPosition: startPosition, tokenCount: tokenCount)
         if kv.precision.isQuantized {
             guard let kvQuantizer else {
                 throw ModelError.internalInconsistency(

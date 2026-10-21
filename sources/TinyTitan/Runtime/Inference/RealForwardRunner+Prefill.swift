@@ -187,11 +187,12 @@ extension RealForwardRunner {
             return PrefillResult(newPosition: startPosition, seed: .logitsWritten)
         }
 
-        let scratch = try ensurePrefillScratch(config: config)
+        let effectiveConfig = effectivePrefillConfig(config)
+        let scratch = try ensurePrefillScratch(config: effectiveConfig)
         let spans = PrefillChunkPlanner.spans(
             tokenCount: tokens.count,
             startPosition: startPosition,
-            config: config)
+            config: effectiveConfig)
         do {
             for (spanIndex, span) in spans.enumerated() {
                 try Task.checkCancellation()
@@ -204,7 +205,7 @@ extension RealForwardRunner {
                     outputMode: outputMode,
                     logits: logits,
                     scratch: scratch,
-                    config: config,
+                    config: effectiveConfig,
                     writeFinalHead: spanIndex == spans.count - 1)
                 try Task.checkCancellation()
                 onProgress(span.completedCount)
@@ -225,6 +226,20 @@ extension RealForwardRunner {
         return PrefillResult(
             newPosition: startPosition + tokens.count,
             seed: .logitsWritten)
+    }
+
+    /// Host-KV streaming bounds a chunk by the selection union that must fit
+    /// the window. `config.chunkTokens` is the caller's ceiling; the KV tier
+    /// only ever lowers it, and the lowered value is used everywhere the chunk
+    /// size matters (scratch, planner, dispatch).
+    func effectivePrefillConfig(
+        _ config: PrefillRuntimeConfig
+    ) -> PrefillRuntimeConfig {
+        guard let kv, kv.streamsKVFromHost else { return config }
+        let capped = kv.streamingPrefillChunkTokens(
+            configured: config.chunkTokens)
+        return capped == config.chunkTokens
+            ? config : .hostKVChunked(chunkTokens: capped)
     }
 
     func ensurePrefillScratch(config: PrefillRuntimeConfig) throws -> PrefillChunkScratchBuffers {

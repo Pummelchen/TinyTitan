@@ -25,6 +25,7 @@ extension ServerModelSession {
         promptCacheDiskLimitBytes: Int = 8_192 * 1_048_576,
         prefillChunkTokens requestedPrefillChunkTokens: Int? = nil,
         kvCachePrecision: KVCachePrecision = .int8,
+        hostKVWindowTokens: Int? = nil,
         ropeScalingMode: RuntimeRoPEScalingMode = .none,
         thinkingMode: ModelThinkingMode = .off,
         reasoningEffort: ModelReasoningEffort? = nil,
@@ -211,6 +212,7 @@ extension ServerModelSession {
             expertIOSubmission: loadRuntime.expertIOSubmission,
             expertIOTimeline: loadRuntime.expertIOTimeline,
             kvCachePrecision: kvCachePrecision,
+            hostKVWindowTokens: hostKVWindowTokens,
             ropeScalingMode: ropeScalingMode,
             yarnContextTokens: ropeScalingMode == .yarn
                 ? maxContext : RuntimeConfiguration.defaultYaRNContextTokens)
@@ -228,7 +230,8 @@ extension ServerModelSession {
             fp16RingEnabled: runtime.fp16RingEnabled,
             slidingWindow: model.config.slidingWindow,
             maxPrefillChunkTokens: runtime.prefillChunkTokens,
-            vocab: model.config.vocabSize)
+            vocab: model.config.vocabSize,
+            hostKVWindowTokens: runtime.hostKVWindowTokens)
         let slotBudget = BatchedMemoryBudget.slotBudgetBytes(
             physicalMemory: ProcessInfo.processInfo.physicalMemory,
             // A dense family has no routed experts, so it has no expert cache to

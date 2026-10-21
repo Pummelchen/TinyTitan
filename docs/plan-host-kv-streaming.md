@@ -1,11 +1,13 @@
 # Host KV with a VRAM window: the design and the wall
 
-**Status (2026-10-21): design; not implemented.** This is the third piece of
-the Project Maya transfer (see `docs/project-maya-scan-2026-10-20.md`, item C).
-Maya keeps each attention layer's KV in pinned host memory with a window of
-positions in VRAM; the Qwen3.8 table in its study is the same model family this
-repository runs. This note records what TinyTitan would have to change, why it
-is not a one-session change, and what the first test would be.
+**Status (2026-10-21): implemented (decode and chunked prefill).** This is the
+third piece of the Project Maya transfer (see
+`docs/project-maya-scan-2026-10-20.md`, item C). Maya keeps each attention
+layer's KV in pinned host memory with a window of positions in VRAM; the
+Qwen3.8 table in its study is the same model family this repository runs.
+`docs/host-kv-streaming-2026-10-21.md` records the seams, the command line and
+the acceptance matrix; this note keeps the original design and now states what
+shipped against it.
 
 ## What the engine has today
 
@@ -55,30 +57,49 @@ is not a one-session change, and what the first test would be.
   that is the 4-9× prompt case Maya measured, and it needs the staging buffer
   to be filled while earlier layers run.
 
-## Why it is not in this pass
+## How it is built
 
-The attention kernel's `keepMask` is a mask over the existing buffer, not an
-indirection through a window. A selected-block copy needs either
+The complete tree changed the two things this note said stood in the way.
 
-- a kernel variant that reads a compacted window plus a block map, or
-- a position remap in the mask and a window that is a dense copy of the
-  selected rows,
+- `KVCacheManager` now has an optional host tier (`windowTokens`). For the
+  streamed full-attention layers `kBuffers`/`vBuffers` are a window of that
+  many rows, the authoritative rows live in a lazily faulted `mmap` arena, and
+  the engine keeps a logical-position -> window-row map plus a row -> occupant
+  reverse map. SWA layers keep their ring and linear layers keep no rows, so
+  their layout is unchanged.
+- `attention_decode_window_partial(_simd)` reads a compact selection with a
+  row indirection (`sel_row`), so the attention cost is the selection, not the
+  context. The contiguous kernel is unchanged when the tier is off.
+- The tiled prefill kernels take `useKeep == 3`: `keepIdx` stays logical (for
+  the visibility check) and a parallel `keepRows` names the window row. A
+  prefill chunk writes into a per-layer staging buffer, and `advance` moves
+  the chunk to the arena after the command buffers complete.
+- Selection-aware gathering protects every row assigned in one sweep, so a
+  later allocation cannot evict an earlier indirection entry. Dirty rows are
+  written back on eviction and at `advance`.
+- Snapshot/restore reads and writes the arena, not the window.
+- `--host-kv-window <tokens>` is the switch. The decode path needs the CPU
+  selection (the GPU selection deliberately does not read back), and the
+  prefill chunk is capped at `windowTokens / selectionWidth` so the union of a
+  chunk's selections fits the window.
 
-and neither is a local change: `encodeFullAttentionDecode`, the QSA decode and
-prefill paths, `KVCacheManager`'s region layout, and the snapshot/restore code
-all assume one contiguous per-slot buffer. Estimating from the existing split
-work, it is a multi-week change with a new kernel, a new cache layout and a
-new test matrix (short-context parity, 128K/1M start, decode and prefill
-timings). Shipping a half-integrated KV tier would risk silent wrong answers at
-long context, which is the one class of bug this project refuses to trade for a
-number.
+The first test when it was designed is below; it is implemented, scaled so it
+runs in the ordinary suite, and the exact command for a real 128K/1M run is in
+the implementation note.
 
-## First test when it is built
+## Acceptance tests
 
-1. Short-context parity: the same prompt at 4K gives byte-identical logits to
-   the contiguous KV (the existing `QwenRunnerTests` harness).
-2. Window boundary: a 128K prompt crosses the window repeatedly; logits match a
-   contiguous 128K run.
-3. Memory: the process's Metal allocation at 1M is the window, not the full KV;
-   the host arena is the difference.
-4. Speed: decode at 128K/1M against the contiguous path, and prefill at 512K.
+1. Short-context parity: the same rows at 4K give the same attention as the
+   contiguous KV. `HostKVStreamingTests.shortContextParity` runs the same data
+   through both layouts at 4,096 positions; `QwenRunnerTests` pins the runner
+   path on the toy fixture.
+2. Window boundary: `windowBoundaryMatchesContiguousSelection` crosses a
+   32-row window at 131,072 positions and compares against contiguous attention
+   over the same mask; `QwenRunnerTests.hostKVStreamsQSADecodeAndPrefill`
+   exercises the real QSA selection and asserts the window was evicted.
+3. Memory: `memoryIsTheWindowNotTheFullKV` compares a 1,048,576-token arena
+   against a 64-row window and asserts the Metal cost is the window.
+4. Selection-bounded copies: `copiesStaySelectionBounded` asserts a repeated
+   selection copies nothing and a disjoint one copies its keys, not the
+   context. The large-context timing is a benchmark run, not a unit test; see
+   the implementation note for the command.

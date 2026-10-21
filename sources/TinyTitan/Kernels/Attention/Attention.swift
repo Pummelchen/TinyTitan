@@ -24,6 +24,11 @@ struct AttentionSplitGeometry: Sendable, Equatable {
 final class Attention {
     let ctx: MetalContext
     let psoPartial: MTLComputePipelineState
+    /// Host-KV streaming: pass 1 over a compact selection with an indirection
+    /// row per key. The serial form backs head_dim > 256; the simd form is
+    /// preferred whenever the shape allows it.
+    let psoWindowPartial: MTLComputePipelineState
+    let psoWindowPartialSimd: MTLComputePipelineState?
     let psoGQAPartial: MTLComputePipelineState
     let psoCombine: MTLComputePipelineState
     let psoPartialSWA: MTLComputePipelineState
@@ -65,6 +70,10 @@ final class Attention {
     init(context: MetalContext) throws {
         self.ctx = context
         self.psoPartial = try context.pipeline("attention_decode_partial")
+        self.psoWindowPartial = try context.pipeline(
+            "attention_decode_window_partial")
+        self.psoWindowPartialSimd = try? context.pipeline(
+            "attention_decode_window_partial_simd")
         self.psoGQAPartial = try context.pipeline("attention_decode_gqa_swa_partial")
         self.psoCombine = try context.pipeline("attention_decode_combine")
         self.psoPartialSWA = try Self.specializedPipeline(
@@ -267,7 +276,8 @@ final class Attention {
         seqLen: UInt32,
         scale: Float? = nil,
         kvFormat: KVView? = nil,
-        keepMask: MTLBuffer? = nil
+        keepMask: MTLBuffer? = nil,
+        windowSelection: KVWindowSelection? = nil
     ) throws {
         precondition(
             numQHeads % numKVHeads == 0,
@@ -275,7 +285,9 @@ final class Attention {
         precondition(
             headDim <= 512,
             "head_dim must be <= 512 (kernel scratch is sized for the full-attn case)")
-        precondition(seqLen > 0, "full attention requires at least one KV position")
+        precondition(
+            seqLen > 0 || windowSelection != nil,
+            "full attention requires at least one KV position")
         let sc = scale ?? Self.defaultScale(headDim: headDim)
 
         try encodeSplit(
@@ -283,10 +295,12 @@ final class Attention {
             q: q, qOffset: qOffset, k: k, kOffset: kOffset,
             v: v, vOffset: vOffset, out: out, outOffset: outOffset,
             headDim: headDim, numQHeads: numQHeads, numKVHeads: numKVHeads,
-            seqLen: seqLen, kvStart: 0, scale: sc,
+            seqLen: windowSelection.map { UInt32($0.count) } ?? seqLen,
+            kvStart: 0, scale: sc,
             preferGQASWA: false,
             kvFormat: kvFormat,
-            keepMask: keepMask)
+            keepMask: keepMask,
+            windowSelection: windowSelection)
     }
 
     /// Two-pass split-KV (Flash-Decoding) dispatch shared by SWA and full
@@ -305,7 +319,8 @@ final class Attention {
         preferGQASWA: Bool,
         ringCapacity: UInt32 = 0,
         kvFormat: KVView? = nil,
-        keepMask: MTLBuffer? = nil
+        keepMask: MTLBuffer? = nil,
+        windowSelection: KVWindowSelection? = nil
     ) throws {
         precondition(
             Int(numQHeads) <= Self.maxQHeads,
@@ -322,6 +337,9 @@ final class Attention {
         precondition(
             keepMask == nil || !preferGQASWA,
             "sparse key selection is not implemented for the GQA/SWA path")
+        precondition(
+            windowSelection == nil || (keepMask == nil && !preferGQASWA),
+            "a windowed selection replaces the keep mask and is full-attention only")
         splitStateLock.lock()
         let reentered = splitInFlight
         splitInFlight = true
@@ -339,26 +357,38 @@ final class Attention {
         let geometry = Self.splitGeometry(
             numQHeads: numQHeads,
             numKVHeads: numKVHeads,
-            seqLen: seqLen,
+            seqLen: windowSelection.map { UInt32($0.count) } ?? seqLen,
             kvStart: kvStart,
             preferGQASWA: preferGQASWA)
         let useSWAGQAPartial = geometry.useSWAGroupedPartial
         let nChunks = geometry.numChunks
         let chunkLen = geometry.chunkLength
-        var partialPSO = partialPipeline(
-            headDim: headDim,
-            numQHeads: numQHeads,
-            numKVHeads: numKVHeads,
-            numChunks: nChunks,
-            useGQAPartial: useSWAGQAPartial,
-            ringCapacity: ringCapacity)
-        if keepMask != nil, !useSWAGQAPartial, ringCapacity == 0, headDim % 32 == 0, headDim <= 256,
-            simdPartialEnabled,
-            let simd = simdPartialPipeline(
-                headDim: headDim, numQHeads: numQHeads,
-                numKVHeads: numKVHeads, numChunks: nChunks)
-        {
-            partialPSO = simd
+        var partialPSO: MTLComputePipelineState
+        if windowSelection != nil {
+            if headDim % 32 == 0, headDim <= 256, simdPartialEnabled,
+                let simd = psoWindowPartialSimd
+            {
+                partialPSO = simd
+            } else {
+                partialPSO = psoWindowPartial
+            }
+        } else {
+            partialPSO = partialPipeline(
+                headDim: headDim,
+                numQHeads: numQHeads,
+                numKVHeads: numKVHeads,
+                numChunks: nChunks,
+                useGQAPartial: useSWAGQAPartial,
+                ringCapacity: ringCapacity)
+            if keepMask != nil, !useSWAGQAPartial, ringCapacity == 0,
+                headDim % 32 == 0, headDim <= 256,
+                simdPartialEnabled,
+                let simd = simdPartialPipeline(
+                    headDim: headDim, numQHeads: numQHeads,
+                    numKVHeads: numKVHeads, numChunks: nChunks)
+            {
+                partialPSO = simd
+            }
         }
         let tgWidth = min(Self.threadsPerGroup, Int(partialPSO.maxTotalThreadsPerThreadgroup))
 
@@ -396,9 +426,14 @@ final class Attention {
         p1.setBytes(&kvStride, length: MemoryLayout<UInt32>.size, index: 15)
         p1.setBytes(&kvValueBytes, length: MemoryLayout<UInt32>.size, index: 16)
         p1.setBytes(&kvGroupSize, length: MemoryLayout<UInt32>.size, index: 17)
-        var useKeep = UInt32(keepMask == nil ? 0 : 1)
-        p1.setBuffer(keepMask ?? emptyKeepMask, offset: 0, index: 18)
-        p1.setBytes(&useKeep, length: MemoryLayout<UInt32>.size, index: 19)
+        if let windowSelection {
+            p1.setBuffer(windowSelection.indices, offset: 0, index: 18)
+            p1.setBuffer(windowSelection.rows, offset: 0, index: 19)
+        } else {
+            var useKeep = UInt32(keepMask == nil ? 0 : 1)
+            p1.setBuffer(keepMask ?? emptyKeepMask, offset: 0, index: 18)
+            p1.setBytes(&useKeep, length: MemoryLayout<UInt32>.size, index: 19)
+        }
         let partialGroups = geometry.partialThreadgroups
         p1.dispatchThreadgroups(
             MTLSize(width: partialGroups, height: 1, depth: 1),

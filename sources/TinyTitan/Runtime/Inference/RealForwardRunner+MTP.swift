@@ -233,11 +233,14 @@ extension RealForwardRunner {
         }
         reset()
         mtp.reset()
-        let scratch = try ensurePrefillScratch(config: config)
+        // The target may stream its full-attention KV through a window; the
+        // chunk must be small enough that the union of its selections fits.
+        let effectiveConfig = effectivePrefillConfig(config)
+        let scratch = try ensurePrefillScratch(config: effectiveConfig)
         let spans = PrefillChunkPlanner.spans(
             tokenCount: tokens.count,
             startPosition: 0,
-            config: config)
+            config: effectiveConfig)
         var carry: Data?
         do {
             for (spanIndex, span) in spans.enumerated() {
@@ -251,7 +254,7 @@ extension RealForwardRunner {
                         ? .greedyIfAvailable : .logits,
                     logits: logits,
                     scratch: scratch,
-                    config: config,
+                    config: effectiveConfig,
                     writeFinalHead: spanIndex == spans.count - 1)
 
                 let readback = try ensureMTPPrefillReadback(rows: span.tokenCount)

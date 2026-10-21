@@ -57,7 +57,7 @@ extension RealForwardRunner {
         layer: Int,
         position: Int,
         eps: Float
-    ) throws -> MTLBuffer? {
+    ) throws -> DecodeKeySelection? {
         guard let indexer = qsaIndexer else { return nil }
         let weights = try indexerWeights(layer: layer)
         let selecting = qsaSelectionNeeded(layer: layer, position: position)
@@ -74,11 +74,15 @@ extension RealForwardRunner {
                 commandBuffer: passthrough, hidden: out,
                 weights: weights, layer: layer,
                 position: position, eps: eps)
-            return nil
+            return DecodeKeySelection(mask: nil, indices: nil, count: position + 1)
         }
+        // Host-KV streaming needs the selected keys on the host to gather
+        // their rows; the GPU selection deliberately never reads back. Force
+        // the CPU reference while the window is engaged.
+        let streaming = kv?.streamsLayer(layer) ?? false
         let gpuSelect =
             qsaGPUSelectEnabled && indexer.canSelectOnGPU
-            && activationDumpDirectory == nil
+            && activationDumpDirectory == nil && !streaming
         if gpuSelect && !qsaSelectVerify {
             // Everything rides the layer's own command buffer: entry, key
             // append, scores, and the selection itself. No readback.
@@ -101,7 +105,7 @@ extension RealForwardRunner {
                 commandBuffer: passthrough,
                 visibleKeys: position + 1)
             try rotate(&passthrough, role: "qsa.select")
-            return mask
+            return DecodeKeySelection(mask: mask, indices: nil, count: 0)
         }
         guard
             try runSync({ cb in
@@ -134,7 +138,7 @@ extension RealForwardRunner {
             // overwrites the buffer and decides the attention; any difference
             // is reported per (layer, position).
             let gpuMask = indexer.keepMaskBytes(count: position + 1)
-            let mask = indexer.selectKeys(visibleKeys: position + 1)
+            let compact = indexer.selectKeysCompact(visibleKeys: position + 1)
             let cpuMask = indexer.keepMaskBytes(count: position + 1)
             if gpuMask != cpuMask {
                 let diff = zip(gpuMask, cpuMask).enumerated().filter {
@@ -150,13 +154,16 @@ extension RealForwardRunner {
                         "TinyTitan qsa_select_verify ok layer=\(layer) position=\(position)\n".utf8)
                 )
             }
-            return mask
+            return DecodeKeySelection(
+                mask: compact.mask, indices: compact.indices,
+                count: compact.count)
         }
-        let mask = indexer.selectKeys(visibleKeys: position + 1)
+        let compact = indexer.selectKeysCompact(visibleKeys: position + 1)
         if layer == Self.qsaSnapshotLayer {
             dumpQSASnapshot(layer: layer, visibleKeys: position + 1)
         }
-        return mask
+        return DecodeKeySelection(
+            mask: compact.mask, indices: compact.indices, count: compact.count)
     }
 
     /// The same snapshot from the chunked path, taken from its last row.

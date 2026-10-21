@@ -18,7 +18,12 @@ extension KVCacheManager {
         // captured/restored at slot 0's region base (offset 0), which is what the
         // prompt cache keys on. A batched slot's payload is a later phase.
         for layer in 0..<config.numLayers where kinds[layer] != .linear {
-            let storedTokens = min(snapshotPosition, capacityTokens[layer])
+            // A streamed layer's arena spans `maxContext`; its window is not
+            // the snapshot's source.
+            let storedTokens =
+                streamsLayer(layer)
+                ? min(snapshotPosition, maxContext)
+                : min(snapshotPosition, capacityTokens[layer])
             let (length, overflow) = storedTokens.multipliedReportingOverflow(
                 by: strides[layer])
             guard !overflow else { throw InferenceStateSnapshotError.integerOverflow }
@@ -39,6 +44,12 @@ extension KVCacheManager {
         var segment = 0
         for layer in 0..<config.numLayers where kinds[layer] != .linear {
             let kLength = segmentLengths[segment]
+            if streamsLayer(layer) {
+                appendStreamedSnapshot(
+                    layer: layer, length: kLength, to: &payload)
+                segment += 2
+                continue
+            }
             payload.append(
                 kBuffers[layer].contents().assumingMemoryBound(to: UInt8.self),
                 count: kLength)
@@ -75,6 +86,19 @@ extension KVCacheManager {
         var segment = 0
         for layer in 0..<config.numLayers where kinds[layer] != .linear {
             let kLength = segmentLengths[segment]
+            if streamsLayer(layer) {
+                guard offset >= 0, kLength >= 0,
+                    offset <= bytes.count - 2 * kLength,
+                    let source = bytes.baseAddress?.advanced(by: offset)
+                else {
+                    throw InferenceStateSnapshotError.invalidLayout
+                }
+                restoreStreamedSnapshot(
+                    layer: layer, source: source, length: kLength)
+                offset += 2 * kLength
+                segment += 2
+                continue
+            }
             try copySnapshotSegment(
                 bytes: bytes,
                 offset: &offset,

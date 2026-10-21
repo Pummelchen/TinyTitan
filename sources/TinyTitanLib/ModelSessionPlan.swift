@@ -89,6 +89,7 @@ package struct ModelSessionPlan: Sendable {
     package let promptCacheDiskLimitBytes: Int
     package let prefillChunkTokens: Int?
     package let kvCachePrecision: KVCachePrecision
+    package let hostKVWindowTokens: Int?
     package let ropeScalingMode: RuntimeRoPEScalingMode
     package let thinkingMode: ModelThinkingMode
     /// Reasoning-effort override for effort-aware families; nil keeps the
@@ -111,6 +112,7 @@ package struct ModelSessionPlan: Sendable {
         promptCacheDiskLimitBytes: Int,
         prefillChunkTokens: Int?,
         kvCachePrecision: KVCachePrecision = .int8,
+        hostKVWindowTokens: Int? = nil,
         ropeScalingMode: RuntimeRoPEScalingMode = .none,
         thinkingMode: ModelThinkingMode = .off,
         reasoningEffort: ModelReasoningEffort? = nil,
@@ -129,6 +131,7 @@ package struct ModelSessionPlan: Sendable {
         self.promptCacheDiskLimitBytes = promptCacheDiskLimitBytes
         self.prefillChunkTokens = prefillChunkTokens
         self.kvCachePrecision = kvCachePrecision
+        self.hostKVWindowTokens = hostKVWindowTokens
         self.ropeScalingMode = ropeScalingMode
         self.thinkingMode = thinkingMode
         self.reasoningEffort = reasoningEffort
@@ -152,6 +155,7 @@ package struct ModelSessionPlan: Sendable {
             promptCacheDiskLimitBytes: promptCacheDiskLimitBytes,
             prefillChunkTokens: prefillChunkTokens,
             kvCachePrecision: kvCachePrecision,
+            hostKVWindowTokens: hostKVWindowTokens,
             ropeScalingMode: ropeScalingMode,
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort,

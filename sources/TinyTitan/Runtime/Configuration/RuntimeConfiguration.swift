@@ -384,6 +384,8 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     public let expertIOSubmission: RuntimeExpertIOSubmission
     public let expertIOTimeline: RuntimeExpertIOTimeline
     public let kvCachePrecision: KVCachePrecision
+    /// Full-attention KV window in VRAM; nil keeps the contiguous cache.
+    public let hostKVWindowTokens: Int?
     public let ropeScalingMode: RuntimeRoPEScalingMode
     public let yarnContextTokens: Int
 
@@ -400,6 +402,7 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         expertIOSubmission: RuntimeExpertIOSubmission = .deferred,
         expertIOTimeline: RuntimeExpertIOTimeline = .shared,
         kvCachePrecision: KVCachePrecision = .int8,
+        hostKVWindowTokens: Int? = nil,
         ropeScalingMode: RuntimeRoPEScalingMode = .none,
         yarnContextTokens: Int = RuntimeConfiguration.defaultYaRNContextTokens
     ) throws {
@@ -411,6 +414,10 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         }
         guard Self.supportedYaRNContextTokens.contains(yarnContextTokens) else {
             throw RuntimeConfigurationError.invalidYaRNContextTokens(yarnContextTokens)
+        }
+        if let hostKVWindowTokens, hostKVWindowTokens <= 0 {
+            throw RuntimeConfigurationError.invalidHostKVWindowTokens(
+                hostKVWindowTokens)
         }
         self.expertCacheSlots = expertCacheSlots
         self.expertCachePolicy = expertCachePolicy
@@ -424,6 +431,7 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         self.expertIOSubmission = expertIOSubmission
         self.expertIOTimeline = expertIOTimeline
         self.kvCachePrecision = kvCachePrecision
+        self.hostKVWindowTokens = hostKVWindowTokens
         self.ropeScalingMode = ropeScalingMode
         self.yarnContextTokens = yarnContextTokens
     }

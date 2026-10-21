@@ -15,18 +15,22 @@ import TinyTitanValidationSupport
         weightBits: Int = 4,
         slots: Int = 1,
         forceLogitsHead: Bool = false,
-        maxContext: Int = 64
+        maxContext: Int = 64,
+        hostKVWindowTokens: Int? = nil,
+        qsa: Bool = false
     ) throws -> (URL, MetalContext, RealForwardRunner) {
-        let dir = try QwenToySynthetic.write(weightBits: weightBits)
+        let dir = try QwenToySynthetic.write(weightBits: weightBits, qsa: qsa)
         let ctx = try MetalContext()
         let model = try Model.load(
             directoryURL: dir,
             device: ctx.device,
-            expecting: .qwenToy())
+            expecting: qsa ? .qwenToyQSA() : .qwenToy())
         // A 4-bit lm_head defaults to the fused greedy head, which never writes
         // the logits buffer; a logits comparison must force the logits head, as
         // the server does.
-        let runtime = try RuntimeConfiguration(forceLogitsHead: forceLogitsHead)
+        let runtime = try RuntimeConfiguration(
+            forceLogitsHead: forceLogitsHead,
+            hostKVWindowTokens: hostKVWindowTokens)
         let runner = try RealForwardRunner(
             model: model,
             context: ctx,
@@ -131,9 +135,11 @@ import TinyTitanValidationSupport
         let referenceA = try await alone(aTokens)
         let referenceB = try await alone(bTokens)
 
-        let (dir, ctx, runner) = try makeRunner(weightBits: bits, slots: 2)
+        let (dir, ctx, runner) = try makeRunner(
+            weightBits: bits, slots: 2, hostKVWindowTokens: 64)
         defer { try? FileManager.default.removeItem(at: dir) }
         #expect(runner.slots == 2)
+        #expect(runner.kv?.streamsLayer(3) == true)
         let logits = try makeLogits(ctx, vocab: vocab)
         var gotA: [[Float]] = []
         var gotB: [[Float]] = []
@@ -191,8 +197,10 @@ import TinyTitanValidationSupport
         let referenceB = try await alone(bTokens)
 
         let (dir, ctx, runner) = try makeRunner(
-            weightBits: bits, slots: 2, forceLogitsHead: true)
+            weightBits: bits, slots: 2, forceLogitsHead: true,
+            hostKVWindowTokens: 64)
         defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(runner.kv?.streamsLayer(3) == true)
         let logitsA = try makeLogits(ctx, vocab: vocab)
         let logitsB = try makeLogits(ctx, vocab: vocab)
         var gotA: [[Float]] = []
@@ -653,4 +661,76 @@ import TinyTitanValidationSupport
         #expect(mtp.sharedScalarGateElements == 1)
         #expect(mtp.qElements == 128 * 2 * mtp.maxQElementsPerToken)
     }
+
+    /// The host-KV tier is a storage change, not an arithmetic one: with a
+    /// window that holds the whole toy context, decode and chunked prefill must
+    /// produce the contiguous cache's logits.
+    @Test(arguments: [4, 8])
+    func hostKVWindowMatchesContiguousLogits(bits: Int) async throws {
+        let vocab = 1024
+        let tokens: [Int32] = [11, 7, 5, 3, 9]
+
+        func run(window: Int?) async throws -> [Float] {
+            let (dir, ctx, runner) = try makeRunner(
+                weightBits: bits, forceLogitsHead: true,
+                maxContext: 64, hostKVWindowTokens: window)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let logits = try makeLogits(ctx, vocab: vocab)
+            _ = try await runner.prefillChunked(
+                tokens: tokens[...], startPosition: 0, outputMode: .logits,
+                config: .production(chunkTokens: 32), into: logits,
+                onProgress: { _ in })
+            try await runner.produce(token: 13, position: tokens.count, into: logits)
+            return Fp16Buffer.read(logits, count: vocab)
+        }
+
+        let contiguous = try await run(window: nil)
+        let streamed = try await run(window: 64)
+        for i in 0..<vocab {
+            #expect(
+                abs(contiguous[i] - streamed[i]) < 0.05,
+                "logit \(i): \(streamed[i]) vs \(contiguous[i])")
+        }
+    }
+
+    /// Host-KV streaming past the window, with the real QSA path engaged: the
+    /// tree prefill chunks a streamed runner to one token (window 8 / selection
+    /// width 5), while the contiguous run keeps its 32-token chunks. The
+    /// selections must agree, and the streamed cache must decode the same.
+    @Test func hostKVStreamsQSADecodeAndPrefill() async throws {
+        let vocab = 1024
+        let tokens: [Int32] = [11, 7, 5, 3, 9, 4, 2, 8, 6, 1]
+
+        func run(window: Int?) async throws -> [Float] {
+            let (dir, ctx, runner) = try makeRunner(
+                weightBits: 8, forceLogitsHead: true, maxContext: 32,
+                hostKVWindowTokens: window, qsa: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let logits = try makeLogits(ctx, vocab: vocab)
+            _ = try await runner.prefillChunked(
+                tokens: tokens[...], startPosition: 0, outputMode: .logits,
+                config: .production(chunkTokens: 32), into: logits,
+                onProgress: { _ in })
+            try await runner.produce(token: 13, position: tokens.count, into: logits)
+            if window != nil {
+                #expect(runner.kv?.streamsLayer(3) == true)
+                #expect(
+                    (runner.kv?.windowCopyBytes ?? 0) > 0,
+                    "the streamed run must gather a selection")
+                #expect(
+                    (runner.kv?.windowEvictions ?? 0) > 0,
+                    "the streamed run must cross its window")
+            }
+            return Fp16Buffer.read(logits, count: vocab)
+        }
+
+        let contiguous = try await run(window: nil)
+        let streamed = try await run(window: 8)
+        for i in 0..<vocab {
+            #expect(
+                abs(contiguous[i] - streamed[i]) < 0.05,
+                "logit \(i): \(streamed[i]) vs \(contiguous[i])")
+        }
+    }
+
 }

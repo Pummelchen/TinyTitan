@@ -65,7 +65,7 @@ public final class KVCacheManager {
     public let precision: KVCachePrecision
     /// Retained so `reserve` can allocate; init-only allocation was the previous
     /// invariant and growth deliberately relaxes it.
-    private let device: MTLDevice
+    let device: MTLDevice
 
     var kBuffers: [MTLBuffer]
     var vBuffers: [MTLBuffer]
@@ -89,6 +89,66 @@ public final class KVCacheManager {
     /// multiplication below in a sane range for a number someone typed.
     public static let maximumSlots = 256
 
+    /// Host-KV streaming (`docs/plan-host-kv-streaming.md`).
+    ///
+    /// When this is non-nil the full-attention layers keep their authoritative
+    /// rows in a host arena and `kBuffers`/`vBuffers` become a window of this
+    /// many rows per layer and slot. SWA and linear layers are unchanged: an
+    /// SWA ring is already bounded, and a linear layer has no rows. A nil window
+    /// is the original contiguous layout, byte for byte.
+    public let windowTokens: Int?
+    public var streamsKVFromHost: Bool { windowTokens != nil }
+
+    var hostK: [UnsafeMutableRawPointer?] = []
+    var hostV: [UnsafeMutableRawPointer?] = []
+    /// `slots * maxContext * stride` per streamed layer (K and V each).
+    var hostArenaLengths: [Int] = []
+    /// Per streamed layer: `slots * maxContext` logical -> window row, or
+    /// `UInt32.max` when the row is not resident.
+    var windowRowMap: [[UInt32]] = []
+    /// Per streamed layer: `slots * windowTokens` window row -> logical
+    /// position, or `UInt32.max` when free.
+    var windowOccupant: [[UInt32]] = []
+    /// Per streamed layer and slot: next window row the clock hands out.
+    var windowCursor: [[Int]] = []
+    /// Per streamed layer: one flag per window row.
+    var windowDirty: [[Bool]] = []
+    /// Per streamed layer and slot: the logical position being written by the
+    /// current decode step. It must survive the selection sweep.
+    var windowPinned: [[Int]] = []
+    /// Diagnostic counters, read by the acceptance tests.
+    public var windowCopyBytes: Int = 0
+    public var windowEvictions: Int = 0
+    public var windowRowCopies: Int = 0
+
+    /// Prefill writes land here first (quantized or fp16, exactly what the
+    /// attention was going to read), then move to the host arena in `advance`
+    /// once the chunk's command buffers have completed. A chunk is the unit of
+    /// transfer; the window is the unit of read.
+    var prefillStagingK: [MTLBuffer?] = []
+    var prefillStagingV: [MTLBuffer?] = []
+    var prefillStagingCapacity: [Int] = []
+    var prefillStagingStart: [Int] = []
+    var prefillStagingCount: [Int] = []
+    var prefillStagingActive: [Bool] = []
+    /// Selection scratch shared by the serial per-layer gather. Sized on demand.
+    var prefillIndicesBuf: MTLBuffer?
+    var prefillRowsBuf: MTLBuffer?
+    var prefillCountsBuf: MTLBuffer?
+    var prefillSelectionCapacity: Int = 0
+    var windowIndicesBuf: MTLBuffer?
+    var windowRowsBuf: MTLBuffer?
+    var windowSelectionCapacity: Int = 0
+    /// One byte-bound placeholder for the windowed prefill kernel's unused mask
+    /// argument.
+    var windowEmptyMask: MTLBuffer?
+    /// `[maxContext]` bytes reused to mark the union a prefill chunk needs.
+    var windowNeeded: [UInt8] = []
+    /// Window rows reserved by the gather in progress. An indirection entry
+    /// must not be evicted by a later allocation in the same sweep -- that
+    /// would leave the kernel reading another key's row.
+    var windowProtected: Set<Int> = []
+
     /// Logical token cursor per slot. `position` is slot 0's -- the
     /// single-sequence case every existing caller uses.
     var positions: [Int]
@@ -107,19 +167,35 @@ public final class KVCacheManager {
         fp16RingEnabled: Bool = false,
         precision: KVCachePrecision = .fp16,
         slidingWindow: Int? = nil,
-        maxPrefillChunkTokens: Int = 128
+        maxPrefillChunkTokens: Int = 128,
+        windowTokens: Int? = nil
     ) throws {
         precondition(maxContext > 0, "maxContext must be positive")
         precondition(maxPrefillChunkTokens > 0, "maxPrefillChunkTokens must be positive")
         precondition(
             slots > 0 && slots <= Self.maximumSlots,
             "slots must be between 1 and \(Self.maximumSlots)")
+        if let windowTokens {
+            precondition(windowTokens > 0, "windowTokens must be positive")
+        }
         self.device = device
         self.config = config
         self.maxContext = maxContext
         self.slots = slots
         self.positions = Array(repeating: 0, count: slots)
         self.precision = precision
+        self.windowTokens = windowTokens.map { min($0, maxContext) }
+        if let window = self.windowTokens, config.sparseIndexer.enabled {
+            let width =
+                config.sparseIndexer.budget + config.sparseIndexer.compressRatio - 1
+            guard window >= width + 1 else {
+                throw ModelError.internalInconsistency(
+                    detail:
+                        "host-KV window \(window) cannot hold a selection of "
+                        + "\(width) keys plus the in-flight token; raise "
+                        + "--host-kv-window above \(width)")
+            }
+        }
         let ringEnabled = fp16RingEnabled
         self.fp16RingEnabled = ringEnabled
 
@@ -135,12 +211,18 @@ public final class KVCacheManager {
         var kd: [LayerKind] = []
         var caps: [Int] = []
         var valueByteCounts: [Int] = []
+        var hk: [UnsafeMutableRawPointer?] = []
+        var hv: [UnsafeMutableRawPointer?] = []
+        var hLengths: [Int] = []
         ks.reserveCapacity(config.numLayers)
         vs.reserveCapacity(config.numLayers)
         st.reserveCapacity(config.numLayers)
         kd.reserveCapacity(config.numLayers)
         caps.reserveCapacity(config.numLayers)
         valueByteCounts.reserveCapacity(config.numLayers)
+        hk.reserveCapacity(config.numLayers)
+        hv.reserveCapacity(config.numLayers)
+        hLengths.reserveCapacity(config.numLayers)
 
         // Linear-attention layers keep no per-token K/V rows; they share one
         // page-sized placeholder so the parallel arrays stay non-optional.
@@ -170,9 +252,16 @@ public final class KVCacheManager {
                 kd.append(.linear)
                 caps.append(0)
                 valueByteCounts.append(0)
+                hk.append(nil)
+                hv.append(nil)
+                hLengths.append(0)
                 continue
             }
             let isFull = maskValue != 0
+            // The host tier is for full attention only. An SWA layer's ring is
+            // already the bounded working set that a window would otherwise
+            // provide; putting it on the host would add a copy and buy nothing.
+            let streamed = isFull && self.windowTokens != nil
             let fp16Stride = isFull ? fullStride : swaStride
             let elements = fp16Stride / Self.fp16Size
             let layout = Self.rowLayout(elements: elements, precision: precision)
@@ -185,10 +274,14 @@ public final class KVCacheManager {
             // 13.80 s of decode at maxContext 8192 against 22.44 s at 262144.
             // Growing keeps a short conversation at a short conversation's cost
             // while leaving the advertised limit reachable.
-            let capacity =
-                ringEnabled && !isFull
-                ? swaCapacity
-                : min(maxContext, Self.initialCapacityTokens)
+            let capacity: Int
+            if streamed, let window = self.windowTokens {
+                capacity = window
+            } else if ringEnabled && !isFull {
+                capacity = swaCapacity
+            } else {
+                capacity = min(maxContext, Self.initialCapacityTokens)
+            }
             let length = slots * capacity * stride
 
             guard let kBuf = device.makeBuffer(length: length, options: .storageModeShared) else {
@@ -203,6 +296,23 @@ public final class KVCacheManager {
             vBuf.label = "kv.V.layer\(layer)"
             vs.append(vBuf)
 
+            if streamed {
+                let arenaBytes = slots * maxContext * stride
+                guard
+                    let hostKPtr = Self.mapHostArena(bytes: arenaBytes),
+                    let hostVPtr = Self.mapHostArena(bytes: arenaBytes)
+                else {
+                    throw ModelError.residentBufferWrapFailed
+                }
+                hk.append(hostKPtr)
+                hv.append(hostVPtr)
+                hLengths.append(arenaBytes)
+            } else {
+                hk.append(nil)
+                hv.append(nil)
+                hLengths.append(0)
+            }
+
             st.append(stride)
             kd.append(isFull ? .full : .swa)
             caps.append(capacity)
@@ -215,6 +325,24 @@ public final class KVCacheManager {
         self.kinds = kd
         self.capacityTokens = caps
         self.valueBytes = valueByteCounts
+        self.hostK = hk
+        self.hostV = hv
+        self.hostArenaLengths = hLengths
+        self.initializeHostStreaming(precision: precision)
+    }
+
+    /// Maps a page-aligned anonymous arena. Pages are touched lazily: the
+    /// 1M-context arena is 6.3 GB of address space at 4-bit, but only the rows
+    /// a conversation wrote are ever resident.
+    static func mapHostArena(bytes: Int) -> UnsafeMutableRawPointer? {
+        guard bytes > 0 else { return nil }
+        let page = Int(getpagesize())
+        let rounded = ((bytes + page - 1) / page) * page
+        let ptr = mmap(
+            nil, rounded, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON, -1, 0)
+        guard let ptr, ptr != MAP_FAILED else { return nil }
+        return ptr
     }
 
     /// Tokens each linear layer is sized for before any growth.
@@ -223,248 +351,18 @@ public final class KVCacheManager {
     /// ordinary conversation without a single grow. Capacity doubles from here.
     public static let initialCapacityTokens = 8_192
 
-    /// Worst-case bytes `slots` sequences' K/V stores can occupy at
-    /// `maxContext`, without allocating anything.
-    ///
-    /// Worst case means every slot grown to the advertised context: growth is
-    /// lazy, so this is the ceiling a batched session must be able to hold, not
-    /// what it maps at load. It mirrors the layout `init` builds, and a test
-    /// compares the two against each other so a storage-format change cannot
-    /// leave the formula quietly wrong.
-    public static func worstCaseBytes(
-        config: ArchConfig,
-        maxContext: Int,
-        precision: KVCachePrecision = .fp16,
-        slots: Int = 1,
-        fp16RingEnabled: Bool = false,
-        slidingWindow: Int? = nil,
-        maxPrefillChunkTokens: Int = 128
-    ) -> Int {
-        precondition(maxContext > 0, "maxContext must be positive")
-        precondition(slots > 0, "slots must be positive")
-        var total = 0
-        for layer in 0..<config.numLayers {
-            let maskValue = config.fullAttentionLayerMask[layer]
-            if maskValue == 2 { continue }
-            let isFull = maskValue != 0
-            let elements =
-                isFull
-                ? config.numFullKVHeads * config.fullHeadDim
-                : config.numKVHeads * config.headDim
-            let stride = rowLayout(elements: elements, precision: precision).stride
-            let capacity: Int
-            if fp16RingEnabled && !isFull {
-                capacity = min(
-                    maxContext,
-                    max(
-                        1,
-                        (slidingWindow ?? config.slidingWindow)
-                            + maxPrefillChunkTokens))
-            } else {
-                capacity = maxContext
-            }
-            // One K buffer and one V buffer per layer.
-            total += slots * capacity * stride * 2
+    deinit {
+        let page = Int(getpagesize())
+        for (index, pointer) in hostK.enumerated() {
+            guard let pointer, hostArenaLengths[index] > 0 else { continue }
+            let rounded = ((hostArenaLengths[index] + page - 1) / page) * page
+            _ = munmap(pointer, rounded)
         }
-        return total
-    }
-
-    /// Grows linear layers so every one can hold `tokens`, copying what is
-    /// already stored.
-    ///
-    /// Must be called before writing at a position beyond the current capacity.
-    /// Ring-backed SWA layers are never grown -- their capacity is the window and
-    /// is deliberate. Capacity doubles, so a conversation reaching the advertised
-    /// 262144 limit pays five copies in total rather than one per token.
-    ///
-    /// Buffers are `storageModeShared`, so the copy is a plain `memcpy`; callers
-    /// fetch buffers through the accessors at use time and never cache them
-    /// across tokens, which is what makes swapping them safe here.
-    public func reserve(tokens: Int) throws {
-        try reserve(tokens: tokens, slot: 0)
-    }
-
-    /// Grows the stores so slot `slot` can hold `tokens`, copying every slot's
-    /// live rows. All slots share one allocation per layer, so growth is
-    /// all-or-nothing even though only one cursor motivated it.
-    public func reserve(tokens: Int, slot: Int) throws {
-        validateSlot(slot)
-        let needed = min(max(tokens, 1), maxContext)
-        for layer in 0..<kinds.count {
-            guard kinds[layer] != .linear else { continue }
-            if fp16RingEnabled && kinds[layer] == .swa { continue }
-            let current = capacityTokens[layer]
-            guard current < needed else { continue }
-            var target = current
-            while target < needed { target *= 2 }
-            target = min(target, maxContext)
-
-            let stride = strides[layer]
-            let length = slots * target * stride
-            guard let newK = device.makeBuffer(length: length, options: .storageModeShared),
-                let newV = device.makeBuffer(length: length, options: .storageModeShared)
-            else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            newK.label = "kv.K.layer\(layer)"
-            newV.label = "kv.V.layer\(layer)"
-            // Each slot's live rows move from its old region to its new one.
-            // At one slot this is the original single `memcpy` from the base.
-            for s in 0..<slots {
-                let usedBytes = min(current, positions[s]) * stride
-                guard usedBytes > 0 else { continue }
-                memcpy(
-                    newK.contents() + s * target * stride,
-                    kBuffers[layer].contents() + s * current * stride, usedBytes)
-                memcpy(
-                    newV.contents() + s * target * stride,
-                    vBuffers[layer].contents() + s * current * stride, usedBytes)
-            }
-            kBuffers[layer] = newK
-            vBuffers[layer] = newV
-            capacityTokens[layer] = target
+        for (index, pointer) in hostV.enumerated() {
+            guard let pointer, hostArenaLengths[index] > 0 else { continue }
+            let rounded = ((hostArenaLengths[index] + page - 1) / page) * page
+            _ = munmap(pointer, rounded)
         }
-    }
-
-    public func layerKind(_ layer: Int) -> LayerKind { kinds[layer] }
-
-    /// Bytes per token for `layer` (K and V share the same stride).
-    public func stride(layer: Int) -> Int { strides[layer] }
-
-    /// Physical token capacity for `layer`. Ring-enabled SWA layers can be
-    /// smaller than `maxContext`; full layers and ring-off storage stay linear.
-    public func capacity(layer: Int) -> Int { capacityTokens[layer] }
-
-    public func ringCapacity(layer: Int) -> Int {
-        guard fp16RingEnabled, kinds[layer] == .swa else { return 0 }
-        return capacityTokens[layer]
-    }
-
-    /// Total bytes of the K buffer for `layer`, across all slots.
-    public func bufferLength(layer: Int) -> Int {
-        return slots * capacityTokens[layer] * strides[layer]
-    }
-
-    /// First token index of slot `slot`'s region within a layer buffer.
-    func regionBase(layer: Int, slot: Int) -> Int {
-        validateSlot(slot)
-        return slot * capacityTokens[layer]
-    }
-
-    /// Write target for this layer's K projection at `position` in `slot`.
-    public func kSlot(
-        layer: Int, position: Int,
-        slot: Int = 0
-    ) -> (buffer: MTLBuffer, offset: Int) {
-        precondition(kinds[layer] != .linear, "linear layers have no KV slots")
-        validateRange(start: position, count: 1)
-        let token =
-            regionBase(layer: layer, slot: slot)
-            + physicalSlot(layer: layer, position: position)
-        return (kBuffers[layer], token * strides[layer])
-    }
-
-    /// Write target for this layer's V projection at `position` in `slot`.
-    /// Always distinct from `kSlot`: K runs per-head k_norm + RoPE while V is
-    /// normed differently, so the two buffers cannot alias.
-    public func vSlot(
-        layer: Int, position: Int,
-        slot: Int = 0
-    ) -> (buffer: MTLBuffer, offset: Int) {
-        precondition(kinds[layer] != .linear, "linear layers have no KV slots")
-        validateRange(start: position, count: 1)
-        let token =
-            regionBase(layer: layer, slot: slot)
-            + physicalSlot(layer: layer, position: position)
-        return (vBuffers[layer], token * strides[layer])
-    }
-
-    public func kRange(
-        layer: Int, start: Int, count: Int,
-        slot: Int = 0
-    ) -> (buffer: MTLBuffer, offset: Int, stride: Int) {
-        validateRange(start: start, count: count)
-        validateContiguousPhysicalRange(layer: layer, start: start, count: count)
-        let token =
-            regionBase(layer: layer, slot: slot)
-            + physicalSlot(layer: layer, position: start)
-        return (kBuffers[layer], token * strides[layer], strides[layer])
-    }
-
-    public func vRange(
-        layer: Int, start: Int, count: Int,
-        slot: Int = 0
-    ) -> (buffer: MTLBuffer, offset: Int, stride: Int) {
-        validateRange(start: start, count: count)
-        validateContiguousPhysicalRange(layer: layer, start: start, count: count)
-        let token =
-            regionBase(layer: layer, slot: slot)
-            + physicalSlot(layer: layer, position: start)
-        return (vBuffers[layer], token * strides[layer], strides[layer])
-    }
-
-    /// Advance slot 0's cursor once the current token's K/V are written across
-    /// all layers.
-    public func advance() { advance(slot: 0, by: 1) }
-
-    public func advance(by count: Int) { advance(slot: 0, by: count) }
-
-    public func advance(slot: Int, by count: Int) {
-        validateSlot(slot)
-        precondition(count >= 0, "advance count must be non-negative")
-        precondition(
-            positions[slot] + count <= maxContext,
-            "advance would exceed maxContext")
-        positions[slot] += count
-    }
-
-    /// Slot `slot`'s logical cursor.
-    public func position(slot: Int) -> Int {
-        validateSlot(slot)
-        return positions[slot]
-    }
-
-    /// Rewind the logical cursor without copying KV. Speculative rows are
-    /// append-only and become unreachable immediately; a later pass
-    /// overwrites them.
-    /// Ring-backed draft KV is safe because MTP verification never rewinds by
-    /// more than its two-token proposal depth.
-    func rewind(to newPosition: Int) throws {
-        try rewind(slot: 0, to: newPosition)
-    }
-
-    func rewind(slot: Int, to newPosition: Int) throws {
-        validateSlot(slot)
-        guard newPosition >= 0, newPosition <= positions[slot] else {
-            throw InferenceStateSnapshotError.invalidPosition(newPosition)
-        }
-        positions[slot] = newPosition
-    }
-
-    /// Drop all cached positions and return physical pages to the OS.
-    ///
-    /// No buffer zeroing — the attention kernels read only `[0, validTokenCount]`,
-    /// and `validTokenCount` is now 0. `MADV_DONTNEED` on the page-aligned span
-    /// releases resident memory between turns; pages fault back in on next write.
-    public func reset() {
-        for slot in 0..<slots { positions[slot] = 0 }
-        let pageSize = Int(getpagesize())
-        var advised = Set<ObjectIdentifier>()
-        for layer in 0..<config.numLayers {
-            advise(kBuffers[layer], pageSize: pageSize, seen: &advised)
-            advise(vBuffers[layer], pageSize: pageSize, seen: &advised)
-        }
-    }
-
-    /// Reset one slot's cursor without touching the others.
-    ///
-    /// The rows are neither zeroed nor returned to the OS: a recycled batch slot
-    /// overwrites them before they can become visible again (attention reads
-    /// only `[0, validTokenCount)`), and the whole-store `reset()` is what
-    /// releases pages between generations.
-    public func reset(slot: Int) {
-        validateSlot(slot)
-        positions[slot] = 0
     }
 
 }

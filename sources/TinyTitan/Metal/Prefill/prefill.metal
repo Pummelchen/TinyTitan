@@ -888,6 +888,9 @@ kernel void attention_prefill_causal_qsa_tiled(
     device const uint* keepIdx [[buffer(8)]],
     device const uint* keepCount [[buffer(9)]],
     constant uint& keepIdxStride [[buffer(10)]],
+    // useKeep == 3: host-KV window. `keepIdx` holds the logical key and this
+    // parallel list holds the window row that actually stores it.
+    device const uint* keepRows [[buffer(11)]],
     uint3 tg [[threadgroup_position_in_grid]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint3 threads3 [[threads_per_threadgroup]]
@@ -935,7 +938,8 @@ kernel void attention_prefill_causal_qsa_tiled(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    const bool compacted = (useKeep == 2u);
+    const bool compacted = (useKeep >= 2u);
+    const bool windowed = (useKeep == 3u);
     const uint iterations = compacted ? keepCount[t] : (last_exclusive - first);
 
     float row_max = -INFINITY;
@@ -950,19 +954,25 @@ kernel void attention_prefill_causal_qsa_tiled(
             const uint step = base + i;
             uint key;
             bool valid;
+            uint phys = 0u;
             if (compacted) {
                 key = keepIdx[t * keepIdxStride + step];
                 valid = (key >= first && key < last_exclusive);
+                if (valid) {
+                    phys = windowed ? keepRows[t * keepIdxStride + step]
+                                    : prefill_kv_slot(key);
+                }
             } else {
                 key = first + step;
                 valid = (useKeep == 0u) || (keep[t * keepStride + key] != 0u);
+                if (valid) { phys = prefill_kv_slot(key); }
             }
             float dot = 0.0f;
             if (valid) {
-                dot = prefill_qsa_dot(K, prefill_kv_slot(key), kvh * HD, HD,
+                dot = prefill_qsa_dot(K, phys, kvh * HD, HD,
                                       q_smem, q_gsum, p);
             }
-            s_key[i] = key;
+            s_key[i] = phys;
             // A dropped key must contribute nothing through the softmax, and
             // exp(-inf - m) is exactly zero for any finite running maximum.
             s_score[i] = valid ? dot * p.scale : -INFINITY;
@@ -992,8 +1002,7 @@ kernel void attention_prefill_causal_qsa_tiled(
                 ? fast::exp(s_score[i] - new_max) : 0.0f;
             tile_sum += w;
             if (owns && w > 0.0f) {
-                const uint phys = prefill_kv_slot(s_key[i]);
-                a = fma(w, prefill_load_kv(V, phys, kvh * HD + d, p), a);
+                a = fma(w, prefill_load_kv(V, s_key[i], kvh * HD + d, p), a);
             }
         }
         acc = a;
@@ -1030,6 +1039,8 @@ kernel void attention_prefill_causal_tiled(
     device const uint* keepIdx [[buffer(8)]],
     device const uint* keepCount [[buffer(9)]],
     constant uint& keepIdxStride [[buffer(10)]],
+    // useKeep == 3: host-KV window, same logical/row split as the QSA kernel.
+    device const uint* keepRows [[buffer(11)]],
     uint3 tg [[threadgroup_position_in_grid]],
     uint3 tid [[thread_position_in_threadgroup]],
     uint lane [[thread_index_in_simdgroup]],
@@ -1061,24 +1072,28 @@ kernel void attention_prefill_causal_tiled(
     // Compacted selections iterate the budget; everything else iterates the
     // visible range. Both bounds are uniform across the threadgroup, so the
     // reduction below is reached by every thread the same number of times.
-    const bool compacted = (useKeep == 2u);
+    const bool compacted = (useKeep >= 2u);
+    const bool windowed = (useKeep == 3u);
     const uint iterations = compacted ? keepCount[t] : (last_exclusive - first);
     for (uint step = 0u; step < iterations; ++step) {
         uint key;
+        uint phys_key;
         if (compacted) {
             key = keepIdx[t * keepIdxStride + step];
             // The host selects only visible keys, but a stale or truncated
             // list must not read outside the cache rather than merely give a
             // wrong answer.
             if (key < first || key >= last_exclusive) { continue; }
+            phys_key = windowed ? keepRows[t * keepIdxStride + step]
+                                : prefill_kv_slot(key);
         } else {
             key = first + step;
             // Uniform across the threadgroup -- `t` and `key` are the same for
             // every thread in it -- so skipping here cannot strand anyone at the
             // threadgroup reduction below.
             if (useKeep != 0u && keep[t * keepStride + key] == 0u) { continue; }
+            phys_key = prefill_kv_slot(key);
         }
-        const uint phys_key = prefill_kv_slot(key);
         const float qv = owns ? float(q_row[d]) : 0.0f;
         const uint flat = kvh * p.headDim + d;
         const float kv = owns ? prefill_load_kv(K, phys_key, flat, p) : 0.0f;

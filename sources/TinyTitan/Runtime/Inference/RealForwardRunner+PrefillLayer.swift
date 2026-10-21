@@ -184,6 +184,7 @@ extension RealForwardRunner {
         // the rest of the request.
         let aneChunk: ANEPrefillAttention? = {
             guard let ane = anePrefill,
+                kv?.streamsKVFromHost != true,
                 slot == 0,
                 !snapshotGDNAfterFirstToken,
                 !useTwoRowProjection,

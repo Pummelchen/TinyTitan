@@ -38,6 +38,7 @@ extension ModelSessionPlan {
             promptCacheDiskLimitBytes: arguments.promptCacheDiskMiB * 1_048_576,
             prefillChunkTokens: arguments.prefillChunkTokens,
             kvCachePrecision: arguments.kvCachePrecision,
+            hostKVWindowTokens: arguments.hostKVWindowTokens,
             ropeScalingMode: arguments.ropeScalingMode,
             thinkingMode: thinking,
             reasoningEffort: reasoningEffort,

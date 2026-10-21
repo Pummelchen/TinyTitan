@@ -348,24 +348,49 @@ extension RealForwardRunner {
                 ringCapacity > 0 && startPosition + t > ringCapacity
                 ? UInt32(ringCapacity)
                 : 0
-            try prefillAttention.encodeCausal(
-                commandBuffer: cb,
-                q: attnQ,
-                k: keyView.buffer, kOffset: keyView.offset,
-                v: valueView.buffer, vOffset: valueView.offset,
-                out: scratch.attentionOutput,
-                params: params,
-                kvRingCapacity: activeRingCapacity,
-                keepMask: keepMask?.mask,
-                keepStride: keepMask?.maskStride ?? 0,
-                keepIndices: keepMask?.indices,
-                keepIndexStride: keepMask?.indexStride ?? 0,
-                keepCounts: keepMask?.counts,
-                path: keepMask == nil
-                    ? prefillAttentionPath
-                    // Only the tiled kernel
-                    // honours a selection.
-                    : .causalTiled)
+            if kv.streamsLayer(L) {
+                // The chunk's KV went to staging; gather the union of every
+                // query row's selection into the window and let the kernel
+                // read through the row indirection.
+                let prepared = try kv.preparePrefillWindow(
+                    layer: L, slot: slot,
+                    startPosition: startPosition, tokenCount: t,
+                    selection: keepMask,
+                    commandBuffer: cb)
+                try prefillAttention.encodeCausal(
+                    commandBuffer: cb,
+                    q: attnQ,
+                    k: keyView.buffer, kOffset: keyView.offset,
+                    v: valueView.buffer, vOffset: valueView.offset,
+                    out: scratch.attentionOutput,
+                    params: params,
+                    kvRingCapacity: activeRingCapacity,
+                    keepMask: prepared.mask,
+                    keepStride: 0,
+                    keepIndices: prepared.indices,
+                    keepIndexStride: prepared.indexStride,
+                    keepCounts: prepared.counts,
+                    keepRows: prepared.rows,
+                    path: .causalTiled)
+            } else {
+                try prefillAttention.encodeCausal(
+                    commandBuffer: cb,
+                    q: attnQ,
+                    k: keyView.buffer, kOffset: keyView.offset,
+                    v: valueView.buffer, vOffset: valueView.offset,
+                    out: scratch.attentionOutput,
+                    params: params,
+                    kvRingCapacity: activeRingCapacity,
+                    keepMask: keepMask?.mask,
+                    keepStride: keepMask?.maskStride ?? 0,
+                    keepIndices: keepMask?.indices,
+                    keepIndexStride: keepMask?.indexStride ?? 0,
+                    keepCounts: keepMask?.counts,
+                    path: keepMask == nil
+                        ? prefillAttentionPath
+                        // Only the tiled kernel honours a selection.
+                        : .causalTiled)
+            }
         } else {
             throw PrefillError.chunkedUnsupported(
                 "chunked prefill attention requires a KV cache")

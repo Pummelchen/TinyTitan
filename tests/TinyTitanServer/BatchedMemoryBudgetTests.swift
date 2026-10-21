@@ -111,4 +111,28 @@ import TinyTitan
             BatchedMemoryBudget.effectiveSlots(
                 requested: 4, perSlotBytes: perSlot, budgetBytes: budget) >= 1)
     }
+
+    /// The host tier trades VRAM for host RAM, not for nothing: a bounded
+    /// server must count the window and the arena together.
+    @Test func hostKVCountsTheWindowAndTheArena() {
+        let maxContext = 262_144
+        let window = 65_536
+        let streamed = BatchedMemoryBudget.perSlotBytes(
+            config: config, maxContext: maxContext, precision: .int8,
+            fp16RingEnabled: false, slidingWindow: config.slidingWindow,
+            maxPrefillChunkTokens: 128, vocab: config.vocabSize,
+            hostKVWindowTokens: window)
+        let metal = KVCacheManager.worstCaseBytes(
+            config: config, maxContext: maxContext, precision: .int8,
+            fp16RingEnabled: false, slidingWindow: config.slidingWindow,
+            maxPrefillChunkTokens: 128, windowTokens: window)
+        let host = KVCacheManager.worstCaseHostArenaBytes(
+            config: config, maxContext: maxContext, precision: .int8)
+        #expect(host > 0)
+        #expect(streamed > metal)
+        #expect(
+            streamed >= metal + host,
+            "the per-slot budget must include the authoritative arena")
+    }
+
 }

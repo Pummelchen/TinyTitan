@@ -158,6 +158,7 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
     case invalidExpertIOSubmission(String)
     case invalidExpertIOTimeline(String)
     case invalidGPUKeepWarmInterval(String)
+    case invalidHostKVWindowTokens(Int)
 
     public var description: String {
         switch self {
@@ -186,6 +187,8 @@ public enum RuntimeConfigurationError: Error, CustomStringConvertible, Equatable
             return "unsupported expert I/O submission '\(value)'; allowed: deferred, immediate"
         case .invalidExpertIOTimeline(let value):
             return "unsupported expert I/O timeline '\(value)'; allowed: shared, per-layer"
+        case .invalidHostKVWindowTokens(let value):
+            return "host-KV window must be a positive token count, not \(value)"
         case .invalidGPUKeepWarmInterval(let value):
             return
                 "unsupported GPU keep-warm interval '\(value)'; allowed: \(RuntimeGPUKeepWarm.minimumIntervalUs)...\(RuntimeGPUKeepWarm.maximumIntervalUs) microseconds, or unset"

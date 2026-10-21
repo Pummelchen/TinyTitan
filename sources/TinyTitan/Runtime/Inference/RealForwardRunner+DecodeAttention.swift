@@ -189,9 +189,9 @@ extension RealForwardRunner {
         position: Int,
         slot: Int = 0,
         seqLen: UInt32,
-        keepMask: MTLBuffer? = nil
+        selection: DecodeKeySelection? = nil
     ) throws {
-        guard let elementwise, let rope, let qPackedScratch, let attnGateScratch else {
+        guard let elementwise, let attnGateScratch else {
             throw ModelError.internalInconsistency(
                 detail:
                     "attn_output_gate layer \(L) without gate kernels (arch mask misconfiguration)")
@@ -212,58 +212,11 @@ extension RealForwardRunner {
         let kWrite = quantizedKV ? (buffer: kStage, offset: 0) : kSlot
         let vWrite = quantizedKV ? (buffer: vStage, offset: 0) : vSlot
         let o = try model.oProj(layer: L)
-        let qNormW = try model.qNorm(layer: L)
-        let kNormW = try model.kNorm(layer: L)
-        let rotaryDim = UInt32(Double(headDim) * cfg.partialRotaryFactor)
-
-        try encodeGatedFullQKVProjection(
-            cb, layer: L, qOutput: qPackedScratch,
-            kOutput: kWrite, vOutput: vWrite,
-            qDimension: qDim, kvDimension: kvDim)
-        try rotate(&cb, role: "qsa.qkv")
-        try elementwise.encodeSplitQGate(
-            commandBuffer: cb,
-            packed: qPackedScratch,
-            q: qScratch,
-            gate: attnGateScratch,
-            heads: cfg.numHeads,
-            dim: headDim)
-        try rms.encodeBF16WPerHead(
-            commandBuffer: cb,
-            x: qScratch,
-            weight: qNormW.buffer,
-            weightOffset: Int(qNormW.offset),
-            out: qScratch,
-            headDim: UInt32(headDim),
-            numHeads: cfg.numHeads,
-            eps: eps)
-        try rms.encodeBF16WPerHead(
-            commandBuffer: cb,
-            x: kWrite.buffer, xOffset: kWrite.offset,
-            weight: kNormW.buffer,
-            weightOffset: Int(kNormW.offset),
-            out: kWrite.buffer, outOffset: kWrite.offset,
-            headDim: UInt32(headDim),
-            numHeads: numKV,
-            eps: eps)
-        try rope.encodeNeoxSubdim(
-            commandBuffer: cb,
-            data: qScratch,
-            position: UInt32(position),
-            headDim: UInt32(headDim),
-            numHeads: UInt32(cfg.numHeads),
-            rotaryDim: rotaryDim,
-            theta: Float(cfg.fullRopeTheta))
-        try rotate(&cb, role: "qsa.gate_norm_rope1")
-        try rope.encodeNeoxSubdim(
-            commandBuffer: cb,
-            data: kWrite.buffer,
-            dataOffset: kWrite.offset,
-            position: UInt32(position),
-            headDim: UInt32(headDim),
-            numHeads: UInt32(numKV),
-            rotaryDim: rotaryDim,
-            theta: Float(cfg.fullRopeTheta))
+        try encodeGatedFullPreAttention(
+            &cb, layer: L, position: position,
+            kWrite: kWrite, vWrite: vWrite,
+            qDim: qDim, kvDim: kvDim,
+            headDim: headDim, numKV: numKV, eps: eps)
         if quantizedKV {
             try encodeQuantizedKV(
                 commandBuffer: cb, kv: kv, layer: L,
@@ -272,6 +225,12 @@ extension RealForwardRunner {
         }
         let keyView = kv.keyView(layer: L, slot: slot, validTokenCount: Int(seqLen))
         let valueView = kv.valueView(layer: L, slot: slot, validTokenCount: Int(seqLen))
+        // Host-KV streaming: gather the keys this step will read into the
+        // window and let the indirection kernel iterate them. Without it the
+        // contiguous kernel keeps reading the same buffer it always has.
+        let windowSelection = try decodeWindowSelection(
+            kv: kv, layer: L, slot: slot, position: position,
+            seqLen: seqLen, selection: selection)
         try attention.encodeFull(
             commandBuffer: cb,
             q: qScratch,
@@ -284,7 +243,8 @@ extension RealForwardRunner {
             seqLen: seqLen,
             scale: Float(cfg.attentionScale),
             kvFormat: keyView,
-            keepMask: keepMask)
+            keepMask: windowSelection == nil ? selection?.mask : nil,
+            windowSelection: windowSelection)
         try rotate(&cb, role: "qsa.attention")
         try elementwise.encodeSigmoidGateMul(
             commandBuffer: cb,
@@ -316,7 +276,7 @@ extension RealForwardRunner {
         slot: Int = 0,
         isLinear: Bool,
         rmsEps eps: Float,
-        keepMask: MTLBuffer? = nil
+        selection: DecodeKeySelection? = nil
     ) throws {
         let D = UInt32(cfg.hiddenSize)
         let isFull = cfg.fullAttentionLayerMask[L] == 1
@@ -337,7 +297,7 @@ extension RealForwardRunner {
                 position: position,
                 slot: slot,
                 seqLen: seqLen,
-                keepMask: keepMask)
+                selection: selection)
         } else {
             let kSlot =
                 kv?.kSlot(layer: L, position: position, slot: slot)
@@ -443,6 +403,9 @@ extension RealForwardRunner {
             }
             softmaxCB = attentionCB
             if isFull {
+                let windowSelection = try decodeWindowSelection(
+                    kv: kv, layer: L, slot: slot, position: position,
+                    seqLen: seqLen, selection: selection)
                 try attention.encodeFull(
                     commandBuffer: attentionCB,
                     q: qScratch,
@@ -454,7 +417,9 @@ extension RealForwardRunner {
                     numKVHeads: UInt32(numKVL),
                     seqLen: seqLen,
                     scale: Float(cfg.attentionScale),
-                    kvFormat: keyView)
+                    kvFormat: keyView,
+                    keepMask: windowSelection == nil ? selection?.mask : nil,
+                    windowSelection: windowSelection)
             } else {
                 let ringCapacity = kv.ringCapacity(layer: L)
                 let activeRingCapacity =

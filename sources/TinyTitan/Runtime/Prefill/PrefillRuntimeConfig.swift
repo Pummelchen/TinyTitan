@@ -144,6 +144,14 @@ public struct PrefillRuntimeConfig: Sendable, Equatable {
         production(chunkTokens: 128)
     }
 
+    /// A chunk size chosen by the KV tier rather than the CLI's allowed list.
+    /// Host-KV streaming caps the chunk at `windowTokens / selectionWidth`, a
+    /// value the user never types and the production factory would reject.
+    static func hostKVChunked(chunkTokens: Int) -> PrefillRuntimeConfig {
+        precondition(chunkTokens > 0 && chunkTokens <= maxChunkTokens)
+        return PrefillRuntimeConfig(mode: .chunked, chunkTokens: chunkTokens)
+    }
+
     public static func production(chunkTokens: Int) -> PrefillRuntimeConfig {
         precondition(
             RuntimeConfiguration.allowedPrefillChunkTokens.contains(chunkTokens),

@@ -181,6 +181,39 @@ extension QSAIndexer {
         keepBuf = made
     }
 
+    /// `selectKeys` plus the compacted list the host-KV window needs.
+    ///
+    /// Inside the dense-exact window every visible key is kept, so there is no
+    /// mask and the caller can pass a nil index list (the window path expands
+    /// `0..<visible`). Past it the list is ascending, which keeps the gathered
+    /// window rows sequential.
+    func selectKeysCompact(visibleKeys: Int) -> (
+        mask: MTLBuffer?, indices: MTLBuffer?, count: Int
+    ) {
+        guard visibleKeys > selectionWidth else {
+            return (nil, nil, visibleKeys)
+        }
+        let mask = selectKeys(visibleKeys: visibleKeys)
+        guard (try? growCompactScratch(rows: 1, width: selectionWidth)) != nil,
+            let indexBuf = keepIndexBuf, let countBuf = keepCountBuf
+        else {
+            return (mask, nil, 0)
+        }
+        let keep = keepBuf.contents().bindMemory(
+            to: UInt8.self, capacity: capacity)
+        let out = indexBuf.contents().bindMemory(
+            to: UInt32.self, capacity: selectionWidth)
+        let counts = countBuf.contents().bindMemory(to: UInt32.self, capacity: 1)
+        var written = 0
+        for key in 0..<visibleKeys where keep[key] != 0 {
+            if written == selectionWidth { break }
+            out[written] = UInt32(key)
+            written += 1
+        }
+        counts[0] = UInt32(written)
+        return (mask, indexBuf, written)
+    }
+
     /// Turns the scored blocks into the per-key selection the attention reads.
     ///
     /// The scores have to be on the host for this: the ordering is

@@ -33,6 +33,9 @@ public struct ServerArguments: Equatable, Sendable {
     public let promptCacheDiskMiB: Int
     public let prefillChunkTokens: Int?
     public let kvCachePrecision: KVCachePrecision
+    /// Host-KV window: full-attention rows stay in a host arena and only this
+    /// many rows per layer/slot live in Metal. Nil is the contiguous cache.
+    public let hostKVWindowTokens: Int?
     public let ropeScalingMode: RuntimeRoPEScalingMode
     public let thinkingMode: ModelThinkingMode
     /// Reasoning-effort override for effort-aware model families; nil keeps
@@ -91,64 +94,6 @@ public struct ServerArguments: Equatable, Sendable {
             && promptCacheDiskDirectory == nil
     }
 
-    /// The accepted slot counts, spelled from the validator that enforces them.
-    ///
-    /// The help text used to list them by hand and had already drifted: it
-    /// stopped at 128 while `RuntimeConfiguration.allowedExpertCacheSlots`
-    /// accepts 40, 48, 112, 160, 192 and 256 as well. Spelled from the source
-    /// of truth so it cannot drift again.
-    static var expertCacheSlotsHelp: String {
-        RuntimeConfiguration.allowedExpertCacheSlots
-            .map(String.init).joined(separator: ", ")
-    }
-
-    /// The accepted native context windows, spelled from the gate that enforces
-    /// them. `--max-context` takes one of these rungs, not any token count
-    /// between the first and the last, and the help used to write it as a range.
-    static var supportedContextRungsHelp: String {
-        RuntimeConfiguration.supportedContextTokens
-            .map(String.init).joined(separator: ", ")
-    }
-
-    /// The accepted YaRN rungs, spelled from the gate that enforces them. It was
-    /// a literal in the refusal until 2026-10-18, which is how the 2M rung
-    /// landed with a message still naming two values.
-    static var supportedYaRNContextRungsHelp: String {
-        RuntimeConfiguration.supportedYaRNContextTokens
-            .map(String.init).joined(separator: ", ")
-    }
-
-    /// The accepted prefill chunk sizes, spelled from the gate that enforces
-    /// them -- the hand-written list in the help text is how
-    /// `expertCacheSlotsHelp` above came to be derived instead of typed.
-    static var prefillChunkTokensHelp: String {
-        RuntimeConfiguration.allowedPrefillChunkTokens
-            .map(String.init).joined(separator: ", ")
-    }
-
-    /// The RAM tier of the prompt cache that a launch without the flag gets.
-    ///
-    /// Sized by the machine the way the expert-cache budget is. Prompt state
-    /// costs ~0.74 MiB per prefix token on qwen38 4-bit -- measured on a live
-    /// generation, a 152-token snapshot at `state_bytes=117_442_560` = 112 MiB,
-    /// all of it served from this tier -- so the flat 256 MiB default holds
-    /// about 350 tokens and pushes anything longer onto the SSD tier: a second
-    /// streaming consumer beside the expert reads that already own the disk, on
-    /// a Mac that may have 40 GiB spare above it. 2 GiB is the same rule at a
-    /// big machine's size: roughly 2,800 prefix tokens resident. It does not
-    /// scale further, because past a few GiB the limits that bind are the
-    /// store's own 4 GiB per-snapshot capture ceiling and the retained entry
-    /// count rather than RAM; an operator who wants more names it, and the
-    /// flag's range reaches 4 GiB.
-    /// Below 48 GiB the tuned 256 MiB stays, because every machine this
-    /// project has measured lives there and it is what those measurements
-    /// priced.
-    public static func defaultPromptCacheMemoryMiB(
-        physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory
-    ) -> Int {
-        physicalMemory >= 48 << 30 ? 2_048 : 256
-    }
-
     /// lint:allow-long a flag table: one `case` per option plus its
     /// validation. Splitting it into per-group parsers would hide the
     /// exhaustive switch that makes an unhandled flag a compile-visible gap.
@@ -180,6 +125,7 @@ public struct ServerArguments: Equatable, Sendable {
         var promptCacheDiskMiB = 8_192
         var prefillChunkTokens: Int?
         var kvCachePrecision: KVCachePrecision = .int8
+        var hostKVWindowTokens: Int?
         var ropeScalingMode: RuntimeRoPEScalingMode = .none
         var thinkingMode = ModelThinkingMode.resolved(environment: environment)
         var reasoningEffort = ModelReasoningEffort.resolved(environment: environment)
@@ -339,6 +285,12 @@ public struct ServerArguments: Equatable, Sendable {
                     throw ServerArgumentError.invalid("--kv-bits must be 4, 8, or 16")
                 }
                 kvCachePrecision = parsed
+            case "--host-kv-window":
+                guard let parsed = Int(value), parsed > 0 else {
+                    throw ServerArgumentError.invalid(
+                        "--host-kv-window must be a positive token count")
+                }
+                hostKVWindowTokens = parsed
             case "--thinking":
                 guard let parsed = ModelThinkingMode(rawValue: value) else {
                     throw ServerArgumentError.invalid("--thinking must be off or on")
@@ -467,6 +419,7 @@ public struct ServerArguments: Equatable, Sendable {
             promptCacheDiskMiB: promptCacheDiskMiB,
             prefillChunkTokens: prefillChunkTokens,
             kvCachePrecision: kvCachePrecision,
+            hostKVWindowTokens: hostKVWindowTokens,
             ropeScalingMode: ropeScalingMode,
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort,

@@ -1127,4 +1127,27 @@ struct ServerArgumentTests {
         #expect(WorkspaceHeader.value(in: head(nil)) == nil)
         #expect(WorkspaceHeader.value(in: nil) == nil)
     }
+
+    @Test func parsesHostKVWindow() throws {
+        let parsed = try ServerArguments.parse([
+            "--model", "model.ssdai", "--host-kv-window", "65536",
+        ])
+        #expect(parsed.hostKVWindowTokens == 65_536)
+        let off = try ServerArguments.parse(["--model", "model.ssdai"])
+        #expect(off.hostKVWindowTokens == nil)
+        #expect(throws: ServerArgumentError.self) {
+            try ServerArguments.parse([
+                "--model", "model.ssdai", "--host-kv-window", "0",
+            ])
+        }
+        #expect(throws: ServerArgumentError.self) {
+            try ServerArguments.parse([
+                "--model", "model.ssdai", "--host-kv-window", "-1",
+            ])
+        }
+        #expect(throws: RuntimeConfigurationError.self) {
+            try RuntimeConfiguration(hostKVWindowTokens: 0)
+        }
+    }
+
 }

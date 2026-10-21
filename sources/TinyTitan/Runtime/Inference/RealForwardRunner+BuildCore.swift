@@ -180,7 +180,8 @@ extension RealForwardRunner {
             fp16RingEnabled: useFP16Ring,
             precision: runtimeConfiguration.kvCachePrecision,
             slidingWindow: cfg.slidingWindow,
-            maxPrefillChunkTokens: runtimeConfiguration.prefillChunkTokens)
+            maxPrefillChunkTokens: runtimeConfiguration.prefillChunkTokens,
+            windowTokens: runtimeConfiguration.hostKVWindowTokens)
 
         let silu = cfg.hiddenActivation == "silu"
         bp.embedInt4 = try EmbedLookupInt4(context: context)

@@ -608,3 +608,263 @@ void attention_decode_partial_simd(
     }
     if (lane == 0) { m_out[base] = m_g; d_out[base] = d_g; }
 }
+
+// ============================================================================
+// Windowed decode attention.
+//
+// The host-KV tier keeps the authoritative rows in a host arena and a window
+// of `windowTokens` rows in VRAM. The selection is gathered into that window
+// before the call, so these kernels iterate a compact list of selected keys
+// rather than a logical range: `sel_index[i]` is the key's logical position
+// (diagnostics only) and `sel_row[i]` is the window row that holds it.
+//
+// The chunking is over the selection, not over positions: chunk 0 reads the
+// first `chunk_len` selected keys, chunk 1 the next, and so on. That keeps the
+// per-chunk work uniform even when the selected keys are scattered across a
+// million-position history, and it is why the cost is O(selection) instead of
+// O(context).
+// ============================================================================
+
+[[kernel, max_total_threads_per_threadgroup(kAttnThreads)]]
+void attention_decode_window_partial(
+    device const half*  Q             [[buffer(0)]],
+    device const uchar* K             [[buffer(1)]],
+    device const uchar* V             [[buffer(2)]],
+    device       float* m_out         [[buffer(3)]],
+    device       float* d_out         [[buffer(4)]],
+    device       float* o_out         [[buffer(5)]],
+    constant     uint&  head_dim      [[buffer(6)]],
+    constant     uint&  num_q_heads   [[buffer(7)]],
+    constant     uint&  num_kv_heads  [[buffer(8)]],
+    constant     uint&  sel_count     [[buffer(9)]],
+    constant     uint&  kv_start      [[buffer(10)]],
+    constant     uint&  chunk_len     [[buffer(11)]],
+    constant     uint&  num_chunks    [[buffer(12)]],
+    constant     float& scale         [[buffer(13)]],
+    constant     uint&  kv_bits       [[buffer(14)]],
+    constant     uint&  kv_stride     [[buffer(15)]],
+    constant     uint&  kv_value_bytes [[buffer(16)]],
+    constant     uint&  kv_group_size [[buffer(17)]],
+    device const uint*  sel_index     [[buffer(18)]],
+    device const uint*  sel_row       [[buffer(19)]],
+    uint tg_id           [[threadgroup_position_in_grid]],
+    uint lid             [[thread_position_in_threadgroup]],
+    uint lsize           [[threads_per_threadgroup]],
+    uint simd_lane_id    [[thread_index_in_simdgroup]],
+    uint simd_group_id   [[simdgroup_index_in_threadgroup]],
+    uint simdgroups      [[simdgroups_per_threadgroup]]
+) {
+    threadgroup float q_smem[kAttnMaxHeadDim];
+    threadgroup float reduce_scratch[kAttnMaxSimdGroups];
+    threadgroup float bcast;
+    const uint HD = attn_fc_head_dim(head_dim);
+    const uint NQ = attn_fc_num_q_heads(num_q_heads);
+    const uint NKV = attn_fc_num_kv_heads(num_kv_heads);
+    const uint NC = attn_fc_num_chunks(num_chunks);
+
+    const uint q_head = tg_id / NC;
+    const uint chunk  = tg_id % NC;
+    const uint p_start = chunk * chunk_len;
+    uint p_end = p_start + chunk_len;
+    if (p_end > sel_count) { p_end = sel_count; }
+
+    const uint kv_head = q_head / (NQ / NKV);
+
+    device const half* Q_row = Q + uint(q_head) * HD;
+    for (uint i = lid; i < HD; i += lsize) {
+        q_smem[i] = float(Q_row[i]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    constexpr uint kPerThread = (kAttnMaxHeadDim + kAttnThreads - 1) / kAttnThreads;
+    float o_local[kPerThread];
+    for (uint k = 0; k < kPerThread; ++k) { o_local[k] = 0.0f; }
+
+    float m_run = -INFINITY;
+    float d_run = 0.0f;
+
+    for (uint s = p_start; s < p_end; ++s) {
+        const uint phys_p = sel_row[s];
+        float partial = 0.0f;
+        for (uint i = lid; i < HD; i += lsize) {
+            const uint flat = kv_head * HD + i;
+            const float kval = attn_load_kv(K, phys_p, flat, NKV * HD,
+                                             kv_bits, kv_stride, kv_value_bytes,
+                                             kv_group_size);
+            partial = fma(q_smem[i], kval, partial);
+        }
+        float s_score = block_reduce_sum(partial,
+                                   simd_lane_id, simd_group_id, simdgroups,
+                                   reduce_scratch, &bcast);
+        s_score *= attn_fc_scale(scale);
+
+        const float m_new = max(m_run, s_score);
+        const float alpha = attn_softmax_exp(m_run - m_new);
+        const float p_exp = attn_softmax_exp(s_score - m_new);
+        d_run = d_run * alpha + p_exp;
+
+        uint slot = 0;
+        for (uint i = lid; i < HD; i += lsize) {
+            const uint flat = kv_head * HD + i;
+            const float vval = attn_load_kv(V, phys_p, flat, NKV * HD,
+                                             kv_bits, kv_stride, kv_value_bytes,
+                                             kv_group_size);
+            o_local[slot] = o_local[slot] * alpha + p_exp * vval;
+            slot += 1;
+        }
+        m_run = m_new;
+    }
+
+    const uint base = uint(q_head) * NC + chunk;
+    if (lid == 0) { m_out[base] = m_run; d_out[base] = d_run; }
+    device float* o_row = o_out + base * HD;
+    uint slot = 0;
+    for (uint i = lid; i < HD; i += lsize) {
+        o_row[i] = o_local[slot];
+        slot += 1;
+    }
+}
+
+[[kernel, max_total_threads_per_threadgroup(kAttnThreads)]]
+void attention_decode_window_partial_simd(
+    device const half*  Q             [[buffer(0)]],
+    device const uchar* K             [[buffer(1)]],
+    device const uchar* V             [[buffer(2)]],
+    device       float* m_out         [[buffer(3)]],
+    device       float* d_out         [[buffer(4)]],
+    device       float* o_out         [[buffer(5)]],
+    constant     uint&  head_dim      [[buffer(6)]],
+    constant     uint&  num_q_heads   [[buffer(7)]],
+    constant     uint&  num_kv_heads  [[buffer(8)]],
+    constant     uint&  sel_count     [[buffer(9)]],
+    constant     uint&  kv_start      [[buffer(10)]],
+    constant     uint&  chunk_len     [[buffer(11)]],
+    constant     uint&  num_chunks    [[buffer(12)]],
+    constant     float& scale         [[buffer(13)]],
+    constant     uint&  kv_bits       [[buffer(14)]],
+    constant     uint&  kv_stride     [[buffer(15)]],
+    constant     uint&  kv_value_bytes [[buffer(16)]],
+    constant     uint&  kv_group_size [[buffer(17)]],
+    device const uint*  sel_index     [[buffer(18)]],
+    device const uint*  sel_row       [[buffer(19)]],
+    uint tg_id           [[threadgroup_position_in_grid]],
+    uint lid             [[thread_position_in_threadgroup]],
+    uint lsize           [[threads_per_threadgroup]],
+    uint lane            [[thread_index_in_simdgroup]],
+    uint sg              [[simdgroup_index_in_threadgroup]],
+    uint simdgroups      [[simdgroups_per_threadgroup]]
+) {
+    threadgroup float m_sg[kAttnMaxSimdGroups];
+    threadgroup float d_sg[kAttnMaxSimdGroups];
+    threadgroup float o_sg[kAttnMaxSimdGroups * kAttnSimdMaxHeadDim];
+    const uint HD = attn_fc_head_dim(head_dim);
+    const uint NQ = attn_fc_num_q_heads(num_q_heads);
+    const uint NKV = attn_fc_num_kv_heads(num_kv_heads);
+    const uint NC = attn_fc_num_chunks(num_chunks);
+    const uint q_head = tg_id / NC;
+    const uint chunk  = tg_id % NC;
+    const uint p_start = chunk * chunk_len;
+    uint p_end = p_start + chunk_len;
+    if (p_end > sel_count) { p_end = sel_count; }
+    const uint kv_head = q_head / (NQ / NKV);
+    device const half* Q_row = Q + uint(q_head) * HD;
+    const uint dpl = HD / 32u;
+    const uint d0 = lane * dpl;
+    float q_reg[kAttnSimdMaxDimsPerLane];
+    float o_reg[kAttnSimdMaxDimsPerLane];
+    for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+        q_reg[j] = (j < dpl) ? float(Q_row[d0 + j]) : 0.0f;
+        o_reg[j] = 0.0f;
+    }
+    const uint row_elems = NKV * HD;
+    const uint flat0 = kv_head * HD + d0;
+    const float sc = attn_fc_scale(scale);
+    float m_run = -INFINITY;
+    float d_run = 0.0f;
+    const bool fast8 = (kv_bits == 8u) && (kv_group_size % dpl == 0u);
+    const uint groups = (row_elems + kv_group_size - 1u) / kv_group_size;
+    const uint grp = flat0 / kv_group_size;
+    for (uint s = p_start + sg; s < p_end; s += simdgroups) {
+        const uint phys_p = sel_row[s];
+        float partial = 0.0f;
+        if (fast8) {
+            device const uchar* krow = K + phys_p * kv_stride;
+            device const half* ks = reinterpret_cast<device const half*>(krow + kv_value_bytes);
+            const float kscale = float(ks[grp]);
+            const float kbias = float(ks[groups + grp]);
+            for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+                if (j < dpl) {
+                    const float kval = float(krow[flat0 + j]) * kscale + kbias;
+                    partial = fma(q_reg[j], kval, partial);
+                }
+            }
+        } else {
+            for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+                if (j < dpl) {
+                    const float kval = attn_load_kv(K, phys_p, flat0 + j, row_elems,
+                                                    kv_bits, kv_stride, kv_value_bytes,
+                                                    kv_group_size);
+                    partial = fma(q_reg[j], kval, partial);
+                }
+            }
+        }
+        const float s_score = simd_sum(partial) * sc;
+        const float m_new = max(m_run, s_score);
+        const float alpha = attn_softmax_exp(m_run - m_new);
+        const float p_exp = attn_softmax_exp(s_score - m_new);
+        d_run = d_run * alpha + p_exp;
+        if (fast8) {
+            device const uchar* vrow = V + phys_p * kv_stride;
+            device const half* vs = reinterpret_cast<device const half*>(vrow + kv_value_bytes);
+            const float vscale = float(vs[grp]);
+            const float vbias = float(vs[groups + grp]);
+            for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+                if (j < dpl) {
+                    const float vval = float(vrow[flat0 + j]) * vscale + vbias;
+                    o_reg[j] = o_reg[j] * alpha + p_exp * vval;
+                }
+            }
+        } else {
+            for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+                if (j < dpl) {
+                    const float vval = attn_load_kv(V, phys_p, flat0 + j, row_elems,
+                                                    kv_bits, kv_stride, kv_value_bytes,
+                                                    kv_group_size);
+                    o_reg[j] = o_reg[j] * alpha + p_exp * vval;
+                }
+            }
+        }
+        m_run = m_new;
+    }
+    if (lane == 0) { m_sg[sg] = m_run; d_sg[sg] = d_run; }
+    for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+        if (j < dpl) o_sg[sg * HD + d0 + j] = o_reg[j];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (sg != 0) return;
+    float m_g = -INFINITY;
+    for (uint c = 0; c < simdgroups; ++c) m_g = max(m_g, m_sg[c]);
+    const uint base = uint(q_head) * NC + chunk;
+    device float* o_row = o_out + base * HD;
+    if (m_g == -INFINITY) {
+        if (lane == 0) { m_out[base] = -INFINITY; d_out[base] = 0.0f; }
+        for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+            if (j < dpl) o_row[d0 + j] = 0.0f;
+        }
+        return;
+    }
+    float d_g = 0.0f;
+    float w[kAttnMaxSimdGroups];
+    for (uint c = 0; c < kAttnMaxSimdGroups; ++c) {
+        w[c] = (c < simdgroups && m_sg[c] != -INFINITY) ? attn_softmax_exp(m_sg[c] - m_g) : 0.0f;
+        if (c < simdgroups) d_g += d_sg[c] * w[c];
+    }
+    for (uint j = 0; j < kAttnSimdMaxDimsPerLane; ++j) {
+        if (j < dpl) {
+            float acc = 0.0f;
+            for (uint c = 0; c < simdgroups; ++c) acc += o_sg[c * HD + d0 + j] * w[c];
+            o_row[d0 + j] = acc;
+        }
+    }
+    if (lane == 0) { m_out[base] = m_g; d_out[base] = d_g; }
+}

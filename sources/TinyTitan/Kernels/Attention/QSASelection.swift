@@ -18,3 +18,15 @@ struct QSASelection {
     let indexStride: Int
     let counts: MTLBuffer
 }
+
+/// One decode step's key selection, in the forms the two attention paths need.
+///
+/// `mask` is the historical form the contiguous full-attention kernel reads.
+/// `indices` is the same selection compacted to ascending logical keys with
+/// `count` valid entries; the host-KV window path needs that list on the host
+/// to decide which rows to copy in, and the kernel iterates it directly.
+struct DecodeKeySelection {
+    let mask: MTLBuffer?
+    let indices: MTLBuffer?
+    let count: Int
+}

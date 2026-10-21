@@ -104,9 +104,9 @@ extension RealForwardRunner {
                 "layer \(L) is both a PLE layer and a sparse-attention "
                     + "layer; the residual entry would be reordered "
                     + "around the n-gram block")
-            var keepMask: MTLBuffer?
+            var selection: DecodeKeySelection?
             if qsaIndexer != nil, cfg.fullAttentionLayerMask[L] == 1 {
-                keepMask = try encodeQSAEntryAndSelect(
+                selection = try encodeQSAEntryAndSelect(
                     passthrough: &attnCB,
                     hidden: hidden, norm: inNorm, out: normed,
                     layer: L, position: position, eps: eps)
@@ -129,7 +129,7 @@ extension RealForwardRunner {
                 layer: L, position: position,
                 slot: slot,
                 isLinear: isLinear, rmsEps: eps,
-                keepMask: keepMask)
+                selection: selection)
             try encodeResidualExitDecode(
                 commandBuffer: tailCB,
                 hidden: hidden, delta: oOut,

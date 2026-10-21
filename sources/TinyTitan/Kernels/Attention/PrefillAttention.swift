@@ -137,6 +137,7 @@ final class PrefillAttention {
         keepIndices: MTLBuffer? = nil,
         keepIndexStride: Int = 0,
         keepCounts: MTLBuffer? = nil,
+        keepRows: MTLBuffer? = nil,
         path: RuntimePrefillAttentionPath = .causalTiled
     ) throws {
         validate(params)
@@ -183,7 +184,11 @@ final class PrefillAttention {
         let compacted =
             compactionAllowed
             && keepMask != nil && keepIndices != nil && keepCounts != nil
-        var useKeep = UInt32(keepMask == nil ? 0 : (compacted ? 2 : 1))
+        // useKeep 3 is the host-KV window: the compacted list is logical keys
+        // and `keepRows` is the window row for each of them.
+        let windowed = compacted && keepRows != nil
+        var useKeep = UInt32(
+            keepMask == nil ? 0 : (windowed ? 3 : (compacted ? 2 : 1)))
         var stride = UInt32(keepStride)
         var indexStride = UInt32(keepIndexStride)
         enc.setBuffer(keepMask ?? emptyKeepMask, offset: 0, index: 5)
@@ -192,6 +197,7 @@ final class PrefillAttention {
         enc.setBuffer(keepIndices ?? emptyKeepMask, offset: 0, index: 8)
         enc.setBuffer(keepCounts ?? emptyKeepMask, offset: 0, index: 9)
         enc.setBytes(&indexStride, length: MemoryLayout<UInt32>.size, index: 10)
+        enc.setBuffer(keepRows ?? emptyKeepMask, offset: 0, index: 11)
         let groups =
             useTensorOps
             ? MTLSize(
