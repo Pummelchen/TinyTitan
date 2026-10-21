@@ -206,6 +206,7 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
     var batchNormedBuffer: MTLBuffer?
     var batchLogitsBuffer: MTLBuffer?
     var batchScratchRows = 0
+    var batchedDecodeScratch: BatchedDecodeScratch?
     var headFourRowLaunches = 0  // test-visible: width-4 head launches
     static let mtpChunkCapacity = 32
     let mtpTokenBlock: MTLBuffer?
