@@ -278,9 +278,27 @@ Against two sequential serial requests (about 30.4 s at 64 and 52.4 s at 128),
 the union shape is +5% at 64 and +10% / -11% on the two 128-token pairs:
 throughput parity, not a durable win. Per-request latency is still ~2x serial
 because the union router readback, fetch and phase 1/2 for both rows are
-serialized inside the layer. The next levers are the next-layer expert
-prediction/prefetch across the union (the per-row path's ring is unused here)
-and, if it stays bit-identical, one batched router readback instead of two.
+serialized inside the layer.
+
+Two scheduling levers were tried and reverted, each with byte-identical text:
+
+- **Next-layer prefetch ring.** Probing the next router for both rows and
+  feeding the ring plus adoption cost 11-19% at both lengths: 34.0 / 31.6 s at
+  64 and 63.4 / 70.2 s at 128, against 28.8 / 29.3 and 47.5 / 59.1 without it.
+  The ring's speculative reads compete with the union demand fetch, so the
+  serial path's depth-1 win does not transfer.
+- **Shared expert after the router wait** (so its GPU work overlaps the fetch):
+  29.3 / 37.8 s at 64 and 66.4 / 68.1 s at 128 -- no better, and worse on the
+  long arm. The fetch is short enough that moving the shared expert behind the
+  wait lengthens the critical path.
+
+The remaining per-layer cost is the router readback and the two rows' phase
+1/2. At width 2 the union serves two rows for one projection read but doubles
+the expert/FFN work, which is why aggregate throughput lands at parity rather
+than at a win. A durable win needs four rows per projection read (the width-4
+head-only data already lost at 256, so this is doubtful) or a cheaper expert
+path. The 128-token numbers vary by ~10% run to run, so only repeated paired
+runs can settle a few-percent claim.
 
 ## What the measurements say the next attempt must do
 
