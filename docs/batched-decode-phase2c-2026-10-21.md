@@ -237,11 +237,14 @@ decode.** It is opt-in (`TINYTITAN_FUSED_DECODE=1`) until T7 selects it.
 
 Shape: batched entry norm + QKV/o_proj + per-row epilogue/attention/KV write
 (`encodeBatchAttentionBlock`), GDN layers per row on row-sliced input/output,
-then the **production per-row decode FFN** per row (router, shared expert,
-routed phase 1/2), with the row's post-attention norm staged into the
-runner-wide `routedX` the phase-1 kernels read. The attention block, shared
-expert, router and linear attention all take row offsets; the earlier T34
-commits are the pieces.
+then a **decode-shaped union FFN**: one router readback for both rows, one
+union plan/fetch, and the decode kernels for the router, shared expert, phase
+1/2 and the residual add. The MTP verify pipeline's router/shared blocks are
+prefill kernels and did not reproduce the decode text (the first attempt at
+this FFN diverged), so the union shares only the work that cannot change
+numbers. The routed command is carried as a pending command across the next
+layer's attention; the previous layer's pending is released only after the
+next layer's router wait, which by queue order has already drained it.
 
 The last correctness blocker was not in the loop. The **two-row and four-row
 GEMV kernels accumulated the affine scale term outside the bias term**
@@ -252,7 +255,7 @@ flipped greedy tokens: the fused path produced the same first heading and then
 diverged. Matching the single-row order in `dequant_int4_gemv2_simd`,
 `affine_quant_gemv2_simd` and `affine_quant_gemv4_simd` removed all of it.
 
-Evidence, Ornith 4-bit, `RealForwardRunner` test harness:
+Evidence, Ornith 4-bit, `RealForwardRunner` test harness and the battery:
 
 | Gate | Result |
 | --- | --- |
@@ -260,22 +263,24 @@ Evidence, Ornith 4-bit, `RealForwardRunner` test harness:
 | layer-boundary hidden traces (reference dumps), all 40 layers | bit-identical |
 | server text, 24 tokens, two prompts, width 2 with the env switch | identical to the serial arm, both rows |
 | four-prompt battery, 64 and 128 tokens, byte-identical text | 8/8 prompts identical |
-| wall clock, 24 tokens, two rows | fused 17.5 s against serial 8.2 s per row |
 
-The battery (`.build/t34-fused-battery.py`, which starts one serial server and
-one fused server and compares whole texts) passed every prompt:
+The battery (`.build/t34-fused-battery.py`, one serial server against one fused
+server, whole texts compared) also gives the speed picture. Row-FFN is the
+per-row decode FFN shape; union-FFN is the decode-kernel union stage with the
+pending command carried:
 
-| Tokens | Serial per prompt | Fused pair wall | Fused decode | Serial decode |
+| Tokens | Serial per prompt | Row-FFN pair wall | Union-FFN pair wall | Union decode |
 | ---: | ---: | ---: | ---: | ---: |
-| 64 | 15.0-16.5 s | 36.1 / 38.1 s | 2.15-2.34 tok/s per row | 5.94-6.20 tok/s |
-| 128 | 26.4-27.6 s | 65.9 / 66.6 s | 2.10-2.30 tok/s per row | 5.94-6.20 tok/s |
+| 64 | 15.0-16.5 s | 36.1 / 38.1 s | 28.8 / 29.3 s | 3.11-3.55 tok/s per row |
+| 128 | 26.4-27.6 s | 65.9 / 66.6 s | 47.5 / 59.1 s | 2.39-2.69 tok/s per row |
 
-The wall clock is the remaining failure: this shape drains the routed command
-and the router readback per row per layer, so it has no overlap -- decode is
-~2.7x slower per row than serial. The next T34 step is carrying each row's
-pending routed command across layers, which needs per-row `routedX`, `h1`,
-`h2`, `moeActs` and route buffers so one row's in-flight FFN is not overwritten
-by the other's. Carry it without breaking the bit-identical gate above.
+Against two sequential serial requests (about 30.4 s at 64 and 52.4 s at 128),
+the union shape is +5% at 64 and +10% / -11% on the two 128-token pairs:
+throughput parity, not a durable win. Per-request latency is still ~2x serial
+because the union router readback, fetch and phase 1/2 for both rows are
+serialized inside the layer. The next levers are the next-layer expert
+prediction/prefetch across the union (the per-row path's ring is unused here)
+and, if it stays bit-identical, one batched router readback instead of two.
 
 ## What the measurements say the next attempt must do
 

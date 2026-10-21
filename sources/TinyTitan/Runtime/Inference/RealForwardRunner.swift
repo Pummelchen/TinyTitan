@@ -207,11 +207,7 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
     var batchLogitsBuffer: MTLBuffer?
     var batchScratchRows = 0
     var batchedDecodeScratch: BatchedDecodeScratch?
-    /// Test hook: force the fused loop on or off for this runner without the
-    /// process-global environment switch. Nil follows `TINYTITAN_FUSED_DECODE`.
-    var fusedDecodeOverride: Bool?
-    /// Test-visible: how many decode steps actually took the fused loop.
-    var fusedBatchDecodeLaunches = 0
+    var fusedDecodeState = FusedDecodeState()
     var headFourRowLaunches = 0  // test-visible: width-4 head launches
     static let mtpChunkCapacity = 32
     let mtpTokenBlock: MTLBuffer?

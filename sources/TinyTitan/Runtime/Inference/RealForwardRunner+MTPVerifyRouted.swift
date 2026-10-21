@@ -23,6 +23,14 @@ extension RealForwardRunner {
     /// lint:allow-long one layer's verify-MoE stage is a single ordered
     /// pipeline in the same shape as its decode and tile siblings: route
     /// readback, union plan, overlapped fetch, per-row encode, commit.
+    struct VerifyPairOutcome {
+        let routedCB: MTLCommandBuffer
+        let sharedCB: MTLCommandBuffer
+        let expertLease: RoutedExpertLease?
+        let nextCB: MTLCommandBuffer?
+    }
+
+    /// The MTP verify caller: same pipeline, awaited to completion.
     func encodeRoutedMoEVerifyPair(
         cb: inout MTLCommandBuffer,
         layer L: Int,
@@ -30,6 +38,28 @@ extension RealForwardRunner {
         scratch: PrefillChunkScratchBuffers,
         hiddenSize D: Int
     ) async throws {
+        let outcome = try await encodeVerifyPairBody(
+            cb: &cb, layer: L, views: views, scratch: scratch, hiddenSize: D)
+        try waitForCompletion(outcome.routedCB)
+        recordKernelGPU(role: "prefill_shared_expert", outcome.sharedCB)
+        recordKernelGPU(role: "verify_routed_pair", outcome.routedCB)
+        outcome.expertLease?.release()
+        if let nextCB = outcome.nextCB { cb = nextCB }
+    }
+
+    /// One verify-pair FFN stage without the final wait: the routed command,
+    /// its lease and the next command buffer are handed back so a decode loop
+    /// can carry the GPU work across the next layer.
+    ///
+    /// lint:allow-long the existing verify-pair pipeline, split out of its
+    /// caller as pure code motion; no logic changed.
+    func encodeVerifyPairBody(
+        cb: inout MTLCommandBuffer,
+        layer L: Int,
+        views: LayerPrefillQKVViews,
+        scratch: PrefillChunkScratchBuffers,
+        hiddenSize D: Int
+    ) async throws -> VerifyPairOutcome {
         let t = 2
         let topK = UInt32(cfg.topKExperts)
         let FmoE = UInt32(cfg.moeIntermediateSize)
@@ -270,17 +300,15 @@ extension RealForwardRunner {
             }
         }
         routedCB.commit()
-        try waitForCompletion(routedCB)
-        recordKernelGPU(role: "prefill_shared_expert", sharedCB)
-        recordKernelGPU(role: "verify_routed_pair", routedCB)
-        lease?.release()
         leaseTransferred = true
-
-        if L + 1 < cfg.numLayers {
-            guard let nextCB = ctx.queue.makeCommandBuffer() else {
-                throw ModelError.residentBufferWrapFailed
-            }
-            cb = nextCB
+        let nextCB =
+            L + 1 < cfg.numLayers
+            ? ctx.queue.makeCommandBuffer() : nil
+        if L + 1 < cfg.numLayers, nextCB == nil {
+            throw ModelError.residentBufferWrapFailed
         }
+        return VerifyPairOutcome(
+            routedCB: routedCB, sharedCB: sharedCB, expertLease: lease,
+            nextCB: nextCB)
     }
 }

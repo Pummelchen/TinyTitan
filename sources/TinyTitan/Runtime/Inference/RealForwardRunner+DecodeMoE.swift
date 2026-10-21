@@ -5,11 +5,8 @@ import Metal
 /// and the slot bookkeeping the stage publishes.
 ///
 /// Split out of `RealForwardRunner+Decode.swift` (2026-09-28) under the
-/// 500-line-per-file rule (Task 8 of the cleanup runbook) as pure code motion:
-/// the same bodies, moved so the token layer loop and the expert stage read
-/// apart. No signature or behaviour change; every declaration they touch was
-/// already internal (`private` is file-scoped in Swift, so a cross-file reach
-/// would have forced a widening here -- none was needed).
+/// 500-line-per-file rule as pure code motion: same bodies, no behaviour
+/// change, and no declaration needed widening.
 extension RealForwardRunner {
 
     /// Routed-expert stage of one decode layer: top-k readback, expert fetch,
@@ -39,7 +36,6 @@ extension RealForwardRunner {
         hiddenOffset: Int = 0
     ) async throws {
         let D = UInt32(cfg.hiddenSize)
-        let routedResidual = residualHidden ?? hidden
         let FmoE = UInt32(cfg.moeIntermediateSize)
         let readbackStarted = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let idxPtr = outIndices.contents().bindMemory(
@@ -373,7 +369,7 @@ extension RealForwardRunner {
         let gTail: (MTLCommandBuffer) throws -> Void = { [self] cb in
             try encodeResidualExitDecode(
                 commandBuffer: cb,
-                hidden: routedResidual, hiddenOffset: hiddenOffset,
+                hidden: residualHidden ?? hidden, hiddenOffset: hiddenOffset,
                 delta: h2Buf,
                 sublayer: .mlp, layer: L)
         }
