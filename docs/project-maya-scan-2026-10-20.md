@@ -80,6 +80,20 @@ Qwen3.8 decode, 7-12 % of the token, once the server's concurrent path drives
 the batched head. The rest of the plan above is unchanged; this measurement is
 what makes the head worth wiring first, before the layer path is restructured.
 
+**What a head-only barrier would and would not buy (measured 2026-10-21).**
+Two concurrent 2.2K requests on the Ornith 4-bit server, width 2, prompt cache
+off: 59.5 s serial against 55.3 s concurrent (~7 % wall), but one request's
+decode collapsed to 1.99 tok/s against 8.2 serial and the other's did the same
+work in 8.2 s — the single `forwardStepGate` serialises whole token steps, so
+concurrency currently trades fairness for a small wall gain. A head-only
+barrier would shave the 4-5 ms of head per token (~7-10 % of decode) only when
+two sessions reach the head together; it would not fix the layer-loop
+serialisation or the starvation. A genuinely batched layer path is a
+multi-week rewrite with a ~7-12 % payoff at width 2, for multi-session use
+only — the default is width 1. **Not pursued in this pass.** The 4-bit head
+was measured too: 7.78 ms against 9.11 ms per token on the same shape, ~1.3 ms
+(~2 %), which does not justify the quality risk of re-quantising the install.
+
 Effort is a project, not a knob, and it is the one idea on this list that
 changes a product story ("several agent sessions on one Mac") rather than a
 percentage.
