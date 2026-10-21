@@ -213,9 +213,28 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
     /// unset. The other knobs have no runtime switch yet and are reported
     /// rather than silently ignored.
     public func application(
+        for machine: Machine,
+        contextTokens: Int,
+        modelID: String? = nil,
         explicitPrefillChunkTokens: Int?,
         explicitExpertCacheSlots: Int?
-    ) -> CalibrationApplication {
+    ) throws -> CalibrationApplication {
+        guard self.machine.identifier == machine.identifier,
+            self.machine.memoryBytes == machine.memoryBytes
+        else {
+            throw CalibrationProfileError.incompatibleMachine(
+                "profile is for \(self.machine.identifier)/"
+                    + "\(self.machine.memoryBytes) bytes, not "
+                    + "\(machine.identifier)/\(machine.memoryBytes)")
+        }
+        guard target.contextTokens == contextTokens else {
+            throw CalibrationProfileError.incompatibleTarget(
+                "profile is for context \(target.contextTokens), not \(contextTokens)")
+        }
+        if let modelID, target.modelID != modelID {
+            throw CalibrationProfileError.incompatibleTarget(
+                "profile is for model \(target.modelID), not \(modelID)")
+        }
         var ignored: [String] = []
         if knobs.boundedIO != nil { ignored.append("boundedIO") }
         if knobs.q8Attention != nil { ignored.append("q8Attention") }
@@ -239,6 +258,8 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
 
 public enum CalibrationProfileError: Error, CustomStringConvertible {
     case unsupportedSchema(Int)
+    case incompatibleMachine(String)
+    case incompatibleTarget(String)
     case invalidMachine(String)
     case invalidTarget(String)
     case invalidKnob(String)
@@ -250,6 +271,10 @@ public enum CalibrationProfileError: Error, CustomStringConvertible {
         switch self {
         case .unsupportedSchema(let version):
             return "calibration schema version \(version) is not supported"
+        case .incompatibleMachine(let detail):
+            return "calibration profile does not match this machine: \(detail)"
+        case .incompatibleTarget(let detail):
+            return "calibration profile does not match this run: \(detail)"
         case .invalidMachine(let detail):
             return "invalid calibration machine: \(detail)"
         case .invalidTarget(let detail):

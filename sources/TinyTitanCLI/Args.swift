@@ -431,7 +431,12 @@ extension Args {
                     if case .fixed(let chunk)? = prefillChunk { return chunk }
                     return nil
                 }()
-                let application = profile.application(
+                let identity = try ManifestReader.peekIdentity(
+                    directoryURL: URL(fileURLWithPath: model))
+                let application = try profile.application(
+                    for: CalibrationProfile.currentMachine(),
+                    contextTokens: maxContext,
+                    modelID: identity.modelID,
                     explicitPrefillChunkTokens: explicitChunk,
                     explicitExpertCacheSlots: expertCacheSlots)
                 if prefillChunk == nil, let chunk = application.prefillChunkTokens {

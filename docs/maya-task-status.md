@@ -23,7 +23,7 @@ evidence exist.
 | T15 calibrate interface | done | `CalibrationProfile` (v1 schema, validation, machine identity), `tinytitan calibrate --model/--check/--out`, help listed in `TinyTitanCLI --help`; 10 schema tests + 5 CLI tests. Drafts are `measured: false`, knobs empty; T16 fills them. |
 | T16 calibration arms | done | Keep rule, measurement driver and `calibrate --plan` landed. Real Ornith run (32 tokens, 2 repeats): baseline 7.91 tok/s, prefill-chunk-128 +0.5% rejected by the 3% floor, cache-slots-96 +4.1% rejected inside the 6.3% noise band; the produced profile is `measured: true` with no knobs. `docs/calibration-product.md` records the protocol and the arm/switch split; profile at `.build/t16-ornith-calibration.json`. |
 | T17 profile precedence | done | `--calibration-profile <path>` on the CLI and server loads with the bounded reader, validates, fills only unset `prefillChunkTokens`/`expertCacheSlots` (explicit flags win) and logs the applied line plus the knobs with no runtime switch. CLI + server precedence tests: fill, explicit-wins, switchless-reported, corrupt-refused. |
-| T18 calibration tests | pending | — |
+| T18 calibration tests | done | Schema round-trip + every refusal (10), keep floor/noise/slower/non-positive/interleaving/merge/refusals (8), CLI precedence fill/explicit/no-profile/corrupt/foreign-machine/wrong-model/wrong-context/switchless (16), server versions of the same (7). Decision tests inject samples, so no test depends on wall-clock luck. Profiles are checked against machine, memory, context and install model before application. |
 | T19 multi-Mac validation | pending (hardware) | — |
 | T20 checkpoint design | pending | — |
 | T21 checkpoint format | pending | — |

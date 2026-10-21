@@ -1,7 +1,7 @@
 # Calibration product (T15-T18)
 
-Status: T15 (schema + CLI), T16 (decision engine + measurement driver) and T17
-(load and precedence) are implemented. T18 (full test matrix) is next.
+Status: T15 (schema + CLI), T16 (decision engine + measurement driver), T17
+(load and precedence) and T18 (test matrix) are implemented.
 
 ## Profile
 
@@ -78,3 +78,20 @@ Both front ends accept `--calibration-profile <path>`:
 Tests: CLI `profileFillsOnlyUnsetKnobs` / `explicitFlagsWinOverTheProfile` /
 `profileKnobsWithoutSwitchesAreReported` / `corruptProfileIsRefused`; server
 `CalibrationProfileArgumentsTests` mirrors the same four cases.
+
+## Compatibility and the test matrix (T18)
+
+A profile is only applied when it describes the machine and run it is applied
+to:
+
+- machine identifier and physical memory must match `currentMachine()`; a
+  profile from another Mac is refused, not reinterpreted;
+- `target.contextTokens` must equal the context the run was launched with;
+- the CLI also checks `target.modelID` against the install it is loading.
+
+All failures are launch errors (`ArgsError` / `ServerArgumentError`) that name
+the mismatch. Covered cases: schema round-trip and every validation refusal
+(profile tests), the 3 % floor and noise band (runner tests), precedence
+fill/explicit-wins at both front ends, corrupt profile, foreign machine, wrong
+model, wrong context, switchless knobs reported, and the no-profile path.
+Decision tests inject samples, so none of them depends on wall-clock luck.

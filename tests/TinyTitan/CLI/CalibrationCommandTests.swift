@@ -114,6 +114,30 @@ import TinyTitanLib
         }
     }
 
+    /// A toy install plus a profile whose machine and target match it, for the
+    /// precedence tests (the CLI peeks the model identity, so the model must be
+    /// a real install).
+    private func toyProfile(
+        knobs: CalibrationProfile.Knobs
+    ) throws -> (directory: URL, profile: URL) {
+        let directory = try QwenToySynthetic.write(weightBits: 4)
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let profile = CalibrationProfile(
+            machine: CalibrationProfile.currentMachine(),
+            target: .init(
+                modelID: identity.modelID,
+                family: identity.family.rawValue,
+                weightBits: identity.weightBits,
+                contextTokens: 8192),
+            knobs: knobs,
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calibration-\(UUID().uuidString).json")
+        try profile.encodedJSON().write(to: url)
+        return (directory, url)
+    }
+
     private func writeProfile(
         _ profile: CalibrationProfile
     ) throws -> URL {
@@ -124,24 +148,18 @@ import TinyTitanLib
     }
 
     @Test func profileFillsOnlyUnsetKnobs() throws {
-        let profile = CalibrationProfile(
-            machine: .init(
-                identifier: "Mac15,3", memoryBytes: 24 << 30,
-                osVersion: "27.0.1"),
-            target: .init(
-                modelID: "ornith", family: "qwen36", weightBits: 4,
-                contextTokens: 8192),
-            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96),
-            measured: true, measuredAt: "2026-10-22T00:00:00Z",
-            source: "calibrate/1")
-        let url = try writeProfile(profile)
-        defer { try? FileManager.default.removeItem(at: url) }
-
+        let (directory, profile) = try toyProfile(
+            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: profile)
+        }
         let parsed = try Args.parse([
-            "--model", "/tmp/model", "--prompt", "hi",
-            "--calibration-profile", url.path,
+            "--model", directory.path, "--prompt", "hi",
+            "--max-context", "8192",
+            "--calibration-profile", profile.path,
         ])
-        #expect(parsed.calibrationProfile == url.path)
+        #expect(parsed.calibrationProfile == profile.path)
         #expect(parsed.expertCacheSlots == 96)
         if case .fixed(let chunk)? = parsed.prefillChunk {
             #expect(chunk == 128)
@@ -153,22 +171,16 @@ import TinyTitanLib
     }
 
     @Test func explicitFlagsWinOverTheProfile() throws {
-        let profile = CalibrationProfile(
-            machine: .init(
-                identifier: "Mac15,3", memoryBytes: 24 << 30,
-                osVersion: "27.0.1"),
-            target: .init(
-                modelID: "ornith", family: "qwen36", weightBits: 4,
-                contextTokens: 8192),
-            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96),
-            measured: true, measuredAt: "2026-10-22T00:00:00Z",
-            source: "calibrate/1")
-        let url = try writeProfile(profile)
-        defer { try? FileManager.default.removeItem(at: url) }
-
+        let (directory, profile) = try toyProfile(
+            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: profile)
+        }
         let parsed = try Args.parse([
-            "--model", "/tmp/model", "--prompt", "hi",
-            "--calibration-profile", url.path,
+            "--model", directory.path, "--prompt", "hi",
+            "--max-context", "8192",
+            "--calibration-profile", profile.path,
             "--expert-cache-slots", "32", "--prefill-chunk", "256",
         ])
         #expect(parsed.expertCacheSlots == 32)
@@ -180,21 +192,16 @@ import TinyTitanLib
     }
 
     @Test func profileKnobsWithoutSwitchesAreReported() throws {
-        let profile = CalibrationProfile(
-            machine: .init(
-                identifier: "Mac15,3", memoryBytes: 24 << 30,
-                osVersion: "27.0.1"),
-            target: .init(
-                modelID: "ornith", family: "qwen36", weightBits: 4,
-                contextTokens: 8192),
-            knobs: .init(boundedIO: false),
-            measured: true, measuredAt: "2026-10-22T00:00:00Z",
-            source: "calibrate/1")
-        let url = try writeProfile(profile)
-        defer { try? FileManager.default.removeItem(at: url) }
+        let (directory, profile) = try toyProfile(
+            knobs: .init(boundedIO: false))
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: profile)
+        }
         let parsed = try Args.parse([
-            "--model", "/tmp/model", "--prompt", "hi",
-            "--calibration-profile", url.path,
+            "--model", directory.path, "--prompt", "hi",
+            "--max-context", "8192",
+            "--calibration-profile", profile.path,
         ])
         #expect(parsed.expertCacheSlots == nil)
         #expect(parsed.calibrationLogLine?.contains("not applied: boundedIO") == true)
@@ -209,6 +216,91 @@ import TinyTitanLib
             try Args.parse([
                 "--model", "/tmp/model", "--prompt", "hi",
                 "--calibration-profile", url.path,
+            ])
+        }
+    }
+
+    @Test func foreignMachineProfileIsRefused() throws {
+        let directory = try QwenToySynthetic.write(weightBits: 4)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        var machine = CalibrationProfile.currentMachine()
+        machine = .init(
+            identifier: "Mac99,9", memoryBytes: machine.memoryBytes,
+            osVersion: machine.osVersion)
+        let profile = CalibrationProfile(
+            machine: machine,
+            target: .init(
+                modelID: identity.modelID,
+                family: identity.family.rawValue,
+                weightBits: identity.weightBits,
+                contextTokens: 8192),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calibration-foreign-\(UUID().uuidString).json")
+        try profile.encodedJSON().write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", directory.path, "--prompt", "hi",
+                "--max-context", "8192",
+                "--calibration-profile", url.path,
+            ])
+        }
+    }
+
+    @Test func noProfileLeavesTheFlagsAlone() throws {
+        let parsed = try Args.parse([
+            "--model", "/tmp/model", "--prompt", "hi",
+        ])
+        #expect(parsed.calibrationProfile == nil)
+        #expect(parsed.calibrationLogLine == nil)
+        #expect(parsed.expertCacheSlots == nil)
+        #expect(parsed.prefillChunk == nil)
+    }
+
+    @Test func wrongModelProfileIsRefused() throws {
+        let (directory, profile) = try toyProfile(
+            knobs: .init(prefillChunkTokens: 128))
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: profile)
+        }
+        // Rewrite the profile for a different model while keeping the machine
+        // and context valid.
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let other = CalibrationProfile(
+            machine: CalibrationProfile.currentMachine(),
+            target: .init(
+                modelID: identity.modelID + "-other",
+                family: identity.family.rawValue,
+                weightBits: identity.weightBits,
+                contextTokens: 8192),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        try other.encodedJSON().write(to: profile)
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", directory.path, "--prompt", "hi",
+                "--max-context", "8192",
+                "--calibration-profile", profile.path,
+            ])
+        }
+    }
+
+    @Test func wrongContextProfileIsRefused() throws {
+        let (directory, profile) = try toyProfile(
+            knobs: .init(prefillChunkTokens: 128))
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: profile)
+        }
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", directory.path, "--prompt", "hi",
+                "--max-context", "4096",
+                "--calibration-profile", profile.path,
             ])
         }
     }

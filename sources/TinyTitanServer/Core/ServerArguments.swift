@@ -415,7 +415,9 @@ public struct ServerArguments: Equatable, Sendable {
             do {
                 let profile = try CalibrationProfile.load(
                     fileAt: URL(fileURLWithPath: path))
-                let application = profile.application(
+                let application = try profile.application(
+                    for: CalibrationProfile.currentMachine(),
+                    contextTokens: maxContext,
                     explicitPrefillChunkTokens: prefillChunkTokens,
                     explicitExpertCacheSlots: expertCacheSlots)
                 if prefillChunkTokens == nil {

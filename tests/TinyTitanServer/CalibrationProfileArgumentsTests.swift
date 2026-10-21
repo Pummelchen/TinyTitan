@@ -9,9 +9,7 @@ import TinyTitanLib
         knobs: CalibrationProfile.Knobs
     ) throws -> URL {
         let profile = CalibrationProfile(
-            machine: .init(
-                identifier: "Mac15,3", memoryBytes: 24 << 30,
-                osVersion: "27.0.1"),
+            machine: CalibrationProfile.currentMachine(),
             target: .init(
                 modelID: "ornith", family: "qwen36", weightBits: 4,
                 contextTokens: 8192),
@@ -29,7 +27,8 @@ import TinyTitanLib
             knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
         defer { try? FileManager.default.removeItem(at: url) }
         let arguments = try ServerArguments.parse([
-            "--model", "/tmp/model", "--calibration-profile", url.path,
+            "--model", "/tmp/model", "--max-context", "8192",
+            "--calibration-profile", url.path,
         ])
         #expect(arguments.prefillChunkTokens == 128)
         #expect(arguments.expertCacheSlots == 96)
@@ -43,7 +42,8 @@ import TinyTitanLib
             knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
         defer { try? FileManager.default.removeItem(at: url) }
         let arguments = try ServerArguments.parse([
-            "--model", "/tmp/model", "--calibration-profile", url.path,
+            "--model", "/tmp/model", "--max-context", "8192",
+            "--calibration-profile", url.path,
             "--prefill-chunk", "256", "--expert-cache-slots", "32",
         ])
         #expect(arguments.prefillChunkTokens == 256)
@@ -54,11 +54,46 @@ import TinyTitanLib
         let url = try profile(knobs: .init(boundedIO: false))
         defer { try? FileManager.default.removeItem(at: url) }
         let arguments = try ServerArguments.parse([
-            "--model", "/tmp/model", "--calibration-profile", url.path,
+            "--model", "/tmp/model", "--max-context", "8192",
+            "--calibration-profile", url.path,
         ])
         #expect(arguments.prefillChunkTokens == nil)
         #expect(arguments.expertCacheSlots == nil)
         #expect(arguments.calibrationLogLine?.contains("not applied: boundedIO") == true)
+    }
+
+    @Test func foreignMachineProfileIsRefused() throws {
+        var machine = CalibrationProfile.currentMachine()
+        machine = .init(
+            identifier: "Mac99,9", memoryBytes: machine.memoryBytes,
+            osVersion: machine.osVersion)
+        let profile = CalibrationProfile(
+            machine: machine,
+            target: .init(
+                modelID: "ornith", family: "qwen36", weightBits: 4,
+                contextTokens: 8192),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("server-calibration-foreign-\(UUID().uuidString).json")
+        try profile.encodedJSON().write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: ServerArgumentError.self) {
+            try ServerArguments.parse([
+                "--model", "/tmp/model", "--max-context", "8192",
+                "--calibration-profile", url.path,
+            ])
+        }
+    }
+
+    @Test func noProfileLeavesTheFlagsAlone() throws {
+        let arguments = try ServerArguments.parse([
+            "--model", "/tmp/model", "--max-context", "8192",
+        ])
+        #expect(arguments.calibrationProfile == nil)
+        #expect(arguments.calibrationLogLine == nil)
+        #expect(arguments.prefillChunkTokens == nil)
+        #expect(arguments.expertCacheSlots == nil)
     }
 
     @Test func corruptProfileIsRefused() throws {
