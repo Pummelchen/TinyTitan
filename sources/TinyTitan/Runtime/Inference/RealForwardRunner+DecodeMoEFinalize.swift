@@ -94,6 +94,52 @@ extension RealForwardRunner {
         for i in 0..<slots.count { ptr[i] = slots[i] }
     }
 
+    /// Encode one row's shared expert into a caller-owned command buffer.
+    ///
+    /// `encodeAndCommitSharedExpert` is the decode loop's runner-wide form:
+    /// one row, `routedX -> h1Buf`, committed immediately. The fused decode
+    /// loop needs the same arithmetic on a row slice of a batch buffer and on
+    /// a command buffer it shares with the rest of the layer, so the two row
+    /// arguments and the buffer are explicit here. The intermediate scratch is
+    /// runner-wide on purpose: rows are encoded in order on one command
+    /// buffer, so each row's down projection reads the scratch before the next
+    /// row's gate projection overwrites it.
+    func encodeSharedExpert(
+        layer L: Int,
+        x: MTLBuffer, xOffset: Int,
+        y: MTLBuffer, yOffset: Int,
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        let sharedProj = sharedExpertProjections[L]
+        let D = UInt32(cfg.hiddenSize)
+        try shared.encode(
+            commandBuffer: commandBuffer,
+            x: x, xOffset: xOffset,
+            gate: sharedProj.gate,
+            up: sharedProj.up,
+            down: sharedProj.down,
+            y: y, yOffset: yOffset,
+            scratchGate: denseScratchGate,
+            scratchUp: denseScratchUp,
+            scratchAct: denseScratchAct)
+        if cfg.sharedExpertGated {
+            // out = sigmoid(shared_expert_gate(moeX)) * shared_mlp(moeX)
+            let gateView = try requireTensorView(sharedProj.scalarGate, "shared-expert scalar gate")
+            let gateBuf = try requireBuffer(sharedScalarGateBuf, "shared-expert gate buffer")
+            try encodeScalarGate(
+                commandBuffer: commandBuffer,
+                view: gateView,
+                x: x, xOffset: xOffset,
+                y: gateBuf, yOffset: 0,
+                n: D)
+            try requireElementwise().encodeSigmoidScalarMul(
+                commandBuffer: commandBuffer,
+                y: y, yOffset: yOffset,
+                gate: gateBuf, gateOffset: 0,
+                count: cfg.hiddenSize)
+        }
+    }
+
     /// Encodes the shared dense MLP and commits it immediately.
     ///
     /// It depends only on `routedX`, which `tailCB` produces, so it can be
@@ -110,36 +156,14 @@ extension RealForwardRunner {
         layer L: Int,
         completionClock: CommandCompletionClock?
     ) throws -> MTLCommandBuffer {
-        let sharedProj = sharedExpertProjections[L]
-        let D = UInt32(cfg.hiddenSize)
         guard let sharedCB = ctx.queue.makeCommandBuffer() else {
             throw ModelError.residentBufferWrapFailed
         }
-        try shared.encode(
-            commandBuffer: sharedCB,
-            x: routedX,
-            gate: sharedProj.gate,
-            up: sharedProj.up,
-            down: sharedProj.down,
-            y: h1Buf,
-            scratchGate: denseScratchGate,
-            scratchUp: denseScratchUp,
-            scratchAct: denseScratchAct)
-        if cfg.sharedExpertGated {
-            // out = sigmoid(shared_expert_gate(moeX)) * shared_mlp(moeX)
-            let gateView = try requireTensorView(sharedProj.scalarGate, "shared-expert scalar gate")
-            try encodeScalarGate(
-                commandBuffer: sharedCB,
-                view: gateView,
-                x: routedX,
-                y: try requireBuffer(sharedScalarGateBuf, "shared-expert gate buffer"),
-                n: D)
-            try requireElementwise().encodeSigmoidScalarMul(
-                commandBuffer: sharedCB,
-                y: h1Buf,
-                gate: try requireBuffer(sharedScalarGateBuf, "shared-expert gate buffer"),
-                count: cfg.hiddenSize)
-        }
+        try encodeSharedExpert(
+            layer: L,
+            x: routedX, xOffset: 0,
+            y: h1Buf, yOffset: 0,
+            commandBuffer: sharedCB)
         completionClock?.track(sharedCB)
         sharedCB.commit()
         return sharedCB
