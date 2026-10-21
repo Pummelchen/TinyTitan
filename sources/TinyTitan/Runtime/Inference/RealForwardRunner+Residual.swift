@@ -59,13 +59,18 @@ extension RealForwardRunner {
     func encodeResidualEntryDecode(
         commandBuffer: MTLCommandBuffer,
         hidden: MTLBuffer,
+        hiddenOffset: Int = 0,
         norm: TensorView,
         out: MTLBuffer,
+        outOffset: Int = 0,
         sublayer: ResidualSublayer,
         layer: Int,
         eps: Float
     ) throws {
         if let hc = hyperConnection {
+            precondition(
+                hiddenOffset == 0,
+                "hyper-connections require a caller-owned row buffer")
             let down =
                 sublayer == .attention
                 ? try model.hcAttnMixDown(layer: layer)
@@ -100,9 +105,9 @@ extension RealForwardRunner {
         if !ablated("norm") {
             try rms.encodeBF16W(
                 commandBuffer: commandBuffer,
-                x: hidden,
+                x: hidden, xOffset: hiddenOffset,
                 weight: norm.buffer, weightOffset: Int(norm.offset),
-                out: out,
+                out: out, outOffset: outOffset,
                 d: UInt32(cfg.hiddenSize), eps: eps)
         }
     }

@@ -22,8 +22,7 @@ extension RealForwardRunner {
                 ? Int(seqLen) : (selection?.count ?? Int(seqLen)))
     }
 
-    /// Packed q_proj split, per-head q/k norms, NeoX sub-dim RoPE, and the
-    /// quantized-KV write of one gated full-attention layer.
+    /// Packed q_proj split, per-head q/k norms, NeoX sub-dim RoPE.
     func encodeGatedFullPreAttention(
         _ cb: inout MTLCommandBuffer,
         layer L: Int,
@@ -36,8 +35,37 @@ extension RealForwardRunner {
         numKV: Int,
         eps: Float
     ) throws {
-        guard let elementwise, let rope, let qPackedScratch, let attnGateScratch
-        else {
+        guard let qPackedScratch else {
+            throw ModelError.internalInconsistency(
+                detail: "attn_output_gate layer \(L) without q scratch")
+        }
+        try encodeGatedFullQKVProjection(
+            cb, layer: L, qOutput: qPackedScratch,
+            kOutput: kWrite, vOutput: vWrite,
+            qDimension: qDim, kvDimension: kvDim)
+        try rotate(&cb, role: "qsa.qkv")
+        try encodeGatedFullPostProjection(
+            cb, layer: L, position: position,
+            qPacked: qPackedScratch, qPackedOffset: 0,
+            kWrite: kWrite, vWrite: vWrite,
+            headDim: headDim, numKV: numKV, eps: eps)
+    }
+
+    /// Split [query ; gate], per-head q/k norms and NeoX sub-dim RoPE after
+    /// QKV. The batched path feeds it rows produced by a two-row projection.
+    func encodeGatedFullPostProjection(
+        _ cb: MTLCommandBuffer,
+        layer L: Int,
+        position: Int,
+        qPacked: MTLBuffer,
+        qPackedOffset: Int,
+        kWrite: (buffer: MTLBuffer, offset: Int),
+        vWrite: (buffer: MTLBuffer, offset: Int),
+        headDim: Int,
+        numKV: Int,
+        eps: Float
+    ) throws {
+        guard let elementwise, let rope, let attnGateScratch else {
             throw ModelError.internalInconsistency(
                 detail:
                     "attn_output_gate layer \(L) without gate kernels (arch mask misconfiguration)")
@@ -45,14 +73,9 @@ extension RealForwardRunner {
         let qNormW = try model.qNorm(layer: L)
         let kNormW = try model.kNorm(layer: L)
         let rotaryDim = UInt32(Double(headDim) * cfg.partialRotaryFactor)
-        try encodeGatedFullQKVProjection(
-            cb, layer: L, qOutput: qPackedScratch,
-            kOutput: kWrite, vOutput: vWrite,
-            qDimension: qDim, kvDimension: kvDim)
-        try rotate(&cb, role: "qsa.qkv")
         try elementwise.encodeSplitQGate(
             commandBuffer: cb,
-            packed: qPackedScratch,
+            packed: qPacked, packedOffset: qPackedOffset,
             q: qScratch,
             gate: attnGateScratch,
             heads: cfg.numHeads,
@@ -83,7 +106,6 @@ extension RealForwardRunner {
             numHeads: UInt32(cfg.numHeads),
             rotaryDim: rotaryDim,
             theta: Float(cfg.fullRopeTheta))
-        try rotate(&cb, role: "qsa.gate_norm_rope1")
         try rope.encodeNeoxSubdim(
             commandBuffer: cb,
             data: kWrite.buffer,
@@ -94,4 +116,5 @@ extension RealForwardRunner {
             rotaryDim: rotaryDim,
             theta: Float(cfg.fullRopeTheta))
     }
+
 }
