@@ -21,7 +21,7 @@ evidence exist.
 | T13 512K/128K/1M timings | blocked (model) | Same gate as T11. |
 | T14 host-KV guidance | pending | Depends T13; cannot be written against measurements this host can produce. |
 | T15 calibrate interface | done | `CalibrationProfile` (v1 schema, validation, machine identity), `tinytitan calibrate --model/--check/--out`, help listed in `TinyTitanCLI --help`; 10 schema tests + 5 CLI tests. Drafts are `measured: false`, knobs empty; T16 fills them. |
-| T16 calibration arms | pending | — |
+| T16 calibration arms | in progress | Keep-rule engine + `calibrate --plan` landed: the runner measures baseline and arms interleaved, keeps a win only above both 3% and three MADs, and merges only kept knobs into a measured profile; 8 deterministic tests. Arm audit: `prefillChunkTokens`, `expertCacheSlots` and `boundedIO` are real switches; the plan's prefill tile depth, q8 attention and reader threads have no runtime knob and are listed as unavailable by `--plan`. Remaining: the real measurement driver (fresh-prompt runs per arm) and a measured Ornith profile. |
 | T17 profile precedence | pending | — |
 | T18 calibration tests | pending | — |
 | T19 multi-Mac validation | pending (hardware) | — |

@@ -13,16 +13,19 @@ public struct CalibrationOptions: Equatable, Sendable {
     public var maxContext: Int = 4096
     public var out: String?
     public var check: String?
+    public var plan: Bool = false
     public var help: Bool = false
 
     public init(
         model: String? = nil, maxContext: Int = 4096,
-        out: String? = nil, check: String? = nil, help: Bool = false
+        out: String? = nil, check: String? = nil, plan: Bool = false,
+        help: Bool = false
     ) {
         self.model = model
         self.maxContext = maxContext
         self.out = out
         self.check = check
+        self.plan = plan
         self.help = help
     }
 
@@ -40,6 +43,8 @@ public struct CalibrationOptions: Equatable, Sendable {
           --out <path>           Write the profile here instead of stdout.
           --check <path>         Decode and validate an existing profile, then
                                  print it normalized.
+          --plan                 List the arms this machine can measure and the
+                                 plan's arms that have no runtime switch yet.
           --help                 Show this help.
 
         The profile is JSON. A draft has "measured": false and no knobs; a
@@ -67,6 +72,8 @@ public struct CalibrationOptions: Equatable, Sendable {
                 options.out = try value("--out")
             case "--check":
                 options.check = try value("--check")
+            case "--plan":
+                options.plan = true
             case "--max-context":
                 let raw = try value("--max-context")
                 guard let parsed = Int(raw), parsed > 0 else {
@@ -110,6 +117,36 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
 }
 
 public enum CalibrationCommand {
+    private static func planText() -> String {
+        var lines = ["baseline: family defaults", "arms:"]
+        for arm in CalibrationPlan.defaultArms() {
+            lines.append("  \(arm.name): \(describe(arm.knobs))")
+            if let note = arm.note { lines.append("    \(note)") }
+        }
+        lines.append("no runtime switch yet:")
+        for item in CalibrationPlan.unavailable {
+            lines.append("  \(item.name): \(item.reason)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func describe(_ knobs: CalibrationProfile.Knobs) -> String {
+        var parts: [String] = []
+        if let value = knobs.prefillChunkTokens {
+            parts.append("prefillChunkTokens=\(value)")
+        }
+        if let value = knobs.expertCacheSlots {
+            parts.append("expertCacheSlots=\(value)")
+        }
+        if let value = knobs.q8Attention { parts.append("q8Attention=\(value)") }
+        if let value = knobs.readerThreads { parts.append("readerThreads=\(value)") }
+        if let value = knobs.boundedIO { parts.append("boundedIO=\(value)") }
+        if let value = knobs.prefillTileDepth {
+            parts.append("prefillTileDepth=\(value)")
+        }
+        return parts.isEmpty ? "defaults" : parts.joined(separator: " ")
+    }
+
     /// Profiles are small metadata documents; bound the read so a stray path
     /// cannot pull a model payload into memory.
     private static func readProfile(at path: String) throws -> Data {
@@ -133,6 +170,10 @@ public enum CalibrationCommand {
     public static func run(_ options: CalibrationOptions) throws -> Int32 {
         if options.help {
             print(CalibrationOptions.usage)
+            return 0
+        }
+        if options.plan {
+            print(planText())
             return 0
         }
         if options.check != nil, options.model != nil {
