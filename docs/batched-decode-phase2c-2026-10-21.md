@@ -102,8 +102,43 @@ second implementation of the layer loop is a maintenance and correctness risk
 with no measured upside. The attempt is preserved as a patch in the round's
 scratch space, not in the tree.
 
+## Second attempt: batched QKV/o_proj, still no win
+
+A narrower attempt batched only the attention-side dense projections at width
+2: both rows' entry norms went into one buffer, one two-row GEMV produced QKV
+for both, one two-row GEMV produced o_proj from both rows' post-gate attention,
+and each row then ran its own residual + decode FFN. The per-row attention
+epilogue and FFN were kept, and the layer body could resume at the residual
+when the batch had already run attention.
+
+Correctness held: the two prompts produced the same text as the serial arm
+after the row-residual handoff was fixed (the routed-MoE tail had been adding
+row 0's delta to the runner-wide `hidden` instead of the row's buffer). That is
+the first time a lockstep variant matched serial text on Ornith.
+
+It was still rejected on speed. Ornith 4-bit, width 2, 64 new tokens, the same
+two prompts:
+
+```
+serial  (width 1):  10.66 s + 6.79 s  (18.39 and 17.29 decode tok/s)
+batched (width 2):  wall 19.31 s      (7.03 and 4.83 decode tok/s)
+```
+
+The projection batch saved weight reads but the loop waited on each row's
+routed command before the next row's layer, so the decode path's cross-layer
+prefetch ring and asynchronous routed command were lost. The wait cost was
+larger than the projection saving. The attempt was reverted rather than left
+behind a flag, for the same reason as the first one; the diff is preserved in
+the round's scratch space.
+
 ## What the measurements say the next attempt must do
 
+- **Give each row its own routed-MoE scratch and carry its pending command
+  across layers.** The second attempt proved the projection batching and the
+  per-row FFN can be numerically exact; what it could not do was keep the
+  decode path's overlap while two rows shared `routedX`, `h2`, `moeActs` and
+  the router buffers. A B-row set of those is the prerequisite for a fair
+  test.
 - **Reuse the decode kernels, not the prefill ones.** The lockstep win has to
   come from sharing a weight read while every row keeps the arithmetic and the
   pipeline the width-1 path uses. `encodeTwoRows` proved that is possible for a
