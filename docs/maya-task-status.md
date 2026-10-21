@@ -42,4 +42,4 @@ evidence exist.
 
 Add tasks here with the next free T number; keep the main plan in sync.
 
-- T32: isolate the real-dimension batch-attention divergence (added 2026-10-21 after the fused Ornith run produced corrupt text).
+- T32: isolate the real-dimension batch-attention divergence (added 2026-10-21 after the fused Ornith run produced corrupt text). A first pass found and fixed the fused loop using hardcoded position 0 instead of the row positions; the re-run was still corrupt (`# The, 22 ...`), so the divergence is inside the real-shape batch attention or pair FFN. The wiring is reverted; the next step is a layer-level activation diff, not another whole-model run.
