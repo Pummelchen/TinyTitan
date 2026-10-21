@@ -142,6 +142,12 @@ extension Args {
         TinyTitanCLI — Qwen3.5-MoE 35B-A3B text generation
 
         usage: TinyTitanCLI --model <dir> (--prompt <string> | --messages-file <path>) [options]
+               TinyTitanCLI calibrate (--model <dir> [--max-context <tokens>] [--out <path>]
+                                       | --check <path>)
+
+        command:
+          calibrate                  Write or validate a per-machine tuning
+                                    profile (see `TinyTitanCLI calibrate --help`).
 
         required:
           --model <dir>             Path to a .ssdai model directory.

@@ -16,11 +16,11 @@ evidence exist.
 | T8 fused tests | done | Toy width-2 and width-4 logit parity, both batch-stage suites, and the 8/8 real-model text battery; the fused loop is asserted to have run. |
 | T9 real parity | done | B=2: bit-identical logits and all 8 four-prompt cases (64/128) byte-identical. B=4: bit-identical logits for 4 rows and 4/4 texts identical at 64. Qwen3.8 4-bit does not fit this host. |
 | T10 fused benchmark | rejected | No durable win: width 2 is parity at 64/128; width 4 is +9.4% at 64 (59.4 s vs 65.0 s for four prompts) but a loss at 128 (129-131 s for three requests vs 109 s serial for four) under 4.97 GB of swap. Not wired (T7 rejected); the opt-in path stays for a 64 GB retest. |
-| T11 128K host-KV parity | pending | — |
-| T12 1M start/memory | pending | — |
-| T13 512K/128K/1M timings | pending | — |
-| T14 host-KV guidance | pending | — |
-| T15 calibrate interface | pending | — |
+| T11 128K host-KV parity | blocked (model) | Needs a QSA install to exercise window crossings; the Qwen3.8 4-bit install does not fit this 24 GB host and Ornith has no indexer, where a streamed window at 128K equals the whole context. |
+| T12 1M start/memory | blocked (model) | Same gate as T11. The KVCacheManager-level 1M arena/window test exists (`HostKVStreamingTests`). |
+| T13 512K/128K/1M timings | blocked (model) | Same gate as T11. |
+| T14 host-KV guidance | pending | Depends T13; cannot be written against measurements this host can produce. |
+| T15 calibrate interface | done | `CalibrationProfile` (v1 schema, validation, machine identity), `tinytitan calibrate --model/--check/--out`, help listed in `TinyTitanCLI --help`; 10 schema tests + 5 CLI tests. Drafts are `measured: false`, knobs empty; T16 fills them. |
 | T16 calibration arms | pending | — |
 | T17 profile precedence | pending | — |
 | T18 calibration tests | pending | — |
@@ -40,6 +40,10 @@ evidence exist.
 | T32 real-shape batch-attention diff | done | The reported diff does not reproduce. An independent layer-3 probe on Ornith 4-bit (width 2/4, positions 100/60 and 100/60/130/20) shows batch attention == per-row: normed 0.0, packed q 2.4e-4, v 0.0, post-gate attn 2.4e-4, o 2.4e-4, K/V slot bytes 0.0. The in-loop probe ran after the fused FFN's hidden handoff, and its `first=1269` is constant across unrelated positions; it was not a stage comparison. See `docs/batched-decode-phase2c-2026-10-21.md` T32/T33. |
 | T33 instrument q/k/attn stages | done | No wrong tensor in the q/k/attention/o chain; the stage is exact to fp16 rounding on the real install and is pinned in-tree by `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`. The corrupt Ornith text is in the reverted loop's wiring around the stage (T34). |
 | T34 re-land fused decode loop | rejected (wall clock) | Correctness is done: width 2 and width 4 are bit-identical to the per-row decode, with 8/8 and 4/4 text parity. The wall clock is not: width 2 parity, width 4 +9.4% at 64 and a loss at 128 under memory pressure. Per T10 the path is not wired; it stays opt-in for a 64 GB retest. |
+
+Phase 2 (T11-T14) is model/hardware-blocked here: the only QSA install is
+Qwen3.8 4-bit, which does not fit 24 GB, and Ornith cannot exercise a streamed
+window crossing. Phase 3 (T15) is therefore the next feasible task; T16 follows.
 
 ## New tasks found during execution
 
