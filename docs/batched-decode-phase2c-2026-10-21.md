@@ -131,6 +131,23 @@ larger than the projection saving. The attempt was reverted rather than left
 behind a flag, for the same reason as the first one; the diff is preserved in
 the round's scratch space.
 
+A second refinement gave each row its own routed-MoE scratch (`routedX`,
+`h1`, `h2`, `moeActs`, router outputs, shared-expert scratch) and carried the
+pending routed commands across layers instead of draining at each layer
+boundary. That made the batch numerically correct again -- and exposed one
+final shared buffer, the phase-1 `routedX`/`moeActs`, which had stayed
+runner-wide. With the whole per-row set, Ornith 4-bit width 2 produced the
+serial text.
+
+It was still rejected. Warm 64-token pairs were 13.75-14.18 s batched against
+14.44-14.85 s serial, a small win from overlapping one row's prefill with the
+other's decode; at 128 tokens the same pair was 22.65 s batched against
+21.41 s serial. Decode throughput was 8.1 and 10.1 tok/s against 17-18 for
+serial. The layer-boundary synchronization that makes the QKV/o_proj batch
+possible is exactly what removes the per-row cross-layer routed overlap; the
+short-generation wall win does not survive a longer generation, so the path
+was reverted.
+
 ## What the measurements say the next attempt must do
 
 - **Give each row its own routed-MoE scratch and carry its pending command
