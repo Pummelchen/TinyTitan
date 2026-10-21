@@ -30,7 +30,8 @@ mechanisms, and disk-skipping low-weight experts.
 The remaining work in the scan's own priority order is therefore: calibration
 (E), then the fused layer path (A, a separate engine project), then target-scale
 host-KV benchmarking (C), then interior checkpoints (G), the page-cache policy
-(H) and the speculation controller (I).
+(H) and the speculation controller (I). The reviewed, numbered plan is
+`docs/maya-remaining-work-2026-10-21.md` (T1-T31).
 
 ## Why this repository is unusually relevant
 
