@@ -311,6 +311,19 @@ not the common case.
 Still open: the token-wise stages are not fused across rows (Phase 2c), which is
 the throughput win rather than a correctness or safety gap.
 
+
+**Phase 2c, first stage (2026-10-21).** The head is now fused: a
+`BatchedLogitProducer` gate parks concurrent slots' `produce` calls and runs
+them as one `produceBatch`, which stops each row after the final norm and
+sends two rows through the two-row head kernel (one weight read). `B=1` keeps
+the single-row path byte-for-byte. Measured on the Ornith 4-bit server, two
+clients, width 2 against serial width 1: short prompts/128 tokens 24.56/25.30
+s -> 23.43/22.13 s (median -8.5 %, aggregate decode ~+12 %); 2.2K prompts/64
+tokens 64.11/65.63 s -> 62.97/62.92 s (prefill dominates); outputs identical.
+`produceBatchMatchesPerRowLogits` pins the fused head's numbers at 4 and 8
+bits. The dense projections, FFN and the union expert fetch are still per
+row; that is the remaining Phase 2c.
+
 ## Multi-slot output corruption: found and fixed
 
 Width > 1 produced degenerate output on the real models while width 1 was

@@ -80,19 +80,23 @@ Qwen3.8 decode, 7-12 % of the token, once the server's concurrent path drives
 the batched head. The rest of the plan above is unchanged; this measurement is
 what makes the head worth wiring first, before the layer path is restructured.
 
-**What a head-only barrier would and would not buy (measured 2026-10-21).**
-Two concurrent 2.2K requests on the Ornith 4-bit server, width 2, prompt cache
-off: 59.5 s serial against 55.3 s concurrent (~7 % wall), but one request's
-decode collapsed to 1.99 tok/s against 8.2 serial and the other's did the same
-work in 8.2 s — the single `forwardStepGate` serialises whole token steps, so
-concurrency currently trades fairness for a small wall gain. A head-only
-barrier would shave the 4-5 ms of head per token (~7-10 % of decode) only when
-two sessions reach the head together; it would not fix the layer-loop
-serialisation or the starvation. A genuinely batched layer path is a
-multi-week rewrite with a ~7-12 % payoff at width 2, for multi-session use
-only — the default is width 1. **Not pursued in this pass.** The 4-bit head
-was measured too: 7.78 ms against 9.11 ms per token on the same shape, ~1.3 ms
-(~2 %), which does not justify the quality risk of re-quantising the install.
+**The first fused stage landed 2026-10-21.** A batch gate parks concurrent
+slots' decode steps and runs them as one `produceBatch`; the layer loop is
+still per row, but each row's final norm lands in a batch buffer and two rows
+go through the two-row head with one weight read. Measured on the Ornith 4-bit
+server, prompt cache off, two clients at width 2 against the same two requests
+serial at width 1:
+
+  short prompts, 128 tokens:  24.56 / 25.30 s serial -> 23.43 / 22.13 s
+                              (median -8.5 %; aggregate decode ~+12 %)
+  2.2K prompts, 64 tokens:    64.11 / 65.63 s -> 62.97 / 62.92 s
+                              (~-3 %; prefill dominates the wall)
+
+The outputs are byte-identical between serial and batched for every arm. The
+remaining Phase 2c work — fused dense projections, FFN and a union expert
+fetch — is still a multi-week rewrite and is not claimed here. The 4-bit head
+was measured too: 7.78 ms against 9.11 ms per token, ~2 %, not worth the
+quality risk of re-quantising an install.
 
 Effort is a project, not a knob, and it is the one idea on this list that
 changes a product story ("several agent sessions on one Mac") rather than a

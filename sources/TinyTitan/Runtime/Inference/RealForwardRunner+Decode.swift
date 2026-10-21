@@ -45,9 +45,12 @@ extension RealForwardRunner {
     }
 
     /// Decode one row per slot in `rows`, each row's logits landing in the
-    /// matching buffer of `logits`. The rows advance in call order; the
-    /// token-wise stages are still run per row (not yet fused across the
-    /// batch), so this is the correctness-first batched entry point.
+    /// matching buffer of `logits`.
+    ///
+    /// The layer loop still runs per row (the token-wise stages are the next
+    /// fusion step), but the **head is shared**: each row's final norm lands
+    /// in a batch buffer and two rows go through the two-row head with one
+    /// weight read. `rows.count == 1` keeps the single-row path byte-for-byte.
     public func produceBatch(
         _ rows: [(token: Int32, position: Int, slot: Int)],
         logits: [MTLBuffer]
@@ -55,11 +58,102 @@ extension RealForwardRunner {
         precondition(
             rows.count == logits.count,
             "one logits buffer per batch row")
-        for (row, buffer) in zip(rows, logits) {
-            try await produce(
-                token: row.token, position: row.position,
-                slot: row.slot, into: buffer)
+        guard rows.count > 1 else {
+            for (row, buffer) in zip(rows, logits) {
+                try await produce(
+                    token: row.token, position: row.position,
+                    slot: row.slot, into: buffer)
+            }
+            return
         }
+        try await forwardStepGate.acquire()
+        do {
+            let d = Int(cfg.hiddenSize)
+            let vocab = Int(cfg.vocabSize)
+            let (normed, batchLogits) = try ensureBatchScratch(rows: rows.count)
+            for (index, row) in rows.enumerated() {
+                try await produceToken(
+                    token: row.token, position: row.position, slot: row.slot,
+                    into: logits[index], emitHead: false, outputMode: .logits,
+                    normalizedOut: normed, normalizedOutOffset: index * d * 2)
+            }
+            let lm = try model.lmHead()
+            let headWeights = (
+                buffer: lm.buffer, offset: Int(lm.offset),
+                scaleOffset: Int(lm.scaleOffset), biasOffset: Int(lm.biasOffset)
+            )
+            for pair in stride(from: 0, to: rows.count, by: 2) {
+                let remaining = rows.count - pair
+                let yOffset = pair * vocab * 2
+                if remaining >= 2 {
+                    _ = try runSync { cb in
+                        try self.encodeHeadTwoRows(
+                            commandBuffer: cb,
+                            weights: headWeights.buffer,
+                            weightsOffset: headWeights.offset,
+                            scales: headWeights.buffer,
+                            scalesOffset: headWeights.scaleOffset,
+                            biases: headWeights.buffer,
+                            biasesOffset: headWeights.biasOffset,
+                            x: normed, xOffset: pair * d * 2,
+                            y: batchLogits, yOffset: yOffset,
+                            m: UInt32(vocab), n: UInt32(d))
+                    }
+                    let source = batchLogits.contents().advanced(by: yOffset)
+                    memcpy(logits[pair].contents(), source, vocab * 2)
+                    memcpy(
+                        logits[pair + 1].contents(),
+                        source.advanced(by: vocab * 2), vocab * 2)
+                } else {
+                    _ = try runSync { cb in
+                        try self.encodeHeadGEMV(
+                            commandBuffer: cb,
+                            weights: headWeights.buffer,
+                            weightsOffset: headWeights.offset,
+                            scales: headWeights.buffer,
+                            scalesOffset: headWeights.scaleOffset,
+                            biases: headWeights.buffer,
+                            biasesOffset: headWeights.biasOffset,
+                            x: normed, xOffset: pair * d * 2,
+                            y: batchLogits, yOffset: yOffset,
+                            m: UInt32(vocab), n: UInt32(d))
+                    }
+                    memcpy(
+                        logits[pair].contents(),
+                        batchLogits.contents().advanced(by: yOffset), vocab * 2)
+                }
+            }
+        } catch {
+            await forwardStepGate.release()
+            throw error
+        }
+        await forwardStepGate.release()
+    }
+
+    /// One batch buffer for the final-normed rows and one for their logits,
+    /// sized to the largest batch this runner has decoded.
+    private func ensureBatchScratch(
+        rows: Int
+    ) throws -> (normed: MTLBuffer, logits: MTLBuffer) {
+        if batchScratchRows >= rows,
+            let normed = batchNormedBuffer, let logits = batchLogitsBuffer
+        {
+            return (normed, logits)
+        }
+        guard
+            let normed = ctx.device.makeBuffer(
+                length: rows * cfg.hiddenSize * 2,
+                options: .storageModeShared),
+            let logits = ctx.device.makeBuffer(
+                length: rows * cfg.vocabSize * 2,
+                options: .storageModeShared)
+        else {
+            throw ModelError.residentBufferWrapFailed
+        }
+        batchNormedBuffer = normed
+        batchLogitsBuffer = logits
+        batchScratchRows = rows
+        return (normed, logits)
     }
 
     /// lint:allow-long the orchestrator for one decode step, in the same
@@ -70,7 +164,9 @@ extension RealForwardRunner {
         slot: Int,
         into logits: MTLBuffer,
         emitHead: Bool,
-        outputMode: PrefillOutputMode
+        outputMode: PrefillOutputMode,
+        normalizedOut: MTLBuffer? = nil,
+        normalizedOutOffset: Int = 0
     ) async throws {
         let tPreamble = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let kvPosition = kv?.position(slot: slot) ?? 0
@@ -225,24 +321,9 @@ extension RealForwardRunner {
         let fNorm = try model.finalNorm()
         let lm = try model.lmHead()
         let gFinalNorm: (MTLCommandBuffer) throws -> Void = { cb in
-            if let hc = self.hyperConnection {
-                // The stack ends by collapsing the streams through the
-                // model-level mixer: the same gated read a sublayer uses, with
-                // no inject, and its hc_norm serving as the final norm.
-                try hc.encodeRead(
-                    commandBuffer: cb,
-                    streamsBuffer: self.hidden,
-                    hcNorm: fNorm.buffer,
-                    hcNormOffset: Int(fNorm.offset),
-                    down: self.gateWeightsPublic(try self.model.hcMixerDown()),
-                    up: self.gateWeightsPublic(try self.model.hcMixerUp()),
-                    blockInput: self.normed, eps: eps)
-            } else {
-                try self.rms.encodeBF16W(
-                    commandBuffer: cb, x: self.hidden,
-                    weight: fNorm.buffer, weightOffset: Int(fNorm.offset),
-                    out: self.normed, d: D, eps: eps)
-            }
+            try self.encodeFinalNorm(
+                commandBuffer: cb, out: self.normed, outOffset: 0,
+                fNorm: fNorm, d: D, eps: eps)
         }
         let gLmHead: (MTLCommandBuffer) throws -> Void = { cb in
             try self.encodeHeadGEMV(
@@ -271,7 +352,20 @@ extension RealForwardRunner {
             }
             dumpActivation("stack_out", hidden, count: residualWidth, position: position)
         }
-        if emitHead {
+        if let normalizedOut {
+            // The batched head path: stop after the final norm, writing it
+            // into the caller's row buffer instead of one shared `normed`.
+            guard
+                let cb = try runSync({ cb in
+                    try self.encodeFinalNorm(
+                        commandBuffer: cb, out: normalizedOut,
+                        outOffset: normalizedOutOffset, fNorm: fNorm, d: D, eps: eps)
+                })
+            else {
+                throw ModelError.residentBufferWrapFailed
+            }
+            recordKernelGPU(role: "final_norm", cb)
+        } else if emitHead {
             let useFusedHeadForThisToken = useFusedGreedyHead && outputMode == .greedyIfAvailable
             let tHead = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             if useFusedHeadForThisToken {

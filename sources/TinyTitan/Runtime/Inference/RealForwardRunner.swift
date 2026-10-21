@@ -202,6 +202,10 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
     let onesPerExpertScale: MTLBuffer?
     var prefillChunkState = PrefillChunkCommitState()
     var prefillScratch: PrefillChunkScratchBuffers?
+    // Batched head scratch: `rows` final-normed rows and `rows` logits rows.
+    var batchNormedBuffer: MTLBuffer?
+    var batchLogitsBuffer: MTLBuffer?
+    var batchScratchRows = 0
     static let mtpChunkCapacity = 32
     let mtpTokenBlock: MTLBuffer?
     let mtpEmbeddingBlock: MTLBuffer?

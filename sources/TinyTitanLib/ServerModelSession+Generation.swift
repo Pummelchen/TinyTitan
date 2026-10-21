@@ -219,7 +219,7 @@ extension ServerModelSession {
             {
                 mtpDecoder
             } else {
-                runner
+                batchedProducer ?? runner
             }
         let activeStart: RawCompletionStart =
             activeProducer is StreamingMTPDecoder

@@ -164,6 +164,70 @@ import TinyTitanValidationSupport
         }
     }
 
+    /// `produceBatch` shares the LM head across rows: each row's final norm
+    /// goes to a batch buffer and two rows run through the two-row kernel.
+    /// The logits must still match what each row produces alone.
+    @Test(arguments: [4, 8])
+    func produceBatchMatchesPerRowLogits(bits: Int) async throws {
+        let aTokens: [Int32] = [11, 7, 5]
+        let bTokens: [Int32] = [3, 9, 4]
+        let vocab = 1024
+
+        func alone(_ tokens: [Int32]) async throws -> [[Float]] {
+            let (dir, ctx, runner) = try makeRunner(
+                weightBits: bits, forceLogitsHead: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let logits = try makeLogits(ctx, vocab: vocab)
+            var out: [[Float]] = []
+            for (position, token) in tokens.enumerated() {
+                try await runner.produce(
+                    token: token, position: position, into: logits)
+                out.append(Fp16Buffer.read(logits, count: vocab))
+            }
+            return out
+        }
+
+        let referenceA = try await alone(aTokens)
+        let referenceB = try await alone(bTokens)
+
+        let (dir, ctx, runner) = try makeRunner(
+            weightBits: bits, slots: 2, forceLogitsHead: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let logitsA = try makeLogits(ctx, vocab: vocab)
+        let logitsB = try makeLogits(ctx, vocab: vocab)
+        var gotA: [[Float]] = []
+        var gotB: [[Float]] = []
+        for position in 0..<max(aTokens.count, bTokens.count) {
+            var rows: [(token: Int32, position: Int, slot: Int)] = []
+            var buffers: [MTLBuffer] = []
+            if position < aTokens.count {
+                rows.append((aTokens[position], position, 0))
+                buffers.append(logitsA)
+            }
+            if position < bTokens.count {
+                rows.append((bTokens[position], position, 1))
+                buffers.append(logitsB)
+            }
+            try await runner.produceBatch(rows, logits: buffers)
+            if position < aTokens.count {
+                gotA.append(Fp16Buffer.read(logitsA, count: vocab))
+            }
+            if position < bTokens.count {
+                gotB.append(Fp16Buffer.read(logitsB, count: vocab))
+            }
+        }
+        for (name, pair) in [("A", (referenceA, gotA)), ("B", (referenceB, gotB))] {
+            #expect(pair.0.count == pair.1.count)
+            for (step, (want, got)) in zip(pair.0, pair.1).enumerated() {
+                for (i, (w, g)) in zip(want, got).enumerated() {
+                    #expect(
+                        abs(w - g) <= 1e-3,
+                        "row \(name) step \(step) logit \(i): \(g) vs \(w)")
+                }
+            }
+        }
+    }
+
     /// Chunked prefill must fill the slot it is told to, for every slot. Before
     /// this, only slot 0 could take the chunked path (other slots fell back to
     /// decode-as-prefill, which does not match numerically on 4-bit), and the

@@ -69,6 +69,9 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
     let tokenizerFolder: URL
     nonisolated let loadedReasoning: RequestReasoning
     let runner: RealForwardRunner
+    /// Non-nil when the session runs more than one slot: decode steps park
+    /// here so concurrent slots reach one `produceBatch` together.
+    let batchedProducer: (any LogitProducer)?
     let mtpDecoder: StreamingMTPDecoder?
     /// One raw-completion scratch per slot: its own logits/probs/token buffers
     /// and its own sampler, so concurrent slots cannot sample from each other's
@@ -180,6 +183,8 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
             family: model.config.family,
             weightBits: model.routedExpertWeightBits)
         self.runner = runner
+        self.batchedProducer =
+            slots > 1 ? BatchedLogitProducer(runner: runner, width: slots) : nil
         self.mtpDecoder = mtpDecoder
         self.scratches = scratches
         self.slots = max(1, slots)

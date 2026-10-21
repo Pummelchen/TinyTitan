@@ -188,6 +188,62 @@ extension RealForwardRunner {
         }
     }
 
+    /// The model's final norm into a caller-chosen buffer and offset.
+    ///
+    /// The single-row decode writes `normed`; the batched head writes one
+    /// row's worth into a shared batch buffer, so the head can read two
+    /// contiguous rows with one weight pass.
+    func encodeFinalNorm(
+        commandBuffer cb: MTLCommandBuffer,
+        out: MTLBuffer, outOffset: Int,
+        fNorm: TensorView, d: UInt32, eps: Float
+    ) throws {
+        if let hc = hyperConnection {
+            try hc.encodeRead(
+                commandBuffer: cb,
+                streamsBuffer: hidden,
+                hcNorm: fNorm.buffer,
+                hcNormOffset: Int(fNorm.offset),
+                down: gateWeightsPublic(try model.hcMixerDown()),
+                up: gateWeightsPublic(try model.hcMixerUp()),
+                blockInput: out, blockInputOffset: outOffset, eps: eps)
+        } else {
+            try rms.encodeBF16W(
+                commandBuffer: cb, x: hidden,
+                weight: fNorm.buffer, weightOffset: Int(fNorm.offset),
+                out: out, outOffset: outOffset, d: d, eps: eps)
+        }
+    }
+
+    /// Two rows through the LM head, weights read once.
+    func encodeHeadTwoRows(
+        commandBuffer cb: MTLCommandBuffer,
+        weights: MTLBuffer, weightsOffset: Int,
+        scales: MTLBuffer, scalesOffset: Int,
+        biases: MTLBuffer, biasesOffset: Int,
+        x: MTLBuffer, xOffset: Int,
+        y: MTLBuffer, yOffset: Int,
+        m: UInt32, n: UInt32
+    ) throws {
+        if let affineHead {
+            try affineHead.encodeTwoRows(
+                commandBuffer: cb,
+                weights: weights, weightsOffset: weightsOffset,
+                scales: scales, scalesOffset: scalesOffset,
+                biases: biases, biasesOffset: biasesOffset,
+                x: x, xOffset: xOffset, y: y, yOffset: yOffset,
+                m: m, n: n)
+        } else {
+            try int4.encodeTwoRows(
+                commandBuffer: cb,
+                weights: weights, weightsOffset: weightsOffset,
+                scales: scales, scalesOffset: scalesOffset,
+                biases: biases, biasesOffset: biasesOffset,
+                x: x, xOffset: xOffset, y: y, yOffset: yOffset,
+                m: m, n: n)
+        }
+    }
+
     func runSync(_ body: (MTLCommandBuffer) throws -> Void) throws -> MTLCommandBuffer? {
         guard let cb = ctx.queue.makeCommandBuffer() else { return nil }
         try body(cb)
