@@ -120,11 +120,16 @@ extension RealForwardRunner {
     func encodeResidualExitDecode(
         commandBuffer: MTLCommandBuffer,
         hidden: MTLBuffer,
+        hiddenOffset: Int = 0,
         delta: MTLBuffer,
+        deltaOffset: Int = 0,
         sublayer: ResidualSublayer,
         layer: Int
     ) throws {
         if let hc = hyperConnection {
+            precondition(
+                hiddenOffset == 0 && deltaOffset == 0,
+                "hyper-connections require a caller-owned row buffer")
             let inject =
                 sublayer == .attention
                 ? try model.hcAttnInject(layer: layer)
@@ -148,7 +153,9 @@ extension RealForwardRunner {
         try requireElementwise().encodeResidualAdd(
             commandBuffer: commandBuffer,
             hidden: hidden,
+            hiddenOffset: hiddenOffset,
             delta: delta,
+            deltaOffset: deltaOffset,
             count: cfg.hiddenSize)
     }
 

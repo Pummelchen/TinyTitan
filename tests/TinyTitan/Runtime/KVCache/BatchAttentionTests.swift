@@ -228,4 +228,122 @@ import Testing
             }
         }
     }
+
+    /// T34 step 1: the batch attention block must leave each row's residual
+    /// and post-attention-normed MLP input exactly where the per-row layer
+    /// leaves them. This is the composition the fused loop needs before its
+    /// per-row FFN stage.
+    @Test func batchAttentionBlockMatchesPerRow() throws {
+        let ctx = try MetalContext()
+        let (dir, runner) = try makeRunner(ctx, slots: 2)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let d = runner.cfg.hiddenSize
+        let positions = [7, 4]
+
+        func rowValues(slot: Int, position: Int) -> [Float16] {
+            (0..<d).map { i in
+                Float16(
+                    sin(Float(slot * 10_000 + position * 37 + i) * 0.013) * 0.4)
+            }
+        }
+
+        func encodePerRow(slot: Int, position: Int) throws {
+            try upload(
+                ctx, values: rowValues(slot: slot, position: position),
+                to: runner.hidden)
+            let norm = try runner.model.inputNorm(layer: layer)
+            guard var cb = ctx.queue.makeCommandBuffer() else {
+                throw MetalError.commandEncoderFailed
+            }
+            try runner.encodeResidualEntryDecode(
+                commandBuffer: cb, hidden: runner.hidden,
+                norm: norm, out: runner.normed,
+                sublayer: .attention, layer: layer, eps: 1e-6)
+            try runner.encodeGatedFullAttentionDecode(
+                &cb, layer: layer, position: position, slot: slot,
+                seqLen: UInt32(position + 1))
+            cb.commit()
+            cb.waitUntilCompleted()
+            #expect(cb.error == nil)
+        }
+
+        // Build both rows' KV history through the per-row path.
+        for (slot, position) in positions.enumerated() {
+            for t in 0..<position {
+                try encodePerRow(slot: slot, position: t)
+            }
+        }
+
+        let postAttn = try runner.model.postAttnNorm(layer: layer)
+
+        // Reference: per-row entry norm -> gated attention -> residual exit
+        // -> post-attention norm into the MLP input.
+        var refHidden: [[Float16]] = []
+        var refRouted: [[Float16]] = []
+        for (slot, position) in positions.enumerated() {
+            try upload(
+                ctx, values: rowValues(slot: slot, position: position),
+                to: runner.hidden)
+            let norm = try runner.model.inputNorm(layer: layer)
+            guard var cb = ctx.queue.makeCommandBuffer() else {
+                throw MetalError.commandEncoderFailed
+            }
+            try runner.encodeResidualEntryDecode(
+                commandBuffer: cb, hidden: runner.hidden,
+                norm: norm, out: runner.normed,
+                sublayer: .attention, layer: layer, eps: 1e-6)
+            try runner.encodeGatedFullAttentionDecode(
+                &cb, layer: layer, position: position, slot: slot,
+                seqLen: UInt32(position + 1))
+            try runner.encodeResidualExitDecode(
+                commandBuffer: cb, hidden: runner.hidden,
+                delta: runner.oOut, sublayer: .attention, layer: layer)
+            try runner.encodeResidualEntryDecode(
+                commandBuffer: cb, hidden: runner.hidden,
+                norm: postAttn, out: runner.routedX,
+                sublayer: .mlp, layer: layer, eps: 1e-6)
+            cb.commit()
+            cb.waitUntilCompleted()
+            #expect(cb.error == nil)
+            refHidden.append(try download(ctx, from: runner.hidden, bytes: d * 2))
+            refRouted.append(try download(ctx, from: runner.routedX, bytes: d * 2))
+        }
+
+        let scratch = try runner.ensureBatchedDecodeScratch(rows: positions.count)
+        for (slot, position) in positions.enumerated() {
+            try upload(
+                ctx, values: rowValues(slot: slot, position: position),
+                to: scratch.hidden, offset: slot * d * 2)
+        }
+        guard var cb = ctx.queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        try runner.encodeBatchAttentionBlock(
+            layer: layer,
+            rows: positions.enumerated().map { ($0.element, $0.offset) },
+            scratch: scratch, postAttnNorm: postAttn,
+            commandBuffer: &cb)
+        cb.commit()
+        cb.waitUntilCompleted()
+        #expect(cb.error == nil)
+        let batchHidden = try download(
+            ctx, from: scratch.hidden, bytes: positions.count * d * 2)
+        let batchRouted = try download(
+            ctx, from: scratch.routedX, bytes: positions.count * d * 2)
+
+        for slot in positions.indices {
+            for i in 0..<d {
+                let hid = batchHidden[slot * d + i]
+                let wantHid = refHidden[slot][i]
+                #expect(
+                    abs(Float(hid) - Float(wantHid)) < 1e-3,
+                    "row \(slot) hidden element \(i): \(hid) vs \(wantHid)")
+                let routed = batchRouted[slot * d + i]
+                let wantRouted = refRouted[slot][i]
+                #expect(
+                    abs(Float(routed) - Float(wantRouted)) < 1e-3,
+                    "row \(slot) routed element \(i): \(routed) vs \(wantRouted)")
+            }
+        }
+    }
 }

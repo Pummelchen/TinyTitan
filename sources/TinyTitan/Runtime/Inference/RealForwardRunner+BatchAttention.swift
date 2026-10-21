@@ -239,4 +239,45 @@ extension RealForwardRunner {
         }
     }
 
+    /// T34 step 1: one full-attention block for the batch.
+    ///
+    /// `encodeBatchGatedAttention` ends at `scratch.o`. A decode layer then
+    /// adds that output into each row's residual and normalizes it for the
+    /// FFN, which is the composition the fused loop needs before its per-row
+    /// MLP stage. Both halves are row-addressed, so two rows never share the
+    /// residual or norm write. Hyper-connection families are refused: their
+    /// write gate reads the runner-wide stream buffer and is not part of the
+    /// fused eligibility set.
+    func encodeBatchAttentionBlock(
+        layer L: Int,
+        rows: [(position: Int, slot: Int)],
+        scratch: BatchedDecodeScratch,
+        postAttnNorm: TensorView,
+        commandBuffer cb: inout MTLCommandBuffer
+    ) throws {
+        guard hyperConnection == nil else {
+            throw ModelError.unsupportedArchitecture(
+                detail: "fused decode does not cover hyper-connection families")
+        }
+        let d = cfg.hiddenSize
+        let half = MemoryLayout<Float16>.stride
+        let eps: Float = 1e-6
+        try encodeBatchGatedAttention(
+            layer: L, rows: rows, scratch: scratch, commandBuffer: &cb)
+        for index in rows.indices {
+            let offset = index * d * half
+            try encodeResidualExitDecode(
+                commandBuffer: cb,
+                hidden: scratch.hidden, hiddenOffset: offset,
+                delta: scratch.o, deltaOffset: offset,
+                sublayer: .attention, layer: L)
+            try encodeResidualEntryDecode(
+                commandBuffer: cb,
+                hidden: scratch.hidden, hiddenOffset: offset,
+                norm: postAttnNorm,
+                out: scratch.routedX, outOffset: offset,
+                sublayer: .mlp, layer: L, eps: eps)
+        }
+    }
+
 }
