@@ -204,18 +204,30 @@ every run. The release object from that build shows why that number cannot be
 read as a stage diff: the loop calls `encodeBatchQKV` -> `encodeBatchRowAttention`
 -> `encodeBatchOProj`, then the entry norms, then `encodeRoutedMoEVerifyPair`,
 then blits the FFN result out of the pair scratch back into the row buffers,
-commits and waits, and only then calls `probeBatchAttention`. A probe that runs after the
-FFN's hidden handoff is not comparing the input the batch attention consumed,
-and its constant `first=1269` across unrelated positions is a fixed-offset
-fingerprint rather than a data-dependent divergence. The 0.29-1.45 figures were
-therefore a measurement artefact; the corrupt Ornith text is real, but it lies
-in the reverted loop's wiring around the stage, not in the stage itself.
+commits and waits, and only then calls `probeBatchAttention`. A probe that runs
+after the FFN's hidden handoff is not comparing the input the batch attention
+consumed, and its constant `first=1269` across unrelated positions is a
+fixed-offset fingerprint rather than a data-dependent divergence. The 0.29-1.45
+figures were therefore a measurement artefact; the corrupt Ornith text is real,
+but it lies in the reverted loop's wiring around the stage, not in the stage
+itself.
 
 What now pins the stage in-tree is
 `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`: width 4, four
 different decode positions, per-slot multi-token KV built through the per-row
 path, attention and o_proj compared within 1e-3. It complements the position-0
 test and the one-off real-model probe above.
+
+The corrupt T6 run still reproduces from the release binary built at 22:56
+(kept with its resource bundle and a driver in `.build/t6-fused-repro/`; git
+ignores that directory). Ornith 4-bit, two concurrent requests, 12-24 tokens
+yields fragments such as `#262       2`, while the same binary with
+`TINYTITAN_ACT_DUMP` set yields the serial text — because
+`canUseFusedBatchDecode` rejects the fused path whenever activation dumps are
+on (`FUSED_ENTER` is followed by `FUSED_INELIGIBLE`). A dump-based comparison
+therefore cannot see the fused loop as built, and any T34 gate has to add a
+fused-safe probe or dump instead of relying on `TINYTITAN_ACT_DUMP`.
+`TINYTITAN_BATCH_ATTN_PROBE` does not disable the path, so it can stay on.
 
 ## What the measurements say the next attempt must do
 

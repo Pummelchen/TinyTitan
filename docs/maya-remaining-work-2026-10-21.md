@@ -181,7 +181,10 @@ the serial path for two rows; (2) then the verify-pair FFN with the row-hidden
 handoff to/from the pair scratch diffed at every boundary; (3) only then the
 whole-model text battery. The attention probe must sit directly after
 `encodeBatchRowAttention` and before the FFN, on the same hidden the stage
-consumed.
+consumed. `TINYTITAN_ACT_DUMP` turns the fused path off (`FUSED_INELIGIBLE`),
+so the layer gate must be a fused-safe dump or the in-loop probe, not the
+existing activation dump. The corrupt run is reproducible from
+`.build/t6-fused-repro/` (git-ignored) for as long as that binary survives.
 Acceptance: layer-level hidden parity, then identical text at 64/128 tokens on
 the four-prompt battery; keep only if the wall clock also beats serial.
 Depends T33, T6. Size L.
