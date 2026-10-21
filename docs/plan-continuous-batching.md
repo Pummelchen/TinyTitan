@@ -326,6 +326,22 @@ row; that is the remaining Phase 2c. Width 4 scales too: four short prompts of
 128 tokens, 44.98/47.59 s serial against 41.57/41.06 s batched (median
 -10.7 %), all four outputs byte-identical.
 
+**Phase 2c, second step (2026-10-21).** Width 4 now sends four rows through a
+four-row affine head: one launch, one weight read, and exactly the numbers the
+two two-row launches produced. At the Ornith head shape (248,320 x 2,048) it
+costs 9.28 ms against 13.96 ms for the two pairs, a 33 % head-time saving for
+8-bit installs. The int4 head has no four-row kernel: measured at the two-row
+launch's cost for twice the rows (7.52 ms against 3.86 ms), so the 4-bit
+installs keep the two-row pair where they already sit near the memory ceiling.
+
+The full lockstep layer loop (B rows through the batched norms, the prefill
+FFN's union expert fetch, and per-row attention/GDN) was also built end to end.
+It was bit-identical on the toy fixture but **not** on Ornith, and it was twice
+as slow per request: the prefill FFN's commit-and-wait pipeline loses the decode
+path's prefetch ring. It was reverted rather than shipped behind a flag; the
+measurements and what they imply for the next attempt are in
+`docs/batched-decode-phase2c-2026-10-21.md`.
+
 ## Multi-slot output corruption: found and fixed
 
 Width > 1 produced degenerate output on the real models while width 1 was

@@ -228,6 +228,68 @@ import TinyTitanValidationSupport
         }
     }
 
+    /// Width 4 goes through the four-row head (one weight read for all four
+    /// rows instead of two two-row reads), with each row in its own slot. The
+    /// logits must still match what each row produces alone, and the counter
+    /// proves the four-row kernel is the one that ran.
+    @Test(arguments: [4, 8])
+    func produceBatchAtWidthFourMatchesPerRowLogits(bits: Int) async throws {
+        let batches: [[Int32]] = [
+            [11, 7, 5], [3, 9, 4], [13, 2, 8], [6, 1, 12],
+        ]
+        let vocab = 1024
+
+        func alone(_ tokens: [Int32]) async throws -> [[Float]] {
+            let (dir, ctx, runner) = try makeRunner(
+                weightBits: bits, forceLogitsHead: true)
+            defer { try? FileManager.default.removeItem(at: dir) }
+            let logits = try makeLogits(ctx, vocab: vocab)
+            var out: [[Float]] = []
+            for (position, token) in tokens.enumerated() {
+                try await runner.produce(
+                    token: token, position: position, into: logits)
+                out.append(Fp16Buffer.read(logits, count: vocab))
+            }
+            return out
+        }
+
+        var references: [[[Float]]] = []
+        for tokens in batches {
+            references.append(try await alone(tokens))
+        }
+
+        let (dir, ctx, runner) = try makeRunner(
+            weightBits: bits, slots: 4, forceLogitsHead: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let buffers = try batches.map { _ in
+            try makeLogits(ctx, vocab: vocab)
+        }
+        var got: [[[Float]]] = Array(repeating: [], count: batches.count)
+        for position in 0..<batches[0].count {
+            let rows = batches.enumerated().map { slot, tokens in
+                (token: tokens[position], position: position, slot: slot)
+            }
+            try await runner.produceBatch(rows, logits: buffers)
+            for slot in batches.indices {
+                got[slot].append(Fp16Buffer.read(buffers[slot], count: vocab))
+            }
+        }
+        // The 8-bit checkpoint has an affine head, which uses the four-row
+        // kernel; the 4-bit one keeps two-row pairs (see `encodeHeadFourRows`).
+        #expect(
+            runner.headFourRowLaunches == (bits == 8 ? batches[0].count : 0))
+        for slot in batches.indices {
+            for (step, pair) in zip(references[slot], got[slot]).enumerated() {
+                for (i, want) in pair.0.enumerated() {
+                    let value = pair.1[i]
+                    #expect(
+                        abs(want - value) <= 1e-3,
+                        "row \(slot) step \(step) logit \(i): \(value) vs \(want)")
+                }
+            }
+        }
+    }
+
     /// Chunked prefill must fill the slot it is told to, for every slot. Before
     /// this, only slot 0 could take the chunked path (other slots fell back to
     /// decode-as-prefill, which does not match numerically on 4-bit), and the

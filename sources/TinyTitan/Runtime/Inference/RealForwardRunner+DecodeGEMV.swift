@@ -244,6 +244,37 @@ extension RealForwardRunner {
         }
     }
 
+    /// Four rows through the LM head, weights read once. The batched decode at
+    /// width 4 uses one of these instead of two two-row launches, which reads
+    /// the head's weights once rather than twice.
+    func encodeHeadFourRows(
+        commandBuffer cb: MTLCommandBuffer,
+        weights: MTLBuffer, weightsOffset: Int,
+        scales: MTLBuffer, scalesOffset: Int,
+        biases: MTLBuffer, biasesOffset: Int,
+        x: MTLBuffer, xOffset: Int,
+        y: MTLBuffer, yOffset: Int,
+        m: UInt32, n: UInt32
+    ) throws {
+        // The four-row kernel is only for the affine head. Its int4 sibling was
+        // measured at the two-row launch's cost for twice the rows (7.4 ms
+        // against 3.8 ms at 248,320 x 2,048), so the 4-bit head keeps two-row
+        // pairs: sharing the read further does not pay once dequant + dot is
+        // the limit rather than bandwidth.
+        guard let affineHead else {
+            throw ModelError.internalInconsistency(
+                detail: "four-row head requires an affine head")
+        }
+        headFourRowLaunches += 1
+        try affineHead.encodeFourRows(
+            commandBuffer: cb,
+            weights: weights, weightsOffset: weightsOffset,
+            scales: scales, scalesOffset: scalesOffset,
+            biases: biases, biasesOffset: biasesOffset,
+            x: x, xOffset: xOffset, y: y, yOffset: yOffset,
+            m: m, n: n)
+    }
+
     func runSync(_ body: (MTLCommandBuffer) throws -> Void) throws -> MTLCommandBuffer? {
         guard let cb = ctx.queue.makeCommandBuffer() else { return nil }
         try body(cb)

@@ -105,6 +105,71 @@ kernel void affine_quant_gemv2_simd(
     }
 }
 
+// Four-row variant: the same read of each output weight row serves four
+// activation rows. Used by the batched decode's head at width 4, where two
+// two-row launches would read the 254 MB head twice. Per row the accumulation
+// order is the two-row kernel's (that kernel's head is the byte-identical
+// reference the width-2 batch already ships), so row r's value cannot depend on
+// how many other rows ride along.
+kernel void affine_quant_gemv4_simd(
+    device const uint*   weights [[buffer(0)]],
+    device const bfloat* scales  [[buffer(1)]],
+    device const bfloat* biases  [[buffer(2)]],
+    device const half*   x       [[buffer(3)]],
+    device half*         y       [[buffer(4)]],
+    constant uint&       rows    [[buffer(5)]],
+    constant uint&       columns [[buffer(6)]],
+    uint tg_idx [[threadgroup_position_in_grid]],
+    uint sg_idx [[simdgroup_index_in_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]]
+) {
+    constexpr uint rows_per_threadgroup = 8;
+    const uint row = tg_idx * rows_per_threadgroup + sg_idx;
+    if (row >= rows) return;
+    const uint bits = affine_quant_bits();
+    const uint groups_per_row = columns / kAffineGroupSize;
+    const uint words_per_row = (columns * bits) / 32u;
+    device const uint* row_weights = weights + row * words_per_row;
+    device const bfloat* row_scales = scales + row * groups_per_row;
+    device const bfloat* row_biases = biases + row * groups_per_row;
+    device const half* x1 = x + columns;
+    device const half* x2 = x + 2u * columns;
+    device const half* x3 = x + 3u * columns;
+    float acc0 = 0.0f;
+    float acc1 = 0.0f;
+    float acc2 = 0.0f;
+    float acc3 = 0.0f;
+    for (uint group = 0; group < groups_per_row; ++group) {
+        const uint first = group * kAffineGroupSize + lane * 2u;
+        const float q0 = float(affine_quant_value(row_weights, first, bits));
+        const float q1 = float(affine_quant_value(row_weights, first + 1u, bits));
+        const float x00 = float(x[first]), x01 = float(x[first + 1u]);
+        const float x10 = float(x1[first]), x11 = float(x1[first + 1u]);
+        const float x20 = float(x2[first]), x21 = float(x2[first + 1u]);
+        const float x30 = float(x3[first]), x31 = float(x3[first + 1u]);
+        const float scale = float(row_scales[group]);
+        const float bias = float(row_biases[group]);
+        acc0 = fma(scale, q0 * x00 + q1 * x01,
+                   fma(bias, x00 + x01, acc0));
+        acc1 = fma(scale, q0 * x10 + q1 * x11,
+                   fma(bias, x10 + x11, acc1));
+        acc2 = fma(scale, q0 * x20 + q1 * x21,
+                   fma(bias, x20 + x21, acc2));
+        acc3 = fma(scale, q0 * x30 + q1 * x31,
+                   fma(bias, x30 + x31, acc3));
+    }
+    acc0 = simd_sum(acc0);
+    acc1 = simd_sum(acc1);
+    acc2 = simd_sum(acc2);
+    acc3 = simd_sum(acc3);
+    if (lane == 0u) {
+        y[row] = half(acc0);
+        y[rows + row] = half(acc1);
+        y[2u * rows + row] = half(acc2);
+        y[3u * rows + row] = half(acc3);
+    }
+}
+
 kernel void affine_quant_embedding_lookup(
     device const uint*   table     [[buffer(0)]],
     device const bfloat* scales    [[buffer(1)]],

@@ -32,6 +32,49 @@ extension TinyTitanBench {
         }
     }
 
+    /// Which kernel a `head_*` bench name selects, and how many activation
+    /// rows one launch carries. The int4 four-row probe is refused: it was
+    /// measured at the two-row launch's cost for twice the rows and is not a
+    /// shipped path, so a bench run must not imply one.
+    private struct HeadKernel {
+        let bits: Int
+        let kernel: String
+        let rowsPerLaunch: Int
+    }
+
+    private static func headKernel(named kernelName: String) throws -> HeadKernel {
+        let fourRows = kernelName.hasSuffix("_four_rows")
+        let twoRows = kernelName.hasSuffix("_two_rows")
+        let suffix = fourRows ? "4_simd" : (twoRows ? "2_simd" : "_simd")
+        let base =
+            kernelName
+            .replacingOccurrences(of: "_four_rows", with: "")
+            .replacingOccurrences(of: "_two_rows", with: "")
+        let bits: Int
+        let kernel: String
+        switch base {
+        case "head_affine8":
+            bits = 8
+            kernel = "affine_quant_gemv\(suffix)"
+        case "head_affine4":
+            bits = 4
+            kernel = "affine_quant_gemv\(suffix)"
+        case "head_int4":
+            if fourRows {
+                throw BenchHarnessError.badConfiguration(
+                    "the int4 four-row head was measured at the two-row launch's cost "
+                        + "for twice the rows and is not shipped; bench head_int4_two_rows")
+            }
+            bits = 4
+            kernel = "dequant_int4_gemv\(suffix)"
+        default:
+            bits = 8
+            kernel = "affine_quant_gemv\(suffix)"
+        }
+        return HeadKernel(
+            bits: bits, kernel: kernel, rowsPerLaunch: fourRows ? 4 : (twoRows ? 2 : 1))
+    }
+
     static func runHead(
         kernelName: String,
         iterations: Int,
@@ -42,23 +85,10 @@ extension TinyTitanBench {
         let rows: UInt32 = 248_320
         let n: UInt32 = qwen38 ? 2560 : 2048
         let groupCount = Int(n) / 64
-        let twoRows = kernelName == "head_affine8_two_rows"
-        let bits: Int
-        let kernel: String
-        switch kernelName {
-        case "head_affine8_two_rows":
-            bits = 8
-            kernel = "affine_quant_gemv2_simd"
-        case "head_affine4":
-            bits = 4
-            kernel = "affine_quant_gemv_simd"
-        case "head_int4":
-            bits = 4
-            kernel = "dequant_int4_gemv_simd"
-        default:
-            bits = 8
-            kernel = "affine_quant_gemv_simd"
-        }
+        let selection = try Self.headKernel(named: kernelName)
+        let bits = selection.bits
+        let kernel = selection.kernel
+        let xRows = selection.rowsPerLaunch
         let rowBytes = Int(n) * bits / 8
         func makeBuffer(_ bytes: Int, _ value: UInt8) throws -> MTLBuffer {
             guard let buf = device.makeBuffer(length: bytes, options: .storageModeShared) else {
@@ -70,7 +100,6 @@ extension TinyTitanBench {
         let w = try makeBuffer(Int(rows) * rowBytes, 0x5A)
         let s = try makeBuffer(Int(rows) * groupCount * 2, 0x3C)
         let bb = try makeBuffer(Int(rows) * groupCount * 2, 0x00)
-        let xRows = twoRows ? 2 : 1
         let x = try makeBuffer(Int(n) * 2 * xRows, 0)
         Self.fillHeadInput(x, n: n, rows: xRows)
         let y = try makeBuffer(Int(rows) * 2 * xRows, 0)

@@ -49,8 +49,9 @@ extension RealForwardRunner {
     ///
     /// The layer loop still runs per row (the token-wise stages are the next
     /// fusion step), but the **head is shared**: each row's final norm lands
-    /// in a batch buffer and two rows go through the two-row head with one
-    /// weight read. `rows.count == 1` keeps the single-row path byte-for-byte.
+    /// in a batch buffer and four rows go through the four-row head (width 4)
+    /// or two rows through the two-row head (width 2), each with one weight
+    /// read. `rows.count == 1` keeps the single-row path byte-for-byte.
     public func produceBatch(
         _ rows: [(token: Int32, position: Int, slot: Int)],
         logits: [MTLBuffer]
@@ -69,7 +70,6 @@ extension RealForwardRunner {
         try await forwardStepGate.acquire()
         do {
             let d = Int(cfg.hiddenSize)
-            let vocab = Int(cfg.vocabSize)
             let (normed, batchLogits) = try ensureBatchScratch(rows: rows.count)
             for (index, row) in rows.enumerated() {
                 try await produceToken(
@@ -77,57 +77,102 @@ extension RealForwardRunner {
                     into: logits[index], emitHead: false, outputMode: .logits,
                     normalizedOut: normed, normalizedOutOffset: index * d * 2)
             }
-            let lm = try model.lmHead()
-            let headWeights = (
-                buffer: lm.buffer, offset: Int(lm.offset),
-                scaleOffset: Int(lm.scaleOffset), biasOffset: Int(lm.biasOffset)
-            )
-            for pair in stride(from: 0, to: rows.count, by: 2) {
-                let remaining = rows.count - pair
-                let yOffset = pair * vocab * 2
-                if remaining >= 2 {
-                    _ = try runSync { cb in
-                        try self.encodeHeadTwoRows(
-                            commandBuffer: cb,
-                            weights: headWeights.buffer,
-                            weightsOffset: headWeights.offset,
-                            scales: headWeights.buffer,
-                            scalesOffset: headWeights.scaleOffset,
-                            biases: headWeights.buffer,
-                            biasesOffset: headWeights.biasOffset,
-                            x: normed, xOffset: pair * d * 2,
-                            y: batchLogits, yOffset: yOffset,
-                            m: UInt32(vocab), n: UInt32(d))
-                    }
-                    let source = batchLogits.contents().advanced(by: yOffset)
-                    memcpy(logits[pair].contents(), source, vocab * 2)
-                    memcpy(
-                        logits[pair + 1].contents(),
-                        source.advanced(by: vocab * 2), vocab * 2)
-                } else {
-                    _ = try runSync { cb in
-                        try self.encodeHeadGEMV(
-                            commandBuffer: cb,
-                            weights: headWeights.buffer,
-                            weightsOffset: headWeights.offset,
-                            scales: headWeights.buffer,
-                            scalesOffset: headWeights.scaleOffset,
-                            biases: headWeights.buffer,
-                            biasesOffset: headWeights.biasOffset,
-                            x: normed, xOffset: pair * d * 2,
-                            y: batchLogits, yOffset: yOffset,
-                            m: UInt32(vocab), n: UInt32(d))
-                    }
-                    memcpy(
-                        logits[pair].contents(),
-                        batchLogits.contents().advanced(by: yOffset), vocab * 2)
-                }
-            }
+            try encodeBatchHead(
+                rows: rows.count, logits: logits,
+                normed: normed, batchLogits: batchLogits)
         } catch {
             await forwardStepGate.release()
             throw error
         }
         await forwardStepGate.release()
+    }
+
+    /// `rows` final-normed rows through the LM head, four at a time while the
+    /// batch allows it and two otherwise. The four-row kernel accumulates each
+    /// row in the two-row kernel's order, so a width-4 batch produces the same
+    /// numbers it did with two two-row launches.
+    func encodeBatchHead(
+        rows: Int,
+        logits: [MTLBuffer],
+        normed: MTLBuffer,
+        batchLogits: MTLBuffer
+    ) throws {
+        let d = Int(cfg.hiddenSize)
+        let vocab = Int(cfg.vocabSize)
+        let lm = try model.lmHead()
+        let headWeights = (
+            buffer: lm.buffer, offset: Int(lm.offset),
+            scaleOffset: Int(lm.scaleOffset), biasOffset: Int(lm.biasOffset)
+        )
+        var row = 0
+        while affineHead != nil, row + 4 <= rows {
+            let xOffset = row * d * 2
+            let yOffset = row * vocab * 2
+            _ = try runSync { cb in
+                try self.encodeHeadFourRows(
+                    commandBuffer: cb,
+                    weights: headWeights.buffer,
+                    weightsOffset: headWeights.offset,
+                    scales: headWeights.buffer,
+                    scalesOffset: headWeights.scaleOffset,
+                    biases: headWeights.buffer,
+                    biasesOffset: headWeights.biasOffset,
+                    x: normed, xOffset: xOffset,
+                    y: batchLogits, yOffset: yOffset,
+                    m: UInt32(vocab), n: UInt32(d))
+            }
+            let source = batchLogits.contents().advanced(by: yOffset)
+            for offset in 0..<4 {
+                memcpy(
+                    logits[row + offset].contents(),
+                    source.advanced(by: offset * vocab * 2), vocab * 2)
+            }
+            row += 4
+        }
+        while row < rows {
+            let remaining = rows - row
+            let xOffset = row * d * 2
+            let yOffset = row * vocab * 2
+            if remaining >= 2 {
+                _ = try runSync { cb in
+                    try self.encodeHeadTwoRows(
+                        commandBuffer: cb,
+                        weights: headWeights.buffer,
+                        weightsOffset: headWeights.offset,
+                        scales: headWeights.buffer,
+                        scalesOffset: headWeights.scaleOffset,
+                        biases: headWeights.buffer,
+                        biasesOffset: headWeights.biasOffset,
+                        x: normed, xOffset: xOffset,
+                        y: batchLogits, yOffset: yOffset,
+                        m: UInt32(vocab), n: UInt32(d))
+                }
+                let source = batchLogits.contents().advanced(by: yOffset)
+                memcpy(logits[row].contents(), source, vocab * 2)
+                memcpy(
+                    logits[row + 1].contents(),
+                    source.advanced(by: vocab * 2), vocab * 2)
+                row += 2
+            } else {
+                _ = try runSync { cb in
+                    try self.encodeHeadGEMV(
+                        commandBuffer: cb,
+                        weights: headWeights.buffer,
+                        weightsOffset: headWeights.offset,
+                        scales: headWeights.buffer,
+                        scalesOffset: headWeights.scaleOffset,
+                        biases: headWeights.buffer,
+                        biasesOffset: headWeights.biasOffset,
+                        x: normed, xOffset: xOffset,
+                        y: batchLogits, yOffset: yOffset,
+                        m: UInt32(vocab), n: UInt32(d))
+                }
+                memcpy(
+                    logits[row].contents(),
+                    batchLogits.contents().advanced(by: yOffset), vocab * 2)
+                row += 1
+            }
+        }
     }
 
     /// One batch buffer for the final-normed rows and one for their logits,
