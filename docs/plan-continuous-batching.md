@@ -322,7 +322,9 @@ s -> 23.43/22.13 s (median -8.5 %, aggregate decode ~+12 %); 2.2K prompts/64
 tokens 64.11/65.63 s -> 62.97/62.92 s (prefill dominates); outputs identical.
 `produceBatchMatchesPerRowLogits` pins the fused head's numbers at 4 and 8
 bits. The dense projections, FFN and the union expert fetch are still per
-row; that is the remaining Phase 2c.
+row; that is the remaining Phase 2c. Width 4 scales too: four short prompts of
+128 tokens, 44.98/47.59 s serial against 41.57/41.06 s batched (median
+-10.7 %), all four outputs byte-identical.
 
 ## Multi-slot output corruption: found and fixed
 

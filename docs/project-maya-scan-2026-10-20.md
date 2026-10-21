@@ -92,8 +92,10 @@ serial at width 1:
   2.2K prompts, 64 tokens:    64.11 / 65.63 s -> 62.97 / 62.92 s
                               (~-3 %; prefill dominates the wall)
 
-The outputs are byte-identical between serial and batched for every arm. The
-remaining Phase 2c work — fused dense projections, FFN and a union expert
+Width 4 scales the same way: four short prompts of 128 tokens, 44.98/47.59 s
+serial against 41.57/41.06 s batched (median -10.7 %), all four outputs
+byte-identical. The outputs are byte-identical between serial and batched for
+every arm. The remaining Phase 2c work — fused dense projections, FFN and a union expert
 fetch — is still a multi-week rewrite and is not claimed here. The 4-bit head
 was measured too: 7.78 ms against 9.11 ms per token, ~2 %, not worth the
 quality risk of re-quantising an install.
