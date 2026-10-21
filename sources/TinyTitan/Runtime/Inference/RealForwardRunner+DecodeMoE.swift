@@ -34,9 +34,12 @@ extension RealForwardRunner {
         waitNanos: UInt64,
         previousRoutedMicros prevRoutedUs: Double,
         predictedNextLayer: [Int],
-        predictedNextLayerWeights: [Float] = []
+        predictedNextLayerWeights: [Float] = [],
+        hidden residualHidden: MTLBuffer? = nil,
+        hiddenOffset: Int = 0
     ) async throws {
         let D = UInt32(cfg.hiddenSize)
+        let routedResidual = residualHidden ?? hidden
         let FmoE = UInt32(cfg.moeIntermediateSize)
         let readbackStarted = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let idxPtr = outIndices.contents().bindMemory(
@@ -370,7 +373,8 @@ extension RealForwardRunner {
         let gTail: (MTLCommandBuffer) throws -> Void = { [self] cb in
             try encodeResidualExitDecode(
                 commandBuffer: cb,
-                hidden: hidden, delta: h2Buf,
+                hidden: routedResidual, hiddenOffset: hiddenOffset,
+                delta: h2Buf,
                 sublayer: .mlp, layer: L)
         }
         guard let routedCB = ctx.queue.makeCommandBuffer() else {

@@ -229,6 +229,43 @@ therefore cannot see the fused loop as built, and any T34 gate has to add a
 fused-safe probe or dump instead of relying on `TINYTITAN_ACT_DUMP`.
 `TINYTITAN_BATCH_ATTN_PROBE` does not disable the path, so it can stay on.
 
+## T34: the fused width-2 loop is bit-identical, and the multi-row GEMV order was the blocker
+
+**Status (2026-10-22): `produceBatchFused` runs the width-2 fused path on
+Ornith 4-bit and produces bit-identical logits and text against the per-row
+decode.** It is opt-in (`TINYTITAN_FUSED_DECODE=1`) until T7 selects it.
+
+Shape: batched entry norm + QKV/o_proj + per-row epilogue/attention/KV write
+(`encodeBatchAttentionBlock`), GDN layers per row on row-sliced input/output,
+then the **production per-row decode FFN** per row (router, shared expert,
+routed phase 1/2), with the row's post-attention norm staged into the
+runner-wide `routedX` the phase-1 kernels read. The attention block, shared
+expert, router and linear attention all take row offsets; the earlier T34
+commits are the pieces.
+
+The last correctness blocker was not in the loop. The **two-row and four-row
+GEMV kernels accumulated the affine scale term outside the bias term**
+(`fma(s, dot, fma(b, sum, acc))`) while the single-row kernels accumulate scale
+first and bias second. One ULP per group, but on the real model it grew into
+~0.05 of hidden-state drift by layer 39, which moved logits by up to 0.7 and
+flipped greedy tokens: the fused path produced the same first heading and then
+diverged. Matching the single-row order in `dequant_int4_gemv2_simd`,
+`affine_quant_gemv2_simd` and `affine_quant_gemv4_simd` removed all of it.
+
+Evidence, Ornith 4-bit, `RealForwardRunner` test harness:
+
+| Gate | Result |
+| --- | --- |
+| fused vs per-row logits, 3 decode steps from position 0, width 2 | max abs diff **0.0** on every step and row |
+| layer-boundary hidden traces (reference dumps), all 40 layers | bit-identical |
+| server text, 24 tokens, two prompts, width 2 with the env switch | identical to the serial arm, both rows |
+| wall clock, 24 tokens, two rows | fused 17.5 s against serial 8.2 s per row |
+
+The wall clock is the remaining failure: this shape drains the routed command
+and the router readback per row per layer, so it has no overlap. The next T34
+step is carrying each row's pending routed command across layers (and, if it
+pays, one union fetch) without breaking the bit-identical gate above.
+
 ## What the measurements say the next attempt must do
 
 - **Give each row its own routed-MoE scratch and carry its pending command

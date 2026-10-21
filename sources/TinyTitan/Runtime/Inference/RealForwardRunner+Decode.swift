@@ -69,6 +69,10 @@ extension RealForwardRunner {
         }
         try await forwardStepGate.acquire()
         do {
+            if try await produceBatchFused(rows, logits: logits) {
+                await forwardStepGate.release()
+                return
+            }
             let d = Int(cfg.hiddenSize)
             let (normed, batchLogits) = try ensureBatchScratch(rows: rows.count)
             for (index, row) in rows.enumerated() {
@@ -177,7 +181,7 @@ extension RealForwardRunner {
 
     /// One batch buffer for the final-normed rows and one for their logits,
     /// sized to the largest batch this runner has decoded.
-    private func ensureBatchScratch(
+    func ensureBatchScratch(
         rows: Int
     ) throws -> (normed: MTLBuffer, logits: MTLBuffer) {
         if batchScratchRows >= rows,

@@ -10,11 +10,11 @@ evidence exist.
 | T2 width-2/4 aggregate mode | done | Same harness. Aggregate tok/s (width 1 / 2 / 4): 64 -> 9.02 / 9.45 / 10.40; 128 -> 12.89 / 13.68 / 13.54; 256 -> 14.55 / 15.68 / 14.01. Width 2 wins all three; width 4 loses at 256. This is the existing head-only batch, not fused decode. |
 | T3 fused decode design | done | `docs/fused-batched-decode-design.md` (pipeline, buffer ownership, prefetch overlap, B=1 identity, gates). |
 | T4 B-row scratch | done | `BatchedDecodeScratch` (T4) with width 2/4 tests; width 1 unchanged, scratch is opt-in. |
-| T5 batched QKV/o_proj | done | `encodeBatchGatedAttention` + `BatchAttentionTests`: two rows, per-row KV slots, batch o_proj; output matches the per-row gated path within 1e-3. `batchMatchesPerRowAtDecodePositions` adds width 4 at four different positions against per-slot multi-token KV. Full logits parity remains T8/T9. |
-| T6 batched FFN/prefetch | in progress | Toy fused path (batch attention + verify-pair FFN) matched per-row and was measured on Ornith; real text was corrupt, so the path was reverted. Attention is cleared (T32/T33); the corruption is in the fused loop's wiring, not the stage. Re-land under T34. |
+| T5 batched QKV/o_proj | done | `encodeBatchGatedAttention` + `BatchAttentionTests`: two rows, per-row KV slots, batch o_proj; output matches the per-row gated path within 1e-3. `batchMatchesPerRowAtDecodePositions` adds width 4 at four different positions against per-slot multi-token KV. The multi-row GEMVs now accumulate scale/bias in the single-row order, so per-row outputs are bit-identical, not just within 1e-3. |
+| T6 batched FFN/prefetch | in progress | The fused width-2 loop is re-landed under T34 and is bit-identical on Ornith; its FFN is still per row and synchronous, so the prefetch/overlap half of this task remains. |
 | T7 server wiring | pending | Fused path reverted before server landing. |
 | T8 fused tests | in progress | Toy stage tests pass, including width 4 at different positions. The fused loop itself still needs the T34 layer-level gate. |
-| T9 real parity | pending | — |
+| T9 real parity | in progress | Bit-identical logits for 3 decode steps from position 0 and identical 24-token text on two Ornith prompts through `TINYTITAN_FUSED_DECODE=1`. The 64/128-token four-prompt battery is still to run. |
 | T10 fused benchmark | pending | — |
 | T11 128K host-KV parity | pending | — |
 | T12 1M start/memory | pending | — |
@@ -39,7 +39,7 @@ evidence exist.
 | T31 closeout | pending | — |
 | T32 real-shape batch-attention diff | done | The reported diff does not reproduce. An independent layer-3 probe on Ornith 4-bit (width 2/4, positions 100/60 and 100/60/130/20) shows batch attention == per-row: normed 0.0, packed q 2.4e-4, v 0.0, post-gate attn 2.4e-4, o 2.4e-4, K/V slot bytes 0.0. The in-loop probe ran after the fused FFN's hidden handoff, and its `first=1269` is constant across unrelated positions; it was not a stage comparison. See `docs/batched-decode-phase2c-2026-10-21.md` T32/T33. |
 | T33 instrument q/k/attn stages | done | No wrong tensor in the q/k/attention/o chain; the stage is exact to fp16 rounding on the real install and is pinned in-tree by `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`. The corrupt Ornith text is in the reverted loop's wiring around the stage (T34). |
-| T34 re-land fused decode loop | in progress | Row-addressed pieces are in: `encodeBatchAttentionBlock` (verified attention stage + per-row residual exit and post-attention norm), `encodeSharedExpert` / `MoE.encodeRouter` row offsets, and `encodeLinearAttentionDecode` input/output offsets, pinned by `BatchAttentionTests`, `BatchFFNStageTests` and `BatchLinearAttentionStageTests`. Remaining: the row-sliced routed phase-1/2 stage, then the lockstep loop and the fused-safe layer gate. The corrupt run still reproduces from the preserved 22:56 binary in `.build/t6-fused-repro/`; `TINYTITAN_ACT_DUMP` makes the fused path ineligible, so the gate must be fused-safe. |
+| T34 re-land fused decode loop | in progress | `produceBatchFused` (width 2, opt-in) is wired and bit-identical against the per-row decode on Ornith: logits 0.0 for three steps from position 0, all 40 layer-entry traces identical, 24-token server text identical on two prompts. Root cause of the old drift: the two-row/four-row GEMVs accumulated the affine scale/bias in the opposite order from the single-row kernels; fixed. Remaining: the 64/128-token four-prompt battery and the wall-clock gate (fused 17.5 s against serial 8.2 s per row at 24 tokens because the FFN is drained per row). |
 
 ## New tasks found during execution
 
