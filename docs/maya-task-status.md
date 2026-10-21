@@ -11,9 +11,9 @@ evidence exist.
 | T3 fused decode design | done | `docs/fused-batched-decode-design.md` (pipeline, buffer ownership, prefetch overlap, B=1 identity, gates). |
 | T4 B-row scratch | done | `BatchedDecodeScratch` (T4) with width 2/4 tests; width 1 unchanged, scratch is opt-in. |
 | T5 batched QKV/o_proj | done | `encodeBatchGatedAttention` + `BatchAttentionTests`: two rows, per-row KV slots, batch o_proj; output matches the per-row gated path within 1e-3. Full logits parity remains T8/T9. |
-| T6 batched FFN/prefetch | pending | — |
-| T7 server wiring | pending | — |
-| T8 fused tests | pending | — |
+| T6 batched FFN/prefetch | in progress | Toy fused path (batch attention + verify-pair FFN) matched per-row and was measured on Ornith; real text was corrupt, so the path was reverted. Blocked on T32. |
+| T7 server wiring | pending | Fused path reverted before server landing. |
+| T8 fused tests | in progress | Toy test matched; needs real-shape isolation (T32). |
 | T9 real parity | pending | — |
 | T10 fused benchmark | pending | — |
 | T11 128K host-KV parity | pending | — |
@@ -42,4 +42,4 @@ evidence exist.
 
 Add tasks here with the next free T number; keep the main plan in sync.
 
-- None yet.
+- T32: isolate the real-dimension batch-attention divergence (added 2026-10-21 after the fused Ornith run produced corrupt text).

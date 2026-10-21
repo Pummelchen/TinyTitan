@@ -157,6 +157,14 @@ Depends T29. Size M.
 
 ## Phase 7 - Closeout
 
+**T32 - Isolate the real-dimension batch-attention divergence.** The T5
+toy-shaped stage and the T6 toy fused path agree with per-row, but on Ornith
+4-bit the same fused path produced corrupt text. Add a layer-level real-shape
+comparison (batched stage vs the per-row gated path, same hidden/KV inputs) and
+diff the activation at each boundary before T6 is re-wired.
+Acceptance: the first differing tensor is named, with a minimal reproducer.
+Depends T5, T6. Size M.
+
 **T31 - Final scorecard, gates, commit.** Record each outcome; run
 `swift test --no-parallel`, `tools/lint.sh all`, release build + warning gate;
 commit. Acceptance: all green; tree clean; every task done, rejected with
