@@ -15,7 +15,9 @@ extension RealForwardRunner {
     /// place, and leaves the attention-branch output in `oOut`.
     func encodeLinearAttentionDecode(
         _ cb: inout MTLCommandBuffer, layer L: Int,
-        slot: Int = 0
+        slot: Int = 0,
+        input: MTLBuffer? = nil, inputOffset: Int = 0,
+        output: MTLBuffer? = nil, outputOffset: Int = 0
     ) throws {
         guard let gdn, let gdnState, let gdnQKVRaw, let gdnConvOut,
             let gdnZ, let gdnA, let gdnB, let gdnY, let gdnOut
@@ -26,6 +28,8 @@ extension RealForwardRunner {
         }
         let la = cfg.linearAttention
         let D = UInt32(cfg.hiddenSize)
+        let xIn = input ?? normed
+        let yOut = output ?? oOut
         let qkvW = try model.linearInProjQKV(layer: L)
         let zW = try model.linearInProjZ(layer: L)
         let aW = try model.linearInProjA(layer: L)
@@ -49,7 +53,7 @@ extension RealForwardRunner {
             if !ablated("inproj") {
                 try gdn.encodeInputProjections(
                     commandBuffer: cb,
-                    x: normed,
+                    x: xIn, xOffset: inputOffset,
                     qkv: qkvW, qkvOut: gdnQKVRaw,
                     z: zW, zOut: gdnZ,
                     a: aW, aOut: gdnA,
@@ -60,22 +64,22 @@ extension RealForwardRunner {
             try encodeRoleGEMV(
                 commandBuffer: cb, projection: qkvW,
                 weightBits: model.gdnProjectionWeightBits,
-                x: normed, y: gdnQKVRaw,
+                x: xIn, xOffset: inputOffset, y: gdnQKVRaw,
                 m: UInt32(la.qkvDim), n: D)
             try encodeRoleGEMV(
                 commandBuffer: cb, projection: zW,
                 weightBits: model.gdnProjectionWeightBits,
-                x: normed, y: gdnZ,
+                x: xIn, xOffset: inputOffset, y: gdnZ,
                 m: UInt32(la.valueDim), n: D)
             try encodeRoleGEMV(
                 commandBuffer: cb, projection: aW,
                 weightBits: model.gdnProjectionWeightBits,
-                x: normed, y: gdnA,
+                x: xIn, xOffset: inputOffset, y: gdnA,
                 m: UInt32(la.numVHeads), n: D)
             try encodeRoleGEMV(
                 commandBuffer: cb, projection: bW,
                 weightBits: model.gdnProjectionWeightBits,
-                x: normed, y: gdnB,
+                x: xIn, xOffset: inputOffset, y: gdnB,
                 m: UInt32(la.numVHeads), n: D)
         }
         try rotate(&cb, role: "gdn.inproj")
@@ -124,7 +128,7 @@ extension RealForwardRunner {
                 weights: outW.buffer, weightsOffset: Int(outW.offset),
                 scales: outW.buffer, scalesOffset: Int(outW.scaleOffset),
                 biases: outW.buffer, biasesOffset: Int(outW.biasOffset),
-                x: gdnOut, y: oOut, m: D, n: UInt32(la.valueDim))
+                x: gdnOut, y: yOut, yOffset: outputOffset, m: D, n: UInt32(la.valueDim))
         }
         try rotate(&cb, role: "gdn.outproj")
     }
