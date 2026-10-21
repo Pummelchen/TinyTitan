@@ -59,6 +59,54 @@ import TinyTitanValidationSupport
         #expect(RelError.compute(actual: actual, reference: expected) < 0.002)
     }
 
+    /// The two-row head reads the weights once for both rows. This pins that
+    /// the shared read produces the same two results as two single-row calls,
+    /// within the kernel's summation tolerance — the numerical gate for the
+    /// batched decode's first fused stage.
+    @Test(arguments: [4, 8])
+    func twoRowsMatchTwoSingleRows(bits: Int) throws {
+        let rows = 8
+        let columns = 128
+        let (packed, _) = Self.packed(bits: bits, rows: rows, columns: columns)
+        let one = UInt16(truncatingIfNeeded: Float(1).bitPattern >> 16)
+        let scales = [UInt16](repeating: one, count: rows * columns / 64)
+        let biases = [UInt16](repeating: 0, count: scales.count)
+        let inputA = (0..<columns).map { Float16(Float(($0 % 7) + 1) * 0.01) }
+        let inputB = (0..<columns).map { Float16(Float(($0 % 5) + 1) * 0.02) }
+        let ctx = try MetalContext()
+        let kernel = try AffineQuantGEMV(context: ctx, weightBits: bits)
+        let w = try #require(ctx.device.makeBuffer(bytes: packed, length: packed.count))
+        let s = try #require(ctx.device.makeBuffer(bytes: scales, length: scales.count * 2))
+        let b = try #require(ctx.device.makeBuffer(bytes: biases, length: biases.count * 2))
+        let x = try #require(Fp16Buffer.make(ctx.device, halves: inputA + inputB))
+        let y = try #require(Fp16Buffer.make(ctx.device, count: rows * 2))
+        let cb = try #require(ctx.queue.makeCommandBuffer())
+        try kernel.encodeTwoRows(
+            commandBuffer: cb, weights: w, scales: s, biases: b,
+            x: x, y: y, m: UInt32(rows), n: UInt32(columns))
+        cb.commit()
+        cb.waitUntilCompleted()
+        #expect(cb.status == .completed)
+        let actual = Fp16Buffer.read(y, count: rows * 2)
+
+        let single = try #require(Fp16Buffer.make(ctx.device, count: rows))
+        var expected: [Float] = []
+        for (index, offset) in [0, columns * 2].enumerated() {
+            let cb = try #require(ctx.queue.makeCommandBuffer())
+            try kernel.encode(
+                commandBuffer: cb, weights: w, scales: s, biases: b,
+                x: x, xOffset: offset, y: single, m: UInt32(rows),
+                n: UInt32(columns))
+            cb.commit()
+            cb.waitUntilCompleted()
+            #expect(cb.status == .completed)
+            let got = Fp16Buffer.read(single, count: rows)
+            if index == 0 { expected = got } else { expected += got }
+        }
+        #expect(actual.count == expected.count)
+        #expect(RelError.compute(actual: actual, reference: expected) < 0.002)
+    }
+
     @Test(arguments: [2, 4, 8])
     func embeddingDecodesPackedAffine(bits: Int) throws {
         let rows = 3
