@@ -92,10 +92,10 @@ kernel void affine_quant_gemv2_simd(
         const float x10 = float(x1[first]), x11 = float(x1[first + 1u]);
         const float scale = float(row_scales[group]);
         const float bias = float(row_biases[group]);
-        acc0 = fma(scale, q0 * x00 + q1 * x01,
-                   fma(bias, x00 + x01, acc0));
-        acc1 = fma(scale, q0 * x10 + q1 * x11,
-                   fma(bias, x10 + x11, acc1));
+        acc0 = fma(scale, q0 * x00 + q1 * x01, acc0);
+        acc0 = fma(bias, x00 + x01, acc0);
+        acc1 = fma(scale, q0 * x10 + q1 * x11, acc1);
+        acc1 = fma(bias, x10 + x11, acc1);
     }
     acc0 = simd_sum(acc0);
     acc1 = simd_sum(acc1);
@@ -149,14 +149,14 @@ kernel void affine_quant_gemv4_simd(
         const float x30 = float(x3[first]), x31 = float(x3[first + 1u]);
         const float scale = float(row_scales[group]);
         const float bias = float(row_biases[group]);
-        acc0 = fma(scale, q0 * x00 + q1 * x01,
-                   fma(bias, x00 + x01, acc0));
-        acc1 = fma(scale, q0 * x10 + q1 * x11,
-                   fma(bias, x10 + x11, acc1));
-        acc2 = fma(scale, q0 * x20 + q1 * x21,
-                   fma(bias, x20 + x21, acc2));
-        acc3 = fma(scale, q0 * x30 + q1 * x31,
-                   fma(bias, x30 + x31, acc3));
+        acc0 = fma(scale, q0 * x00 + q1 * x01, acc0);
+        acc0 = fma(bias, x00 + x01, acc0);
+        acc1 = fma(scale, q0 * x10 + q1 * x11, acc1);
+        acc1 = fma(bias, x10 + x11, acc1);
+        acc2 = fma(scale, q0 * x20 + q1 * x21, acc2);
+        acc2 = fma(bias, x20 + x21, acc2);
+        acc3 = fma(scale, q0 * x30 + q1 * x31, acc3);
+        acc3 = fma(bias, x30 + x31, acc3);
     }
     acc0 = simd_sum(acc0);
     acc1 = simd_sum(acc1);

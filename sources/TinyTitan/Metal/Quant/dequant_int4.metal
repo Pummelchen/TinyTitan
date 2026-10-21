@@ -253,8 +253,10 @@ kernel void dequant_int4_gemv2_simd(
             sum0 += v0[i];
             sum1 += v1[i];
         }
-        acc0 = fma(s, dot0, fma(b, sum0, acc0));
-        acc1 = fma(s, dot1, fma(b, sum1, acc1));
+        acc0 = fma(s, dot0, acc0);
+        acc0 = fma(b, sum0, acc0);
+        acc1 = fma(s, dot1, acc1);
+        acc1 = fma(b, sum1, acc1);
     }
     for (uint g = full_blocks * 4u; g < n_groups; ++g) {
         const float s = float(s_row[g]);
@@ -264,8 +266,10 @@ kernel void dequant_int4_gemv2_simd(
         const float x00 = float(x[elem]), x01 = float(x[elem + 1u]);
         const float x10 = float(x1[elem]), x11 = float(x1[elem + 1u]);
         const float lo = float(uint(byte & 0xFu)), hi = float(uint(byte >> 4));
-        acc0 = fma(s, fma(lo, x00, hi * x01), fma(b, x00 + x01, acc0));
-        acc1 = fma(s, fma(lo, x10, hi * x11), fma(b, x10 + x11, acc1));
+        acc0 = fma(s, fma(lo, x00, hi * x01), acc0);
+        acc0 = fma(b, x00 + x01, acc0);
+        acc1 = fma(s, fma(lo, x10, hi * x11), acc1);
+        acc1 = fma(b, x10 + x11, acc1);
     }
     acc0 = simd_sum(acc0);
     acc1 = simd_sum(acc1);
