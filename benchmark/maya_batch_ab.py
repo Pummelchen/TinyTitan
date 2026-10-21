@@ -154,10 +154,7 @@ def decode_rates(log: pathlib.Path) -> list[dict[str, float]]:
         r"generation prefill_s=([\d.]+) decode_s=([\d.]+) decode_tok_s=([\d.]+)",
         text,
     )
-    return [
-        {"prefill_s": float(a), "decode_s": float(b), "tok_s": float(c)}
-        for a, b, c in matches
-    ]
+    return [{"prefill_s": float(a), "decode_s": float(b), "tok_s": float(c)} for a, b, c in matches]
 
 
 def one_request(
@@ -207,7 +204,7 @@ def run_batch(
             target=one_request,
             args=(port, model, prompt + f" [nonce {nonce}]", max_tokens, holder, barrier),
         )
-        for prompt, holder in zip(prompts, results)
+        for prompt, holder in zip(prompts, results, strict=True)
     ]
     started = time.time()
     for thread in threads:
@@ -285,8 +282,7 @@ def run_width(
         for index in range(warmups):
             run_batch(port, model, prompts, tokens, f"warm-{index}")
         measured = [
-            run_batch(port, model, prompts, tokens, f"meas-{index}")
-            for index in range(runs)
+            run_batch(port, model, prompts, tokens, f"meas-{index}") for index in range(runs)
         ]
         rates = decode_rates(log)
         walls = [row["wall_s"] for row in measured]
@@ -359,9 +355,7 @@ def main() -> int:
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        raise SystemExit(
-            "another maya_batch_ab.py is running; only one server at a time"
-        ) from None
+        raise SystemExit("another maya_batch_ab.py is running; only one server at a time") from None
     require_no_server(args.port)
     label, path = args.model.split("=", 1)
     payload = {
@@ -390,10 +384,10 @@ def main() -> int:
             )
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2) + "\n")
+    out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     mismatches = text_mismatches(payload)
     payload["text_mismatches"] = mismatches
-    out.write_text(json.dumps(payload, indent=2) + "\n")
+    out.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"out": str(out), "text_mismatches": len(mismatches)}))
     fcntl.flock(lock, fcntl.LOCK_UN)
     lock.close()
