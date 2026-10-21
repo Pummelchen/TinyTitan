@@ -148,6 +148,30 @@ possible is exactly what removes the per-row cross-layer routed overlap; the
 short-generation wall win does not survive a longer generation, so the path
 was reverted.
 
+## Third attempt: the verify-pair FFN in decode
+
+The last attempt used the two-row union-fetch MoE that already serves MTP
+verify (`encodeRoutedMoEVerifyPair`) as the batched FFN: both rows' post-attention
+norms landed in its two-row `routedX`, the batched QKV/o_proj stage ran before
+it, and its per-row phase-1/phase-2 kernels wrote both residual rows. GDN
+layers stayed per-row. This is the "batch the FFN too" version.
+
+Text was correct. It was slower still: 64 tokens 17.72 s against a warm serial
+14.4-14.9 s; 128 tokens 24.34 s against 21.41 s; decode 6.1-7.5 tok/s against
+17-18. The union fetch and batched shared expert did not cover the verify
+pipeline's per-layer router readback and commit/wait, and the layer barrier
+remained. It was reverted.
+
+At this point the three independent shapes have been measured:
+
+- projection-only with per-row decode FFN: short wins, long loses;
+- projection-only with per-row scratch and deferred pending: same;
+- projection plus the existing union-fetch pair FFN: loses at both lengths.
+
+Projection/FFN batching on this engine needs a newly designed decode MoE
+pipeline that keeps the prefetch ring across a layer barrier, not a reuse of
+the prefill/verify pipeline. That is a separate engine project.
+
 ## What the measurements say the next attempt must do
 
 - **Give each row its own routed-MoE scratch and carry its pending command
