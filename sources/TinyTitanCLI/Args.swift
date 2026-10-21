@@ -1,4 +1,6 @@
+import Foundation
 import TinyTitan
+import TinyTitanLib
 
 public enum PrefillChunkChoice: Equatable, Sendable {
     case fixed(Int)
@@ -40,6 +42,10 @@ public struct Args: Equatable, Sendable {
     public var prefillChunk: PrefillChunkChoice?
     public var kvCachePrecision: KVCachePrecision
     public var ropeScalingMode: RuntimeRoPEScalingMode
+    /// A measured calibration profile to apply where no explicit flag wins.
+    public var calibrationProfile: String?
+    /// One line naming what the profile applied, for the CLI's stderr.
+    public var calibrationLogLine: String?
 
     public init(
         model: String,
@@ -66,7 +72,9 @@ public struct Args: Equatable, Sendable {
         rdadvise: String = "default",
         prefillChunk: PrefillChunkChoice? = nil,
         kvCachePrecision: KVCachePrecision = .int8,
-        ropeScalingMode: RuntimeRoPEScalingMode = .none
+        ropeScalingMode: RuntimeRoPEScalingMode = .none,
+        calibrationProfile: String? = nil,
+        calibrationLogLine: String? = nil
     ) {
         self.model = model
         self.prompt = prompt
@@ -87,6 +95,8 @@ public struct Args: Equatable, Sendable {
         self.prefillChunk = prefillChunk
         self.kvCachePrecision = kvCachePrecision
         self.ropeScalingMode = ropeScalingMode
+        self.calibrationProfile = calibrationProfile
+        self.calibrationLogLine = calibrationLogLine
         self.seed = seed
         self.stops = stops
         self.quiet = quiet
@@ -180,6 +190,11 @@ extension Args {
                                     fallback when the manifest cannot be read.
                                     More slots raise the hit rate but use more
                                     memory.
+          --calibration-profile <path>
+                                    Apply a measured profile where no explicit
+                                    flag wins (explicit flags always win).
+                                    Unsupported profile knobs are logged, not
+                                    applied.
           --prefill-chunk <n|auto>  Prefill chunk tokens. Larger chunks reduce
                                     routed-expert file sweeps but use more GPU
                                     scratch. Allowed: 32, 64, 128, 256, 512,
@@ -233,6 +248,8 @@ extension Args {
         var prefillChunk: PrefillChunkChoice?
         var kvCachePrecision: KVCachePrecision = .int8
         var ropeScalingMode: RuntimeRoPEScalingMode = .none
+        var calibrationProfile: String?
+        var calibrationLogLine: String?
 
         var index = 0
         while index < argv.count {
@@ -351,6 +368,8 @@ extension Args {
                     throw ArgsError.invalidValue(flag: flag, value: value)
                 }
                 rdadvise = value
+            case "--calibration-profile":
+                calibrationProfile = try takeValue(argv, &index, flag: flag)
             case "--prefill-chunk":
                 let value = try takeValue(argv, &index, flag: flag)
                 if value == "auto" {
@@ -404,6 +423,29 @@ extension Args {
                 flag: "--reasoning-effort",
                 value: "\(effort.rawValue) requires --thinking on")
         }
+        if let path = calibrationProfile {
+            do {
+                let profile = try CalibrationProfile.load(
+                    fileAt: URL(fileURLWithPath: path))
+                let explicitChunk: Int? = {
+                    if case .fixed(let chunk)? = prefillChunk { return chunk }
+                    return nil
+                }()
+                let application = profile.application(
+                    explicitPrefillChunkTokens: explicitChunk,
+                    explicitExpertCacheSlots: expertCacheSlots)
+                if prefillChunk == nil, let chunk = application.prefillChunkTokens {
+                    prefillChunk = .fixed(chunk)
+                }
+                if expertCacheSlots == nil {
+                    expertCacheSlots = application.expertCacheSlots
+                }
+                calibrationLogLine = application.logLine
+            } catch {
+                throw ArgsError.invalidValue(
+                    flag: "--calibration-profile", value: "\(error)")
+            }
+        }
         return Args(
             model: model,
             prompt: prompt,
@@ -429,7 +471,9 @@ extension Args {
             rdadvise: rdadvise,
             prefillChunk: prefillChunk,
             kvCachePrecision: kvCachePrecision,
-            ropeScalingMode: ropeScalingMode)
+            ropeScalingMode: ropeScalingMode,
+            calibrationProfile: calibrationProfile,
+            calibrationLogLine: calibrationLogLine)
     }
 
     private static func takeValue(

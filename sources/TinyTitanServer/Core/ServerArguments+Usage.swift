@@ -64,6 +64,11 @@ extension ServerArguments {
                                  Optional persistent SSD cache directory.
           --prompt-cache-disk-mib <MiB>
                                  SSD snapshot budget, 0...65536 (default 8192).
+          --calibration-profile <path>
+                                 Apply a measured tuning profile where no
+                                 explicit flag wins (explicit flags always
+                                 win). Knobs with no runtime switch are logged,
+                                 not applied.
           --prefill-chunk <tokens>
                                  Prefill chunk size, one of
                                  \(ServerArguments.prefillChunkTokensHelp)

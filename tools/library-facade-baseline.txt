@@ -1,7 +1,9 @@
 sources/TinyTitanLib/CalibrationProfile.swift:enum:CalibrationProfileError
+sources/TinyTitanLib/CalibrationProfile.swift:func:application
 sources/TinyTitanLib/CalibrationProfile.swift:func:currentMachine
 sources/TinyTitanLib/CalibrationProfile.swift:func:decode
 sources/TinyTitanLib/CalibrationProfile.swift:func:encodedJSON
+sources/TinyTitanLib/CalibrationProfile.swift:func:load
 sources/TinyTitanLib/CalibrationProfile.swift:func:validate
 sources/TinyTitanLib/CalibrationProfile.swift:init:init
 sources/TinyTitanLib/CalibrationProfile.swift:init:init
@@ -9,8 +11,10 @@ sources/TinyTitanLib/CalibrationProfile.swift:init:init
 sources/TinyTitanLib/CalibrationProfile.swift:init:init
 sources/TinyTitanLib/CalibrationProfile.swift:let:contextTokens
 sources/TinyTitanLib/CalibrationProfile.swift:let:currentSchemaVersion
+sources/TinyTitanLib/CalibrationProfile.swift:let:expertCacheSlots
 sources/TinyTitanLib/CalibrationProfile.swift:let:family
 sources/TinyTitanLib/CalibrationProfile.swift:let:identifier
+sources/TinyTitanLib/CalibrationProfile.swift:let:ignoredKnobs
 sources/TinyTitanLib/CalibrationProfile.swift:let:knobs
 sources/TinyTitanLib/CalibrationProfile.swift:let:machine
 sources/TinyTitanLib/CalibrationProfile.swift:let:measured
@@ -18,10 +22,13 @@ sources/TinyTitanLib/CalibrationProfile.swift:let:measuredAt
 sources/TinyTitanLib/CalibrationProfile.swift:let:memoryBytes
 sources/TinyTitanLib/CalibrationProfile.swift:let:modelID
 sources/TinyTitanLib/CalibrationProfile.swift:let:osVersion
+sources/TinyTitanLib/CalibrationProfile.swift:let:prefillChunkTokens
 sources/TinyTitanLib/CalibrationProfile.swift:let:schemaVersion
+sources/TinyTitanLib/CalibrationProfile.swift:let:source
 sources/TinyTitanLib/CalibrationProfile.swift:let:source
 sources/TinyTitanLib/CalibrationProfile.swift:let:target
 sources/TinyTitanLib/CalibrationProfile.swift:let:weightBits
+sources/TinyTitanLib/CalibrationProfile.swift:struct:CalibrationApplication
 sources/TinyTitanLib/CalibrationProfile.swift:struct:CalibrationProfile
 sources/TinyTitanLib/CalibrationProfile.swift:struct:Knobs
 sources/TinyTitanLib/CalibrationProfile.swift:struct:Machine
@@ -29,6 +36,7 @@ sources/TinyTitanLib/CalibrationProfile.swift:struct:Target
 sources/TinyTitanLib/CalibrationProfile.swift:var:boundedIO
 sources/TinyTitanLib/CalibrationProfile.swift:var:description
 sources/TinyTitanLib/CalibrationProfile.swift:var:expertCacheSlots
+sources/TinyTitanLib/CalibrationProfile.swift:var:logLine
 sources/TinyTitanLib/CalibrationProfile.swift:var:prefillChunkTokens
 sources/TinyTitanLib/CalibrationProfile.swift:var:prefillTileDepth
 sources/TinyTitanLib/CalibrationProfile.swift:var:q8Attention

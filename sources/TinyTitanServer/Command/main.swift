@@ -18,6 +18,9 @@ do {
     FileHandle.standardError.write(Data("error: \(error)\n\n\(ServerArguments.usage)\n".utf8))
     exit(2)
 }
+if let line = arguments.calibrationLogLine {
+    FileHandle.standardError.write(Data((line + "\n").utf8))
+}
 
 // A launcher parses stdout, so the catalog is the only thing written there;
 // skipped directories go to stderr.

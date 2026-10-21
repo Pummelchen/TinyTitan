@@ -1,7 +1,7 @@
 # Calibration product (T15-T18)
 
-Status: T15 (schema + CLI) and T16 (decision engine + measurement driver) are
-implemented. T17 (load and precedence) and T18 (full test matrix) are next.
+Status: T15 (schema + CLI), T16 (decision engine + measurement driver) and T17
+(load and precedence) are implemented. T18 (full test matrix) is next.
 
 ## Profile
 
@@ -57,3 +57,24 @@ no knobs: no arm cleared both gates. That is the correct outcome for a
 two-repeat run on a host carrying swap; a longer run is the way to settle the
 4.1%, not a looser rule. The profile is preserved at
 `.build/t16-ornith-calibration.json` (git-ignored).
+
+## Loading and precedence (T17)
+
+Both front ends accept `--calibration-profile <path>`:
+
+- The profile is read with the bounded metadata reader and validated; a corrupt
+  or unsupported profile fails the launch with the validator's error.
+- Precedence is explicit flag > profile > runtime default. The profile only
+  fills `prefillChunkTokens` and `expertCacheSlots` when the corresponding flag
+  was not given; an explicit flag always wins.
+- The startup log names exactly what was applied and lists profile knobs that
+  have no runtime switch (`boundedIO`, `q8Attention`, `readerThreads`,
+  `prefillTileDepth`) under "not applied", so a profile is never silently
+  ignored or partially applied without a line.
+- CLI precedence lives in `Args.parse` (a bad profile is an `ArgsError`); the
+  server's lives in `ServerArguments.parse` (a bad profile is a
+  `ServerArgumentError`) and the log line is written before the ready banner.
+
+Tests: CLI `profileFillsOnlyUnsetKnobs` / `explicitFlagsWinOverTheProfile` /
+`profileKnobsWithoutSwitchesAreReported` / `corruptProfileIsRefused`; server
+`CalibrationProfileArgumentsTests` mirrors the same four cases.

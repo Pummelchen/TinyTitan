@@ -22,7 +22,7 @@ evidence exist.
 | T14 host-KV guidance | pending | Depends T13; cannot be written against measurements this host can produce. |
 | T15 calibrate interface | done | `CalibrationProfile` (v1 schema, validation, machine identity), `tinytitan calibrate --model/--check/--out`, help listed in `TinyTitanCLI --help`; 10 schema tests + 5 CLI tests. Drafts are `measured: false`, knobs empty; T16 fills them. |
 | T16 calibration arms | done | Keep rule, measurement driver and `calibrate --plan` landed. Real Ornith run (32 tokens, 2 repeats): baseline 7.91 tok/s, prefill-chunk-128 +0.5% rejected by the 3% floor, cache-slots-96 +4.1% rejected inside the 6.3% noise band; the produced profile is `measured: true` with no knobs. `docs/calibration-product.md` records the protocol and the arm/switch split; profile at `.build/t16-ornith-calibration.json`. |
-| T17 profile precedence | pending | — |
+| T17 profile precedence | done | `--calibration-profile <path>` on the CLI and server loads with the bounded reader, validates, fills only unset `prefillChunkTokens`/`expertCacheSlots` (explicit flags win) and logs the applied line plus the knobs with no runtime switch. CLI + server precedence tests: fill, explicit-wins, switchless-reported, corrupt-refused. |
 | T18 calibration tests | pending | — |
 | T19 multi-Mac validation | pending (hardware) | — |
 | T20 checkpoint design | pending | — |

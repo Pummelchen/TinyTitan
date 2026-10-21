@@ -199,6 +199,37 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         return profile
     }
 
+    /// Reads and validates a profile file. Bounded: a profile is a small
+    /// metadata document, and a path typo must not pull a model payload in.
+    public static func load(fileAt url: URL, maxBytes: UInt64 = 1 << 20)
+        throws -> CalibrationProfile
+    {
+        let data = try BoundedMetadataRead.read(fileAt: url, maxBytes: maxBytes)
+        return try decode(from: data)
+    }
+
+    /// Applies this profile to the two load-time knobs the runtime exposes.
+    /// An explicit caller value wins; the profile fills only what was left
+    /// unset. The other knobs have no runtime switch yet and are reported
+    /// rather than silently ignored.
+    public func application(
+        explicitPrefillChunkTokens: Int?,
+        explicitExpertCacheSlots: Int?
+    ) -> CalibrationApplication {
+        var ignored: [String] = []
+        if knobs.boundedIO != nil { ignored.append("boundedIO") }
+        if knobs.q8Attention != nil { ignored.append("q8Attention") }
+        if knobs.readerThreads != nil { ignored.append("readerThreads") }
+        if knobs.prefillTileDepth != nil { ignored.append("prefillTileDepth") }
+        return CalibrationApplication(
+            prefillChunkTokens: explicitPrefillChunkTokens
+                ?? knobs.prefillChunkTokens,
+            expertCacheSlots: explicitExpertCacheSlots
+                ?? knobs.expertCacheSlots,
+            source: source,
+            ignoredKnobs: ignored)
+    }
+
     static func iso8601(_ value: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -232,5 +263,31 @@ public enum CalibrationProfileError: Error, CustomStringConvertible {
         case .malformed(let detail):
             return "malformed calibration profile: \(detail)"
         }
+    }
+}
+
+/// What a profile contributes after explicit caller values have won.
+public struct CalibrationApplication: Equatable, Sendable {
+    public let prefillChunkTokens: Int?
+    public let expertCacheSlots: Int?
+    public let source: String
+    /// Profile knobs with no runtime switch; reported, never applied.
+    public let ignoredKnobs: [String]
+
+    /// One line naming exactly what was applied, for the startup log.
+    public var logLine: String {
+        var parts: [String] = []
+        if let value = prefillChunkTokens {
+            parts.append("prefillChunkTokens=\(value)")
+        }
+        if let value = expertCacheSlots {
+            parts.append("expertCacheSlots=\(value)")
+        }
+        let applied = parts.isEmpty ? "no switchable knobs" : parts.joined(separator: " ")
+        var line = "calibration: \(applied) (source \(source))"
+        if !ignoredKnobs.isEmpty {
+            line += "; not applied: " + ignoredKnobs.joined(separator: ", ")
+        }
+        return line
     }
 }

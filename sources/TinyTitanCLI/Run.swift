@@ -70,6 +70,9 @@ public func run(
     stderr: FileHandle = .standardError
 ) async -> RunResult {
     do {
+        if !args.quiet, let line = args.calibrationLogLine {
+            stderr.write(Data((line + "\n").utf8))
+        }
         let modelURL = URL(fileURLWithPath: args.model)
         let thinkingMode: ThinkingMode = args.thinkingMode == .on ? .on : .off
         let reasoningEffort = args.reasoningEffort.flatMap {

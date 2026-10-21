@@ -32,6 +32,10 @@ public struct ServerArguments: Equatable, Sendable {
     public let promptCacheDiskDirectory: String?
     public let promptCacheDiskMiB: Int
     public let prefillChunkTokens: Int?
+    /// Path to a measured calibration profile, if one was requested.
+    public let calibrationProfile: String?
+    /// One line naming what the profile contributed, for the startup log.
+    public let calibrationLogLine: String?
     public let kvCachePrecision: KVCachePrecision
     /// Host-KV window: full-attention rows stay in a host arena and only this
     /// many rows per layer/slot live in Metal. Nil is the contiguous cache.
@@ -124,6 +128,8 @@ public struct ServerArguments: Equatable, Sendable {
         var promptCacheDiskDirectory: String?
         var promptCacheDiskMiB = 8_192
         var prefillChunkTokens: Int?
+        var calibrationProfile: String?
+        var calibrationLogLine: String?
         var kvCachePrecision: KVCachePrecision = .int8
         var hostKVWindowTokens: Int?
         var ropeScalingMode: RuntimeRoPEScalingMode = .none
@@ -269,6 +275,8 @@ public struct ServerArguments: Equatable, Sendable {
                         "--prompt-cache-disk-mib must be between 0 and 65536")
                 }
                 promptCacheDiskMiB = parsed
+            case "--calibration-profile":
+                calibrationProfile = value
             case "--prefill-chunk":
                 guard let parsed = Int(value),
                     RuntimeConfiguration.allowedPrefillChunkTokens.contains(parsed)
@@ -403,6 +411,25 @@ public struct ServerArguments: Equatable, Sendable {
                 "--reasoning-effort \(effort.rawValue) requires --thinking on; "
                     + "the chat template ignores effort while thinking is off")
         }
+        if let path = calibrationProfile {
+            do {
+                let profile = try CalibrationProfile.load(
+                    fileAt: URL(fileURLWithPath: path))
+                let application = profile.application(
+                    explicitPrefillChunkTokens: prefillChunkTokens,
+                    explicitExpertCacheSlots: expertCacheSlots)
+                if prefillChunkTokens == nil {
+                    prefillChunkTokens = application.prefillChunkTokens
+                }
+                if expertCacheSlots == nil {
+                    expertCacheSlots = application.expertCacheSlots
+                }
+                calibrationLogLine = application.logLine
+            } catch {
+                throw ServerArgumentError.invalid(
+                    "--calibration-profile: \(error)")
+            }
+        }
         return ServerArguments(
             model: model,
             mtpModel: mtpModel,
@@ -418,6 +445,8 @@ public struct ServerArguments: Equatable, Sendable {
             promptCacheDiskDirectory: promptCacheDiskDirectory,
             promptCacheDiskMiB: promptCacheDiskMiB,
             prefillChunkTokens: prefillChunkTokens,
+            calibrationProfile: calibrationProfile,
+            calibrationLogLine: calibrationLogLine,
             kvCachePrecision: kvCachePrecision,
             hostKVWindowTokens: hostKVWindowTokens,
             ropeScalingMode: ropeScalingMode,

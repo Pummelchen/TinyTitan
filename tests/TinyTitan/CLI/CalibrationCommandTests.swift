@@ -113,4 +113,103 @@ import TinyTitanLib
             _ = try await CalibrationCommand.run(CalibrationOptions())
         }
     }
+
+    private func writeProfile(
+        _ profile: CalibrationProfile
+    ) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calibration-\(UUID().uuidString).json")
+        try profile.encodedJSON().write(to: url)
+        return url
+    }
+
+    @Test func profileFillsOnlyUnsetKnobs() throws {
+        let profile = CalibrationProfile(
+            machine: .init(
+                identifier: "Mac15,3", memoryBytes: 24 << 30,
+                osVersion: "27.0.1"),
+            target: .init(
+                modelID: "ornith", family: "qwen36", weightBits: 4,
+                contextTokens: 8192),
+            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = try writeProfile(profile)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let parsed = try Args.parse([
+            "--model", "/tmp/model", "--prompt", "hi",
+            "--calibration-profile", url.path,
+        ])
+        #expect(parsed.calibrationProfile == url.path)
+        #expect(parsed.expertCacheSlots == 96)
+        if case .fixed(let chunk)? = parsed.prefillChunk {
+            #expect(chunk == 128)
+        } else {
+            Issue.record("profile chunk was not applied")
+        }
+        #expect(parsed.calibrationLogLine?.contains("prefillChunkTokens=128") == true)
+        #expect(parsed.calibrationLogLine?.contains("expertCacheSlots=96") == true)
+    }
+
+    @Test func explicitFlagsWinOverTheProfile() throws {
+        let profile = CalibrationProfile(
+            machine: .init(
+                identifier: "Mac15,3", memoryBytes: 24 << 30,
+                osVersion: "27.0.1"),
+            target: .init(
+                modelID: "ornith", family: "qwen36", weightBits: 4,
+                contextTokens: 8192),
+            knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = try writeProfile(profile)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let parsed = try Args.parse([
+            "--model", "/tmp/model", "--prompt", "hi",
+            "--calibration-profile", url.path,
+            "--expert-cache-slots", "32", "--prefill-chunk", "256",
+        ])
+        #expect(parsed.expertCacheSlots == 32)
+        if case .fixed(let chunk)? = parsed.prefillChunk {
+            #expect(chunk == 256)
+        } else {
+            Issue.record("explicit chunk was not kept")
+        }
+    }
+
+    @Test func profileKnobsWithoutSwitchesAreReported() throws {
+        let profile = CalibrationProfile(
+            machine: .init(
+                identifier: "Mac15,3", memoryBytes: 24 << 30,
+                osVersion: "27.0.1"),
+            target: .init(
+                modelID: "ornith", family: "qwen36", weightBits: 4,
+                contextTokens: 8192),
+            knobs: .init(boundedIO: false),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = try writeProfile(profile)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let parsed = try Args.parse([
+            "--model", "/tmp/model", "--prompt", "hi",
+            "--calibration-profile", url.path,
+        ])
+        #expect(parsed.expertCacheSlots == nil)
+        #expect(parsed.calibrationLogLine?.contains("not applied: boundedIO") == true)
+    }
+
+    @Test func corruptProfileIsRefused() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("calibration-bad-\(UUID().uuidString).json")
+        try Data(#"{"schemaVersion":99}"#.utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", "/tmp/model", "--prompt", "hi",
+                "--calibration-profile", url.path,
+            ])
+        }
+    }
 }
