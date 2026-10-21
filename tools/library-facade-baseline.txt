@@ -51,6 +51,7 @@ sources/TinyTitanLib/CalibrationRunner.swift:let:baseline
 sources/TinyTitanLib/CalibrationRunner.swift:let:baselineMedian
 sources/TinyTitanLib/CalibrationRunner.swift:let:baselineMedian
 sources/TinyTitanLib/CalibrationRunner.swift:let:decisions
+sources/TinyTitanLib/CalibrationRunner.swift:let:deferred
 sources/TinyTitanLib/CalibrationRunner.swift:let:improvement
 sources/TinyTitanLib/CalibrationRunner.swift:let:kept
 sources/TinyTitanLib/CalibrationRunner.swift:let:knobs

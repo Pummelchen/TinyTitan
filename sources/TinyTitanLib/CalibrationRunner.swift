@@ -224,12 +224,18 @@ public enum CalibrationPlan {
                 name: "cache-slots-96",
                 knobs: CalibrationProfile.Knobs(expertCacheSlots: 96),
                 note: "More routed-expert slots raise the hit rate but use RAM."),
-            CalibrationArm(
-                name: "bounded-io-off",
-                knobs: CalibrationProfile.Knobs(boundedIO: false),
-                note: "TINYTITAN_BOUNDED_IO=0; a startup switch."),
         ]
     }
+
+    /// Arms that are real switches but cannot be varied by an in-process
+    /// driver: they are read from the process environment when the reader or
+    /// engine is created, so a fair A/B needs a fresh process.
+    public static let deferred: [(name: String, reason: String)] = [
+        (
+            "bounded-io-off",
+            "TINYTITAN_BOUNDED_IO is read at reader creation; needs a subprocess driver"
+        )
+    ]
 
     /// Candidate arms the plan named that have no operator switch today.
     public static let unavailable: [(name: String, reason: String)] = [

@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import TinyTitan
 import TinyTitanLib
 
@@ -14,11 +15,15 @@ public struct CalibrationOptions: Equatable, Sendable {
     public var out: String?
     public var check: String?
     public var plan: Bool = false
+    public var measure: Bool = false
+    public var tokens: Int = 64
+    public var repeats: Int = 3
     public var help: Bool = false
 
     public init(
         model: String? = nil, maxContext: Int = 4096,
         out: String? = nil, check: String? = nil, plan: Bool = false,
+        measure: Bool = false, tokens: Int = 64, repeats: Int = 3,
         help: Bool = false
     ) {
         self.model = model
@@ -26,6 +31,9 @@ public struct CalibrationOptions: Equatable, Sendable {
         self.out = out
         self.check = check
         self.plan = plan
+        self.measure = measure
+        self.tokens = tokens
+        self.repeats = repeats
         self.help = help
     }
 
@@ -45,6 +53,12 @@ public struct CalibrationOptions: Equatable, Sendable {
                                  print it normalized.
           --plan                 List the arms this machine can measure and the
                                  plan's arms that have no runtime switch yet.
+          --measure              Run the measurable arms and write a measured
+                                 profile (needs --model). One engine is loaded
+                                 per sample; load time is outside the number.
+          --tokens <n>           Decoded tokens per measurement sample
+                                 (default 64, 8...512).
+          --repeats <n>          Samples per arm (default 3, 2...9).
           --help                 Show this help.
 
         The profile is JSON. A draft has "measured": false and no knobs; a
@@ -74,6 +88,20 @@ public struct CalibrationOptions: Equatable, Sendable {
                 options.check = try value("--check")
             case "--plan":
                 options.plan = true
+            case "--measure":
+                options.measure = true
+            case "--tokens":
+                let raw = try value("--tokens")
+                guard let parsed = Int(raw), (8...512).contains(parsed) else {
+                    throw CalibrationCommandError.invalidValue("--tokens", raw)
+                }
+                options.tokens = parsed
+            case "--repeats":
+                let raw = try value("--repeats")
+                guard let parsed = Int(raw), (2...9).contains(parsed) else {
+                    throw CalibrationCommandError.invalidValue("--repeats", raw)
+                }
+                options.repeats = parsed
             case "--max-context":
                 let raw = try value("--max-context")
                 guard let parsed = Int(raw), parsed > 0 else {
@@ -97,6 +125,7 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
     case missingModel
     case conflictingInput
     case profileTooLarge(Int)
+    case noMetalDevice
 
     public var description: String {
         switch self {
@@ -112,6 +141,8 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
             return "calibrate accepts either --model or --check, not both"
         case .profileTooLarge(let cap):
             return "calibration profile exceeds \(cap) bytes"
+        case .noMetalDevice:
+            return "calibrate --measure needs a Metal device"
         }
     }
 }
@@ -123,11 +154,75 @@ public enum CalibrationCommand {
             lines.append("  \(arm.name): \(describe(arm.knobs))")
             if let note = arm.note { lines.append("    \(note)") }
         }
+        lines.append("deferred (needs a fresh process):")
+        for item in CalibrationPlan.deferred {
+            lines.append("  \(item.name): \(item.reason)")
+        }
         lines.append("no runtime switch yet:")
         for item in CalibrationPlan.unavailable {
             lines.append("  \(item.name): \(item.reason)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private static func measure(
+        modelPath: String, options: CalibrationOptions
+    ) async throws -> Int32 {
+        let directory = URL(fileURLWithPath: modelPath)
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw CalibrationCommandError.noMetalDevice
+        }
+        let target = CalibrationProfile.Target(
+            modelID: identity.modelID,
+            family: identity.family.rawValue,
+            weightBits: identity.weightBits,
+            contextTokens: options.maxContext)
+        let measurer = CalibrationMeasurer(
+            directory: directory, contextTokens: options.maxContext,
+            tokens: options.tokens, device: device)
+        let report = try await measurementReport(
+            target: target, repeats: options.repeats
+        ) { arm in
+            try await measurer.measure(arm)
+        }
+        for decision in report.decisions {
+            let text =
+                "arm \(decision.arm.name): \(decision.reason) "
+                + "(baseline \(format(decision.baselineMedian)), "
+                + "arm \(format(decision.armMedian)) tok/s)\n"
+            FileHandle.standardError.write(Data(text.utf8))
+        }
+        let profile = report.measuredProfile(
+            machine: CalibrationProfile.currentMachine(), target: target)
+        try profile.validate()
+        let data = try profile.encodedJSON()
+        if let out = options.out {
+            try data.write(to: URL(fileURLWithPath: out))
+            FileHandle.standardError.write(Data("wrote \(out)\n".utf8))
+        } else {
+            writeStdout(data)
+        }
+        return 0
+    }
+
+    /// The decision half of `--measure`, with the sampler injected so the
+    /// profile/keep wiring is testable without loading a model.
+    static func measurementReport(
+        target: CalibrationProfile.Target, repeats: Int,
+        sampler: @Sendable (CalibrationArm) async throws -> Double
+    ) async throws -> CalibrationReport {
+        try await CalibrationRunner().run(
+            baseline: CalibrationPlan.baselineArm(),
+            arms: CalibrationPlan.defaultArms(),
+            repeats: repeats
+        ) { arm in
+            try await sampler(arm)
+        }
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 
     private static func describe(_ knobs: CalibrationProfile.Knobs) -> String {
@@ -167,7 +262,7 @@ public enum CalibrationCommand {
     }
 
     /// Runs the subcommand and returns the process exit code.
-    public static func run(_ options: CalibrationOptions) throws -> Int32 {
+    public static func run(_ options: CalibrationOptions) async throws -> Int32 {
         if options.help {
             print(CalibrationOptions.usage)
             return 0
@@ -178,6 +273,12 @@ public enum CalibrationCommand {
         }
         if options.check != nil, options.model != nil {
             throw CalibrationCommandError.conflictingInput
+        }
+        if options.measure, options.check != nil {
+            throw CalibrationCommandError.conflictingInput
+        }
+        if options.measure, let modelPath = options.model {
+            return try await measure(modelPath: modelPath, options: options)
         }
         if let path = options.check {
             let data = try readProfile(at: path)

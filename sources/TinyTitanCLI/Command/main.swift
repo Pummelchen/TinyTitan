@@ -6,7 +6,7 @@ let rawArgv = Array(CommandLine.arguments.dropFirst())
 if rawArgv.first == "calibrate" {
     do {
         let options = try CalibrationOptions.parse(Array(rawArgv.dropFirst()))
-        exit(try CalibrationCommand.run(options))
+        exit(try await CalibrationCommand.run(options))
     } catch {
         FileHandle.standardError.write(Data("error: \(error)\n\n".utf8))
         FileHandle.standardError.write(Data(CalibrationOptions.usage.utf8))
