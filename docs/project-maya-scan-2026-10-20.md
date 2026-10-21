@@ -5,6 +5,33 @@ Read-only scan of [mw00/project-maya](https://github.com/mw00/project-maya)
 separate the ideas worth rebuilding in Swift/Metal from the ones TinyTitan has
 already measured and closed.
 
+## Transfer scorecard (audited 2026-10-21)
+
+The answer to "are all useful Maya ideas implemented, tested and benchmarked?"
+is **no**. This is the audited state after the host-KV and batched-decode work.
+
+| Maya idea | Implemented | Tested | Benchmarked | Where |
+| --- | --- | --- | --- | --- |
+| A. Fused batched decode | **partial** — shared head only | yes for the shipped head; batch/layer tests | head yes; full fused no | The layer path is still per row. Projection-only, per-row-scratch and verify-pair FFN versions were built, made text-correct and reverted after real Ornith 4-bit measurements (`docs/batched-decode-phase2c-2026-10-21.md`). |
+| B. Quantised PLE table + fan-out | yes | yes | yes | 102.4 GB -> 32.0 GB, byte-identical outputs, decode +3 %; gather -14 %, +1.7 % decode (`docs/ple-table-4bit-2026-10-20.md`, `docs/ple-decode-gather-2026-10-21.md`). |
+| C. Host KV + VRAM window | yes | yes, scaled | **not at target scale** | Arena/window/kernels/snapshot/CLI ship at `93a86e8`; the 4K/128K/1M acceptance tests are scaled, and the real 1M/512K timing run was not executed on this host. Commands in `docs/host-kv-streaming-2026-10-21.md`. |
+| D. Persisted expert profile | yes | yes | yes | +40.6 % repeated-prompt decode, +29 % same-domain, +17 % cross-domain (`docs/expert-profile-warm-start-2026-10-20.md`). |
+| E. Calibration as a product feature | **no** | — | — | No `tinytitan calibrate` command; only benchmark-internal calibration. |
+| F. Prompt-progress streaming | yes | yes | not a performance feature | `return_progress` emits `prompt_progress`; unset is byte-identical. |
+| G. Interior conversation checkpoints / slots | **no** | — | — | Prompt cache remains prefix-only; no interior checkpoint tier. |
+| H. Machine-size-aware page cache | **partial** — manual knob | the knob is tested | the arm is benchmarked, the policy is not | `TINYTITAN_BOUNDED_IO=0` exists; no automatic rule that enables caching above a machine-size threshold. |
+| I. Speculation cost model | **no** | — | — | MTP remains off; no controller gated on predicted distinct-expert growth. |
+
+The non-transfer list below is a set of measured or hardware-specific
+rejections, not unfinished work: CPU expert lane, residency/complete-pool mode,
+2-3-bit experts, multi-GPU/tensor-parallel, PCIe/pinned-memory/CUDA-graph
+mechanisms, and disk-skipping low-weight experts.
+
+The remaining work in the scan's own priority order is therefore: calibration
+(E), then the fused layer path (A, a separate engine project), then target-scale
+host-KV benchmarking (C), then interior checkpoints (G), the page-cache policy
+(H) and the speculation controller (I).
+
 ## Why this repository is unusually relevant
 
 Maya's engine is a rewrite of [Strata](https://github.com/Niko1221/Strata), and
