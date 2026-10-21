@@ -165,6 +165,12 @@ diff the activation at each boundary before T6 is re-wired.
 Acceptance: the first differing tensor is named, with a minimal reproducer.
 Depends T5, T6. Size M.
 
+**T33 - Instrument q/k/attn stages.** Extend T32's layer probe to dump the
+per-row q scratch, the K/V rows written to each slot, and the post-gate
+attention before o_proj; compare each against the per-row path.
+Acceptance: the first wrong tensor is named; no whole-model text run.
+Depends T32. Size M.
+
 **T31 - Final scorecard, gates, commit.** Record each outcome; run
 `swift test --no-parallel`, `tools/lint.sh all`, release build + warning gate;
 commit. Acceptance: all green; tree clean; every task done, rejected with

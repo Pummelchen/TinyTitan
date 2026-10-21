@@ -37,9 +37,12 @@ evidence exist.
 | T29 speculation gate | pending | — |
 | T30 MTP controller benchmark | pending | — |
 | T31 closeout | pending | — |
+| T32 real-shape batch-attention diff | in progress | Layer-3 real probe: batch attention output differs from per-row (`attn_maxdiff` 0.29-0.95), first index 1269 in every failing row. Probe reverted; q/k stage instrumentation is next. |
+| T33 instrument q/k/attn stages | pending | Split the T32 probe into q-scratch, k/v cache and post-gate attention comparisons to name the first wrong tensor. |
 
 ## New tasks found during execution
 
 Add tasks here with the next free T number; keep the main plan in sync.
 
+- T33: split the T32 probe into q-scratch, k/v cache and post-gate attention tensors (added after the layer-3 probe showed the attention output diverges, first index 1269).
 - T32: isolate the real-dimension batch-attention divergence (added 2026-10-21 after the fused Ornith run produced corrupt text). A first pass found and fixed the fused loop using hardcoded position 0 instead of the row positions; the re-run was still corrupt (`# The, 22 ...`), so the divergence is inside the real-shape batch attention or pair FFN. The wiring is reverted; the next step is a layer-level activation diff, not another whole-model run.
