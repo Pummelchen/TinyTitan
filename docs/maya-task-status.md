@@ -11,11 +11,11 @@ evidence exist.
 | T3 fused decode design | done | `docs/fused-batched-decode-design.md` (pipeline, buffer ownership, prefetch overlap, B=1 identity, gates). |
 | T4 B-row scratch | done | `BatchedDecodeScratch` (T4) with width 2/4 tests; width 1 unchanged, scratch is opt-in. |
 | T5 batched QKV/o_proj | done | `encodeBatchGatedAttention` + `BatchAttentionTests`: two rows, per-row KV slots, batch o_proj; output matches the per-row gated path within 1e-3. `batchMatchesPerRowAtDecodePositions` adds width 4 at four different positions against per-slot multi-token KV. The multi-row GEMVs now accumulate scale/bias in the single-row order, so per-row outputs are bit-identical, not just within 1e-3. |
-| T6 batched FFN/prefetch | in progress | The fused width-2 loop uses a decode-kernel union FFN (one readback, one union fetch, per-row phase 1/2) and carries its routed command. Bit-identical text; aggregate throughput is at parity (28.8-29.3 s vs ~30.4 s serial at 64, 47.5/59.1 s vs ~52.4 s at 128). Next-layer prefetch (+11-19%) and overlapping the shared expert with the fetch (+0-20%) were measured, byte-identical, and reverted. A durable win is not shown at width 2. |
-| T7 server wiring | pending | Fused path reverted before server landing. |
-| T8 fused tests | in progress | Toy stage tests pass, including width 4 at different positions. The fused loop itself still needs the T34 layer-level gate. |
-| T9 real parity | in progress | B=2: bit-identical logits for 3 decode steps from position 0, and all 8 four-prompt cases (64/128 tokens) byte-identical to serial through `TINYTITAN_FUSED_DECODE=1`. B=4 is not implemented yet; the Qwen3.8 install does not fit this host. |
-| T10 fused benchmark | pending | — |
+| T6 batched FFN/prefetch | done | The fused loop's FFN is a decode-kernel union stage (one readback, one union plan/fetch, per-row phase 1/2, carried routed command), bit-identical at width 2 and width 4. Prefetch and shared-expert-overlap variants were measured and reverted. |
+| T7 server wiring | rejected | Not wired: T10 found no durable win on this host. The path stays opt-in behind `TINYTITAN_FUSED_DECODE=1`. |
+| T8 fused tests | done | Toy width-2 and width-4 logit parity, both batch-stage suites, and the 8/8 real-model text battery; the fused loop is asserted to have run. |
+| T9 real parity | done | B=2: bit-identical logits and all 8 four-prompt cases (64/128) byte-identical. B=4: bit-identical logits for 4 rows and 4/4 texts identical at 64. Qwen3.8 4-bit does not fit this host. |
+| T10 fused benchmark | rejected | No durable win: width 2 is parity at 64/128; width 4 is +9.4% at 64 (59.4 s vs 65.0 s for four prompts) but a loss at 128 (129-131 s for three requests vs 109 s serial for four) under 4.97 GB of swap. Not wired (T7 rejected); the opt-in path stays for a 64 GB retest. |
 | T11 128K host-KV parity | pending | — |
 | T12 1M start/memory | pending | — |
 | T13 512K/128K/1M timings | pending | — |
@@ -39,7 +39,7 @@ evidence exist.
 | T31 closeout | pending | — |
 | T32 real-shape batch-attention diff | done | The reported diff does not reproduce. An independent layer-3 probe on Ornith 4-bit (width 2/4, positions 100/60 and 100/60/130/20) shows batch attention == per-row: normed 0.0, packed q 2.4e-4, v 0.0, post-gate attn 2.4e-4, o 2.4e-4, K/V slot bytes 0.0. The in-loop probe ran after the fused FFN's hidden handoff, and its `first=1269` is constant across unrelated positions; it was not a stage comparison. See `docs/batched-decode-phase2c-2026-10-21.md` T32/T33. |
 | T33 instrument q/k/attn stages | done | No wrong tensor in the q/k/attention/o chain; the stage is exact to fp16 rounding on the real install and is pinned in-tree by `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`. The corrupt Ornith text is in the reverted loop's wiring around the stage (T34). |
-| T34 re-land fused decode loop | in progress | `produceBatchFused` (width 2, opt-in) is bit-identical against the per-row decode on Ornith: logits 0.0, all 40 layer-entry traces identical, 64/128 four-prompt battery byte-identical (8/8). The FFN is a decode-kernel union stage whose routed command is carried across the next layer's attention. Aggregate throughput is at parity; the two scheduling levers tested (prefetch ring, shared-expert overlap) were losses and are reverted. Root cause of the old drift: the multi-row GEMVs accumulated the affine scale/bias in the opposite order from the single-row kernels; fixed. A durable win needs width 4 or a cheaper expert path. |
+| T34 re-land fused decode loop | rejected (wall clock) | Correctness is done: width 2 and width 4 are bit-identical to the per-row decode, with 8/8 and 4/4 text parity. The wall clock is not: width 2 parity, width 4 +9.4% at 64 and a loss at 128 under memory pressure. Per T10 the path is not wired; it stays opt-in for a 64 GB retest. |
 
 ## New tasks found during execution
 

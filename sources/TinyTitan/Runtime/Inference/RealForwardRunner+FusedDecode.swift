@@ -5,8 +5,7 @@ import Metal
 /// and the test override. A class so one stored property on the runner can
 /// hold all three without growing that file past its line budget.
 final class FusedDecodeState {
-    var pairScratch: PrefillChunkScratchBuffers?
-    var pairRows = 0
+    var pairScratch: [PrefillChunkScratchBuffers] = []
     var launches = 0
     var override: Bool?
 }
@@ -46,7 +45,8 @@ extension RealForwardRunner {
         _ rows: [(token: Int32, position: Int, slot: Int)]
     ) -> Bool {
         guard fusedDecodeState.override ?? Self.fusedDecodeOptIn else { return false }
-        guard rows.count == 2, slots >= 2 else { return false }
+        guard rows.count == 2 || rows.count == 4, slots >= rows.count
+        else { return false }
         guard cfg.family == .qwen36 else { return false }
         guard cfg.ple.layerIndices.isEmpty else { return false }
         guard !cfg.hyperConnections.enabled else { return false }
@@ -60,18 +60,34 @@ extension RealForwardRunner {
         return true
     }
 
-    func ensureBatchPairScratch(rows: Int) throws -> PrefillChunkScratchBuffers {
-        if let existing = fusedDecodeState.pairScratch,
-            fusedDecodeState.pairRows == rows
-        {
-            return existing
+    /// One pair scratch per two-row FFN group: a width-4 batch has two groups
+    /// whose in-flight commands must not share the acts or the shared output.
+    func ensureBatchPairScratch(index: Int) throws
+        -> PrefillChunkScratchBuffers
+    {
+        while fusedDecodeState.pairScratch.count <= index {
+            let layout = PrefillChunkScratchLayout(config: cfg, chunkTokens: 2)
+            let made = try PrefillChunkScratchBuffers.allocate(
+                device: ctx.device, layout: layout)
+            fusedDecodeState.pairScratch.append(made)
         }
-        let layout = PrefillChunkScratchLayout(config: cfg, chunkTokens: rows)
-        let made = try PrefillChunkScratchBuffers.allocate(
-            device: ctx.device, layout: layout)
-        fusedDecodeState.pairScratch = made
-        fusedDecodeState.pairRows = rows
-        return made
+        return fusedDecodeState.pairScratch[index]
+    }
+
+    private func blitRows(
+        _ cb: MTLCommandBuffer,
+        from source: MTLBuffer, sourceOffset: Int,
+        to destination: MTLBuffer, destinationOffset: Int,
+        bytes: Int
+    ) throws {
+        guard let blit = cb.makeBlitCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        blit.copy(
+            from: source, sourceOffset: sourceOffset,
+            to: destination, destinationOffset: destinationOffset,
+            size: bytes)
+        blit.endEncoding()
     }
 
     private func encodeEmbeddingRow(
@@ -123,7 +139,8 @@ extension RealForwardRunner {
         rows: [(position: Int, slot: Int)],
         scratch: BatchedDecodeScratch,
         pair: PrefillChunkScratchBuffers,
-        router: TensorView
+        router: TensorView,
+        rowBase: Int
     ) async throws -> PendingRoutedCommand {
         let t = rows.count
         let D = UInt32(cfg.hiddenSize)
@@ -134,7 +151,8 @@ extension RealForwardRunner {
 
         // Router and shared expert for every row, on the attention's buffer.
         for row in 0..<t {
-            let offset = row * cfg.hiddenSize * halfBytes
+            let offset = (rowBase + row) * cfg.hiddenSize * halfBytes
+            let localOffset = row * cfg.hiddenSize * halfBytes
             try moe.encodeRouter(
                 commandBuffer: cb,
                 weights: router.buffer, weightsOffset: Int(router.offset),
@@ -152,7 +170,7 @@ extension RealForwardRunner {
             try encodeSharedExpert(
                 layer: L,
                 x: scratch.routedX, xOffset: offset,
-                y: pair.h1, yOffset: offset,
+                y: pair.h1, yOffset: localOffset,
                 commandBuffer: cb)
         }
         cb.commit()
@@ -194,7 +212,7 @@ extension RealForwardRunner {
         }
         let routedOffsets = try model.routedExpertOffsets(layer: L)
 
-        while verifyPairActs.count < t {
+        while verifyPairActs.count < rowBase + t {
             guard
                 let made = ctx.device.makeBuffer(
                     length: cfg.topKExperts * cfg.moeIntermediateSize * halfBytes,
@@ -203,7 +221,7 @@ extension RealForwardRunner {
             made.label = "batch.union.acts.\(verifyPairActs.count)"
             verifyPairActs.append(made)
         }
-        while verifyPairY.count < t {
+        while verifyPairY.count < rowBase + t {
             guard
                 let made = ctx.device.makeBuffer(
                     length: cfg.hiddenSize * halfBytes,
@@ -212,7 +230,7 @@ extension RealForwardRunner {
             made.label = "batch.union.y.\(verifyPairY.count)"
             verifyPairY.append(made)
         }
-        while verifyPairArgBuffers.count < t {
+        while verifyPairArgBuffers.count < rowBase + t {
             guard let made = moe.makeEmptyRoutedArgumentBuffer(device: ctx.device)
             else { throw ModelError.residentBufferWrapFailed }
             made.label = "batch.union.args.\(verifyPairArgBuffers.count)"
@@ -231,34 +249,35 @@ extension RealForwardRunner {
                 rowBufs.append(view.buffer)
                 rowOffsets.append(Int(view.offset))
             }
-            let argBuf = verifyPairArgBuffers[row]
+            let argBuf = verifyPairArgBuffers[rowBase + row]
             moe.writeRoutedArgumentBuffer(
                 argBuf, routedBlobs: rowBufs, topK: topK,
                 routedBufferOffsets: rowOffsets)
-            let offset = row * cfg.hiddenSize * halfBytes
+            let pairOffset = row * cfg.hiddenSize * halfBytes
+            let globalOffset = (rowBase + row) * cfg.hiddenSize * halfBytes
             try moe.encodeRoutedPersistentPhase1U16Load(
                 commandBuffer: routedCB,
                 routedArgBuffer: argBuf,
                 routedBlobs: rowBufs,
                 routedOffsets: routedOffsets,
-                x: scratch.routedX, xOffset: offset,
-                acts: verifyPairActs[row],
+                x: scratch.routedX, xOffset: globalOffset,
+                acts: verifyPairActs[rowBase + row],
                 d: D, f: FmoE, topK: topK)
             try moe.encodeRoutedPersistentPhase2Reduce(
                 commandBuffer: routedCB,
                 routedArgBuffer: argBuf,
                 routedBlobs: rowBufs,
                 routedOffsets: routedOffsets,
-                acts: verifyPairActs[row],
+                acts: verifyPairActs[rowBase + row],
                 routingWeights: pair.routeWeights,
                 routingWeightsOffset: row * cfg.topKExperts * halfBytes,
-                residual: pair.h1, residualOffset: offset,
-                y: verifyPairY[row],
+                residual: pair.h1, residualOffset: pairOffset,
+                y: verifyPairY[rowBase + row],
                 d: D, f: FmoE, topK: topK)
             try requireElementwise().encodeResidualAdd(
                 commandBuffer: routedCB,
-                hidden: scratch.hidden, hiddenOffset: offset,
-                delta: verifyPairY[row], count: cfg.hiddenSize)
+                hidden: scratch.hidden, hiddenOffset: globalOffset,
+                delta: verifyPairY[rowBase + row], count: cfg.hiddenSize)
         }
         routedCB.commit()
         leaseTransferred = true
@@ -316,7 +335,6 @@ extension RealForwardRunner {
         }
 
         let scratch = try ensureBatchedDecodeScratch(rows: count)
-        let pair = try ensureBatchPairScratch(rows: count)
         let views = try makeLayerPrefillViews()
         let fNorm = try model.finalNorm()
         let (normed, batchLogits) = try ensureBatchScratch(rows: count)
@@ -381,19 +399,54 @@ extension RealForwardRunner {
                 throw ModelError.internalInconsistency(
                     detail: "fused loop reached a routed layer without a router")
             }
-            // The union FFN commits `layerCB` and waits for its router
-            // readback; that wait also drains the previous layer's routed
-            // command, so the GPU was busy with it while the CPU encoded this
-            // layer.
-            let outcome = try await encodeDecodeUnionFFN(
-                cb: &layerCB, layer: L,
-                rows: rows.map { (position: $0.position, slot: $0.slot) },
-                scratch: scratch, pair: pair, router: routerView)
-            if let previous = pending {
-                try finishPendingRoutedCommand(previous, waitIfNeeded: false)
-                pending = nil
+            // Width 4 runs two two-row union FFNs. Each call commits its own
+            // buffer and waits for the router readback; that wait also drains
+            // the previously committed routed command, so the GPU was busy
+            // with it while the CPU encoded this group.
+            for pairIndex in 0..<(count / 2) {
+                let pair = try ensureBatchPairScratch(index: pairIndex)
+                let rowBase = pairIndex * 2
+                let pairCB: MTLCommandBuffer
+                if pairIndex == 0 {
+                    pairCB = layerCB
+                } else {
+                    guard let next = ctx.queue.makeCommandBuffer() else {
+                        throw ModelError.residentBufferWrapFailed
+                    }
+                    for local in 0..<2 {
+                        let globalOffset = (rowBase + local) * d * half
+                        let localOffset = local * d * half
+                        try blitRows(
+                            next,
+                            from: scratch.hidden, sourceOffset: globalOffset,
+                            to: pair.hidden, destinationOffset: localOffset,
+                            bytes: d * half)
+                        try blitRows(
+                            next,
+                            from: scratch.routedX, sourceOffset: globalOffset,
+                            to: pair.routedX, destinationOffset: localOffset,
+                            bytes: d * half)
+                    }
+                    pairCB = next
+                }
+                var cb = pairCB
+                let outcome = try await encodeDecodeUnionFFN(
+                    cb: &cb, layer: L,
+                    rows: (0..<2).map {
+                        (
+                            position: rows[rowBase + $0].position,
+                            slot: rows[rowBase + $0].slot
+                        )
+                    },
+                    scratch: scratch, pair: pair, router: routerView,
+                    rowBase: rowBase)
+                if let previous = pending {
+                    try finishPendingRoutedCommand(
+                        previous, waitIfNeeded: false)
+                    pending = nil
+                }
+                pending = outcome
             }
-            pending = outcome
         }
 
         if let current = pending {

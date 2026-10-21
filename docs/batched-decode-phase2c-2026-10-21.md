@@ -295,10 +295,36 @@ Two scheduling levers were tried and reverted, each with byte-identical text:
 The remaining per-layer cost is the router readback and the two rows' phase
 1/2. At width 2 the union serves two rows for one projection read but doubles
 the expert/FFN work, which is why aggregate throughput lands at parity rather
-than at a win. A durable win needs four rows per projection read (the width-4
-head-only data already lost at 256, so this is doubtful) or a cheaper expert
-path. The 128-token numbers vary by ~10% run to run, so only repeated paired
-runs can settle a few-percent claim.
+than at a win.
+
+### Width 4
+
+Width 4 runs two two-row union FFNs per layer, each with its own pair scratch,
+acts, y and argument buffers; `rowBase` shifts the batch rows so the second
+pair's router, shared expert and phase kernels read rows 2-3 rather than 0-1.
+That offset was the one width-4 bug: the first build read the wrong `routedX`
+rows and rows 2-3 diverged from step 0. Fixed, all four rows are bit-identical
+to the per-row decode for the first two steps from position 0.
+
+Four prompts at 64 tokens, one four-row batch against four queued serial
+prompts: **4/4 texts identical, 59.4 s against 65.0 s (+9.4 %)**. At 128 tokens
+the same comparison is negative: three of the four fused requests completed at
+129-131 s against 109 s for all four serial, the fourth was thrashing swap
+(4.97 GB of 6 GB used) when the run was stopped. The four-row union holds
+roughly twice the expert working set of the two-row one and four KV slots on a
+24 GB host, so the long-context arm loses on memory rather than arithmetic.
+
+### T10 verdict: no durable win on this host
+
+T10's gate is a durable win at 64/128/256, not a short-pair artifact. The
+measured shape is +9 % at 64 (width 4), parity at 64/128 (width 2), and a
+loss at 128 under memory pressure (width 4). That is not a durable win:
+**T10 is rejected for shipping on this 24 GB host**, and T7 (server wiring)
+is not done. The opt-in implementation and its tests stay in the tree as a
+deviation from the phase2c revert rule, because the arithmetic is now proven
+bit-identical and a 64 GB host is the one configuration where the width-4
+working set could turn the 64-token win into a durable one; it is one file
+plus tests behind `TINYTITAN_FUSED_DECODE=1`, and width 1 never touches it.
 
 ## What the measurements say the next attempt must do
 
