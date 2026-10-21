@@ -197,6 +197,10 @@ def update_metadata(install: pathlib.Path, table: pathlib.Path) -> None:
         constants_entry["size"] = constants_path.stat().st_size
     manifest_path.write_text(json.dumps(manifest, indent=1) + "\n")
     print(f"updated {constants_path.name} and {manifest_path.name}")
+    print(
+        "rebind the install receipt before serving:\n"
+        "  .build/release/TinyTitanRepack --verify-install --input-ssdai " + str(install)
+    )
 
 
 def main(argv: list[str]) -> int:
@@ -207,6 +211,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--chunk-rows", type=int, default=131072)
     parser.add_argument("--update-metadata", action="store_true")
     parser.add_argument("--verify", action="store_true")
+    parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help="use an already-converted --out table, verify it, and update the sidecar",
+    )
     parser.add_argument(
         "--delete-source",
         action="store_true",
@@ -224,14 +233,20 @@ def main(argv: list[str]) -> int:
     destination = args.out or (args.install / "ngram_table.q4")
     if destination == source:
         raise SystemExit("refusing to overwrite the source table")
-    if destination.exists():
+    if destination.exists() and not args.metadata_only:
         raise SystemExit(f"{destination} already exists; remove it first")
 
-    convert(source, destination, rows, row_dim, args.chunk_rows)
     groups = row_dim // GROUP
     row_bytes = row_dim // 2 + groups * 4
-    size = destination.stat().st_size
     expected = HEADER_BYTES + rows * row_bytes
+    if args.metadata_only:
+        if not destination.exists():
+            raise SystemExit(f"{destination} does not exist; convert it first")
+        if rows != total:
+            raise SystemExit("--metadata-only needs the full table")
+    else:
+        convert(source, destination, rows, row_dim, args.chunk_rows)
+    size = destination.stat().st_size
     if size != expected:
         raise SystemExit(f"{destination} is {size} bytes; expected {expected}")
     print(

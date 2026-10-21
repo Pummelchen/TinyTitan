@@ -86,10 +86,37 @@ python3 tools/quantize_ngram_table.py \
 `--update-metadata` rewrites `ple_constants.json` (`table_file`,
 `table_dtype`), moves the manifest's file entry to the q4 file with its
 sha256/size, and updates the `ple_constants.json` entry. The install receipt
-(`verified-install.json`) is bound to the old manifest; the default
-`.fullSha256` policy does not read it, but a run under
-`.sizeCheckTrustedReceipt` would need a re-install. `--delete-source` is
-refused for a partial (`--rows`) table.
+is bound to the old manifest, and the server runs the trusted-receipt policy,
+so the conversion is not complete until the receipt is rebound:
+
+```bash
+.build/release/TinyTitanRepack --verify-install \
+  --input-ssdai models/qwen3.8-flash-next_125B_A6B_4Bit
+```
+
+That hashes every manifest file (103.6 GB on the converted install) and writes
+a new `verified-install.json`; without it the server refuses with
+`trusted install receipt invalid: manifest SHA mismatch`. `--delete-source` is
+refused for a partial (`--rows`) table, and `--metadata-only` uses an already
+converted table instead of converting again.
+
+## Done on this machine (2026-10-21)
+
+The installed 125B was converted and the fp16 source removed:
+
+- table **102,400,491,520 → 32,000,144,640 bytes** (31.2 %), install ~95 GB,
+  disk free **19 GiB → 115 GiB**;
+- quality battery, 24 greedy tokens: prompt A and C byte-identical between the
+  fp16 and 4-bit tables, prompt B differs in wording but is a correct summary
+  of the same text (96-token re-check: both coherent, same observations);
+- `TinyTitanRepack --verify-install` verified 57 files / 103.6 GB and rebound
+  the receipt; the server then loaded and answered ("The capital of France is
+  **Paris**.", 4.71 tok/s on a 17-token prompt);
+- **golden caveat:** `benchmark/golden/qwen3.8-flash-next-125b-a6b-4bit.txt`
+  was captured on the fp16 table. A `--check qwen38-4` on this converted
+  install will differ (cache/table numerics). The stored golden remains the
+  fp16 reference for every other install; a release cut from this machine
+  would need a local re-capture and a recorded reason.
 
 To go back: restore `table_file`/`table_dtype` to `ngram_table.bin`/`float16`
 (and the manifest entry) before the source is deleted; after deletion, convert
