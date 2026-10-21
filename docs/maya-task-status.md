@@ -8,7 +8,7 @@ evidence exist.
 | --- | --- | --- |
 | T1 baseline harness | in progress | `benchmark/maya_batch_ab.py`; 64-token run saved in `.build/maya-batch-ab-ornith4-t64.json` (widths 1/2/4, 5 measured + 3 warmup, 0 text mismatches). 128/256 pending. |
 | T2 width-2/4 aggregate mode | in progress | same harness; 64-token aggregate: width 1 9.02 tok/s, width 2 9.45, width 4 10.40 (head-only batch, not fused). 128/256 pending. |
-| T3 fused decode design | pending | — |
+| T3 fused decode design | done | `docs/fused-batched-decode-design.md` (pipeline, buffer ownership, prefetch overlap, B=1 identity, gates). |
 | T4 B-row scratch | pending | — |
 | T5 batched QKV/o_proj | pending | — |
 | T6 batched FFN/prefetch | pending | — |
