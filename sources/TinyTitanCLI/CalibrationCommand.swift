@@ -89,6 +89,7 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
     case invalidValue(String, String)
     case missingModel
     case conflictingInput
+    case profileTooLarge(Int)
 
     public var description: String {
         switch self {
@@ -102,11 +103,26 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
             return "calibrate needs --model <dir> or --check <path>"
         case .conflictingInput:
             return "calibrate accepts either --model or --check, not both"
+        case .profileTooLarge(let cap):
+            return "calibration profile exceeds \(cap) bytes"
         }
     }
 }
 
 public enum CalibrationCommand {
+    /// Profiles are small metadata documents; bound the read so a stray path
+    /// cannot pull a model payload into memory.
+    private static func readProfile(at path: String) throws -> Data {
+        let cap = 1 << 20
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: cap + 1) ?? Data()
+        guard data.count <= cap else {
+            throw CalibrationCommandError.profileTooLarge(cap)
+        }
+        return data
+    }
+
     private static func writeStdout(_ data: Data) {
         var line = data
         line.append(0x0A)
@@ -123,7 +139,7 @@ public enum CalibrationCommand {
             throw CalibrationCommandError.conflictingInput
         }
         if let path = options.check {
-            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            let data = try readProfile(at: path)
             let profile = try CalibrationProfile.decode(from: data)
             writeStdout(try profile.encodedJSON())
             return 0
