@@ -74,7 +74,18 @@ def running_servers() -> list[str]:
         )
     except OSError:
         return []
-    return [line for line in found.stdout.splitlines() if line.strip()]
+    # `pgrep -f` also matches a shell command that merely mentions the
+    # binary (this harness's own `pgrep`, or a wrapper). Only a line whose
+    # executable is the server counts.
+    return [
+        line
+        for line in found.stdout.splitlines()
+        if line.strip()
+        and "TinyTitanServer" in line
+        and "bash -c" not in line
+        and "pgrep" not in line
+        and "python" not in line
+    ]
 
 
 def require_no_server(port: int) -> None:

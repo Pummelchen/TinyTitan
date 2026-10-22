@@ -196,7 +196,8 @@ extension Model {
             seedUseCounts: expertUsageProfile?.seedCounts(layer: L),
             eventCoordinator: expertIOTimelines?[L],
             metalStagingPool: metalStagingPool,
-            metalIOService: metalIOService)
+            metalIOService: metalIOService,
+            pageCachePolicy: pageCachePolicy)
         // A newly opened layer is not wired yet; the next pin walks again.
         // When this run holds the cache wired (`profile.keepExpertCacheWired`,
         // set through `setKeepExpertCacheWired`) it is wired here, so a cache

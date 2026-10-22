@@ -330,13 +330,14 @@ extension ServerModelSession {
             mtpEnabled: mtpDecoder != nil,
             slots: effectiveSlots)
         let promptStateStore: ServerPromptStateStore?
+        let promptCheckpointStore: PromptCheckpointStore?
         let promptCache: ServerPromptCache
         if effectivePromptCacheMode == .multiPrefix {
-            let store = try ServerPromptStateStore(
-                configuration: ServerPromptCacheStorageConfiguration(
-                    memoryLimitBytes: promptCacheMemoryLimitBytes,
-                    diskDirectory: promptCacheDiskDirectory,
-                    diskLimitBytes: promptCacheDiskLimitBytes))
+            let storage = ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: promptCacheMemoryLimitBytes,
+                diskDirectory: promptCacheDiskDirectory,
+                diskLimitBytes: promptCacheDiskLimitBytes)
+            let store = try ServerPromptStateStore(configuration: storage)
             let persisted = store.loadEntries(domain: promptCacheDomain)
             if persisted.count > promptCacheMaximumEntries {
                 store.remove(
@@ -346,11 +347,24 @@ extension ServerModelSession {
                         .map(\.id))
             }
             promptStateStore = store
+            // Interior checkpoints are on by default; the A/B benchmark can
+            // turn them off without a second binary. They are only useful
+            // when a later request edits the last turn, and their capture
+            // cost is real, so the switch is part of the measured surface.
+            if ProcessInfo.processInfo.environment[
+                "TINYTITAN_PROMPT_CHECKPOINTS"] == "0"
+            {
+                promptCheckpointStore = nil
+            } else {
+                promptCheckpointStore = try PromptCheckpointStore(
+                    configuration: storage)
+            }
             promptCache = ServerPromptCache(
                 maximumEntries: promptCacheMaximumEntries,
                 entries: persisted)
         } else {
             promptStateStore = nil
+            promptCheckpointStore = nil
             promptCache = ServerPromptCache(maximumEntries: 1)
         }
         return ServerModelSession(
@@ -372,6 +386,7 @@ extension ServerModelSession {
             promptCacheDomain: promptCacheDomain,
             promptCache: promptCache,
             promptStateStore: promptStateStore,
+            promptCheckpointStore: promptCheckpointStore,
             concisePrompt: conciseModeEnabled()
                 ? ConcisePrompt.standard : nil)
     }

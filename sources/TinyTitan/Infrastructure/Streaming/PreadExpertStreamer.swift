@@ -101,7 +101,8 @@ public final class PreadExpertStreamer: @unchecked Sendable {
 
     let fd: Int32
 
-    /// Bounded-footprint reader. On by default; `TINYTITAN_BOUNDED_IO=0` opts out.
+    /// Bounded-footprint reader. The default; `.page-cache` (T25's automatic
+    /// rule or `TINYTITAN_BOUNDED_IO=0`) opts out.
     ///
     /// Opens its own F_NOCACHE descriptors so expert reads never enter the unified
     /// buffer cache. That makes the slot budget the machine's true footprint,
@@ -117,6 +118,9 @@ public final class PreadExpertStreamer: @unchecked Sendable {
     /// difference, so "a 35B model in 1 GB" stops being true. A footprint you can
     /// account for is the product; throughput is what is being traded for it.
     let boundedReader: ParallelExpertReader?
+    /// T25's machine-size decision. `.bounded` is the default for a directly
+    /// constructed streamer; `Model` passes the resolved one.
+    let pageCachePolicy: PageCachePolicy
     /// The prefetch ring's own reader. A reader serialises batches (its batch
     /// lock waits for the current one), so a speculative read issued through the
     /// demand reader blocks the next layer's demand read. This one is only used
@@ -195,7 +199,8 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         seedUseCounts: [Int]? = nil,
         eventCoordinator: ExpertIOEventCoordinator? = nil,
         metalStagingPool: MetalExpertStagingPool? = nil,
-        metalIOService: MetalExpertIOService? = nil
+        metalIOService: MetalExpertIOService? = nil,
+        pageCachePolicy: PageCachePolicy = .bounded
     ) throws {
         precondition(slotCount > 0, "slotCount must be positive")
         self.layout = layout
@@ -216,6 +221,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
         self.eventCoordinator = eventCoordinator
         self.metalStagingPool = metalStagingPool
         self.metalIOService = metalIOService
+        self.pageCachePolicy = pageCachePolicy
         self.ioBackend = try ExpertIOBackend.environmentValue()
         if let frames = layout.compressedFrames {
             guard frames.count == layout.expertsPerLayer else {
@@ -364,7 +370,7 @@ public final class PreadExpertStreamer: @unchecked Sendable {
             self.boundedReader = nil
             self.prefetchReader = nil
             self.tailReader = nil
-        } else if ProcessInfo.processInfo.environment["TINYTITAN_BOUNDED_IO"] != "0" {
+        } else if pageCachePolicy == .bounded {
             self.metalReader = nil
             do {
                 // A compressed layer's wave is 2-5 ranges of 0.6-1.6 MB, so

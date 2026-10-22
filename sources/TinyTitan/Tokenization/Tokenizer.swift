@@ -15,6 +15,9 @@ import Tokenizers
 /// underlying swift-transformers tokenizer are never mutated afterwards, so
 /// concurrent encode/decode calls only read.
 public struct GFTokenizer: @unchecked Sendable {
+    /// `<|im_start|>`: the token every ChatML message and the generation
+    /// prompt open with. Interior-checkpoint boundaries are located by it.
+    public let imStartID: Int32
     /// Nominal BOS. This is `<|endoftext|>` (the config's unused
     /// `bos_token_id`); it is never prepended — see `encode(_:addBOS:)`.
     public let bosID: Int32
@@ -102,6 +105,7 @@ public struct GFTokenizer: @unchecked Sendable {
             byteLevelDecoderConfiguration,
             tokenizer: tokenizer,
             resolved: resolved)
+        self.imStartID = resolved.imStartID
         self.bosID = resolved.bosID
         self.eosID = resolved.eosID
         self.padID = resolved.padID

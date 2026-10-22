@@ -206,6 +206,13 @@ public struct Model {
     let residentIndex: ResidentIndex
     let packedExpertsLayout: PackedExpertsLayout
     let manifest: Manifest
+    /// Total bytes the install declares. The page-cache rule compares this
+    /// with physical memory; an install whose manifest lists nothing is
+    /// treated as unknown and stays on the bounded reader.
+    let installSizeBytes: UInt64
+    /// T25's machine-size decision, made once at load so every layer streamer
+    /// uses the same answer.
+    let pageCachePolicy: PageCachePolicy
     let directoryURL: URL
     let modelDirectory: SSDAIModelDirectory
     let sharedTargetWeights: SharedTargetWeights?
@@ -281,6 +288,14 @@ public struct Model {
         self.residentIndex = residentIndex
         self.packedExpertsLayout = packedExpertsLayout
         self.manifest = manifest
+        let installBytes = PageCachePolicyResolver.installSize(
+            fileSizes: manifest.files.values.map(\.size))
+        self.installSizeBytes = installBytes
+        self.pageCachePolicy =
+            PageCachePolicyResolver.resolve(
+                physicalMemory: ProcessInfo.processInfo.physicalMemory,
+                installBytes: installBytes
+            ).policy
         self.directoryURL = directoryURL
         self.modelDirectory = modelDirectory
         self.profileWriteQueue = DispatchQueue(label: "TinyTitan.expert-profile")

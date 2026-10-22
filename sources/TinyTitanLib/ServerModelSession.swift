@@ -95,6 +95,9 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
     let promptCacheDomain: ServerPromptCacheDomain
     var promptCache: ServerPromptCache
     let promptStateStore: ServerPromptStateStore?
+    /// Interior checkpoints (system end, last-turn start). Present only in
+    /// multi-prefix mode, where the same storage budget also backs them.
+    let promptCheckpointStore: PromptCheckpointStore?
     var activePromptCacheEntryID: UUID?
     /// Concise-mode system prompt injected into every completion, or nil when
     /// concise mode is off. Selected per quantization (see ConcisePrompt).
@@ -165,6 +168,7 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
         promptCacheDomain: ServerPromptCacheDomain,
         promptCache: ServerPromptCache,
         promptStateStore: ServerPromptStateStore?,
+        promptCheckpointStore: PromptCheckpointStore?,
         concisePrompt: String?
     ) {
         self.context = context
@@ -197,6 +201,7 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
         self.promptCacheDomain = promptCacheDomain
         self.promptCache = promptCache
         self.promptStateStore = promptStateStore
+        self.promptCheckpointStore = promptCheckpointStore
         self.concisePrompt = concisePrompt
     }
 }

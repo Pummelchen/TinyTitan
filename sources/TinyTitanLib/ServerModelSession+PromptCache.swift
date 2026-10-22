@@ -203,61 +203,11 @@ extension ServerModelSession {
                 }
             }
         } else if promptCacheMode == .multiPrefix {
-            switch promptCache.match(
-                domain: promptCacheDomain,
-                request: cacheRequest,
-                renderedPromptIDs: promptIDs,
-                tokenizer: tokenizer)
-            {
-            case .miss:
-                activePromptCacheEntryID = nil
-                effectivePromptIDs = promptIDs
-                completionStart = .reset
-            case .hit(let entryID, let effective, let cached):
-                if entryID == activePromptCacheEntryID,
-                    runner.continuationPosition == cached
-                {
-                    // S15: tier=live is only trusted when the in-memory KV
-                    // still matches the entry (same entry id and the KV
-                    // cursor sits exactly at the request's expected
-                    // position). Anything else falls through to a snapshot
-                    // restore or a full prefill instead of resuming from a
-                    // stale or mismatched KV.
-                    ServerLog.diagnostic(
-                        "TinyTitan prompt_cache hit tier=live "
-                            + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())")
-                } else {
-                    do {
-                        guard let promptStateStore else {
-                            throw ServerPromptStateStoreError.missing(entryID)
-                        }
-                        let tier = try await promptStateStore.restore(
-                            entryID: entryID,
-                            into: runner)
-                        ServerLog.diagnostic(
-                            "TinyTitan prompt_cache hit tier=\(tier) "
-                                + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())"
-                        )
-                    } catch {
-                        // Drop the stale entry and prefill from scratch rather
-                        // than trust it.
-                        FileHandle.standardError.write(
-                            Data(
-                                ("TinyTitan prompt_cache restore_failed "
-                                    + "entry=\(entryID.uuidString.lowercased()) error=\(error)\n")
-                                    .utf8))
-                        promptStateStore?.remove(entryIDs: [entryID])
-                        promptCache.remove(entryIDs: [entryID])
-                        activePromptCacheEntryID = nil
-                        effectivePromptIDs = promptIDs
-                        completionStart = .reset
-                        break
-                    }
-                }
-                activePromptCacheEntryID = entryID
-                effectivePromptIDs = effective
-                completionStart = .resume(cachedPromptTokens: cached)
-            }
+            let resolved = await resolveMultiPrefixCacheStart(
+                cacheRequest: cacheRequest,
+                promptIDs: promptIDs)
+            effectivePromptIDs = resolved.effectivePromptIDs
+            completionStart = resolved.start
         } else {
             promptCache.invalidate()
             activePromptCacheEntryID = nil
@@ -281,5 +231,132 @@ extension ServerModelSession {
                 code: "context_length_exceeded")
         }
         return (effectivePromptIDs, completionStart)
+    }
+
+    /// The multi-prefix branch of `resolveCacheStart`: a live/turn-end hit, an
+    /// interior checkpoint, or a full prefill. Split out so the orchestrator
+    /// stays inside the function-length gate; the branches are unchanged.
+    private func resolveMultiPrefixCacheStart(
+        cacheRequest: ValidatedChatRequest,
+        promptIDs: [Int32]
+    ) async -> (
+        effectivePromptIDs: [Int32], start: RawCompletionStart
+    ) {
+        switch promptCache.match(
+            domain: promptCacheDomain,
+            request: cacheRequest,
+            renderedPromptIDs: promptIDs,
+            tokenizer: tokenizer)
+        {
+        case .miss:
+            activePromptCacheEntryID = nil
+            // The turn-end cache only describes a completed assistant turn.
+            // An edited last turn has no such entry, but the conversation
+            // prefix before it may still be on disk as an interior checkpoint.
+            if let restored = await restoreInteriorCheckpoint(
+                promptIDs: promptIDs,
+                messages: cacheRequest.messages)
+            {
+                return (promptIDs, .resume(cachedPromptTokens: restored))
+            }
+            return (promptIDs, .reset)
+        case .hit(let entryID, let effective, let cached):
+            if entryID == activePromptCacheEntryID,
+                runner.continuationPosition == cached
+            {
+                // S15: tier=live is only trusted when the in-memory KV still
+                // matches the entry (same entry id and the KV cursor sits
+                // exactly at the request's expected position). Anything else
+                // falls through to a snapshot restore or a full prefill
+                // instead of resuming from a stale or mismatched KV.
+                ServerLog.diagnostic(
+                    "TinyTitan prompt_cache hit tier=live "
+                        + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())")
+            } else {
+                do {
+                    guard let promptStateStore else {
+                        throw ServerPromptStateStoreError.missing(entryID)
+                    }
+                    let tier = try await promptStateStore.restore(
+                        entryID: entryID,
+                        into: runner)
+                    ServerLog.diagnostic(
+                        "TinyTitan prompt_cache hit tier=\(tier) "
+                            + "cached_tokens=\(cached) entry=\(entryID.uuidString.lowercased())"
+                    )
+                } catch {
+                    // Drop the stale entry and prefill from scratch rather
+                    // than trust it.
+                    FileHandle.standardError.write(
+                        Data(
+                            ("TinyTitan prompt_cache restore_failed "
+                                + "entry=\(entryID.uuidString.lowercased()) error=\(error)\n")
+                                .utf8))
+                    promptStateStore?.remove(entryIDs: [entryID])
+                    promptCache.remove(entryIDs: [entryID])
+                    activePromptCacheEntryID = nil
+                    return (promptIDs, .reset)
+                }
+            }
+            activePromptCacheEntryID = entryID
+            return (effective, .resume(cachedPromptTokens: cached))
+        }
+    }
+
+    /// Restore the longest interior checkpoint this prompt can use.
+    ///
+    /// Candidates are tried longest first, so an edited last turn reuses the
+    /// whole conversation prefix and never regenerates a prior turn. A
+    /// content-addressed key means a one-token difference in the prefix is a
+    /// miss, not a wrong restore; a corrupt or stale record is deleted and the
+    /// next candidate (or full prefill) is used.
+    func restoreInteriorCheckpoint(
+        promptIDs: [Int32],
+        messages: [GFTokenizer.Message]
+    ) async -> Int? {
+        guard promptCacheMode == .multiPrefix,
+            let store = promptCheckpointStore,
+            runner.supportsInferenceStateRestore
+        else { return nil }
+        let boundaries = PromptCheckpointPlanner.boundaries(
+            promptIDs: promptIDs,
+            messages: messages,
+            imStartID: tokenizer.imStartID,
+            gridTokens: Self.checkpointGridTokens,
+            includeMessageBoundaries: !Self.checkpointGridOnly
+        ).sorted { $0.position > $1.position }
+        for boundary in boundaries {
+            let prefix = Array(promptIDs.prefix(boundary.position))
+            let key = PromptCheckpointKey.make(
+                domain: promptCacheDomain, prefixTokenIDs: prefix)
+            do {
+                let loaded = try await store.load(
+                    key, domain: promptCacheDomain)
+                guard loaded.metadata.position == boundary.position,
+                    loaded.metadata.prefixTokenIDs == prefix
+                else {
+                    throw PromptCheckpointStoreError.invalidMetadata(
+                        "checkpoint position or prefix does not match the request")
+                }
+                try runner.restoreInferenceState(loaded.snapshot)
+                ServerLog.diagnostic(
+                    "TinyTitan prompt_checkpoint hit kind=\(boundary.kind.rawValue) "
+                        + "cached_tokens=\(boundary.position) "
+                        + "state_bytes=\(loaded.snapshot.payload.count)")
+                return boundary.position
+            } catch PromptCheckpointStoreError.missing(_) {
+                continue
+            } catch {
+                // A record that cannot be trusted is removed, and the next
+                // candidate is tried. Falling back to a full prefill is the
+                // only safe outcome; a partially restored runner was reset by
+                // `restoreInferenceState`'s own failure path.
+                await store.remove(key)
+                ServerLog.diagnostic(
+                    "TinyTitan prompt_checkpoint restore_failed "
+                        + "tokens=\(boundary.position) error=\(error)")
+            }
+        }
+        return nil
     }
 }

@@ -241,4 +241,121 @@ import TinyTitan
             try await store.save(meta, snapshot: self.snapshot(for: meta))
         }
     }
+
+    @Test func aDiskOnlyRecordIsFoundWithoutLoadingIt() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let first = try PromptCheckpointStore(configuration: configuration)
+            try await first.save(meta, snapshot: snapshot(for: meta))
+        }
+        let second = try PromptCheckpointStore(configuration: configuration)
+        // `contains` must see the record the first process wrote, or the
+        // capture path rewrites the same multi-gigabyte payload every turn.
+        #expect(await second.contains(meta.key))
+        let absent = PromptCheckpointKey.make(
+            domain: domain, prefixTokenIDs: [7])
+        #expect(!(await second.contains(absent)))
+    }
+
+    @Test func rewritingTheSameDiskRecordChargesItsBytesOnce() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let store = try PromptCheckpointStore(configuration: configuration)
+        let meta = metadata(tokens: [1, 2, 3])
+        try await store.save(meta, snapshot: snapshot(for: meta))
+        let afterFirst = await store.diskBytes
+        try await store.save(meta, snapshot: snapshot(for: meta, byte: 8))
+        let afterSecond = await store.diskBytes
+        #expect(afterFirst == meta.descriptor.payloadBytes)
+        #expect(afterSecond == meta.descriptor.payloadBytes)
+    }
+
+    @Test func metadataListsOneConversationOldestFirst() async throws {
+        let store = try memoryStore()
+        let first = metadata(
+            tokens: [1, 2], conversation: "a",
+            createdAt: Date(timeIntervalSince1970: 1))
+        let second = metadata(
+            tokens: [3, 4], conversation: "a",
+            createdAt: Date(timeIntervalSince1970: 2))
+        let other = metadata(
+            tokens: [5, 6], conversation: "b",
+            createdAt: Date(timeIntervalSince1970: 3))
+        try await store.save(first, snapshot: snapshot(for: first))
+        try await store.save(second, snapshot: snapshot(for: second))
+        try await store.save(other, snapshot: snapshot(for: other))
+        let listed = await store.metadata(for: domain)
+        #expect(listed.map(\.conversationKey) == ["a", "a", "b"])
+        #expect(listed.map(\.position) == [2, 2, 2])
+    }
+
+    @Test func concurrentSavesAndLoadsSeeWholeRecords() async throws {
+        let store = try memoryStore(limit: 1 << 22)
+        let domain = self.domain
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<16 {
+                group.addTask {
+                    let tokens = [Int32(index), 40, 41]
+                    let key = PromptCheckpointKey.make(
+                        domain: domain, prefixTokenIDs: tokens)
+                    let descriptor = InferenceStateSnapshotDescriptor(
+                        position: tokens.count,
+                        kvSegmentLengths: [16],
+                        gdnSegmentLengths: [],
+                        payloadBytes: 16)
+                    let metadata = PromptCheckpointMetadata(
+                        key: key,
+                        domain: domain,
+                        kind: .systemEnd,
+                        conversationKey: "conversation",
+                        prefixTokenIDs: tokens,
+                        descriptor: descriptor)
+                    let snapshot = InferenceStateSnapshot(
+                        descriptor: descriptor,
+                        payload: Data(repeating: UInt8(index), count: 16))
+                    try await store.save(metadata, snapshot: snapshot)
+                    let loaded = try await store.load(key, domain: domain)
+                    #expect(loaded.metadata == metadata)
+                    #expect(
+                        loaded.snapshot.payload
+                            == Data(repeating: UInt8(index), count: 16))
+                }
+            }
+            try await group.waitForAll()
+        }
+        #expect(await store.memoryBytes == 16 * 16)
+    }
+
+    @Test func aLoadedDiskRecordIsListedOnceAndOldestFirst() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 1 << 20, diskDirectory: root,
+            diskLimitBytes: 1 << 20)
+        let first = metadata(
+            tokens: [1, 2], createdAt: Date(timeIntervalSince1970: 1))
+        let second = metadata(
+            tokens: [3, 4], createdAt: Date(timeIntervalSince1970: 2))
+        do {
+            // Force both onto disk by saving through a memory-less store, so
+            // the reading store has to index them from the filesystem.
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(first, snapshot: snapshot(for: first))
+            try await writer.save(second, snapshot: snapshot(for: second))
+        }
+        let reader = try PromptCheckpointStore(configuration: configuration)
+        _ = try await reader.load(second.key, domain: domain)
+        let listed = await reader.metadata(for: domain)
+        #expect(listed.count == 2)
+        #expect(listed.map(\.key) == [first.key, second.key])
+    }
 }

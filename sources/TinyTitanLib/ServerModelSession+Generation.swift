@@ -250,6 +250,11 @@ extension ServerModelSession {
         if activePromptIDs.isEmpty {
             publishPromptProcessed(promptIDs.count)
         }
+        let interiorCapture = interiorCheckpointCapture(
+            promptIDs: activePromptIDs,
+            messages: cacheRequest.messages,
+            imStartID: renderTokenizer.imStartID,
+            enabled: !isRaw && activeProducer is RealForwardRunner)
         // `renderTokenizer` is the one this request's reasoning resolves to, and
         // it is already what rendered the prompt and what the assistant decoder
         // was built with. `tokenizer` is the session's -- the level the model was
@@ -268,6 +273,8 @@ extension ServerModelSession {
             prefillConfig: prefillConfig,
             start: activeStart,
             slot: slot,
+            checkpointPositions: interiorCapture.positions,
+            onPrefillCheckpoint: interiorCapture.onCheckpoint,
             // A watchdog stop is polled here, between tokens, alongside the
             // stop-string matcher's own flag.
             shouldStop: { @Sendable in state.shouldStop || watchdogs.wantsStop },
@@ -415,4 +422,5 @@ extension ServerModelSession {
             decodeSeconds: result.decodeSeconds,
             engineStopReason: result.reason)
     }
+
 }

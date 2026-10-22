@@ -58,6 +58,16 @@ extension RealForwardRunner {
         kv?.position ?? 0
     }
 
+    /// Whether `restoreInferenceState` can accept a snapshot from this runner.
+    ///
+    /// A QSA indexer or PLE block has per-conversation buffers the snapshot
+    /// does not carry, so a restore would attend to the wrong keys. The
+    /// refusal is correct; asking first keeps a caller from reading a
+    /// multi-gigabyte payload only to have it rejected.
+    public var supportsInferenceStateRestore: Bool {
+        qsaIndexer == nil && pleBlock == nil
+    }
+
     public func prepareForContinuation(expectedPosition: Int) throws {
         guard let kv else {
             throw PrefillError.prefillCursorMismatch(

@@ -177,7 +177,14 @@ actor PromptCheckpointStore {
     }
 
     func contains(_ key: PromptCheckpointKey) -> Bool {
-        state.memory[key] != nil || state.disk[key] != nil
+        indexDiskIfNeeded()
+        if state.memory[key] != nil || state.disk[key] != nil { return true }
+        // A checkpoint written by an earlier process is on disk but not in
+        // either in-memory index until someone loads it. The capture path asks
+        // first so a repeated request does not rewrite a multi-gigabyte
+        // payload that is already there.
+        guard configuration.diskDirectory != nil else { return false }
+        return (try? diskRecordFromFileSystem(for: key)) != nil
     }
 
     func remove(_ key: PromptCheckpointKey) {
@@ -198,11 +205,20 @@ actor PromptCheckpointStore {
     }
 
     /// Every checkpoint recorded for a domain, oldest first.
+    ///
+    /// A record loaded from disk also lands in memory (when it fits), so the
+    /// two indexes can name the same key; the key is the identity and the
+    /// memory copy is the newer one.
     func metadata(for domain: ServerPromptCacheDomain) -> [PromptCheckpointMetadata] {
-        var records: [PromptCheckpointMetadata] = []
-        records.append(contentsOf: state.memory.values.map(\.metadata))
-        records.append(contentsOf: state.disk.values.map(\.metadata))
-        return records.filter { $0.domain == domain }
+        indexDiskIfNeeded()
+        var byKey: [PromptCheckpointKey: PromptCheckpointMetadata] = [:]
+        for record in state.disk.values {
+            byKey[record.metadata.key] = record.metadata
+        }
+        for record in state.memory.values {
+            byKey[record.metadata.key] = record.metadata
+        }
+        return byKey.values.filter { $0.domain == domain }
             .sorted { $0.createdAt < $1.createdAt }
     }
 
@@ -325,10 +341,15 @@ actor PromptCheckpointStore {
         try encoder.encode(diskMetadata).write(
             to: directory.appendingPathComponent(Self.metadataName),
             options: .atomic)
+        // Replacing a record charges the payload once, not twice: the old
+        // entry's bytes are still in `diskBytes` until they are subtracted.
+        if let replaced = state.disk[metadata.key] {
+            state.diskBytes -= replaced.metadata.descriptor.payloadBytes
+            state.diskLRU.removeAll { $0 == metadata.key }
+        }
         state.disk[metadata.key] = DiskRecord(
             metadata: metadata, directory: directory, payload: payloadURL,
             modificationDate: Date())
-        state.diskLRU.removeAll { $0 == metadata.key }
         state.diskLRU.append(metadata.key)
         state.diskBytes += snapshot.payload.count
         while state.diskBytes > configuration.diskLimitBytes,

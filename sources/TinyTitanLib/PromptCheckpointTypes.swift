@@ -10,6 +10,10 @@ enum PromptCheckpointKind: String, Codable, Sendable, Equatable, CaseIterable {
     case lastTurnStart = "last-turn-start"
     /// End of a completed assistant turn (the existing prompt-cache point).
     case turnEnd = "turn-end"
+    /// A fixed token-grid point. Off by default; the T24 benchmark enables it
+    /// through `TINYTITAN_CHECKPOINT_GRID` to price coarse placement against
+    /// the message boundaries.
+    case grid = "grid"
 }
 
 /// Content address of a checkpoint: the hash of the domain plus the exact

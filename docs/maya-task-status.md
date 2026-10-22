@@ -19,31 +19,33 @@ evidence exist.
 | T11 128K host-KV parity | blocked (model) | Needs a QSA install to exercise window crossings; the Qwen3.8 4-bit install does not fit this 24 GB host and Ornith has no indexer, where a streamed window at 128K equals the whole context. |
 | T12 1M start/memory | blocked (model) | Same gate as T11. The KVCacheManager-level 1M arena/window test exists (`HostKVStreamingTests`). |
 | T13 512K/128K/1M timings | blocked (model) | Same gate as T11. |
-| T14 host-KV guidance | pending | Depends T13; cannot be written against measurements this host can produce. |
+| T14 host-KV guidance | blocked (dependency) | Depends T13; cannot be written against measurements this host can produce. |
 | T15 calibrate interface | done | `CalibrationProfile` (v1 schema, validation, machine identity), `tinytitan calibrate --model/--check/--out`, help listed in `TinyTitanCLI --help`; 10 schema tests + 5 CLI tests. Drafts are `measured: false`, knobs empty; T16 fills them. |
 | T16 calibration arms | done | Keep rule, measurement driver and `calibrate --plan` landed. Real Ornith run (32 tokens, 2 repeats): baseline 7.91 tok/s, prefill-chunk-128 +0.5% rejected by the 3% floor, cache-slots-96 +4.1% rejected inside the 6.3% noise band; the produced profile is `measured: true` with no knobs. `docs/calibration-product.md` records the protocol and the arm/switch split; profile at `.build/t16-ornith-calibration.json`. |
 | T17 profile precedence | done | `--calibration-profile <path>` on the CLI and server loads with the bounded reader, validates, fills only unset `prefillChunkTokens`/`expertCacheSlots` (explicit flags win) and logs the applied line plus the knobs with no runtime switch. CLI + server precedence tests: fill, explicit-wins, switchless-reported, corrupt-refused. |
 | T18 calibration tests | done | Schema round-trip + every refusal (10), keep floor/noise/slower/non-positive/interleaving/merge/refusals (8), CLI precedence fill/explicit/no-profile/corrupt/foreign-machine/wrong-model/wrong-context/switchless (16), server versions of the same (7). Decision tests inject samples, so no test depends on wall-clock luck. Profiles are checked against machine, memory, context and install model before application. |
-| T19 multi-Mac validation | pending (hardware) | — |
+| T19 multi-Mac validation | blocked (hardware) | One 24 GB M3 here; the task needs three Macs and a per-machine table. No single-machine result is reported as a pass. |
 | T20 checkpoint design | done | `docs/interior-checkpoints-design.md`: coarse points (`systemEnd`, `lastTurnStart`, existing `turnEnd`), payload = `InferenceStateSnapshot` plus prefix tokens and domain/content hashes (no logits for interior), 100K int8 arithmetic (~1.06 GB for system-end + last-turn-start, ~2.15 GB with the turn end, ~3.65 GB for a 16K grid), eviction order and restore gates. Explicitly no per-16K default: message-shaped requests only diverge at turn boundaries. |
 | T21 checkpoint format | done | `PromptCheckpointStore` + metadata/key types: content-addressed by SHA-256(domain + prefix tokens), kind and conversation key, `InferenceStateSnapshot` payload, position/key/domain/payload validation, memory+disk LRU, atomic writes, SHA-verified loads, corrupt records deleted; 10 store tests. `InteriorCheckpointRestoreTests` proves the live round-trip: a snapshot captured at token 3 of a 7-token prompt restores into a fresh runner and continues with the uninterrupted run's exact logits, while a different prefix/domain is a miss. Session capture and the edited-turn path are T22. |
-| T22 edited-turn resume | pending | — |
-| T23 checkpoint tests | pending | — |
-| T24 100K checkpoint benchmark | pending | — |
-| T25 page-cache policy | pending | — |
-| T26 policy tests | pending | — |
-| T27 large-memory benchmark | pending (hardware) | — |
-| T28 distinct-expert estimator | pending | — |
-| T29 speculation gate | pending | — |
-| T30 MTP controller benchmark | pending | — |
-| T31 closeout | pending | — |
+| T22 edited-turn resume | done | `PromptCheckpointPlanner` locates `systemEnd`/`lastTurnStart` on the rendered ids; `runRawCompletion` splits prefill at those positions and captures; a turn-cache miss tries the longest content-addressed checkpoint. `EditedTurnCheckpointTests` (last-turn resume, system-end fallback, no-prefix full prefill). Live 2K smoke: edited last turn prefill 35.7 s -> 0.94 s (38x) with the same text SHA-256; 100K A/B below. |
+| T23 checkpoint tests | done | Planner boundaries/grid/conversation key (6), store round-trip/dedup/disk-only/limits/corruption/domain/concurrency (13), live runner edited-turn round-trip (3), plus T21's `InteriorCheckpointRestoreTests`. No test depends on wall clock. |
+| T24 100K checkpoint benchmark | done (scaled; 100K host-blocked) | `docs/interior-checkpoint-benchmark-2026-10-22.md`: 24,551-token conversation, edited last turn, `none` 1119.3 s vs `message` 3.07 s (**365x**), `16k` grid 465.2 s (2.41x), byte-identical text; 32K grid has no point at this size. The 100K attempt (about 61K tokens at the same character ratio) was still prefilling at the 3600 s timeout, so a literal 100K suite is recorded blocked, not invented. |
+| T25 page-cache policy | done | `PageCachePolicyResolver`: explicit `TINYTITAN_BOUNDED_IO` (0/1/invalid) wins; otherwise page cache only at `RAM >= 2 * installBytes`; unreadable memory/install and 2x overflow fail closed. `Model` install size from manifest files, decision passed to every streamer. On 24 GB the 19/34/96 GB installs all select bounded (no change). `docs/page-cache-policy.md`. |
+| T26 policy tests | done | `PageCachePolicyTests`: 24 GB no-op, 2x boundary, unreadable/overflow fail-closed, both overrides, invalid values, install-size sum/overflow. |
+| T27 large-memory benchmark | blocked (hardware) | No 64/128 GB Mac in this checkout; policy is pinned by tests and the 24 GB arm measurements exist, the large-memory arm does not. |
+| T28 distinct-expert estimator | done | `benchmark/t28_distinct_expert_estimator.py`, adjacent-route new-expert rate. On the recorded 48-layer Qwen3.8 trace: MAE 1.881 for W=2 (topK baseline 6.063; topK*W bound 3.937) and 3.726 for W=4 (baseline 16.532). `benchmark/test_t28_distinct_expert_estimator.py` (5 tests); `docs/speculation-cost-model-verdict.md`. |
+| T29 speculation gate | rejected | The measured width-2 verify pass is 2.238x a scalar token and emits 1.857 tokens/pass at 85.7% acceptance, so even 100% acceptance gives 0.894x; a +5% gate can never fire. No controller code is kept; the arithmetic is in `docs/speculation-cost-model-verdict.md`. |
+| T30 MTP controller benchmark | blocked (asset) | No MTP sidecar installed (`models/ornith-1.5_35B_A3B_MTP_4Bit` absent); installing one to satisfy a benchmark is forbidden. Prior Qwen3.8 MTP: -43.2% at 85.7% acceptance, recorded in `docs/qwen38-mtp-and-overlap-verdict.md`. |
+| T31 closeout | done | `docs/maya-closeout-2026-10-22.md`: full suite 1,938 tests passed, all eighteen lint gates passed, release build warnings-as-errors clean, Ornith 4-bit golden baseline identical; every task is done, rejected with evidence, or recorded blocked by a named resource. |
 | T32 real-shape batch-attention diff | done | The reported diff does not reproduce. An independent layer-3 probe on Ornith 4-bit (width 2/4, positions 100/60 and 100/60/130/20) shows batch attention == per-row: normed 0.0, packed q 2.4e-4, v 0.0, post-gate attn 2.4e-4, o 2.4e-4, K/V slot bytes 0.0. The in-loop probe ran after the fused FFN's hidden handoff, and its `first=1269` is constant across unrelated positions; it was not a stage comparison. See `docs/batched-decode-phase2c-2026-10-21.md` T32/T33. |
 | T33 instrument q/k/attn stages | done | No wrong tensor in the q/k/attention/o chain; the stage is exact to fp16 rounding on the real install and is pinned in-tree by `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`. The corrupt Ornith text is in the reverted loop's wiring around the stage (T34). |
 | T34 re-land fused decode loop | rejected (wall clock) | Correctness is done: width 2 and width 4 are bit-identical to the per-row decode, with 8/8 and 4/4 text parity. The wall clock is not: width 2 parity, width 4 +9.4% at 64 and a loss at 128 under memory pressure. Per T10 the path is not wired; it stays opt-in for a 64 GB retest. |
 
-Phase 2 (T11-T14) is model/hardware-blocked here: the only QSA install is
-Qwen3.8 4-bit, which does not fit 24 GB, and Ornith cannot exercise a streamed
-window crossing. Phase 3 (T15) is therefore the next feasible task; T16 follows.
+Closeout: T1-T34 are done, rejected with evidence, or blocked by a named
+resource. The remaining blockers are the model/hardware pair for T11-T14 and
+T19/T27, the missing MTP sidecar for T30, and the 100K read in T24 (a full
+prefill of the ~61K-token scaled request was still running at the 3600 s
+timeout). See `docs/maya-closeout-2026-10-22.md`.
 
 ## New tasks found during execution
 

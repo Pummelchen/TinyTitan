@@ -102,6 +102,12 @@ public func runRawCompletion(
     prefillConfig: PrefillRuntimeConfig = .defaultChunked,
     start: RawCompletionStart = .reset,
     slot: Int = 0,
+    /// Prefix lengths at which to call `onPrefillCheckpoint` after prefill
+    /// reaches them. Positions outside `(cached, promptIds.count)` are
+    /// ignored. Used by the server's interior-checkpoint tier; empty for every
+    /// other caller.
+    checkpointPositions: [Int] = [],
+    onPrefillCheckpoint: (@Sendable (Int) -> Void)? = nil,
     shouldStop: () -> Bool = { false },
     onProgress: (RawDecodeProgress) -> Void
 ) async throws -> RawDecodeResult {
@@ -217,15 +223,47 @@ public func runRawCompletion(
                 PrefillError.chunkedRequiresChunkedRunnerReason)
         }
         let mode: PrefillOutputMode = fusedGreedy ? .greedyIfAvailable : .logits
-        let result = try await chunked.prefillChunked(
-            tokens: prefillTokens,
-            startPosition: position,
+        // Interior checkpoints are captured at message boundaries, which
+        // seldom coincide with a prefill chunk. Split the prompt into segments
+        // ending at each boundary, prefill one segment, capture, continue --
+        // the KV cursor is exactly at the boundary when the callback runs.
+        let points =
+            checkpointPositions
+            .filter { $0 > position && $0 < promptIds.count }
+            .sorted()
+        var segmentStart = position
+        var result = PrefillResult(
+            newPosition: position, seed: .logitsWritten)
+        for point in points {
+            _ = try await chunked.prefillChunked(
+                tokens: promptIds[segmentStart..<point],
+                startPosition: segmentStart,
+                slot: slot,
+                outputMode: mode,
+                config: prefillConfig,
+                into: scratch.logits
+            ) { done in
+                onProgress(
+                    .prefill(
+                        done: segmentStart + done,
+                        total: promptIds.count))
+            }
+            history.append(contentsOf: promptIds[segmentStart..<point])
+            segmentStart = point
+            onPrefillCheckpoint?(point)
+        }
+        result = try await chunked.prefillChunked(
+            tokens: promptIds[segmentStart...],
+            startPosition: segmentStart,
             slot: slot,
             outputMode: mode,
             config: prefillConfig,
             into: scratch.logits
         ) { done in
-            onProgress(.prefill(done: cachedPromptTokens + done, total: promptIds.count))
+            onProgress(
+                .prefill(
+                    done: segmentStart + done,
+                    total: promptIds.count))
         }
         if mode == .logits, result.seed != .logitsWritten {
             throw PrefillError.unsupportedPrefillSeed(
@@ -238,8 +276,10 @@ public func runRawCompletion(
         }
         position = result.newPosition
         prefillSeed = result.seed
-        history.append(contentsOf: prefillTokens)
+        history.append(contentsOf: promptIds[segmentStart...])
     case .off:
+        let points = Set(
+            checkpointPositions.filter { $0 > position && $0 < promptIds.count })
         for t in prefillTokens {
             try Task.checkCancellation()
             try await producer.produce(
@@ -248,6 +288,9 @@ public func runRawCompletion(
             position += 1
             history.append(t)
             onProgress(.prefill(done: position, total: promptIds.count))
+            if points.contains(position) {
+                onPrefillCheckpoint?(position)
+            }
         }
     }
 

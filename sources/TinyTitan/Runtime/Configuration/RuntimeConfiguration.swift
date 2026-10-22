@@ -52,9 +52,11 @@ public struct RuntimeConfiguration: Sendable, Equatable {
     /// tokens measured **131 distinct experts per layer** across a 128-token
     /// window. 128 slots is the first budget that holds it.
     ///
-    /// Because expert reads bypass the page cache (see `ParallelExpertReader`),
-    /// there is no second cache to fall back on: whatever the slots do not hold is
-    /// fetched from SSD every token. That makes the curve a cliff rather than a
+    /// Under the bounded policy (the automatic answer on this 24 GB host, and
+    /// on any host where the install is above half of RAM), expert reads
+    /// bypass the page cache (see `PageCachePolicy` and
+    /// `ParallelExpertReader`). There is then no second cache to fall back on:
+    /// whatever the slots do not hold is fetched from SSD every token. That makes the curve a cliff rather than a
     /// slope. Measured, 4-bit, short prompt, bounded:
     ///
     ///      16 slots  1.05 GB   8.73 tok/s   io 49.4 ms

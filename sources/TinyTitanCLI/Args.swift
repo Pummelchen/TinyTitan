@@ -157,7 +157,8 @@ extension Args {
 
         command:
           calibrate                  Write or validate a per-machine tuning
-                                    profile (see `TinyTitanCLI calibrate --help`).
+                                    profile (the calibrate command's --help
+                                    lists its own flags).
 
         required:
           --model <dir>             Path to a .ssdai model directory.

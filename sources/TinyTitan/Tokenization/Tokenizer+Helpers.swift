@@ -26,6 +26,7 @@ extension GFTokenizer {
     }
 
     struct ResolvedSpecialTokens {
+        let imStartID: Int32
         let bosID: Int32
         let eosID: Int32
         let padID: Int32
@@ -111,9 +112,9 @@ extension GFTokenizer {
             }
             return Int32(value)
         }
-        // `<|im_start|>` is required even though no stored property holds it;
-        // template rendering relies on the tokenizer recognizing its text.
-        _ = try id(Self.imStartMark)
+        // Template rendering recognizes `<|im_start|>` as text; the id is
+        // also what interior-checkpoint boundaries are located by.
+        let imStart = try id(Self.imStartMark)
         let imEnd = try id(Self.imEndMark)
         let endOfText = try id("<|endoftext|>")
         let toolCallStart = try id("<tool_call>")
@@ -123,6 +124,7 @@ extension GFTokenizer {
         let thinkStart = try id("<think>")
         let thinkEnd = try id("</think>")
         return ResolvedSpecialTokens(
+            imStartID: imStart,
             bosID: endOfText,
             eosID: endOfText,
             padID: endOfText,

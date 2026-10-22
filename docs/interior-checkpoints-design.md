@@ -1,15 +1,17 @@
 # Interior checkpoints: granularity and payload (T20)
 
-Status: T20 design; T21 format and store implemented. The content-addressed
-store (`PromptCheckpointTypes.swift`, `PromptCheckpointStore.swift`) saves and
+Status: T20 design; T21 format and store; T22 session capture and edited-turn
+restore; T23 correctness matrix implemented. The content-addressed store
+(`PromptCheckpointTypes.swift`, `PromptCheckpointStore.swift`) saves and
 restores an `InferenceStateSnapshot` keyed by domain + prefix tokens, with
 position/hash/size validation, memory/disk LRU and SHA-verified loads. A real
-runner round-trip is pinned by `InteriorCheckpointRestoreTests`: a checkpoint
-captured at token 3 of a 7-token prompt restores into a fresh runner and
-continues the suffix with exactly the uninterrupted prefill's logits, while a
-different prefix or domain is a miss. Session capture during generation and
-the edited-turn path are T22; T23 the correctness matrix; T24 the 100K
-benchmark.
+runner round-trip is pinned by `InteriorCheckpointRestoreTests`; the split
+prefill at a real boundary and the edited-turn resume are pinned by
+`EditedTurnCheckpointTests`, and the boundary planner by
+`PromptCheckpointPlannerTests`.
+
+T24's placement benchmark is the only part not closed here; see
+`docs/maya-task-status.md` for its measured result.
 
 ## The gap this closes
 
@@ -148,13 +150,27 @@ interior lookup.
 - No cross-machine reuse: the domain hash includes the runtime profile and
   KV storage, and the payload is device/runtime-layout specific.
 
-## Open questions for T21
+## Implementation notes (T22)
 
-- Whether the checkpoint record lives beside the prompt-cache entry (one file
-  per entry holding a list) or as its own store keyed by content hash. The
-  content-hash key is the better dedupe, but the metadata/eviction needs a
-  conversation key either way.
-- How `systemEnd` is detected when the chat template and tool schema are
-  rendered: the boundary must be taken on the rendered token IDs, not on the
-  message list, so the template's own header/tail tokens are included
-  correctly.
+- **Boundary detection is on the rendered ids.** The ChatML template renders
+  the last assistant turn differently depending on whether a user turn follows
+  it, so encoding `messages.dropLast()` is not always a prefix of the full
+  render. `PromptCheckpointPlanner` locates `<|im_start|>` in the ids that were
+  actually rendered instead: the second message start is `systemEnd`, the last
+  message start before the generation prompt is `lastTurnStart`.
+- **Capture splits prefill at the boundary.** `runRawCompletion` takes
+  `checkpointPositions` and `onPrefillCheckpoint`; it prefills a segment, calls
+  the hook with the KV cursor exactly at the boundary, then continues. The
+  callback copies the snapshot and spawns the store save, so a multi-gigabyte
+  write does not stall decode. A failed capture logs and is ignored: the next
+  request can always full-prefill.
+- **Restore is tried only after a turn-cache miss.** An append still uses the
+  longer `turnEnd` entry. On a miss, candidates are tried longest first; a
+  content-hash miss is a miss, a corrupt record is deleted, and the next
+  candidate (or full prefill) follows. A QSA/PLE install refuses restore before
+  reading the payload, because those subsystems are not in the snapshot.
+- **Switch.** `TINYTITAN_PROMPT_CHECKPOINTS=0` turns the tier off for A/B.
+  `TINYTITAN_CHECKPOINT_GRID=<tokens>` adds an opt-in grid (default off), and
+  `TINYTITAN_CHECKPOINT_GRID_ONLY=1` removes the message boundaries so a
+  benchmark can price the grid on its own. Both are used only by T24; the
+  shipped default remains the two message boundaries.

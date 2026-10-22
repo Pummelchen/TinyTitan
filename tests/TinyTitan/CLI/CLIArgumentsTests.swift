@@ -198,8 +198,13 @@ import TinyTitan
             "--seed", "--stop", "--quiet", "--help",
             "--rdadvise", "--expert-cache-slots", "--prefill-chunk", "--concise",
             "--kv-bits", "--rope-scaling", "--thinking", "--reasoning-effort",
+            "--calibration-profile", "--check", "--out",
         ]
-        let words = Args.usage.split { $0.isWhitespace || $0 == "(" || $0 == ")" }
+        // The usage text also spells the `calibrate` subcommand's flags, so
+        // the bracket and pipe delimiters around them are part of the scan.
+        let words = Args.usage.split {
+            $0.isWhitespace || "()[]|".contains($0)
+        }
         let options = Set(words.map(String.init).filter { $0.hasPrefix("--") })
         #expect(options == expected)
     }
