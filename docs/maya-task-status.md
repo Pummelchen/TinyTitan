@@ -26,7 +26,7 @@ evidence exist.
 | T18 calibration tests | done | Schema round-trip + every refusal (10), keep floor/noise/slower/non-positive/interleaving/merge/refusals (8), CLI precedence fill/explicit/no-profile/corrupt/foreign-machine/wrong-model/wrong-context/switchless (16), server versions of the same (7). Decision tests inject samples, so no test depends on wall-clock luck. Profiles are checked against machine, memory, context and install model before application. |
 | T19 multi-Mac validation | pending (hardware) | — |
 | T20 checkpoint design | done | `docs/interior-checkpoints-design.md`: coarse points (`systemEnd`, `lastTurnStart`, existing `turnEnd`), payload = `InferenceStateSnapshot` plus prefix tokens and domain/content hashes (no logits for interior), 100K int8 arithmetic (~1.06 GB for system-end + last-turn-start, ~2.15 GB with the turn end, ~3.65 GB for a 16K grid), eviction order and restore gates. Explicitly no per-16K default: message-shaped requests only diverge at turn boundaries. |
-| T21 checkpoint format | pending | — |
+| T21 checkpoint format | in progress | `PromptCheckpointStore` + `PromptCheckpointMetadata`/`PromptCheckpointKey`: content-addressed by SHA-256(domain + prefix tokens), kind and conversation key, `InferenceStateSnapshot` payload, position/prefix/key/domain validation, memory+disk LRU with atomic writes and SHA-verified loads, corrupt records deleted. 10 store tests (round-trip, hash sensitivity, refusals, domain mismatch, eviction, disk persistence, corruption). Remaining: capture the points during prefill and restore into a live cache. |
 | T22 edited-turn resume | pending | — |
 | T23 checkpoint tests | pending | — |
 | T24 100K checkpoint benchmark | pending | — |
