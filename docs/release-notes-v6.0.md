@@ -1,7 +1,8 @@
 ## TinyTitan 6.0 — checkpoints, calibration, and a machine-size cache policy
 
-This release closes the Project Maya transfer and is the first to persist
-conversation state that is not just the completed turn. It is a major version
+This is the Project Maya release: it ships the useful ideas that fit this host
+and records the rest as rejected or hardware-gated. It is the first version to
+persist conversation state that is not just the completed turn. It is a major version
 because the cache policy changes by machine size, the checkpoint format gains a
 Qwen3.8 auxiliary payload, and `tinytitan calibrate` is a new command surface.
 
@@ -83,6 +84,8 @@ The host-KV parity/timing tasks at 128K/1M (T11–T14) and the multi-Mac and
 64/128 GB page-cache tasks (T19/T27) are not runnable on this 24 GB Mac; their
 ledger entries stay blocked rather than passed. The literal 100K checkpoint read
 (T24) is recorded at 24.5K because the full prefill exceeded the request timeout.
+The Ornith MTP sidecar is installed for T30; it is a draft head with no
+generation baseline, so it is declared non-golden rather than checked.
 
 ### Performance
 
