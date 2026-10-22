@@ -1,7 +1,15 @@
 # Interior checkpoints: granularity and payload (T20)
 
-Status: design. T21 implements the format and save/restore; T22 the edited-turn
-resume; T23 the correctness tests; T24 the 100K benchmark.
+Status: T20 design; T21 format and store implemented. The content-addressed
+store (`PromptCheckpointTypes.swift`, `PromptCheckpointStore.swift`) saves and
+restores an `InferenceStateSnapshot` keyed by domain + prefix tokens, with
+position/hash/size validation, memory/disk LRU and SHA-verified loads. A real
+runner round-trip is pinned by `InteriorCheckpointRestoreTests`: a checkpoint
+captured at token 3 of a 7-token prompt restores into a fresh runner and
+continues the suffix with exactly the uninterrupted prefill's logits, while a
+different prefix or domain is a miss. Session capture during generation and
+the edited-turn path are T22; T23 the correctness matrix; T24 the 100K
+benchmark.
 
 ## The gap this closes
 

@@ -259,7 +259,7 @@ let package = Package(
             name: "TinyTitanTests",
             dependencies: [
                 "TinyTitan", "TinyTitanValidationSupport", "TinyTitanRepackCore",
-                "TinyTitanCLICore",
+                "TinyTitanCLICore", "TinyTitanLib",
             ],
             path: "tests/TinyTitan",
             resources: [
