@@ -49,6 +49,18 @@ scorecard and the verification footer.
 - The grid remains an explicit benchmark opt-in (`TINYTITAN_CHECKPOINT_GRID`,
   `TINYTITAN_CHECKPOINT_GRID_ONLY`); the default is unchanged.
 
+## Additional model tuning (Qwen3.8-Flash-Next 4-bit)
+
+The same round profiled the 125B model on this host. The only change kept is
+its prefill chunk: **4,096 -> 2,048**, measured at 5-16% faster decode at the
+same prefill on ~200- and ~851-token chat prompts, with the generated text
+byte-identical to the golden baseline. The 8-bit row and the family fallback
+keep 4,096 because a 10k-token prompt prefills ~11% faster with it; an operator
+running long prompts can pass `--prefill-chunk 4096`. Expert cache slots (96),
+wired cache, read advice, the page cache, GPU key select, HC fusion and the
+LFU use cap were each A/B'd and left at their current values; see
+`docs/qwen38-4bit-tuning-2026-10-22.md` for the arms and the losses.
+
 ## Verification
 
 | Gate | Result |

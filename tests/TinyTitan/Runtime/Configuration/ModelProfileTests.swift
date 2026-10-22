@@ -42,11 +42,18 @@ import Testing
         // supersedes the 2026-09-05 decision to leave it off.
         #expect(q38.prefetchDepth == 1)
         #expect(q38.keepExpertCacheWired)
+        // 2026-10-22: the 4,096 reservation costs decode on the 24 GB host;
+        // 2,048 measured 5-16% faster decode at the same prefill on chat-like
+        // prompts and the generated text stayed byte-identical.
+        #expect(q38.prefillChunkTokens == 2_048)
         let q38b = ModelProfile.resolve(
             modelID: "qwen3.8-flash-next", family: .qwen38flash, weightBits: 8, environment: [:])
         #expect(q38b.expertCacheBudgetBytes == Int(9.5 * Double(1 << 30)))
         // Inferred from the 4-bit A/B (see the 8-bit row comment), not measured.
         #expect(q38b.prefetchDepth == 1)
+        // The 8-bit row keeps 4,096: its prefill is slower and the long-prompt
+        // case is the one it is chosen for.
+        #expect(q38b.prefillChunkTokens == 4_096)
         #expect(q38.sampling.temperature == 1.0 && q38.sampling.topP == 0.95)
         #expect(!q38.hcFused && !q38.qsaGPUSelect)
         let q36 = ModelProfile.resolve(

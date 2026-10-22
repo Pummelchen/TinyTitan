@@ -167,11 +167,22 @@ public struct ModelProfile: Sendable, Equatable {
             // into hits *before* demand rather than merely warming pages, and the
             // response is byte-identical (golden re-checked). The cache stays wired
             // through prefill (see keepExpertCacheWired).
+            //
+            // Chunk 2,048 (2026-10-22): the 4,096 reservation is held through
+            // decode and costs it. An 851-token prompt prefilled in the same
+            // ~30 s at both sizes, and 2,048 decoded 5.51/4.90 tok/s against
+            // 4,769/4,645 (+15.6%/+5.5%, two interleaved rounds); a 200-token
+            // chat prompt measured 6.11/6.79 against 5.58/6.09. The 4,096
+            // chunk still wins the long-prefill case (~11% on 10k in the
+            // comment on `defaultPrefillChunkTokens`), so an operator running
+            // 10k prompts should pass `--prefill-chunk 4096`; the family
+            // fallback and the 8-bit row keep it.
+            //
             // Sampling is the *thinking* row here; the request's thinking mode
             // selects between it and the instruct row at validation time
             // (`GenerationDefaults.forFamily(_:thinking:)`).
             Key("qwen3.8-flash-next", 4): (
-                12 << 30, 1, 4_096,
+                12 << 30, 1, 2_048,
                 GenerationDefaults.qwen38Thinking,
                 true, true, false, false, true
             ),
