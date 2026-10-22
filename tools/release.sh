@@ -265,6 +265,7 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 # wrapped, not guessed at.
 NON_GOLDEN_INSTALLS="
   qwen3.8-flash-next_125B_A6B_MTP_4Bit
+  ornith-1.5_35B_A3B_MTP_4Bit
 "
 NON_GOLDEN_SET=" $(printf '%s' "$NON_GOLDEN_INSTALLS" | tr -s '[:space:]' ' ') "
 
