@@ -61,14 +61,22 @@ wired cache, read advice, the page cache, GPU key select, HC fusion and the
 LFU use cap were each A/B'd and left at their current values; see
 `docs/qwen38-4bit-tuning-2026-10-22.md` for the arms and the losses.
 
+`docs/qwen38-4bit-verification-2026-10-22.md` maps every task-list
+optimization onto this model: width-2 batching has no aggregate win (and at a
+lower slot count produced different text until QSA/PLE models were clamped to
+one sequence), the fused loop is rejected on Qwen3.8 correctness, interior
+checkpoints are unavailable because the snapshot refuses QSA/PLE state, and the
+page-cache policy correctly stays bounded for the 96 GB install.
+
 ## Verification
 
 | Gate | Result |
 | --- | --- |
-| `swift test --no-parallel` | **PASS**, 1,938 tests across the seven test bundles (926 + 417 + 164 + 189 + 81 + 63 + 98), 0 failures |
+| `swift test --no-parallel` | **PASS**, 1,939 tests across the seven test bundles (926 + 418 + 164 + 189 + 81 + 63 + 98), 0 failures |
 | `tools/lint.sh all` | **PASS**, exit 0: all eighteen gates, including swiftlint 0.65.1, swift-format and ruff 0.16.7 |
 | `swift build -c release` | **PASS**, warnings-as-errors, 0 warnings |
 | `tools/golden-baseline.sh --check 4` | **PASS**, `output identical to baseline` (Ornith 1.5 4-bit) |
+| `tools/golden-baseline.sh --check qwen38-4` | **PASS**, `output identical to baseline` (Qwen3.8-Flash-Next 4-bit) |
 | T24 edited-turn | **PASS**, text hash `b344d80e24a36799…` identical across none/message/16k |
 
 The T24 command and per-arm rows are in

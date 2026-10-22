@@ -135,4 +135,16 @@ import TinyTitan
             "the per-slot budget must include the authoritative arena")
     }
 
+    @Test func aPerSequenceStateModelIsServedOneAtATime() {
+        #expect(
+            BatchedMemoryBudget.effectiveRequestedSlots(
+                requested: 4, hasPerSequenceState: true) == 1,
+            "QSA/PLE state is not slot-keyed; two sequences would cross-talk")
+        #expect(
+            BatchedMemoryBudget.effectiveRequestedSlots(
+                requested: 4, hasPerSequenceState: false) == 4)
+        #expect(
+            BatchedMemoryBudget.effectiveRequestedSlots(
+                requested: 1, hasPerSequenceState: true) == 1)
+    }
 }

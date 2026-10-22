@@ -29,6 +29,22 @@ enum BatchedMemoryBudget {
         numExperts > 0 ? max(0, configured) : 0
     }
 
+    /// The width to budget before the memory clamp.
+    ///
+    /// A family with per-sequence runtime state that is not slot-keyed -- the
+    /// QSA indexer and the PLE block on Qwen3.8-Flash-Next -- cannot run two
+    /// sequences without cross-talk: the indexer's pooled keys are per layer,
+    /// not per slot, and `resetSequence` only clears it on slot 0. Serving one
+    /// at a time is the correct fallback until that state is slot-keyed.
+    /// Returning one here is what makes the queueing honest rather than
+    /// silently emitting another sequence's tokens.
+    static func effectiveRequestedSlots(
+        requested: Int,
+        hasPerSequenceState: Bool
+    ) -> Int {
+        hasPerSequenceState ? 1 : max(1, requested)
+    }
+
     /// The largest width whose worst-case stores fit the budget.
     ///
     /// Always at least one: the single-sequence path must stay available even

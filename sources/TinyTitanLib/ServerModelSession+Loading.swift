@@ -222,7 +222,18 @@ extension ServerModelSession {
         // point of the cap is that the cache cannot be paged out to rescue an
         // over-commit. The clamp is per load, so a catalog switch re-evaluates
         // it against the model actually being loaded.
-        let requestedSlots = mtpModelDirectory == nil ? slots : 1
+        let hasPerSequenceState =
+            model.config.sparseIndexer.enabled || model.config.ple.enabled
+        let requestedSlots = BatchedMemoryBudget.effectiveRequestedSlots(
+            requested: mtpModelDirectory == nil ? slots : 1,
+            hasPerSequenceState: hasPerSequenceState)
+        if slots > 1, hasPerSequenceState {
+            FileHandle.standardError.write(
+                Data(
+                    ("TinyTitan batch width \(slots) is not supported for a "
+                        + "QSA/PLE model (per-sequence indexer/ngram state is "
+                        + "not slot-keyed); serving 1 at once\n").utf8))
+        }
         let perSlotBytes = BatchedMemoryBudget.perSlotBytes(
             config: model.config,
             maxContext: maxContext,
