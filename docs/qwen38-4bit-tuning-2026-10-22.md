@@ -76,6 +76,21 @@ Verification:
 - `ModelProfileTests`, `DefaultPrefillChunkTests`, `ExpertCacheBudgetTests` —
   27 + 2 tests pass.
 
+## Rejected during the round
+
+- **Chunk 1,024 vs 2,048** on the 851-token prompt with 64 new tokens:
+  5.83/5.40 against 5.40/5.70, a wash (+1% at best) with the same prefill.
+  2,048 stays; 1,024 buys nothing and doubles the chunk count on long prompts.
+- **Releasing the prefill scratch before decode**
+  (`TINYTITAN_RELEASE_PREFILL_SCRATCH=1`) was tried to keep 4,096's prefill
+  and 2,048's decode. It lost in both rounds (3.82/5.77 tok/s at 2,048 against
+  6.67/5.30 without; 3.19/3.86 at 4,096), and the experiment was reverted
+  rather than shipped. Freeing and reallocating the Metal scratch churns the
+  allocator more than the memory it returns.
+- **Chunk 512** prefilled the 851-token prompt in 38.9 s against ~30 s for
+  1,024-4,096, so it is out on prefill alone.
+
 Only the chunk value changed; no new switch was kept. The measurement scripts
 and raw logs are under the git-ignored `.build/` (`qwen38-chat-slots.sh`,
-`qwen38-chunk64-ab.sh`, `qwen38-cap-ab.sh`, and the per-arm logs).
+`qwen38-chunk64-ab.sh`, `qwen38-chunk1024-ab.sh`, `qwen38-cap-ab.sh`, and the
+per-arm logs).
