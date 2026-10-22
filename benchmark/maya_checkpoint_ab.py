@@ -36,6 +36,8 @@ import pathlib
 import re
 import signal
 import statistics
+
+from tinytitan_profile import pgrep_answer
 import subprocess
 import time
 import uuid
@@ -56,27 +58,13 @@ PARAGRAPH = (
 
 
 def running_servers() -> list[str]:
-    try:
-        found = subprocess.run(
-            ["pgrep", "-fl", "TinyTitanServer"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return []
+    verdict, lines = pgrep_answer(["-fl", "TinyTitanServer"])
+    if verdict == "unknown":
+        raise RuntimeError("cannot check for a running TinyTitanServer: " + "; ".join(lines))
     # `pgrep -f` also matches a shell command that merely mentions the
-    # binary (this harness's own `pgrep`, or a wrapper). Only a line whose
-    # executable is the server counts.
-    return [
-        line
-        for line in found.stdout.splitlines()
-        if line.strip()
-        and "TinyTitanServer" in line
-        and "bash -c" not in line
-        and "pgrep" not in line
-        and "python" not in line
-    ]
+    # binary (this harness's own wrapper). Only a line whose executable is
+    # the server counts.
+    return [line for line in lines if "bash -c" not in line and "python" not in line]
 
 
 def require_no_server(port: int) -> None:

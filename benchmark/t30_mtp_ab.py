@@ -24,6 +24,8 @@ import signal
 import subprocess
 import time
 
+from tinytitan_profile import pgrep_answer
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = ROOT / ".build/release/TinyTitanServer"
 TARGET = ROOT / "models/ornith-1.5_35B_A3B_4Bit"
@@ -37,17 +39,10 @@ PROMPT = (
 
 
 def running_servers() -> list[str]:
-    found = subprocess.run(
-        ["pgrep", "-fl", "TinyTitanServer"], capture_output=True, text=True, check=False
-    )
-    return [
-        line
-        for line in found.stdout.splitlines()
-        if "TinyTitanServer" in line
-        and "bash -c" not in line
-        and "pgrep" not in line
-        and "python" not in line
-    ]
+    verdict, lines = pgrep_answer(["-fl", "TinyTitanServer"])
+    if verdict == "unknown":
+        raise RuntimeError("cannot check for a running TinyTitanServer: " + "; ".join(lines))
+    return [line for line in lines if "bash -c" not in line and "python" not in line]
 
 
 def stop(process: subprocess.Popen) -> None:
