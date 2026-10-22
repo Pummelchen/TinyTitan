@@ -63,19 +63,19 @@ Per-version measurements and the method live on the wiki
 
 | Model | Quantization | GPU | CPU |
 | --- | --- | ---: | ---: |
-| Qwen 3.5 2B (dense) | 4-bit | **53.73 tok/s** | **15.42 tok/s** |
-| Qwen 3.5 2B (dense) | 8-bit | **32.77 tok/s** | **15.83 tok/s** |
-| Qwen 3.5 4B (dense) | 4-bit | **26.18 tok/s** | **7.71 tok/s** |
+| Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** |
+| Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** |
+| Qwen 3.5 4B (dense) | 4-bit | **22.81 tok/s** | **7.54 tok/s** |
 | Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA |
 | KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.86 tok/s** | NA |
-| Qwen 3.5 4B (dense) | 8-bit | **16.14 tok/s** | **7.04 tok/s** |
-| Qwen 3.5 9B (dense) | 4-bit | **14.93 tok/s** | **4.07 tok/s** |
+| Qwen 3.5 4B (dense) | 8-bit | **14.10 tok/s** | **7.85 tok/s** |
+| Qwen 3.5 9B (dense) | 4-bit | **12.88 tok/s** | **4.43 tok/s** |
 | Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA |
 | Qwen-AgentWorld 35B-A3B | 8-bit | **12.28 tok/s** | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA |
-| Qwen 3.5 9B (dense) | 8-bit | **8.90 tok/s** | **4.51 tok/s** |
+| Qwen 3.5 9B (dense) | 8-bit | **7.80 tok/s** | **4.42 tok/s** |
 | KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.91 tok/s** | NA |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA |
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA |
