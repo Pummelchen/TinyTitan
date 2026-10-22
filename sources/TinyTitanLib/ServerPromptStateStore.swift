@@ -14,24 +14,30 @@ import TinyTitan
 /// bookkeeping is guarded by `state`, and every disk write is serialized on
 /// `diskQueue` so concurrent saves cannot interleave file operations.
 final class ServerPromptStateStore: @unchecked Sendable {
-    private struct DiskMetadata: Codable {
+    struct DiskMetadata: Codable {
         static let currentVersion = 1
 
         let version: Int
         let entry: ServerPromptCacheEntry
         let descriptor: InferenceStateSnapshotDescriptor
         let payloadSHA256: String
+        // Additive in v1: Qwen3.8 records carry the QSA/PLE payload and hash.
+        let auxiliaryBytes: Int?
+        let auxiliarySHA256: String?
     }
 
-    private struct DiskRecord {
+    struct DiskRecord {
         let metadata: DiskMetadata
         let directory: URL
         let payload: URL
+        let auxiliary: URL
+        let auxiliaryBytes: Int
         var modificationDate: Date
     }
 
-    private static let metadataName = "metadata.json"
-    private static let payloadName = "state.bin"
+    static let metadataName = "metadata.json"
+    static let payloadName = "state.bin"
+    static let auxiliaryName = "auxiliary.bin"
     /// Applied by `BoundedMetadataRead` before the buffer is allocated, not to
     /// the bytes after they have been read — a stat-then-re-read check bounded
     /// the decision but not the memory (K17).
@@ -41,9 +47,19 @@ final class ServerPromptStateStore: @unchecked Sendable {
     /// never allocated, bounding the multi-GiB capture + write cost regardless
     /// of a large configured disk budget (default 8 GiB).
     static let maximumCaptureBytes = 4 * 1_024 * 1_048_576
+    static let maximumAuxiliaryBytes = 1_024 * 1_048_576
 
-    private struct State {
-        var memory: [UUID: InferenceStateSnapshot] = [:]
+    struct MemoryRecord {
+        let snapshot: InferenceStateSnapshot
+        let auxiliary: InferenceAuxiliaryState?
+
+        var bytes: Int {
+            snapshot.payload.count + (auxiliary?.payload.count ?? 0)
+        }
+    }
+
+    struct State {
+        var memory: [UUID: MemoryRecord] = [:]
         var memoryLRU: [UUID] = []
         var memoryBytes = 0
         var disk: [UUID: DiskRecord] = [:]
@@ -51,9 +67,9 @@ final class ServerPromptStateStore: @unchecked Sendable {
         var diskBytes = 0
     }
 
-    private let configuration: ServerPromptCacheStorageConfiguration
-    private let fileManager: FileManager
-    private let state = Mutex(State())
+    let configuration: ServerPromptCacheStorageConfiguration
+    let fileManager: FileManager
+    let state = Mutex(State())
     private let diskQueue = DispatchQueue(
         label: "tinytitan.prompt-state-store.disk",
         qos: .utility)
@@ -114,6 +130,7 @@ final class ServerPromptStateStore: @unchecked Sendable {
             else { continue }
             let metadataURL = directory.appendingPathComponent(Self.metadataName)
             let payloadURL = directory.appendingPathComponent(Self.payloadName)
+            let auxiliaryURL = directory.appendingPathComponent(Self.auxiliaryName)
             guard
                 let metadataData = try? BoundedMetadataRead.read(
                     fileAt: metadataURL,
@@ -135,11 +152,23 @@ final class ServerPromptStateStore: @unchecked Sendable {
             else {
                 continue
             }
+            let auxiliaryBytes = metadata.auxiliaryBytes ?? 0
+            if auxiliaryBytes > 0 {
+                guard
+                    let auxiliaryValues = try? auxiliaryURL.resourceValues(
+                        forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey]),
+                    auxiliaryValues.isRegularFile == true,
+                    auxiliaryValues.isSymbolicLink != true,
+                    auxiliaryValues.fileSize == auxiliaryBytes
+                else { continue }
+            }
             loaded.append(
                 DiskRecord(
                     metadata: metadata,
                     directory: directory,
                     payload: payloadURL,
+                    auxiliary: auxiliaryURL,
+                    auxiliaryBytes: auxiliaryBytes,
                     modificationDate: values.contentModificationDate ?? .distantPast))
         }
 
@@ -149,7 +178,8 @@ final class ServerPromptStateStore: @unchecked Sendable {
                 let id = record.metadata.entry.id
                 state.disk[id] = record
                 state.diskLRU.append(id)
-                state.diskBytes += record.metadata.descriptor.payloadBytes
+                state.diskBytes +=
+                    record.metadata.descriptor.payloadBytes + record.auxiliaryBytes
             }
         }
         // The evicted ids mean nothing to a listing; a refusal is the cap not being
@@ -172,35 +202,53 @@ final class ServerPromptStateStore: @unchecked Sendable {
     /// caller's actor, so a multi-GiB write does not stall the session.
     func save(
         entry: ServerPromptCacheEntry,
-        snapshot: InferenceStateSnapshot
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState? = nil
     ) async -> ServerPromptStateSaveResult {
         await withCheckedContinuation { continuation in
             diskQueue.async { [self] in
-                continuation.resume(returning: saveSync(entry: entry, snapshot: snapshot))
+                continuation.resume(
+                    returning: saveSync(
+                        entry: entry, snapshot: snapshot,
+                        auxiliary: auxiliary))
             }
         }
     }
 
     private func saveSync(
         entry: ServerPromptCacheEntry,
-        snapshot: InferenceStateSnapshot
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?
     ) -> ServerPromptStateSaveResult {
         precondition(entry.kvPosition == snapshot.descriptor.position)
+        if let auxiliary {
+            precondition(auxiliary.position == entry.kvPosition)
+        }
+        let auxiliaryBytes = auxiliary?.payload.count ?? 0
+        let totalBytes = snapshot.payload.count + auxiliaryBytes
         var unbacked: [UUID] = []
         var diskError: String?
-
-        if snapshot.payload.count <= configuration.memoryLimitBytes,
-            configuration.memoryLimitBytes > 0
-        {
-            insertMemory(snapshot, id: entry.id)
+        if auxiliaryBytes > Self.maximumAuxiliaryBytes {
+            diskError =
+                "auxiliary state is \(auxiliaryBytes) bytes, over the "
+                + "\(Self.maximumAuxiliaryBytes)-byte cap"
         }
 
-        if configuration.diskDirectory != nil,
+        if auxiliaryBytes <= Self.maximumAuxiliaryBytes,
+            totalBytes <= configuration.memoryLimitBytes,
+            configuration.memoryLimitBytes > 0
+        {
+            insertMemory(snapshot, auxiliary: auxiliary, id: entry.id)
+        }
+
+        if auxiliaryBytes <= Self.maximumAuxiliaryBytes,
+            configuration.diskDirectory != nil,
             configuration.diskLimitBytes > 0,
-            snapshot.payload.count <= configuration.diskLimitBytes
+            totalBytes <= configuration.diskLimitBytes
         {
             do {
-                try writeDisk(entry: entry, snapshot: snapshot)
+                try writeDisk(
+                    entry: entry, snapshot: snapshot, auxiliary: auxiliary)
             } catch {
                 diskError = String(describing: error)
             }
@@ -240,7 +288,8 @@ final class ServerPromptStateStore: @unchecked Sendable {
             try loadSnapshot(entryID: entryID)
         }.value
         do {
-            try runner.restoreInferenceState(loaded.snapshot)
+            try runner.restoreInferenceState(
+                loaded.snapshot, auxiliary: loaded.auxiliary)
             return loaded.tier
         } catch {
             remove(entryIDs: [entryID])
@@ -250,11 +299,15 @@ final class ServerPromptStateStore: @unchecked Sendable {
 
     func loadSnapshot(
         entryID: UUID
-    ) throws -> (snapshot: InferenceStateSnapshot, tier: String) {
-        if let snapshot = state.withLock({ $0.memory[entryID] }) {
+    ) throws -> (
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?,
+        tier: String
+    ) {
+        if let record = state.withLock({ $0.memory[entryID] }) {
             touchMemory(entryID)
             touchDisk(entryID)
-            return (snapshot, "ram")
+            return (record.snapshot, record.auxiliary, "ram")
         }
         guard let record = state.withLock({ $0.disk[entryID] }) else {
             throw ServerPromptStateStoreError.missing(entryID)
@@ -267,45 +320,21 @@ final class ServerPromptStateStore: @unchecked Sendable {
             let snapshot = InferenceStateSnapshot(
                 descriptor: record.metadata.descriptor,
                 payload: payload)
-            if payload.count <= configuration.memoryLimitBytes,
+            let auxiliary = try readAuxiliaryVerifying(
+                record: record, entryID: entryID)
+            if snapshot.payload.count + (auxiliary?.payload.count ?? 0)
+                <= configuration.memoryLimitBytes,
                 configuration.memoryLimitBytes > 0
             {
-                insertMemory(snapshot, id: entryID)
+                insertMemory(snapshot, auxiliary: auxiliary, id: entryID)
                 _ = evictMemoryIfNeeded()
             }
             touchDisk(entryID)
-            return (snapshot, "ssd")
+            return (snapshot, auxiliary, "ssd")
         } catch {
             remove(entryIDs: [entryID])
             throw error
         }
-    }
-
-    private func readPayloadVerifying(
-        record: DiskRecord,
-        entryID: UUID
-    ) throws -> Data {
-        let expected = record.metadata.descriptor.payloadBytes
-        let handle = try FileHandle(forReadingFrom: record.payload)
-        defer { try? handle.close() }
-        var hasher = SHA256()
-        var payload = Data()
-        payload.reserveCapacity(expected)
-        while true {
-            guard let chunk = try handle.read(upToCount: 1_048_576),
-                !chunk.isEmpty
-            else { break }
-            hasher.update(data: chunk)
-            payload.append(chunk)
-        }
-        guard payload.count == expected else {
-            throw ServerPromptStateStoreError.corrupt(entryID, "payload size mismatch")
-        }
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        guard digest == record.metadata.payloadSHA256 else {
-            throw ServerPromptStateStoreError.corrupt(entryID, "SHA-256 mismatch")
-        }
-        return payload
     }
 
     func contains(_ entryID: UUID) -> Bool {
@@ -315,8 +344,8 @@ final class ServerPromptStateStore: @unchecked Sendable {
     func remove(entryIDs: some Sequence<UUID>) {
         for id in entryIDs {
             state.withLock { state in
-                if let snapshot = state.memory.removeValue(forKey: id) {
-                    state.memoryBytes -= snapshot.payload.count
+                if let record = state.memory.removeValue(forKey: id) {
+                    state.memoryBytes -= record.bytes
                 }
                 state.memoryLRU.removeAll { $0 == id }
             }
@@ -342,19 +371,26 @@ final class ServerPromptStateStore: @unchecked Sendable {
         }
         state.withLock { state in
             if let current = state.disk.removeValue(forKey: id) {
-                state.diskBytes -= current.metadata.descriptor.payloadBytes
+                state.diskBytes -=
+                    current.metadata.descriptor.payloadBytes
+                    + current.auxiliaryBytes
             }
             state.diskLRU.removeAll { $0 == id }
         }
         return nil
     }
 
-    private func insertMemory(_ snapshot: InferenceStateSnapshot, id: UUID) {
+    private func insertMemory(
+        _ snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?,
+        id: UUID
+    ) {
+        let record = MemoryRecord(snapshot: snapshot, auxiliary: auxiliary)
         state.withLock { state in
-            if let previous = state.memory.updateValue(snapshot, forKey: id) {
-                state.memoryBytes -= previous.payload.count
+            if let previous = state.memory.updateValue(record, forKey: id) {
+                state.memoryBytes -= previous.bytes
             }
-            state.memoryBytes += snapshot.payload.count
+            state.memoryBytes += record.bytes
         }
         touchMemory(id)
     }
@@ -366,7 +402,7 @@ final class ServerPromptStateStore: @unchecked Sendable {
         }
     }
 
-    private func touchDisk(_ id: UUID) {
+    func touchDisk(_ id: UUID) {
         let record = state.withLock { state -> DiskRecord? in
             guard var record = state.disk[id] else { return nil }
             record.modificationDate = Date()
@@ -393,8 +429,8 @@ final class ServerPromptStateStore: @unchecked Sendable {
                 let id = state.memoryLRU.first
             {
                 state.memoryLRU.removeFirst()
-                if let snapshot = state.memory.removeValue(forKey: id) {
-                    state.memoryBytes -= snapshot.payload.count
+                if let record = state.memory.removeValue(forKey: id) {
+                    state.memoryBytes -= record.bytes
                     evicted.append(id)
                 }
             }
@@ -424,76 +460,4 @@ final class ServerPromptStateStore: @unchecked Sendable {
         }
     }
 
-    private func writeDisk(
-        entry: ServerPromptCacheEntry,
-        snapshot: InferenceStateSnapshot
-    ) throws {
-        guard let root = configuration.diskDirectory else { return }
-        let id = entry.id
-        let finalDirectory = root.appendingPathComponent(id.uuidString.lowercased())
-        let temporaryDirectory = root.appendingPathComponent(
-            ".tmp-\(id.uuidString.lowercased())-\(UUID().uuidString.lowercased())")
-        try fileManager.createDirectory(
-            at: temporaryDirectory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700])
-        do {
-            let payloadURL = temporaryDirectory.appendingPathComponent(Self.payloadName)
-            try snapshot.payload.write(to: payloadURL, options: [.atomic])
-            try fileManager.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: payloadURL.path)
-            let metadata = DiskMetadata(
-                version: DiskMetadata.currentVersion,
-                entry: entry,
-                descriptor: snapshot.descriptor,
-                payloadSHA256: Self.sha256(snapshot.payload))
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            let metadataURL = temporaryDirectory.appendingPathComponent(Self.metadataName)
-            try encoder.encode(metadata).write(to: metadataURL, options: [.atomic])
-            try fileManager.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: metadataURL.path)
-            // S23: never remove the live directory before the replacement is
-            // in place. Swap via renames: move the old directory aside, move
-            // the new one into place, then drop the backup. If the swap fails,
-            // restore the old directory so the previously persisted record
-            // stays loadable instead of being orphaned.
-            if fileManager.fileExists(atPath: finalDirectory.path) {
-                let backupDirectory = root.appendingPathComponent(
-                    ".bak-\(id.uuidString.lowercased())-\(UUID().uuidString.lowercased())")
-                try fileManager.moveItem(at: finalDirectory, to: backupDirectory)
-                do {
-                    try fileManager.moveItem(at: temporaryDirectory, to: finalDirectory)
-                    try? fileManager.removeItem(at: backupDirectory)
-                } catch {
-                    try? fileManager.moveItem(at: backupDirectory, to: finalDirectory)
-                    throw error
-                }
-            } else {
-                try fileManager.moveItem(at: temporaryDirectory, to: finalDirectory)
-            }
-            state.withLock { state in
-                if let previous = state.disk[id] {
-                    state.diskBytes -= previous.metadata.descriptor.payloadBytes
-                }
-                let record = DiskRecord(
-                    metadata: metadata,
-                    directory: finalDirectory,
-                    payload: finalDirectory.appendingPathComponent(Self.payloadName),
-                    modificationDate: Date())
-                state.disk[id] = record
-                state.diskBytes += snapshot.payload.count
-            }
-            touchDisk(id)
-        } catch {
-            try? fileManager.removeItem(at: temporaryDirectory)
-            throw error
-        }
-    }
-
-    private static func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
 }

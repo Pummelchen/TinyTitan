@@ -67,11 +67,20 @@ extension ServerModelSession {
                         throw InferenceStateSnapshotError.invalidPosition(
                             snapshot.descriptor.position)
                     }
+                    let auxiliary = try runner.captureAuxiliaryState()
+                    if let auxiliary,
+                        auxiliary.position != publication.entry.kvPosition
+                    {
+                        throw InferenceAuxiliaryStateError.invalidPosition(
+                            expected: publication.entry.kvPosition,
+                            actual: auxiliary.position)
+                    }
                     let entry = publication.entry
                     Task.detached(priority: .utility) { [promptStateStore] in
                         let saved = await promptStateStore.save(
                             entry: entry,
-                            snapshot: snapshot)
+                            snapshot: snapshot,
+                            auxiliary: auxiliary)
                         if let diskError = saved.diskError {
                             FileHandle.standardError.write(
                                 Data(
@@ -82,6 +91,7 @@ extension ServerModelSession {
                             "TinyTitan prompt_cache stored "
                                 + "tokens=\(entry.kvPosition) "
                                 + "state_bytes=\(snapshot.payload.count) "
+                                + "aux_bytes=\(auxiliary?.payload.count ?? 0) "
                                 + "ram_bytes=\(saved.memoryBytes) "
                                 + "disk_bytes=\(saved.diskBytes) "
                                 + "entry=\(entry.id.uuidString.lowercased())")

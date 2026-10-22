@@ -68,13 +68,15 @@ one sequence), the fused loop is rejected on Qwen3.8 correctness, and the
 page-cache policy correctly stays bounded for the 96 GB install. Interior
 checkpoints now work on Qwen3.8 as well: a 1,407-token edited last turn fell
 from 44.38 s to 2.76 s (16.1x, identical text) with the QSA/PLE auxiliary
-payload; `docs/qwen38-checkpoint-auxiliary.md`.
+payload, and the turn-end cache carries the same payload across a process
+restart (`tier=ssd`, 6.22 s prefill vs 14.33 s cache-off, identical text);
+`docs/qwen38-checkpoint-auxiliary.md`.
 
 ## Verification
 
 | Gate | Result |
 | --- | --- |
-| `swift test --no-parallel` | **PASS**, 1,944 tests across the seven test bundles (927 + 419 + 164 + 189 + 84 + 63 + 98), 0 failures |
+| `swift test --no-parallel` | **PASS**, 1,947 tests across the seven test bundles (927 + 421 + 164 + 189 + 85 + 63 + 98), 0 failures |
 | `tools/lint.sh all` | **PASS**, exit 0: all eighteen gates, including swiftlint 0.65.1, swift-format and ruff 0.16.7 |
 | `swift build -c release` | **PASS**, warnings-as-errors, 0 warnings |
 | `tools/golden-baseline.sh --check 4` | **PASS**, `output identical to baseline` (Ornith 1.5 4-bit) |

@@ -263,4 +263,73 @@ struct ServerPromptStateStoreTests {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         return attributes?[.posixPermissions] as? Int ?? 0o777
     }
+
+    @Test func auxiliaryStateSurvivesStoreRecreation() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1, 2])
+        let snapshot = makeSnapshot(
+            position: 2, payload: Data([1, 2, 3, 4, 5, 6, 7]))
+        let auxiliary = InferenceAuxiliaryState(
+            position: 2, payload: Data(repeating: 8, count: 16))
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1_024)
+        let writer = try ServerPromptStateStore(configuration: configuration)
+        let saved = await writer.save(
+            entry: entry, snapshot: snapshot, auxiliary: auxiliary)
+        #expect(saved.diskError == nil)
+        #expect(saved.diskBytes == snapshot.payload.count + 16)
+        #expect(
+            permissions(
+                of: root.appendingPathComponent(entry.id.uuidString.lowercased())
+                    .appendingPathComponent("auxiliary.bin")) & 0o077 == 0)
+
+        let reader = try ServerPromptStateStore(configuration: configuration)
+        #expect(reader.loadEntries(domain: domain) == [entry])
+        let loaded = try reader.loadSnapshot(entryID: entry.id)
+        #expect(loaded.snapshot == snapshot)
+        #expect(loaded.auxiliary == auxiliary)
+    }
+
+    @Test func corruptAuxiliaryStateIsRemovedRatherThanRestored() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1, 2])
+        let snapshot = makeSnapshot(
+            position: 2, payload: Data([1, 2, 3, 4, 5, 6, 7]))
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1_024)
+        let writer = try ServerPromptStateStore(configuration: configuration)
+        _ = await writer.save(
+            entry: entry, snapshot: snapshot,
+            auxiliary: InferenceAuxiliaryState(
+                position: 2, payload: Data(repeating: 3, count: 8)))
+        let auxiliary =
+            root.appendingPathComponent(entry.id.uuidString.lowercased())
+            .appendingPathComponent("auxiliary.bin")
+        try Data(repeating: 4, count: 8).write(to: auxiliary)
+        let reader = try ServerPromptStateStore(configuration: configuration)
+        #expect(reader.loadEntries(domain: domain) == [entry])
+        #expect(throws: ServerPromptStateStoreError.self) {
+            try reader.loadSnapshot(entryID: entry.id)
+        }
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: auxiliary.deletingLastPathComponent().path))
+    }
+
+    @Test func auxiliaryStateCountsAgainstTheMemoryBudget() async throws {
+        let store = try ServerPromptStateStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 10, diskDirectory: nil, diskLimitBytes: 0))
+        let entry = makeEntry(tokens: [1])
+        let snapshot = makeSnapshot(
+            position: 1, payload: Data(repeating: 1, count: 6))
+        let saved = await store.save(
+            entry: entry, snapshot: snapshot,
+            auxiliary: InferenceAuxiliaryState(
+                position: 1, payload: Data(repeating: 2, count: 6)))
+        #expect(saved.memoryBytes <= 10)
+        #expect(!store.contains(entry.id))
+    }
 }

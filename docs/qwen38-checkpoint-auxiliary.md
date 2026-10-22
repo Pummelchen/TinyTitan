@@ -75,10 +75,29 @@ This is a break-even-on-first-edit feature, not a free one, and it is the honest
 reason the interior tier is most valuable for agent retries rather than a
 conversation that is never edited.
 
-## What is not done
+## Turn-end cache across a restart
 
-`ServerPromptStateStore` — the turn-end cache — still stores snapshots without
-auxiliary state, so a Qwen3.8 turn-end restore after a process restart (a
-non-live hit) still falls back to a full prefill. Interior checkpoints are the
-edited-turn path and are complete; carrying the same auxiliary payload into the
-turn store is the remaining step for restart-surviving appends.
+`ServerPromptStateStore` now writes the same `auxiliary.bin` beside its
+`state.bin`, with optional v1 metadata fields and the same SHA/size checks and
+memory/disk accounting. `publishCacheEntry` captures the auxiliary state with
+the turn snapshot, and `restore` passes it to
+`restoreInferenceState(_:auxiliary:)`.
+
+Measured with two server processes and the same disk cache directory
+(226-token append, 8 generated tokens, memory cache disabled so the restore is
+a real disk read):
+
+| arm | prefill | wall | cached tokens |
+| --- | ---: | ---: | ---: |
+| fresh server, turn cache | **6.22 s** | **8.54 s** | 203 |
+| prompt cache off | 14.33 s | 15.50 s | 0 |
+
+The log line is `prompt_cache hit tier=ssd cached_tokens=203`; the generated
+text is identical between the two arms. A record written before this change
+has no auxiliary file, so its restore is refused, the record is removed and the
+request full-prefills — the pre-existing fallback, not a wrong answer.
+
+The first request in that run cost 18.06 s against 15.50 s for the control,
+because publishing the turn snapshot now copies both payloads. The saving is
+realised on the next process; the test's prompt is short, so a longer
+conversation is where the 2.3x prefill saving matters.
