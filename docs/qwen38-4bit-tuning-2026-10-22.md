@@ -78,6 +78,13 @@ Verification:
 
 ## Rejected during the round
 
+- **4-bit KV cache** (`--kv-bits 4`) measured 6.12/6.08 tok/s against
+  5.88/5.90 at 8-bit (+3.6%, two interleaved rounds) with the same prefill.
+  It was not adopted: it changes the numerics (the campaign's 4-bit row
+  recorded `output differs` and a -2.1% decode on its model), and KV precision
+  is a deliberate quality decision, not a free speed knob. The gain is also
+  smaller than the run-to-run spread.
+
 - **Chunk 1,024 vs 2,048** on the 851-token prompt with 64 new tokens:
   5.83/5.40 against 5.40/5.70, a wash (+1% at best) with the same prefill.
   2,048 stays; 1,024 buys nothing and doubles the chunk count on long prompts.
