@@ -1,8 +1,8 @@
-# Speculation cost model: estimator, gate, and the missing sidecar (T28-T30)
+# Speculation cost model: estimator and gate (T28-T30)
 
-Status: T28 measured; T29 rejected (no path to the required win); T30 incomplete
-because no MTP sidecar is installed and the rules forbid installing one to
-satisfy a benchmark.
+Status: T28 measured; T29 rejected (no path to the required win); T30 now
+measured and rejected — the Ornith MTP sidecar was installed from its pinned
+Hugging Face source and the 64/128-token arms lose.
 
 ## T28 — distinct-expert growth estimator
 
@@ -54,18 +54,30 @@ keep only code that improves TinyTitan's performance; a gate whose only
 reachable state is "off" is dead code, and the measured evidence belongs in this
 document rather than in the hot path.
 
-## T30 — no sidecar to benchmark
+## T30 — measured, and it loses
 
-`T30` names Ornith 4-bit at 64/128 tokens with the controller on/off. This
-checkout has no MTP sidecar: `models/` contains only the target installs, and
-`benchmark/tinytitan_benchmark.py` expects
-`models/ornith-1.5_35B_A3B_MTP_4Bit`, which is absent. Installing a model is an
-operator-requested job and AGENTS.md forbids doing it to satisfy a benchmark, so
-there is no honest arm to run.
+The sidecar is available after all. `tools/install_models.sh ornith15-mtp`
+ranges the pinned `ornith-ai/Ornith-1.5-35B-A3B` revision
+`e4dfb35a93d4b6822a811a7676f3488514abe7e2`, verifies shard 16 (4.18 GB) and
+installs a 43 MB sidecar at `models/ornith-1.5_35B_A3B_MTP_4Bit` with a
+verified receipt.
 
-The prior measurements on the available target (Qwen3.8 4-bit) are the same
-verdict T29's arithmetic gives: **−43.2%** at 85.7% acceptance, output identical
-on the code-shaped scenario and divergent on one prose prompt. The task is
-recorded **incomplete (asset-gated)**, not passed: a 64/128-token Ornith MTP
-run needs the sidecar installed and would be the first thing to re-measure if it
-appears.
+`benchmark/t30_mtp_ab.py` then ran three requests per arm, pure greedy, cache
+off, Ornith 4-bit, at 64 and 128 new tokens:
+
+| tokens | arm | aggregate tok/s | paired median ratio | acceptance | emitted/pass |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 64 | scalar | 11.76 | — | — | — |
+| 64 | MTP | 11.16 | 0.858 | 70.3% | 1.703 |
+| 128 | scalar | 12.21 | — | — | — |
+| 128 | MTP | 10.74 | 0.866 | 64.9% | 1.649 |
+
+Text hashes are identical across all six requests per token count
+(`856f0857dfc36dc8` at 64, `4e5fd441610d4b39` at 128), so this is a speed
+loss, not a quality trade. MTP is −5.1% aggregate at 64 and −12.0% at 128;
+the paired medians are −14.2% and −13.4%. No arm clears the +5% gate.
+
+This is the same conclusion T29's arithmetic predicted: at 70% acceptance the
+verify pass has to cost less than ~1.7× a scalar token, and the measured
+width-2 path costs 2.238×. The controller remains unwired; the sidecar is
+installed for a future verify-path rewrite, not because it is enabled.

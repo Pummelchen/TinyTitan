@@ -34,7 +34,7 @@ scorecard and the verification footer.
 | T24 literal 100K | Host-blocked: the 100K request (about 61K tokens at the measured character ratio) was still prefilling at the 3600 s timeout. A 24.5K read is the feasible scale; the placement conclusion is unchanged and the scaling is documented. |
 | T27 large-memory benchmark | Blocked (hardware): no 64/128 GB Mac. |
 | T29 speculation gate | Rejected: measured verify pass 2.238x a scalar token, 1.857 emitted/pass at 85.7% acceptance, so even perfect acceptance is 0.894x. A +5% gate cannot fire; no controller code is kept. |
-| T30 MTP controller benchmark | Blocked (asset): no `models/ornith-1.5_35B_A3B_MTP_4Bit`; installing one to satisfy a benchmark is forbidden. Prior Qwen3.8 MTP is -43.2%. |
+| T30 MTP controller benchmark | **Rejected after measurement.** The Ornith MTP sidecar was installed from the pinned HF source (`tools/install_models.sh ornith15-mtp`, 4.18 GB shard -> 43 MB install). At 64/128 tokens MTP measured 11.16/10.74 vs 11.76/12.21 tok/s aggregate (−5.1%/−12.0%; paired medians −14.2%/−13.4%), text identical; acceptance 70.3%/64.9%. No >5% win. |
 | T34 fused decode | Rejected earlier on wall clock; its opt-in path remains for a 64 GB retest, not wired. |
 
 ## Performance kept, performance not kept

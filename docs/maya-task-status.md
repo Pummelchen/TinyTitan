@@ -35,7 +35,7 @@ evidence exist.
 | T27 large-memory benchmark | blocked (hardware) | No 64/128 GB Mac in this checkout; policy is pinned by tests and the 24 GB arm measurements exist, the large-memory arm does not. |
 | T28 distinct-expert estimator | done | `benchmark/t28_distinct_expert_estimator.py`, adjacent-route new-expert rate. On the recorded 48-layer Qwen3.8 trace: MAE 1.881 for W=2 (topK baseline 6.063; topK*W bound 3.937) and 3.726 for W=4 (baseline 16.532). `benchmark/test_t28_distinct_expert_estimator.py` (5 tests); `docs/speculation-cost-model-verdict.md`. |
 | T29 speculation gate | rejected | The measured width-2 verify pass is 2.238x a scalar token and emits 1.857 tokens/pass at 85.7% acceptance, so even 100% acceptance gives 0.894x; a +5% gate can never fire. No controller code is kept; the arithmetic is in `docs/speculation-cost-model-verdict.md`. |
-| T30 MTP controller benchmark | blocked (asset) | No MTP sidecar installed (`models/ornith-1.5_35B_A3B_MTP_4Bit` absent); installing one to satisfy a benchmark is forbidden. Prior Qwen3.8 MTP: -43.2% at 85.7% acceptance, recorded in `docs/qwen38-mtp-and-overlap-verdict.md`. |
+| T30 MTP controller benchmark | rejected (measured) | Sidecar installed from the pinned `ornith-ai/Ornith-1.5-35B-A3B` shard 16 via `tools/install_models.sh ornith15-mtp` (4.18 GB source, 43 MB install, verified receipt). Three paired requests at 64/128 tokens: acceptance 70.3%/64.9%, emitted 1.703/1.649 per pass; aggregate 11.16 vs 11.76 tok/s at 64 (−5.1%) and 10.74 vs 12.21 at 128 (−12.0%), paired medians −14.2%/−13.4%, text identical. No >5% win; the gate stays off. `benchmark/t30_mtp_ab.py`; `docs/speculation-cost-model-verdict.md`. |
 | T31 closeout | done | `docs/maya-closeout-2026-10-22.md`: full suite 1,947 tests passed, all eighteen lint gates passed, release build warnings-as-errors clean, Ornith 4-bit and Qwen3.8 4-bit golden baselines identical; every task is done, rejected with evidence, or recorded blocked by a named resource. |
 | T32 real-shape batch-attention diff | done | The reported diff does not reproduce. An independent layer-3 probe on Ornith 4-bit (width 2/4, positions 100/60 and 100/60/130/20) shows batch attention == per-row: normed 0.0, packed q 2.4e-4, v 0.0, post-gate attn 2.4e-4, o 2.4e-4, K/V slot bytes 0.0. The in-loop probe ran after the fused FFN's hidden handoff, and its `first=1269` is constant across unrelated positions; it was not a stage comparison. See `docs/batched-decode-phase2c-2026-10-21.md` T32/T33. |
 | T33 instrument q/k/attn stages | done | No wrong tensor in the q/k/attention/o chain; the stage is exact to fp16 rounding on the real install and is pinned in-tree by `BatchAttentionTests.batchMatchesPerRowAtDecodePositions`. The corrupt Ornith text is in the reverted loop's wiring around the stage (T34). |
@@ -43,9 +43,9 @@ evidence exist.
 
 Closeout: T1-T34 are done, rejected with evidence, or blocked by a named
 resource. The remaining blockers are the model/hardware pair for T11-T14 and
-T19/T27, the missing MTP sidecar for T30, and the 100K read in T24 (a full
-prefill of the ~61K-token scaled request was still running at the 3600 s
-timeout). See `docs/maya-closeout-2026-10-22.md`.
+T19/T27, plus the 100K read in T24 (a full prefill of the ~61K-token scaled
+request was still running at the 3600 s timeout). T30's sidecar was installed
+and the arm was measured and rejected. See `docs/maya-closeout-2026-10-22.md`.
 
 ## New tasks found during execution
 

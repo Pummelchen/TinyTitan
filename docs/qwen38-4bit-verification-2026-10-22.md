@@ -20,7 +20,7 @@ logs are under the git-ignored `.build/` (`qwen38-*`).
 | T20-T24 interior checkpoints | **Now available on Qwen3.8.** `InferenceAuxiliaryState` carries the QSA pooled blocks/raw tail and the PLE convolution window beside the snapshot; a 1,407-token edited last turn went from 44.38 s to 2.76 s (16.1x, identical text hash), with capture 58.64 s against 44.19 s. The turn-cache live tier still hits (`cached_tokens=36`, append 4.93 s vs 5.23 s), and the turn-end cache now restores across a process restart (`tier=ssd`, `cached_tokens=203`, 6.22 s prefill vs 14.33 s with cache off). See `docs/qwen38-checkpoint-auxiliary.md`. |
 | T25-T26 page cache | Policy correctly selects **bounded** (96 GB install against 48 GB threshold). `TINYTITAN_BOUNDED_IO=0` measured a wash (4.69/4.84 vs 4.58/4.96 tok/s), so no override. |
 | T27 large-memory | Blocked (hardware), unchanged. |
-| T28-T30 MTP | No sidecar for this install; unchanged. |
+| T28-T30 MTP | T28 done; T29 rejected by the verify-cost arithmetic. T30 was measured on the Ornith sidecar (installed from HF) and loses at 64/128 tokens; this Qwen3.8 install still has no MTP sidecar. |
 | T31 gates | Full suite/lint/golden green for the changed profile (see the closeout). |
 
 ## Calibration on Qwen3.8 (T16)
