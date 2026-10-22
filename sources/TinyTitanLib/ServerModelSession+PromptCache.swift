@@ -338,7 +338,8 @@ extension ServerModelSession {
                     throw PromptCheckpointStoreError.invalidMetadata(
                         "checkpoint position or prefix does not match the request")
                 }
-                try runner.restoreInferenceState(loaded.snapshot)
+                try runner.restoreInferenceState(
+                    loaded.snapshot, auxiliary: loaded.auxiliary)
                 ServerLog.diagnostic(
                     "TinyTitan prompt_checkpoint hit kind=\(boundary.kind.rawValue) "
                         + "cached_tokens=\(boundary.position) "

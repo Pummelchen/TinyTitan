@@ -150,4 +150,57 @@ import Testing
             try await store.save(metadata, snapshot: snapshot)
         }
     }
+
+    /// Qwen3.8 needs the QSA indexer state restored beside the KV snapshot; a
+    /// snapshot without it must still refuse rather than return a model that
+    /// ranks blocks from the wrong prefix.
+    @Test func qsaAuxiliaryStateRestoresTheSameContinuation() async throws {
+        let ctx = try MetalContext()
+        let tokens: [Int32] = [11, 7, 5, 3, 9, 13, 17]
+        let boundary = 3
+        let config = PrefillRuntimeConfig.production(chunkTokens: 32)
+        let logits = try makeLogits(ctx)
+        let dir = try QwenToySynthetic.write(weightBits: 4, qsa: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = try Model.load(
+            directoryURL: dir, device: ctx.device, expecting: .qwenToyQSA())
+        let runtime = try RuntimeConfiguration(
+            forceLogitsHead: true, kvCachePrecision: .int8)
+
+        func runner() throws -> RealForwardRunner {
+            try RealForwardRunner(
+                model: model, context: ctx, maxContext: maxContext,
+                slots: 1, runtimeConfiguration: runtime)
+        }
+
+        let reference = try runner()
+        _ = try await reference.prefillChunked(
+            tokens: tokens[...], startPosition: 0, outputMode: .logits,
+            config: config, into: logits, onProgress: { _ in })
+        let expected = values(logits)
+
+        let capture = try runner()
+        _ = try await capture.prefillChunked(
+            tokens: tokens[0..<boundary], startPosition: 0,
+            outputMode: .logits, config: config, into: logits,
+            onProgress: { _ in })
+        let snapshot = try capture.captureInferenceState()
+        let auxiliary = try #require(try capture.captureAuxiliaryState())
+        #expect(auxiliary.position == boundary)
+
+        // A bare snapshot still refuses, and resets the runner rather than
+        // leaving it half-restored.
+        let refused = try runner()
+        #expect(throws: InferenceStateSnapshotError.self) {
+            try refused.restoreInferenceState(snapshot)
+        }
+
+        let restored = try runner()
+        try restored.restoreInferenceState(snapshot, auxiliary: auxiliary)
+        _ = try await restored.prefillChunked(
+            tokens: tokens[boundary...], startPosition: boundary,
+            outputMode: .logits, config: config, into: logits,
+            onProgress: { _ in })
+        #expect(values(logits) == expected)
+    }
 }

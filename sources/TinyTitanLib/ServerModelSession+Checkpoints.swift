@@ -59,6 +59,7 @@ extension ServerModelSession {
                             + "actual=\(snapshot.descriptor.position)")
                     return
                 }
+                let auxiliary = try captureRunner.captureAuxiliaryState()
                 let prefix = Array(capturePromptIDs.prefix(position))
                 let key = PromptCheckpointKey.make(
                     domain: captureDomain, prefixTokenIDs: prefix)
@@ -75,12 +76,13 @@ extension ServerModelSession {
                     }
                     do {
                         try await checkpointStore.save(
-                            metadata, snapshot: snapshot)
+                            metadata, snapshot: snapshot, auxiliary: auxiliary)
                         ServerLog.diagnostic(
                             "TinyTitan prompt_checkpoint stored "
                                 + "kind=\(metadata.kind.rawValue) "
                                 + "tokens=\(position) "
-                                + "state_bytes=\(snapshot.payload.count)")
+                                + "state_bytes=\(snapshot.payload.count) "
+                                + "aux_bytes=\(auxiliary?.payload.count ?? 0)")
                     } catch {
                         ServerLog.diagnostic(
                             "TinyTitan prompt_checkpoint save_failed "

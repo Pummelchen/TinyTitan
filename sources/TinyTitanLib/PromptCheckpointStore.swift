@@ -20,6 +20,10 @@ actor PromptCheckpointStore {
     /// A single captured snapshot is capped, like the turn store, so a huge
     /// context cannot allocate an unbounded payload regardless of the budget.
     static let maximumCaptureBytes = 4 * 1_024 * 1_048_576
+    /// QSA pooled blocks plus the PLE window. At 8K this is tens of MiB; the
+    /// cap keeps a pathological context from turning an auxiliary file into a
+    /// second unbounded snapshot.
+    static let maximumAuxiliaryBytes = 1_024 * 1_048_576
 
     private struct DiskMetadata: Codable {
         static let currentVersion = 1
@@ -27,18 +31,24 @@ actor PromptCheckpointStore {
         let version: Int
         let metadata: PromptCheckpointMetadata
         let payloadSHA256: String
+        // Additive in v1: an old record has no auxiliary state, a new Qwen3.8
+        // record carries the QSA/PLE payload and its hash.
+        let auxiliaryBytes: Int?
+        let auxiliarySHA256: String?
     }
 
     private struct DiskRecord {
         let metadata: PromptCheckpointMetadata
         let directory: URL
         let payload: URL
+        let auxiliaryBytes: Int
         var modificationDate: Date
     }
 
     private struct MemoryRecord {
         let metadata: PromptCheckpointMetadata
         let snapshot: InferenceStateSnapshot
+        let auxiliary: InferenceAuxiliaryState?
     }
 
     private struct State {
@@ -52,6 +62,7 @@ actor PromptCheckpointStore {
 
     private static let metadataName = "metadata.json"
     private static let payloadName = "state.bin"
+    private static let auxiliaryName = "auxiliary.bin"
 
     private let configuration: ServerPromptCacheStorageConfiguration
     private let fileManager: FileManager
@@ -77,7 +88,8 @@ actor PromptCheckpointStore {
     /// before anything is written.
     func save(
         _ metadata: PromptCheckpointMetadata,
-        snapshot: InferenceStateSnapshot
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState? = nil
     ) throws {
         try metadata.validate()
         guard snapshot.descriptor == metadata.descriptor else {
@@ -94,19 +106,27 @@ actor PromptCheckpointStore {
             throw PromptCheckpointStoreError.exceedsLimit(
                 bytes: bytes, limit: Self.maximumCaptureBytes)
         }
-        if bytes <= configuration.memoryLimitBytes {
-            insertMemory(metadata: metadata, snapshot: snapshot)
+        let auxiliaryBytes = auxiliary?.payload.count ?? 0
+        guard auxiliaryBytes <= Self.maximumAuxiliaryBytes else {
+            throw PromptCheckpointStoreError.exceedsLimit(
+                bytes: auxiliaryBytes, limit: Self.maximumAuxiliaryBytes)
+        }
+        let total = bytes + auxiliaryBytes
+        if total <= configuration.memoryLimitBytes {
+            insertMemory(
+                metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
             return
         }
         guard configuration.diskDirectory != nil else {
             throw PromptCheckpointStoreError.exceedsLimit(
-                bytes: bytes, limit: configuration.memoryLimitBytes)
+                bytes: total, limit: configuration.memoryLimitBytes)
         }
-        guard bytes <= configuration.diskLimitBytes else {
+        guard total <= configuration.diskLimitBytes else {
             throw PromptCheckpointStoreError.exceedsLimit(
-                bytes: bytes, limit: configuration.diskLimitBytes)
+                bytes: total, limit: configuration.diskLimitBytes)
         }
-        try writeDisk(metadata: metadata, snapshot: snapshot)
+        try writeDisk(
+            metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
     }
 
     /// Loads a checkpoint and verifies it against `domain` and its content
@@ -114,21 +134,26 @@ actor PromptCheckpointStore {
     func load(
         _ key: PromptCheckpointKey,
         domain: ServerPromptCacheDomain
-    ) throws -> (metadata: PromptCheckpointMetadata, snapshot: InferenceStateSnapshot) {
+    ) throws -> (
+        metadata: PromptCheckpointMetadata,
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?
+    ) {
         if let record = state.memory[key] {
             guard record.metadata.domain == domain else {
                 throw PromptCheckpointStoreError.domainMismatch
             }
             try Self.verifyKey(record.metadata)
             touchMemory(key)
-            return (record.metadata, record.snapshot)
+            return (record.metadata, record.snapshot, record.auxiliary)
         }
         if state.disk[key] == nil,
             let restored = try? diskRecordFromFileSystem(for: key)
         {
             state.disk[key] = restored
             state.diskLRU.append(key)
-            state.diskBytes += restored.metadata.descriptor.payloadBytes
+            state.diskBytes +=
+                restored.metadata.descriptor.payloadBytes + restored.auxiliaryBytes
         }
         guard let diskRecord = state.disk[key] else {
             throw PromptCheckpointStoreError.missing(key)
@@ -159,13 +184,36 @@ actor PromptCheckpointStore {
                 throw PromptCheckpointStoreError.corrupt(
                     key, "payload hash does not match")
             }
+            let auxiliary: InferenceAuxiliaryState?
+            if let auxiliaryBytes = diskMetadata.auxiliaryBytes,
+                let auxiliarySHA256 = diskMetadata.auxiliarySHA256
+            {
+                let auxiliaryData = try readPayload(
+                    at: diskRecord.directory.appendingPathComponent(
+                        Self.auxiliaryName),
+                    expectedBytes: auxiliaryBytes)
+                guard Sha256Verifier.hashData(auxiliaryData) == auxiliarySHA256
+                else {
+                    throw PromptCheckpointStoreError.corrupt(
+                        key, "auxiliary payload hash does not match")
+                }
+                auxiliary = InferenceAuxiliaryState(
+                    position: diskMetadata.metadata.position,
+                    payload: auxiliaryData)
+            } else {
+                auxiliary = nil
+            }
             touchDisk(key)
             let snapshot = InferenceStateSnapshot(
                 descriptor: diskMetadata.metadata.descriptor, payload: payload)
-            if payload.count <= configuration.memoryLimitBytes {
-                insertMemory(metadata: diskMetadata.metadata, snapshot: snapshot)
+            if payload.count + (auxiliary?.payload.count ?? 0)
+                <= configuration.memoryLimitBytes
+            {
+                insertMemory(
+                    metadata: diskMetadata.metadata, snapshot: snapshot,
+                    auxiliary: auxiliary)
             }
-            return (diskMetadata.metadata, snapshot)
+            return (diskMetadata.metadata, snapshot, auxiliary)
         } catch let error as PromptCheckpointStoreError {
             remove(key)
             throw error
@@ -188,11 +236,16 @@ actor PromptCheckpointStore {
     }
 
     func remove(_ key: PromptCheckpointKey) {
-        state.memory.removeValue(forKey: key)
+        if let removed = state.memory.removeValue(forKey: key) {
+            state.memoryBytes -=
+                removed.snapshot.payload.count
+                + (removed.auxiliary?.payload.count ?? 0)
+        }
         state.memoryLRU.removeAll { $0 == key }
         if let record = state.disk.removeValue(forKey: key) {
             state.diskLRU.removeAll { $0 == key }
-            state.diskBytes -= record.metadata.descriptor.payloadBytes
+            state.diskBytes -=
+                record.metadata.descriptor.payloadBytes + record.auxiliaryBytes
             try? fileManager.removeItem(at: record.directory)
         }
     }
@@ -251,11 +304,14 @@ actor PromptCheckpointStore {
             let key = diskMetadata.metadata.key
             guard state.disk[key] == nil else { continue }
             let payloadURL = directory.appendingPathComponent(Self.payloadName)
+            let auxiliaryBytes = diskMetadata.auxiliaryBytes ?? 0
             state.disk[key] = DiskRecord(
                 metadata: diskMetadata.metadata, directory: directory,
-                payload: payloadURL, modificationDate: Date())
+                payload: payloadURL, auxiliaryBytes: auxiliaryBytes,
+                modificationDate: Date())
             state.diskLRU.append(key)
-            state.diskBytes += diskMetadata.metadata.descriptor.payloadBytes
+            state.diskBytes +=
+                diskMetadata.metadata.descriptor.payloadBytes + auxiliaryBytes
         }
     }
 
@@ -280,26 +336,31 @@ actor PromptCheckpointStore {
         return DiskRecord(
             metadata: diskMetadata.metadata, directory: directory,
             payload: directory.appendingPathComponent(Self.payloadName),
+            auxiliaryBytes: diskMetadata.auxiliaryBytes ?? 0,
             modificationDate: Date())
     }
 
     private func insertMemory(
         metadata: PromptCheckpointMetadata,
-        snapshot: InferenceStateSnapshot
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?
     ) {
+        func bytes(_ record: MemoryRecord) -> Int {
+            record.snapshot.payload.count + (record.auxiliary?.payload.count ?? 0)
+        }
         if let existing = state.memory[metadata.key] {
-            state.memoryBytes -= existing.snapshot.payload.count
+            state.memoryBytes -= bytes(existing)
         }
         state.memory[metadata.key] = MemoryRecord(
-            metadata: metadata, snapshot: snapshot)
+            metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
         state.memoryLRU.removeAll { $0 == metadata.key }
         state.memoryLRU.append(metadata.key)
-        state.memoryBytes += snapshot.payload.count
+        state.memoryBytes += snapshot.payload.count + (auxiliary?.payload.count ?? 0)
         while state.memoryBytes > configuration.memoryLimitBytes,
             let oldest = state.memoryLRU.first
         {
             if let record = state.memory.removeValue(forKey: oldest) {
-                state.memoryBytes -= record.snapshot.payload.count
+                state.memoryBytes -= bytes(record)
             }
             state.memoryLRU.removeFirst()
         }
@@ -318,7 +379,8 @@ actor PromptCheckpointStore {
 
     private func writeDisk(
         metadata: PromptCheckpointMetadata,
-        snapshot: InferenceStateSnapshot
+        snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState?
     ) throws {
         guard let root = configuration.diskDirectory else {
             throw PromptCheckpointStoreError.diskUnavailable
@@ -332,10 +394,26 @@ actor PromptCheckpointStore {
         try snapshot.payload.write(to: payloadURL, options: .atomic)
         try fileManager.setAttributes(
             [.posixPermissions: 0o600], ofItemAtPath: payloadURL.path)
+        let auxiliaryURL = directory.appendingPathComponent(Self.auxiliaryName)
+        let auxiliaryBytes = auxiliary?.payload.count ?? 0
+        let auxiliarySHA256: String?
+        if let auxiliary {
+            try auxiliary.payload.write(to: auxiliaryURL, options: .atomic)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: auxiliaryURL.path)
+            auxiliarySHA256 = Sha256Verifier.hashData(auxiliary.payload)
+        } else {
+            // A rewrite with no auxiliary state must not leave the previous
+            // record's QSA/PLE payload behind a new metadata file.
+            try? fileManager.removeItem(at: auxiliaryURL)
+            auxiliarySHA256 = nil
+        }
         let diskMetadata = DiskMetadata(
             version: DiskMetadata.currentVersion,
             metadata: metadata,
-            payloadSHA256: Sha256Verifier.hashData(snapshot.payload))
+            payloadSHA256: Sha256Verifier.hashData(snapshot.payload),
+            auxiliaryBytes: auxiliary == nil ? nil : auxiliaryBytes,
+            auxiliarySHA256: auxiliarySHA256)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         try encoder.encode(diskMetadata).write(
@@ -344,14 +422,17 @@ actor PromptCheckpointStore {
         // Replacing a record charges the payload once, not twice: the old
         // entry's bytes are still in `diskBytes` until they are subtracted.
         if let replaced = state.disk[metadata.key] {
-            state.diskBytes -= replaced.metadata.descriptor.payloadBytes
+            state.diskBytes -=
+                replaced.metadata.descriptor.payloadBytes
+                + replaced.auxiliaryBytes
             state.diskLRU.removeAll { $0 == metadata.key }
         }
         state.disk[metadata.key] = DiskRecord(
             metadata: metadata, directory: directory, payload: payloadURL,
+            auxiliaryBytes: auxiliaryBytes,
             modificationDate: Date())
         state.diskLRU.append(metadata.key)
-        state.diskBytes += snapshot.payload.count
+        state.diskBytes += snapshot.payload.count + auxiliaryBytes
         while state.diskBytes > configuration.diskLimitBytes,
             let oldest = state.diskLRU.first
         {
@@ -360,7 +441,8 @@ actor PromptCheckpointStore {
                 continue
             }
             state.diskLRU.removeFirst()
-            state.diskBytes -= record.metadata.descriptor.payloadBytes
+            state.diskBytes -=
+                record.metadata.descriptor.payloadBytes + record.auxiliaryBytes
             try? fileManager.removeItem(at: record.directory)
         }
     }
@@ -368,7 +450,9 @@ actor PromptCheckpointStore {
     private func readPayload(
         at url: URL, expectedBytes: Int
     ) throws -> Data {
-        guard expectedBytes > 0, expectedBytes <= Self.maximumCaptureBytes else {
+        guard expectedBytes > 0,
+            expectedBytes <= max(Self.maximumCaptureBytes, Self.maximumAuxiliaryBytes)
+        else {
             throw PromptCheckpointStoreError.invalidMetadata(
                 "payload size \(expectedBytes) is not a valid capture size")
         }

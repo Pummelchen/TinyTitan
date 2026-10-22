@@ -174,6 +174,56 @@ final class PLEBlock {
             history * rowBytes)
     }
 
+    // MARK: - Auxiliary state (Qwen3.8 interior checkpoints)
+
+    /// Append the convolution history the next token reads.
+    ///
+    /// `xpad[xpadIndex]` holds exactly `history` valid rows at offset 0 after
+    /// `encodeRows`; the padding rows above them are scratch and are not part
+    /// of the state.
+    func appendSnapshotPayload(to data: inout Data) {
+        let rowBytes = hcDim * MemoryLayout<Float16>.stride
+        let bytes = history * rowBytes
+        AuxiliaryCoding.appendUInt32(xpadIndex, to: &data)
+        AuxiliaryCoding.appendUInt32(history, to: &data)
+        AuxiliaryCoding.appendBytes(
+            xpad[xpadIndex].contents(), count: bytes, to: &data)
+    }
+
+    /// Restore what `appendSnapshotPayload` wrote. Both ping-pong buffers are
+    /// cleared first so the unused one cannot leak an earlier prompt.
+    func restoreSnapshotPayload(
+        _ bytes: UnsafeRawBufferPointer,
+        offset: inout Int
+    ) throws {
+        let index = try AuxiliaryCoding.readUInt32(bytes, offset: &offset)
+        let storedHistory = try AuxiliaryCoding.readUInt32(bytes, offset: &offset)
+        guard index < 2 else {
+            throw InferenceAuxiliaryStateError.malformed(
+                "PLE xpad index \(index) is not 0 or 1")
+        }
+        guard storedHistory == history else {
+            throw InferenceAuxiliaryStateError.malformed(
+                "PLE history \(storedHistory) does not match \(history)")
+        }
+        let rowBytes = hcDim * MemoryLayout<Float16>.stride
+        let count = history * rowBytes
+        try AuxiliaryCoding.require(
+            bytes, offset: offset, count: count, "PLE history")
+        guard let base = bytes.baseAddress else {
+            throw InferenceAuxiliaryStateError.truncated("PLE history")
+        }
+        for buffer in xpad {
+            memset(buffer.contents(), 0, buffer.length)
+        }
+        memcpy(
+            xpad[index].contents(),
+            base.advanced(by: offset),
+            count)
+        offset += count
+        xpadIndex = index
+    }
+
     /// Clears the carried convolution history. Call between completions: a
     /// state left over from a previous prompt would leak that prompt's
     /// n-grams into the first tokens of the next one.

@@ -18,7 +18,7 @@ scorecard and the verification footer.
 
 | Task | Outcome |
 | --- | --- |
-| T22 edited-turn resume | `PromptCheckpointPlanner`, the prefill split hook and the longest-prefix restore. A turn-cache miss tries `lastTurnStart`, then `systemEnd`, then full prefill. |
+| T22 edited-turn resume | `PromptCheckpointPlanner`, the prefill split hook and the longest-prefix restore. A turn-cache miss tries `lastTurnStart`, then `systemEnd`, then full prefill. Qwen3.8 carries QSA/PLE state in `InferenceAuxiliaryState` (1,407-token edit 44.38 s -> 2.76 s, 16.1x). |
 | T23 checkpoint tests | Planner/store/live-runner matrix, including prefix, domain, limits, corruption, dedup and concurrency. |
 | T24 checkpoint benchmark | 24.5K-token edited-turn read: 1119.3 s -> 3.07 s (**365x**), byte-identical text; 16K grid 465.2 s (2.41x). Literal 100K is host-blocked (see below). |
 | T25 page-cache policy | Machine-size rule (`RAM >= 2 * installBytes`), explicit override, fail-closed inputs. No change on 24 GB. |
@@ -64,15 +64,17 @@ LFU use cap were each A/B'd and left at their current values; see
 `docs/qwen38-4bit-verification-2026-10-22.md` maps every task-list
 optimization onto this model: width-2 batching has no aggregate win (and at a
 lower slot count produced different text until QSA/PLE models were clamped to
-one sequence), the fused loop is rejected on Qwen3.8 correctness, interior
-checkpoints are unavailable because the snapshot refuses QSA/PLE state, and the
-page-cache policy correctly stays bounded for the 96 GB install.
+one sequence), the fused loop is rejected on Qwen3.8 correctness, and the
+page-cache policy correctly stays bounded for the 96 GB install. Interior
+checkpoints now work on Qwen3.8 as well: a 1,407-token edited last turn fell
+from 44.38 s to 2.76 s (16.1x, identical text) with the QSA/PLE auxiliary
+payload; `docs/qwen38-checkpoint-auxiliary.md`.
 
 ## Verification
 
 | Gate | Result |
 | --- | --- |
-| `swift test --no-parallel` | **PASS**, 1,939 tests across the seven test bundles (926 + 418 + 164 + 189 + 81 + 63 + 98), 0 failures |
+| `swift test --no-parallel` | **PASS**, 1,944 tests across the seven test bundles (927 + 419 + 164 + 189 + 84 + 63 + 98), 0 failures |
 | `tools/lint.sh all` | **PASS**, exit 0: all eighteen gates, including swiftlint 0.65.1, swift-format and ruff 0.16.7 |
 | `swift build -c release` | **PASS**, warnings-as-errors, 0 warnings |
 | `tools/golden-baseline.sh --check 4` | **PASS**, `output identical to baseline` (Ornith 1.5 4-bit) |

@@ -358,4 +358,81 @@ import TinyTitan
         #expect(listed.count == 2)
         #expect(listed.map(\.key) == [first.key, second.key])
     }
+
+    @Test func auxiliaryQSAStateTravelsWithTheCheckpoint() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let meta = metadata(tokens: [1, 2, 3])
+        let auxiliary = InferenceAuxiliaryState(
+            position: 3, payload: Data(repeating: 9, count: 64))
+        do {
+            let writer = try PromptCheckpointStore(configuration: configuration)
+            try await writer.save(
+                meta, snapshot: snapshot(for: meta), auxiliary: auxiliary)
+        }
+        let reader = try PromptCheckpointStore(configuration: configuration)
+        let loaded = try await reader.load(meta.key, domain: domain)
+        #expect(loaded.auxiliary == auxiliary)
+        #expect(loaded.snapshot.payload == snapshot(for: meta).payload)
+    }
+
+    @Test func corruptAuxiliaryStateIsDeletedRatherThanRestored() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let meta = metadata(tokens: [1, 2, 3])
+        let auxiliary = InferenceAuxiliaryState(
+            position: 3, payload: Data(repeating: 4, count: 32))
+        do {
+            let writer = try PromptCheckpointStore(configuration: configuration)
+            try await writer.save(
+                meta, snapshot: snapshot(for: meta), auxiliary: auxiliary)
+        }
+        let path = root.appendingPathComponent(meta.key.contentHash)
+            .appendingPathComponent("auxiliary.bin")
+        var bytes = try Data(contentsOf: path)
+        bytes[0] ^= 0xFF
+        try bytes.write(to: path)
+        let reader = try PromptCheckpointStore(configuration: configuration)
+        await #expect(throws: PromptCheckpointStoreError.self) {
+            try await reader.load(meta.key, domain: domain)
+        }
+        #expect(!FileManager.default.fileExists(atPath: path.path))
+    }
+
+    @Test func rewritingWithoutAuxiliaryDropsTheOldPayload() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let store = try PromptCheckpointStore(configuration: configuration)
+        let meta = metadata(tokens: [1, 2, 3])
+        try await store.save(
+            meta, snapshot: snapshot(for: meta),
+            auxiliary: InferenceAuxiliaryState(
+                position: 3, payload: Data(repeating: 1, count: 32)))
+        let firstBytes = await store.diskBytes
+        try await store.save(meta, snapshot: snapshot(for: meta))
+        let secondBytes = await store.diskBytes
+        #expect(firstBytes == meta.descriptor.payloadBytes + 32)
+        #expect(secondBytes == meta.descriptor.payloadBytes)
+        let loaded = try await store.load(meta.key, domain: domain)
+        #expect(loaded.auxiliary == nil)
+    }
+
+    @Test func auxiliaryStateCountsAgainstTheMemoryLimit() async throws {
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 20, diskDirectory: nil, diskLimitBytes: 0))
+        let meta = metadata(tokens: [1, 2, 3])
+        await #expect(throws: PromptCheckpointStoreError.self) {
+            try await store.save(
+                meta, snapshot: self.snapshot(for: meta),
+                auxiliary: InferenceAuxiliaryState(
+                    position: 3, payload: Data(repeating: 1, count: 8)))
+        }
+    }
 }

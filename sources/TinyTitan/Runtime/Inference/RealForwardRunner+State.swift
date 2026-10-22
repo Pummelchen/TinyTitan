@@ -58,15 +58,13 @@ extension RealForwardRunner {
         kv?.position ?? 0
     }
 
-    /// Whether `restoreInferenceState` can accept a snapshot from this runner.
+    /// Whether a snapshot from this runner can be restored.
     ///
-    /// A QSA indexer or PLE block has per-conversation buffers the snapshot
-    /// does not carry, so a restore would attend to the wrong keys. The
-    /// refusal is correct; asking first keeps a caller from reading a
-    /// multi-gigabyte payload only to have it rejected.
-    public var supportsInferenceStateRestore: Bool {
-        qsaIndexer == nil && pleBlock == nil
-    }
+    /// A QSA indexer or PLE block still needs its own state, but that state
+    /// now travels beside the snapshot as `InferenceAuxiliaryState`. A caller
+    /// that supplies only the snapshot is refused inside
+    /// `restoreInferenceState`, as before.
+    public var supportsInferenceStateRestore: Bool { true }
 
     public func prepareForContinuation(expectedPosition: Int) throws {
         guard let kv else {
@@ -117,7 +115,100 @@ extension RealForwardRunner {
             payload: payload)
     }
 
-    public func restoreInferenceState(_ snapshot: InferenceStateSnapshot) throws {
+    /// Capture the QSA/PLE state a restore cannot derive from the KV payload.
+    ///
+    /// Nil for a family without either subsystem; those families restore from
+    /// the snapshot alone.
+    public func captureAuxiliaryState() throws -> InferenceAuxiliaryState? {
+        guard qsaIndexer != nil || pleBlock != nil, let kv, kv.position > 0 else {
+            return nil
+        }
+        let position = kv.position
+        var payload = Data()
+        if let qsaIndexer {
+            var qsa = Data()
+            try qsaIndexer.appendSnapshotPayload(to: &qsa, position: position)
+            AuxiliaryCoding.appendUInt32(1, to: &payload)
+            AuxiliaryCoding.appendUInt32(qsa.count, to: &payload)
+            payload.append(qsa)
+        } else {
+            AuxiliaryCoding.appendUInt32(0, to: &payload)
+        }
+        if let pleBlock {
+            var ple = Data()
+            pleBlock.appendSnapshotPayload(to: &ple)
+            AuxiliaryCoding.appendUInt32(1, to: &payload)
+            AuxiliaryCoding.appendUInt32(ple.count, to: &payload)
+            payload.append(ple)
+        } else {
+            AuxiliaryCoding.appendUInt32(0, to: &payload)
+        }
+        return InferenceAuxiliaryState(position: position, payload: payload)
+    }
+
+    /// Restore the payload written by `captureAuxiliaryState`. The KV cursor is
+    /// already at `snapshot.descriptor.position`.
+    func restoreAuxiliaryState(_ auxiliary: InferenceAuxiliaryState) throws {
+        guard auxiliary.version == InferenceAuxiliaryState.currentVersion else {
+            throw InferenceAuxiliaryStateError.unsupportedVersion(
+                auxiliary.version)
+        }
+        guard let kv, kv.position == auxiliary.position else {
+            throw InferenceAuxiliaryStateError.invalidPosition(
+                expected: kv?.position ?? 0, actual: auxiliary.position)
+        }
+        try auxiliary.payload.withUnsafeBytes { bytes in
+            var offset = 0
+            let qsaFlag = try AuxiliaryCoding.readUInt32(bytes, offset: &offset)
+            if qsaFlag == 1 {
+                guard let qsaIndexer else {
+                    throw InferenceAuxiliaryStateError.unexpectedState(
+                        "QSA indexer")
+                }
+                let length = try AuxiliaryCoding.readUInt32(
+                    bytes, offset: &offset)
+                try AuxiliaryCoding.require(
+                    bytes, offset: offset, count: length, "QSA payload")
+                let start = offset
+                try qsaIndexer.restoreSnapshotPayload(
+                    bytes, offset: &offset, position: auxiliary.position)
+                guard offset - start == length else {
+                    throw InferenceAuxiliaryStateError.malformed(
+                        "QSA payload is \(length) bytes, consumed \(offset - start)")
+                }
+            } else if qsaIndexer != nil {
+                throw InferenceAuxiliaryStateError.missingState("QSA indexer")
+            }
+            let pleFlag = try AuxiliaryCoding.readUInt32(bytes, offset: &offset)
+            if pleFlag == 1 {
+                guard let pleBlock else {
+                    throw InferenceAuxiliaryStateError.unexpectedState("PLE")
+                }
+                let length = try AuxiliaryCoding.readUInt32(
+                    bytes, offset: &offset)
+                try AuxiliaryCoding.require(
+                    bytes, offset: offset, count: length, "PLE payload")
+                let start = offset
+                try pleBlock.restoreSnapshotPayload(
+                    bytes, offset: &offset)
+                guard offset - start == length else {
+                    throw InferenceAuxiliaryStateError.malformed(
+                        "PLE payload is \(length) bytes, consumed \(offset - start)")
+                }
+            } else if pleBlock != nil {
+                throw InferenceAuxiliaryStateError.missingState("PLE")
+            }
+            guard offset == bytes.count else {
+                throw InferenceAuxiliaryStateError.malformed(
+                    "auxiliary payload has \(bytes.count - offset) trailing bytes")
+            }
+        }
+    }
+
+    public func restoreInferenceState(
+        _ snapshot: InferenceStateSnapshot,
+        auxiliary: InferenceAuxiliaryState? = nil
+    ) throws {
         do {
             let descriptor = snapshot.descriptor
             guard descriptor.version == InferenceStateSnapshotDescriptor.currentVersion else {
@@ -146,15 +237,19 @@ extension RealForwardRunner {
             // re-prefill, not a wrong answer.
             //
             // Both are non-nil only for a family that enables them
-            // (Qwen3.8-Flash-Next), so the MoE families keep restoring. Carrying
-            // these buffers in the snapshot, or replaying the prefix to rebuild
-            // them, is the real fix; it is recorded in
-            // the wiki's project tracker.
-            if qsaIndexer != nil {
-                throw InferenceStateSnapshotError.stateNotInSnapshot("sparse-indexer")
-            }
-            if pleBlock != nil {
-                throw InferenceStateSnapshotError.stateNotInSnapshot("PLE")
+            // (Qwen3.8-Flash-Next). The companion `InferenceAuxiliaryState`
+            // is what carries them; a caller that has it restores it below,
+            // after the KV cursor lands at the prefix length. A caller with
+            // only the snapshot is refused rather than left with the previous
+            // conversation's indexer and n-gram window.
+            if auxiliary == nil {
+                if qsaIndexer != nil {
+                    throw InferenceStateSnapshotError.stateNotInSnapshot(
+                        "sparse-indexer")
+                }
+                if pleBlock != nil {
+                    throw InferenceStateSnapshotError.stateNotInSnapshot("PLE")
+                }
             }
             try snapshot.payload.withUnsafeBytes { bytes in
                 var offset = 0
@@ -174,6 +269,9 @@ extension RealForwardRunner {
                 guard offset == bytes.count else {
                     throw InferenceStateSnapshotError.invalidLayout
                 }
+            }
+            if let auxiliary {
+                try restoreAuxiliaryState(auxiliary)
             }
             resetTransientState()
         } catch {
