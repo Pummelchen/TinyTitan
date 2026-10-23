@@ -713,9 +713,14 @@ systems. Passing local tests never bypasses the final checklist above.
   awaiting `Task.value` from a cancelled task does not throw. The CLI never calls
   `Session.cancel()`, which is the path the server uses. A long generation
   therefore ignores SIGINT until it finishes on its own.
-- **Current evidence:** Static trace only; a CLI SIGINT probe against the installed
-  4B was not executed, because the only permitted model process was the contract
-  suite and the two may not overlap.
+- **Current evidence:** Observed live on 2026-10-23 against the installed
+  `models/qwen3.5_4B_4Bit`. SIGINT was delivered to the running CLI mid-decode
+  (stdout 1,008 bytes); the process stayed alive and kept writing (2,037 bytes at
+  +10 s, 2,468 at +15 s), then produced the normal
+  `[stop=maxTokens prefill=18tok new=800tok decode=35.95s tok/s=22.255]` footer
+  and exited. No cancellation occurred. The exit status was not captured because
+  the process was started outside the measuring shell's job table; the normal
+  completion footer is the evidence that generation ran to its limit.
 - **Next:** No fix applied. Either call `session.cancel()` from the SIGINT handler,
   or replace `runOneShot` with a cancellation-forwarding structure and keep the
   `.cancelled` mapping; then add a probe that observes the interruption.
@@ -856,7 +861,7 @@ The earlier 108-suite-per-interpreter matrix remains qualified:
 - All 226 tracked Python files parsed on all three interpreters; that is syntax
   evidence only. No model/CoreML verification or dependency installation followed.
 
-### Release build, golden and contract checks
+### Release build, golden, contract and probe checks
 
 Three further checks were recorded in this continuation, all on the same dirty
 tree and installed models only:
@@ -884,6 +889,13 @@ TINYTITAN_LIBRARY_CONTRACT_MODEL=models/qwen3.5_4B_4Bit \
   fifth, `aToolLoopRoundTrips`, was not part of this filtered run and remains
   unexercised. A pass here is not evidence for AUD2-035: the CLI path never calls
   `Session.cancel()`, whereas the suite exercises the cancellation API directly.
+- CLI SIGINT probe: after the contract suite ended, the release binary was run
+  against the installed 4B and SIGINT was sent mid-decode. At 1,008 stdout bytes
+  the signal was delivered; the process stayed alive and output grew to 2,037
+  bytes after 10 s and 2,468 after 15 s, then ended with the normal
+  `[stop=maxTokens … new=800tok decode=35.95s tok/s=22.255]` footer. This is the
+  first live confirmation of AUD2-035 rather than a source trace; the streams are
+  `AUDIT/cli-sigint-probe.out` and `.err`.
 
 ### Historical checks, not final-tree certification
 
@@ -1024,11 +1036,12 @@ from inside the tree.** Three blockers are external:
 
 Completed and evidenced here: the unmasked full serial suite, the release build,
 the 18-gate lint run, the corrected seven-object coverage export, the CI artifact
-inspection, the ornith-8 golden check and four of the five library-contract
-tests. Still incomplete: the module-by-module Tier A review, clean-commit CI
-certification, fresh sanitizer runs on the final edits, the Python dependency
-reconciliation, durable CI coverage, release-only/opt-in paths, AUD2-035's live
-probe, and remediation of every OPEN/START/PROGRESS record. This report is a
+inspection, the ornith-8 golden check, four of the five library-contract tests
+and the live CLI SIGINT probe. Still incomplete: the module-by-module Tier A
+review, clean-commit CI certification, fresh sanitizer runs on the final edits,
+the Python dependency reconciliation, durable CI coverage, release-only/opt-in
+paths, and remediation of every OPEN/START/PROGRESS record — including
+AUD2-035, which the probe now confirms but does not fix. This report is a
 faithful snapshot of that state, not a Phase E certificate.
 
 The following repository constraints still apply:

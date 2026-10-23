@@ -627,7 +627,7 @@
       "discovered-by": "lead from the credit-terminated library reviewer, re-derived in the current tree by the main agent",
       "evidence-before": "The SIGINT handler cancels only the task that drives run(args:). Session.respond wraps generation in an unstructured Task and awaits work.value; cancellation does not propagate into an unstructured task, and awaiting Task.value in a cancelled task does not throw. The CLI never calls Session.cancel(), which is the path the server uses. A long generation therefore ignores SIGINT until it finishes on its own.",
       "fix-summary": "No fix applied. Either call session.cancel() from the SIGINT handler or replace runOneShot with a cancellation-forwarding structure and keep the .cancelled mapping.",
-      "evidence-after": "Static trace only; a CLI SIGINT probe against the installed 4B was not executed.",
+      "evidence-after": "Observed live on 2026-10-23 against models/qwen3.5_4B_4Bit: SIGINT was delivered to the running CLI mid-decode (stdout 1,008 bytes); the process stayed alive and kept writing (2,037 bytes at +10 s, 2,468 at +15 s), then produced the normal [stop=maxTokens prefill=18tok new=800tok decode=35.95s tok/s=22.255] footer and exited. Cancellation was not observed. The probe's exit status was not captured because the process was started outside the measuring shell's job table; the normal completion footer is the evidence that generation ran to its limit.",
       "commit": null,
       "blocked-reason": null
     },
