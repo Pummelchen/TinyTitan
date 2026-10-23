@@ -1,6 +1,11 @@
 # Pre-production audit — 23 October 2026
 
-**Audit incomplete. Known defects remain. No finding is formally closed.**
+`[#AUD2-038 38/38 | done:1 open:35 blocked:2 new:2] OPEN — preserve the original
+brief and reconcile this report against it`
+
+**Audit incomplete. Known defects remain. No product defect is formally closed.**
+One documentation record, AUD2-032, is closed because the brief it concerned has
+now been recovered and preserved.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -10,24 +15,25 @@ tier and status, including disproven claims and audit-introduced regressions.
 
 ## Snapshot and interpretation
 
-- Audit: `pre-production-audit-2026-10-23`; original brief: Attachment `9ca50da3`,
-  13 sections.
+- Audit: `pre-production-audit-2026-10-23`; original brief now preserved verbatim
+  at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
+  sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
 - Measured HEAD: `164e84a08de5d434f95a90d552ceeff608581caa`, **with uncommitted
   source and test changes**. That commit alone does not contain the tested fixes.
-- **36 records: 0 DONE, 35 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **17 OPEN, 2 START, 3 PROGRESS, 10 TEST, 3 AUDIT, 1 BLOCKED**.
-- Recorded severities: **2 S0, 13 S1, 21 S2**. These are ledger classifications,
-  not a claim that all 36 records are confirmed outstanding product bugs.
+- **38 records: 1 DONE, 35 unresolved/non-blocked, 2 BLOCKED.**
+- Exact statuses: **18 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 1 DONE,
+  2 BLOCKED**.
+- Recorded severities: **2 S0, 15 S1, 21 S2**. These are ledger classifications,
+  not a claim that all 38 records are confirmed outstanding product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
-  AUD2-031 and AUD2-032 concern verification, rather than independent runtime
-  defects. AUD2-032 records that the original brief itself is unrecoverable, so
-  compliance with it cannot be certified.
-- No issue has a remediation commit recorded. No fix is represented here as
-  merged, released, or certified on a clean final revision.
+  AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
+  runtime defects. AUD2-032 is now DONE: the brief was recovered and reconciled.
+- No product issue has a remediation commit recorded. No fix is represented here
+  as merged, released, or certified on a clean final revision.
 
 Sources are [baseline](AUDIT/baseline.md), [environment](AUDIT/environment.md),
 [scope and tiers](AUDIT/scope-tiers.md), and
@@ -59,10 +65,51 @@ item does not mean no work happened there; it means completion is not evidenced.
   seven-object export with exclusions disclosed.
 - [x] Record corrected fixtures, invalid RED evidence, audit regressions and
   remaining review gaps rather than silently replacing the history.
-- [ ] Reconcile this operational checklist against every requirement in the
-  original 13-section brief before claiming Phase E completion.
+- [x] Reconcile this operational checklist against every requirement in the
+  original 13-section brief before claiming Phase E completion. *(The brief was
+  recovered and is preserved verbatim; the reconciliation table below records
+  what is evidenced, what is missing and what is blocked. Reconciliation is not
+  completion: see AUD2-037 and AUD2-038.)*
 - [ ] Provide the requested Swift 6.4.1 compiler/host, or obtain an explicit change
   to that requirement; installed Swift 6.4.0 is not a substitute.
+
+### Reconciliation against the recovered brief
+
+The brief is [preserved verbatim](AUDIT/audit-brief.md). Its requirements are
+mapped below to the evidence that exists in this report. `Partial` means the
+requirement was worked but its own definition of done is not met.
+
+| Brief section | Requirement | State | Where |
+| --- | --- | --- | --- |
+| §0 | No weakened checks, branch/reporting discipline, no secrets, no narrowing | Met for all work recorded here | This report's corrections log; `git` history on `audit/2026-10-23` |
+| §1 | One pinned toolchain per language; formatter, linter, CVE scanner, type checker | Partial | [environment](AUDIT/environment.md), [tool proofs](AUDIT/tool-coverage.md) |
+| §1 | Swift 6 language mode, strict concurrency, warnings-as-errors, SwiftLint `--strict` | Met and proven by deliberate-violation build | [tool proofs](AUDIT/tool-coverage.md) |
+| §1 | Swift 6.4 / Xcode 27 exactly | Partial — installed is 6.4.0, requested 6.4.1 | AUD2-022 (BLOCKED) |
+| §1 | Strict C99 with the named hardening flags, proven to reject GNU extensions | Met and proven | [tool proofs](AUDIT/tool-coverage.md) |
+| §1 | Python basic: Ruff format+lint, B/E722/S101/PT rules, bare-except proof, pip-audit | Partial — Ruff and the proof exist; the 3.13 matrix is not certified on the pinned stack | [baseline](AUDIT/baseline.md), [tool proofs](AUDIT/tool-coverage.md) |
+| §1 | Tool-coverage proof for every delegated check | Met for the delegated checks that were listed | [tool proofs](AUDIT/tool-coverage.md) |
+| §1 | Sanitizers run the suite (C ASan/UBSan, Swift TSan) | Partial — runs exist, none on the final edits | This report, historical checks |
+| §1b | One primary host recorded | Met | [environment](AUDIT/environment.md) |
+| §1b, §11, §12 | One independent host runs the single final verification | **Not met** | AUD2-038 (BLOCKED) |
+| §2 | Inventory, 2-hop dependency graph, trust boundaries, tier table | Met | [scope and tiers](AUDIT/scope-tiers.md) |
+| §3 | Baseline with actual language mode, warnings, tests, lint, CVEs, secret scan | Partial — baseline exists; its masked Swift claims were withdrawn and re-measured | [baseline](AUDIT/baseline.md) |
+| §4 L0–L4 | Repository, architecture, module, line and security passes at tier depth | Partial — rANS, checkpoint, server, CLI, PLE and Metal areas reviewed; no complete Tier A batch review | Issue record below |
+| §4 L5 | Performance pass on Tier A and profiler-identified hot paths | **Not recorded** | AUD2-037 |
+| §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
+| §4 L7 | Ops pass per deployable service | **Not recorded** | AUD2-037 |
+| §5 | Facade hunt with a production-path facade as S0 | **Not recorded** | AUD2-037 |
+| §6 | Unused code limited to Tier A and audit-orphaned code | **Not recorded** | AUD2-037 |
+| §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
+| §8 | Ledger schema and S0/S1 gates | Partial — schema met; no product record has passed TEST→AUDIT→DONE | [ledger](AUDIT/ledger.md) |
+| §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and this milestone adds two records it found | Ledger notes |
+| §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — audit commits are focused; no remediation commits exist | `git log` |
+| §11 | Phase A inventory/baseline/environment | Met | Committed |
+| §11 | Phase B L0–L7 loop | In progress | This report |
+| §11 | Phase C drain to zero | Not started — no product record is DONE | Ledger |
+| §11 | Phase D convergence | Not started — requires zero open | Ledger |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 35 non-terminal records |
+| §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
 
@@ -74,8 +121,10 @@ The 2026-10-23 continuation delegated eleven module-batch reviews to independent
 subagents and **every one terminated on the operator's credit limit before
 emitting a finding**. Their preambles were recovered; four reviewer leads were
 re-derived in the tree and filed as AUD2-033…036, and a fifth lead (a claimed
-`workspaceId` type error) was disproven. AUD2-032 records the separate
-missing-brief blocker. That is targeted verification, not a substitute for the
+`workspaceId` type error) was disproven. AUD2-032, the separate missing-brief
+blocker, is now closed: the brief was recovered and preserved, and reconciling
+against it exposed four unrun passes (AUD2-037) and the unmet independent-host
+requirement (AUD2-038). That is targeted verification, not a substitute for the
 listed passes: no batch produced a complete L2/L3/L4 review, so every item below
 stays unchecked and the full current-tree review remains incomplete.
 
@@ -631,26 +680,27 @@ systems. Passing local tests never bypasses the final checklist above.
   validation and inspect a fresh CI artifact. Do not invent a coverage threshold
   or call the local percentage whole-repository coverage.
 
-### AUD2-032 — The original 13-section audit brief is unrecoverable
+### AUD2-032 — The original 13-section audit brief was not in the repository
 
-**S2 · Tier A · AUDIT · audit evidence/scope**
+**S2 · Tier A · DONE · audit evidence/scope**
 
 - **Location:** [audit ledger](AUDIT/ledger.json) metadata,
-  [environment](AUDIT/environment.md) and this report.
-- **Finding:** The brief is named only as “Attachment `9ca50da3`
-  (pre-production audit + remediation, 13 sections)”. An exhaustive read-only
-  search of `AUDIT/`, `docs/` and the supplied transcript found no attachment body
-  or path; the transcript begins at “continue the audit”. Later hash matches are
-  ledger copies and report references, not the brief. Surviving legacy labels
-  (L0…L7) are descriptive only: no normative checklist, Phase B/C procedure,
-  convergence threshold or Phase E exception rule was recovered.
-- **Current evidence:** [Scope and tiers](AUDIT/scope-tiers.md) and
-  [baseline](AUDIT/baseline.md) are the operative scope and completion record.
-  They are not presented as a substitute for the missing brief, and no attempt was
-  made to reconstruct requirements from memory.
-- **Next:** The operator supplies Attachment `9ca50da3`, or explicitly accepts the
-  recorded scope as normative. Until then, original-brief compliance and Phase E
-  certification remain unclaimable.
+  [brief](AUDIT/audit-brief.md) and this report.
+- **Finding:** Until 2026-10-23 the brief was named only as “Attachment
+  `9ca50da3` (pre-production audit + remediation, 13 sections)”, and an
+  exhaustive read-only search of `AUDIT/`, `docs/` and the supplied transcript
+  found no attachment body or path.
+- **Resolution:** The operator supplied the original brief. It is preserved
+  verbatim at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) behind a provenance
+  header naming the source attachment, the recovery date, the size and the
+  SHA-256. The trailing 17,800 bytes of the preserved file hash to
+  `0390fa3d63e92f40d8eaedff2a1c1f74c5cbd07b670a42f32123663fa2aec3e2`, matching
+  the supplied attachment byte for byte.
+- **Result:** The reconciliation table near the top of this report now maps
+  every brief section to its evidence. That reconciliation did not produce a
+  clean bill: it found four mandated passes with no recorded work (AUD2-037) and
+  one host requirement the audit cannot satisfy alone (AUD2-038). Section 12
+  completion remains unclaimed.
 
 ### AUD2-033 — LZFSE first-stage publication does not wait for the last wave
 
@@ -752,6 +802,60 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Next:** No fix applied. Bound the gather by `PLEBlock.maxRows` (or size
   `PLEBlock` from the effective chunk) and refuse a config whose `chunkTokens`
   exceeds the runner's.
+
+### AUD2-037 — Four brief-mandated passes have no recorded evidence
+
+**S1 · Tier A · OPEN · audit process**
+
+- **Location:** [original brief](AUDIT/audit-brief.md), §5, §6, L5 and L7; this
+  report.
+- **Finding:** The recovered brief requires four passes that this audit has not
+  recorded. **§5 facade hunt** looks for work that is faked on a production path:
+  always-true validators or auth checks, hardcoded success returns,
+  `NotImplemented*`/`fatalError("TODO")`/empty bodies, canned data served outside
+  tests, `sleep()` standing in for processing, localhost/test defaults and
+  surfaces wired to nothing. A production-path facade is an S0 by the brief's own
+  rule. **§6 unused code** is limited to Tier A modules and code this audit
+  orphaned. **L5 performance** covers Tier A and profiler-identified hot paths.
+  **L7 ops** covers each deployable service once: structured errors, health
+  checks, graceful shutdown, startup config validation and rollback path.
+- **Current evidence:** None of the four has a section here or a ledger record.
+  Existing checks are narrow proxies, not the passes: the `test-hollow` and
+  `stdout-clean` lint gates cover thin slices, and the TSan, golden and contract
+  runs exercise neither L5 hot paths nor L7 service behaviour. Filing this record
+  is deliberately not the same as running the passes, and no facade, unused-code,
+  performance or ops conclusion is asserted anywhere in this report.
+- **Next:** Run each pass at Tier A depth, file every finding it produces with its
+  own ID, and only then mark this record DONE. A facade found on a production
+  path is S0 and takes priority over the remaining S1 work.
+
+### AUD2-038 — No independent host exists for the Phase E verification
+
+**S1 · Tier A · BLOCKED · audit process / Phase E**
+
+- **Location:** [original brief](AUDIT/audit-brief.md), §1b, §11 Phase E and §12;
+  [environment](AUDIT/environment.md).
+- **Finding:** The brief requires the single final whole-repository verification
+  to run from a fresh clone on **one independent host**, and §12 makes that run a
+  condition of completion. [The environment record](AUDIT/environment.md) names
+  exactly one host, the primary development Mac. No second Mac, VPS or container
+  host was provisioned, and no remote verification was attempted. The brief also
+  requires asking before provisioning a VPS, so this cannot be resolved from
+  inside the audit.
+- **Current evidence:** Every run recorded here — the full serial suite, the
+  release build, the lint gates, the coverage export, the golden check and the
+  CLI probe — executed on the primary host against a dirty tree. None is a
+  Phase E run.
+- **Blocked on:** *repository operator*. Reason: an independent host is required
+  and only the primary Mac is available. Tried: inventoried the recorded hosts and
+  confirmed the scope of every run to date; no host was provisioned or contacted.
+  Options: (1) provide access to an independent Apple Silicon Mac, or an approved
+  Linux VPS for the non-Swift harness checks, for the single final Phase E run;
+  (2) explicitly waive §1b and §12's independent-host requirement in writing,
+  accepting a primary-host-only final verification and a correspondingly weaker
+  completion claim.
+- **Next:** The operator chooses an option above. Until then Phase E and §12
+  completion are unclaimable, regardless of how many records reach DONE.
 
 ## Recorded verification and its limits
 
@@ -1000,6 +1104,11 @@ unfixed; remote artifacts have not been inspected.
   credit limit first. No reviewer claim is treated as evidence; the four
   reviewer-derived records added here (AUD2-033…036) were re-derived in the tree
   by the main agent, and AUD2-032 came from the search for the brief.
+- The brief itself has since been recovered from the operator. It is preserved
+  verbatim at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) and verified by hash;
+  the earlier statement that it was unrecoverable described the state before that
+  recovery, not the current one. Reconciliation added AUD2-037 and AUD2-038 and
+  did not close any product record.
 - A reviewer lead alleging that `FleetModels.workspaceId` was a non-optional
   `String` while the plugin sends `null` is **disproven**: the Swift property is
   `String?` and the plugin writes `null` only for an unregistered workspace. It is
@@ -1022,27 +1131,40 @@ history. Do not close a static claim without the required reproduction/review,
 replace a disproven claim with its sibling, or treat absent evidence as a pass.
 
 At this snapshot **the audit is not complete, and it cannot be certified complete
-from inside the tree.** Three blockers are external:
+from inside the tree.** The blocks are external or unrun:
 
-1. The original 13-section brief is missing (AUD2-032); compliance with it cannot
-   be demonstrated without the operator supplying it or accepting the recorded
-   scope.
+1. The brief is no longer missing: it is preserved at
+   [AUDIT/audit-brief.md](AUDIT/audit-brief.md) and hash-verified. Reconciling
+   against it exposed four mandated passes with no recorded work (AUD2-037) and
+   an independent-host requirement the audit cannot satisfy alone (AUD2-038).
 2. The required Swift 6.4.1 toolchain is not installed on this host; all runs
-   above are Swift 6.4.0.
+   above are Swift 6.4.0 (AUD2-022).
 3. The eleven delegated Tier A reviewer batches all terminated on the operator's
    credit limit before emitting a finding, so no full L2/L3/L4 pass exists for any
    module. Four targeted findings were re-derived manually; that is not the same
    thing.
+4. There is no second host for the Phase E verification (AUD2-038), so §12's
+   completion condition cannot be met from this machine even if every other record
+   were closed.
 
-Completed and evidenced here: the unmasked full serial suite, the release build,
-the 18-gate lint run, the corrected seven-object coverage export, the CI artifact
-inspection, the ornith-8 golden check, four of the five library-contract tests
-and the live CLI SIGINT probe. Still incomplete: the module-by-module Tier A
-review, clean-commit CI certification, fresh sanitizer runs on the final edits,
-the Python dependency reconciliation, durable CI coverage, release-only/opt-in
-paths, and remediation of every OPEN/START/PROGRESS record — including
-AUD2-035, which the probe now confirms but does not fix. This report is a
-faithful snapshot of that state, not a Phase E certificate.
+The ledger stands at **35 non-terminal records** (18 OPEN, 2 START, 3 PROGRESS,
+10 TEST, 2 AUDIT), one DONE documentation record and two BLOCKED. This milestone
+therefore adds records rather than draining them, which §8's closure invariant
+forbids *at a convergence milestone*. The run has never reached Phase C, let alone
+Phase D, so no convergence milestone is claimed and the invariant is not yet due;
+it applies once the open count starts being driven to zero.
+
+Completed and evidenced here: recovery and hash verification of the original
+brief, the unmasked full serial suite, the release build, the 18-gate lint run,
+the corrected seven-object coverage export, the CI artifact inspection, the
+ornith-8 golden check, four of the five library-contract tests and the live CLI
+SIGINT probe. Still incomplete: reconciliation of the ledger against the four
+passes the brief names (AUD2-037), the module-by-module Tier A review,
+clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
+dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
+remediation of every OPEN/START/PROGRESS record — including AUD2-035, which the
+probe confirms but does not fix. This report is a faithful snapshot of that state,
+not a Phase E certificate.
 
 The following repository constraints still apply:
 

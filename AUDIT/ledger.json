@@ -1,7 +1,7 @@
 {
   "meta": {
     "audit": "pre-production-audit-2026-10-23",
-    "prompt": "Attachment 9ca50da3 (pre-production audit + remediation, 13 sections)",
+    "prompt": "Original brief preserved at AUDIT/audit-brief.md (operator attachment 64ce6918, SHA-256 0390fa3d63e92f40d8eaedff2a1c1f74c5cbd07b670a42f32123663fa2aec3e2, 13 sections)",
     "branch": "audit/2026-10-23",
     "base_commit": "4816a84",
     "prior_audit": "docs/audit-ledger.json (2026-10-06, 210/210 closed)",
@@ -19,9 +19,12 @@
       "All continuation results describe a dirty working tree at164e84a on Swift6.4.0, not clean-commit or requested Swift6.4.1 certification. Full current Tier-A L2/L3/L4 review and model-dependent checks remain incomplete.",
       "Fresh post-format full serial run exited0 with1974passed and11explicit skips (1985counted tests/286counted suites); all18lint gates passed. No source/test changes occurred during that rerun. Commands, complete bundle timing footers and source-backed skip gates are recorded in baseline.md.",
       "Actual SwiftPM JSON covered only the final test bundle. A local all-seven-object export now measures395mapped source files with explicit exclusions; this is not whole-repository coverage and the durable CI gap stays open as AUD2-031. No pipeline, permission or instruction configuration was changed.",
-      "2026-10-23 continuation: five new records filed (AUD2-032..036) from reviewer leads re-derived in the current tree; the eleven delegated module reviews all terminated on credit exhaustion before emitting findings, so no reviewer claim is recorded as evidence. AUD2-031's remote artifact was inspected: it contains one bundle and 27 files, confirming the last-bundle-only defect in CI output."
+      "2026-10-23 continuation: five new records filed (AUD2-032..036) from reviewer leads re-derived in the current tree; the eleven delegated module reviews all terminated on credit exhaustion before emitting findings, so no reviewer claim is recorded as evidence. AUD2-031's remote artifact was inspected: it contains one bundle and 27 files, confirming the last-bundle-only defect in CI output.",
+      "2026-10-23 brief recovery: the operator supplied the original 13-section brief. It is preserved verbatim in AUDIT/audit-brief.md with a provenance header; the trailing 17,800 bytes hash to the supplied SHA-256. AUD2-032 is closed as documentation. Reconciliation against the brief added AUD2-037 (section 5 facade hunt, section 6 Tier-A unused code, L5 performance and L7 ops have no recorded pass) and AUD2-038 (no independent host for the Phase E whole-repository verification). The ledger is still in Phase B discovery, so no convergence milestone is claimed and section 8's strictly-decreasing closure invariant is not yet due."
     ],
-    "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason"
+    "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason",
+    "brief_file": "AUDIT/audit-brief.md",
+    "brief_sha256": "0390fa3d63e92f40d8eaedff2a1c1f74c5cbd07b670a42f32123663fa2aec3e2"
   },
   "tasks": [
     {
@@ -568,15 +571,15 @@
       "severity": "S2",
       "tier": "A",
       "project": "audit evidence/scope",
-      "file": "AUDIT/ledger.json:meta.prompt; AUDIT/environment.md; audit_2310.md",
-      "title": "The original 13-section audit brief is unrecoverable, so original-brief compliance cannot be certified",
+      "file": "AUDIT/audit-brief.md; AUDIT/ledger.json:meta.prompt; audit_2310.md",
+      "title": "The original 13-section audit brief was not in the repository; it is now preserved and reconciled",
       "category": "verification-gap",
-      "status": "AUDIT",
+      "status": "DONE",
       "host": "dev-mac (primary)",
       "discovered-by": "exhaustive read-only search of AUDIT/, docs/ and the supplied session transcript",
       "evidence-before": "The brief is named only as 'Attachment 9ca50da3 (pre-production audit + remediation, 13 sections)'. The supplied transcript begins at 'continue the audit' (line 3); later hash matches are ledger copies and report references. No attachment body or path exists in the workspace. Surviving legacy labels (L0 repository, L1 architecture, L2 module, L3 line, L4 security, L5/L6 performance+tests, L6 closure sweep, L7 ops) are descriptive only; no normative checklist, Phase B/C procedure, convergence threshold or Phase E exception rule was recovered.",
-      "fix-summary": "None possible in-tree. AUDIT/scope-tiers.md and AUDIT/baseline.md are the operative scope and completion record; they are not presented as a substitute for the missing brief.",
-      "evidence-after": "Original-brief compliance and Phase E certification remain unclaimable until the operator supplies Attachment 9ca50da3 or explicitly accepts the recorded scope as normative.",
+      "fix-summary": "Brief preserved verbatim as AUDIT/audit-brief.md behind a provenance header naming the operator attachment, recovery date, size and SHA-256. The audit report now carries a section-by-section reconciliation against the brief instead of treating the recorded scope as a substitute. No requirement was reconstructed from memory.",
+      "evidence-after": "AUDIT/audit-brief.md is 111 lines / 18,443 bytes: a 19-line provenance header plus the 92-line brief. The trailing 17,800 bytes hash to 0390fa3d63e92f40d8eaedff2a1c1f74c5cbd07b670a42f32123663fa2aec3e2, matching the supplied attachment. Reconciliation identifies two requirements with no recorded pass (AUD2-037) and one unmet host requirement (AUD2-038); section 12 completion is therefore still unclaimed.",
       "commit": null,
       "blocked-reason": null
     },
@@ -647,6 +650,48 @@
       "evidence-after": "Static analysis only. Shipped front ends appear to pass the engine's own prefillChunkTokens, so reachability requires a caller that constructs a mismatched PrefillRuntimeConfig; RealForwardRunner is public in the engine target but is not part of the TinyTitanLib facade.",
       "commit": null,
       "blocked-reason": null
+    },
+    {
+      "id": "AUD2-037",
+      "severity": "S1",
+      "tier": "A",
+      "project": "audit process",
+      "file": "AUDIT/audit-brief.md (sections 5, 6, L5, L7); audit_2310.md",
+      "title": "Four brief-mandated passes have no recorded evidence: facade hunt, Tier-A unused code, L5 performance and L7 ops",
+      "category": "verification-gap",
+      "status": "OPEN",
+      "host": "dev-mac (primary)",
+      "discovered-by": "main-agent reconciliation of the recovered original brief against the recorded passes",
+      "evidence-before": "The recovered brief mandates a facade hunt (section 5: always-true validators or auth checks, hardcoded success returns, NotImplemented/fatalError/empty bodies on a production path, canned data on a non-test path, sleep standing in for work, localhost/test defaults, surfaces wired to nothing; a production-path facade is S0), unused-code coverage limited to Tier A modules and audit-orphaned code (section 6), an L5 performance pass over Tier A and profiler-identified hot paths, and an L7 ops pass per deployable service (structured errors, health checks, graceful shutdown, startup config validation, rollback path). The report has no section for any of the four, and no ledger record was derived from them. Proxies that do exist are not substitutes: the test-hollow and stdout-clean lint gates cover narrow slices, and the TSan/golden runs exercise neither L5 hot paths nor L7 service behaviour.",
+      "fix-summary": "None. The gap is recorded rather than filled with an inferred pass. No facade, unused-code, performance or ops conclusion is asserted.",
+      "evidence-after": "",
+      "commit": null,
+      "blocked-reason": null
+    },
+    {
+      "id": "AUD2-038",
+      "severity": "S1",
+      "tier": "A",
+      "project": "audit process / Phase E",
+      "file": "AUDIT/audit-brief.md (sections 1b, 11 Phase E, 12); AUDIT/environment.md",
+      "title": "No independent host exists for the Phase E whole-repository verification",
+      "category": "verification-gap",
+      "status": "BLOCKED",
+      "host": "dev-mac (primary)",
+      "discovered-by": "main-agent reconciliation of the recovered brief against the recorded hosts",
+      "evidence-before": "Sections 1b and 11 Phase E require the single final whole-repository verification to run from a fresh clone on one independent host, and section 12 makes that run a condition of completion. AUDIT/environment.md records exactly one host: the primary development Mac. No second Mac, VPS or container host was provisioned, and no remote verification was attempted. Asking before provisioning a VPS is itself a brief requirement, so this cannot be resolved unilaterally.",
+      "fix-summary": "None. No host was provisioned and no substitute local run is presented as Phase E.",
+      "evidence-after": "",
+      "commit": null,
+      "blocked-reason": {
+        "owner": "repository operator",
+        "reason": "Phase E requires a second, independent host; only the primary Mac is available and provisioning one needs operator approval",
+        "tried": "Inventoried the recorded hosts in AUDIT/environment.md; confirmed every run to date used the primary Mac; did not provision or contact any remote host",
+        "options": [
+          "Provide access to an independent Apple Silicon Mac (or an approved Linux VPS for non-Swift harness checks) for the single final Phase E run",
+          "Explicitly waive sections 1b and 12's independent-host requirement in writing, accepting a primary-host-only final verification and a correspondingly weaker completion claim"
+        ]
+      }
     }
   ]
 }
