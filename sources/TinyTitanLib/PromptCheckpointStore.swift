@@ -352,7 +352,27 @@ actor PromptCheckpointStore {
     private func touchDisk(_ key: PromptCheckpointKey) {
         state.diskLRU.removeAll { $0 == key }
         state.diskLRU.append(key)
-        state.disk[key]?.modificationDate = Date()
+        guard var record = state.disk[key] else { return }
+        let date = Date()
+        record.modificationDate = date
+        state.disk[key] = record
+        // The in-process LRU above only lives as long as this actor, so the
+        // directory's own modification date is what carries an access across a
+        // restart; `indexDiskIfNeeded` orders by it. Without this write a
+        // record read every session stays the oldest on disk and is the first
+        // one evicted. The turn store persists its touch the same way.
+        do {
+            try fileManager.setAttributes(
+                [.modificationDate: date],
+                ofItemAtPath: record.directory.path)
+        } catch {
+            // Not fatal: the record keeps its older date, so it is simply an
+            // earlier eviction candidate next restart. Say so rather than
+            // swallow it.
+            ServerLog.diagnostic(
+                "prompt checkpoints: could not record access on "
+                    + "\(key.contentHash): \(error)")
+        }
     }
 
     private static func verifyKey(_ metadata: PromptCheckpointMetadata) throws {

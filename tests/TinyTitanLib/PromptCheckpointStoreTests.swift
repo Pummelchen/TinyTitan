@@ -654,6 +654,53 @@ import TinyTitan
         #expect(!FileManager.default.fileExists(atPath: oldestDirectory.path))
     }
 
+    /// A real access has to survive the restart it exists to protect: save A,
+    /// save B, load A, restart and fill the budget must evict B — the record
+    /// nobody touched. Updating only the in-memory date on touch makes the
+    /// loaded record the first eviction candidate again.
+    @Test func aLoadedRecordKeepsItsPlaceAcrossARestart() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let loaded = metadata(tokens: [1, 2, 3])
+        let untouched = metadata(tokens: [4, 5, 6])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(loaded, snapshot: snapshot(for: loaded))
+            try await writer.save(untouched, snapshot: snapshot(for: untouched))
+        }
+        // Both directories are pinned in the past, A behind B, so the outcome
+        // rests on the access alone and not on timestamp resolution: only a
+        // persisted touch can move A past B.
+        let fm = FileManager.default
+        try fm.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 0)],
+            ofItemAtPath: root.appendingPathComponent(
+                loaded.key.contentHash
+            ).path)
+        try fm.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1)],
+            ofItemAtPath: root.appendingPathComponent(
+                untouched.key.contentHash
+            ).path)
+        let reader = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        _ = try await reader.load(loaded.key, domain: domain)
+        // A restarted store with room for two of the three 16-byte records.
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 32))
+        let third = metadata(tokens: [7, 8, 9])
+        try await store.save(third, snapshot: snapshot(for: third))
+        #expect(await store.contains(loaded.key))
+        #expect(!(await store.contains(untouched.key)))
+        #expect(await store.contains(third.key))
+    }
+
     /// `removeAll` on a store that has not indexed the disk yet still has to
     /// delete what is there.
     @Test func removeAllOnAFreshStoreDeletesTheDiskRecords() async throws {
