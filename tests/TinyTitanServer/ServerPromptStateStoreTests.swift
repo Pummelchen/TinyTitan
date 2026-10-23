@@ -172,6 +172,43 @@ struct ServerPromptStateStoreTests {
                 atPath: payload.deletingLastPathComponent().path))
     }
 
+    /// A payload swapped to a larger file *after* the record was indexed is
+    /// refused on the declared size, and the reader stops there: it asks the
+    /// handle for `expected + 1` bytes and never walks to the end of the
+    /// planted tail. The indexing pass checks the file size, so this is the
+    /// window between indexing and reading — the only place the unbounded read
+    /// could still put a planted file's bytes in memory.
+    @Test func swappedOversizedDiskPayloadIsRefusedAtTheDeclaredSize() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1, 2])
+        let snapshot = makeSnapshot(position: 2, payload: Data([1, 2, 3, 4, 5, 6, 7]))
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0,
+            diskDirectory: root,
+            diskLimitBytes: 1_024)
+        let writer = try ServerPromptStateStore(configuration: configuration)
+        _ = await writer.save(entry: entry, snapshot: snapshot)
+
+        let reader = try ServerPromptStateStore(configuration: configuration)
+        #expect(reader.loadEntries(domain: domain) == [entry])
+
+        let payload =
+            root
+            .appendingPathComponent(entry.id.uuidString.lowercased())
+            .appendingPathComponent("state.bin")
+        let handle = try FileHandle(forWritingTo: payload)
+        try handle.truncate(atOffset: 16 * 1_024 * 1_024)
+        try handle.close()
+
+        #expect(throws: ServerPromptStateStoreError.self) {
+            try reader.loadSnapshot(entryID: entry.id)
+        }
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: payload.deletingLastPathComponent().path))
+    }
+
     /// AUD-142: a record whose `metadata.json` crosses the store's bound is
     /// skipped, and skipped *without being read*. The shape this replaced stat'd
     /// the path, checked the size, then re-read the path — so the bytes checked
