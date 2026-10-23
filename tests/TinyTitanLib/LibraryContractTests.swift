@@ -108,6 +108,39 @@ struct LibraryContractTests {
         }
     }
 
+    /// §5.4 sibling: the CLI's SIGINT handler cancels the task that awaits
+    /// `respond`, not the session. That cancellation has to reach the
+    /// generation task, or the process keeps decoding to its token limit after
+    /// the operator asked it to stop (AUD2-035).
+    @Test func cancellingTheAwaitingTaskEndsTheGeneration() async throws {
+        let engine = try await engine()
+        defer { Task { await engine.unload() } }
+        let session = await engine.session()
+
+        let work = Task {
+            try await session.respond(
+                to: [ChatMessage(role: .user, content: "Write a long essay about rivers.")],
+                options: GenerationOptions(maxTokens: 2_048, temperature: 0.6)
+            ) { _ in }
+        }
+        // Same window as the session-cancel test: the model is decoding, not
+        // still prefilling.
+        try await Task.sleep(for: .seconds(3))
+        work.cancel()
+
+        do {
+            let summary = try await work.value
+            Issue.record(
+                "a caller-cancelled generation returned a summary: \(summary.completionTokens) tokens"
+            )
+        } catch let error as TinyTitanError {
+            guard case .cancelled = error else {
+                Issue.record("expected .cancelled, got \(error)")
+                return
+            }
+        }
+    }
+
     /// §5.5 — `unload()` releases the model, and every session that outlives it
     /// says so instead of failing somewhere deeper.
     @Test func unloadingShutsLiveSessionsDown() async throws {
