@@ -333,6 +333,25 @@ class PromptSizing(unittest.TestCase):
         prompt = pathlib.Path(flag_map(first_run)["--messages-file"])
         self.assertFalse(prompt.exists(), "the prompt outlives the sweep")
 
+    def test_the_prompt_handle_is_explicitly_closed(self):
+        handles = []
+        create_temporary_file = tempfile.NamedTemporaryFile
+
+        def record_handle(*args, **kwargs):
+            handle = create_temporary_file(*args, **kwargs)
+            handles.append(handle)
+            return handle
+
+        try:
+            with mock.patch.object(sweep.tempfile, "NamedTemporaryFile", record_handle):
+                status, _, _ = Runner([footer(), footer(), footer()]).call()
+            self.assertEqual(status, 0)
+            self.assertEqual(len(handles), 1)
+            self.assertTrue(handles[0].closed, "the prompt handle relies on garbage collection")
+        finally:
+            for handle in handles:
+                handle.close()
+
 
 class NoImportSideEffects(unittest.TestCase):
     def test_importing_the_driver_runs_nothing(self):

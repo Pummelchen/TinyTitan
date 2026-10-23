@@ -278,10 +278,10 @@ def main() -> int:
     planned = plan_runs(args.sweep, slots, chunks)
     prompt_directory = os.path.join(repository_root(), ".build", "benchmark-prompts")
     os.makedirs(prompt_directory, exist_ok=True)
-    prompt_file = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", suffix=".json", delete=False, dir=prompt_directory
-    ).name
-    with open(prompt_file, "w", encoding="utf-8") as f:
+    ) as f:
+        prompt_file = f.name
         f.write(json.dumps([{"role": "user", "content": make_prompt(args.prompt_tokens)}]))
 
     print("TinyTitan M5 sweep")
