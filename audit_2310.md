@@ -701,6 +701,7 @@ systems. Passing local tests never bypasses the final checklist above.
   clean bill: it found four mandated passes with no recorded work (AUD2-037) and
   one host requirement the audit cannot satisfy alone (AUD2-038). Section 12
   completion remains unclaimed.
+- **Commit:** `0f61aa5` on `audit/2026-10-23`.
 
 ### AUD2-033 — LZFSE first-stage publication does not wait for the last wave
 

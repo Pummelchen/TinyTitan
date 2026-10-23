@@ -237,6 +237,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** The brief is named only as 'Attachment 9ca50da3 (pre-production audit + remediation, 13 sections)'. The supplied transcript begins at 'continue the audit' (line 3); later hash matches are ledger copies and report references. No attachment body or path exists in the workspace. Surviving legacy labels (L0 repository, L1 architecture, L2 module, L3 line, L4 security, L5/L6 performance+tests, L6 closure sweep, L7 ops) are descriptive only; no normative checklist, Phase B/C procedure, convergence threshold or Phase E exception rule was recovered.
 - **fix-summary:** Brief preserved verbatim as AUDIT/audit-brief.md behind a provenance header naming the operator attachment, recovery date, size and SHA-256. The audit report now carries a section-by-section reconciliation against the brief instead of treating the recorded scope as a substitute. No requirement was reconstructed from memory.
 - **evidence-after:** AUDIT/audit-brief.md is 111 lines / 18,443 bytes: a 19-line provenance header plus the 92-line brief. The trailing 17,800 bytes hash to 0390fa3d63e92f40d8eaedff2a1c1f74c5cbd07b670a42f32123663fa2aec3e2, matching the supplied attachment. Reconciliation identifies two requirements with no recorded pass (AUD2-037) and one unmet host requirement (AUD2-038); section 12 completion is therefore still unclaimed.
+- **commit:** 0f61aa5ef46d0a1a9be5497610871a1279ab9ad8
 
 ### AUD2-033
 
