@@ -12,7 +12,9 @@ unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
 conflict refusal that names its own flags (AUD2-047), the calibration identity
 binding (AUD2-005), the --plan conflict (AUD2-008), the host-KV window range
 (AUD2-017), the shared disk budget (AUD2-003), the bounded payload read (AUD2-006)
-and the fail-silent restore (AUD2-009) beneath it stand`
+and the fail-silent restore (AUD2-009) beneath it stand; the 36 closed records are
+integrated into `main` by operator decision of 2026-10-24, with Phase E unrun, no
+release and 15 records still non-terminal`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
@@ -23,8 +25,10 @@ prompt-cache disk budget (AUD2-003), the two reader/restore corrections
 (AUD2-006, 009), the persisted checkpoint access (AUD2-007), the two expansion
 geometry records (AUD2-013, AUD2-014), the coverage-artifact scope record
 (AUD2-031) and the audit's own markdown-link checker (AUD2-051) are closed with
-remediation commits, and none is merged, released or certified on a clean final
-revision. AUD2-048 (a
+remediation commits. The merge directed on 2026-10-24 carries them into `main`
+through a CI-gated PR (*Integration decision* below); carrying them is not the same
+as certifying them — none is released, and none is certified on a clean final
+revision, because Phase E's independent-host run did not happen. AUD2-048 (a
 diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate never
 reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
 cannot say which guard refused, so a negative test can pass for the wrong reason —
@@ -173,9 +177,9 @@ requirement was worked but its own definition of done is not met.
 | §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a`, `8acc6f8` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898`/`8acc6f8` each bundle S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 34 DONE, 15 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 36 DONE, 15 non-terminal (11 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED) | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 15 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038; 15 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -306,7 +310,65 @@ stays unchecked and the full current-tree review remains incomplete.
 - [ ] Preserve required raw evidence in a reviewable delivery form; this document
   alone does not deliver the ignored logs or untracked fixes.
 - [ ] Complete Phase E and clean-commit CI/cold review before integration through
-  a PR to `main`. No merge or release is claimed by this report.
+  a PR to `main`. **Operator decision 2026-10-24:** integration is directed with
+  this item's Phase E condition unmet — see *Integration decision* below. The PR
+  route and its CI gate stand; the independent-host run does not happen, so this
+  box stays unchecked and the merge is a recorded override, not a completion. No
+  release or tag is claimed by this report.
+
+## Integration decision — 24 October 2026
+
+**Directed by the operator**, in these words: *"merge all fixed into main and close
+the other branch"*, then, when the conflict with the audit's own rule was put to
+them: merge **through a PR, after its CI run**; **delete** `audit/2026-10-23` on the
+remote and locally once the merge lands; and **write the override down** rather than
+merge silently. This section is that record. It changes no finding's status.
+
+- **What lands:** the 46 commits this branch carries over `origin/main`
+  (`5bcceee`) — 64 files, 7,729 insertions, 350 deletions — i.e. the fixes of the
+  **36 DONE** records, the two CI-step changes (AUD2-031's merged coverage export,
+  AUD2-051's link checker), the new tests, and the audit's own documents
+  (`audit_2310.md`, `AUDIT/*.md`, `AUDIT/ledger.json`, `tools/coverage-export.sh`).
+  `main` had moved by one commit the branch does not have
+  (`5bcceee`, a `.github/traffic.json` badge refresh); `git merge-tree` predicts no
+  conflict, and that is the only merge measurement taken.
+- **What is *not* claimed by the merge:** Phase E never runs. §1b, §11 and §12's
+  single final verification on an independent host stays **Not met**, AUD2-038 stays
+  **BLOCKED** — an operator directive to ship is not a host, and closing the record
+  on this decision would be the scope-narrowing §0 forbids — and 15 records remain
+  non-terminal (11 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED). §12 completion, Phase D
+  convergence and any release remain unclaimed. Nothing in this section should be
+  read as "certified on a clean final revision": every measurement below was taken on
+  this host, most of them against a dirty tree.
+- **The gate that replaces it:** the merge happens only on a green `pull_request`
+  run at the PR head. This is the first time CI executes either of the steps this
+  branch changed — `Check Markdown links` over `audit_2310.md` and the rendered
+  `AUDIT/ledger.md`, and `tools/coverage-export.sh` with its shape and scope checks —
+  because the workflow triggers are `push: branches: main` and `pull_request` and the
+  branch was never merged (disclosed in AUD2-031 and AUD2-051). A red run therefore
+  leaves `main` untouched and the fix lands on this branch, which is precisely the
+  protection the PR route buys over merging locally and pushing.
+- **Measured before the PR, not asserted:** the 18-gate chain `LINT_EXIT=0` at
+  `d6b1842` (`AUDIT/aud2-051-lint.log`); the full serial suite 2,007 tests, exit 0,
+  and the coverage export `EXPORT_EXIT=0` at 397 mapped source files
+  (`AUDIT/aud2-031-coverage-run.log`); the committed link step over the finished
+  records `Checked 364 local link(s); 0 broken`, exit 0
+  (`AUDIT/aud2-051-final-link-check.log`); the `docs` gate exit 0
+  (`AUDIT/aud2-051-final-docs-gate.log`). CI's own history on `main` is green at
+  `5bcceee` for both `CI` and `CodeQL`.
+- **Risk accepted, in writing:** `main`'s pipeline changes on this merge — the
+  uploaded coverage artifact is `.build/package-code-coverage.json` built by the new
+  script instead of SwiftPM's last-bundle JSON, and the link checker's semantics are
+  narrower in exactly one respect (code spans and fenced blocks are literal text).
+  If either regresses on the runner, it is fixed forward on `main`; the audit records
+  are not edited afterwards to make the merge look cleaner than it was.
+- **After the merge:** `audit/2026-10-23` is deleted on the remote and locally, so
+  the branch ref stops being the place work continues; the commits stay reachable
+  through `main`'s merge. The 15 non-terminal records continue from
+  `AUDIT/ledger.json` on `main`, on a fresh branch cut from it. The raw evidence logs
+  named above live in the gitignored `AUDIT/` tree and are **not** in the merge — that
+  is the still-open *"preserve required raw evidence in a reviewable delivery form"*
+  item above, and deleting the branch does not close it.
 
 ## Issue record
 
@@ -1337,6 +1399,11 @@ systems. Passing local tests never bypasses the final checklist above.
   completion claim.
 - **Next:** The operator chooses an option above. Until then Phase E and §12
   completion are unclaimable, regardless of how many records reach DONE.
+  **Decision recorded 2026-10-24, and it is neither option above:** the operator
+  directed integration into `main` through a CI-gated PR with Phase E unrun. A merge
+  is not a second host and not a written waiver of §1b/§12, so this record stays
+  **BLOCKED**, both options stay open, and the audit's completion claim is unchanged
+  — see *Integration decision*.
 
 ### AUD2-039 — Swift 6.4.1 keg adds 49 linker warnings to a zero-warning baseline
 
@@ -2286,23 +2353,26 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **50 records: 34 DONE, 15 non-terminal (11 OPEN, 2 PROGRESS,
-2 AUDIT) and 1 BLOCKED**. The count has fallen at every earlier recorded
+The ledger stands at **51 records: 36 DONE, 15 non-terminal (11 OPEN, 2 AUDIT,
+1 PROGRESS, 1 BLOCKED)** — counted from `AUDIT/ledger.json` itself, not restated.
+The count has fallen at every earlier recorded
 milestone — 36 non-terminal at the last snapshot of this section, 21 after the
 rANS and checkpoint batches, 15 before the AUD2-007 pass, which closed one record
-and opened two to land at 16. It fell again here: AUD2-013 and AUD2-014 closed
-with evidence and one new record (AUD2-050, the tree-wide sibling of the
-wrong-reason tests AUD2-013's sweep proved) arrived, so 16 → 15. That is stated
+and opened two to land at 16. It fell again at AUD2-013/014 and then once more when
+AUD2-031 closed (`a9f680a` 16 non-terminal → `b719a4a` 15), rose to 16 when
+AUD2-051 was filed (`8bd3695`) and returned to 15 when it closed (`afcd297`), so the
+milestone's net is one record drained and one filed-and-closed. That is stated
 rather than smoothed over — §8's invariant is a record moving to a terminal
 status, and one net drain at one milestone is not convergence. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
-claimed. Every
+claimed. The integration decision below moves these 36 closed records into `main`;
+it changes none of these counts and closes no record. Every
 non-terminal record left is either an S2 design gap that needs work
-this branch has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
+this audit has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
 045) or a gap in the audit's own tooling and tests (AUD2-049, AUD2-050), an S3
 diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation
 (AUD2-015, 016), a verification record
-(AUD2-019, 031), or the external host (AUD2-038).
+(AUD2-019), or the external host (AUD2-038).
 
 Completed and evidenced here: recovery and hash verification of the original
 brief, the debug and release builds plus the full serial suite under the required

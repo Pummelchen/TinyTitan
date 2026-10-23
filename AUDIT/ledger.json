@@ -34,7 +34,8 @@
    "AUD2-017 deviation: OpenAIValidationTests.parsesHostKVWindow gained its upper-bound expectations in 9ca9942, whose commit is about min_p, while the matching source fix (ServerArguments, RuntimeConfiguration) was left uncommitted until 41d14ca. The committed tree was therefore red for that test from 9ca9942 to 7024d03. Recorded here rather than hidden: the RED run against the reverted fix (AUDIT/aud2-017-red.log, exit 1) is exactly what HEAD would have shown.",
    "AUD2-003's RED is compile-only (new seam); AUD2-006's new test is a pin, not a RED (the pre-fix reader refused the same input, having read all of it); AUD2-009 has no unit seam and is recorded as reviewed and compiled. None of the three is claimed as test-proved behavior.",
    "AUD2-008's fix introduced no refusal it did not already make, but the message those refusals print was written for --model with --check; the sibling pass filed that as AUD2-047 and fixed it at 3191968 rather than closing AUD2-008 over a diagnostic that misnames the flags.",
-   "AUD2-013's mutation sweep found two expansion tests that had been passing for the wrong reason (a slot-bounds or target-size refusal satisfying an expectation that named a different guard); both fixtures were corrected and assert the refusal detail now. The same assertion form is un-swept elsewhere in tests/ — recorded as AUD2-050 instead of folded into AUD2-013."
+   "AUD2-013's mutation sweep found two expansion tests that had been passing for the wrong reason (a slot-bounds or target-size refusal satisfying an expectation that named a different guard); both fixtures were corrected and assert the refusal detail now. The same assertion form is un-swept elsewhere in tests/ — recorded as AUD2-050 instead of folded into AUD2-013.",
+   "Integration decision 2026-10-24: the operator directed a merge of this branch into main through a PR whose pull_request CI run must be green first, with Phase E unrun, 15 records non-terminal and AUD2-038 still BLOCKED. The merge carries the 36 DONE records' fixes and the audit documents; it closes no record, waives no section, and is not a release. audit_2310.md 'Integration decision' is the authority for what is and is not claimed."
   ],
   "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason",
   "brief_file": "AUDIT/audit-brief.md",
@@ -723,7 +724,8 @@
      "Provide access to an independent Apple Silicon Mac (or an approved Linux VPS for non-Swift harness checks) for the single final Phase E run",
      "Explicitly waive sections 1b and 12's independent-host requirement in writing, accepting a primary-host-only final verification and a correspondingly weaker completion claim"
     ]
-   }
+   },
+   "disposition": "Operator decision 2026-10-24: integration into main proceeds through a CI-gated PR with Phase E unrun. This record stays BLOCKED -- a merge is neither an independent host nor a written waiver of sections 1b and 12 -- and both listed options remain open. Recorded in audit_2310.md under 'Integration decision'."
   },
   {
    "id": "AUD2-039",
