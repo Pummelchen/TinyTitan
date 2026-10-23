@@ -201,17 +201,22 @@ extension ServerHTTPHandler {
     }
 
     /// S1: (re)arm the per-connection idle close deadline. Fires after
-    /// `idleReadTimeout` without read activity; the connection is closed only
-    /// when no request is in flight (idle keep-alive or a stalled slowloris
-    /// request), never in the middle of a generation.
+    /// `idleReadTimeout` without read activity. A request whose head has arrived
+    /// but whose body has not completed is a stalled upload -- it is counted
+    /// in flight, yet nothing will ever complete it -- so it is closed like an
+    /// idle connection. A generation whose head was consumed is never closed
+    /// mid-flight; its deadline is re-armed instead, because the old code
+    /// stopped here and disarmed the timer for good (AUD2-034).
     func resetIdleDeadline(_ context: ChannelHandlerContext) {
         idleCloseTask?.cancel()
         let contextBox = SendableContext(context)
         idleCloseTask = context.eventLoop.scheduleTask(
-            in: TinyTitanHTTPServer.idleReadTimeout
+            in: idleReadTimeout
         ) {
-            if self.inFlightRequests == 0 {
+            if self.inFlightRequests == 0 || self.head != nil {
                 contextBox.value.close(promise: nil)
+            } else {
+                self.resetIdleDeadline(contextBox.value)
             }
         }
     }

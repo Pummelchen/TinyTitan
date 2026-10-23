@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import NIOCore
 import NIOEmbedded
+import NIOHTTP1
 import Synchronization
 import Testing
 
@@ -648,6 +649,80 @@ struct HTTPServerTests {
             settled.withLock { $0 },
             "next() parked after cancellation instead of resolving")
         drainer.cancel()
+    }
+
+    /// AUD2-034: a head counted as in-flight plus a body that never completes is
+    /// a stalled upload, not a generation. The idle deadline reset on every read,
+    /// then fired once and declined to close because `inFlightRequests` was 1,
+    /// and was never re-armed -- so the body buffer and connection were held
+    /// indefinitely. The never-close-mid-generation rule still applies to the
+    /// control below: the head has been consumed there, so the timer only
+    /// re-arms.
+    @Test func aStalledRequestBodyIsClosedByTheIdleDeadline() async throws {
+        let channel = EmbeddedChannel()
+        let handler = ServerHTTPHandler(
+            modelID: "test-model",
+            backend: ScriptedServerBackend(),
+            coordinator: ServerCoordinator(queueLimit: 1),
+            heartbeatInterval: .seconds(5),
+            reasoningProfile: .default,
+            router: nil,
+            childChannels: ChildChannelRegistry(maximumChannels: 2),
+            responseStore: ResponseStore(capacity: 2),
+            idleReadTimeout: .milliseconds(40))
+        try await channel.pipeline.addHandler(handler).get()
+        let closed = Mutex(false)
+        channel.closeFuture.whenComplete { _ in closed.withLock { $0 = true } }
+
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                HTTPRequestHead(
+                    version: .http1_1, method: .POST, uri: "/v1/chat/completions")))
+        try channel.writeInbound(
+            HTTPServerRequestPart.body(ByteBuffer(bytes: Array(#"{"a":"#.utf8))))
+        #expect(handler.head != nil)
+        #expect(handler.inFlightRequests == 1)
+
+        channel.embeddedEventLoop.advanceTime(by: .milliseconds(200))
+        channel.embeddedEventLoop.run()
+        #expect(
+            closed.withLock { $0 },
+            "a stalled body with no .end must be closed, not held in flight forever")
+        _ = try? channel.finish()
+    }
+
+    /// The control for the test above: once the head is consumed and only the
+    /// generation is outstanding, the deadline must not close the connection.
+    /// Re-arming is what keeps the timer alive without violating that rule.
+    @Test func anInFlightGenerationIsNotClosedByTheIdleDeadline() async throws {
+        let channel = EmbeddedChannel()
+        let handler = ServerHTTPHandler(
+            modelID: "test-model",
+            backend: ScriptedServerBackend(),
+            coordinator: ServerCoordinator(queueLimit: 1),
+            heartbeatInterval: .seconds(5),
+            reasoningProfile: .default,
+            router: nil,
+            childChannels: ChildChannelRegistry(maximumChannels: 2),
+            responseStore: ResponseStore(capacity: 2),
+            idleReadTimeout: .milliseconds(40))
+        try await channel.pipeline.addHandler(handler).get()
+        let closed = Mutex(false)
+        channel.closeFuture.whenComplete { _ in closed.withLock { $0 = true } }
+        try channel.writeInbound(
+            HTTPServerRequestPart.head(
+                HTTPRequestHead(
+                    version: .http1_1, method: .POST, uri: "/v1/chat/completions")))
+        // As `.end` leaves it: the body was routed, the response is outstanding.
+        handler.head = nil
+        #expect(handler.inFlightRequests == 1)
+        channel.embeddedEventLoop.advanceTime(by: .milliseconds(200))
+        channel.embeddedEventLoop.run()
+        #expect(
+            !closed.withLock { $0 },
+            "a generation must never be closed mid-flight")
+        handler.idleCloseTask?.cancel()
+        _ = try? channel.finish()
     }
 
     /// S4's cap is enforced mid-stream by failing the stream: an error frame,

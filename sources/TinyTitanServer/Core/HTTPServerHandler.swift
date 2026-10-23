@@ -82,6 +82,9 @@ final class ServerHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     /// phase bookkeeping key off it (S10, S25, S1).
     var inFlightRequests = 0
     var idleCloseTask: Scheduled<Void>?
+    /// The idle/mid-body deadline this connection arms. Injected so the
+    /// stalled-upload path is testable without waiting two minutes.
+    let idleReadTimeout: TimeAmount
 
     init(
         modelID: String,
@@ -91,7 +94,8 @@ final class ServerHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         reasoningProfile: ServerReasoningProfile,
         router: (any ModelRouting)?,
         childChannels: ChildChannelRegistry,
-        responseStore: ResponseStore
+        responseStore: ResponseStore,
+        idleReadTimeout: TimeAmount = TinyTitanHTTPServer.idleReadTimeout
     ) {
         self.modelID = modelID
         self._responseModelID = modelID
@@ -102,6 +106,7 @@ final class ServerHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         self.heartbeatInterval = heartbeatInterval
         self.childChannels = childChannels
         self.responseStore = responseStore
+        self.idleReadTimeout = idleReadTimeout
     }
 
     /// Which API's wire shapes a request speaks. Error envelopes, stream
