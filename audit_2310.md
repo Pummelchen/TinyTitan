@@ -1,16 +1,16 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-045 45/45 | done:20 open:24 blocked:1 new:3] DONE — the keep-warm race
-and the thrown-allocation cleanup are closed under a fresh TSan run, and the
-LZFSE publisher now waits for the last wave; the sibling that skips the publish
-on a tiered layer is filed, not fixed`
+`[#AUD2-046 46/46 | done:22 open:23 blocked:1 new:4] DONE — checkpoint metadata
+is validated on every decode path and a corrupt record is quarantined instead of
+reported missing, and the M5 sweep closes its prompt handle explicitly; the two
+index-order gaps the reviewer found are filed, not fixed`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
 a process record once its four passes were run; AUD2-040 to AUD2-044, the
-keep-warm pair (AUD2-020, 021), AUD2-033 and the rANS cluster (AUD2-010, 011,
-012, 018, 023, 024, 025, 027, 030) are closed with remediation commits, and none
-is merged, released or certified on a clean final revision.
+keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028 and the rANS cluster
+(AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are closed with remediation
+commits, and none is merged, released or certified on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -24,20 +24,20 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `d11be7c`, which carries the keep-warm fixes, the AUD2-033
-  final-wave publish and its comment correction, on top of the rANS cluster at
-  `61de182`, the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
+- Measured HEAD: `c5e2e93`, which carries the AUD2-028 checkpoint validation on
+  top of the AUD2-026 sweep fix at `5deb70a`, the keep-warm fixes, the AUD2-033
+  final-wave publish and its comment correction, the rANS cluster at `61de182`,
+  the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
   **The tree also carries uncommitted source and test changes** belonging to
-  records still in START/PROGRESS/TEST, so that commit alone does not contain
-  every tested fix.
-- **45 records: 20 DONE, 24 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **17 OPEN, 1 START, 2 PROGRESS, 2 TEST, 2 AUDIT, 20 DONE,
-  1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 26 S2, 1 S3**. These are ledger
-  classifications, not a claim that all 45 records are confirmed product bugs.
-- `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
-  evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
-  reconciliation. `BLOCKED` is not a passing verification.
+  records still in START/PROGRESS, so that commit alone does not contain every
+  tested fix.
+- **46 records: 22 DONE, 23 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **18 OPEN, 1 START, 2 PROGRESS, 2 AUDIT, 22 DONE, 1 BLOCKED**.
+- Recorded severities: **2 S0, 16 S1, 27 S2, 1 S3**. These are ledger
+  classifications, not a claim that all 46 records are confirmed product bugs.
+- `OPEN`, `START` and `PROGRESS` remain unfinished. `AUDIT` retains a
+  claim/disposition awaiting formal reconciliation. `BLOCKED` is not a passing
+  verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
   AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
   runtime defects. AUD2-022 (Swift 6.4.1), AUD2-032 (brief recovery) and AUD2-037
@@ -45,10 +45,12 @@ tier and status, including disproven claims and audit-introduced regressions.
   AUD2-040 (stale diagnostic), AUD2-041 (`min_p` accepted and ignored), AUD2-042
   (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
   and AUD2-044 (late port validation) are DONE with remediation commits, as are
-  the nine rANS records closed at `61de182` and AUD2-020, AUD2-021 and AUD2-033.
+  the nine rANS records closed at `61de182`, AUD2-020, AUD2-021, AUD2-033,
+  AUD2-026 and AUD2-028.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
   `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
-  AUD2-033 is `71b40d7` (with the comment-only `d11be7c`) and the rANS cluster is
+  AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-033 is `71b40d7` (with the
+  comment-only `d11be7c`) and the rANS cluster is
   `61de182`, all on the audit branch. Removal tickets
   TT-050 and TT-051 are filed in the project tracker (wiki commit `081335d`). No
   fix is represented here as merged, released, or certified on a clean final
@@ -124,12 +126,12 @@ requirement was worked but its own definition of done is not met.
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS/TEST remain uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS remain uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 20 DONE, 24 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 22 DONE, 23 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 24 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 23 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -642,7 +644,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-026 — M5 sweep relies on garbage collection to close a prompt handle
 
-**S2 · Tier C · TEST · benchmark**
+**S2 · Tier C · DONE · benchmark**
 
 - **Location:** [M5 sweep](benchmark/tinytitan_m5_sweep.py) and
   [M5 tests](benchmark/test_tinytitan_m5_sweep.py).
@@ -652,9 +654,9 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Current evidence:** One added test retains the real wrapper and failed on
   `handle.closed` before the fix. Writing inside its context manager gives
   explicit closure. All 24 tests passed on each of Python 3.13.14, 3.14.9 and
-  3.15.0, exit 0 with no ResourceWarnings; sibling sites were reviewed.
-- **Next:** Carry the unchanged regression and explicit-close patch through
-  focused commit and Phase E. No model run or performance improvement is claimed.
+  3.15.0, exit 0 with no ResourceWarnings; sibling sites were reviewed. The
+  Python gate and all 18 lint gates passed on the same tree.
+- **Commit:** `5deb70a`. Not merged, released or verified on an independent host.
 
 ### AUD2-027 — Different rANS experts can alias compressed payload runs
 
@@ -672,20 +674,34 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-028 — Checkpoint metadata byte counts can overflow accounting
 
-**S1 · Tier A · TEST · TinyTitanLib**
+**S1 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift)
+- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift),
+  [checkpoint disk I/O](sources/TinyTitanLib/PromptCheckpointStore+Disk.swift)
   and [checkpoint tests](tests/TinyTitanLib/PromptCheckpointStoreTests.swift).
 - **Finding:** Decoded payload/auxiliary counts reached signed accounting before
-  range validation, permitting negative/over-cap values and overflow.
-- **Current evidence:** Corrected RED budgets prevent eviction from hiding
-  acceptance. Tests use real 16-byte payloads and metadata-only mutation, not huge
-  allocations. The guard permits payloads from one byte through 4 GiB and
-  auxiliary data from zero through 1 GiB at all three decoded-metadata paths,
-  before accounting/read. Two new methods cover six cases each; the complete
-  checkpoint suite passed 28 tests and the full Swift suite passed.
-- **Next:** Add indexed-then-mutated metadata coverage and complete final
-  certification. This numeric guard does not resolve other checkpoint findings.
+  range validation, permitting negative/over-cap values and overflow. A
+  directory whose metadata could not be decoded was treated as absent, so it
+  surfaced as `missing` and its bytes stayed uncounted and un-evictable.
+- **Current evidence:** `DiskMetadata.validate()` bounds payloads to 1…4 GiB and
+  auxiliary data to 0…1 GiB, and `save`, `load`, restart indexing and the
+  filesystem lookup all call it before accounting or reading a payload. A record
+  that cannot be read, decoded or validated is quarantined: the directory is
+  deleted, the key logged, and `corrupt` thrown. Restart indexing orders by
+  directory modification date and evicts after indexing; `removeAll` indexes
+  first. RED was captured by mutation on the final tree (quarantine and sort
+  removed: 3 tests, 5 issues, exit 1, `AUDIT/aud2-028-red-mutation.log`; index
+  validation removed: the new `metadata(for:)` assertion fails,
+  `AUDIT/aud2-028-red-index-validate.log`). The restored tree passes 28 tests,
+  exit 0 (`AUDIT/aud2-028-green-final.log`), and six lint gates pass on it.
+- **Reviewed limits:** The independent review found two indexing gaps — a record
+  loaded before the first index is evicted first, and `diskIndexed` latches done
+  when the listing fails — filed as AUD2-046. Its two byte-count asymmetries
+  (`save` accepts a zero-byte payload that `validate` rejects; `validate` accepts
+  `auxiliaryBytes == 0` that `readPayload` rejects) are unreachable through
+  capture and are recorded, not changed. This commit does not close AUD2-001,
+  AUD2-002 or AUD2-007.
+- **Commit:** `c5e2e93`. Not merged, released or verified on an independent host.
 
 ### AUD2-029 — Failed checkpoint removal drops real bytes from accounting
 
@@ -1185,6 +1201,31 @@ systems. Passing local tests never bypasses the final checklist above.
   after its whole set has landed (keeping `publishesFirstStage` true), or
   `publishesFirstStage` is false whenever the uniform-size split will not run.
 
+### AUD2-046 — Lazy checkpoint indexing evicts a pre-index load first and latches on a failed listing
+
+**S2 · Tier A · OPEN · TinyTitanLib**
+
+- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift),
+  `indexDiskIfNeeded` and `load`'s filesystem restore.
+- **Finding:** Two manifestations, one cause. A record `load` finds on disk
+  before indexing has run is appended to an empty `diskLRU`; indexing then skips
+  that key and appends the older records behind it, so eviction removes the
+  just-touched record first. Separately, `diskIndexed` is set true before
+  `contentsOfDirectory` is attempted and its error is folded into an empty list,
+  so one failed listing (root removed, `EACCES`, `EIO`) disables indexing for the
+  store's lifetime: `removeAll` unlinks nothing and `contains`/`metadata` answer
+  from an empty index. The turn store does not share either shape — it indexes
+  at startup, resets the index, and retries on the next call.
+- **Current evidence:** Found by the independent review of `c5e2e93` and
+  re-derived against the code; not reproduced yet. Candidate tests: load the
+  newest record on a fresh store, then save a third under a two-record budget
+  and assert the backdated record is the one evicted; make the root unreadable
+  across one `contains` call, restore it, and assert `removeAll` still deletes
+  the record.
+- **Next:** File a focused fix: leave the index unlatched until a listing
+  succeeds, and merge the loaded record into the LRU by its date rather than
+  appending it ahead of older entries.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -1235,6 +1276,18 @@ tested; AUD2-033's regression test was RED against the old condition
 (`frontsWritten → [true ×8, false, false]`, exit 1, `AUDIT/aud2-033-red.log`) and
 GREEN after the fix (exit 0, `AUDIT/aud2-033-green.log`). The comment-only
 `d11be7c` followed the suite; no code changed after it.
+
+The checkpoint batch at `c5e2e93` was verified the same way: full serial suite
+(`swift test --no-parallel`, **7 bundles, 1,993 tests, 0 recorded issues, exit 0**,
+`AUDIT/aud2-028-full.log`) and all 18 lint gates (`tools/lint.sh`, exit 0,
+`AUDIT/aud2-028-lint.log`). Its RED is a post-hoc mutation on the final tree, not
+a pre-fix run, and both mutations were reverted by editing with the file restored
+before the GREEN: `AUDIT/aud2-028-red-mutation.log` (3 tests, 5 issues, exit 1)
+and `AUDIT/aud2-028-red-index-validate.log` (the added `metadata(for:)`
+assertion fails). The focused suite passed 28 tests, exit 0
+(`AUDIT/aud2-028-green-final.log`). AUD2-026's three-interpreter Python run
+predates `5deb70a`, the same source under test; no full Swift run was repeated
+for it because it touches only the benchmark sweep.
 
 ### Full serial Swift run
 
