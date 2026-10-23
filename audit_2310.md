@@ -1,10 +1,12 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-050 50/50 | done:35 open:14 blocked:1] DONE — the coverage artifact CI
-uploads is now built from the manifest's seven test bundles and checked for scope,
-so it no longer reads as package-wide while naming one bundle (AUD2-031); every
-expansion-layout guard now has a test that names it, proved by disabling the guard
-one at a time
+`[#AUD2-051 51/51 | done:35 open:15 blocked:1] DONE — the audit's own records now
+show a second untested tool (AUD2-051: the CI markdown-link step fails on the 17
+path:line links this report writes, and on two Swift code spans); the coverage
+artifact CI uploads is built from the manifest's seven test bundles and checked for
+scope, so it no longer reads as package-wide while naming one bundle (AUD2-031);
+every expansion-layout guard
+now has a test that names it, proved by disabling the guard one at a time
 (AUD2-013), and the rANS offset narrowing is a documented invariant rather than an
 unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
 conflict refusal that names its own flags (AUD2-047), the calibration identity
@@ -26,7 +28,9 @@ diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate neve
 reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
 cannot say which guard refused, so a negative test can pass for the wrong reason —
 found twice inside AUD2-013's own suite and un-swept across the rest of `tests/`)
-are opened in the same pass.
+and AUD2-051 (the CI markdown-link step has never run over these records and fails
+on them: 17 `path:line` URLs this report writes plus two Swift code spans it reads
+as links) are opened in the same pass.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -1684,6 +1688,48 @@ systems. Passing local tests never bypasses the final checklist above.
   fixture is refused by the wrong site, move the fixture or assert the case or
   detail that names the guard. Fixing this in the suite this audit already
   touched is not enough; the same form is what hid the two wrong-reason tests.
+
+### AUD2-051 — The CI markdown-link step fails on the audit's own records
+
+**S2 · Tier A · OPEN · audit evidence/CI**
+
+- **Location:** `.github/workflows/ci.yml` (lines 1061–1096, the
+  `Check Markdown links` step), 17 links in this report, and
+  `AUDIT/ledger.md:178`.
+- **Finding:** The step's own script, run verbatim at `b719a4a` on a clean tree,
+  reports `Checked 365 local link(s); 19 broken` and exits 1
+  (`AUDIT/aud2-051-markdown-link-check.log`). Two distinct causes:
+  - **17 links written as `path:lines`.** `[Foo.swift:352-377](sources/…/Foo.swift:352-377)`
+    puts a `:352-377` suffix on the URL, which is neither a path nor a fragment:
+    the step's `File.exist?` is false, and GitHub cannot resolve it for a reader
+    either. The repository already has the other convention — `docs/` writes the
+    readable text and an anchor URL
+    (`[PreadExpertStreamer+Plan.swift:95-106](…/PreadExpertStreamer+Plan.swift#L95)`),
+    and across tracked markdown 179 links use an `#L` anchor and 167 a plain path,
+    against these 17 suffixes. Every one of the 17 cited ranges was checked against
+    its file and is **in range**, so this is link syntax, not a stale citation.
+  - **2 code spans read as links.** The step scans raw lines, so a Swift
+    initializer inside backticks — `` `offsets: [UInt64](repeating: 0, count:)` ``
+    at `audit_2310.md:695`, and the same text rendered into `AUDIT/ledger.md:178` —
+    matches the link regex, because `](` looks like a link to a scanner that has no
+    notion of code spans. In CommonMark a code span is not a link.
+- **Exposure:** `audit_2310.md` and the rendered `AUDIT/ledger.md` are tracked only
+  on `audit/2026-10-23` (`git ls-tree main` shows neither), and the workflow
+  triggers are `push: branches: main` and `pull_request`, so **no CI run has
+  executed this step over these files yet** — the first PR that carries this branch
+  fails it. That is why the defect is invisible rather than absent: the step has
+  never been run against the documents the audit produced.
+- **Severity rationale:** S2, not S1 — it turns CI red on the audit branch and makes
+  17 citations unclickable; it ships no runtime defect. It is not waived: the
+  checker must keep resolving every real link, and skipping a code span is not a
+  weakening because a code span is never a link.
+- **Next:** convert the 17 URLs to the `#L` convention this repository already uses
+  (text unchanged, so the citations stay readable), make the step skip fenced and
+  inline code before matching, and prove both: the step exits 0 on the corrected
+  tree and still exits 1 on a deliberately broken link. Disclosed limit to keep
+  stated: the step checks that the target *file* exists, never that an anchor's line
+  number still says what the prose claims — converting these links does not fix
+  that, and no line-number validation is claimed here.
 
 ## Recorded verification and its limits
 

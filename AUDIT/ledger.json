@@ -936,6 +936,24 @@
    "commit": null,
    "blocked-reason": null,
    "disposition": "Open. Filed from AUD2-013's mutation sweep under the brief's §5 sibling audit; the two instances that sweep proved are closed inside AUD2-013 and the un-swept remainder of the pattern is this record. No production defect is claimed here — the count is a candidate pool to measure, not a count of broken tests."
+  },
+  {
+   "id": "AUD2-051",
+   "severity": "S2",
+   "tier": "A",
+   "project": "audit evidence/CI",
+   "file": ".github/workflows/ci.yml:1061-1096; audit_2310.md (17 links); AUDIT/ledger.md:178",
+   "title": "The CI markdown-link step fails on the audit's own records: path:line links and code spans read as links",
+   "category": "verification-gap",
+   "status": "OPEN",
+   "host": "dev-mac (primary)",
+   "discovered-by": "running the 'Check Markdown links' step verbatim locally while closing AUD2-031 (AUDIT/aud2-051-markdown-link-check.log)",
+   "evidence-before": "ruby script extracted from ci.yml:1061-1096, run at b719a4a on a clean tree (ruby 2.6.10p210, system ruby -- the runner uses the same interpreter family): 'Checked 365 local link(s); 19 broken', exit 1 (AUDIT/aud2-051-markdown-link-check.log). Two distinct causes. (1) Seventeen links in audit_2310.md are written as [Foo.swift:352-377](sources/.../Foo.swift:352-377): the URL carries a ':lines' suffix that is neither a path nor a fragment, so File.exist? is false and GitHub could not resolve it for a reader either. docs/ already uses the other form -- text 'PreadExpertStreamer+Plan.swift:95-106' with URL '...swift#L95' -- and 179 markdown links in the tree use an '#L' anchor against 167 plain paths and these 17 suffixes. Each of the 17 cited ranges was checked against its file and is in range, so this is link syntax, not a stale citation. (2) Two code spans -- 'offsets: [UInt64](repeating: 0, count: ...)' in audit_2310.md:695 and the same Swift text rendered into AUDIT/ledger.md:178 -- match the link regex because the step scans raw lines, so a bracketed Swift initializer followed by a paren becomes a 'link'. Exposure: audit_2310.md and the AUDIT/*.md files are tracked only on audit/2026-10-23 (git ls-tree main shows neither), and the workflow triggers are push to main and pull_request, so no CI run has executed this step over these files yet; the first PR that carries them fails it. The filing of this record raised the same count from 19 to 24 (AUDIT/aud2-051-filing-run.log, 370 links checked): five more matches came from the new section's own code spans and its ellipsis-path examples -- writing about the defect in markdown trips the defect, which is the clearest available demonstration that the scanner has no notion of code spans.",
+   "fix-summary": null,
+   "evidence-after": null,
+   "commit": null,
+   "blocked-reason": null,
+   "disposition": "Open. Filed from AUD2-031's own verification run under the brief's section 5 sibling audit -- the coverage step was fixed and the markdown step beside it was the same class of untested tool. Severity S2: it makes CI red on the audit's branch rather than shipping a defect. Not a waiver of any link check: the fix must keep checking that every real link resolves, and skipping a code span is not a weakening because a code span is not a link in CommonMark. Disclosed limit to state in the fix: the step verifies the target file exists, never that an '#L' anchor or a cited line number is still accurate -- converting these 17 links to anchors keeps that limit, and no line-number validation is claimed."
   }
  ]
 }
