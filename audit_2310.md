@@ -546,7 +546,7 @@ systems. Passing local tests never bypasses the final checklist above.
   `-warnings-as-errors` on every target.
 - **Regression:** The keg adds **49 linker deployment-target warnings** against a
   zero-warning baseline. Filed as AUD2-039 rather than smoothed over.
-- **Commit:** recorded after the commit on `audit/2026-10-23`.
+- **Commit:** `250a03a` on `audit/2026-10-23`.
 
 ### AUD2-023 — rANS publishes before all expert waves are decoded
 
