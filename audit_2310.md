@@ -1,17 +1,17 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-046 46/46 | done:23 open:22 blocked:1 new:4] DONE — checkpoint metadata
-is validated on every decode path, a corrupt record is quarantined instead of
-reported missing, and lazy indexing now retries and keeps the loaded record's
-place in the LRU; the M5 sweep closes its prompt handle explicitly`
+`[#AUD2-029 46/46 | done:24 open:21 blocked:1 new:4] DONE — a checkpoint
+deletion that fails keeps its bytes charged: eviction stops instead of rotating,
+remove keeps the record, removeAll keeps the survivors; the checkpoint
+validation, quarantine and indexing fixes beneath it stand`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
 a process record once its four passes were run; AUD2-040 to AUD2-044, the
-keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046 and the
-rANS cluster (AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are closed with
-remediation commits, and none is merged, released or certified on a clean final
-revision.
+keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029
+and the rANS cluster (AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are
+closed with remediation commits, and none is merged, released or certified on a
+clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -25,7 +25,8 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `7740a42`, which carries the AUD2-046 indexing fix on top of the
+- Measured HEAD: `7024d03`, which carries the AUD2-029 deletion-accounting fix
+  on top of the AUD2-046 indexing fix at `7740a42`, the
   AUD2-028 checkpoint validation at `c5e2e93`, the AUD2-026 sweep fix at
   `5deb70a`, the keep-warm fixes, the AUD2-033
   final-wave publish and its comment correction, the rANS cluster at `61de182`,
@@ -33,8 +34,8 @@ tier and status, including disproven claims and audit-introduced regressions.
   **The tree also carries uncommitted source and test changes** belonging to
   records still in START/PROGRESS, so that commit alone does not contain every
   tested fix.
-- **46 records: 23 DONE, 22 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **17 OPEN, 1 START, 2 PROGRESS, 2 AUDIT, 23 DONE, 1 BLOCKED**.
+- **46 records: 24 DONE, 21 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **17 OPEN, 2 PROGRESS, 2 AUDIT, 24 DONE, 1 BLOCKED**.
 - Recorded severities: **2 S0, 16 S1, 27 S2, 1 S3**. These are ledger
   classifications, not a claim that all 46 records are confirmed product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished. `AUDIT` retains a
@@ -48,10 +49,11 @@ tier and status, including disproven claims and audit-introduced regressions.
   (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
   and AUD2-044 (late port validation) are DONE with remediation commits, as are
   the nine rANS records closed at `61de182`, AUD2-020, AUD2-021, AUD2-033,
-  AUD2-026, AUD2-028 and AUD2-046.
+  AUD2-026, AUD2-028, AUD2-046 and AUD2-029.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
   `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
-  AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-046 is `7740a42`, AUD2-033 is
+  AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-046 is `7740a42`, AUD2-029 is
+  `7024d03`, AUD2-033 is
   `71b40d7` (with the
   comment-only `d11be7c`) and the rANS cluster is
   `61de182`, all on the audit branch. Removal tickets
@@ -129,12 +131,12 @@ requirement was worked but its own definition of done is not met.
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS remain uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS remain uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 23 DONE, 22 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 24 DONE, 21 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 22 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 21 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -708,17 +710,38 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-029 — Failed checkpoint removal drops real bytes from accounting
 
-**S2 · Tier A · START · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift).
-- **Finding:** Remove/evict drops the index entry and subtracts bytes before an
-  ignored filesystem removal error; removeAll resets state despite such errors.
-  Persisted occupied bytes then disappear from budget accounting.
-- **Current evidence:** Confirmed statically and still unfixed. An immutable-
-  directory reproduction has not run. Turn-store deletion tests are a sibling
-  reference, not evidence that this store behaves correctly.
-- **Next:** Reproduce a real filesystem deletion failure and retain truthful
-  index/accounting state until removal succeeds or is explicitly reconciled.
+- **Location:** [checkpoint maintenance](sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift),
+  `evictDiskIfNeeded`, `remove` and `removeAll`.
+- **Finding:** All three paths dropped the index entry and subtracted its bytes
+  before the filesystem removal succeeded, and each ignored the removal error.
+  `evictDiskIfNeeded` also removed the oldest key from the LRU either way, so a
+  directory it could not unlink left the budget under-reporting occupied disk
+  with nothing left to retry; `removeAll` replaced the whole state, so a
+  directory that refused deletion vanished from both the index and the budget.
+- **Current evidence:** Reproduced with a directory marked `UF_IMMUTABLE`
+  (`FileManager.setAttributes([.immutable: true], …)`), which makes
+  `removeItem` fail `EPERM` on any account — independent of runner permissions
+  or Full Disk Access. The first RED attempt was **invalid and is disclosed**:
+  `aFailedRemovalKeepsTheRecordCharged` read `contains(key)` before
+  `diskBytes`, and `contains` re-indexes the directory, restoring the bytes and
+  passing against unfixed code. Reordered so the accounting is read first, the
+  three tests then failed on the unfixed tree for exactly the recorded reasons
+  (3 tests, 6 issues, exit 1, `AUDIT/aud2-029-red.log`): bytes dropped after a
+  refused unlink, an evicted-but-undeleted record uncharged, and a survivor
+  lost from `removeAll`. `evictDiskIfNeeded` now stops the loop and restores the
+  record instead of rotating past it; `remove` returns before touching the
+  index; `removeAll` rebuilds state from the directories that remain.
+- **Evidence after:** The checkpoint suite passes 33 tests
+  (`AUDIT/aud2-029-green.log`); the full serial suite passes 7 bundles, 1,998
+  tests, exit 0 (`AUDIT/aud2-029-full.log`) and all 18 lint gates exit 0
+  (`AUDIT/aud2-029-lint.log`). The fix needed the AUD2-046 split to be
+  extended: the three methods moved by code motion into
+  `PromptCheckpointStore+Maintenance.swift`, with `diskIndexed` widened from
+  `private` to internal and the split recorded in
+  [repository layout](docs/repository-layout.md).
+- **Commit:** `7024d03`. Not merged, released or verified on an independent host.
 
 ### AUD2-030 — An intermediate geometry guard rejected equivalent bit widths
 
@@ -1299,6 +1322,15 @@ exit 1 (`AUDIT/aud2-046-red.log`), and passed after the fix (30 checkpoint
 tests, exit 0, `AUDIT/aud2-046-green.log`). The fix commit `7740a42` carries the
 full serial suite (**7 bundles, 1,995 tests, exit 0**, `AUDIT/aud2-046-full.log`)
 and all 18 lint gates (`AUDIT/aud2-046-lint.log`, 18/18).
+
+AUD2-029's first RED run was invalid and is not counted: the bytes assertion ran
+after `contains`, which re-indexes and restored what the test meant to measure,
+so the test passed against unfixed code. After reordering, the three
+immutable-directory tests failed for their recorded reasons (3 tests, 6 issues,
+exit 1, `AUDIT/aud2-029-red.log`) and passed after the fix (33 checkpoint tests,
+exit 0, `AUDIT/aud2-029-green.log`). The fix commit `7024d03` carries the full
+serial suite (**7 bundles, 1,998 tests, exit 0**, `AUDIT/aud2-029-full.log`) and
+all 18 lint gates (`AUDIT/aud2-029-lint.log`, 18/18).
 
 ### Full serial Swift run
 

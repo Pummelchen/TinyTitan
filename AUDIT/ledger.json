@@ -28,7 +28,8 @@
    "AUD2-020, AUD2-021 and AUD2-033 were verified by one full serial suite on their three fix commits (AUDIT/aud2-020-021-033-full.log, 7 bundles, 1,993 tests, exit 0) and one lint run over the same tree (AUDIT/aud2-020-021-033-lint.log, 18/18). A comment-only commit (d11be7c) followed the suite; no code changed after it.",
    "AUD2-028 commit c5e2e93 was verified with a post-hoc mutation RED rather than a pre-fix RED: the guards were reverted and restored by editing, never by discarding the working tree, and both logs are named in the record. The checkpoint split documented in docs/repository-layout.md was corrected from 447 to 463 lines because the same commit adds the validation the split made room for. The independent review of that commit produced AUD2-046; its two unreachable asymmetries are recorded in AUD2-028's evidence rather than filed as defects.",
    "AUD2-028 was reverted-and-restored in place for both mutation REDs and the file was restored before the GREEN run; the full suite and all 18 lint gates ran on the committed tree c5e2e93 (AUDIT/aud2-028-full.log, 7 bundles / 1,993 tests / exit 0; AUDIT/aud2-028-lint.log, 18/18).",
-   "AUD2-046's RED was a pre-fix run on the tree without the fix (not a post-hoc mutation): the tests were written first and failed for the two recorded reasons. The committed fix is 7740a42, verified by the full serial suite (7 bundles / 1,995 tests / exit 0) and all 18 lint gates."
+   "AUD2-046's RED was a pre-fix run on the tree without the fix (not a post-hoc mutation): the tests were written first and failed for the two recorded reasons. The committed fix is 7740a42, verified by the full serial suite (7 bundles / 1,995 tests / exit 0) and all 18 lint gates.",
+   "AUD2-029's first remove-failure test was green against the unfixed code because the test's own contains() call re-indexed the directory and restored the accounting; the assertion order was corrected and the run withdrawn before any fix was written. The final tests use UF_IMMUTABLE, which was first checked to make removeItem fail with EPERM."
   ],
   "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason",
   "brief_file": "AUDIT/audit-brief.md",
@@ -532,17 +533,18 @@
    "severity": "S2",
    "tier": "A",
    "project": "TinyTitanLib",
-   "file": "sources/TinyTitanLib/PromptCheckpointStore.swift:259,274,363",
+   "file": "sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift:84-160; sources/TinyTitanLib/PromptCheckpointStore.swift:259-310 (at c5e2e93)",
    "title": "Checkpoint deletion and eviction discard accounting even when filesystem removal fails",
    "category": "resource-lifecycle/error-handling",
-   "status": "START",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent checkpoint review, main-agent full-file verification",
-   "evidence-before": "evictDiskIfNeeded and remove drop the index entry and subtract bytes before try? removeItem; removeAll resets all state after ignored removal errors. Failed removals leave occupied bytes invisible to subsequent budgeting. Confirmed statically; immutable-directory reproduction not yet run. Turn-store deletion-failure tests are a sibling reference, not evidence for this store.",
-   "fix-summary": "",
-   "evidence-after": "",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-before": "remove, evictDiskIfNeeded and removeAll subtracted the payload bytes and dropped the index entry before a `try? fileManager.removeItem`, so a directory that refused removal kept occupying the disk while vanishing from the budget. Reproduction: an immutable record directory (UF_IMMUTABLE) makes removeItem fail with EPERM; on the unfixed tree AUDIT/aud2-029-red.log records 3 tests / 6 issues / exit 1 -- remove left diskBytes 0 with the directory present, eviction left 32 instead of 48 and dropped the record from `metadata(for:)`, and removeAll left 0 with the record still on disk. The first draft of the remove test passed because its own contains() call re-indexed the record and restored the bytes; the assertions now read diskBytes before contains(), and that is disclosed rather than left as a green.",
+   "fix-summary": "remove keeps the record indexed and charged when the unlink throws, logs the key, and deletes on a later call once removal succeeds. evictDiskIfNeeded re-inserts the record and stops the pass instead of retrying a directory that just refused removal. removeAll keeps the records it could not delete (ordered by date) and clears only the process-local memory state. The disk lifecycle moved to PromptCheckpointStore+Maintenance.swift as code motion because the store crossed 500 lines; diskIndexed widened to internal. No budget, eviction threshold or format change.",
+   "evidence-after": "GREEN: AUDIT/aud2-029-green.log, 33 checkpoint tests, exit 0. The failure fixture is the macOS immutable flag, verified independently to make removeItem fail with EPERM, so the tests do not depend on the runner's permissions or Full Disk Access; each test clears the flag and re-runs the operation to prove the retry deletes and zeroes the bytes. Full serial suite on the split tree: 7 bundles, 1,998 tests, exit 0 (AUDIT/aud2-029-full.log); all 18 lint gates exit 0 (AUDIT/aud2-029-lint.log), including file-length after the split (store 365 lines, maintenance 161). No model run applies.",
+   "commit": "7024d03",
+   "blocked-reason": null,
+   "disposition": "Fixed on the audit branch at 7024d03; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-030",
