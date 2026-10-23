@@ -1,7 +1,7 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-038 38/38 | done:1 open:35 blocked:2 new:2] OPEN — preserve the original
-brief and reconcile this report against it`
+`[#AUD2-039 39/39 | done:2 open:36 blocked:1 new:1] DONE — verify the required
+Swift 6.4.1 toolchain and record its build and test evidence`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 One documentation record, AUD2-032, is closed because the brief it concerned has
@@ -21,17 +21,18 @@ tier and status, including disproven claims and audit-introduced regressions.
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
 - Measured HEAD: `164e84a08de5d434f95a90d552ceeff608581caa`, **with uncommitted
   source and test changes**. That commit alone does not contain the tested fixes.
-- **38 records: 1 DONE, 35 unresolved/non-blocked, 2 BLOCKED.**
-- Exact statuses: **18 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 1 DONE,
-  2 BLOCKED**.
-- Recorded severities: **2 S0, 15 S1, 21 S2**. These are ledger classifications,
-  not a claim that all 38 records are confirmed outstanding product bugs.
+- **39 records: 2 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 2 DONE,
+  1 BLOCKED**.
+- Recorded severities: **2 S0, 15 S1, 22 S2**. These are ledger classifications,
+  not a claim that all 39 records are confirmed outstanding product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
   AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
-  runtime defects. AUD2-032 is now DONE: the brief was recovered and reconciled.
+  runtime defects. AUD2-022 (Swift 6.4.1) and AUD2-032 (brief recovery) are DONE;
+  neither closes a product defect.
 - No product issue has a remediation commit recorded. No fix is represented here
   as merged, released, or certified on a clean final revision.
 
@@ -70,8 +71,10 @@ item does not mean no work happened there; it means completion is not evidenced.
   recovered and is preserved verbatim; the reconciliation table below records
   what is evidenced, what is missing and what is blocked. Reconciliation is not
   completion: see AUD2-037 and AUD2-038.)*
-- [ ] Provide the requested Swift 6.4.1 compiler/host, or obtain an explicit change
-  to that requirement; installed Swift 6.4.0 is not a substitute.
+- [x] Verify the package under the requested Swift 6.4.1 compiler. *(Homebrew keg
+  6.4.1 built the package and ran the full serial suite, both exit 0. Its 49
+  linker warnings are tracked as AUD2-039.)*
+- [ ] Run it on a clean final revision; the 6.4.1 runs above used the dirty tree.
 
 ### Reconciliation against the recovered brief
 
@@ -84,7 +87,7 @@ requirement was worked but its own definition of done is not met.
 | §0 | No weakened checks, branch/reporting discipline, no secrets, no narrowing | Met for all work recorded here | This report's corrections log; `git` history on `audit/2026-10-23` |
 | §1 | One pinned toolchain per language; formatter, linter, CVE scanner, type checker | Partial | [environment](AUDIT/environment.md), [tool proofs](AUDIT/tool-coverage.md) |
 | §1 | Swift 6 language mode, strict concurrency, warnings-as-errors, SwiftLint `--strict` | Met and proven by deliberate-violation build | [tool proofs](AUDIT/tool-coverage.md) |
-| §1 | Swift 6.4 / Xcode 27 exactly | Partial — installed is 6.4.0, requested 6.4.1 | AUD2-022 (BLOCKED) |
+| §1 | Swift 6.4 / Xcode 27 exactly | Met — Homebrew `swift` 6.4.1 builds and tests the package; 49 linker warnings tracked as AUD2-039 | AUD2-022, AUD2-039 |
 | §1 | Strict C99 with the named hardening flags, proven to reject GNU extensions | Met and proven | [tool proofs](AUDIT/tool-coverage.md) |
 | §1 | Python basic: Ruff format+lint, B/E722/S101/PT rules, bare-except proof, pip-audit | Partial — Ruff and the proof exist; the 3.13 matrix is not certified on the pinned stack | [baseline](AUDIT/baseline.md), [tool proofs](AUDIT/tool-coverage.md) |
 | §1 | Tool-coverage proof for every delegated check | Met for the delegated checks that were listed | [tool proofs](AUDIT/tool-coverage.md) |
@@ -92,7 +95,7 @@ requirement was worked but its own definition of done is not met.
 | §1b | One primary host recorded | Met | [environment](AUDIT/environment.md) |
 | §1b, §11, §12 | One independent host runs the single final verification | **Not met** | AUD2-038 (BLOCKED) |
 | §2 | Inventory, 2-hop dependency graph, trust boundaries, tier table | Met | [scope and tiers](AUDIT/scope-tiers.md) |
-| §3 | Baseline with actual language mode, warnings, tests, lint, CVEs, secret scan | Partial — baseline exists; its masked Swift claims were withdrawn and re-measured | [baseline](AUDIT/baseline.md) |
+| §3 | Baseline with actual language mode, warnings, tests, lint, CVEs, secret scan | Partial — baseline exists and was re-measured; the 6.4.1 build adds 49 linker warnings (AUD2-039) | [baseline](AUDIT/baseline.md) |
 | §4 L0–L4 | Repository, architecture, module, line and security passes at tier depth | Partial — rANS, checkpoint, server, CLI, PLE and Metal areas reviewed; no complete Tier A batch review | Issue record below |
 | §4 L5 | Performance pass on Tier A and profiler-identified hot paths | **Not recorded** | AUD2-037 |
 | §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
@@ -179,9 +182,9 @@ stays unchecked and the full current-tree review remains incomplete.
 
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
-  timing footers. *(Partial: the release build and the serial suite both ran on
-  the dirty tree under Swift 6.4.0; neither is the required 6.4.1 final-revision
-  run.)*
+  timing footers. *(Partial: the serial suite now runs under the required 6.4.1
+  compiler on the dirty tree; the 6.4.1 release build has not been run, and the
+  clean-final-revision run remains outstanding.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
   sanitizer results do not certify later edits.
 - [ ] Reconcile Python 3.13/3.14/3.15 runtime verification with the pinned
@@ -520,18 +523,30 @@ systems. Passing local tests never bypasses the final checklist above.
   one joined stop on both success and error without changing the measured timing
   boundary.
 
-### AUD2-022 — Requested Swift 6.4.1 is unavailable
+### AUD2-022 — Requested Swift 6.4.1 was missed by an Xcode-only inventory
 
-**S1 · Tier A · BLOCKED · toolchain verification**
+**S1 · Tier A · DONE · toolchain verification**
 
-- **Location:** [environment evidence](AUDIT/environment.md).
-- **Finding/evidence:** Both XcodeDefault and CommandLineTools report
-  `swiftlang-6.4.0.34.1`; no installed Swift 6.4.1 toolchain was found. Recorded
-  local results establish only the installed compiler's behavior.
-- **Owner:** Repository operator.
-- **Next:** Provide an Apple Silicon host/toolchain reporting Swift 6.4.1, or
-  explicitly revise the required patch version. No revision is assumed and no
-  compiler installation is authorized by this report.
+- **Location:** [environment evidence](AUDIT/environment.md) and
+  [baseline](AUDIT/baseline.md).
+- **Finding:** The earlier inventory queried XcodeDefault and CommandLineTools,
+  found only `swiftlang-6.4.0.34.1`, and concluded that no 6.4.1 compiler existed.
+  That search omitted Homebrew's keg-only formulae, so the conclusion was wrong:
+  it was an audit false negative, not a missing toolchain.
+- **Resolution:** Homebrew's `swift` formula 6.4.1 is installed at
+  `/opt/homebrew/opt/swift` (Cellar `swift/6.4.1`, keg-only, 2.5 GB) and reports
+  `Swift version 6.4.1 (swift-6.4.1-RELEASE)`, target
+  `arm64-apple-macosx27.0.0`. `xcrun swift` remains Xcode's 6.4.0, so 6.4.1 runs
+  invoke the keg by absolute path.
+- **Evidence:** Build **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks, zero
+  compiler errors. Full serial suite **exit 0**, all seven bundles, 1,985 counted
+  tests, the same 11 skips as the 6.4.0 run, zero compiler errors. Both used
+  `--scratch-path .build/brew641`, leaving the main build tree untouched. The
+  language standard is unchanged: `swiftLanguageModes: [.v6]` plus
+  `-warnings-as-errors` on every target.
+- **Regression:** The keg adds **49 linker deployment-target warnings** against a
+  zero-warning baseline. Filed as AUD2-039 rather than smoothed over.
+- **Commit:** recorded after the commit on `audit/2026-10-23`.
 
 ### AUD2-023 — rANS publishes before all expert waves are decoded
 
@@ -858,13 +873,39 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Next:** The operator chooses an option above. Until then Phase E and §12
   completion are unclaimable, regardless of how many records reach DONE.
 
+### AUD2-039 — Swift 6.4.1 keg adds 49 linker warnings to a zero-warning baseline
+
+**S2 · Tier B · OPEN · build/toolchain**
+
+- **Location:** [Package.swift](Package.swift) line 29 (`.macOS(.v26)`),
+  [environment](AUDIT/environment.md) and [baseline](AUDIT/baseline.md).
+- **Finding:** The Homebrew 6.4.1 keg targets `arm64-apple-macosx27.0.0` and
+  links against the host's Swift runtime dylibs, which are built for macOS 27.0.
+  The package declares macOS 26.0, so every link step emits
+  `building for macOS-26.0, but linking with dylib '/usr/lib/swift/libswiftCore.dylib'
+  which was built for newer version 27.0`. The 6.4.0 Xcode build of the same tree
+  produced zero warnings, so this is a measurable regression against the baseline
+  even though no source changed.
+- **Current evidence:** `AUDIT/brew641-build.log` and
+  `AUDIT/brew641-full-tests.log`: 49 warning lines, all of this one class, plus a
+  `libSwiftScan` fallback notice. Zero compiler errors; `-warnings-as-errors`
+  still governs compilation, so these are linker notices rather than suppressed
+  source diagnostics.
+- **Options:** raise the deployment target to macOS 27 (changes the supported OS
+  set, so it needs an operator decision), use an Xcode-bundled 6.4.1 toolchain
+  whose runtime matches (none is installed), or accept the warnings in writing as
+  a property of the audit's verification toolchain.
+- **Next:** No change applied. The project's shipping toolchain remains Xcode 27 /
+  Swift 6.4; this record exists so the warning delta is not lost.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
 Host evidence reports an M3 MacBook Pro with 24 GB RAM, macOS 27.0.1 (26A434),
-Xcode 27.1 (27A9275), Swift `swiftlang-6.4.0.34.1`, driver 1.168.6. The measured
-source was the dirty working tree at the HEAD above. Resource availability must
-be rechecked before future model runs; an old inventory is not current preflight.
+Xcode 27.1 (27A9275), Xcode's Swift `swiftlang-6.4.0.34.1` (driver 1.168.6), and
+the Homebrew keg-only Swift 6.4.1. The measured source was the dirty working tree
+at the HEAD above. Resource availability must be rechecked before future model
+runs; an old inventory is not current preflight.
 
 ### Full serial Swift run
 
@@ -1002,6 +1043,37 @@ TINYTITAN_LIBRARY_CONTRACT_MODEL=models/qwen3.5_4B_4Bit \
   first live confirmation of AUD2-035 rather than a source trace; the streams are
   `AUDIT/cli-sigint-probe.out` and `.err`.
 
+### Swift 6.4.1 toolchain verification (AUD2-022)
+
+The required 6.4.1 compiler is Homebrew's keg-only `swift` formula, not an Xcode
+toolchain. Exact commands from the repository root:
+
+```bash
+/opt/homebrew/opt/swift/bin/swift --version          # 6.4.1 (swift-6.4.1-RELEASE)
+TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build \
+  --scratch-path .build/brew641 --disable-automatic-resolution
+TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
+  /opt/homebrew/opt/swift/bin/swift test --scratch-path .build/brew641 --no-parallel
+```
+
+- Build: **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks, **zero compiler
+  errors**, **49 linker warnings**.
+- Tests: **exit 0**; seven bundles passed (949/150 suites in 61.754 s, 422/48 in
+  19.696 s, 168/25 in 4.011 s, 189/23 in 0.456 s, 96/16 in 1.141 s, 63/14 in
+  1.067 s, 98/10 in 0.917 s); **1,985 counted tests** with the same 11 skips as
+  the 6.4.0 run; zero compiler errors.
+- Lint after the runs: **18/18 gates, exit 0** (`AUDIT/brew641-lint.log`).
+- All 49 warnings are `building for macOS-26.0, but linking with dylib …
+  built for newer version 27.0`. They are recorded as AUD2-039, not as a pass.
+- `xcrun swift` still reports 6.4.0, so the project's shipping toolchain is
+  unchanged; the keg is used only by the explicit paths above.
+
+An earlier attempt used `AUDIT/scratch/brew641` as the scratch path. The
+`arch-path` and `swiftlint` gates then scanned SwiftPM's checkouts and generated
+test entry points under that tree and failed. The scratch tree was removed and the
+runs repeated under `.build/brew641`, which the gates exclude. No gate was
+weakened, and no source was changed by this exercise.
+
 ### Historical checks, not final-tree certification
 
 The baseline records a release build of 589/589 modules in 137.8 seconds with no
@@ -1110,6 +1182,16 @@ unfixed; remote artifacts have not been inspected.
   the earlier statement that it was unrecoverable described the state before that
   recovery, not the current one. Reconciliation added AUD2-037 and AUD2-038 and
   did not close any product record.
+- The toolchain inventory made the same class of mistake: it searched Xcode's and
+  CommandLineTools' toolchains only and reported that no Swift 6.4.1 compiler
+  existed. Homebrew's keg-only `swift` 6.4.1 was installed all along. The negative
+  finding is withdrawn; the 6.4.1 build and suite are recorded, and the 49 linker
+  warnings they expose are filed as AUD2-039.
+- A scratch build first lived under `AUDIT/scratch/brew641`, which made the
+  `arch-path` and `swiftlint` gates scan SwiftPM checkouts and generated test
+  entry points. The tree was removed and the runs repeated under `.build/brew641`.
+  This was a self-created artifact and a wrong path choice, not a source defect;
+  no gate was excluded to hide it.
 - A reviewer lead alleging that `FleetModels.workspaceId` was a non-optional
   `String` while the plugin sends `null` is **disproven**: the Swift property is
   `String?` and the plugin writes `null` only for an unregistered workspace. It is
@@ -1138,26 +1220,29 @@ from inside the tree.** The blocks are external or unrun:
    [AUDIT/audit-brief.md](AUDIT/audit-brief.md) and hash-verified. Reconciling
    against it exposed four mandated passes with no recorded work (AUD2-037) and
    an independent-host requirement the audit cannot satisfy alone (AUD2-038).
-2. The required Swift 6.4.1 toolchain is not installed on this host; all runs
-   above are Swift 6.4.0 (AUD2-022).
-3. The eleven delegated Tier A reviewer batches all terminated on the operator's
+2. The eleven delegated Tier A reviewer batches all terminated on the operator's
    credit limit before emitting a finding, so no full L2/L3/L4 pass exists for any
    module. Four targeted findings were re-derived manually; that is not the same
    thing.
-4. There is no second host for the Phase E verification (AUD2-038), so §12's
+3. There is no second host for the Phase E verification (AUD2-038), so §12's
    completion condition cannot be met from this machine even if every other record
    were closed.
 
-The ledger stands at **35 non-terminal records** (18 OPEN, 2 START, 3 PROGRESS,
-10 TEST, 2 AUDIT), one DONE documentation record and two BLOCKED. This milestone
-therefore adds records rather than draining them, which §8's closure invariant
-forbids *at a convergence milestone*. The run has never reached Phase C, let alone
-Phase D, so no convergence milestone is claimed and the invariant is not yet due;
-it applies once the open count starts being driven to zero.
+The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
+the package and passed the full serial suite (AUD2-022, DONE). It did surface a
+new build-hygiene finding, AUD2-039.
+
+The ledger stands at **36 non-terminal records** (19 OPEN, 2 START, 3 PROGRESS,
+10 TEST, 2 AUDIT), two DONE records and one BLOCKED. This milestone adds records
+rather than draining them, which §8's closure invariant forbids *at a convergence
+milestone*. The run has never reached Phase C, let alone Phase D, so no
+convergence milestone is claimed and the invariant is not yet due; it applies once
+the open count starts being driven to zero.
 
 Completed and evidenced here: recovery and hash verification of the original
-brief, the unmasked full serial suite, the release build, the 18-gate lint run,
-the corrected seven-object coverage export, the CI artifact inspection, the
+brief, the build and full serial suite under the required Swift 6.4.1 compiler,
+the unmasked full serial suite under 6.4.0, the release build, the 18-gate lint
+run, the corrected seven-object coverage export, the CI artifact inspection, the
 ornith-8 golden check, four of the five library-contract tests and the live CLI
 SIGINT probe. Still incomplete: reconciliation of the ledger against the four
 passes the brief names (AUD2-037), the module-by-module Tier A review,

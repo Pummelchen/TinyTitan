@@ -10,7 +10,8 @@ Branch: `audit/2026-10-23` (§0; merge to `main` only via PR after Phase E).
 | Model | base 8-core M3 MacBook Pro, 24 GB |
 | macOS | 27.0.1 (26A434) |
 | Xcode | 27.1 (27A9275) |
-| Swift | 6.4 (swiftlang-6.4.0.34.1) — the pinned toolchain; no substitution permitted (§1) |
+| Swift (Xcode) | 6.4 (swiftlang-6.4.0.34.1), `xcrun swift` — the project's pinned toolchain |
+| Swift (required 6.4.1) | Homebrew `swift` 6.4.1, keg-only: `/opt/homebrew/opt/swift` → `Cellar/swift/6.4.1`; `swift-6.4.1-RELEASE`, target `arm64-apple-macosx27.0.0` |
 
 ## Toolchain (one pinned version per language; §1)
 
@@ -29,7 +30,10 @@ baseline (recorded in `baseline.md`).
 Install methods: swiftlint, ruff, shellcheck, gitleaks via Homebrew on PATH;
 pip-audit via a project venv (not on the user PATH — CI runs 2.10.1). Node v26.12.0
 / npm 12.2.0 for the plugin packages' own eslint + prettier (`npm ci` in
-`plugins/dsh-lan-manager/` and `plugins/dsh-tinytitan/`).
+`plugins/dsh-lan-manager/` and `plugins/dsh-tinytitan/`). Swift 6.4.1 comes from
+the Homebrew formula `swift` (keg-only, 2.5 GB, installed 2026-10-17); it is not
+on `PATH`, so `xcrun swift` still resolves to Xcode's 6.4.0 and the 6.4.1 runs
+below invoke `/opt/homebrew/opt/swift/bin/swift` explicitly.
 
 ## Language standards in force (build-config-enforced, §1)
 
@@ -53,11 +57,39 @@ Proofs that these standards actually fail the build on a violation are in
 
 ## Requested compatibility extension (2026-10-23)
 
-The operator now requires Swift **6.4.1** and Python **3.13, 3.14 and 3.15**.
-The current Xcode and CommandLineTools both report `swiftlang-6.4.0.34.1`;
-no installed 6.4.1 compiler was found. This is **BLOCKED (AUD2-022)**, owned by
-the repository operator. Tests on the installed compiler remain useful local
-6.4.0 evidence, not a substitute for the requested 6.4.1 verification.
+The operator requires Swift **6.4.1** and Python **3.13, 3.14 and 3.15**.
+
+The earlier inventory searched Xcode's and CommandLineTools' toolchains only and
+reported no 6.4.1 compiler. That negative finding was wrong: Homebrew's
+keg-only `swift` formula **6.4.1** is installed and reports
+`Swift version 6.4.1 (swift-6.4.1-RELEASE)`. Verified with the package:
+
+```bash
+/opt/homebrew/opt/swift/bin/swift --version
+/opt/homebrew/opt/swift/bin/swift package --version
+TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build \
+  --scratch-path .build/brew641 --disable-automatic-resolution
+TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
+  /opt/homebrew/opt/swift/bin/swift test --scratch-path .build/brew641 --no-parallel
+```
+
+- Build: **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks,
+  **zero compiler errors**.
+- Tests: **exit 0**, seven bundles, 1,985 counted tests, the same 11 skips as the
+  6.4.0 run, **zero compiler errors** (`AUDIT/brew641-full-tests.log`).
+- The keg's SwiftPM emits `warning: Unable to locate libSwiftScan` and falls back
+  to the frontend scanner; it does not affect the build result.
+- **49 linker warnings** appear because the keg links the package's macOS 26.0
+  deployment target against system Swift dylibs built for 27.0
+  (`libswiftCore`, `libswift_Concurrency`, …). They are not source diagnostics;
+  `-warnings-as-errors` still governs compilation. Recorded as AUD2-039 because
+  the baseline had zero build warnings.
+- The language standard is unchanged and still enforced: `swiftLanguageModes:
+  [.v6]`, upcoming features, and `-warnings-as-errors` on every target.
+
+Xcode's own toolchain remains 6.4.0; no Xcode-bundled 6.4.1 was found. AUD2-022
+is closed on the 6.4.1 evidence above, with the linker-warning regression tracked
+separately.
 
 | Python runtime | Location | Converter dependencies |
 | --- | --- | --- |
@@ -87,8 +119,9 @@ test. The updated 24-test suite passed on all three interpreters with no
 
 The complete serial Swift run now has an unmasked exit status and an explicit
 skip inventory in `baseline.md`; `continuation-lint-verified.log` records all
-18 lint gates passing. These remain installed-toolchain, dirty-tree results,
-not Swift 6.4.1 or Phase E certification. No model or dependency was installed.
+18 lint gates passing. These remain dirty-tree results; the separate Swift 6.4.1
+build and suite above change the compiler question, not the Phase E question.
+No model or dependency was installed.
 
 The post-format rerun also exited 0, with unchanged pass/skip counts. Its separate
 multi-object coverage export is recorded in `baseline.md`: SwiftPM's own JSON

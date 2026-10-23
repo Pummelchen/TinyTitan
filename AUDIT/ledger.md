@@ -2,7 +2,7 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 38 | done: 1 | open: 35 | blocked: 2
+Tasks: 39 | done: 2 | open: 36 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
@@ -29,7 +29,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-019 | S1 | A | audit evidence | AUDIT/baseline.md:10 | Baseline package-test status was inferred from a masked pipeline and one bundle footer | PROGRESS | dev-mac (primary) |
 | AUD2-020 | S1 | A | TinyTitan/TinyTitanBench | sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift:100-127; sources/TinyTitanBench/GPUKeepWarmStream.swift:91-116 | Keep-warm worker and caller access the stop Bool without synchronization | TEST | dev-mac (primary) |
 | AUD2-021 | S1 | A | TinyTitanBench | sources/TinyTitanBench/MetalHeadBenchmarks.swift:217-246 | A thrown cadence-benchmark command allocation leaves keep-warm worker running | START | dev-mac (primary) |
-| AUD2-022 | S1 | A | toolchain verification | AUDIT/environment.md | Requested Swift 6.4.1 compiler is not installed on the available Mac | BLOCKED | dev-mac (primary) |
+| AUD2-022 | S1 | A | toolchain verification | AUDIT/environment.md | Requested Swift 6.4.1 was missed by an Xcode-only toolchain inventory; Homebrew 6.4.1 builds and tests the package | DONE | dev-mac (primary) |
 | AUD2-023 | S0 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:17-24; sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift:133-177 | rANS publishes gate/up after the first wave while later experts are still undecoded | TEST | dev-mac (primary) |
 | AUD2-024 | S0 | A | TinyTitan/TinyTitanFormat | sources/TinyTitan/Runtime/Inference/Model+RANS.swift:5-64; sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:136-137 | rANS sidecar output geometry is not bound to the tensor layout used by inference | TEST | dev-mac (primary) |
 | AUD2-025 | S1 | A | TinyTitanFormat | sources/TinyTitanFormat/ExpertRANSIndex.swift:228-238 | Untrusted rANS payload offset addition can overflow before validation | TEST | dev-mac (primary) |
@@ -46,6 +46,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-036 | S2 | A | TinyTitan runtime/prefill | sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:305-372; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillLayer.swift:57,121; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PLE.swift:90-117 | PLE prefill gather is bounded by the scratch chunk size, not by the PLEBlock rows it writes | OPEN | dev-mac (primary) |
 | AUD2-037 | S1 | A | audit process | AUDIT/audit-brief.md (sections 5, 6, L5, L7); audit_2310.md | Four brief-mandated passes have no recorded evidence: facade hunt, Tier-A unused code, L5 performance and L7 ops | OPEN | dev-mac (primary) |
 | AUD2-038 | S1 | A | audit process / Phase E | AUDIT/audit-brief.md (sections 1b, 11 Phase E, 12); AUDIT/environment.md | No independent host exists for the Phase E whole-repository verification | BLOCKED | dev-mac (primary) |
+| AUD2-039 | S2 | B | build/toolchain | Package.swift:29; AUDIT/environment.md; AUDIT/baseline.md | Swift 6.4.1 keg adds 49 linker deployment-target warnings against a zero-warning baseline | OPEN | dev-mac (primary) |
 
 ## Evidence and dispositions
 
@@ -166,9 +167,9 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 ### AUD2-022
 
 - **discovered-by:** main-agent version command plus independent toolchain inventory
-- **evidence-before:** xcrun swift --version: Swift6.4, swiftlang-6.4.0.34.1, driver1.168.6; xcodebuild -version: Xcode27.1 27A9275. XcodeDefault and CommandLineTools report the same compiler; no6.4.1 toolchain found. Local tests are6.4.0 evidence only.
-- **fix-summary:** No compiler or language-mode substitution presented as Swift6.4.1 verification.
-- **blocked-reason:** {"options": ["Provide an Apple Silicon host or Xcode toolchain reporting Swift6.4.1 for the final verification", "Explicitly revise the required patch version to the installed supported Swift6.4.0; no revision assumed"], "owner": "repository operator", "reason": "Exact Swift6.4.1 compiler unavailable", "tried": "Queried XcodeDefault, CommandLineTools and installed toolchain locations"}
+- **evidence-before:** Earlier inventory: xcrun swift --version = Swift 6.4 (swiftlang-6.4.0.34.1), driver 1.168.6; xcodebuild -version = Xcode 27.1 (27A9275). XcodeDefault and CommandLineTools both reported 6.4.0 and the search concluded no 6.4.1 compiler existed. That search omitted Homebrew's keg-only formulae, so the conclusion was wrong.
+- **fix-summary:** Located the Homebrew keg-only `swift` formula at /opt/homebrew/opt/swift (Cellar/swift/6.4.1) and verified it reports Swift 6.4.1 (swift-6.4.1-RELEASE). Built and tested the package with it through an explicit absolute path and a scratch path under .build/brew641, so Xcode's 6.4.0 and the main build tree were untouched. The Xcode-only negative finding is corrected, not hidden.
+- **evidence-after:** /opt/homebrew/opt/swift/bin/swift --version: Swift version 6.4.1 (swift-6.4.1-RELEASE), target arm64-apple-macosx27.0.0; swift package --version: Swift Package Manager - Swift 6.4.1; brew list --versions swift: 6.4.1. Build: exit 0, Build complete! (72.81 sec), 1258 tasks, zero compiler errors (AUDIT/brew641-build.log). Full serial suite: exit 0, all seven bundles passed, 1985 counted tests with the same 11 skips as the 6.4.0 run, zero compiler errors (AUDIT/brew641-full-tests.log). Language standard unchanged and enforced: swiftLanguageModes [.v6] plus -warnings-as-errors. 49 linker deployment-target warnings remain and are filed as AUD2-039; libSwiftScan falls back to the frontend scanner.
 
 ### AUD2-023
 
@@ -280,6 +281,13 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **fix-summary:** None. No host was provisioned and no substitute local run is presented as Phase E.
 - **blocked-reason:** {"options": ["Provide access to an independent Apple Silicon Mac (or an approved Linux VPS for non-Swift harness checks) for the single final Phase E run", "Explicitly waive sections 1b and 12's independent-host requirement in writing, accepting a primary-host-only final verification and a correspondingly weaker completion claim"], "owner": "repository operator", "reason": "Phase E requires a second, independent host; only the primary Mac is available and provisioning one needs operator approval", "tried": "Inventoried the recorded hosts in AUDIT/environment.md; confirmed every run to date used the primary Mac; did not provision or contact any remote host"}
 
+### AUD2-039
+
+- **discovered-by:** main-agent build and test under the required Homebrew Swift 6.4.1
+- **evidence-before:** The committed baseline records a release build with zero warnings and -warnings-as-errors on every target. Package.swift declares platforms .macOS(.v26). The Homebrew 6.4.1 keg targets arm64-apple-macosx27.0.0 and links the host's Swift runtime dylibs, which are built for 27.0.
+- **fix-summary:** No fix applied. The warnings are not source diagnostics and do not fail the build; every Swift target still compiles with -warnings-as-errors. Options, none taken unilaterally: raise the package deployment target to macOS 27 (a supported-OS change needing operator approval), use an Xcode-bundled 6.4.1 toolchain whose runtime matches (none is installed), or accept the warnings in writing as a property of the verification toolchain.
+- **evidence-after:** AUDIT/brew641-build.log: 49 lines of the form `building for macOS-26.0, but linking with dylib '/usr/lib/swift/libswiftCore.dylib' which was built for newer version 27.0`, plus one libSwiftScan fallback notice. AUDIT/brew641-full-tests.log: the same 49 warnings, zero compiler errors, exit 0. The 6.4.0 Xcode build of the same tree had zero warnings. No baseline metric is silently rewritten; the increase is recorded here.
+
 ## Verification notes
 
 - All nine behavioral S3 findings reclassified S2 per section 8; none waived or narrowed.
@@ -296,3 +304,4 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - Actual SwiftPM JSON covered only the final test bundle. A local all-seven-object export now measures395mapped source files with explicit exclusions; this is not whole-repository coverage and the durable CI gap stays open as AUD2-031. No pipeline, permission or instruction configuration was changed.
 - 2026-10-23 continuation: five new records filed (AUD2-032..036) from reviewer leads re-derived in the current tree; the eleven delegated module reviews all terminated on credit exhaustion before emitting findings, so no reviewer claim is recorded as evidence. AUD2-031's remote artifact was inspected: it contains one bundle and 27 files, confirming the last-bundle-only defect in CI output.
 - 2026-10-23 brief recovery: the operator supplied the original 13-section brief. It is preserved verbatim in AUDIT/audit-brief.md with a provenance header; the trailing 17,800 bytes hash to the supplied SHA-256. AUD2-032 is closed as documentation. Reconciliation against the brief added AUD2-037 (section 5 facade hunt, section 6 Tier-A unused code, L5 performance and L7 ops have no recorded pass) and AUD2-038 (no independent host for the Phase E whole-repository verification). The ledger is still in Phase B discovery, so no convergence milestone is claimed and section 8's strictly-decreasing closure invariant is not yet due.
+- 2026-10-23 Swift 6.4.1 correction: the earlier AUD2-022 inventory searched only Xcode/CommandLineTools and missed Homebrew's keg-only swift 6.4.1. The keg builds and tests the package (exit 0, all seven bundles, same 11 skips). Its 49 linker deployment-target warnings are filed as AUD2-039 because the baseline had zero warnings. Both the error and the resulting regression are recorded rather than smoothed over.

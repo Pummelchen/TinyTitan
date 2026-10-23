@@ -212,9 +212,10 @@ intentional error-path diagnostics remain visible. This is not a sanitizer run.
 | TinyTitanFleetTests | 1.179 | 5098 |
 | ContinuityCoreTests | 0.908 | 5318 |
 
-The measured state is still dirty HEAD `164e84a`, on the installed Swift 6.4.0
-compiler. It does not establish requested Swift 6.4.1, model/golden behavior,
-clean-commit CI or complete current Tier-A manual coverage.
+The measured state is still dirty HEAD `164e84a`. The 6.4.0 results above do not
+by themselves establish requested Swift 6.4.1 or Phase E; the separate 6.4.1
+build and suite are recorded below, and model/golden behavior, clean-commit CI and
+complete current Tier-A manual coverage remain outstanding.
 
 ### Coverage export gap (AUD2-031)
 
@@ -288,3 +289,42 @@ absence is not silently counted as zero or complete coverage. All 16 `.metal`
 files, embedded Metal source strings, release-only paths and skipped model paths
 remain outside what these LLVM percentages establish. The local export repairs
 this measurement's scope; AUD2-031 stays open for durable CI export/scope checks.
+
+## Swift 6.4.1 verification (AUD2-022, 2026-10-23)
+
+The required 6.4.1 compiler is Homebrew's keg-only `swift` formula, not an Xcode
+toolchain: `/opt/homebrew/opt/swift/bin/swift` reports
+`Swift version 6.4.1 (swift-6.4.1-RELEASE)`, target `arm64-apple-macosx27.0.0`.
+`xcrun swift` remains Xcode's 6.4.0.
+
+```bash
+TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build \
+  --scratch-path .build/brew641 --disable-automatic-resolution
+TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
+  /opt/homebrew/opt/swift/bin/swift test --scratch-path .build/brew641 --no-parallel
+```
+
+| Metric | 6.4.0 baseline tree | 6.4.1 keg |
+| --- | --- | --- |
+| Build | exit 0, 306/306 release tasks, 0 warnings | exit 0, 1,258 debug tasks, 72.81 s, 0 compiler errors, 49 linker warnings |
+| Tests | 1,985 counted, 1,974 passed, 11 skipped | 1,985 counted, same 11 skips, all seven bundles passed |
+| Warnings | 0 | 49 linker deployment-target warnings |
+| Lint | 18/18 gates | 18/18 gates (`AUDIT/brew641-lint.log`) |
+
+Bundle footers under 6.4.1: 949/150 suites in 61.754 s, 422/48 in 19.696 s,
+168/25 in 4.011 s, 189/23 in 0.456 s, 96/16 in 1.141 s, 63/14 in 1.067 s,
+98/10 in 0.917 s.
+
+The 49 warnings are all of one class: linking the package's macOS 26.0
+deployment target against system Swift dylibs built for 27.0. SwiftPM also emits
+`warning: Unable to locate libSwiftScan` and falls back to the frontend scanner.
+Neither is a compiler diagnostic; every target still builds with
+`-warnings-as-errors`, and `swiftLanguageModes: [.v6]` is unchanged. Because the
+baseline had zero warnings, the increase is filed as AUD2-039 rather than
+silently accepted.
+
+The scratch build lives under `.build/brew641`, which the lint gates exclude. An
+earlier attempt used `AUDIT/scratch/brew641`; the arch-path and swiftlint gates
+then scanned SwiftPM's checkouts and generated test entry points and failed. That
+scratch tree was removed and the run repeated at the recorded path; no gate was
+weakened or excluded.
