@@ -209,6 +209,73 @@ import TinyTitan
         #expect(!FileManager.default.fileExists(atPath: payload.path))
     }
 
+    @Test(
+        arguments: [-1, PromptCheckpointStore.maximumAuxiliaryBytes + 1, Int.max],
+        [false, true])
+    func invalidAuxiliaryByteCountsAreRefused(bytes: Int, indexFirst: Bool) async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: Int.max)
+        let meta = metadata(tokens: [1, 2, 3])
+        let writer = try PromptCheckpointStore(configuration: configuration)
+        try await writer.save(meta, snapshot: snapshot(for: meta))
+        let path = root.appendingPathComponent(meta.key.contentHash)
+            .appendingPathComponent("metadata.json")
+        var json = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        json["auxiliaryBytes"] = bytes
+        try JSONSerialization.data(withJSONObject: json).write(to: path)
+        let reader = try PromptCheckpointStore(configuration: configuration)
+        if indexFirst {
+            #expect(!(await reader.contains(meta.key)))
+            // `contains` can also answer from the directory itself; this
+            // asserts the index skipped the record rather than charging it.
+            #expect(await reader.metadata(for: domain).isEmpty)
+        } else {
+            await #expect(throws: PromptCheckpointStoreError.self) {
+                try await reader.load(meta.key, domain: domain)
+            }
+        }
+        #expect(await reader.diskBytes == 0)
+    }
+
+    @Test(
+        arguments: [-1, PromptCheckpointStore.maximumCaptureBytes + 1, Int.max],
+        [false, true])
+    func invalidPayloadByteCountsAreRefused(bytes: Int, indexFirst: Bool) async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: Int.max)
+        let meta = metadata(tokens: [1, 2, 3])
+        let writer = try PromptCheckpointStore(configuration: configuration)
+        try await writer.save(meta, snapshot: snapshot(for: meta))
+        let path = root.appendingPathComponent(meta.key.contentHash)
+            .appendingPathComponent("metadata.json")
+        var json = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+        var checkpoint = try #require(json["metadata"] as? [String: Any])
+        var descriptor = try #require(checkpoint["descriptor"] as? [String: Any])
+        descriptor["payloadBytes"] = bytes
+        descriptor["kvSegmentLengths"] = [bytes]
+        checkpoint["descriptor"] = descriptor
+        json["metadata"] = checkpoint
+        try JSONSerialization.data(withJSONObject: json).write(to: path)
+        let reader = try PromptCheckpointStore(configuration: configuration)
+        if indexFirst {
+            #expect(!(await reader.contains(meta.key)))
+            // `contains` can also answer from the directory itself; this
+            // asserts the index skipped the record rather than charging it.
+            #expect(await reader.metadata(for: domain).isEmpty)
+        } else {
+            await #expect(throws: PromptCheckpointStoreError.self) {
+                try await reader.load(meta.key, domain: domain)
+            }
+        }
+        #expect(await reader.diskBytes == 0)
+    }
+
     @Test func diskLimitEvictsTheOldestDirectory() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -434,5 +501,179 @@ import TinyTitan
                 auxiliary: InferenceAuxiliaryState(
                     position: 3, payload: Data(repeating: 1, count: 8)))
         }
+    }
+
+    /// The write goes through a staging directory and a rename swap, so a
+    /// successful save — first write or rewrite — must leave exactly the
+    /// record directory under the root: no `.tmp-` staging and no `.bak-`
+    /// backup from the swap the rewrite performs.
+    @Test func aRewriteLeavesOnlyTheRecordDirectory() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configuration = ServerPromptCacheStorageConfiguration(
+            memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20)
+        let store = try PromptCheckpointStore(configuration: configuration)
+        let meta = metadata(tokens: [1, 2, 3])
+        try await store.save(meta, snapshot: snapshot(for: meta))
+        try await store.save(meta, snapshot: snapshot(for: meta, byte: 8))
+        let loaded = try await store.load(meta.key, domain: domain)
+        #expect(loaded.snapshot.payload == Data(repeating: 8, count: 16))
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil)
+        #expect(entries.map(\.lastPathComponent) == [meta.key.contentHash])
+    }
+
+    /// A `.tmp-` staging directory is what a crash mid-write leaves behind;
+    /// it holds no metadata, so it must stay invisible to both indexing and
+    /// lookup rather than being served or charged.
+    @Test func aStaleStagingDirectoryIsNotIndexedOrServed() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let staging = root.appendingPathComponent(
+            ".tmp-\(meta.key.contentHash)-\(UUID().uuidString)",
+            isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: staging, withIntermediateDirectories: true)
+        try Data(repeating: 5, count: 16).write(
+            to: staging.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        #expect(!(await store.contains(meta.key)))
+        let listed = await store.metadata(for: domain)
+        #expect(listed.isEmpty)
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// A record directory a crashed in-place write left incomplete (payload,
+    /// no metadata) is replaced whole by the next save of that key.
+    @Test func anIncompleteRecordDirectoryIsReplacedWhole() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(
+            meta.key.contentHash, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try Data(repeating: 5, count: 16).write(
+            to: directory.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        try await store.save(meta, snapshot: snapshot(for: meta, byte: 9))
+        let loaded = try await store.load(meta.key, domain: domain)
+        #expect(loaded.snapshot.payload == Data(repeating: 9, count: 16))
+        let names = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )
+        .map(\.lastPathComponent).sorted()
+        #expect(names == ["metadata.json", "state.bin"])
+    }
+
+    /// A directory whose metadata.json cannot be decoded is corrupt, not
+    /// absent: `load` reports it as corrupt, and the directory is deleted so
+    /// its bytes are reclaimed instead of staying uncounted forever.
+    @Test func corruptDiskMetadataIsQuarantinedNotMissing() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(
+            meta.key.contentHash, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(
+            to: directory.appendingPathComponent("metadata.json"))
+        try Data(repeating: 1, count: 16).write(
+            to: directory.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        await #expect(throws: PromptCheckpointStoreError.self) {
+            try await store.load(meta.key, domain: domain)
+        }
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    /// `contains` cannot throw, but a corrupt record it trips over must not
+    /// survive as uncounted disk either.
+    @Test func containsQuarantinesACorruptRecordItFinds() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(
+            meta.key.contentHash, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(
+            to: directory.appendingPathComponent("metadata.json"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        #expect(!(await store.contains(meta.key)))
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    /// After a restart the eviction order is the directories' modification
+    /// dates, not the order the volume happened to list them in.
+    @Test func restartEvictionOrderFollowsModificationDates() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let oldest = metadata(tokens: [1, 2, 3])
+        let newest = metadata(tokens: [4, 5, 6])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(oldest, snapshot: snapshot(for: oldest))
+            try await writer.save(newest, snapshot: snapshot(for: newest))
+        }
+        // Backdate the first record so the listing order cannot decide the
+        // outcome: whichever order the volume returns, the older mtime goes.
+        let oldestDirectory = root.appendingPathComponent(
+            oldest.key.contentHash)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 0)],
+            ofItemAtPath: oldestDirectory.path)
+        // A fresh store with room for two records (each payload is 16 bytes):
+        // indexing both, then saving a third, must evict the record with the
+        // oldest modification date.
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 32))
+        let third = metadata(tokens: [7, 8, 9])
+        try await store.save(third, snapshot: snapshot(for: third))
+        #expect(!(await store.contains(oldest.key)))
+        #expect(await store.contains(newest.key))
+        #expect(await store.contains(third.key))
+        #expect(!FileManager.default.fileExists(atPath: oldestDirectory.path))
+    }
+
+    /// `removeAll` on a store that has not indexed the disk yet still has to
+    /// delete what is there.
+    @Test func removeAllOnAFreshStoreDeletesTheDiskRecords() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        await store.removeAll()
+        let directory = root.appendingPathComponent(meta.key.contentHash)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
     }
 }

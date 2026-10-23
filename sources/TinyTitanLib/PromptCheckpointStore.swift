@@ -25,7 +25,7 @@ actor PromptCheckpointStore {
     /// second unbounded snapshot.
     static let maximumAuxiliaryBytes = 1_024 * 1_048_576
 
-    private struct DiskMetadata: Codable {
+    struct DiskMetadata: Codable {
         static let currentVersion = 1
 
         let version: Int
@@ -35,9 +35,25 @@ actor PromptCheckpointStore {
         // record carries the QSA/PLE payload and its hash.
         let auxiliaryBytes: Int?
         let auxiliarySHA256: String?
+
+        func validate() throws {
+            try metadata.validate()
+            let payloadBytes = metadata.descriptor.payloadBytes
+            guard payloadBytes > 0, payloadBytes <= PromptCheckpointStore.maximumCaptureBytes else {
+                throw PromptCheckpointStoreError.invalidMetadata(
+                    "payload size \(payloadBytes) is out of range")
+            }
+            let auxiliaryBytes = auxiliaryBytes ?? 0
+            guard auxiliaryBytes >= 0,
+                auxiliaryBytes <= PromptCheckpointStore.maximumAuxiliaryBytes
+            else {
+                throw PromptCheckpointStoreError.invalidMetadata(
+                    "auxiliary size \(auxiliaryBytes) is out of range")
+            }
+        }
     }
 
-    private struct DiskRecord {
+    struct DiskRecord {
         let metadata: PromptCheckpointMetadata
         let directory: URL
         let payload: URL
@@ -45,13 +61,13 @@ actor PromptCheckpointStore {
         var modificationDate: Date
     }
 
-    private struct MemoryRecord {
+    struct MemoryRecord {
         let metadata: PromptCheckpointMetadata
         let snapshot: InferenceStateSnapshot
         let auxiliary: InferenceAuxiliaryState?
     }
 
-    private struct State {
+    struct State {
         var memory: [PromptCheckpointKey: MemoryRecord] = [:]
         var memoryLRU: [PromptCheckpointKey] = []
         var memoryBytes = 0
@@ -60,13 +76,13 @@ actor PromptCheckpointStore {
         var diskBytes = 0
     }
 
-    private static let metadataName = "metadata.json"
-    private static let payloadName = "state.bin"
-    private static let auxiliaryName = "auxiliary.bin"
+    static let metadataName = "metadata.json"
+    static let payloadName = "state.bin"
+    static let auxiliaryName = "auxiliary.bin"
 
-    private let configuration: ServerPromptCacheStorageConfiguration
-    private let fileManager: FileManager
-    private var state = State()
+    let configuration: ServerPromptCacheStorageConfiguration
+    let fileManager: FileManager
+    var state = State()
     private var diskIndexed = false
 
     init(
@@ -147,13 +163,18 @@ actor PromptCheckpointStore {
             touchMemory(key)
             return (record.metadata, record.snapshot, record.auxiliary)
         }
-        if state.disk[key] == nil,
-            let restored = try? diskRecordFromFileSystem(for: key)
-        {
-            state.disk[key] = restored
-            state.diskLRU.append(key)
-            state.diskBytes +=
-                restored.metadata.descriptor.payloadBytes + restored.auxiliaryBytes
+        if state.disk[key] == nil {
+            // A corrupt record is deleted and reported (see load's catch),
+            // never surfaced as `missing`: `missing` means the space is free,
+            // and an uncounted directory left behind is neither evictable
+            // nor reclaimed.
+            if let restored = try diskRecordFromFileSystem(for: key) {
+                state.disk[key] = restored
+                state.diskLRU.append(key)
+                state.diskBytes +=
+                    restored.metadata.descriptor.payloadBytes
+                    + restored.auxiliaryBytes
+            }
         }
         guard let diskRecord = state.disk[key] else {
             throw PromptCheckpointStoreError.missing(key)
@@ -175,7 +196,7 @@ actor PromptCheckpointStore {
             guard diskMetadata.metadata.key == key else {
                 throw PromptCheckpointStoreError.keyMismatch
             }
-            try diskMetadata.metadata.validate()
+            try diskMetadata.validate()
             let payload = try readPayload(
                 at: diskRecord.payload,
                 expectedBytes: diskMetadata.metadata.descriptor.payloadBytes)
@@ -251,6 +272,9 @@ actor PromptCheckpointStore {
     }
 
     func removeAll() {
+        // Index first: without it, `state.disk` is empty and nothing is
+        // unlinked, so the directories survive a removeAll on a fresh store.
+        indexDiskIfNeeded()
         for record in state.disk.values {
             try? fileManager.removeItem(at: record.directory)
         }
@@ -278,18 +302,25 @@ actor PromptCheckpointStore {
     var memoryBytes: Int { state.memoryBytes }
     var diskBytes: Int { state.diskBytes }
 
-    private func indexDiskIfNeeded() {
+    func indexDiskIfNeeded() {
         guard !diskIndexed else { return }
         diskIndexed = true
         guard let root = configuration.diskDirectory else { return }
+        let keys: Set<URLResourceKey> = [
+            .isDirectoryKey, .contentModificationDateKey,
+        ]
         let entries =
             (try? fileManager.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: [.isDirectoryKey]))
+                at: root, includingPropertiesForKeys: Array(keys)))
             ?? []
+        // Restart LRU order is the directories' modification dates, not the
+        // volume's listing order — the turn store applies the same rule, and
+        // a listing order would evict an arbitrary record first.
+        var loaded: [(record: DiskRecord, date: Date)] = []
         for directory in entries {
             guard
-                (try? directory.resourceValues(forKeys: [.isDirectoryKey]))?
-                    .isDirectory == true
+                let values = try? directory.resourceValues(forKeys: keys),
+                values.isDirectory == true
             else { continue }
             let metadataURL = directory.appendingPathComponent(
                 Self.metadataName)
@@ -299,19 +330,48 @@ actor PromptCheckpointStore {
                 let diskMetadata = try? JSONDecoder().decode(
                     DiskMetadata.self, from: data),
                 diskMetadata.version == DiskMetadata.currentVersion,
-                (try? diskMetadata.metadata.validate()) != nil
+                (try? diskMetadata.validate()) != nil
             else { continue }
             let key = diskMetadata.metadata.key
             guard state.disk[key] == nil else { continue }
             let payloadURL = directory.appendingPathComponent(Self.payloadName)
             let auxiliaryBytes = diskMetadata.auxiliaryBytes ?? 0
-            state.disk[key] = DiskRecord(
-                metadata: diskMetadata.metadata, directory: directory,
-                payload: payloadURL, auxiliaryBytes: auxiliaryBytes,
-                modificationDate: Date())
-            state.diskLRU.append(key)
+            loaded.append(
+                (
+                    DiskRecord(
+                        metadata: diskMetadata.metadata, directory: directory,
+                        payload: payloadURL, auxiliaryBytes: auxiliaryBytes,
+                        modificationDate:
+                            values.contentModificationDate ?? .distantPast),
+                    values.contentModificationDate ?? .distantPast
+                ))
+        }
+        loaded.sort { $0.date < $1.date }
+        for entry in loaded {
+            state.disk[entry.record.metadata.key] = entry.record
+            state.diskLRU.append(entry.record.metadata.key)
             state.diskBytes +=
-                diskMetadata.metadata.descriptor.payloadBytes + auxiliaryBytes
+                entry.record.metadata.descriptor.payloadBytes
+                + entry.record.auxiliaryBytes
+        }
+        // A restart can index more than the budget allows (the limit may have
+        // been lowered); evict immediately rather than waiting for a save
+        // that may never come — the turn store does the same on load.
+        evictDiskIfNeeded()
+    }
+
+    func evictDiskIfNeeded() {
+        while state.diskBytes > configuration.diskLimitBytes,
+            let oldest = state.diskLRU.first
+        {
+            guard let record = state.disk.removeValue(forKey: oldest) else {
+                state.diskLRU.removeFirst()
+                continue
+            }
+            state.diskLRU.removeFirst()
+            state.diskBytes -=
+                record.metadata.descriptor.payloadBytes + record.auxiliaryBytes
+            try? fileManager.removeItem(at: record.directory)
         }
     }
 
@@ -325,19 +385,35 @@ actor PromptCheckpointStore {
         guard fileManager.fileExists(atPath: metadataURL.path) else {
             return nil
         }
-        let data = try BoundedMetadataRead.read(
-            fileAt: metadataURL, maxBytes: 16 * 1_048_576)
-        let diskMetadata = try JSONDecoder().decode(
-            DiskMetadata.self, from: data)
-        guard diskMetadata.version == DiskMetadata.currentVersion,
-            diskMetadata.metadata.key == key
-        else { return nil }
-        try diskMetadata.metadata.validate()
-        return DiskRecord(
-            metadata: diskMetadata.metadata, directory: directory,
-            payload: directory.appendingPathComponent(Self.payloadName),
-            auxiliaryBytes: diskMetadata.auxiliaryBytes ?? 0,
-            modificationDate: Date())
+        // A directory named for this key whose metadata cannot be read,
+        // decoded or validated is corrupt, not absent: quarantine it (delete,
+        // so its bytes are reclaimed) and say so. Returning nil here would
+        // surface as `missing` and leave the directory uncounted forever.
+        do {
+            let data = try BoundedMetadataRead.read(
+                fileAt: metadataURL, maxBytes: 16 * 1_048_576)
+            let diskMetadata = try JSONDecoder().decode(
+                DiskMetadata.self, from: data)
+            guard diskMetadata.version == DiskMetadata.currentVersion,
+                diskMetadata.metadata.key == key
+            else {
+                throw PromptCheckpointStoreError.corrupt(
+                    key, "metadata does not match the record directory")
+            }
+            try diskMetadata.validate()
+            return DiskRecord(
+                metadata: diskMetadata.metadata, directory: directory,
+                payload: directory.appendingPathComponent(Self.payloadName),
+                auxiliaryBytes: diskMetadata.auxiliaryBytes ?? 0,
+                modificationDate: Date())
+        } catch {
+            try? fileManager.removeItem(at: directory)
+            ServerLog.diagnostic(
+                "prompt checkpoints: quarantined corrupt record "
+                    + "\(key.contentHash): \(error)")
+            throw PromptCheckpointStoreError.corrupt(
+                key, String(describing: error))
+        }
     }
 
     private func insertMemory(
@@ -375,96 +451,6 @@ actor PromptCheckpointStore {
         state.diskLRU.removeAll { $0 == key }
         state.diskLRU.append(key)
         state.disk[key]?.modificationDate = Date()
-    }
-
-    private func writeDisk(
-        metadata: PromptCheckpointMetadata,
-        snapshot: InferenceStateSnapshot,
-        auxiliary: InferenceAuxiliaryState?
-    ) throws {
-        guard let root = configuration.diskDirectory else {
-            throw PromptCheckpointStoreError.diskUnavailable
-        }
-        let directory = root.appendingPathComponent(
-            metadata.key.contentHash, isDirectory: true)
-        try fileManager.createDirectory(
-            at: directory, withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        let payloadURL = directory.appendingPathComponent(Self.payloadName)
-        try snapshot.payload.write(to: payloadURL, options: .atomic)
-        try fileManager.setAttributes(
-            [.posixPermissions: 0o600], ofItemAtPath: payloadURL.path)
-        let auxiliaryURL = directory.appendingPathComponent(Self.auxiliaryName)
-        let auxiliaryBytes = auxiliary?.payload.count ?? 0
-        let auxiliarySHA256: String?
-        if let auxiliary {
-            try auxiliary.payload.write(to: auxiliaryURL, options: .atomic)
-            try fileManager.setAttributes(
-                [.posixPermissions: 0o600], ofItemAtPath: auxiliaryURL.path)
-            auxiliarySHA256 = Sha256Verifier.hashData(auxiliary.payload)
-        } else {
-            // A rewrite with no auxiliary state must not leave the previous
-            // record's QSA/PLE payload behind a new metadata file.
-            try? fileManager.removeItem(at: auxiliaryURL)
-            auxiliarySHA256 = nil
-        }
-        let diskMetadata = DiskMetadata(
-            version: DiskMetadata.currentVersion,
-            metadata: metadata,
-            payloadSHA256: Sha256Verifier.hashData(snapshot.payload),
-            auxiliaryBytes: auxiliary == nil ? nil : auxiliaryBytes,
-            auxiliarySHA256: auxiliarySHA256)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(diskMetadata).write(
-            to: directory.appendingPathComponent(Self.metadataName),
-            options: .atomic)
-        // Replacing a record charges the payload once, not twice: the old
-        // entry's bytes are still in `diskBytes` until they are subtracted.
-        if let replaced = state.disk[metadata.key] {
-            state.diskBytes -=
-                replaced.metadata.descriptor.payloadBytes
-                + replaced.auxiliaryBytes
-            state.diskLRU.removeAll { $0 == metadata.key }
-        }
-        state.disk[metadata.key] = DiskRecord(
-            metadata: metadata, directory: directory, payload: payloadURL,
-            auxiliaryBytes: auxiliaryBytes,
-            modificationDate: Date())
-        state.diskLRU.append(metadata.key)
-        state.diskBytes += snapshot.payload.count + auxiliaryBytes
-        while state.diskBytes > configuration.diskLimitBytes,
-            let oldest = state.diskLRU.first
-        {
-            guard let record = state.disk.removeValue(forKey: oldest) else {
-                state.diskLRU.removeFirst()
-                continue
-            }
-            state.diskLRU.removeFirst()
-            state.diskBytes -=
-                record.metadata.descriptor.payloadBytes + record.auxiliaryBytes
-            try? fileManager.removeItem(at: record.directory)
-        }
-    }
-
-    private func readPayload(
-        at url: URL, expectedBytes: Int
-    ) throws -> Data {
-        guard expectedBytes > 0,
-            expectedBytes <= max(Self.maximumCaptureBytes, Self.maximumAuxiliaryBytes)
-        else {
-            throw PromptCheckpointStoreError.invalidMetadata(
-                "payload size \(expectedBytes) is not a valid capture size")
-        }
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        let data = try handle.read(upToCount: expectedBytes + 1) ?? Data()
-        guard data.count == expectedBytes else {
-            throw PromptCheckpointStoreError.corrupt(
-                PromptCheckpointKey(contentHash: url.deletingLastPathComponent().lastPathComponent),
-                "payload is \(data.count) bytes, expected \(expectedBytes)")
-        }
-        return data
     }
 
     private static func verifyKey(_ metadata: PromptCheckpointMetadata) throws {
