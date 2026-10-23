@@ -1,16 +1,16 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-024 44/44 | done:17 open:26 blocked:1 new:2] DONE — the rANS cluster is
-closed at 61de182: both S0s and seven related S1/S2 records, with geometry bound
-to the tensor layout, publication held to the final wave, and the scale, stream
-and overlap guards proven by tests`
+`[#AUD2-045 45/45 | done:20 open:24 blocked:1 new:3] DONE — the keep-warm race
+and the thrown-allocation cleanup are closed under a fresh TSan run, and the
+LZFSE publisher now waits for the last wave; the sibling that skips the publish
+on a tiered layer is filed, not fixed`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
-a process record once its four passes were run; AUD2-040 to AUD2-044 and the
-rANS cluster (AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are closed with
-remediation commits, and none is merged, released or certified on a clean final
-revision.
+a process record once its four passes were run; AUD2-040 to AUD2-044, the
+keep-warm pair (AUD2-020, 021), AUD2-033 and the rANS cluster (AUD2-010, 011,
+012, 018, 023, 024, 025, 027, 030) are closed with remediation commits, and none
+is merged, released or certified on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -24,16 +24,17 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `61de182f1d3e141e92314f079cf1f0e606fcb647`, which carries the
-  rANS cluster on top of the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
+- Measured HEAD: `d11be7c`, which carries the keep-warm fixes, the AUD2-033
+  final-wave publish and its comment correction, on top of the rANS cluster at
+  `61de182`, the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
   **The tree also carries uncommitted source and test changes** belonging to
   records still in START/PROGRESS/TEST, so that commit alone does not contain
   every tested fix.
-- **44 records: 17 DONE, 26 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **17 OPEN, 2 START, 2 PROGRESS, 3 TEST, 2 AUDIT, 17 DONE,
+- **45 records: 20 DONE, 24 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **17 OPEN, 1 START, 2 PROGRESS, 2 TEST, 2 AUDIT, 20 DONE,
   1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 25 S2, 1 S3**. These are ledger
-  classifications, not a claim that all 44 records are confirmed product bugs.
+- Recorded severities: **2 S0, 16 S1, 26 S2, 1 S3**. These are ledger
+  classifications, not a claim that all 45 records are confirmed product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
@@ -44,10 +45,11 @@ tier and status, including disproven claims and audit-introduced regressions.
   AUD2-040 (stale diagnostic), AUD2-041 (`min_p` accepted and ignored), AUD2-042
   (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
   and AUD2-044 (late port validation) are DONE with remediation commits, as are
-  the nine rANS records closed at `61de182`.
+  the nine rANS records closed at `61de182` and AUD2-020, AUD2-021 and AUD2-033.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
-  `c8d04c4`, AUD2-044 is `3ac4699` and the rANS cluster is `61de182`, all on the
-  audit branch. Removal tickets
+  `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
+  AUD2-033 is `71b40d7` (with the comment-only `d11be7c`) and the rANS cluster is
+  `61de182`, all on the audit branch. Removal tickets
   TT-050 and TT-051 are filed in the project tracker (wiki commit `081335d`). No
   fix is represented here as merged, released, or certified on a clean final
   revision.
@@ -107,7 +109,7 @@ requirement was worked but its own definition of done is not met.
 | §1 | Strict C99 with the named hardening flags, proven to reject GNU extensions | Met and proven | [tool proofs](AUDIT/tool-coverage.md) |
 | §1 | Python basic: Ruff format+lint, B/E722/S101/PT rules, bare-except proof, pip-audit | Partial — Ruff and the proof exist; the 3.13 matrix is not certified on the pinned stack | [baseline](AUDIT/baseline.md), [tool proofs](AUDIT/tool-coverage.md) |
 | §1 | Tool-coverage proof for every delegated check | Met for the delegated checks that were listed | [tool proofs](AUDIT/tool-coverage.md) |
-| §1 | Sanitizers run the suite (C ASan/UBSan, Swift TSan) | Partial — runs exist, none on the final edits | This report, historical checks |
+| §1 | Sanitizers run the suite (C ASan/UBSan, Swift TSan) | Partial — TSan is clean on the keep-warm paths (AUD2-020); no sanitizer run covers the whole final tree | AUD2-020, this report |
 | §1b | One primary host recorded | Met | [environment](AUDIT/environment.md) |
 | §1b, §11, §12 | One independent host runs the single final verification | **Not met** | AUD2-038 (BLOCKED) |
 | §2 | Inventory, 2-hop dependency graph, trust boundaries, tier table | Met | [scope and tiers](AUDIT/scope-tiers.md) |
@@ -119,15 +121,15 @@ requirement was worked but its own definition of done is not met.
 | §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
-| §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage; their fixes share one commit, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
+| §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; the rest of the tree's fixes are still uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS/TEST remain uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 17 DONE, 26 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 20 DONE, 24 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 26 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 24 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -512,32 +514,56 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-020 — Keep-warm stop flag has a data race
 
-**S1 · Tier A · TEST · TinyTitan/TinyTitanBench**
+**S1 · Tier A · DONE · TinyTitan/TinyTitanBench**
 
 - **Location:** [runtime runner](sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift)
   and [benchmark worker](sources/TinyTitanBench/GPUKeepWarmStream.swift).
 - **Finding:** An ordinary Bool was written by the caller and read by the worker
   without synchronization; an unchecked invariant did not make this defined.
-- **Current evidence:** A running TSan reproduction reported the race; an earlier
-  compilation failure is not RED evidence. The patch uses release/acquire atomic
-  access and retains the semaphore join and command-buffer completion order.
-  Historical TSan GREEN passed three tests; narrow review found no new defect
-  for the supported one-start/one-stop lifecycle. No performance claim is made.
-- **Next:** Verify the final tree under TSan and cover the benchmark worker and
-  forced in-flight shutdown. Tests do not promise arbitrary concurrent start/stop.
+- **Resolution:** Both types hold `running` as an `Atomic<Bool>` (Synchronization),
+  stored with `.releasing` in `start()`/`stop()` and loaded with `.acquiring` by
+  the worker loop. The stop/join semaphore still publishes `dispatches`; the
+  cadence structure is unchanged and no timing claim is made.
+- **Evidence:** A running TSan reproduction reported the race; an earlier
+  compilation failure was not RED evidence. Fresh sanitizer run on the final
+  tree: `swift test --sanitize=thread --no-parallel --filter GPUKeepWarmRunnerTests`
+  exited 0 with **3 tests passed and 0 ThreadSanitizer warnings**
+  (`AUDIT/aud2-020-tsan.log`); the only later change to the file was a comment.
+  An independent reviewer read both types and found no remaining unsynchronized
+  access: `startedAt` is written before the `serial.async` that is the worker's
+  release edge and read only after the semaphore join, and `dispatches` is
+  published by the semaphore, not the atomic, so `.releasing`/`.acquiring` is
+  stronger than the kill flag needs. Two latent, unreachable paths are recorded
+  rather than fixed: `stop()` without `start()`, or a second `stop()`, would block
+  on a drained semaphore, and a runner dropped without `stop()` is retained by
+  its own `guard let self` loop; the only production call site stops exactly once.
+  The three lifecycle tests can fail on a missing join but cannot fail if the
+  atomic store were dropped -- they pin the join, TSan pins the ordering. No
+  performance claim is made.
+- **Commit:** `3842d8d` on `audit/2026-10-23`; the TSan run compiled its parent.
 
 ### AUD2-021 — Benchmark allocation failure leaves keep-warm work running
 
-**S1 · Tier A · START · TinyTitanBench**
+**S1 · Tier A · DONE · TinyTitanBench**
 
 - **Location:** [Metal head benchmarks](sources/TinyTitanBench/MetalHeadBenchmarks.swift).
 - **Finding:** Worker start precedes throwing command-buffer/encoder allocations;
   joined stop exists only on the success path. The running worker retains itself.
-- **Current evidence:** Independently reviewed and still **unfixed**. An atomic
-  stop flag does not fix missing cleanup when the stop is never called.
-- **Next:** Write a failing allocation-error cleanup test, then guarantee exactly
-  one joined stop on both success and error without changing the measured timing
-  boundary.
+- **Resolution:** `runHeadCadence` sets a `keepWarmStopped` flag after
+  `keepWarm?.start()` and a `defer` stops the worker when it is still set, so
+  every throw inside the loop (`requireCommandBuffer`, a nil compute encoder)
+  unwinds through a stop. The success path stops first and then sets the flag, so
+  a stop happens exactly once.
+- **Evidence:** No unit seam exists to force a command-buffer allocation failure:
+  `requireCommandBuffer` throws only when Metal returns nil, which needs an
+  injected queue and the production function takes the real one; no test was
+  written and none is claimed. Evidence is compile, review and the suite: the
+  TSan build compiled the fixed file, the full serial suite passed on the same
+  tree, and an independent reviewer confirmed nothing throws between the
+  success-path stop and the flag assignment, so a double stop is impossible. The
+  bench executable is outside `TinyTitanLib`'s closure, so its existing prints do
+  not reach the stdout-clean gate.
+- **Commit:** `3098fdd` on `audit/2026-10-23`.
 
 ### AUD2-022 — Requested Swift 6.4.1 was missed by an Xcode-only inventory
 
@@ -738,7 +764,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-033 — LZFSE first-stage publication does not wait for the last wave
 
-**S1 · Tier A · OPEN · TinyTitan runtime/streaming**
+**S1 · Tier A · DONE · TinyTitan runtime/streaming**
 
 - **Location:** [compressed plan execution](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift)
   (lines 259–275), [rANS contrast](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift)
@@ -757,9 +783,28 @@ systems. Passing local tests never bypasses the final checklist above.
   live: the 2026-10-23 ornith-8 golden check is batch-1 greedy decode and passed
   byte-identical, which does not exercise a >8-miss plan. Treat as S0 if a shipped
   front end reaches that plan shape, as the rANS record implies.
-- **Next:** No fix applied. Make the LZFSE condition match the rANS final-wave rule
-  (`end == plan.misses.count`), or publish only after every wave's phase 0; then
-  retain a >8-miss regression test.
+- **Resolution:** `executeCompressedMisses` forwards `firstStage` only from the
+  wave whose `end` is `plan.misses.count`, matching `executeRANSPlan`, so the
+  publish fires when the last wave's fronts are resident and every miss slot the
+  consumer covers has bytes. The doc comment above it no longer claims a
+  per-layer wave with a publish inside each one.
+- **Evidence:** RED on the same tree. The new test plans ten misses (two waves of
+  eight), poisons every slot byte with `0xAA`, and records at first-stage time
+  which slots had been written. With the old `start == 0` condition it failed
+  with `frontsWritten → [true ×8, false, false]` at
+  `CompressedExpertStreamerTests.swift:308`, exit 1 (`AUDIT/aud2-033-red.log`);
+  with the fix the eight-test suite passed, exit 0
+  (`AUDIT/aud2-033-green.log`). The condition was reverted and restored by
+  editing, not by discarding work, and `git status` on the file is clean. Full
+  serial suite on the fix commits: **7 bundles, 1,993 tests, exit 0**
+  (`AUDIT/aud2-020-021-033-full.log`); **all 18 lint gates exit 0**
+  (`AUDIT/aud2-020-021-033-lint.log`). The one later change was the comment-only
+  `d11be7c`. Sibling sweep: the raw bounded path reads all misses in one batch and
+  publishes after that set's fronts, so it does not share the defect; the tiered
+  branch that skips the split yet still declares `publishesFirstStage` is filed
+  separately as AUD2-045. No live model check: the recorded golden is batch-1
+  decode and does not reach a two-wave plan, so this is a structural proof.
+- **Commit:** `71b40d7`, with the comment correction in `d11be7c`.
 
 ### AUD2-034 — A stalled request body is never timed out once its head is in flight
 
@@ -1113,6 +1158,33 @@ systems. Passing local tests never bypasses the final checklist above.
   127.0.0.1` and empty stdout, while the control on a free port served
   `/health {"status":"ok"}` and exited 0 on SIGTERM.
 
+### AUD2-045 — A tiered layer declares a first stage its read branch never publishes
+
+**S2 · Tier A · OPEN · TinyTitan runtime/streaming**
+
+- **Location:**
+  [plan construction](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift)
+  and the [tiered branch](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift)
+  of `executeBoundedReads`.
+- **Finding:** The bounded fallback builds the operation with
+  `publishesFirstStage: boundedReader != nil && layout.phase1Bytes != nil`.
+  `executeBoundedReads` early-returns for a layer whose `expertSizes` are not
+  uniform (the tiered format), reading each expert's own length and skipping the
+  phase-1 split; that branch never calls `firstStage`. `encodeDecodeEarlyMissFixup`
+  then awaits `firstStageCompletion` before encoding the miss fixup, so on such a
+  layer the fixup waits for the whole load instead of overlapping the tail read.
+  There is no hang — `firstStageCompletion` also resumes at `finish` — but the
+  declared stage never exists. AUD2-033 fixed the same publish condition for the
+  wave path; this is the branch that bypasses it.
+- **Current evidence:** Found by the sibling sweep while closing AUD2-033. Not
+  reproduced: the tiered install is unreachable in this tree — `Model.swift:181-188`
+  records that the tiered width it serves has no converter (TT-050) — so no plan
+  reaches the branch. Severity is S2 on reachability plus lost overlap, not on
+  results: the fixup is still ordered after the load.
+- **Next:** Decide at layout construction: either the tiered branch publishes
+  after its whole set has landed (keeping `publishesFirstStage` true), or
+  `publishesFirstStage` is false whenever the uniform-size split will not run.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -1151,6 +1223,18 @@ with `an error was expected but none was thrown` (`AUDIT/aud2-010-red.log`, exit
 `AUDIT/aud2-010-green.log`). No live model run exercises these guards: they are
 untrusted-sidecar paths, and the writer-to-GPU round trips in the suite stand in
 for a real sidecar.
+
+The keep-warm pair and AUD2-033 were verified together on the same tree: the full
+serial suite (`swift test --no-parallel`, **7 bundles, 1,993 tests, 0 recorded
+issues, exit 0**, `AUDIT/aud2-020-021-033-full.log`) and all 18 lint gates
+(`tools/lint.sh`, exit 0, `AUDIT/aud2-020-021-033-lint.log`). AUD2-020's race was
+re-run under TSan on the final tree (**3 tests, 0 ThreadSanitizer warnings, exit
+0**, `AUDIT/aud2-020-tsan.log`); AUD2-021 has no unit seam for a failed
+allocation and is recorded as reviewed, compiled and suite-covered rather than
+tested; AUD2-033's regression test was RED against the old condition
+(`frontsWritten → [true ×8, false, false]`, exit 1, `AUDIT/aud2-033-red.log`) and
+GREEN after the fix (exit 0, `AUDIT/aud2-033-green.log`). The comment-only
+`d11be7c` followed the suite; no code changed after it.
 
 ### Full serial Swift run
 

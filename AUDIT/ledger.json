@@ -24,7 +24,8 @@
    "2026-10-23 Swift 6.4.1 correction: the earlier AUD2-022 inventory searched only Xcode/CommandLineTools and missed Homebrew's keg-only swift 6.4.1. The keg builds and tests the package (exit 0, all seven bundles, same 11 skips). Its 49 linker deployment-target warnings are filed as AUD2-039 because the baseline had zero warnings. Both the error and the resulting regression are recorded rather than smoothed over.",
    "The 2026-10-23 section-6 sweep ran over the Tier A modules and the code this audit orphaned. It filed AUD2-042 (five declarations with no caller, deprecated with removal tickets TT-050/TT-051) and AUD2-043 (the decode-only expert I/O line lost its only reporter in 0cdba76 while its benchmark still parsed it, restored in the library). Neither changes inference; AUD2-043 restores a measurement the slot sweep depends on.",
    "2026-10-23 L5/L7: the two remaining brief-mandated passes ran over the Tier A hot paths and the one deployable service. L5 found no N+1, unbounded collection, missing stream or blocking call and claims no new measurement; L7 found one startup-validation gap (AUD2-044, fixed at 3ac4699 and live-probed) and no further finding in health, shutdown, structured errors or rollback. AUD2-037 is therefore DONE; its commit field is backfilled on the next ledger commit, as AUD2-032's was.",
-   "2026-10-23 rANS cluster commit 61de182: the two S0 records (AUD2-023, AUD2-024) share the rANS call path with six S1 records, so their hunks interleave in the same functions and they share one focused commit rather than nine artificial splits. That is a recorded deviation from one-commit-per-record; every record's own diff, test and cold-read are named in its evidence-after. AUD2-010's RED was demonstrated on the fix itself by restoring the old branch and observing the failure, with the committed file restored before the GREEN run."
+   "2026-10-23 rANS cluster commit 61de182: the two S0 records (AUD2-023, AUD2-024) share the rANS call path with six S1 records, so their hunks interleave in the same functions and they share one focused commit rather than nine artificial splits. That is a recorded deviation from one-commit-per-record; every record's own diff, test and cold-read are named in its evidence-after. AUD2-010's RED was demonstrated on the fix itself by restoring the old branch and observing the failure, with the committed file restored before the GREEN run.",
+   "AUD2-020, AUD2-021 and AUD2-033 were verified by one full serial suite on their three fix commits (AUDIT/aud2-020-021-033-full.log, 7 bundles, 1,993 tests, exit 0) and one lint run over the same tree (AUDIT/aud2-020-021-033-lint.log, 18/18). A comment-only commit (d11be7c) followed the suite; no code changed after it."
   ],
   "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason",
   "brief_file": "AUDIT/audit-brief.md",
@@ -370,14 +371,15 @@
    "file": "sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift:100-127; sources/TinyTitanBench/GPUKeepWarmStream.swift:91-116",
    "title": "Keep-warm worker and caller access the stop Bool without synchronization",
    "category": "concurrency",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent review verified by main-agent full-file read",
    "evidence-before": "Ordinary Bool written by start/stop and read on a dispatch worker. Existing unchecked invariant claims stale reads are harmless, which does not make the Swift data race defined. keepwarm-tsan-red.log:153-235 records the actual race after an earlier invalid compilation attempt; only the running reproduction is RED evidence.",
-   "fix-summary": "Pending patch uses Atomic<Bool> release stores/acquire loads; semaphore signal/wait still joins the worker and synchronizes the dispatch count. Command buffers finish before the signal. The cadence structure is unchanged; no timing claim.",
-   "evidence-after": "Independent full-file narrow review found no new high-confidence defect for the supported one-start/one-stop lifecycle. Historical keepwarm-tsan-green.log:75-85 reports3tests exit0; it is not fresh final-tree sanitizer certification. Runner tests cover128fresh immediate joins and enabled/disabled modes, not the benchmark stream or forced in-flight dispatch shutdown. AUD2-021 remains unfixed. No concurrent start/stop guarantee inferred.",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "Both keep-warm types hold `running` as an `Atomic<Bool>` (Synchronization), stored with .releasing in start()/stop() and loaded with .acquiring by the worker loop. The stop/join semaphore still publishes `dispatches`; the cadence structure is unchanged and no timing claim is made.",
+   "evidence-after": "AUDIT stage 2026-10-23: an independent reviewer read both types and found no remaining unsynchronized access. `startedAt` is written before the serial.async that is the worker's release edge and read only after the semaphore join, and `dispatches` is written only on `serial` and read only after `stop()` waits, so the semaphore -- not the atomic -- is what publishes it; .releasing/.acquiring is stronger than the kill flag needs. Latent, not live: `stop()` without `start()` or a second `stop()` would block on a drained semaphore, and a runner dropped without stop() is retained by its own `guard let self` loop; the only production call site stops exactly once. Fresh sanitizer evidence on the final tree: `swift test --sanitize=thread --no-parallel --filter GPUKeepWarmRunnerTests` exited 0 with 3 tests passed and 0 ThreadSanitizer warnings (AUDIT/aud2-020-tsan.log); the only later change to the file was a comment. The three lifecycle tests can fail on a missing join but cannot fail if the atomic store were dropped -- they pin the join, TSan pins the ordering. Commit 3842d8d (the TSan run compiled its parent).",
+   "commit": "3842d8d",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 3842d8d; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-021",
@@ -387,14 +389,15 @@
    "file": "sources/TinyTitanBench/MetalHeadBenchmarks.swift:217-246",
    "title": "A thrown cadence-benchmark command allocation leaves keep-warm worker running",
    "category": "resource-lifecycle",
-   "status": "START",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent review verified by main-agent full-file read",
    "evidence-before": "start precedes throwing requireCommandBuffer/encoder allocation, but stop is only on the success path. The worker retains itself while running. Expected: exactly one joined stop on success and error without changing measured timing.",
-   "fix-summary": "",
-   "evidence-after": "",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "runHeadCadence sets a `keepWarmStopped` flag after `keepWarm?.start()` and a `defer` stops the worker when it is still set, so every throw inside the loop (`requireCommandBuffer`, a nil compute encoder) unwinds through a stop. The success path stops first and then sets the flag, so a stop happens exactly once.",
+   "evidence-after": "No unit seam exists to force a command-buffer allocation failure: `requireCommandBuffer` throws only when Metal returns nil, which needs an injected queue and the production function takes the real one; no test was written and none is claimed. Evidence is compile, review and the suite: the TSan build compiled the fixed file (TinyTitanBench-product, AUDIT/aud2-020-tsan.log), the full serial suite passed on the same tree, and an independent reviewer confirmed nothing throws between the success-path stop and the flag assignment, so a double stop is impossible. The bench executable is outside TinyTitanLib's closure, so its existing prints do not reach the stdout-clean gate. Commit 3098fdd.",
+   "commit": "3098fdd",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 3098fdd; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-022",
@@ -596,14 +599,15 @@
    "file": "sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:259-275; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:11-27; sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift:123-171",
    "title": "LZFSE compressed plans publish the first stage after wave 0 while phase 1 is encoded for every miss",
    "category": "concurrency/correctness",
-   "status": "OPEN",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "lead from the credit-terminated native-I/O reviewer, re-derived in the current tree by the main agent",
    "evidence-before": "executeCompressedMisses walks plan.misses in waves of 8 and passes firstStage only when start == 0; decodeCompressedSet invokes it after that wave's phase-0 blocks decode. encodeDecodeEarlyMissFixup awaits firstStageCompletion and then encodes phase 1 over phase1MissSlots, which is populated from every index of plan.misses (RealForwardRunner+DecodeMoE.swift:180-194). With more than 8 misses, later waves' gate/up halves are not resident when GPU phase-1 work for their slots is committed. The rANS path was fixed for exactly this class in AUD2-023 and now passes firstStage only when end == plan.misses.count; the LZFSE path retains the earlier condition.",
-   "fix-summary": "No fix applied. Make the LZFSE condition match the rANS final-wave rule (end == plan.misses.count) or publish only after every wave's phase 0.",
-   "evidence-after": "Not reproduced live: the 2026-10-23 ornith-8 golden check is batch-1 greedy decode and passed byte-identical, which does not exercise a >8-miss plan. Treat as S0 if a shipped front end reaches that plan shape, as the rANS record implies.",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "executeCompressedMisses now forwards firstStage only from the wave whose `end` is `plan.misses.count`, matching executeRANSPlan, so the publish fires when the last wave's fronts are resident and every miss slot the consumer covers has bytes. The doc comment above it no longer claims a per-layer wave with a publish inside each one.",
+   "evidence-after": "RED on the same tree: the new test plans ten misses (two waves of eight), poisons all slot bytes with 0xAA and records at firstStage time which slots had been written. With the old `start == 0` condition it failed with frontsWritten [true x8, false, false] at CompressedExpertStreamerTests.swift:308, exit 1 (AUDIT/aud2-033-red.log); with the fix the eight-test suite passed, exit 0 (AUDIT/aud2-033-green.log). The condition was reverted and restored by editing, not by discarding work; `git status` on the file is clean. Full serial suite on the fix commits: 7 bundles, 1,993 tests, exit 0 (AUDIT/aud2-020-021-033-full.log); all 18 lint gates exit 0 (AUDIT/aud2-020-021-033-lint.log). The one change after that run was a comment-only correction (d11be7c). Sibling sweep: the raw bounded path reads all misses in one batch and publishes after that set's fronts, so it does not share the defect; the tiered branch that skips the split yet still declares publishesFirstStage is filed separately as AUD2-045. No live model check: the recorded golden is batch-1 decode and does not reach a two-wave plan; this is a structural proof, not a live one.",
+   "commit": "71b40d7",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 71b40d7; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-034",
@@ -801,6 +805,23 @@
    "evidence-after": "RED: the two tests did not compile against the missing type ('cannot find ServerPortCheck in scope', swift test --no-parallel --filter ServerPortCheckTests). GREEN: 2/2 -- a port with a listener is unavailable, and the same port is available again once its socket closes (the SO_REUSEADDR case). Full serial suite: 7 bundles, 1,992 tests, 0 failures, exit 0 (AUDIT/aud2-044-full-tests.log). tools/lint.sh: 18/18 gates, exit 0 (AUDIT/aud2-044-lint.log); release build clean. Live probe: a python3 listener on 127.0.0.1:18451, then .build/release/TinyTitanServer --model models/qwen3.5_4B_4Bit --port 18451 --lazy-load exited 2 in 0.43 s with 'error: --port 18451 is already in use on 127.0.0.1' and empty stdout (AUDIT/aud2-044-live-occupied.err). Control on a free port 18452 with --lazy-load served /health {\"status\":\"ok\"} and exited 0 on SIGTERM (AUDIT/aud2-044-live-free.out, -health.json), which also records the graceful-shutdown half of L7.",
    "disposition": "Fixed on the branch at 3ac4699; not merged, released or verified on an independent host. This is the L7 startup-validation finding; the listener, signals, health route, structured errors and the rollback story were checked in the same pass and produced no further finding.",
    "commit": "3ac4699cc86c149045c4d17817986ff35636f052",
+   "blocked-reason": null
+  },
+  {
+   "id": "AUD2-045",
+   "severity": "S2",
+   "tier": "A",
+   "project": "TinyTitan runtime/streaming",
+   "file": "sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:284-296; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:167-213",
+   "title": "A tiered layer is declared to publish a first stage that the tiered read branch never publishes",
+   "category": "correctness/overlap",
+   "status": "OPEN",
+   "host": "dev-mac (primary)",
+   "discovered-by": "main-agent sibling sweep while closing AUD2-033",
+   "evidence-before": "The bounded fallback builds the operation with publishesFirstStage: boundedReader != nil && layout.phase1Bytes != nil. executeBoundedReads early-returns for a layer whose expertSizes are not uniform (the tiered format), reading each expert's own length and skipping the phase-1 split; that branch never calls firstStage. encodeDecodeEarlyMissFixup then awaits firstStageCompletion before encoding the miss fixup, so on such a layer the fixup waits for the whole load instead of overlapping the tail read -- no hang, because firstStageCompletion also resumes at finish, but the declared stage never exists. AUD2-033 fixed the same publish condition for the wave path; this is the branch that bypasses it.",
+   "fix-summary": "No fix applied. Decide at layout construction: either the tiered branch publishes after its whole set has landed (keeping publishesFirstStage true), or publishesFirstStage is false whenever the uniform-size split will not run.",
+   "evidence-after": "Not reproduced: the tiered install is unreachable in this tree -- Model.swift:181-188 records that the tiered width it serves has no converter (TT-050), so no plan reaches this branch. Severity is S2 on reachability plus lost overlap, not on results: the fixup is still ordered after the load.",
+   "commit": null,
    "blocked-reason": null
   }
  ]
