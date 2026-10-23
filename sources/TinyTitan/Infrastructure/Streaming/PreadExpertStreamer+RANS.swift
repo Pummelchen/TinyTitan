@@ -55,6 +55,10 @@ extension PreadExpertStreamer {
     /// The general form: any output buffers and base offsets. The ring's GPU
     /// prefetch uses it with dedicated buffers, so a predicted expert is
     /// decoded a layer ahead and adopted instead of decoded on demand.
+    ///
+    /// `offsets` narrows to the 32-bit descriptor field the kernel reads, so a
+    /// base offset above `UInt32.max` traps there rather than wrapping; every
+    /// slot is its own `MTLBuffer` at offset 0, so none gets that far.
     func decodeRANSInto(
         experts: [Int],
         outputs: [MTLBuffer],
