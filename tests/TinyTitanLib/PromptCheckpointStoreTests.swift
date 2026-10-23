@@ -736,4 +736,117 @@ import TinyTitan
         #expect(!FileManager.default.fileExists(atPath: directory.path))
         #expect(await store.diskBytes == 0)
     }
+
+    /// A directory that refuses removal still occupies disk, so `remove` must
+    /// keep it indexed and charged until a later unlink succeeds.
+    @Test func aFailedRemovalKeepsTheRecordCharged() async throws {
+        let root = try temporaryDirectory()
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(meta.key.contentHash)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        _ = try await store.load(meta.key, domain: domain)
+        try FileManager.default.setAttributes(
+            [.immutable: true], ofItemAtPath: directory.path)
+        await store.remove(meta.key)
+        // Charged before `contains`, which re-indexes a record it finds on
+        // disk and would silently restore the accounting under test.
+        #expect(await store.diskBytes == 16)
+        #expect(FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.contains(meta.key))
+        try FileManager.default.setAttributes(
+            [.immutable: false], ofItemAtPath: directory.path)
+        await store.remove(meta.key)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// Eviction that cannot unlink the oldest record must not subtract its
+    /// bytes: the budget stays truthful and the record stays listed.
+    @Test func aFailedEvictionKeepsTheRecordCharged() async throws {
+        let root = try temporaryDirectory()
+        let oldest = metadata(tokens: [1, 2, 3])
+        let newest = metadata(tokens: [4, 5, 6])
+        let oldestDirectory = root.appendingPathComponent(oldest.key.contentHash)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: oldestDirectory.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(oldest, snapshot: snapshot(for: oldest))
+            try await writer.save(newest, snapshot: snapshot(for: newest))
+        }
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 32))
+        try FileManager.default.setAttributes(
+            [.immutable: true], ofItemAtPath: oldestDirectory.path)
+        let third = metadata(tokens: [7, 8, 9])
+        try await store.save(third, snapshot: snapshot(for: third))
+        #expect(await store.diskBytes == 48)
+        let listed = await store.metadata(for: domain)
+        #expect(listed.count == 3)
+        #expect(FileManager.default.fileExists(atPath: oldestDirectory.path))
+        try FileManager.default.setAttributes(
+            [.immutable: false], ofItemAtPath: oldestDirectory.path)
+        await store.evictDiskIfNeeded()
+        #expect(!FileManager.default.fileExists(atPath: oldestDirectory.path))
+        #expect(await store.diskBytes == 32)
+    }
+
+    /// `removeAll` cannot free a directory it fails to unlink; it has to leave
+    /// that record indexed rather than reset the accounting to zero.
+    @Test func aFailedRemoveAllKeepsTheRecordItCouldNotDelete() async throws {
+        let root = try temporaryDirectory()
+        let meta = metadata(tokens: [1, 2, 3])
+        let other = metadata(tokens: [4, 5, 6])
+        let directory = root.appendingPathComponent(meta.key.contentHash)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+            try await writer.save(other, snapshot: snapshot(for: other))
+        }
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        try FileManager.default.setAttributes(
+            [.immutable: true], ofItemAtPath: directory.path)
+        await store.removeAll()
+        #expect(await store.contains(meta.key))
+        #expect(!(await store.contains(other.key)))
+        #expect(await store.diskBytes == 16)
+        try FileManager.default.setAttributes(
+            [.immutable: false], ofItemAtPath: directory.path)
+        await store.removeAll()
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
 }

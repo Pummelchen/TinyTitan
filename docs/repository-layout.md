@@ -188,17 +188,19 @@ comparison against `HEAD` so the move could not carry an edit by accident:
 | `TinyTitanLib/OpenAIRequestValidator+Structure.swift` | 234 | `OpenAIRequestValidator.swift` (521 → 302) | The nested-input walks (`response_format`, a tool's schema and its depth cap, the message history) left the scalar field cascade. Five members widened `private` → `internal`, named above. |
 | `Runtime/Prefill/ANEPrefillAttention+Sidecar.swift` | 99 | `ANEPrefillAttention.swift` (519 → 431) | The sidecar's on-disk contract: its directory rule, its `ane_prefill.json` shape and the bounded read of it. Beside the existing `+Models.swift`, and nothing widened. |
 
-`TinyTitanLib/PromptCheckpointStore.swift` (556 → 463) split its disk I/O
-into `TinyTitanLib/PromptCheckpointStore+Disk.swift` (113): the complete
+`TinyTitanLib/PromptCheckpointStore.swift` (556 → 365) split its disk I/O
+into `TinyTitanLib/PromptCheckpointStore+Disk.swift` (113) and its disk
+lifecycle (`indexDiskIfNeeded`, `evictDiskIfNeeded`, `remove`, `removeAll`) into
+`TinyTitanLib/PromptCheckpointStore+Maintenance.swift` (161). The complete
 `writeDisk(metadata:snapshot:auxiliary:)` and `readPayload(at:expectedBytes:)`
 methods moved verbatim. Only cross-file access widened from `private` to
-internal: the moved methods, `DiskMetadata`, `DiskRecord`, `State`, the dependent
-`MemoryRecord` type, `metadataName`, `payloadName`, `auxiliaryName`,
-`configuration`, `fileManager`, `state`, `indexDiskIfNeeded` and
-`evictDiskIfNeeded`. No public/package surface changed. The move is not a pure
-no-op in behavior: the same commit adds the record validation and corrupt-record
-quarantine AUD2-028 required, which is why the surviving half is 463 lines rather
-than the 447 the move alone produced.
+internal: the moved methods and functions, `DiskMetadata`, `DiskRecord`, `State`,
+the dependent `MemoryRecord` type, `metadataName`, `payloadName`,
+`auxiliaryName`, `configuration`, `fileManager`, `state`, `diskIndexed`. No
+public/package surface changed. The move is not a pure no-op in behavior: the
+same work adds the record validation, corrupt-record quarantine and
+removal-failure accounting that AUD2-028 and AUD2-029 required, which is why the
+surviving half is 365 lines rather than the 447 the first move alone produced.
 
 Three files were split out of that list on 2026-09-15, each as pure code motion
 after the seam was checked to be self-contained — no `private` member reached
