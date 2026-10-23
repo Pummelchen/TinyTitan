@@ -2,7 +2,7 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 39 | done: 2 | open: 36 | blocked: 1
+Tasks: 41 | done: 2 | open: 38 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
@@ -47,6 +47,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-037 | S1 | A | audit process | AUDIT/audit-brief.md (sections 5, 6, L5, L7); audit_2310.md | Four brief-mandated passes have no recorded evidence: facade hunt, Tier-A unused code, L5 performance and L7 ops | OPEN | dev-mac (primary) |
 | AUD2-038 | S1 | A | audit process / Phase E | AUDIT/audit-brief.md (sections 1b, 11 Phase E, 12); AUDIT/environment.md | No independent host exists for the Phase E whole-repository verification | BLOCKED | dev-mac (primary) |
 | AUD2-039 | S2 | B | build/toolchain | Package.swift:29; AUDIT/environment.md; AUDIT/baseline.md | Swift 6.4.1 keg adds 49 linker deployment-target warnings against a zero-warning baseline | OPEN | dev-mac (primary) |
+| AUD2-040 | S2 | A | TinyTitan runtime / QSA | sources/TinyTitan/Runtime/Family/QSAExactness.swift:80-89 | QSAIndexerRequired tells the user the indexer is not implemented; it is implemented, and the guard that raises it is unreachable | OPEN | dev-mac (primary) |
+| AUD2-041 | S1 | A | TinyTitanLib / OpenAI request parsing | sources/TinyTitanLib/OpenAIModels.swift:1-120; docs/release-notes-v5.10.md:56 | min_p is documented as accepted-but-must-be-zero and is instead silently ignored on the HTTP request path | OPEN | dev-mac (primary) |
 
 ## Evidence and dispositions
 
@@ -274,6 +276,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **discovered-by:** main-agent reconciliation of the recovered original brief against the recorded passes
 - **evidence-before:** The recovered brief mandates a facade hunt (section 5: always-true validators or auth checks, hardcoded success returns, NotImplemented/fatalError/empty bodies on a production path, canned data on a non-test path, sleep standing in for work, localhost/test defaults, surfaces wired to nothing; a production-path facade is S0), unused-code coverage limited to Tier A modules and audit-orphaned code (section 6), an L5 performance pass over Tier A and profiler-identified hot paths, and an L7 ops pass per deployable service (structured errors, health checks, graceful shutdown, startup config validation, rollback path). The report has no section for any of the four, and no ledger record was derived from them. Proxies that do exist are not substitutes: the test-hollow and stdout-clean lint gates cover narrow slices, and the TSan/golden runs exercise neither L5 hot paths nor L7 service behaviour.
 - **fix-summary:** None. The gap is recorded rather than filled with an inferred pass. No facade, unused-code, performance or ops conclusion is asserted.
+- **evidence-after:** Section 5 facade hunt run 2026-10-23 over sources/: fatalError/preconditionFailure/assertionFailure (16 hits, all fail-loud construction guards or bench-only), 'not implemented' strings (8 hits: sparse-selection guards in PrefillAttention.swift:173 and Attention.swift:338 are unreachable from the two callers, which force .causalTiled or omit the mask when a selection exists; PreadExpertStreamer+Prefetch.swift:88-99 fails the prefetch operation deliberately to stop a garbage copy; SamplerTypes min-p/topP guards are engine-level; the QSA one is AUD2-040), sleep calls (15 hits, all poll intervals, retry backoff, a 250 us batch-coalescing delay or keep-warm cadence -- none stand in for work), localhost/example endpoints (0 in sources/), hardcoded success strings (0), canned/fixture data outside tests (0), literal return-true sites inspected in the server, repack and fused-decode paths (all real capability checks). Produced AUD2-040 (S2, stale QSA diagnostic) and AUD2-041 (S1, min_p silently ignored). Still unrun: section 6 Tier-A unused code, L5 performance, L7 ops. This record stays OPEN.
 
 ### AUD2-038
 
@@ -288,6 +291,20 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** The committed baseline records a release build with zero warnings and -warnings-as-errors on every target. Package.swift declares platforms .macOS(.v26). The Homebrew 6.4.1 keg targets arm64-apple-macosx27.0.0 and links the host's Swift runtime dylibs, which are built for 27.0.
 - **fix-summary:** No fix applied. The warnings are not source diagnostics and do not fail the build; every Swift target still compiles with -warnings-as-errors. Options, none taken unilaterally: raise the package deployment target to macOS 27 (a supported-OS change needing operator approval), use an Xcode-bundled 6.4.1 toolchain whose runtime matches (none is installed), or accept the warnings in writing as a property of the verification toolchain.
 - **evidence-after:** AUDIT/brew641-build.log: 49 lines of the form `building for macOS-26.0, but linking with dylib '/usr/lib/swift/libswiftCore.dylib' which was built for newer version 27.0`, plus one libSwiftScan fallback notice. AUDIT/brew641-full-tests.log: the same 49 warnings, zero compiler errors, exit 0. The release build adds 41 warnings of the same class (972 tasks, 125.84 s, exit 0; AUDIT/brew641-release-build.log). The 6.4.0 Xcode build of the same tree had zero warnings. No baseline metric is silently rewritten; the increase is recorded here.
+
+### AUD2-040
+
+- **discovered-by:** section 5 facade hunt (AUD2-037)
+- **evidence-before:** Static: the indexer exists (sources/TinyTitan/Kernels/Attention/QSAIndexer.swift) and is built when the family enables one (RealForwardRunner+BuildCore.swift:321-330, `try QSAIndexer(...)`; RealForwardRunner.swift:336 `staged` traps if the builder never set it). qsaExactness is derived from the same flag (RealForwardRunner+QSA.swift:373-377), and requireQSAExact returns early unless `qsaIndexer == nil && exactness != nil` (RealForwardRunner+QSA.swift:396-405) -- a combination the current builder cannot produce, because an enabled indexer is either constructed or throws during load. The description at QSAExactness.swift:80-89 is therefore both unreachable today and factually wrong: it says 'The QSA indexer is not implemented yet' and tells the operator to shorten the prompt, when the implemented indexer and a shorter prompt are not the issue. No test pins the string (`grep -rn 'not implemented yet' tests/` is empty).
+- **fix-summary:** No fix applied yet.
+- **evidence-after:** Pending.
+
+### AUD2-041
+
+- **discovered-by:** section 5 facade hunt (AUD2-037)
+- **evidence-before:** docs/release-notes-v5.10.md:56 states '`min_p` is accepted but must be zero: the filter does not exist, and refusing beats sampling as if it did'. docs/adding-a-model.md:55-56 repeats that min_p is unsupported. The claim is false at the wire: OpenAIChatRequest (sources/TinyTitanLib/OpenAIModels.swift:1-120) declares no minP field and no `min_p` coding key, and the server decodes request bodies with a plain JSONDecoder() (HTTPServerHandler+Chat.swift:25), whose default behaviour is to ignore unknown keys. OpenAIRequestValidator passes only `effectiveSampling.minP` (OpenAIRequestValidator.swift:300), and every sampled row in GenerationDefaults sets minP = 0 (SamplerTypes.swift:18-21, :33, :52...), so a client-sent min_p of any value never reaches the engine. The engine's own refusal (GenerationConfig.validate, SamplerTypes.swift:179-183) is reachable only from embedder code and is pinned by tests/TinyTitan/Kernels/Sampling/SampleTopK64Tests.swift:24; nothing pins the HTTP path. Reproduction: POST /v1/chat/completions with "min_p":0.1 returns a normal completion sampled as if min_p were 0.
+- **fix-summary:** No fix applied yet.
+- **evidence-after:** Pending.
 
 ## Verification notes
 

@@ -1,7 +1,8 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-039 39/39 | done:2 open:36 blocked:1 new:1] DONE — verify the required
-Swift 6.4.1 toolchain and record its build and test evidence`
+`[#AUD2-041 41/41 | done:2 open:38 blocked:1 new:2] OPEN — file the facade-hunt
+findings: min_p is silently ignored on the wire; the QSA diagnostic names a
+feature that exists`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 One documentation record, AUD2-032, is closed because the brief it concerned has
@@ -21,10 +22,10 @@ tier and status, including disproven claims and audit-introduced regressions.
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
 - Measured HEAD: `164e84a08de5d434f95a90d552ceeff608581caa`, **with uncommitted
   source and test changes**. That commit alone does not contain the tested fixes.
-- **39 records: 2 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 2 DONE,
+- **41 records: 2 DONE, 38 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **21 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 2 DONE,
   1 BLOCKED**.
-- Recorded severities: **2 S0, 15 S1, 22 S2**. These are ledger classifications,
+- Recorded severities: **2 S0, 16 S1, 23 S2**. These are ledger classifications,
   not a claim that all 39 records are confirmed outstanding product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
@@ -100,11 +101,11 @@ requirement was worked but its own definition of done is not met.
 | §4 L5 | Performance pass on Tier A and profiler-identified hot paths | **Not recorded** | AUD2-037 |
 | §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
 | §4 L7 | Ops pass per deployable service | **Not recorded** | AUD2-037 |
-| §5 | Facade hunt with a production-path facade as S0 | **Not recorded** | AUD2-037 |
+| §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, two outcomes filed | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | **Not recorded** | AUD2-037 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Partial — schema met; no product record has passed TEST→AUDIT→DONE | [ledger](AUDIT/ledger.md) |
-| §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and this milestone adds two records it found | Ledger notes |
+| §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
 | §10 | One focused commit per S0/S1; audit branch only | Partial — audit commits are focused; no remediation commits exist | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
@@ -843,9 +844,21 @@ systems. Passing local tests never bypasses the final checklist above.
   runs exercise neither L5 hot paths nor L7 service behaviour. Filing this record
   is deliberately not the same as running the passes, and no facade, unused-code,
   performance or ops conclusion is asserted anywhere in this report.
-- **Next:** Run each pass at Tier A depth, file every finding it produces with its
-  own ID, and only then mark this record DONE. A facade found on a production
-  path is S0 and takes priority over the remaining S1 work.
+- **Progress (2026-10-23):** the **§5 facade hunt** has run over `sources/`.
+  Sixteen trap sites, eight "not implemented" strings, fifteen sleep calls, the
+  endpoint/`localhost` defaults, hardcoded success strings, canned data and the
+  literal `return true` sites in the server, repack and fused-decode paths were
+  each traced to their callers. No production-path facade was found: the traps
+  are fail-loud construction guards or bench code, every sleep is a poll interval,
+  retry backoff, a 250 µs batch-coalescing delay or keep-warm cadence, and the
+  capability checks are real. The hunt produced two findings — AUD2-041 (S1, a
+  sampling parameter documented as refused that the wire never reads) and
+  AUD2-040 (S2, a diagnostic that names a feature as unimplemented when it is
+  implemented and the guard is unreachable).
+- **Next:** Run the remaining three passes — §6 Tier-A unused code, L5 performance
+  and L7 ops — at Tier A depth, file every finding they produce with its own ID,
+  and only then mark this record DONE. A facade found on a production path is S0
+  and takes priority over the remaining S1 work.
 
 ### AUD2-038 — No independent host exists for the Phase E verification
 
@@ -900,6 +913,62 @@ systems. Passing local tests never bypasses the final checklist above.
   a property of the audit's verification toolchain.
 - **Next:** No change applied. The project's shipping toolchain remains Xcode 27 /
   Swift 6.4; this record exists so the warning delta is not lost.
+
+### AUD2-040 — The QSA error text names a feature as unimplemented that is implemented
+
+**S2 · Tier A · OPEN · facade hunt / stale diagnostic**
+
+- **Location:** [QSAExactness.swift:80-89](sources/TinyTitan/Runtime/Family/QSAExactness.swift#L80),
+  raised by `requireQSAExact`
+  ([RealForwardRunner+QSA.swift:396](sources/TinyTitan/Runtime/Inference/RealForwardRunner+QSA.swift#L396)).
+- **Finding:** The error text says "The QSA indexer is not implemented yet" and
+  tells the operator to shorten the prompt. The indexer is implemented
+  ([QSAIndexer.swift](sources/TinyTitan/Kernels/Attention/QSAIndexer.swift)) and is
+  constructed whenever a family enables one
+  ([RealForwardRunner+BuildCore.swift:321](sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift#L321),
+  `try QSAIndexer(...)`); `staged` traps if the builder never sets it
+  ([RealForwardRunner.swift:336](sources/TinyTitan/Runtime/Inference/RealForwardRunner.swift#L336)).
+  `qsaExactness` is derived from the same flag, so the throw requires
+  `qsaIndexer == nil && exactness != nil` — which the current builder cannot
+  produce. The message is both unreachable today and wrong if it is ever reached:
+  a real cause would be an indexer that failed to build, not an unimplemented
+  feature, and shortening the prompt is not the remedy.
+- **Current evidence:** Static call-chain trace above; `grep -rn "not implemented
+  yet" tests/` returns nothing, so no test pins the string. The nearby comment at
+  `requireQSADensePrefill` already states the guard "only fires for a family that
+  declares a sparse indexer without one being built — which nothing does today",
+  which the description contradicts.
+- **Next:** Rewrite the description to state the actual condition, keeping the
+  guard as defence in depth.
+
+### AUD2-041 — `min_p` is documented as refused but the request model never reads it
+
+**S1 · Tier A · OPEN · untrusted-input validation**
+
+- **Location:** [OpenAIModels.swift](sources/TinyTitanLib/OpenAIModels.swift),
+  [OpenAIRequestValidator.swift:300](sources/TinyTitanLib/OpenAIRequestValidator.swift#L300),
+  [release-notes-v5.10.md:56](docs/release-notes-v5.10.md#L56).
+- **Finding:** The release notes state "`min_p` is accepted but must be zero: the
+  filter does not exist, and refusing beats sampling as if it did", and
+  [adding-a-model.md](docs/adding-a-model.md) repeats that `min_p` is unsupported.
+  The wire does neither: `OpenAIChatRequest` declares no `minP` field and no
+  `min_p` coding key, and the server decodes bodies with a plain `JSONDecoder()`
+  ([HTTPServerHandler+Chat.swift:25](sources/TinyTitanServer/Core/HTTPServerHandler+Chat.swift#L25)),
+  which ignores unknown keys. The validator passes only
+  `effectiveSampling.minP`, and every shipped row sets it to zero
+  ([SamplerTypes.swift:18-21](sources/TinyTitan/Runtime/Generation/SamplerTypes.swift#L18)),
+  so a client-sent `min_p` of any value reaches the sampler as `0` with no
+  diagnostic. The engine's own refusal
+  ([SamplerTypes.swift:179](sources/TinyTitan/Runtime/Generation/SamplerTypes.swift#L179))
+  is reachable only from library callers; it is pinned by
+  [SampleTopK64Tests.swift:24](tests/TinyTitan/Kernels/Sampling/SampleTopK64Tests.swift#L24),
+  and nothing pins the HTTP path.
+- **Current evidence:** Static proof above. Reproduction: a
+  `/v1/chat/completions` body containing `"min_p":0.1` is accepted and sampled
+  exactly as without it — the documented refusal never fires.
+- **Next:** Decode `min_p` and refuse a non-zero value with a 400
+  `unsupported_value`, as the release note promises, and pin both the refusal and
+  the accepted zero in the OpenAI validation suite.
 
 ## Recorded verification and its limits
 
@@ -1225,8 +1294,9 @@ from inside the tree.** The blocks are external or unrun:
 
 1. The brief is no longer missing: it is preserved at
    [AUDIT/audit-brief.md](AUDIT/audit-brief.md) and hash-verified. Reconciling
-   against it exposed four mandated passes with no recorded work (AUD2-037) and
-   an independent-host requirement the audit cannot satisfy alone (AUD2-038).
+   against it exposed four mandated passes with no recorded work (AUD2-037, whose
+   §5 facade hunt has since run) and an independent-host requirement the audit
+   cannot satisfy alone (AUD2-038).
 2. The eleven delegated Tier A reviewer batches all terminated on the operator's
    credit limit before emitting a finding, so no full L2/L3/L4 pass exists for any
    module. Four targeted findings were re-derived manually; that is not the same
@@ -1239,7 +1309,7 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **36 non-terminal records** (19 OPEN, 2 START, 3 PROGRESS,
+The ledger stands at **38 non-terminal records** (21 OPEN, 2 START, 3 PROGRESS,
 10 TEST, 2 AUDIT), two DONE records and one BLOCKED. This milestone adds records
 rather than draining them, which §8's closure invariant forbids *at a convergence
 milestone*. The run has never reached Phase C, let alone Phase D, so no
@@ -1252,7 +1322,7 @@ Swift 6.4.1 compiler, the unmasked full serial suite under 6.4.0, the 6.4.0
 release build, the 18-gate lint run, the corrected seven-object coverage export,
 the CI artifact inspection, the ornith-8 golden check, four of the five
 library-contract tests and the live CLI SIGINT probe. Still incomplete:
-reconciliation of the ledger against the four
+reconciliation of the ledger against the remaining
 passes the brief names (AUD2-037), the module-by-module Tier A review,
 clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
 dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
