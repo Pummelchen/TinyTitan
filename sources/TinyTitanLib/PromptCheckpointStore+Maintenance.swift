@@ -2,7 +2,98 @@ import Foundation
 import TinyTitan
 
 extension PromptCheckpointStore {
+    private static let stagingPrefix = ".tmp-"
+    private static let backupPrefix = ".bak-"
+
+    /// The hash a `.tmp-<hash>-<uuid>`/`.bak-<hash>-<uuid>` leftover names.
+    private static func leftoverHash(_ name: String, prefix: String) -> String? {
+        guard name.hasPrefix(prefix) else { return nil }
+        let rest = name.dropFirst(prefix.count)
+        guard let hash = rest.split(separator: "-", maxSplits: 1).first, !hash.isEmpty
+        else { return nil }
+        return String(hash)
+    }
+
+    /// Deletes one directory this store owns and says why. A failure to delete is
+    /// reported and the directory stays for a later attempt; it is never counted.
+    private func reclaim(_ directory: URL, reason: String) {
+        do {
+            try fileManager.removeItem(at: directory)
+        } catch {
+            ServerLog.diagnostic(
+                "prompt checkpoints: could not reclaim "
+                    + "\(directory.lastPathComponent): \(error)")
+            return
+        }
+        ServerLog.diagnostic(
+            "prompt checkpoints: reclaimed \(directory.lastPathComponent): \(reason)")
+    }
+
+    /// Reads one canonical record directory and refuses it unless every part is
+    /// present and matches its own metadata: the metadata decodes and validates,
+    /// its key hashes to the directory name, and the payload (and auxiliary, when
+    /// declared) is a regular file of exactly the declared size.
+    private func diskRecord(
+        at directory: URL, expectedHash: String, modificationDate: Date
+    ) throws -> DiskRecord {
+        let key = PromptCheckpointKey(contentHash: expectedHash)
+        let metadataURL = directory.appendingPathComponent(Self.metadataName)
+        let data = try BoundedMetadataRead.read(
+            fileAt: metadataURL, maxBytes: 16 * 1_048_576)
+        let diskMetadata = try JSONDecoder().decode(DiskMetadata.self, from: data)
+        guard diskMetadata.version == DiskMetadata.currentVersion else {
+            throw PromptCheckpointStoreError.corrupt(
+                key, "unsupported metadata version \(diskMetadata.version)")
+        }
+        guard diskMetadata.metadata.key.contentHash == expectedHash else {
+            throw PromptCheckpointStoreError.corrupt(
+                key, "metadata does not hash to the record directory")
+        }
+        try diskMetadata.validate()
+        let payloadURL = directory.appendingPathComponent(Self.payloadName)
+        let payloadBytes = diskMetadata.metadata.descriptor.payloadBytes
+        let payloadValues = try payloadURL.resourceValues(
+            forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        guard payloadValues.isRegularFile == true,
+            payloadValues.isSymbolicLink != true,
+            payloadValues.fileSize == payloadBytes
+        else {
+            throw PromptCheckpointStoreError.corrupt(
+                key,
+                "payload file is \(payloadValues.fileSize.map(String.init) ?? "unreadable") "
+                    + "bytes, expected \(payloadBytes)")
+        }
+        let auxiliaryBytes = diskMetadata.auxiliaryBytes ?? 0
+        if auxiliaryBytes > 0 {
+            let auxiliaryURL = directory.appendingPathComponent(Self.auxiliaryName)
+            let auxiliaryValues = try auxiliaryURL.resourceValues(
+                forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+            guard auxiliaryValues.isRegularFile == true,
+                auxiliaryValues.isSymbolicLink != true,
+                auxiliaryValues.fileSize == auxiliaryBytes
+            else {
+                throw PromptCheckpointStoreError.corrupt(
+                    key,
+                    "auxiliary file is "
+                        + "\(auxiliaryValues.fileSize.map(String.init) ?? "unreadable") "
+                        + "bytes, expected \(auxiliaryBytes)")
+            }
+        }
+        return DiskRecord(
+            metadata: diskMetadata.metadata, directory: directory,
+            payload: payloadURL, auxiliaryBytes: auxiliaryBytes,
+            modificationDate: modificationDate)
+    }
+
     /// Indexes the disk directories once, and only once the listing succeeds.
+    ///
+    /// Startup is also where crash leftovers are settled. A record directory must
+    /// be named for the hash its metadata contains and carry a payload of exactly
+    /// the declared size; anything else is quarantined and reclaimed instead of
+    /// staying uncounted forever (AUD2-001/002). A `.bak-` left by the rename
+    /// swap is restored when the canonical directory is missing -- the crash
+    /// window between the two renames -- and deleted as stale otherwise. `.tmp-`
+    /// staging is never published: those are writes that did not commit.
     func indexDiskIfNeeded() {
         guard !diskIndexed else { return }
         guard let root = configuration.diskDirectory else {
@@ -10,7 +101,7 @@ extension PromptCheckpointStore {
             return
         }
         let keys: Set<URLResourceKey> = [
-            .isDirectoryKey, .contentModificationDateKey,
+            .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey,
         ]
         // A failed listing is not "nothing to index": leaving the flag clear
         // lets a later call retry, where latching it would strand every
@@ -20,40 +111,94 @@ extension PromptCheckpointStore {
                 at: root, includingPropertiesForKeys: Array(keys))
         else { return }
         diskIndexed = true
-        // Restart LRU order is the directories' modification dates, not the
-        // volume's listing order — the turn store applies the same rule, and
-        // a listing order would evict an arbitrary record first.
-        var loaded: [(record: DiskRecord, date: Date)] = []
+
+        var valid: [String: (record: DiskRecord, date: Date)] = [:]
+        var backups: [(hash: String, directory: URL, date: Date)] = []
+        var staged: [(directory: URL, reason: String)] = []
+        var rejected: [(directory: URL, reason: String)] = []
         for directory in entries {
             guard
                 let values = try? directory.resourceValues(forKeys: keys),
-                values.isDirectory == true
+                values.isDirectory == true, values.isSymbolicLink != true
             else { continue }
-            let metadataURL = directory.appendingPathComponent(
-                Self.metadataName)
-            guard
-                let data = try? BoundedMetadataRead.read(
-                    fileAt: metadataURL, maxBytes: 16 * 1_048_576),
-                let diskMetadata = try? JSONDecoder().decode(
-                    DiskMetadata.self, from: data),
-                diskMetadata.version == DiskMetadata.currentVersion,
-                (try? diskMetadata.validate()) != nil
-            else { continue }
-            let key = diskMetadata.metadata.key
-            guard state.disk[key] == nil else { continue }
-            let payloadURL = directory.appendingPathComponent(Self.payloadName)
-            let auxiliaryBytes = diskMetadata.auxiliaryBytes ?? 0
-            loaded.append(
-                (
-                    DiskRecord(
-                        metadata: diskMetadata.metadata, directory: directory,
-                        payload: payloadURL, auxiliaryBytes: auxiliaryBytes,
-                        modificationDate:
-                            values.contentModificationDate ?? .distantPast),
-                    values.contentModificationDate ?? .distantPast
-                ))
+            let name = directory.lastPathComponent
+            let date = values.contentModificationDate ?? .distantPast
+            if name.hasPrefix(Self.stagingPrefix) {
+                staged.append(
+                    (directory, "unpublished staging from an interrupted save"))
+                continue
+            }
+            if name.hasPrefix(Self.backupPrefix) {
+                guard let hash = Self.leftoverHash(name, prefix: Self.backupPrefix)
+                else {
+                    rejected.append((directory, "backup directory names no record hash"))
+                    continue
+                }
+                backups.append((hash, directory, date))
+                continue
+            }
+            if name.hasPrefix(".") {
+                rejected.append((directory, "unrecognised hidden directory"))
+                continue
+            }
+            do {
+                let record = try diskRecord(
+                    at: directory, expectedHash: name, modificationDate: date)
+                guard state.disk[record.metadata.key] == nil else { continue }
+                valid[name] = (record, date)
+            } catch {
+                rejected.append((directory, "invalid record: \(error)"))
+            }
         }
-        loaded.sort { $0.date < $1.date }
+        // Reclaim rejected canonical directories before a backup for the same
+        // hash is considered: the backup is exactly what should replace one.
+        for entry in rejected {
+            reclaim(entry.directory, reason: entry.reason)
+        }
+        let indexed = { [self] (hash: String) -> Bool in
+            valid[hash] != nil || state.disk.keys.contains { $0.contentHash == hash }
+        }
+        for backup in backups.sorted(by: { $0.date > $1.date }) {
+            if indexed(backup.hash) {
+                reclaim(
+                    backup.directory,
+                    reason: "stale backup of an already indexed record")
+                continue
+            }
+            do {
+                let record = try diskRecord(
+                    at: backup.directory, expectedHash: backup.hash,
+                    modificationDate: backup.date)
+                let canonical = root.appendingPathComponent(
+                    backup.hash, isDirectory: true)
+                guard !fileManager.fileExists(atPath: canonical.path) else {
+                    reclaim(
+                        backup.directory,
+                        reason: "backup whose canonical path already exists")
+                    continue
+                }
+                try fileManager.moveItem(at: backup.directory, to: canonical)
+                let restored = DiskRecord(
+                    metadata: record.metadata, directory: canonical,
+                    payload: canonical.appendingPathComponent(Self.payloadName),
+                    auxiliaryBytes: record.auxiliaryBytes,
+                    modificationDate: record.modificationDate)
+                valid[backup.hash] = (restored, backup.date)
+                ServerLog.diagnostic(
+                    "prompt checkpoints: restored backup "
+                        + "\(backup.directory.lastPathComponent) as \(backup.hash)")
+            } catch {
+                reclaim(backup.directory, reason: "invalid backup: \(error)")
+            }
+        }
+        for entry in staged {
+            reclaim(entry.directory, reason: entry.reason)
+        }
+
+        let loaded = valid.values.sorted { $0.date < $1.date }
+        // Restart LRU order is the directories' modification dates, not the
+        // volume's listing order — the turn store applies the same rule, and
+        // a listing order would evict an arbitrary record first.
         // A record `load` found before this index is already in `state.disk`;
         // appending the listing behind it would make the most recently loaded
         // record the first eviction candidate. Both sides carry a date -- the

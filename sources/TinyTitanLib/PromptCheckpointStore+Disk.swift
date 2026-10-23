@@ -100,12 +100,29 @@ extension PromptCheckpointStore {
             throw PromptCheckpointStoreError.invalidMetadata(
                 "payload size \(expectedBytes) is not a valid capture size")
         }
+        // Check the file's size before reading it, and read exactly the declared
+        // size. Reading `expected + 1` to detect a too-long file allocated the
+        // declared buffer first, so a corrupt or swapped multi-GiB record was
+        // materialized before anything checked it (AUD2-004).
+        let key = PromptCheckpointKey(
+            contentHash: url.deletingLastPathComponent().lastPathComponent)
+        let values = try url.resourceValues(
+            forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true,
+            values.isSymbolicLink != true,
+            values.fileSize == expectedBytes
+        else {
+            throw PromptCheckpointStoreError.corrupt(
+                key,
+                "payload is \(values.fileSize.map(String.init) ?? "unreadable") bytes, "
+                    + "expected \(expectedBytes)")
+        }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        let data = try handle.read(upToCount: expectedBytes + 1) ?? Data()
+        let data = try handle.read(upToCount: expectedBytes) ?? Data()
         guard data.count == expectedBytes else {
             throw PromptCheckpointStoreError.corrupt(
-                PromptCheckpointKey(contentHash: url.deletingLastPathComponent().lastPathComponent),
+                key,
                 "payload is \(data.count) bytes, expected \(expectedBytes)")
         }
         return data

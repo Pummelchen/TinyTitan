@@ -197,27 +197,32 @@ actor PromptCheckpointStore {
                 throw PromptCheckpointStoreError.keyMismatch
             }
             try diskMetadata.validate()
-            let payload = try readPayload(
-                at: diskRecord.payload,
-                expectedBytes: diskMetadata.metadata.descriptor.payloadBytes)
-            guard Sha256Verifier.hashData(payload) == diskMetadata.payloadSHA256
+            // Verify the file's hash while streaming it, before any payload-sized
+            // allocation. `readPayload` used to read the declared size first and
+            // hash the Data afterwards, so a corrupt or swapped multi-GiB record
+            // was materialized before it was refused (AUD2-004).
+            guard try Sha256Verifier.hashFile(at: diskRecord.payload)
+                == diskMetadata.payloadSHA256
             else {
                 throw PromptCheckpointStoreError.corrupt(
                     key, "payload hash does not match")
             }
+            let payload = try readPayload(
+                at: diskRecord.payload,
+                expectedBytes: diskMetadata.metadata.descriptor.payloadBytes)
             let auxiliary: InferenceAuxiliaryState?
             if let auxiliaryBytes = diskMetadata.auxiliaryBytes,
                 let auxiliarySHA256 = diskMetadata.auxiliarySHA256
             {
-                let auxiliaryData = try readPayload(
-                    at: diskRecord.directory.appendingPathComponent(
-                        Self.auxiliaryName),
-                    expectedBytes: auxiliaryBytes)
-                guard Sha256Verifier.hashData(auxiliaryData) == auxiliarySHA256
+                let auxiliaryURL = diskRecord.directory.appendingPathComponent(
+                    Self.auxiliaryName)
+                guard try Sha256Verifier.hashFile(at: auxiliaryURL) == auxiliarySHA256
                 else {
                     throw PromptCheckpointStoreError.corrupt(
                         key, "auxiliary payload hash does not match")
                 }
+                let auxiliaryData = try readPayload(
+                    at: auxiliaryURL, expectedBytes: auxiliaryBytes)
                 auxiliary = InferenceAuxiliaryState(
                     position: diskMetadata.metadata.position,
                     payload: auxiliaryData)

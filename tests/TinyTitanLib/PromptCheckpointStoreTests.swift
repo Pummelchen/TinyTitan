@@ -545,6 +545,9 @@ import TinyTitan
         let listed = await store.metadata(for: domain)
         #expect(listed.isEmpty)
         #expect(await store.diskBytes == 0)
+        #expect(
+            !FileManager.default.fileExists(atPath: staging.path),
+            "an unpublished staging directory is reclaimed, not left on disk")
     }
 
     /// A record directory a crashed in-place write left incomplete (payload,
@@ -895,5 +898,149 @@ import TinyTitan
         await store.removeAll()
         #expect(!FileManager.default.fileExists(atPath: directory.path))
         #expect(await store.diskBytes == 0)
+    }
+
+    /// AUD2-001/002: a canonical directory with only a payload and no metadata is
+    /// crash debris, not a record. Startup reclaims it instead of leaving bytes
+    /// uncounted forever.
+    @Test func payloadOnlyDirectoryIsReclaimedAtStartup() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(meta.key.contentHash, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try Data(repeating: 1, count: 16).write(
+            to: directory.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// AUD2-002: corrupt metadata used to be skipped by indexing and only found
+    /// by an exact-key lookup, so it stayed uncounted until someone asked for it.
+    @Test func corruptMetadataIsReclaimedAtStartup() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        let directory = root.appendingPathComponent(meta.key.contentHash, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(
+            to: directory.appendingPathComponent("metadata.json"))
+        try Data(repeating: 1, count: 16).write(
+            to: directory.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// AUD2-001: a directory is a record only under the hash its metadata names.
+    /// A renamed or planted directory must not be indexed as a different key.
+    @Test func aDirectoryNamedForTheWrongHashIsReclaimedAtStartup() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let wrong = String(repeating: "a", count: 64)
+        #expect(wrong != meta.key.contentHash)
+        try FileManager.default.moveItem(
+            at: root.appendingPathComponent(meta.key.contentHash),
+            to: root.appendingPathComponent(wrong))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent(wrong).path))
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// AUD2-001/002: a payload shorter than its descriptor declares is an
+    /// incomplete record. Indexing used to accept the metadata alone, so the
+    /// directory was counted until a later load failed.
+    @Test func truncatedPayloadIsReclaimedAtStartup() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let directory = root.appendingPathComponent(meta.key.contentHash)
+        try Data(repeating: 1, count: 8).write(
+            to: directory.appendingPathComponent("state.bin"))
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
+
+    /// AUD2-001: the publish swap renames the canonical directory to `.bak-` and
+    /// then the staging directory into place. A crash between those renames
+    /// leaves only the backup; startup restores it instead of deleting the last
+    /// good record.
+    @Test func aValidBackupIsRestoredWhenTheCanonicalRecordIsGone() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let canonical = root.appendingPathComponent(meta.key.contentHash)
+        let backup = root.appendingPathComponent(
+            ".bak-\(meta.key.contentHash)-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: canonical, to: backup)
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(FileManager.default.fileExists(atPath: canonical.path))
+        #expect(!FileManager.default.fileExists(atPath: backup.path))
+        let loaded = try await store.load(meta.key, domain: domain)
+        #expect(loaded.snapshot.payload == snapshot(for: meta).payload)
+    }
+
+    /// The other half: a backup left behind after both renames completed is
+    /// stale, and must not be indexed as a second copy of the record.
+    @Test func aStaleBackupIsReclaimedWhenTheCanonicalRecordExists() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let canonical = root.appendingPathComponent(meta.key.contentHash)
+        let backup = root.appendingPathComponent(
+            ".bak-\(meta.key.contentHash)-\(UUID().uuidString)")
+        try FileManager.default.copyItem(at: canonical, to: backup)
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1 << 20))
+        await store.indexDiskIfNeeded()
+        #expect(!FileManager.default.fileExists(atPath: backup.path))
+        #expect(FileManager.default.fileExists(atPath: canonical.path))
+        #expect(await store.diskBytes == 16)
     }
 }
