@@ -52,6 +52,32 @@ the **products** — a library and an engine — and the rest are the bundles an
 tooling that ship beside them; the split is spelled out under
 [Library and engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine).
 
+## Quick start
+
+Requires macOS 26+, Xcode 27 (Swift 6.4) and Apple Silicon.
+
+```bash
+git clone https://github.com/Pummelchen/TinyTitan.git
+cd TinyTitan
+swift build -c release
+.build/release/TinyTitanCLI --help
+```
+
+Install a model with `tools/install_models.sh --choose` (the dense 2B row is
+about 2.3 GB), then run a prompt:
+
+```bash
+.build/release/TinyTitanCLI --model models/qwen3.5_2B_4Bit \
+  --prompt "Explain a mutex in one paragraph." --max-new 96
+```
+
+Start the server with `tools/server_launcher.sh`; it prints the base URL and
+writes the client configuration. The full walkthrough is
+[Getting Started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started).
+
+Last verified: 2026-10-23 — release build and both `--help` commands in a fresh
+clone; the 2B install and a greedy 96-token CLI run on this host.
+
 ## Benchmarks
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means the CPU
