@@ -248,11 +248,14 @@ extension PreadExpertStreamer {
         for index in plan.misses { try readPlanMiss(plan, index: index) }
     }
 
-    /// Decode every miss of a compressed plan into its slots, one wave a layer.
+    /// Decode every miss of a compressed plan into its slots, eight experts a
+    /// wave; a miss set no larger than that is a single wave.
     ///
-    /// The wave is the layer's whole miss set, and it is handed to
-    /// `decodeCompressedSet`, which reads it in one storage call and decodes
-    /// every block in parallel -- fronts, the phase-1 publish, then the tails.
+    /// Each wave is handed to `decodeCompressedSet`, which reads it in one
+    /// storage call and decodes every block in parallel -- fronts, then the
+    /// tails. The first stage is published from the wave that ends at the last
+    /// miss, because the consumer commits GPU work for every miss slot once it
+    /// fires.
     /// Measured on Ornith 4-bit: four-experts-at-a-time with per-frame ranges
     /// took 5-13 ms to read and 1.8 ms per expert to decode, against a raw path
     /// that reads 3-4 experts at 3.4 GB/s in ~2 ms.
