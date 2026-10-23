@@ -2,7 +2,7 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 46 | done: 22 | open: 23 | blocked: 1
+Tasks: 46 | done: 23 | open: 22 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
@@ -53,7 +53,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-043 | S2 | A | TinyTitanLib diagnostics / expert-cache benchmark | sources/TinyTitanLib/ServerModelSession+Diagnostics.swift:324-337; sources/TinyTitanLib/ExpertCacheDiagnostics.swift:82-101; benchmark/expert_cache_slots.py:12,48,83-87 | The decode-only expert I/O line has no emitter, so the slot sweep's primary metric parses nothing | DONE | dev-mac (primary) |
 | AUD2-044 | S2 | A | TinyTitanServer startup | sources/TinyTitanServer/Command/main.swift:39-48,206; sources/TinyTitanServer/Core/HTTPServer.swift:125; sources/TinyTitanServer/Core/ServerPortCheck.swift | An occupied --port is reported only after the full model load | DONE | dev-mac (primary) |
 | AUD2-045 | S2 | A | TinyTitan runtime/streaming | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:284-296; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:167-213 | A tiered layer is declared to publish a first stage that the tiered read branch never publishes | OPEN | dev-mac (primary) |
-| AUD2-046 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:305-361 | Lazy disk indexing evicts a record loaded before the first index first, and latches done when the directory listing fails | OPEN | dev-mac (primary) |
+| AUD2-046 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:305-361 | Lazy disk indexing evicts a record loaded before the first index first, and latches done when the directory listing fails | DONE | dev-mac (primary) |
 
 ## Evidence and dispositions
 
@@ -388,8 +388,10 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 
 - **discovered-by:** independent checkpoint review of c5e2e93 (reviewer Q4), re-derived against the code by the main agent
 - **evidence-before:** Two manifestations, one cause. (a) load() inserts a record it finds on disk into state.disk and touchDisk appends it to an empty diskLRU before indexing has run; indexDiskIfNeeded then skips that key (`guard state.disk[key] == nil`) and appends the older records behind it, so the just-touched record sits at the LRU front and eviction removes it before records whose directories are older. (b) diskIndexed is set true before contentsOfDirectory is attempted, and its error is folded into an empty list, so one failed listing (root removed, EACCES, EIO) disables indexing for the lifetime of the store: removeAll then unlinks nothing and contains/metadata keep answering from direct lookup and an empty index. The turn store's loadEntries does not share either shape -- it is called at startup, resets the index, and retries on the next call.
-- **fix-summary:** No fix applied.
-- **evidence-after:** Confirmed by reading PromptCheckpointStore.swift:166-177,305-361 and touchDisk at :450-454 against ServerPromptStateStore.swift:102-184; no reproduction yet. Candidate tests: load the newest record on a fresh store, then save a third under a two-record budget and assert the backdated record is the one evicted; chmod the root unreadable across one contains() call, restore it, and assert removeAll still deletes the record.
+- **fix-summary:** indexDiskIfNeeded sets diskIndexed only after contentsOfDirectory succeeds, so a failed listing retries on the next call instead of latching; and it merges state.diskLRU with the indexed records by date -- the filesystem mtime for indexed records, the write/touch time for in-process ones -- instead of appending the listing behind a record loaded before the index. No format, budget or eviction-limit change.
+- **evidence-after:** RED on the pre-fix tree: AUDIT/aud2-046-red.log, 2 tests / 4 issues / exit 1 -- aRecordLoadedBeforeIndexingKeepsItsPlaceInTheLRU failed with the backdated record surviving and the newest evicted (three assertions), aFailedListingDoesNotLatchIndexingOff failed on the surviving directory after the root was replaced by a regular file for one call. GREEN after the fix: AUDIT/aud2-046-green.log, 30 checkpoint tests, exit 0. Full serial suite on the fix: 7 bundles, 1,995 tests, exit 0 (AUDIT/aud2-046-full.log); all 18 lint gates exit 0 (AUDIT/aud2-046-lint.log). The failed-listing fixture is deterministic (ENOTDIR), not permission-based, so it does not depend on the runner's Full Disk Access.
+- **disposition:** Fixed on the audit branch at 7740a42; not merged, released or verified on an independent host. Found by the independent review of c5e2e93.
+- **commit:** 7740a42
 
 ## Verification notes
 
@@ -414,3 +416,4 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - AUD2-020, AUD2-021 and AUD2-033 were verified by one full serial suite on their three fix commits (AUDIT/aud2-020-021-033-full.log, 7 bundles, 1,993 tests, exit 0) and one lint run over the same tree (AUDIT/aud2-020-021-033-lint.log, 18/18). A comment-only commit (d11be7c) followed the suite; no code changed after it.
 - AUD2-028 commit c5e2e93 was verified with a post-hoc mutation RED rather than a pre-fix RED: the guards were reverted and restored by editing, never by discarding the working tree, and both logs are named in the record. The checkpoint split documented in docs/repository-layout.md was corrected from 447 to 463 lines because the same commit adds the validation the split made room for. The independent review of that commit produced AUD2-046; its two unreachable asymmetries are recorded in AUD2-028's evidence rather than filed as defects.
 - AUD2-028 was reverted-and-restored in place for both mutation REDs and the file was restored before the GREEN run; the full suite and all 18 lint gates ran on the committed tree c5e2e93 (AUDIT/aud2-028-full.log, 7 bundles / 1,993 tests / exit 0; AUDIT/aud2-028-lint.log, 18/18).
+- AUD2-046's RED was a pre-fix run on the tree without the fix (not a post-hoc mutation): the tests were written first and failed for the two recorded reasons. The committed fix is 7740a42, verified by the full serial suite (7 bundles / 1,995 tests / exit 0) and all 18 lint gates.
