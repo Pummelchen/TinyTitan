@@ -2,7 +2,7 @@
 
 This release is cut at the close of an independent audit of the whole tree,
 run 2026-10-06 to 2026-10-11: 210 findings filed in a public ledger
-(`docs/audit-2026-10-06/`), 209 fixed or closed with evidence during the
+(`docs/audit-ledger.json`), 209 fixed or closed with evidence during the
 audit, and the 210th — this release itself — closed by it. The headline for a
 user is the installer: it verifies every archive it downloads, v5.18
 published only two of the three, and the closed installer therefore refused
@@ -124,7 +124,7 @@ installed here compares byte-identical.
 
 ### Also in this release
 
-- **The audit itself is part of the tree**: `docs/audit-2026-10-06/` — the
+- **The audit itself is part of the tree**: `docs/audit-ledger.json` — the
   210-row ledger (`ledger.json`, rendered `ledger.md`), the environment
   record, the per-finding evidence and the handover. CI now carries a
   **supply-chain job** (gitleaks 8.30.1 over the full history, pip-audit

@@ -36,7 +36,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 GATE = ROOT / "tools" / "docs-facts.py"
-LEDGER_REL = "docs/audit-2026-10-06/ledger.json"
+LEDGER_REL = "docs/audit-ledger.json"
 BOGUS = "14710ba"  # the sha the ledger actually got wrong
 
 
@@ -55,7 +55,7 @@ def row(task_id: str, commit: str, status: str = "DONE") -> dict:
         "severity": "S2",
         "tier": "A",
         "project": "docs-gates",
-        "file_line": "docs/audit-2026-10-06/ledger.json",
+        "file_line": "docs/audit-ledger.json",
         "title": f"fixture row {task_id}",
         "category": "missing gate",
         "status": status,
@@ -216,7 +216,7 @@ class LedgerCommitEvidenceTests(unittest.TestCase):
         # wrong in it.
         lines, checked = self.module.ledger_commit_evidence([], root=self.repo)
         self.assertEqual(1, len(lines), lines)
-        self.assertIn("no docs/audit-*/ledger.json", lines[0])
+        self.assertIn("no docs/audit-ledger.json", lines[0])
         self.assertEqual(0, checked)
 
     def test_a_missing_ledger_fails_rather_than_being_skipped(self):

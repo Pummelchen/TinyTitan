@@ -17,7 +17,7 @@ extend-exclude = [".build", "models"]
 # E4/E7/E9 and F are the correctness core (imports, statements, undefined
 # names); W is whitespace-level syntax. The rest cover the pitfalls the audit
 # standard names, one family each, as measured by the probe in
-# docs/audit-2026-10-06/tool-coverage.md:
+# docs/audit-ledger.json:
 #   B      flake8-bugbear — loop-variable capture (B023), mutable defaults (B006),
 #          zip without strict (B905), useless expressions (B018)
 #   E722   bare `except:`

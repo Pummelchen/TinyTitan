@@ -269,7 +269,7 @@ def check_counts(path, paragraphs, want):
 def ledger_totals():
     """The audit ledgers' own `counts`, summed. Returns (rows, done, open,
     blocked, paths); an empty path list means there is no ledger to compare to."""
-    rc, out, _ = sh("git", "ls-files", "docs/audit-*/ledger.json")
+    rc, out, _ = sh("git", "ls-files", "docs/audit-ledger.json")
     paths = sorted(out.splitlines()) if rc == 0 else []
     total = [0, 0, 0, 0]
     errors = []
@@ -347,7 +347,7 @@ def ledger_commit_evidence(ledgers, root=None):
     lines = []
     if not ledgers:
         lines.append(
-            "FAIL no docs/audit-*/ledger.json is tracked, so no commit reference could be read"
+            "FAIL no docs/audit-ledger.json is tracked, so no commit reference could be read"
         )
         return lines, 0
     checked = 0
