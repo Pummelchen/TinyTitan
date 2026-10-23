@@ -1,8 +1,8 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-051 51/51 | done:35 open:15 blocked:1] DONE — the audit's own records now
-show a second untested tool (AUD2-051: the CI markdown-link step fails on the 17
-path:line links this report writes, and on two Swift code spans); the coverage
+`[#AUD2-051 51/51 | done:36 open:14 blocked:1] DONE — the CI markdown-link step,
+which had never run over these records, now reads code spans and fences as literal
+text and resolves the 17 citations it used to fail on (AUD2-051); the coverage
 artifact CI uploads is built from the manifest's seven test bundles and checked for
 scope, so it no longer reads as package-wide while naming one bundle (AUD2-031);
 every expansion-layout guard
@@ -21,16 +21,15 @@ keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029
 the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
 prompt-cache disk budget (AUD2-003), the two reader/restore corrections
 (AUD2-006, 009), the persisted checkpoint access (AUD2-007), the two expansion
-geometry records (AUD2-013, AUD2-014) and the coverage-artifact scope record
-(AUD2-031) are closed with remediation commits, and
-none is merged, released or certified on a clean final revision. AUD2-048 (a
+geometry records (AUD2-013, AUD2-014), the coverage-artifact scope record
+(AUD2-031) and the audit's own markdown-link checker (AUD2-051) are closed with
+remediation commits, and none is merged, released or certified on a clean final
+revision. AUD2-048 (a
 diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate never
 reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
 cannot say which guard refused, so a negative test can pass for the wrong reason —
 found twice inside AUD2-013's own suite and un-swept across the rest of `tests/`)
-and AUD2-051 (the CI markdown-link step has never run over these records and fails
-on them: 17 `path:line` URLs this report writes plus two Swift code spans it reads
-as links) are opened in the same pass.
+are opened in the same pass.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -452,9 +451,9 @@ systems. Passing local tests never bypasses the final checklist above.
 
 **S2 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift:352-377),
+- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift#L352-L377),
   with the restart index it feeds in
-  [`PromptCheckpointStore+Maintenance.swift`](sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift:6).
+  [`PromptCheckpointStore+Maintenance.swift`](sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift#L6).
 - **Finding:** The listing-order and unindexed-`removeAll` halves of this row
   closed at `7740a42` (AUD2-046). What stayed was the access itself: `touchDisk`
   reassigned `record.modificationDate` inside the actor's state and never wrote
@@ -467,7 +466,7 @@ systems. Passing local tests never bypasses the final checklist above.
   `FileManager.setAttributes([.modificationDate:])` on the record's own
   directory, the way the turn store does. Only `load` reaches it, and the
   multi-prefix restore path
-  ([`ServerModelSession+PromptCache.swift:333`](sources/TinyTitanLib/ServerModelSession+PromptCache.swift:333))
+  ([`ServerModelSession+PromptCache.swift:333`](sources/TinyTitanLib/ServerModelSession+PromptCache.swift#L333))
   calls `load`, so a served cache hit is the access that moves the record: the
   defect was reachable in production, not latent. A failed attribute write keeps
   the older date — ordering, not data — and is reported through
@@ -510,7 +509,7 @@ systems. Passing local tests never bypasses the final checklist above.
 **S2 · Tier A · DONE · TinyTitan**
 
 - **Location:** [streamed restore](sources/TinyTitan/Runtime/KVCache/KVCacheManager+HostStreamingPrefill.swift)
-  (lines 410–424) and [snapshot caller](sources/TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift:96).
+  (lines 410–424) and [snapshot caller](sources/TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift#L96).
 - **Finding:** `restoreStreamedSnapshot` returned silently when
   `hostK[layer]`/`hostV[layer]` was missing or `length` exceeded
   `hostArenaLengths[layer]`. The caller in `KVCacheManager+Snapshot` guards the
@@ -586,10 +585,10 @@ systems. Passing local tests never bypasses the final checklist above.
 
 **S2 · Tier A · DONE · TinyTitan**
 
-- **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:73-137),
+- **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift#L73-L137),
   with the one map builder that feeds it
-  ([`Model+LayerStreamers.swift:354-379`](sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:354))
-  and the [suite that pins it](tests/TinyTitan/Infrastructure/Streaming/TwoBitExpertReadTests.swift:182).
+  ([`Model+LayerStreamers.swift:354-379`](sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift#L354))
+  and the [suite that pins it](tests/TinyTitan/Infrastructure/Streaming/TwoBitExpertReadTests.swift#L182).
 - **Finding:** An invalid target order or range can overwrite unread packed
   source bytes or exceed the slot during in-place expansion.
 - **Current evidence:** `validateExpansionLayout` went in at `61de182` with the
@@ -662,9 +661,9 @@ systems. Passing local tests never bypasses the final checklist above.
 
 **S2 · Tier A · DONE · TinyTitan**
 
-- **Location:** [expansion guards](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:87-105),
-  [descriptor writes](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:115-124),
-  [staging geometry](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:262-279).
+- **Location:** [expansion guards](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift#L87-L105),
+  [descriptor writes](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift#L115-L124),
+  [staging geometry](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift#L262-L279).
 - **Finding:** The recorded group contains silent three-bit trailing-byte loss,
   two-bit even-size assumptions, UInt64-to-UInt32 output-offset narrowing, and a
   dead zero assignment to payloadOffset.
@@ -685,7 +684,7 @@ systems. Passing local tests never bypasses the final checklist above.
     `UInt32(offsets[position])` (`:118`). The stride is
     `max(1, maximumPayload)` where every expert's run is clamped inside the
     payload file by `payloadEnd <= payloadSize` at decode
-    ([`ExpertRANSIndex.swift:229-234`](sources/TinyTitanFormat/ExpertRANSIndex.swift:229)),
+    ([`ExpertRANSIndex.swift:229-234`](sources/TinyTitanFormat/ExpertRANSIndex.swift#L229)),
     and the staging buffer is allocated at `stride * maximumWave` with
     `maximumWave = 8`, so overflowing a 32-bit base needs one expert's compressed
     run above 4 GiB / 8 = 512 MiB — a multi-gigabyte layer sidecar — and Swift's
@@ -694,10 +693,10 @@ systems. Passing local tests never bypasses the final checklist above.
     `offsets` is `[UInt64]` because Metal buffer offsets are, and every
     construction site in this tree gives zero: each slot is its own
     `makeBuffer(bytesNoCopy:)` with `bufferOffsets.append(0)`
-    ([`PreadExpertStreamer.swift:340-350`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer.swift:340)),
+    ([`PreadExpertStreamer.swift:340-350`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer.swift#L340)),
     and the ring's speculative path passes
     `offsets: [UInt64](repeating: 0, count:)`
-    ([`PreadExpertStreamer+Prefetch.swift:46`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Prefetch.swift:46)).
+    ([`PreadExpertStreamer+Prefetch.swift:46`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Prefetch.swift#L46)).
     No speculative guard was added — a `stride * 8 > UInt32.max` check would
     police a state the payload-file clamp already prevents, and the repo rule is
     not to validate scenarios that cannot happen. The constraint a future
@@ -1602,7 +1601,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 **S3 · Tier A · OPEN · TinyTitanLib**
 
-- **Location:** [turn store](sources/TinyTitanLib/ServerPromptStateStore.swift:405-422).
+- **Location:** [turn store](sources/TinyTitanLib/ServerPromptStateStore.swift#L405-L422).
 - **Finding:** `touchDisk` updates the in-memory record, then on its background
   disk queue writes the directory's modification date under `try?`. A failure —
   read-only volume, `EACCES`, `EIO`, the directory replaced under the store —
@@ -1620,8 +1619,8 @@ systems. Passing local tests never bypasses the final checklist above.
 
 **S2 · Tier A · OPEN · audit tooling**
 
-- **Location:** [docs-facts](tools/docs-facts.py:269-289) and
-  [`ledger_commit_evidence`](tools/docs-facts.py:321-360).
+- **Location:** [docs-facts](tools/docs-facts.py#L269-L289) and
+  [`ledger_commit_evidence`](tools/docs-facts.py#L321-L360).
 - **Finding:** `ledger_totals()` lists its ledgers with
   `git ls-files docs/audit-ledger.json` — a hardcoded path to the *prior*
   (2026-10-06) ledger — and `ledger_commit_evidence()` iterates exactly that
@@ -1652,7 +1651,7 @@ systems. Passing local tests never bypasses the final checklist above.
   `throws: Never.self` acceptance form), against callees including
   [`ExpertRANSIndex.decode`](sources/TinyTitanFormat/ExpertRANSIndex.swift) (15
   throw sites behind an 8-case `Failure` enum),
-  [`TwoBitExpand.validateExpansionLayout`](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:73-137)
+  [`TwoBitExpand.validateExpansionLayout`](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift#L73-L137)
   (6) and
   [`Model+SchemaValidation`](sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift)
   (6).
@@ -1691,11 +1690,11 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-051 — The CI markdown-link step fails on the audit's own records
 
-**S2 · Tier A · OPEN · audit evidence/CI**
+**S2 · Tier A · DONE · audit evidence/CI**
 
-- **Location:** `.github/workflows/ci.yml` (lines 1061–1096, the
-  `Check Markdown links` step), 17 links in this report, and
-  `AUDIT/ledger.md:178`.
+- **Location:** [CI workflow](.github/workflows/ci.yml) (the
+  `Check Markdown links` step, lines 1061–1116; 1061–1096 before this fix),
+  17 links in this report, and `AUDIT/ledger.md:179`.
 - **Finding:** The step's own script, run verbatim at `b719a4a` on a clean tree,
   reports `Checked 365 local link(s); 19 broken` and exits 1
   (`AUDIT/aud2-051-markdown-link-check.log`). Two distinct causes:
@@ -1710,9 +1709,10 @@ systems. Passing local tests never bypasses the final checklist above.
     its file and is **in range**, so this is link syntax, not a stale citation.
   - **2 code spans read as links.** The step scans raw lines, so a Swift
     initializer inside backticks — `` `offsets: [UInt64](repeating: 0, count:)` ``
-    at `audit_2310.md:695`, and the same text rendered into `AUDIT/ledger.md:178` —
-    matches the link regex, because `](` looks like a link to a scanner that has no
-    notion of code spans. In CommonMark a code span is not a link.
+    at `audit_2310.md:695` in that baseline run (699 now), and the same text
+    rendered into `AUDIT/ledger.md:178` (179 now) — matches the link regex,
+    because `](` looks like a link to a scanner that has no notion of code spans.
+    In CommonMark a code span is not a link.
 - **Exposure:** `audit_2310.md` and the rendered `AUDIT/ledger.md` are tracked only
   on `audit/2026-10-23` (`git ls-tree main` shows neither), and the workflow
   triggers are `push: branches: main` and `pull_request`, so **no CI run has
@@ -1723,13 +1723,48 @@ systems. Passing local tests never bypasses the final checklist above.
   17 citations unclickable; it ships no runtime defect. It is not waived: the
   checker must keep resolving every real link, and skipping a code span is not a
   weakening because a code span is never a link.
-- **Next:** convert the 17 URLs to the `#L` convention this repository already uses
-  (text unchanged, so the citations stay readable), make the step skip fenced and
-  inline code before matching, and prove both: the step exits 0 on the corrected
-  tree and still exits 1 on a deliberately broken link. Disclosed limit to keep
-  stated: the step checks that the target *file* exists, never that an anchor's line
-  number still says what the prose claims — converting these links does not fix
-  that, and no line-number validation is claimed here.
+- **Fix:** two parts, one per cause. The step's ruby scanner now tracks fenced
+  blocks (``` and `~~~`) and strips *paired* inline code spans from a line before
+  matching, so literal Swift text is no longer read as a link; because only matched
+  pairs are removed, a line with an unmatched backtick still has its remaining
+  links checked, and a link after a fence close is still checked. In the records,
+  the 17 URLs written as `path:352-377` became the convention the rest of the tree
+  uses — readable text, anchor URL (`Foo.swift:352-377` with URL
+  `Foo.swift#L352-L377`), so a reader gets a clickable citation and the checker
+  resolves the path. Three illustrative link-shaped snippets in `AUDIT/ledger.json`
+  — the AUD2-014 fix-summary's Swift initializer and the two examples this row
+  quotes — are now backtick-wrapped, so the rendered ledger shows them as the code
+  they are. No citation, number or claim changed, and each of the 17 ranges was
+  re-checked against its file.
+- **Evidence:** four runs in `AUDIT/aud2-051-verification.log`, each with the step's
+  ruby extracted from the YAML itself (which also proves the job still parses), on
+  ruby 2.6.10p210. On four fixtures (`broken.md`, `code.md`, `fenced.md`,
+  `keep.md`) the OLD step reports 7 broken of 8 — four of them a code span, a
+  double-backtick span and two fenced-block lines — while the NEW step reports
+  exactly the three genuinely missing files and exits 1: `Checked 4 local
+  link(s); 3 broken`. The check is therefore not weakened. Over this tree the NEW
+  step reports `Checked 363 local link(s); 0 broken`, exit 0, and the OLD step over
+  the SAME already-converted tree still reports 7 broken (all code spans here and
+  in the rendered ledger), which isolates cause 2 from cause 1 instead of leaving
+  the two fixes entangled. The counts reconcile: 370 checked before, 363 after — the
+  7 code-span matches are no longer counted, the 17 converted links still are. The
+  filed baseline was 19 of 365 at `b719a4a`; the filing text itself raised it to 24
+  of 370 (`AUDIT/aud2-051-filing-run.log`) before any fix, because writing about the
+  defect in markdown trips it. After these record edits, the step re-extracted from
+  the committed workflow reports `Checked 364 local link(s); 0 broken`, exit 0
+  (`AUDIT/aud2-051-final-link-check.log`) — 364 rather than 363 because the
+  rewritten Location bullet links `ci.yml` itself — and the `docs` gate is green over
+  the edited records (`AUDIT/aud2-051-final-docs-gate.log`). All 18 gates re-ran with
+  the edited workflow in the
+  tree: every gate ok, `LINT_EXIT=0` (`AUDIT/aud2-051-lint.log`).
+- **Not checked, stated:** the step still has not run in CI over these files — the
+  branch is unmerged and the triggers are `push` to `main` and `pull_request`. And
+  the checker validates that the target *file* exists, never that an `#L` anchor
+  still names the lines the prose claims; converting these links does not fix that,
+  no line-number validation is claimed here, and the audit's own records remain read
+  by no gate (AUD2-049).
+- **Commit:** `d6b1842` on `audit/2026-10-23` (the checker); the record conversions
+  ride in the records commit that names it.
 
 ## Recorded verification and its limits
 
