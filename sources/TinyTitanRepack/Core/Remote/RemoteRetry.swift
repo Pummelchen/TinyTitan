@@ -81,7 +81,7 @@ public func withRemoteRetries<T>(
         UInt64.random(in: 0..<250_000_000)
     },
     sleeper: @escaping RemoteRetrySleeper = {
-        try await Task.sleep(nanoseconds: $0)
+        try await Task.sleep(for: .nanoseconds(Int64(clamping: $0)))
     },
     op: () async throws -> T
 ) async throws -> T {

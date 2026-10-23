@@ -12,6 +12,12 @@ the numbers come from builds, not from reading release notes.
 | Manifest | `// swift-tools-version: 6.4` |
 | Language mode | `swiftLanguageModes: [.v6]` -- Swift 6 mode, so strict concurrency and the graduated 6.0/6.1/6.2 features are already errors, not warnings |
 
+Verified again on 2026-10-23 with **Swift 6.4.1** (`swift-6.4.1-RELEASE`,
+Homebrew toolchain): `swift build --build-tests` 0 errors / 0 warnings and
+`swift test --no-parallel` passes all **1,947 tests** (927 + 421 + 164 + 189 +
+85 + 63 + 98). Swift 6.4.1 is a patch release -- compiler, stdlib and linker
+fixes, no new language features -- so 6.4 remains the language baseline.
+
 Features that are no longer "upcoming" -- they graduated into language mode 6
 and are therefore already enforced -- were confirmed against the compiler by
 probing `-enable-upcoming-feature <name>` and finding the flag retired:
@@ -22,7 +28,7 @@ probing `-enable-upcoming-feature <name>` and finding the flag retired:
 ## Enforced: the three that are still upcoming and the tree is clean under
 
 Declared once in `Package.swift` as `tinytitanLanguageStandard` and applied to
-**every target** (28 of 28), so a target added later cannot quietly opt out:
+**every target** (25 of 25), so a target added later cannot quietly opt out:
 
 ```swift
 .enableUpcomingFeature("InferIsolatedConformances")
@@ -50,13 +56,13 @@ and the golden baseline is byte-identical on Ornith 4-bit.
 | `InternalImportsByDefault` | **918 errors** | Changes what every `import` in every target means, and the fix is a `public import` at each re-export. Worth doing for the same reason `MemberImportVisibility` was (fewer accidental re-exports), but 918 sites is its own pass. |
 | `NonisolatedNonsendingByDefault` | 79 errors **and** a semantics change | "Approachable concurrency" makes a `nonisolated async` function run on the *caller's* actor. That moves work between executors, so it needs a dedicated pass over the concurrency-sensitive paths -- the area this project's audit treated most carefully -- plus a fresh golden baseline, not a flag. |
 
-## Small adoptions still open
+## Small adoptions
 
 Found while measuring, each mechanical and behaviour-preserving:
 
-- `Task.sleep(nanoseconds:)` -> `Task.sleep(for:)` with `Duration`: **15 sites**
-  (1 in `sources/`, the rest in tests). The `Duration` form is the modern one and
-  reads better (`for: .milliseconds(5)`).
+- **Done 2026-10-23:** `Task.sleep(nanoseconds:)` -> `Task.sleep(for:)` with
+  `Duration`; the last **9 sites** (3 in `sources/`, 6 in tests) now use the
+  `Duration` form (`for: .milliseconds(5)`).
 - `NSLock` -> `Synchronization.Mutex`: **28 sites**. Not a blanket change and not
   a deprecation: `Mutex`'s advantage is binding the state it protects into the
   mutex (`Mutex<State>`), which is a per-site design improvement rather than a

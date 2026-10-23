@@ -13,7 +13,7 @@ import PackageDescription
 /// `-warnings-as-errors` is part of the standard, not a preference: a warning
 /// that only appears in a build log is a check nobody runs, and the release
 /// script's log scan did not cover `swift test` at all. Every target carries
-/// this array (23 of 23 at the time of writing), so the flag cannot be dodged
+/// this array (25 of 25 at the time of writing), so the flag cannot be dodged
 /// by a new target either. The tree builds and tests clean with it
 /// (`swift build --build-tests`, `swift test --no-parallel`).
 let tinytitanLanguageStandard: [SwiftSetting] = [

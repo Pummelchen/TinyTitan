@@ -60,7 +60,7 @@ private func run(
     let reader = Task.detached { pipe.fileHandleForReading.readDataToEndOfFile() }
     let deadline = Date().addingTimeInterval(timeout)
     while process.isRunning, Date() < deadline {
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await Task.sleep(for: .milliseconds(200))
     }
     if process.isRunning { process.terminate() }
     let data = await reader.value
@@ -185,7 +185,7 @@ private func stubServerSeconds() -> Double? {
             ?? "/tmp/tinytitan-stub-port"
         try String(port).write(toFile: file, atomically: true, encoding: .utf8)
         print("stub server on port \(port) for \(seconds)s")
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        try await Task.sleep(for: .seconds(seconds))
         for (index, request) in backend.requests.enumerated() {
             print(
                 "request \(index): roles \(request.messages.map(\.role)) tools \(request.tools.count) max \(request.maximumCompletionTokens)"

@@ -237,9 +237,12 @@ struct ManagedModelBackendTests {
         let managed = backend(idleTimeout: .seconds(30), recorder: recorder)
         _ = try await managed.generate(request()) { _ in }
 
-        await managed.backdateActivity(by: .seconds(120))
-        // Idle long enough by the clock, but a request is in flight.
+        // Backdate *inside* the in-flight window: if the clock is moved while
+        // the reaper is free to run, it can wake between these two awaits,
+        // see an idle model, unload it, and make reaperStep() return .stop.
         await managed.withInFlight {
+            await managed.backdateActivity(by: .seconds(120))
+            // Idle long enough by the clock, but a request is in flight.
             #expect(await managed.reaperStep() == .sleep(.seconds(30)))
         }
         // Once it drains, the same clock reading means unload.

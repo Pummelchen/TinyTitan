@@ -10,18 +10,18 @@ import Testing
 @testable import TinyTitanServerCore
 
 private actor ScriptedServerBackend: ServerInferenceBackend {
-    let delayNanoseconds: UInt64
+    let delay: Duration
 
-    init(delayNanoseconds: UInt64 = 0) {
-        self.delayNanoseconds = delayNanoseconds
+    init(delay: Duration = .zero) {
+        self.delay = delay
     }
 
     func generate(
         _ request: ValidatedChatRequest,
         onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
     ) async throws -> ServerCompletion {
-        if delayNanoseconds > 0 {
-            try await Task.sleep(nanoseconds: delayNanoseconds)
+        if delay > .zero {
+            try await Task.sleep(for: delay)
         }
         onEvent(.content("hello"))
         return ServerCompletion(
@@ -268,7 +268,7 @@ struct HTTPServerTests {
         let server = TinyTitanHTTPServer(
             modelID: "test-model",
             queueLimit: 1,
-            backend: ScriptedServerBackend(delayNanoseconds: 2_000_000_000))
+            backend: ScriptedServerBackend(delay: .seconds(2)))
         let channel = try await server.start(port: 0)
         let port = try #require(channel.localAddress?.port)
 
@@ -287,9 +287,9 @@ struct HTTPServerTests {
         // queueLimit 1 admits one active request plus one queued; the third is
         // refused. Launch the first two and give them time to take those slots.
         let active = Task { try await URLSession.shared.data(for: streamingRequest()) }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await Task.sleep(for: .milliseconds(300))
         let queued = Task { try await URLSession.shared.data(for: streamingRequest()) }
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await Task.sleep(for: .milliseconds(300))
 
         let (data, response) = try await URLSession.shared.data(for: streamingRequest())
         let status = (response as? HTTPURLResponse)?.statusCode
@@ -530,7 +530,7 @@ struct HTTPServerTests {
         let server = TinyTitanHTTPServer(
             modelID: "test-model",
             queueLimit: 1,
-            backend: ScriptedServerBackend(delayNanoseconds: 50_000_000),
+            backend: ScriptedServerBackend(delay: .milliseconds(50)),
             heartbeatInterval: .milliseconds(10))
         let channel = try await server.start(port: 0)
         let port = try #require(channel.localAddress?.port)

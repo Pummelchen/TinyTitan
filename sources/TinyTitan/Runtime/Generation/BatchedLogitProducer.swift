@@ -17,7 +17,7 @@ private struct LogitsBuffer: @unchecked Sendable {
 /// server's concurrent sessions reach that call together: each session's
 /// `produce` parks on a continuation, the first row schedules a short flush,
 /// and `width` rows (or the timeout, whichever comes first) run as one batch.
-/// A lone session waits at most `flushDelayNanos` a token, well under a
+/// A lone session waits at most `flushDelay` a token, well under a
 /// millisecond.
 ///
 /// The batch is emitted under the runner's own `ForwardStepGate`, so a prefill
@@ -111,7 +111,7 @@ private actor BatchGate {
     private var busy = false
     /// Long enough for a sibling session to arrive, short enough that a lone
     /// request does not pay a measurable per-token delay.
-    private static let flushDelayNanos: UInt64 = 250_000
+    private static let flushDelay: Duration = .microseconds(250)
 
     init(width: Int) {
         self.width = max(2, width)
@@ -131,7 +131,7 @@ private actor BatchGate {
             } else if !flushScheduled {
                 flushScheduled = true
                 Task {
-                    try? await Task.sleep(nanoseconds: Self.flushDelayNanos)
+                    try? await Task.sleep(for: Self.flushDelay)
                     await self.flush(runner: runner)
                 }
             }
@@ -160,7 +160,7 @@ private actor BatchGate {
             } else if !flushScheduled {
                 flushScheduled = true
                 Task {
-                    try? await Task.sleep(nanoseconds: Self.flushDelayNanos)
+                    try? await Task.sleep(for: Self.flushDelay)
                     await self.flush(runner: runner)
                 }
             }

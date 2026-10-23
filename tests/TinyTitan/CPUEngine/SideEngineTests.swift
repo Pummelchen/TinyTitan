@@ -288,7 +288,7 @@ import Testing
             loads.increment()
             // Long enough that the second judgement is inside `resident()`
             // while the first is still waiting on the load.
-            try? await Task.sleep(nanoseconds: 60_000_000)
+            try? await Task.sleep(for: .milliseconds(60))
             return FakeSideEngineModel()
         }
         async let first = engine.judge(.durability(key: "k", value: "v"))
