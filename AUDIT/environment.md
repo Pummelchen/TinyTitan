@@ -51,6 +51,57 @@ pip-audit via a project venv (not on the user PATH — CI runs 2.10.1). Node v26
 Proofs that these standards actually fail the build on a violation are in
 `tool-coverage.md` (§1 language-standard proof + tool-coverage proof).
 
+## Requested compatibility extension (2026-10-23)
+
+The operator now requires Swift **6.4.1** and Python **3.13, 3.14 and 3.15**.
+The current Xcode and CommandLineTools both report `swiftlang-6.4.0.34.1`;
+no installed 6.4.1 compiler was found. This is **BLOCKED (AUD2-022)**, owned by
+the repository operator. Tests on the installed compiler remain useful local
+6.4.0 evidence, not a substitute for the requested 6.4.1 verification.
+
+| Python runtime | Location | Converter dependencies |
+| --- | --- | --- |
+| 3.13.14 | `~/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/bin/python3.13` | absent |
+| 3.14.9 | `/opt/homebrew/bin/python3.14` | NumPy 2.5.4, safetensors 0.8.0, ml_dtypes 0.6.0 |
+| 3.15.0 | `/opt/homebrew/bin/python3.15` | NumPy 2.5.4, safetensors 0.8.0, ml_dtypes 0.6.0 |
+
+All 226 tracked Python files compiled in memory on these three interpreters.
+That establishes syntax only. The completed runtime matrix is recorded in
+`python-matrix-summary.json`: 108 serial suite invocations per interpreter.
+Python 3.14 and 3.15 each reported 2,077 tests, zero failures/errors/skips and
+exit 0; each also emitted 12 M5-sweep `ResourceWarning` messages (AUD2-026).
+Python 3.13 reported 1,728 passes, 18 failures, 10 errors and 87 skips, exit 1:
+the missing converter/analysis dependencies leave that runtime verification
+incomplete, not green. Seven reported errors are unittest loader placeholders.
+The off-pin NumPy 2.5.4 stack on 3.14/3.15 does not certify the committed 2.5.3
+stack; no dependency was installed or fetched to turn an unavailable gate into
+a pass. Real-model and CoreML checks were not part of this matrix.
+
+The AUD2-026 follow-up changed the M5 sweep and added one real-handle regression
+test. The updated 24-test suite passed on all three interpreters with no
+`ResourceWarning` (`m5-handle-green-3.13.log`, `m5-handle-green-3.14.log`,
+`m5-handle-green-3.15.log`). The original matrix still describes the earlier
+23-test source state, not this revised suite.
+
+## Continuation verification limits
+
+The complete serial Swift run now has an unmasked exit status and an explicit
+skip inventory in `baseline.md`; `continuation-lint-verified.log` records all
+18 lint gates passing. These remain installed-toolchain, dirty-tree results,
+not Swift 6.4.1 or Phase E certification. No model or dependency was installed.
+
+The post-format rerun also exited 0, with unchanged pass/skip counts. Its separate
+multi-object coverage export is recorded in `baseline.md`: SwiftPM's own JSON
+contains only the last bundle (AUD2-031), while the corrected local export names
+all seven current test binaries and discloses unmapped sources and Metal. Neither
+percentage establishes whole-repository coverage. A CI artifact from run
+`39974492789` was downloaded and contains one bundle / 27 files, matching the
+local last-bundle scope; the durable export gap is still open and no pipeline was
+changed. The same continuation recorded a clean release build (306/306 tasks,
+106.09 s, zero warnings), a byte-identical `ornith-8` golden and four passing
+`LibraryContractTests` against the installed 4B; `audit_2310.md` carries the
+commands and footers.
+
 ## Prior audit
 
 The 2026-10-06 pre-production audit under this same prompt closed 210/210 rows

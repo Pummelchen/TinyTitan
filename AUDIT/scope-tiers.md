@@ -23,7 +23,7 @@ plugin packages and a Python benchmark/converter tree.
 | `sources/TinyTitanMemory`, `TinyTitanMemoryTool` | Swift 6 | SwiftPM | memory surface + `tinytitan-memory` tool |
 | `sources/TinyTitanFleet` (Core + Command) | Swift 6 | SwiftPM | `ttlanmanager` (LAN fleet manager) |
 | `sources/TinyTitanValidation` | Swift 6 | SwiftPM | test/reference support only |
-| `benchmark/` | Python 3.13 | `python3 -m unittest` | converter `prepare_qwen38.py` + test/measure scripts |
+| `benchmark/` | Python 3.13 | `python3 -m unittest` | test/measure scripts (converter is `tools/prepare_qwen38.py`) |
 | `plugins/dsh-tinytitan` | JavaScript | npm (eslint + prettier) | DeepSeek Harness bundle (route writer, quiet compaction) |
 | `plugins/dsh-lan-manager` | JavaScript | npm | DSH LAN manager front end for `ttlanmanager` |
 | `tools/` | bash 3.2-compatible | — | `lint.sh`, `release.sh`, `install_models.sh`, `server_launcher.sh`, `golden-baseline.sh`, … |
@@ -42,7 +42,7 @@ Target graph: `KernelsC`/`Format` → `TinyTitan` → `TinyTitanLib` →
 Contracts with >1 consumer (auto Tier A):
 
 1. **`.ssdai` format + `verified-install.json` receipt** — written by
-   `RepackCore`/`benchmark/prepare_qwen38.py`, read and *enforced* by the
+   `RepackCore`/`tools/prepare_qwen38.py`, read and *enforced* by the
    engine (trust decision), checked by `tools/release.sh`. Consumers: 3+.
 2. **Loopback OpenAI-/Anthropic-compatible HTTP API** — served by
    `ServerCore`, consumed by arbitrary external clients (Zed, Codex, DSH
@@ -72,7 +72,7 @@ Contracts with >1 consumer (auto Tier A):
   wrong text.
 - **Agent memory DB** (`ContinuityCore`/`TinyTitanMemory`): persistent data
   mutation, and LLM output (model tool calls) writing into it.
-- **Converter downloads** (`benchmark/prepare_qwen38.py`): network fetch
+- **Converter downloads** (`tools/prepare_qwen38.py`): network fetch
   (HF/CDN) writing production installs; also `ttlanmanager` ↔ LAN harnesses.
 - **LLM output driving privileged actions**: the DSH plugin executes harness
   tool calls; engine tool-calling path in `ServerCore`.
@@ -87,7 +87,7 @@ Contracts with >1 consumer (auto Tier A):
 | `TinyTitanLib` | **A** | public facade; concurrency (Engine/Session lifetime, cancellation) |
 | `TinyTitanServerCore` | **A** | network-facing endpoint, untrusted JSON, tool-calling path |
 | `TinyTitanRepackCore` (+Command) | **A** | irreversible writes (installer), receipt attestation, resume/discard paths |
-| `benchmark/prepare_qwen38.py` + its resume/download loop | **A** | writes production data (installs); network downloads; §1 Python carve-out does not de-scope this |
+| `tools/prepare_qwen38.py` + its resume/download loop | **A** | writes production data (installs); network downloads; §1 Python carve-out does not de-scope this |
 | `ContinuityCore` | **A** | persistent-data mutation (memory DB v2) |
 | `TinyTitanMemory` (+Tool) | **A** | persistent-data mutation, LLM-output-driven writes |
 | `TinyTitanFleetCore` (+Command) | **A** | network client to LAN harnesses; cross-project contract (group key) |

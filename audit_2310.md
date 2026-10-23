@@ -15,15 +15,17 @@ tier and status, including disproven claims and audit-introduced regressions.
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
 - Measured HEAD: `164e84a08de5d434f95a90d552ceeff608581caa`, **with uncommitted
   source and test changes**. That commit alone does not contain the tested fixes.
-- **31 records: 0 DONE, 30 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **13 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 1 BLOCKED**.
-- Recorded severities: **2 S0, 12 S1, 17 S2**. These are ledger classifications,
-  not a claim that all 31 records are confirmed outstanding product bugs.
+- **36 records: 0 DONE, 35 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **17 OPEN, 2 START, 3 PROGRESS, 10 TEST, 3 AUDIT, 1 BLOCKED**.
+- Recorded severities: **2 S0, 13 S1, 21 S2**. These are ledger classifications,
+  not a claim that all 36 records are confirmed outstanding product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
-- AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022
-  and AUD2-031 concern verification, rather than independent runtime defects.
+- AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
+  AUD2-031 and AUD2-032 concern verification, rather than independent runtime
+  defects. AUD2-032 records that the original brief itself is unrecoverable, so
+  compliance with it cannot be certified.
 - No issue has a remediation commit recorded. No fix is represented here as
   merged, released, or certified on a clean final revision.
 
@@ -67,6 +69,15 @@ item does not mean no work happened there; it means completion is not evidenced.
 Every Tier A surface requires the brief's complete L2/L3/L4 manual passes on the
 current tree. Earlier audit closure, delta-only review, narrow patch review,
 linters and test coverage do not discharge these items.
+
+The 2026-10-23 continuation delegated eleven module-batch reviews to independent
+subagents and **every one terminated on the operator's credit limit before
+emitting a finding**. Their preambles were recovered; four reviewer leads were
+re-derived in the tree and filed as AUD2-033…036, and a fifth lead (a claimed
+`workspaceId` type error) was disproven. AUD2-032 records the separate
+missing-brief blocker. That is targeted verification, not a substitute for the
+listed passes: no batch produced a complete L2/L3/L4 review, so every item below
+stays unchecked and the full current-tree review remains incomplete.
 
 - [ ] TinyTitanKernelsC: native memory, pointer lifetime and Swift/C contracts.
 - [ ] TinyTitan runtime: loading, streaming, mmap, Metal buffers/kernels, decode,
@@ -119,7 +130,9 @@ linters and test coverage do not discharge these items.
 
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
-  timing footers.
+  timing footers. *(Partial: the release build and the serial suite both ran on
+  the dirty tree under Swift 6.4.0; neither is the required 6.4.1 final-revision
+  run.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
   sanitizer results do not certify later edits.
 - [ ] Reconcile Python 3.13/3.14/3.15 runtime verification with the pinned
@@ -128,14 +141,17 @@ linters and test coverage do not discharge these items.
   rather than assuming configured CI jobs succeeded.
 - [ ] Implement and verify durable multi-bundle CI coverage export and scope
   validation; inspect the actual resulting artifact. No pipeline change is
-  authorized merely by this documentation request.
-- [ ] Run applicable model/golden and Engine/Session contract checks using only
+  authorized merely by this documentation request. *(Partial: a fresh CI artifact
+  was inspected and contains one bundle / 27 files; the export itself is still
+  unfixed and no pipeline file was changed.)*
+- [x] Run applicable model/golden and Engine/Session contract checks using only
   already-installed models after the required host/process preflight; explicitly
   report missing installs or unsupported hardware as not checked.
 - [ ] Exercise relevant release-only and opt-in paths, or record their precise
   missing preconditions. Do not relabel skipped tests as passes.
-- [ ] Rerun all 18 lint gates, documentation checks and patch hygiene after the
-  final changes; retain warnings/errors instead of masking tool status.
+- [x] Rerun all 18 lint gates, documentation checks and patch hygiene after the
+  final changes; retain warnings/errors instead of masking tool status. *(This
+  certifies the measured dirty tree; it is not a clean-commit certification.)*
 - [ ] Reconcile every issue with its evidence, disposition and commit; resolve
   blockers or obtain explicit operator decisions, without treating them as GREEN.
 - [ ] Preserve required raw evidence in a reviewable delivery form; this document
@@ -606,10 +622,131 @@ systems. Passing local tests never bypasses the final checklist above.
   current test binaries and excludes build/tests/dependencies. It maps 395 source
   files; excluding reference support gives 378 shipping-source files and
   50,611/62,974 covered lines (80.37%). Unmapped Swift/C files and all Metal code
-  are disclosed below. No CI pipeline was modified; the durable gap is unfixed.
+  are disclosed below. A fresh CI artifact from run `39974492789`
+  (`AUDIT/ci-coverage-39974492789/TinyTitan.json`) was then inspected: it holds
+  **one bundle and 27 files**, confirming remotely that the defect is in CI output
+  and not only in the local export. No CI pipeline was modified; the durable gap
+  is unfixed.
 - **Next:** Obtain approval for the needed pipeline change, implement target/scope
   validation and inspect a fresh CI artifact. Do not invent a coverage threshold
   or call the local percentage whole-repository coverage.
+
+### AUD2-032 — The original 13-section audit brief is unrecoverable
+
+**S2 · Tier A · AUDIT · audit evidence/scope**
+
+- **Location:** [audit ledger](AUDIT/ledger.json) metadata,
+  [environment](AUDIT/environment.md) and this report.
+- **Finding:** The brief is named only as “Attachment `9ca50da3`
+  (pre-production audit + remediation, 13 sections)”. An exhaustive read-only
+  search of `AUDIT/`, `docs/` and the supplied transcript found no attachment body
+  or path; the transcript begins at “continue the audit”. Later hash matches are
+  ledger copies and report references, not the brief. Surviving legacy labels
+  (L0…L7) are descriptive only: no normative checklist, Phase B/C procedure,
+  convergence threshold or Phase E exception rule was recovered.
+- **Current evidence:** [Scope and tiers](AUDIT/scope-tiers.md) and
+  [baseline](AUDIT/baseline.md) are the operative scope and completion record.
+  They are not presented as a substitute for the missing brief, and no attempt was
+  made to reconstruct requirements from memory.
+- **Next:** The operator supplies Attachment `9ca50da3`, or explicitly accepts the
+  recorded scope as normative. Until then, original-brief compliance and Phase E
+  certification remain unclaimable.
+
+### AUD2-033 — LZFSE first-stage publication does not wait for the last wave
+
+**S1 · Tier A · OPEN · TinyTitan runtime/streaming**
+
+- **Location:** [compressed plan execution](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift)
+  (lines 259–275), [rANS contrast](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift)
+  (line 24) and [early fixup](sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift)
+  (lines 123–171).
+- **Finding:** `executeCompressedMisses` walks `plan.misses` in waves of 8 and
+  passes `firstStage` only when `start == 0`; `decodeCompressedSet` invokes it
+  after that first wave's phase-0 blocks decode. `encodeDecodeEarlyMissFixup`
+  awaits `firstStageCompletion()` and then encodes phase 1 over
+  `phase1MissSlots`, which is populated from **every** index of `plan.misses`.
+  With more than 8 misses, the gate/up halves of later waves are not resident when
+  GPU phase-1 work for their slots is committed. The rANS path was fixed for this
+  exact class in AUD2-023 and now passes `firstStage` only when
+  `end == plan.misses.count`; the LZFSE path retains the earlier condition.
+- **Current evidence:** Confirmed statically in the current tree. Not reproduced
+  live: the 2026-10-23 ornith-8 golden check is batch-1 greedy decode and passed
+  byte-identical, which does not exercise a >8-miss plan. Treat as S0 if a shipped
+  front end reaches that plan shape, as the rANS record implies.
+- **Next:** No fix applied. Make the LZFSE condition match the rANS final-wave rule
+  (`end == plan.misses.count`), or publish only after every wave's phase 0; then
+  retain a >8-miss regression test.
+
+### AUD2-034 — A stalled request body is never timed out once its head is in flight
+
+**S2 · Tier A · OPEN · TinyTitanServerCore**
+
+- **Location:** [HTTP handler](sources/TinyTitanServer/Core/HTTPServerHandler.swift)
+  (lines 117–152) and [deadline plumbing](sources/TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift)
+  (line 207), against `idleReadTimeout = .seconds(120)`
+  ([server](sources/TinyTitanServer/Core/HTTPServer.swift), line 15).
+- **Finding:** `channelRead` resets the 120-second idle deadline on every read and
+  increments `inFlightRequests` when a valid head arrives. `resetIdleDeadline`'s
+  scheduled task closes only when `inFlightRequests == 0` and is not re-armed after
+  it fires. A client that sends headers plus a partial body therefore leaves
+  `inFlightRequests == 1` forever: the timer fires, declines to close, and nothing
+  else closes the connection. The body buffer (up to the configured limit) and the
+  connection are held indefinitely. The comment above `resetIdleDeadline` claims a
+  stalled slowloris request is closed, which this path cannot do.
+- **Current evidence:** Verified by code path only; no live stalled-client probe
+  was run. Loopback-only binding limits the blast radius, but this is local denial
+  of service and contradicts the stated control.
+- **Next:** No fix applied. Add a body-completion deadline (or re-arm while a body
+  is incomplete), distinct from the no-in-flight idle close, and keep the
+  never-close-mid-generation rule.
+
+### AUD2-035 — CLI Ctrl-C cancels the outer task, so an in-flight generation keeps running
+
+**S2 · Tier A · OPEN · TinyTitanCLI / TinyTitanLib**
+
+- **Location:** [CLI signal handler](sources/TinyTitanCLI/Command/main.swift)
+  (lines 49–52) and [session one-shot](sources/TinyTitanLib/Session.swift)
+  (lines 89–105).
+- **Finding:** The SIGINT handler cancels only the task that drives `run(args:)`.
+  `Session.respond` wraps generation in an unstructured `Task` and awaits
+  `work.value`; cancellation does not propagate into an unstructured task, and
+  awaiting `Task.value` from a cancelled task does not throw. The CLI never calls
+  `Session.cancel()`, which is the path the server uses. A long generation
+  therefore ignores SIGINT until it finishes on its own.
+- **Current evidence:** Static trace only; a CLI SIGINT probe against the installed
+  4B was not executed, because the only permitted model process was the contract
+  suite and the two may not overlap.
+- **Next:** No fix applied. Either call `session.cancel()` from the SIGINT handler,
+  or replace `runOneShot` with a cancellation-forwarding structure and keep the
+  `.cancelled` mapping; then add a probe that observes the interruption.
+
+### AUD2-036 — PLE prefill gather is bounded by the scratch chunk, not the PLEBlock rows
+
+**S2 · Tier A · OPEN · TinyTitan runtime/prefill**
+
+- **Location:** [PLE block construction](sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift)
+  (line 309), [chunk guard](sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillLayer.swift)
+  (line 57), [gather](sources/TinyTitan/Runtime/Inference/RealForwardRunner+PLE.swift)
+  (line 90), [PLEBlock allocation](sources/TinyTitan/Kernels/Primitives/PLEBlock.swift)
+  (line 136) and [prefill config](sources/TinyTitan/Runtime/Prefill/PrefillRuntimeConfig.swift)
+  (line 155).
+- **Finding:** `PLEBlock` allocates `embedding = embedDim * maxRows` with
+  `maxRows = runtimeConfiguration.prefillChunkTokens`.
+  `executePrefillChunk` checks `tokens.count` against
+  `scratch.layout.chunkTokens`, which is built from the caller's
+  `PrefillRuntimeConfig`; `production(chunkTokens:)` accepts any value in
+  `allowedPrefillChunkTokens` independently of the runner's own configuration.
+  `gatherPLERowsPrefill` then writes `tokens.count` rows of `headCount*rowBytes`
+  into that buffer. A caller passing a chunk larger than the runner's configured
+  `prefillChunkTokens` passes the scratch guard and writes past the PLE embedding
+  allocation in host-visible shared Metal memory.
+- **Current evidence:** Static analysis only. Shipped front ends appear to pass the
+  engine's own `prefillChunkTokens`, so reachability requires a caller that
+  constructs a mismatched `PrefillRuntimeConfig`; `RealForwardRunner` is public in
+  the engine target but is not part of the `TinyTitanLib` facade.
+- **Next:** No fix applied. Bound the gather by `PLEBlock.maxRows` (or size
+  `PLEBlock` from the effective chunk) and refuse a config whose `chunkTokens`
+  exceeds the runner's.
 
 ## Recorded verification and its limits
 
@@ -685,8 +822,16 @@ TMPDIR="$PWD/AUDIT/scratch" xcrun swift test --no-parallel --filter PromptCheckp
 - Checkpoint store: **28 tests / 1 suite, exit 0**; 10.46-second build,
   0.057-second suite (`checkpoint-byte-counts-green.log`).
 - Lint: **18/18 gates passed, exit 0**. Source-length scan: 419 production Swift
-  files, largest 500 lines; strict formatting: 692 Swift files. This does not
-  establish complete manual or model verification.
+  files, largest 500 lines; strict formatting: 692 Swift files. A fresh full run
+  after the last source changes (`full-audit-lint.log`) again exited **0** with
+  every gate reporting its own count: 419 Swift files force-cast clean, 2,410
+  functions (0 new offenders), 265 test files with no silent skip, 1,959 test
+  bodies with none hollow, 169 allowlisted public declarations, 28 shell scripts
+  under bash 3.2.57 and shellcheck 0.11.0, swiftlint 0.65.1 `--strict`, 692 Swift
+  files clean under `swift-format`, both plugin packages under eslint 10.11.0 / prettier
+  3.9.9, and ruff 0.16.7 with 227 scripts parsing under 3.13. This does not
+  establish complete manual or model verification, and certifies the measured
+  dirty tree rather than a clean commit.
 
 M5 command, repeated with each interpreter listed in the environment record:
 
@@ -710,6 +855,35 @@ The earlier 108-suite-per-interpreter matrix remains qualified:
   the committed 2.5.3 pin, so neither certifies the pinned dependency stack.
 - All 226 tracked Python files parsed on all three interpreters; that is syntax
   evidence only. No model/CoreML verification or dependency installation followed.
+
+### Release build, golden and contract checks
+
+Three further checks were recorded in this continuation, all on the same dirty
+tree and installed models only:
+
+```bash
+TMPDIR="$PWD/AUDIT/scratch" xcrun swift build -c release \
+  --disable-automatic-resolution > AUDIT/full-audit-release-build.log 2>&1
+tools/golden-baseline.sh --check ornith-8 > AUDIT/golden-check-ornith8.log 2>&1
+TINYTITAN_LIBRARY_CONTRACT_MODEL=models/qwen3.5_4B_4Bit \
+  TMPDIR="$PWD/AUDIT/scratch" xcrun swift test --no-parallel \
+  --filter LibraryContractTests > AUDIT/full-audit-library-contract.log 2>&1
+```
+
+- Release build: **exit 0**, `Build complete! (106.09 sec)`, final task counter
+  **306/306**, **zero** `error:` and **zero** `warning:` lines.
+- Golden: **`== ornith-8 ==` / `ok — output identical to baseline`**, `exit=0`.
+  Ornith 1.5 8-bit is the correct target because its stored baseline was captured
+  on this exact machine and OS; the qwen35-4b baseline was captured under macOS
+  26.6.2 and is stale for this 27.0.1 host. The check is batch-1 greedy decode, so
+  it does not exercise the >8-miss plan in AUD2-033.
+- Library contract: **4 tests / 1 suite passed in 14.187 s, exit 0** against the
+  installed `models/qwen3.5_4B_4Bit`. The four tests are
+  `twoEnginesOnOneDeviceRunAlternately`, `twoGenerationsOnOneSessionBothComplete`,
+  `cancellingMidDecodeEndsTheGeneration` and `unloadingShutsLiveSessionsDown`; the
+  fifth, `aToolLoopRoundTrips`, was not part of this filtered run and remains
+  unexercised. A pass here is not evidence for AUD2-035: the CLI path never calls
+  `Session.cancel()`, whereas the suite exercises the cancellation API directly.
 
 ### Historical checks, not final-tree certification
 
@@ -810,6 +984,23 @@ unfixed; remote artifacts have not been inspected.
   workspace-policy deviations. Later scratch/logs use `AUDIT/` and
   `AUDIT/scratch`; no new model/dependency/toolchain installation, worktree,
   cache purge, commit or push was used to make verification pass.
+- The delegated reviewer batches produced no findings because all eleven hit the
+  credit limit first. No reviewer claim is treated as evidence; the four
+  reviewer-derived records added here (AUD2-033…036) were re-derived in the tree
+  by the main agent, and AUD2-032 came from the search for the brief.
+- A reviewer lead alleging that `FleetModels.workspaceId` was a non-optional
+  `String` while the plugin sends `null` is **disproven**: the Swift property is
+  `String?` and the plugin writes `null` only for an unregistered workspace. It is
+  recorded as a rejected lead, not filed as a defect.
+- [Scope and tiers](AUDIT/scope-tiers.md) named the converter as
+  `benchmark/prepare_qwen38.py`, but the converter is
+  [tools/prepare_qwen38.py](tools/prepare_qwen38.py); `benchmark/` holds the
+  suites and measure scripts. The four references were corrected in place. This
+  was a documentation path error, not a scope or tier change: the converter
+  remains Tier A.
+- The statement that remote CI artifact contents had not been inspected is
+  superseded: a fresh artifact was downloaded and shown to contain one bundle and
+  27 files, which confirms AUD2-031 rather than closing it.
 
 ## Continuation boundaries
 
@@ -817,6 +1008,28 @@ Continue from the recorded issue evidence, not from a claim that passing tests
 means all bugs are fixed. Preserve uncommitted work and the invalid-evidence
 history. Do not close a static claim without the required reproduction/review,
 replace a disproven claim with its sibling, or treat absent evidence as a pass.
+
+At this snapshot **the audit is not complete, and it cannot be certified complete
+from inside the tree.** Three blockers are external:
+
+1. The original 13-section brief is missing (AUD2-032); compliance with it cannot
+   be demonstrated without the operator supplying it or accepting the recorded
+   scope.
+2. The required Swift 6.4.1 toolchain is not installed on this host; all runs
+   above are Swift 6.4.0.
+3. The eleven delegated Tier A reviewer batches all terminated on the operator's
+   credit limit before emitting a finding, so no full L2/L3/L4 pass exists for any
+   module. Four targeted findings were re-derived manually; that is not the same
+   thing.
+
+Completed and evidenced here: the unmasked full serial suite, the release build,
+the 18-gate lint run, the corrected seven-object coverage export, the CI artifact
+inspection, the ornith-8 golden check and four of the five library-contract
+tests. Still incomplete: the module-by-module Tier A review, clean-commit CI
+certification, fresh sanitizer runs on the final edits, the Python dependency
+reconciliation, durable CI coverage, release-only/opt-in paths, AUD2-035's live
+probe, and remediation of every OPEN/START/PROGRESS record. This report is a
+faithful snapshot of that state, not a Phase E certificate.
 
 The following repository constraints still apply:
 
