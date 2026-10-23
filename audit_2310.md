@@ -1,13 +1,13 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-041 41/41 | done:4 open:36 blocked:1 new:2] DONE — refuse non-zero min_p
-on the wire and name the real cause in the QSA refusal; the section-6
-unused-code sweep is next`
+`[#AUD2-043 43/43 | done:6 open:36 blocked:1 new:2] DONE — the section-6 sweep is
+filed: five unreferenced declarations deprecated behind removal tickets, and the
+decode-only expert I/O line restored; L5 performance and L7 ops are next`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
-Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-040 and AUD2-041
-are closed with remediation commits, and neither is merged, released or certified
-on a clean final revision.
+Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-040, AUD2-041,
+AUD2-042 and AUD2-043 are closed with remediation commits, and none is merged,
+released or certified on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -21,26 +21,28 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `dc5272952e45c696f086487293cc2ca4c04e9e94`, which carries the
-  AUD2-040 and AUD2-041 fixes. **The tree also carries uncommitted source and
-  test changes** belonging to records still in START/PROGRESS/TEST, so that
-  commit alone does not contain every tested fix.
-- **41 records: 4 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 4 DONE,
+- Measured HEAD: `c8d04c45e84a1509555d96e5337d74ee9e73bcf2`, which carries the
+  AUD2-040, AUD2-041, AUD2-042 and AUD2-043 fixes. **The tree also carries
+  uncommitted source and test changes** belonging to records still in
+  START/PROGRESS/TEST, so that commit alone does not contain every tested fix.
+- **43 records: 6 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 6 DONE,
   1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 23 S2**. These are ledger classifications,
-  not a claim that all 41 records are confirmed product bugs.
+- Recorded severities: **2 S0, 16 S1, 24 S2, 1 S3**. These are ledger
+  classifications, not a claim that all 43 records are confirmed product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
   AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
   runtime defects. AUD2-022 (Swift 6.4.1) and AUD2-032 (brief recovery) are DONE
-  and neither closes a product defect; AUD2-040 (stale diagnostic) and AUD2-041
-  (`min_p` accepted and ignored) are DONE with remediation commits.
-- AUD2-040 is `dc52729` and AUD2-041 is `9ca9942`, both on the audit branch. No
-  fix is represented here as merged, released, or certified on a clean final
-  revision.
+  and neither closes a product defect; AUD2-040 (stale diagnostic), AUD2-041
+  (`min_p` accepted and ignored), AUD2-042 (five unreferenced declarations) and
+  AUD2-043 (an orphaned expert-I/O diagnostic) are DONE with remediation commits.
+- AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98` and
+  AUD2-043 is `c8d04c4`, all on the audit branch. Removal tickets TT-050 and
+  TT-051 are filed in the project tracker (wiki commit `081335d`). No fix is
+  represented here as merged, released, or certified on a clean final revision.
 
 Sources are [baseline](AUDIT/baseline.md), [environment](AUDIT/environment.md),
 [scope and tiers](AUDIT/scope-tiers.md), and
@@ -107,12 +109,12 @@ requirement was worked but its own definition of done is not met.
 | §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
 | §4 L7 | Ops pass per deployable service | **Not recorded** | AUD2-037 |
 | §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
-| §6 | Unused code limited to Tier A and audit-orphaned code | **Not recorded** | AUD2-037 |
+| §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Partial — schema met; AUD2-041 is the first S1 through TEST→AUDIT→DONE, no S0 has | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729` (AUD2-040) and `9ca9942` (AUD2-041) are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98` and `c8d04c4` are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress | This report |
 | §11 | Phase C drain to zero | Not started — no product record is DONE | Ledger |
@@ -861,10 +863,22 @@ systems. Passing local tests never bypasses the final checklist above.
   AUD2-040 (S2, a diagnostic that names a feature as unimplemented when it is
   implemented and the guard is unreachable). Both are now DONE (`9ca9942`,
   `dc52729`), each with a failing-then-passing test.
-- **Next:** Run the remaining three passes — §6 Tier-A unused code, L5 performance
-  and L7 ops — at Tier A depth, file every finding they produce with its own ID,
-  and only then mark this record DONE. A facade found on a production path is S0
-  and takes priority over the remaining S1 work.
+- **Progress (2026-10-23, §6):** the **Tier A unused-code sweep** enumerated the
+  declarations of the Tier A modules and this audit's orphaned code, resolving
+  every candidate against `sources/`, `tests/` and `plugins/`. Five declarations
+  have no reference anywhere but themselves (AUD2-042, S3): they are deprecated
+  with the removal tickets TT-050 and TT-051 rather than deleted, which is §6's
+  default and keeps the reachability proof unspent. One audit-adjacent
+  regression surfaced (AUD2-043, S2): `0cdba76` removed the only printer of the
+  `[decode expert io]` line when generation moved onto the library, leaving
+  `TINYTITAN_DECODE_IO_TRACE`, the runner's baseline and `decodeExpertIO()` with
+  no reporter while `benchmark/expert_cache_slots.py` still parsed the line as
+  its primary metric. The reporter is restored in the library and the line was
+  observed on a live run, with the benchmark's own regex matching it.
+- **Next:** Run the remaining two passes — L5 performance and L7 ops — at Tier A
+  depth, file every finding they produce with its own ID, and only then mark this
+  record DONE. A facade found on a production path is S0 and takes priority over
+  the remaining S1 work.
 
 ### AUD2-038 — No independent host exists for the Phase E verification
 
@@ -985,6 +999,64 @@ systems. Passing local tests never bypasses the final checklist above.
   validation suites, full serial suite 7 bundles / 1,988 tests / exit 0, all 18
   lint gates pass, and no S0/S1 gate item was waived.
 
+### AUD2-042 — Five declarations have no caller anywhere in the tree
+
+**S3 · Tier A · DONE · unused code**
+
+- **Location:**
+  [Model+LayerStreamers.swift:87-92](sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift#L87),
+  [Model.swift:185-192](sources/TinyTitan/Runtime/Inference/Model.swift#L185),
+  [RealForwardRunner+Requirements.swift:40-47](sources/TinyTitan/Runtime/Inference/RealForwardRunner+Requirements.swift#L40),
+  [ModelRouterError.swift:179-184](sources/TinyTitanServer/Core/ModelRouterError.swift#L179),
+  [ServerMemory.swift:352-357](sources/TinyTitanServer/Core/ServerMemory.swift#L352).
+- **Finding:** `releaseLayerStreamer(_:)`, `routedExpertBits(layer:expert:)`,
+  `requireSharedScalarGateBuffer()`, `ModelRouter.reasoningChoice(for:)` and
+  `ServerMemory.isFirstTurn(_:)` each resolve to exactly one line — their own
+  declaration — across `sources/`, `tests/` and `plugins/`. A reference from a
+  test target, the embedded example or a DeepSeek Harness plugin would have kept
+  a declaration alive; there is none. The members are the remains of a
+  layer-major prefill that did not land, a tiered install layout no shipped
+  converter writes, and two convenience accessors whose call sites index the
+  underlying maps directly.
+- **Resolution (`ccfee98`):** all five are deprecated with
+  `@available(*, deprecated, message:)` naming the removal ticket and the reason
+  there is no caller — TT-050 for the engine declarations, TT-051 for the two
+  ServerCore ones (wiki commit `081335d`). Nothing was deleted, which is §6's
+  default: the removal tickets carry the deletion. `-warnings-as-errors` turns a
+  future call into a build failure, so a reintroduced user is caught at the
+  commit that adds it. Release build exit 0 with no warnings, full serial suite
+  7 bundles / 1,990 tests / exit 0, 18/18 lint gates. S3 needs no TEST stage
+  because nothing changed behavior.
+
+### AUD2-043 — The decode-only expert I/O line lost its only emitter
+
+**S2 · Tier A · DONE · observability**
+
+- **Location:**
+  [ServerModelSession+Diagnostics.swift:324-337](sources/TinyTitanLib/ServerModelSession+Diagnostics.swift#L324),
+  [ExpertCacheDiagnostics.swift:82-101](sources/TinyTitanLib/ExpertCacheDiagnostics.swift#L82),
+  [expert_cache_slots.py:48](benchmark/expert_cache_slots.py#L48).
+- **Finding:** `TINYTITAN_DECODE_IO_TRACE` still selects the runner's statistics
+  baseline and `decodeExpertIO()` still returns it, but no caller printed the
+  result after `0cdba76` removed the four-line block in the CLI's run loop when
+  generation moved onto the library. The consumer still expects it:
+  `benchmark/expert_cache_slots.py` sets the flag, documents the printed shape
+  and parses it with `IO` — the only source of hits, misses, hit rate and
+  bytes/token — and `verdict()` exits 2 when a slot logs nothing. The flag, the
+  baseline and the accessor therefore had no reporter while the sweep that
+  depends on them would have reported `no data` for every slot.
+- **Resolution (`c8d04c4`):** `emitGenerationDiagnostics` emits
+  `ExpertCacheDiagnostics.decodeIOLine` whenever `decodeExpertIO()` is non-nil,
+  outside the other diagnostic guards because the runner's own baseline already
+  gates it. The formatter reproduces the shape the benchmark parses and omits
+  the per-token figure when a run reports no new tokens. It lives in the library
+  because the CLI reaches it through `Engine.load`, so there is one emitter.
+  RED against the missing function, GREEN 8/8, full suite 7 bundles / 1,990
+  tests / exit 0, 18/18 lint gates. Live: a `--max-new 8` run of the installed
+  qwen3.8-flash-next 4-bit printed `[decode expert io] hits 2575 misses 785
+  (76.6% hit) 2.02 GiB = 259.1 MiB/token`, and the benchmark's regex matched it
+  with groups `('2575','785','76.6','2.02','259.1')`.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -993,6 +1065,15 @@ Xcode 27.1 (27A9275), Xcode's Swift `swiftlang-6.4.0.34.1` (driver 1.168.6), and
 the Homebrew keg-only Swift 6.4.1. The measured source was the dirty working tree
 at the HEAD above. Resource availability must be rechecked before future model
 runs; an old inventory is not current preflight.
+
+After the AUD2-040/041/042/043 fixes, two further runs were recorded on the same
+host: the full serial suite (`swift test --no-parallel`, **7 bundles, 1,990
+tests, 0 failures, exit 0**, `AUDIT/aud2-042-043-full-tests.log`) and all 18
+lint gates (`tools/lint.sh`, exit 0, `AUDIT/aud2-042-043-lint.log`). The live
+expert-I/O probe is `AUDIT/aud2-043-live.log`; it used the installed
+qwen3.8-flash-next 4-bit under the machine's 12 GiB limit, and its preflight was
+macOS 27.0.1, Xcode 27.1, 99 GiB free and 76% memory free with no other model
+process running.
 
 ### Full serial Swift run
 
