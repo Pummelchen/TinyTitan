@@ -108,4 +108,26 @@ struct ExpertCacheDiagnosticsTests {
         #expect(lines.count == 1)
         #expect(!lines[0].contains("derived_slots"))
     }
+
+    /// `benchmark/expert_cache_slots.py:48` parses this exact shape out of the
+    /// CLI's stderr, and `docs/plan-qwen38-decode-12gb.md:238` names the flag
+    /// that turns it on. Nothing emitted it after 0cdba76 removed the CLI's
+    /// copy, so the sweep silently measured nothing.
+    @Test func decodeIOLineKeepsTheShapeTheBenchmarkParses() {
+        let line = ExpertCacheDiagnostics.decodeIOLine(
+            hits: 900, misses: 100, bytes: 1_288_490_189, tokens: 400)
+
+        #expect(
+            line == "[decode expert io] hits 900 misses 100 (90.0% hit) 1.20 GiB"
+                + " = 3.1 MiB/token")
+    }
+
+    /// A request that decoded no tokens has no per-token figure to report, and
+    /// an empty counter set must print 0.0% rather than a NaN.
+    @Test func decodeIOLineOmitsThePerTokenFigureWithNoTokens() {
+        let line = ExpertCacheDiagnostics.decodeIOLine(
+            hits: 0, misses: 0, bytes: 0, tokens: 0)
+
+        #expect(line == "[decode expert io] hits 0 misses 0 (0.0% hit) 0.00 GiB")
+    }
 }

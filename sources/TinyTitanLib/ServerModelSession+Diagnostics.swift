@@ -321,6 +321,18 @@ extension ServerModelSession {
         if ProcessInfo.processInfo.environment["TINYTITAN_KERNEL_STATS"] != nil {
             emitKernelDiagnostics(result: result)
         }
+        // Decode-only expert I/O. Gated by the runner's own baseline rather than
+        // by a flag here: `decodeExpertIO()` is non-nil only when
+        // TINYTITAN_DECODE_IO_TRACE took the handover snapshot. This line used
+        // to be written by the CLI (removed in 0cdba76 when generation moved
+        // onto the library), leaving the flag, the baseline and the accessor
+        // with no reporter while benchmark/expert_cache_slots.py still parsed it.
+        if let decode = runner.decodeExpertIO() {
+            ServerLog.diagnostic(
+                ExpertCacheDiagnostics.decodeIOLine(
+                    hits: decode.hits, misses: decode.misses, bytes: decode.bytes,
+                    tokens: result.newTokens))
+        }
     }
 
     func emitRunnerDiagnostics(

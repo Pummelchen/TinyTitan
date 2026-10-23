@@ -73,4 +73,32 @@ package enum ExpertCacheDiagnostics {
             """
         return [line, warning]
     }
+
+    /// The `[decode expert io]` line, in the shape
+    /// `benchmark/expert_cache_slots.py` parses: expert I/O attributable to
+    /// decode alone.
+    ///
+    /// The runner's stage line reports the whole request, prefill included, so
+    /// this is the only decode-only attribution. The runner takes the baseline
+    /// at the prefill/decode handover, which is why the line appears only when
+    /// `TINYTITAN_DECODE_IO_TRACE=1`; `tokens` is 0 for a request that
+    /// generated nothing, and then there is no per-token figure to state.
+    package static func decodeIOLine(
+        hits: UInt64,
+        misses: UInt64,
+        bytes: UInt64,
+        tokens: Int
+    ) -> String {
+        let total = hits + misses
+        let rate = total == 0 ? 0 : 100 * Double(hits) / Double(total)
+        var line = "[decode expert io] hits \(hits) misses \(misses)"
+        line += String(format: " (%.1f%% hit)", rate)
+        line += String(format: " %.2f GiB", Double(bytes) / 1_073_741_824)
+        if tokens > 0 {
+            line += String(
+                format: " = %.1f MiB/token",
+                Double(bytes) / 1_048_576 / Double(tokens))
+        }
+        return line
+    }
 }
