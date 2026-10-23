@@ -33,20 +33,19 @@ Two jobs, both at boot, both idempotent:
 
 ## Supported harness version
 
-This bundle supports **exactly one DeepSeek Harness release: `0.2.1-rc.2`** —
+This bundle supports **exactly one DeepSeek Harness release: `0.2.1-rc.3`** —
 not older, not newer, and not a build from `main`. Both jobs above are written
 against that release: the preset is generated from _its_ shipped `standard`
 composition (the `preset-standard` row of
 `@deepseek-ai/dsh-web-app/presets/standard.patch.yml`, read through
 `@deepseek-ai/dsh-agent-preset`'s `agentPresets.register`), so the row ids move
 when the harness does, and the compaction backend subclasses that release's
-`dsh-compaction-basic`. It is also the release `tools/dsh_local.sh` installs.
+`dsh-compaction-basic`.
 
-The pin lives in four places that cannot import each other — `package.json`'s
-`peerDependencies` (exact, no range), the launcher's `DSH_VERSION` default,
-`SUPPORTED_DSH_VERSION` in `src/support.js`, and **the bundle's own `version`**,
-which is the release it supports rather than a number of its own — and
-`test/support.test.js` fails if any of them disagrees.
+The pin lives in three places that cannot import each other — `package.json`'s
+`peerDependencies` (exact, no range), `SUPPORTED_DSH_VERSION` in `src/support.js`,
+and **the bundle's own `version`**, which is the release it supports rather than a
+number of its own — and `test/support.test.js` fails if any of them disagrees.
 
 On any other release — older, newer, or a build from `main` — the plugin **refuses
 to run**. It writes one line to **stderr** naming both versions and does nothing

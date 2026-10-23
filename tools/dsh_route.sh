@@ -59,7 +59,7 @@ BASE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # install from the release tarball keeps both one level up (`~/.tinytitan/bin`,
 # `~/.tinytitan/models`) and names them through TINYTITAN_BIN_DIR and
 # TINYTITAN_MODELS_DIR. The launcher the installer writes sets those, but the
-# installer also tells a person to "re-run tools/dsh_local.sh ensure" from a
+# installer used to tell a person to re-run a private-harness setup from a
 # shell, where they are unset — so the installed layout is checked before giving
 # up, and the failure a user sees is about a missing model rather than a missing
 # path the installer put somewhere else.

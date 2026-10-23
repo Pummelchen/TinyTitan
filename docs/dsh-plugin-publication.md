@@ -1,15 +1,16 @@
 # Publishing a DeepSeek Harness plugin
 
-> **Decision, 2026-09-25: `dsh-tinytitan` is not published to npm and does not
-> need to be.** The installer (`tools/install_tinytitan.sh`) downloads this
-> project's source archive for the release tag, which carries `plugins/`, and
-> `tools/dsh_local.sh ensure` installs the bundle from there with a `file:` add.
-> Everything therefore arrives from the web with no registry account on either
-> side — the project has no npm account, and the user never needs one. The
-> catalogue entry (§4) still points at the repository, which is where the code
-> lives. Read §3 and §4 as the research that led here, not as a plan: publishing
-> remains possible for anyone who wants it, `npm pack --dry-run` is verified
-> clean (13 files, 27.3 kB), but it is not on the path and nothing waits on it.
+> **Decision, 2026-09-25, revised 2026-10-24: `dsh-tinytitan` is not published
+> to npm, and this project no longer installs a private harness for it.**
+> `plugins/` ships in the release source archive, and a user installs a plugin
+> into their **own** DSH profile (`dsh plugin --profile <name> add …`) from that
+> checkout or the repository. Everything therefore arrives with no registry
+> account on either side — the project has no npm account, and the user never
+> needs one. The catalogue entry (§4) still points at the repository, which is
+> where the code lives. Read §3 and §4 as the research that led here, not as a
+> plan: publishing remains possible for anyone who wants it, `npm pack --dry-run`
+> is verified clean (13 files, 27.3 kB), but it is not on the path and nothing
+> waits on it.
 
 Research for `plugins/dsh-tinytitan/`, done 2026-09-14 against the installed
 `@deepseek-ai/dsh` **0.1.5-rc.2**, the upstream repository

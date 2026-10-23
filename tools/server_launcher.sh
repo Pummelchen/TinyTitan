@@ -85,11 +85,6 @@
 #              swapping. GPU models only: the CPU engine runs one generation at a
 #              time whatever it is told.
 #   --memory        enable persistent agent memory for this project
-#   --web           after the server is up, open TinyTitan's own DeepSeek
-#              Harness in the default browser: a local page with a prompt box,
-#              installed under ~/.tinytitan and isolated from any dsh you run
-#              yourself (see tools/dsh_local.sh). 7788 is its port, or the next
-#              free one.
 #   --install       download and convert a model that is not on disk yet without
 #              asking. The interactive menu lists the supported models this
 #              checkout does not have as extra rows, marked "not installed";
@@ -213,12 +208,6 @@ PAGE_CACHE=0
 # never downloads on its own, and `--install` is how a caller says yes ahead of
 # time (a first-run script, a CI image).
 INSTALL_MISSING=0
-# --web: after the server is up, hand the terminal over to TinyTitan's own
-# DeepSeek Harness, which opens a prompt box in the default browser. It is a
-# mode rather than a `--client` entry on purpose: the client list in
-# tools/tinytitan_models.sh is shared with the coder benchmark, which rejects
-# any kind that is not `coder` or `editor` and asserts the id set exactly.
-WEB=0
 # The tiers are the sizes a person can reason about, not the runtime's own
 # slot rungs. Defined here, before the positional parse, because the
 # unlabelled RAM value is read there: with the definition further down the
@@ -279,7 +268,6 @@ while [[ $# -gt 0 ]]; do
     # is one, so this only ever raises it, and raising it is warned about.
     --concurrency) CONCURRENCY_ARG="${2:?--concurrency needs a power of two}"; shift 2 ;;
     --memory)   MEMORY=1; shift ;;
-    --web)      WEB=1; shift ;;
     # Answer the "download and convert it?" question ahead of time. Without it
     # the launcher asks when a person is there, and never downloads on its own
     # from a pipe or a dry run.
@@ -426,10 +414,7 @@ normalize_client() {
   return 1
 }
 
-# --web is its own handover, so it does not ask the client question: the browser
-# page is what comes next, and a coder CLI on top of it would fight for the
-# terminal.
-if [[ -z "$CLIENT" ]] && (( INTERACTIVE )) && (( ! WEB )); then
+if [[ -z "$CLIENT" ]] && (( INTERACTIVE )); then
   menu_ids=()
   while IFS= read -r id; do menu_ids+=("$id"); done < <(tinytitan_client_ids)
   echo "What do you want to launch?"
@@ -1318,45 +1303,6 @@ fi
 non_default_port=0
 if (( PORT != TINYTITAN_DEFAULT_PORT )); then non_default_port=1; fi
 
-# The two warm-up numbers are checked here for the same reason the port is: by the
-# time the warm-up runs, the model has already loaded. `TINYTITAN_WARM_TOKENS` is
-# put through an arithmetic expansion where it is used, so a word there is bash's
-# own `unbound variable`, a leading zero is read as octal (`0755` becomes 493, and
-# `08000` is `value too great for base`), and either one ends the run with a
-# message that names neither the variable nor what to do about it.
-# `TINYTITAN_WARM_TIMEOUT` goes to curl's max-time, which documents 0 as "continue
-# forever" — a switch rather than a bound — and answers a malformed value with a
-# failed request, which the warm-up reports the same way it reports a slow model.
-# Checked only for the run that warms: `--web`, and TINYTITAN_WARM not switched
-# off. A value the run never reads is not this run's business.
-if (( WEB )) && [[ "${TINYTITAN_WARM:-1}" != "0" ]]; then
-  WARM_TOKENS="${TINYTITAN_WARM_TOKENS:-4000}"
-  case "$WARM_TOKENS" in
-    "0")
-      echo "TINYTITAN_WARM_TOKENS=0 warms nothing; name a whole number of tokens, 1 or more" >&2
-      exit 2
-      ;;
-    0*)
-      echo "unknown warm-up size: $WARM_TOKENS (a whole number of tokens with no leading zero)" >&2
-      exit 2
-      ;;
-    *[!0-9]*)
-      echo "unknown warm-up size: $WARM_TOKENS (TINYTITAN_WARM_TOKENS takes a whole number of tokens, 1 or more)" >&2
-      exit 2
-      ;;
-  esac
-  WARM_TIMEOUT="${TINYTITAN_WARM_TIMEOUT:-900}"
-  case "$WARM_TIMEOUT" in
-    "0")
-      echo "TINYTITAN_WARM_TIMEOUT=0 is curl's no-timeout, which leaves the warm-up waiting forever; name a whole number of seconds" >&2
-      exit 2
-      ;;
-    0* | *[!0-9]*)
-      echo "unknown warm-up timeout: $WARM_TIMEOUT (TINYTITAN_WARM_TIMEOUT takes a whole number of seconds, 1 or more)" >&2
-      exit 2
-      ;;
-  esac
-fi
 
 # The context, KV and YaRN flags reach the GPU runtime only. Asking for one of
 # them against a CPU model is a misunderstanding worth naming: the CPU engine
@@ -1516,19 +1462,7 @@ print_setup() {
     echo "  Model:      $launch_model $api_model_note"
     echo "  Endpoints:  POST /v1/chat/completions, POST /v1/responses"
   fi
-  if (( WEB )); then
-    echo ""
-    echo "DeepSeek Harness is opening in your default browser: a prompt box"
-    echo "pointed at this server. It is this install's own copy under"
-    # shellcheck disable=SC2088  # prose in a message, not a path being used
-    echo "~/.tinytitan (port ${TINYTITAN_DSH_PORT:-7788}, or the next free one), so a"
-    echo "DeepSeek Harness you run yourself is not touched."
-    echo "Engine is in fast mode: the coding agent's system prompt and tool"
-    echo "definitions are stripped before prefill, so answers start in seconds."
-  fi
-  # The launcher's own route is written by `dsh_local.sh ensure --port` on the
-  # --web path, so the "regenerate it yourself" advice below would be noise there.
-  if (( non_default_port && ! WEB )); then
+  if (( non_default_port )); then
     echo ""
     echo "Port $PORT is not the default, so anything that assumes ${TINYTITAN_DEFAULT_PORT} needs"
     echo "telling. The DeepSeek Harness route is one of those; regenerate it"
@@ -1668,23 +1602,7 @@ if [[ -n "$PROMPT_CACHE_DISK_ARG" ]]; then
   }
 fi
 
-# --web runs the engine in **fast mode**: TINYTITAN_STRIP_CLI_PROMPT enables the
-# same CLI-strip the "<model>-fast" alias selects, for every request. The harness
-# is a coding agent, so each turn carries a multi-thousand-token system prompt
-# and 27 tool definitions that a plain prompt box never needs; stripping them
-# leaves the real user/assistant conversation — a few hundred tokens instead of
-# several thousand — which is the difference between an answer in seconds and the
-# page sitting on "Deep diving...". The engine logs a strip report per request,
-# so what was removed is visible rather than assumed.
-# The page-cache opt-in is set on the launch line, not exported earlier: the plan
-# block runs in a subshell, so an export there never reached this child.
-if (( WEB )); then
   if [[ "$PAGE_CACHE" == 1 ]]; then
-    TINYTITAN_BOUNDED_IO=0 TINYTITAN_STRIP_CLI_PROMPT=1 "${server_cmd[@]+"${server_cmd[@]}"}" &
-  else
-    TINYTITAN_STRIP_CLI_PROMPT=1 "${server_cmd[@]+"${server_cmd[@]}"}" &
-  fi
-elif [[ "$PAGE_CACHE" == 1 ]]; then
   TINYTITAN_BOUNDED_IO=0 "${server_cmd[@]+"${server_cmd[@]}"}" &
 else
   "${server_cmd[@]+"${server_cmd[@]}"}" &
@@ -1971,78 +1889,6 @@ esac
 # hands off to — started a server and never told the user its address.
 print_setup
 
-# --web: bring up TinyTitan's own DeepSeek Harness and let it take the terminal.
-# It opens the default browser itself and prints the tokenised URL, so there is
-# nothing else to tell the user. `ensure` writes the route against *this*
-# server's port, which is why it runs here rather than at install time: the port
-# is not known until now. The child is not `exec`ed — the trap above has to
-# survive so Ctrl-C stops the model with the page.
-if (( WEB )); then
-  # `--model` sets the harness's own default model: it ships pointing at
-  # DeepSeek's hosted route, so without this the window opens on a provider we
-  # have no key for. The launcher knows the served id; the harness does not.
-  # `--reasoning` has to travel with it: the route's declared level is what the
-  # harness asks for per request, and a route that says "think" against a server
-  # started thinking-off is the page hanging on "Deep diving..." forever.
-  if ! "$SCRIPT_DIR/dsh_local.sh" ensure --port "$PORT" --model "$MODEL" \
-       --reasoning "$thinking_level"; then
-    echo "ERROR: could not set up DeepSeek Harness (see above)." >&2
-    echo "       The server is still running on http://127.0.0.1:${PORT}/v1 —" >&2
-    echo "       point any OpenAI-compatible client at it." >&2
-    wait "$server_pid"
-    exit $?
-  fi
-  # Warm the expert cache before the window opens.
-  #
-  # The first request after a load pays for every expert sweep it misses.
-  # Measured on the 35B-A3B 4-bit: the same ~4.2k-token prompt took **161s cold**
-  # and **72s** once the cache held the working set. A throwaway prefill moves
-  # that cost to startup, where this script can say what it is doing, instead of
-  # leaving it on the person's first question with the page stuck on "Deep
-  # diving...". Set TINYTITAN_WARM=0 to skip it, or TINYTITAN_WARM_TOKENS to
-  # change the size.
-  if [[ "${TINYTITAN_WARM:-1}" != "0" ]]; then
-    # One read, from the value the guard checked. The mutation sweep showed that a
-    # second read of the environment is equivalent today, because the guard refuses
-    # rather than rewrites — so this holds the seam, not the safety: if the check
-    # ever normalises a value, the warm-up must send the normalised one.
-    warm_tokens="$WARM_TOKENS"
-    echo
-    echo "Warming the expert cache (one throwaway prompt, ~$warm_tokens tokens;"
-    echo "this is the slow part of the first answer, moved here)."
-    # Built in shell rather than by python3 for two reasons. It keeps a python3
-    # requirement out of a path that has to work on a Mac that has none — and a
-    # single-quoted heredoc containing an apostrophe inside `$( )` is a **bash 3.2
-    # parse error**, and /bin/bash is 3.2 on a factory Mac, so the script failed
-    # to parse at all before it ran a line. Reproduced in isolation; the same
-    # heredoc parses under 5.x, which is why it went unnoticed here.
-    warm_sentence="The quick brown fox jumps over the lazy dog. "
-    warm_repeat=$(( warm_tokens / 11 ))
-    (( warm_repeat < 1 )) && warm_repeat=1
-    warm_text=""
-    warm_i=0
-    while (( warm_i < warm_repeat )); do
-      warm_text="${warm_text}${warm_sentence}"
-      warm_i=$(( warm_i + 1 ))
-    done
-    warm_body="$(printf '{"model":"%s","messages":[{"role":"user","content":"%s\\nReply with the single word: ready"}],"max_tokens":1,"stream":false}' "$MODEL" "$warm_text")"
-    warm_started="$(date +%s)"
-    if curl -s --max-time "$WARM_TIMEOUT" \
-         "http://127.0.0.1:${PORT}/v1/chat/completions" \
-         -H 'Content-Type: application/json' -d "$warm_body" >/dev/null 2>&1; then
-      echo "Expert cache warm ($(( $(date +%s) - warm_started ))s)."
-    else
-      warn_red "The warm-up did not finish; the first answer will be slower."
-    fi
-  fi
-  echo
-  echo "Opening DeepSeek Harness in your default browser..."
-  # `--port` matters here as much as it does to `ensure`: `web` exports it as
-  # TINYTITAN_PORT so the plugin's boot-time route refresh keeps this server's
-  # address instead of rewriting it to the default 8080.
-  "$SCRIPT_DIR/dsh_local.sh" web --port "$PORT"
-  exit $?
-fi
 
 # A server-only run stays in the foreground so Ctrl-C stops the model.
 if [[ "$CLIENT" == "server" ]]; then

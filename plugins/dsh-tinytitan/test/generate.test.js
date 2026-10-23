@@ -781,7 +781,7 @@ test("another provider's default is not ours to rewrite", async () => {
 });
 
 test("a default that was never set is the installer's job", async () => {
-  // Writing one here would be inventing a choice, and `dsh_local.sh ensure`
+  // Writing one here would be inventing a choice, and an install-time route writer
   // already owns first-run defaults.
   for (const user of [undefined, {}, { provider: "tinytitan" }]) {
     const settings = stubSettings(user);
@@ -857,7 +857,7 @@ test("the route refresh repairs a stale default in the same pass", async (t) => 
 
 /**
  * A profile whose route serves `alpha_4-Bit` and `beta_4-Bit`, with the default
- * block above it. This is the shape `dsh_local.sh` leaves behind: a real
+ * block above it. This is the shape a prior install leaves behind: a real
  * `agent-default-model` section and a generated `llm-pi-ai` block.
  */
 function profile(defaultLines) {

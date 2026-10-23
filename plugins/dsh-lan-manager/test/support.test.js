@@ -14,8 +14,6 @@ import test from "node:test";
 import { apply } from "../src/index.js";
 import { SUPPORTED_DSH_VERSION, supportDecision } from "../src/versions.js";
 
-const LAUNCHER = new URL("../../../tools/dsh_local.sh", import.meta.url);
-
 /** A version we positively read as *not* the supported one. */
 const OTHER_VERSIONS = [
   "0.1.5-rc.2",
@@ -62,13 +60,6 @@ test("the bundle's own version is the release it supports", () => {
   // cannot leave the manifest announcing a version that no longer exists.
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(manifest.version, SUPPORTED_DSH_VERSION);
-});
-
-test("the launcher pins the same release the plugin supports", () => {
-  const launcher = readFileSync(LAUNCHER, "utf8");
-  const pinned = /^DSH_VERSION="\$\{TINYTITAN_DSH_VERSION:-([^}]+)\}"/m.exec(launcher);
-  assert.ok(pinned, "tools/dsh_local.sh must pin DSH_VERSION to a default");
-  assert.equal(pinned[1], SUPPORTED_DSH_VERSION);
 });
 
 test("the supported release runs", () => {

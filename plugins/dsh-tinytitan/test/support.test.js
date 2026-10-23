@@ -2,7 +2,7 @@
  * The supported harness release, the gate that enforces it, and the two
  * declarations that must agree with it.
  *
- * `package.json` cannot import a constant and `tools/dsh_local.sh` is a shell
+ * `package.json` cannot import a constant and a package version is not a shell
  * script, so the agreement is asserted here rather than derived. That is the
  * point of the file: widening the peer range, or moving the launcher's pin, has
  * to fail the suite instead of drifting quietly away from the release this
@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { REPO_ROOT, resolveConfig } from "../src/config.js";
+import { resolveConfig } from "../src/config.js";
 import { apply } from "../src/index.js";
 import {
   SUPPORTED_DSH_VERSION,
@@ -91,13 +91,6 @@ test("the bundle's own version is the release it supports", () => {
   // to a release script, because bumping one without the other is the drift this
   // file's header is about.
   assert.equal(MANIFEST.version, SUPPORTED_DSH_VERSION);
-});
-
-test("the launcher pins the same release the plugin supports", () => {
-  const launcher = readFileSync(join(REPO_ROOT, "tools", "dsh_local.sh"), "utf8");
-  const pinned = /^DSH_VERSION="\$\{TINYTITAN_DSH_VERSION:-([^}]+)\}"/m.exec(launcher);
-  assert.ok(pinned, "tools/dsh_local.sh must pin DSH_VERSION to a default");
-  assert.equal(pinned[1], SUPPORTED_DSH_VERSION);
 });
 
 test("an exact version is what npm treats as exact", () => {

@@ -39,14 +39,12 @@ surface to build, keep in step with every engine feature, and support, and it wa
 removed for exactly that reason. Do not add one back, and do not take on work that
 only a GUI needs.
 
-The **one** sanctioned convenience is a client we merely install and configure, not
-build: `tools/dsh_local.sh` sets up a pinned, private DeepSeek Harness under
-`~/.tinytitan` and the launcher's `--web` opens it in the browser, so a user who
-wants a window gets one already pointed at their model. It is upstream's code with
-our plugin, isolated from any DeepSeek Harness the user runs, and it is a client of
-the loopback server like Zed or `curl` — not a front end this repository maintains.
-Keep it that way: no forking the harness, no GUI code in this tree, and nothing
-here may depend on a window existing.
+The DeepSeek Harness integration is **plugins we publish, not a harness we
+install**: `plugins/dsh-tinytitan` and `plugins/dsh-lan-manager` are installed into
+the user's own DSH profile (`dsh plugin --profile <name> add …`), and this project
+no longer bundles, downloads or pins a private DeepSeek Harness of its own. Keep it
+that way: no forking the harness, no GUI code in this tree, no private `~/.tinytitan`
+harness install, and nothing here may depend on a window existing.
 
 **One toolchain, and it is a hard rule: Xcode 27 / Swift 6.4.** Nothing else is
 supported — not an earlier 6.x, not a later one — because every guarantee in this

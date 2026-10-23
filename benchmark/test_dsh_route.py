@@ -278,7 +278,7 @@ class InstalledLayoutTests(unittest.TestCase):
     from the release tarball keeps both one level above the tools (`bin/`,
     `models/`) and normally has `TINYTITAN_BIN_DIR`/`TINYTITAN_MODELS_DIR` set by
     the launcher it wrote. The installer's own advice after a model lands is to
-    re-run `tools/dsh_local.sh ensure` from a shell, where neither variable is
+    run the route writer from a shell where neither variable is
     set: before 2026-09-25 that run died with "no server binary at
     …/.build/release/TinyTitanServer", which a user reads as "no model".
     """

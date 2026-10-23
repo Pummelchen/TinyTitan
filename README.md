@@ -19,8 +19,8 @@ GGUF dependency.
 model locally on a machine that could never hold it in RAM, and developers who
 want a loopback OpenAI- or Anthropic-compatible endpoint for Codex, Claude Code,
 Qwen Code, OpenCode, Zed or the official SDKs. It is a terminal-first tool: the
-engine and its server are the product, and a browser chat window is an optional
-client of that server. It is **not** a fine-tuning toolkit, a vision model, a
+engine and its server are the product, and the DeepSeek Harness plugins are an
+optional client of that server. It is **not** a fine-tuning toolkit, a vision model, a
 GUI app, or a way to expose a model to your network — the server is
 `127.0.0.1`-only and has no authentication.
 
@@ -39,16 +39,13 @@ GUI app, or a way to expose a model to your network — the server is
    models you have installed and keeps its route current, with a quiet
    compaction backend; the LAN manager drives a fleet of harnesses from one
    console.
-4. **A ready-made DSH bundle install — [`tools/dsh_local.sh`](tools/dsh_local.sh).**
-   A pinned harness with the TinyTitan bundle already wired, entirely under
-   `~/.tinytitan`: it never touches a `dsh`, a `~/.dsh` or a port you already use.
-5. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
+4. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
    [`tools/`](tools).** Stream a checkpoint into a hash-verified install that
    keeps the routed experts on SSD, so a model larger than your RAM still runs —
    and a truncated, swapped or edited install is refused rather than served.
 
-Those five ship from one branch (`main`) and one release tag. The first two are
-the **products** — a library and an engine — and the rest are the bundles and
+Those four ship from one branch (`main`) and one release tag. The first two are
+the **products** — a library and an engine — and the rest are the plugin and
 tooling that ship beside them; the split is spelled out under
 [Library and engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine).
 

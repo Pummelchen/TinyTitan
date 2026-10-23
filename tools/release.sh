@@ -516,7 +516,7 @@ TOOLS_ARCHIVE="$STAGE_ROOT/$TOOLS_STAGE_PREFIX.tar.gz"
 git archive --format=tar --prefix="$TOOLS_STAGE_PREFIX/" "$TAG" | gzip > "$TOOLS_ARCHIVE" \
   || die "git archive produced no tools snapshot for $TAG"
 for member in tools/install_tinytitan.sh tools/server_launcher.sh tools/install_models.sh \
-  tools/tinytitan_models.sh tools/dsh_local.sh plugins/dsh-tinytitan/ Package.swift \
+  tools/tinytitan_models.sh plugins/dsh-tinytitan/ Package.swift \
   sources/TinyTitanLib/; do
   tar tzf "$TOOLS_ARCHIVE" | grep -q "^$TOOLS_STAGE_PREFIX/$member" \
     || die "the tools archive carries no $member, which an installed copy needs"
