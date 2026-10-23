@@ -122,6 +122,34 @@ import TinyTitanLib
         }
     }
 
+    /// Every conflict has to say which options it refuses. All three sites
+    /// shared one message written for `--model` with `--check`, so a refused
+    /// `--plan` or `--measure` combination printed advice about flags the user
+    /// never passed.
+    @Test func eachConflictRefusalNamesItsOwnFlags() async {
+        let conflicts: [(String, CalibrationOptions)] = [
+            ("--check --plan", CalibrationOptions(check: "/tmp/p", plan: true)),
+            ("--model --plan", CalibrationOptions(model: "/tmp/m", plan: true)),
+            ("--model --check", CalibrationOptions(model: "/tmp/m", check: "/tmp/p")),
+            ("--check --measure", CalibrationOptions(check: "/tmp/p", measure: true)),
+        ]
+        for (combined, options) in conflicts {
+            do {
+                _ = try await CalibrationCommand.run(options)
+                Issue.record("\(combined) was accepted; expected a refusal")
+            } catch let error as CalibrationCommandError {
+                for flag in combined.split(separator: " ") {
+                    #expect(
+                        error.description.contains(String(flag)),
+                        "\(combined) refused with \"\(error.description)\""
+                    )
+                }
+            } catch {
+                Issue.record("\(combined) threw \(error), not a CalibrationCommandError")
+            }
+        }
+    }
+
     /// A toy install plus a profile whose machine and target match it, for the
     /// precedence tests (the CLI peeks the model identity, so the model must be
     /// a real install).

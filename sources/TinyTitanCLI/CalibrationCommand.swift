@@ -123,7 +123,7 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
     case missingValue(String)
     case invalidValue(String, String)
     case missingModel
-    case conflictingInput
+    case conflictingInput(String, String)
     case profileTooLarge(Int)
     case noMetalDevice
 
@@ -137,8 +137,8 @@ public enum CalibrationCommandError: Error, CustomStringConvertible {
             return "\(name) got an invalid value \(value)"
         case .missingModel:
             return "calibrate needs --model <dir> or --check <path>"
-        case .conflictingInput:
-            return "calibrate accepts either --model or --check, not both"
+        case .conflictingInput(let first, let second):
+            return "calibrate \(first) and \(second) cannot be combined"
         case .profileTooLarge(let cap):
             return "calibration profile exceeds \(cap) bytes"
         case .noMetalDevice:
@@ -270,17 +270,20 @@ public enum CalibrationCommand {
         if options.plan {
             // `--plan` prints the plan and ignores everything else; refusing
             // the combination says so instead of silently dropping input.
-            if options.check != nil || options.model != nil {
-                throw CalibrationCommandError.conflictingInput
+            if options.check != nil {
+                throw CalibrationCommandError.conflictingInput("--plan", "--check")
+            }
+            if options.model != nil {
+                throw CalibrationCommandError.conflictingInput("--plan", "--model")
             }
             print(planText())
             return 0
         }
         if options.check != nil, options.model != nil {
-            throw CalibrationCommandError.conflictingInput
+            throw CalibrationCommandError.conflictingInput("--model", "--check")
         }
         if options.measure, options.check != nil {
-            throw CalibrationCommandError.conflictingInput
+            throw CalibrationCommandError.conflictingInput("--measure", "--check")
         }
         if options.measure, let modelPath = options.model {
             return try await measure(modelPath: modelPath, options: options)
