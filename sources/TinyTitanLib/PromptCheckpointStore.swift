@@ -201,8 +201,9 @@ actor PromptCheckpointStore {
             // allocation. `readPayload` used to read the declared size first and
             // hash the Data afterwards, so a corrupt or swapped multi-GiB record
             // was materialized before it was refused (AUD2-004).
-            guard try Sha256Verifier.hashFile(at: diskRecord.payload)
-                == diskMetadata.payloadSHA256
+            guard
+                try Sha256Verifier.hashFile(at: diskRecord.payload)
+                    == diskMetadata.payloadSHA256
             else {
                 throw PromptCheckpointStoreError.corrupt(
                     key, "payload hash does not match")
