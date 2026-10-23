@@ -131,8 +131,11 @@ contains only the last bundle (AUD2-031), while the corrected local export names
 all seven current test binaries and discloses unmapped sources and Metal. Neither
 percentage establishes whole-repository coverage. A CI artifact from run
 `39974492789` was downloaded and contains one bundle / 27 files, matching the
-local last-bundle scope; the durable export gap is still open and no pipeline was
-changed. The same continuation recorded a clean release build (306/306 tasks,
+local last-bundle scope. `74b56e1` closed that gap on this branch:
+`tools/coverage-export.sh` now merges the seven manifest bundles in CI and checks
+the report's scope, so the unmerged JSON is no longer what gets uploaded. The step
+has not run on this host's CI yet -- the workflow triggers are `push: main` and
+`pull_request` -- and the branch is unmerged. The same continuation recorded a clean release build (306/306 tasks,
 106.09 s, zero warnings), a byte-identical `ornith-8` golden and four passing
 `LibraryContractTests` against the installed 4B; `audit_2310.md` carries the
 commands and footers.

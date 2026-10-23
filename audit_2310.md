@@ -1,7 +1,10 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-050 50/50 | done:34 open:15 blocked:1] DONE — every expansion-layout guard
-now has a test that names it, proved by disabling the guard one at a time
+`[#AUD2-050 50/50 | done:35 open:14 blocked:1] DONE — the coverage artifact CI
+uploads is now built from the manifest's seven test bundles and checked for scope,
+so it no longer reads as package-wide while naming one bundle (AUD2-031); every
+expansion-layout guard now has a test that names it, proved by disabling the guard
+one at a time
 (AUD2-013), and the rANS offset narrowing is a documented invariant rather than an
 unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
 conflict refusal that names its own flags (AUD2-047), the calibration identity
@@ -15,8 +18,9 @@ a process record once its four passes were run; AUD2-040 to AUD2-044, the
 keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029,
 the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
 prompt-cache disk budget (AUD2-003), the two reader/restore corrections
-(AUD2-006, 009), the persisted checkpoint access (AUD2-007) and the two expansion
-geometry records (AUD2-013, AUD2-014) are closed with remediation commits, and
+(AUD2-006, 009), the persisted checkpoint access (AUD2-007), the two expansion
+geometry records (AUD2-013, AUD2-014) and the coverage-artifact scope record
+(AUD2-031) are closed with remediation commits, and
 none is merged, released or certified on a clean final revision. AUD2-048 (a
 diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate never
 reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
@@ -155,7 +159,7 @@ requirement was worked but its own definition of done is not met.
 | §3 | Baseline with actual language mode, warnings, tests, lint, CVEs, secret scan | Partial — baseline exists and was re-measured; the 6.4.1 build adds 49 linker warnings (AUD2-039) | [baseline](AUDIT/baseline.md) |
 | §4 L0–L4 | Repository, architecture, module, line and security passes at tier depth | Partial — rANS, checkpoint, server, CLI, PLE and Metal areas reviewed; no complete Tier A batch review | Issue record below |
 | §4 L5 | Performance pass on Tier A and profiler-identified hot paths | Met — no N+1, unbounded collection, missing stream or blocking request-path call; no new measurement taken or claimed | AUD2-037 |
-| §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
+| §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — the coverage artifact is now package-scoped and scope-checked; contract tests partly run; Metal and 29 production files stay outside LLVM coverage | AUD2-031, this report |
 | §4 L7 | Ops pass per deployable service | Met — health, signals, graceful shutdown, structured errors and rollback checked; the one startup-validation gap is fixed | AUD2-037, AUD2-044 |
 | §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
@@ -276,11 +280,16 @@ stays unchecked and the full current-tree review remains incomplete.
   dependency stack; syntax checks and the focused M5 suite are insufficient.
 - [ ] Inspect final-revision dependency/security/CodeQL evidence and secret scans,
   rather than assuming configured CI jobs succeeded.
-- [ ] Implement and verify durable multi-bundle CI coverage export and scope
-  validation; inspect the actual resulting artifact. No pipeline change is
-  authorized merely by this documentation request. *(Partial: a fresh CI artifact
-  was inspected and contains one bundle / 27 files; the export itself is still
-  unfixed and no pipeline file was changed.)*
+- [x] Implement durable multi-bundle CI coverage export and scope
+  validation. *(Done in `74b56e1`: `tools/coverage-export.sh` merges the seven
+  manifest test bundles, refuses a bundle newer than the profile, and fails on a
+  report whose file set any single bundle exceeds; the workflow uploads
+  `.build/package-code-coverage.json`. Verified locally on a fresh coverage run
+  and red-proved on the artifacts it catches. The step has **not** run in CI: the
+  workflow triggers are `push: main` and `pull_request`, and this change lives on
+  `audit/2026-10-23` only, so it is not yet a merged pipeline change and merging
+  it stays the operator's call. The pre-fix remote artifact (one bundle / 27
+  files) remains evidence of the defect.)*
 - [x] Run applicable model/golden and Engine/Session contract checks using only
   already-installed models after the required host/process preflight; explicitly
   report missing installs or unsupported hardware as not checked.
@@ -1031,26 +1040,60 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-031 — SwiftPM coverage JSON represents only the final test bundle
 
-**S1 · Tier A · PROGRESS · audit evidence/coverage**
+**S1 · Tier A · DONE · audit evidence/coverage**
 
-- **Location:** [CI workflow](.github/workflows/ci.yml) and
+- **Location:** [CI workflow](.github/workflows/ci.yml) (lines 1027–1060),
+  [coverage export script](tools/coverage-export.sh) and
   [coverage evidence](AUDIT/baseline.md).
 - **Finding:** After seven bundles passed, SwiftPM's JSON contained only 27 files
   associated with ContinuityCore, including tests/generated code. Its 96.22%
-  cannot be reported as package or production coverage. CI checks artifact
-  presence, not represented targets; remote artifact contents were not inspected.
-- **Current evidence:** A successful local export explicitly names all seven
-  current test binaries and excludes build/tests/dependencies. It maps 395 source
-  files; excluding reference support gives 378 shipping-source files and
-  50,611/62,974 covered lines (80.37%). Unmapped Swift/C files and all Metal code
-  are disclosed below. A fresh CI artifact from run `39974492789`
-  (`AUDIT/ci-coverage-39974492789/TinyTitan.json`) was then inspected: it holds
-  **one bundle and 27 files**, confirming remotely that the defect is in CI output
-  and not only in the local export. No CI pipeline was modified; the durable gap
-  is unfixed.
-- **Next:** Obtain approval for the needed pipeline change, implement target/scope
-  validation and inspect a fresh CI artifact. Do not invent a coverage threshold
-  or call the local percentage whole-repository coverage.
+  cannot be reported as package or production coverage. CI checked artifact
+  presence, not represented targets, and uploaded exactly that file:
+  `path: .build/debug/codecov/*.json` under the name `swift-code-coverage`.
+- **Fix:** `tools/coverage-export.sh` builds the report itself. Its object list
+  comes from `swift package dump-package` rather than a glob of the build
+  directory — this tree carries ten `.xctest` bundles for seven declared test
+  targets, so a glob folds removed products into the number — and it refuses a
+  bundle newer than `default.profdata`, because llvm-cov drops such an object
+  silently and still exits with a report that parses. Two checks then guard the
+  two ways the artifact can lie: **shape** (a report mapping no file, or any file
+  outside `sources/`, fails) and **scope** (every bundle is exported alone and the
+  merged file set must strictly contain each single-bundle set, then be strictly
+  larger than the largest one). No constant threshold could do the scope check
+  honestly: one bundle here maps 323 of the 397 merged files, so 397 is only
+  whole next to the per-bundle numbers. CI runs the script between the suite and
+  anything that rebuilds, and uploads `.build/package-code-coverage.json`.
+  The operator's 2026-10-11 call stands: nothing asserts a percentage, so the
+  artifact stays a signal; what is now checked is that it describes the package.
+- **Evidence:** A fresh coverage run at `a9f680a` (`TEST_EXIT=0`, 2,007 tests in
+  seven bundles: 956/427/168/189/106/63/98) exported `EXPORT_EXIT=0` with
+  **397 source files, 51,762/64,190 lines = 80.64% of instrumented lines**,
+  per-bundle 19/8/247/41/52/323/313 and `report: 397 source files, 74 more than
+  the largest single bundle` (`AUDIT/aud2-031-coverage-run.log`, reproduced by
+  `AUDIT/aud2-031-export-rerun.log`). Both red paths were proved on the artifacts
+  the check exists to catch (`AUDIT/aud2-031-red-checks.log`, clean tree at
+  `74b56e1`): the preserved SwiftPM JSON fails shape with *maps 8 file(s) outside
+  sources/*, and a real single-bundle export — which **passes** shape at 323 files
+  and 42,546/53,090 = 80.14%, a plausible-looking percentage — fails scope with
+  *TinyTitanFleetTests maps 8 source file(s) the report does not*.
+  The first full gate chain after the change failed on my own regression
+  (an unguarded `"${OBJECTS[@]:1}"` slice, `AUDIT/aud2-031-lint.log`
+  `LINT_EXIT=1`); after the fix all 18 gates pass, `LINT_EXIT=0`
+  (`AUDIT/aud2-031-lint2.log`).
+- **Not checked, stated:** the new step has not executed in CI. The workflow
+  triggers are `push: branches: main` and `pull_request`, so the first CI run of
+  this step will be the next PR, and the change is not merged: it lives on
+  `audit/2026-10-23`, so the pipeline edit is still the operator's call at merge
+  time. The downloaded pre-fix artifact from run
+  `39974492789` is evidence of the defect, not of the fix. And 80.64% over 397
+  files is not whole-repository coverage: 29 of 426 non-metal production files sit
+  outside the profile — the whole `TinyTitanBench` target (7 files) and
+  `TinyTitanMemoryTool`'s entry point, the other four executable `main.swift`s, five
+  more `TinyTitanRepack` files, two `TinyTitanFleet` support files,
+  `ServerVersion.swift`, three `TinyTitanLib` files, two `TinyTitanValidation`
+  support files, two C headers, `ContinuityDemo.swift` and `QSASelection.swift` —
+  and none of the 16 `.metal` files is instrumented by LLVM at all.
+- **Commit:** `74b56e1` on `audit/2026-10-23`.
 
 ### AUD2-032 — The original 13-section audit brief was not in the repository
 
@@ -2095,7 +2138,9 @@ unfixed; remote artifacts have not been inspected.
   remains Tier A.
 - The statement that remote CI artifact contents had not been inspected is
   superseded: a fresh artifact was downloaded and shown to contain one bundle and
-  27 files, which confirms AUD2-031 rather than closing it.
+  27 files, which confirmed the defect. The durable fix landed later in the same
+  day in `74b56e1`; that artifact is evidence of the defect, not of the fix,
+  because no CI run has executed the new step yet.
 - Two tests in `ExpansionLayoutValidationTests` had been **passing for the wrong
   reason**, and that is disclosed rather than quietly fixed:
   `tensorsThatShareATargetRegionAreRefused` was refused by the slot-bounds check

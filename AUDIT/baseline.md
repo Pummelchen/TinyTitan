@@ -12,7 +12,7 @@ justified numbered task.
 | Converter suites (`test_prepare_qwen38` + `test_qwen38_resume_e2e` + `test_prepare_agentworld`) | **87 tests, 0 failures** (42.3 s) |
 | Secret scan (gitleaks 8.30.1, full history) | **1,981 commits scanned, no leaks found** (33.2 MB, 12.4 s) |
 | Dependency CVEs | pip-audit runs in CI over `benchmark/requirements.txt` (numpy 2.5.3, safetensors 0.8.0, ml_dtypes 0.6.0 — "no known vulnerabilities" per CI record); Swift deps pinned by `Package.resolved` (swift-transformers, swift-nio 2.100.0 exact); npm audit in CI over both plugin lockfiles |
-| Coverage | **SwiftPM-only export is partial.** It contains only ContinuityCore, not all seven bundles. The post-format multi-object measurement below covers 395 source files with explicit exclusions; it is not whole-repository coverage. AUD2-031 remains open for durable export/scope checks. A downloaded CI artifact (run `39974492789`) holds one bundle and 27 files — the same scope — confirming the defect remotely. No threshold gate. |
+| Coverage | **Durable export fixed in `74b56e1` (AUD2-031 DONE).** SwiftPM's own `<bin-path>/codecov/*.json` names one test bundle (27 files, 503 functions against 11,984 in the merged profile). CI now runs `tools/coverage-export.sh`, which merges the seven manifest bundles and fails a report whose file set does not strictly contain every single-bundle set. The current merged report maps 397 source files, 51,762/64,190 lines (80.64%); it is **not** whole-repository coverage -- 29 of 426 non-metal production files and all 16 `.metal` files stay outside it. No threshold gate, per the operator's signal-not-wall call. The step has not run in CI yet (triggers are `push: main` / `pull_request`). A downloaded pre-fix artifact (run `39974492789`) holds one bundle and 27 files -- the defect, confirmed remotely. |
 
 Language standard in force (recorded, not intended — proofs in
 `tool-coverage.md`): Swift 6.4 / Swift 6 language mode (`swiftLanguageModes:
@@ -227,14 +227,36 @@ only that mixed last-bundle scope, not package or production coverage. The origi
 artifact is preserved as `AUDIT/continuation-codecov-last-bundle.json`.
 
 The merged `default.profdata` reports 11,984 functions, while that JSON reports
-503. The committed CI upload at `.github/workflows/ci.yml:1027-1046` checks only
-that a JSON file exists, not its target coverage. A remote CI artifact from run
+503. The CI upload as it then stood (`.github/workflows/ci.yml:1027-1046`) checked
+only that a JSON file exists, not its target coverage. A remote CI artifact from run
 `39974492789` was then downloaded and inspected
 (`AUDIT/ci-coverage-39974492789/TinyTitan.json`, 251,307 bytes): **27 files, 503
 functions, 4,095/4,256 lines (96.22%)** — the same last-bundle scope as the local
-export, so the defect is in CI output and not only in this checkout. No pipeline
-was modified. The build directory also contains stale
-test bundles from removed products; those were not included by globbing.
+export, so the defect is in CI output and not only in this checkout. The build
+directory also contains stale test bundles from removed products; those were not
+included by globbing, which is why the durable script takes its object list from
+the manifest.
+
+### Durable export (AUD2-031 closed, `74b56e1`)
+
+`tools/coverage-export.sh` now does the merge in CI: it reads the test targets from
+`xcrun swift package dump-package`, refuses a bundle newer than the profile (the
+way llvm-cov silently drops one), exports the merged report to
+`.build/package-code-coverage.json`, and checks it twice — shape (every mapped file
+under `sources/`, at least one mapped) and scope (each bundle exported alone; the
+merged set must strictly contain every single-bundle set and be strictly larger than
+the largest). The workflow runs it immediately after the serial suite and uploads
+that file. Both red paths were proved on real artifacts: the preserved SwiftPM JSON
+fails shape (8 files outside `sources/`), and a single-bundle export — which passes
+shape at 323 files and 80.14% — fails scope with
+`TinyTitanFleetTests maps 8 source file(s) the report does not`
+(`AUDIT/aud2-031-red-checks.log`). Nothing asserts a percentage. The step has not
+executed in CI: its triggers are `push: main` and `pull_request`, and the change
+lives on `audit/2026-10-23` until merged.
+
+The first version of that script contained a bare `"${OBJECTS[@]:1}"` slice, which
+`shell-portability` failed (`AUDIT/aud2-031-lint.log`, `LINT_EXIT=1`); the guarded
+rewrite passes all 18 gates (`AUDIT/aud2-031-lint2.log`, `LINT_EXIT=0`).
 
 After the post-format run, this local export exited **0**, producing
 `AUDIT/swift-coverage-multi-bundle.json` (199,816 bytes) with empty stderr
@@ -257,38 +279,50 @@ xcrun llvm-cov export --summary-only \
 ```
 
 Every exported filename is unique and under `sources/`; tests, dependencies and
-generated build files are excluded. The **395 mapped source files** include 17
-`TinyTitanValidation` reference/test-support files, so the aggregate is not a pure
-shipping-code metric. Source-tree line coverage is **51,598/63,995 (80.63%)**;
-excluding that reference target, the 378 represented shipping-source files have
-**50,611/62,974 lines (80.37%)**, 5,171/6,505 functions (79.49%), and
-17,015/22,937 regions (74.18%). These are measurements, not thresholds.
+generated build files are excluded. That manual run measured **395 mapped source
+files** and **51,598/63,995 lines (80.63%)**.
+
+The same report produced by `tools/coverage-export.sh` on the current tree
+(`.build/package-code-coverage.json`, 200,799 bytes, from the 2,007-test run at
+`a9f680a`) maps **397 source files** with **51,762/64,190 lines = 80.64%**;
+aggregating the per-file summaries gives 5,288/6,649 functions (79.53%) and
+17,342/23,325 regions (74.35%) — per-file aggregates, which count a shared
+declaration once per file. The two files added since the manual run are
+`PromptCheckpointStore+Maintenance.swift` (`7024d03`) and `ServerPortCheck.swift`
+(`3ac4699`); nothing left the set. The 397 include 17 `TinyTitanValidation`
+reference/test-support files, so the aggregate is not a pure shipping-code metric:
+excluding that target leaves 380 files and **50,775/63,169 lines (80.38%)**. These
+are measurements, not thresholds.
 
 | Source directory | Mapped files | Covered / instrumented lines |
 | --- | --- | --- |
 | ContinuityCore | 19 | 2,090 / 2,214 |
-| TinyTitan | 197 | 25,336 / 31,858 |
-| TinyTitanCLI | 4 | 564 / 905 |
-| TinyTitanFleet | 8 | 1,308 / 1,625 |
+| TinyTitan | 197 | 25,343 / 31,859 |
+| TinyTitanCLI | 4 | 567 / 907 |
+| TinyTitanFleet | 8 | 1,310 / 1,625 |
 | TinyTitanFormat | 7 | 1,129 / 1,431 |
 | TinyTitanKernelsC | 3 | 308 / 373 |
-| TinyTitanLib | 39 | 3,651 / 6,196 |
+| TinyTitanLib | 40 | 3,767 / 6,351 |
 | TinyTitanMemory | 22 | 3,011 / 3,209 |
 | TinyTitanRepack | 45 | 6,352 / 7,547 |
-| TinyTitanServer | 34 | 6,862 / 7,616 |
+| TinyTitanServer | 35 | 6,898 / 7,653 |
 | TinyTitanValidation (reference support) | 17 | 987 / 1,021 |
 
-**Scope limits:** 27 of the current 422 Swift/C source files have no mapping in
-this export: all seven benchmark files; six executable entry files; and
+**Scope limits:** 29 of the current 426 non-metal Swift/C files have no mapping in
+this export: all seven benchmark files; six executable entry files
+(`TinyTitanCLI`, `TinyTitanFleet`, `TinyTitanMemoryTool`, `TinyTitanRepack`,
+`TinyTitanServer` mains and `ContinuityDemo.swift`); and
 `QSASelection.swift`, `FleetBrand.swift`, `FleetUsage.swift`, `ModelBackend.swift`,
 `ModelDescriptor.swift`, `RunnerCounterSnapshot.swift`, `InstallProgressDisplay.swift`,
 `RemoteChunkPolicy.swift`, `VerifiedInstallManifest.swift`, `ModelInstallProgress.swift`,
-`BoundedScratch.swift`, `ServerVersion.swift`, `OffByMultiples.swift`, and
-`Tolerances.swift`. Some contain declarations rather than instrumentable functions;
+`BoundedScratch.swift`, `ServerVersion.swift`, `OffByMultiples.swift`,
+`Tolerances.swift` and the two `TinyTitanKernelsC` headers.
+Some contain declarations rather than instrumentable functions;
 absence is not silently counted as zero or complete coverage. All 16 `.metal`
 files, embedded Metal source strings, release-only paths and skipped model paths
-remain outside what these LLVM percentages establish. The local export repairs
-this measurement's scope; AUD2-031 stays open for durable CI export/scope checks.
+remain outside what these LLVM percentages establish. `74b56e1` makes the CI report
+carry this scope instead of one bundle; the unmapped set and the Metal gap are
+disclosed here, not fixed by that commit.
 
 ## Swift 6.4.1 verification (AUD2-022, 2026-10-23)
 
