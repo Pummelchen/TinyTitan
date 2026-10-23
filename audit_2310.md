@@ -1,8 +1,11 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-051 51/51 | done:36 open:14 blocked:1] DONE — the CI markdown-link step,
-which had never run over these records, now reads code spans and fences as literal
-text and resolves the 17 citations it used to fail on (AUD2-051); the coverage
+`[#AUD2-049 51/51 | done:37 open:13 blocked:1] DONE — the docs gate now reads every
+tracked audit ledger and counts each from its own task rows, so this audit's
+`AUDIT/ledger.json` is checked instead of resolving nothing (AUD2-049); the CI
+markdown-link step, which had never run over these records, now reads code spans and
+fences as literal text and resolves the 17 citations it used to fail on (AUD2-051);
+the coverage
 artifact CI uploads is built from the manifest's seven test bundles and checked for
 scope, so it no longer reads as package-wide while naming one bundle (AUD2-031);
 every expansion-layout guard
@@ -12,9 +15,9 @@ unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
 conflict refusal that names its own flags (AUD2-047), the calibration identity
 binding (AUD2-005), the --plan conflict (AUD2-008), the host-KV window range
 (AUD2-017), the shared disk budget (AUD2-003), the bounded payload read (AUD2-006)
-and the fail-silent restore (AUD2-009) beneath it stand; the 36 closed records are
+and the fail-silent restore (AUD2-009) beneath it stand; the 37 closed records are
 integrated into `main` by operator decision of 2026-10-24, with Phase E unrun, no
-release and 15 records still non-terminal`
+release and 14 records still non-terminal`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
@@ -24,13 +27,14 @@ the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
 prompt-cache disk budget (AUD2-003), the two reader/restore corrections
 (AUD2-006, 009), the persisted checkpoint access (AUD2-007), the two expansion
 geometry records (AUD2-013, AUD2-014), the coverage-artifact scope record
-(AUD2-031) and the audit's own markdown-link checker (AUD2-051) are closed with
+(AUD2-031), the audit's own markdown-link checker (AUD2-051) and the docs gate's
+per-ledger ledger check (AUD2-049) are closed with
 remediation commits. The merge directed on 2026-10-24 carries them into `main`
 through a CI-gated PR (*Integration decision* below); carrying them is not the same
 as certifying them — none is released, and none is certified on a clean final
 revision, because Phase E's independent-host run did not happen. AUD2-048 (a
-diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate never
-reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
+diagnostic asymmetry found while closing AUD2-007) and AUD2-050 (a type-level
+`#expect(throws:)`
 cannot say which guard refused, so a negative test can pass for the wrong reason —
 found twice inside AUD2-013's own suite and un-swept across the rest of `tests/`)
 are opened in the same pass.
@@ -177,9 +181,9 @@ requirement was worked but its own definition of done is not met.
 | §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a`, `8acc6f8` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898`/`8acc6f8` each bundle S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 36 DONE, 15 non-terminal (11 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED) | Ledger |
+| §11 | Phase C drain to zero | In progress — 37 DONE, 14 non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED) | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038; 15 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038; 14 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -241,9 +245,12 @@ stays unchecked and the full current-tree review remains incomplete.
 - [ ] Sweep and close the S3 diagnostic asymmetry the AUD2-007 fix exposed in the
   turn store (AUD2-048): the same attribute write, reported by one store and
   discarded with `try?` by the other.
-- [ ] Extend the `docs` gate's ledger-commit check to `AUDIT/ledger.json` and test
-  it against a rotted pointer (AUD2-049): the audit's own evidence currently
-  resolves nothing, while the gate's message says it resolved 222 references.
+- [x] Extend the `docs` gate's ledger-commit check to `AUDIT/ledger.json` and test
+  it against a rotted pointer (AUD2-049): the gate now discovers every tracked
+  `*ledger.json`, counts each from its own task rows rather than summing two
+  audits, and reads this ledger's commit pointers — 258 of them instead of the
+  prior ledger's 222 at `6335058`, and a copy of this ledger with `14710ba` in a
+  DONE row is refused by name.
 - [ ] Give the benchmark allocation-error cleanup path a test. The path itself is
   closed — AUD2-021 is DONE at `3098fdd`, with `keepWarmStopped` and a `defer` so
   every throw inside the cadence loop unwinds through a `stop()` — but its own
@@ -322,12 +329,16 @@ stays unchecked and the full current-tree review remains incomplete.
 the other branch"*, then, when the conflict with the audit's own rule was put to
 them: merge **through a PR, after its CI run**; **delete** `audit/2026-10-23` on the
 remote and locally once the merge lands; and **write the override down** rather than
-merge silently. This section is that record. It changes no finding's status.
+merge silently. This section is that record. It was recorded before AUD2-049 closed;
+that fix at `6335058` and its records commit are the only changes reflected in the
+counts below, and no other finding's status moves.
 
-- **What lands:** the 46 commits this branch carries over `origin/main`
-  (`5bcceee`) — 64 files, 7,729 insertions, 350 deletions — i.e. the fixes of the
-  **36 DONE** records, the two CI-step changes (AUD2-031's merged coverage export,
-  AUD2-051's link checker), the new tests, and the audit's own documents
+- **What lands:** the commits this branch carries over `origin/main`
+  (`5bcceee`) — 64 files and 7,729 insertions/deletions measured at `904032c`, plus
+  AUD2-049's fix and this records commit — i.e. the fixes of the
+  **37 DONE** records, the three tooling/CI changes (AUD2-031's merged coverage
+  export, AUD2-051's link checker and AUD2-049's per-ledger docs gate), the new
+  tests, and the audit's own documents
   (`audit_2310.md`, `AUDIT/*.md`, `AUDIT/ledger.json`, `tools/coverage-export.sh`).
   `main` had moved by one commit the branch does not have
   (`5bcceee`, a `.github/traffic.json` badge refresh); `git merge-tree` predicts no
@@ -335,8 +346,8 @@ merge silently. This section is that record. It changes no finding's status.
 - **What is *not* claimed by the merge:** Phase E never runs. §1b, §11 and §12's
   single final verification on an independent host stays **Not met**, AUD2-038 stays
   **BLOCKED** — an operator directive to ship is not a host, and closing the record
-  on this decision would be the scope-narrowing §0 forbids — and 15 records remain
-  non-terminal (11 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED). §12 completion, Phase D
+  on this decision would be the scope-narrowing §0 forbids — and 14 records remain
+  non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED). §12 completion, Phase D
   convergence and any release remain unclaimed. Nothing in this section should be
   read as "certified on a clean final revision": every measurement below was taken on
   this host, most of them against a dirty tree.
@@ -364,7 +375,7 @@ merge silently. This section is that record. It changes no finding's status.
   are not edited afterwards to make the merge look cleaner than it was.
 - **After the merge:** `audit/2026-10-23` is deleted on the remote and locally, so
   the branch ref stops being the place work continues; the commits stay reachable
-  through `main`'s merge. The 15 non-terminal records continue from
+  through `main`'s merge. The 14 non-terminal records continue from
   `AUDIT/ledger.json` on `main`, on a fresh branch cut from it. The raw evidence logs
   named above live in the gitignored `AUDIT/` tree and are **not** in the merge — that
   is the still-open *"preserve required raw evidence in a reviewable delivery form"*
@@ -1684,30 +1695,58 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-049 — The docs gate never reads this audit's own ledger
 
-**S2 · Tier A · OPEN · audit tooling**
+**S2 · Tier A · DONE · audit tooling**
 
-- **Location:** [docs-facts](tools/docs-facts.py#L269-L289) and
-  [`ledger_commit_evidence`](tools/docs-facts.py#L321-L360).
-- **Finding:** `ledger_totals()` lists its ledgers with
+- **Location:** [docs-facts](tools/docs-facts.py#L269-L382) (discovery and
+  per-ledger counts) and
+  [`ledger_commit_evidence`](tools/docs-facts.py#L385-L470).
+- **Finding:** `ledger_totals()` listed its ledgers with
   `git ls-files docs/audit-ledger.json` — a hardcoded path to the *prior*
-  (2026-10-06) ledger — and `ledger_commit_evidence()` iterates exactly that
+  (2026-10-06) ledger — and `ledger_commit_evidence()` iterated exactly that
   list. `AUDIT/ledger.json`, which this report names the audit's authoritative
-  record, is never opened. The gate prints "222 ledger commit reference(s)
-  resolved" while reading none of this audit's 34 pointers, so a DONE row here
+  record, was never opened. The gate printed "222 ledger commit reference(s)
+  resolved" while reading none of this audit's pointers, so a DONE row here
   naming a nonexistent sha, prose, or nothing at all would still report ok.
   AUD-209 is the reason the check exists: seven rotted commit fields in the
   ledger it *does* read.
-- **Current evidence:** Checked by hand twice this session, because the gate
-  cannot check it: all 34 `commit` references in `AUDIT/ledger.json` resolve
-  under `git cat-file -e <sha>^{commit}` and no DONE row has an empty field (32
-  before `8acc6f8` gave AUD2-013 and AUD2-014 theirs). Re-running
-  `bash tools/lint.sh docs` after that commit prints the *same* 222 — every one
-  of them from `docs/audit-ledger.json`. So the finding is that the gate would
-  not see rot, not that any exists today.
-- **Next:** Take ledger paths as a set that includes `AUDIT/ledger.json`, keep
-  the prose exemption, judge only the structured `commit` field, and add the test
-  that puts an unresolvable sha in a copy of this ledger and expects a FAIL —
-  without it the fix is a path list nothing checks.
+- **Trap the naive fix falls into:** adding `AUDIT/ledger.json` to the literal
+  pattern would have made `ledger_totals()` add the two audits' `counts`
+  blocks. This ledger publishes none, so the sum would have stayed at the prior
+  ledger's totals while the gate claimed to have read both — and the obvious
+  repair for the missing block, writing one into this ledger, would have made
+  the sum 210/210/0/0 plus this audit's rows and turned a true handover
+  restatement red. Two records are not one total.
+- **Fix:** the gate now discovers every tracked `*ledger.json` and counts each
+  one from its own `tasks` rows — DONE closed, BLOCKED blocked, every other
+  status open — so a ledger with no `counts` block is counted rather than
+  skipped. A declared `counts` block is checked against those rows instead of
+  trusted, so the prior ledger's own numbers are now derived and verified too.
+  A restated "N rows / N closed / N open / N blocked" is judged against the
+  ledger its sentence names (or against any one ledger when it names none),
+  never against a sum. A `null` commit field is the blank-field exception, not
+  a prose pointer named "None"; a first pass that only widened the path refused
+  this ledger's no-fix rows fifteen times before that was read correctly.
+- **Evidence:** against the unfixed gate the 26-test ledger suite answered 3
+  failures and 10 errors (`AUDIT/aud2-049-red.log`); against the fix the three
+  docs-facts suites are 43 tests OK (`AUDIT/aud2-049-green.log`). The proof the
+  row asked for is
+  `test_an_unresolvable_sha_in_a_copy_of_this_ledger_fails`: a copy of this
+  ledger with `14710ba` in a DONE row answers
+  `FAIL <id>: commit 14710ba -- no such commit in this repository`. Discovery is
+  pinned against a two-ledger fixture whose separate counts and whose sum are
+  all asserted differently, and against this repository's own pair. At
+  `6335058` `bash tools/lint.sh docs` reports `258 ledger commit reference(s)
+  resolved` over both ledgers (222 + this ledger's 36); recording this row's own
+  pointer makes it 259. `bash tools/lint.sh docs` is rc 0
+  (`AUDIT/aud2-049-docs.log`) and `bash tools/lint.sh python` is rc 0 under the
+  pinned ruff 0.16.7 (`AUDIT/aud2-049-python.log`).
+- **Not claimed:** the check proves a pointer resolves and is reachable from
+  HEAD; it cannot prove the named commit is the fix the row describes, and no
+  line-number validation of the ledger's `file` paths is added. The handover's
+  restatement remains the prior ledger's, now checked against that ledger
+  alone.
+- **Commit:** `6335058` on `audit/2026-10-23` (the gate and its tests); the
+  ledger row and this section ride in the records commit that names it.
 
 ### AUD2-050 — A type-level `#expect(throws:)` cannot say which guard refused
 
@@ -1828,8 +1867,9 @@ systems. Passing local tests never bypasses the final checklist above.
   branch is unmerged and the triggers are `push` to `main` and `pull_request`. And
   the checker validates that the target *file* exists, never that an `#L` anchor
   still names the lines the prose claims; converting these links does not fix that,
-  no line-number validation is claimed here, and the audit's own records remain read
-  by no gate (AUD2-049).
+  and no line-number validation is claimed here. The ledger's structured `commit`
+  fields are now read by the docs gate (AUD2-049), but this report's prose and its
+  anchors still are not.
 - **Commit:** `d6b1842` on `audit/2026-10-23` (the checker); the record conversions
   ride in the records commit that names it.
 
@@ -1979,8 +2019,9 @@ dirty files being this report and the two ledger files). The gates then ran a
 second time after the report and ledger edits below: 18/18, `LINT_EXIT=0`
 (`AUDIT/aud2-013-lint-final2.log`). The second run is what makes the edits above
 safe to land without a third: no gate reads either file — `grep -rn audit_2310
-tools/ .github/workflows/` returns nothing, and `tools/docs-facts.py` reads only
-`docs/audit-ledger.json`, which is AUD2-049. No model ran: nothing in this pair
+tools/ .github/workflows/` returns nothing, and `tools/docs-facts.py` read only
+`docs/audit-ledger.json` at that commit (AUD2-049 closed that gap at `6335058`,
+which reads both ledgers). No model ran: nothing in this pair
 touches numerics, which is why no golden-baseline check is claimed.
 Sibling audit under the brief's §5 turned up the tree-wide version of the same
 test defect and it was filed as AUD2-050 rather than folded into this closure.
@@ -2353,23 +2394,23 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **51 records: 36 DONE, 15 non-terminal (11 OPEN, 2 AUDIT,
+The ledger stands at **51 records: 37 DONE, 14 non-terminal (10 OPEN, 2 AUDIT,
 1 PROGRESS, 1 BLOCKED)** — counted from `AUDIT/ledger.json` itself, not restated.
 The count has fallen at every earlier recorded
 milestone — 36 non-terminal at the last snapshot of this section, 21 after the
 rANS and checkpoint batches, 15 before the AUD2-007 pass, which closed one record
 and opened two to land at 16. It fell again at AUD2-013/014 and then once more when
 AUD2-031 closed (`a9f680a` 16 non-terminal → `b719a4a` 15), rose to 16 when
-AUD2-051 was filed (`8bd3695`) and returned to 15 when it closed (`afcd297`), so the
-milestone's net is one record drained and one filed-and-closed. That is stated
+AUD2-051 was filed (`8bd3695`) and returned to 15 when it closed (`afcd297`), and
+fell to 14 when AUD2-049 closed (`6335058`). That is stated
 rather than smoothed over — §8's invariant is a record moving to a terminal
-status, and one net drain at one milestone is not convergence. The run has
+status, and one record's closure at one milestone is not convergence. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
-claimed. The integration decision below moves these 36 closed records into `main`;
+claimed. The integration decision below moves these 37 closed records into `main`;
 it changes none of these counts and closes no record. Every
 non-terminal record left is either an S2 design gap that needs work
 this audit has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
-045) or a gap in the audit's own tooling and tests (AUD2-049, AUD2-050), an S3
+045) or a gap in the audit's own tooling and tests (AUD2-050), an S3
 diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation
 (AUD2-015, 016), a verification record
 (AUD2-019), or the external host (AUD2-038).
