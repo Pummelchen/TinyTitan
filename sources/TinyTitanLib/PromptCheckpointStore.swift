@@ -304,15 +304,21 @@ actor PromptCheckpointStore {
 
     func indexDiskIfNeeded() {
         guard !diskIndexed else { return }
-        diskIndexed = true
-        guard let root = configuration.diskDirectory else { return }
+        guard let root = configuration.diskDirectory else {
+            diskIndexed = true
+            return
+        }
         let keys: Set<URLResourceKey> = [
             .isDirectoryKey, .contentModificationDateKey,
         ]
-        let entries =
-            (try? fileManager.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: Array(keys)))
-            ?? []
+        // A failed listing is not "nothing to index": leaving the flag clear
+        // lets a later call retry, where latching it would strand every
+        // record on disk for the store's lifetime.
+        guard
+            let entries = try? fileManager.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: Array(keys))
+        else { return }
+        diskIndexed = true
         // Restart LRU order is the directories' modification dates, not the
         // volume's listing order — the turn store applies the same rule, and
         // a listing order would evict an arbitrary record first.
@@ -347,9 +353,23 @@ actor PromptCheckpointStore {
                 ))
         }
         loaded.sort { $0.date < $1.date }
+        // A record `load` found before this index is already in `state.disk`;
+        // appending the listing behind it would make the most recently loaded
+        // record the first eviction candidate. Both sides carry a date -- the
+        // filesystem's for indexed records, the write or touch time for the
+        // in-process ones -- so one merged order is well defined.
+        var order: [(key: PromptCheckpointKey, date: Date)] =
+            state.diskLRU.compactMap { key in
+                state.disk[key].map { (key, $0.modificationDate) }
+            }
+        order.append(
+            contentsOf: loaded.map {
+                (key: $0.record.metadata.key, date: $0.record.modificationDate)
+            })
+        order.sort { $0.date < $1.date }
+        state.diskLRU = order.map(\.key)
         for entry in loaded {
             state.disk[entry.record.metadata.key] = entry.record
-            state.diskLRU.append(entry.record.metadata.key)
             state.diskBytes +=
                 entry.record.metadata.descriptor.payloadBytes
                 + entry.record.auxiliaryBytes

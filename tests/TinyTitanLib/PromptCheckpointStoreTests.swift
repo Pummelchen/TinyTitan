@@ -676,4 +676,64 @@ import TinyTitan
         #expect(!FileManager.default.fileExists(atPath: directory.path))
         #expect(await store.diskBytes == 0)
     }
+
+    /// A record loaded before anything indexed the root is the most recently
+    /// used, not the oldest: the backdated directory still goes first.
+    @Test func aRecordLoadedBeforeIndexingKeepsItsPlaceInTheLRU() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let oldest = metadata(tokens: [1, 2, 3])
+        let newest = metadata(tokens: [4, 5, 6])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(oldest, snapshot: snapshot(for: oldest))
+            try await writer.save(newest, snapshot: snapshot(for: newest))
+        }
+        let oldestDirectory = root.appendingPathComponent(oldest.key.contentHash)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 0)],
+            ofItemAtPath: oldestDirectory.path)
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 32))
+        _ = try await store.load(newest.key, domain: domain)
+        let third = metadata(tokens: [7, 8, 9])
+        try await store.save(third, snapshot: snapshot(for: third))
+        #expect(!(await store.contains(oldest.key)))
+        #expect(await store.contains(newest.key))
+        #expect(await store.contains(third.key))
+        #expect(!FileManager.default.fileExists(atPath: oldestDirectory.path))
+    }
+
+    /// A failed listing must not latch indexing off for the store's lifetime.
+    /// Root replaced by a regular file makes the listing fail with ENOTDIR.
+    @Test func aFailedListingDoesNotLatchIndexingOff() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let meta = metadata(tokens: [1, 2, 3])
+        do {
+            let writer = try PromptCheckpointStore(
+                configuration: ServerPromptCacheStorageConfiguration(
+                    memoryLimitBytes: 0, diskDirectory: root,
+                    diskLimitBytes: 1 << 20))
+            try await writer.save(meta, snapshot: snapshot(for: meta))
+        }
+        let store = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root,
+                diskLimitBytes: 1 << 20))
+        let displaced = root.appendingPathExtension("displaced")
+        try FileManager.default.moveItem(at: root, to: displaced)
+        try Data().write(to: root)
+        #expect(!(await store.contains(meta.key)))
+        try FileManager.default.removeItem(at: root)
+        try FileManager.default.moveItem(at: displaced, to: root)
+        await store.removeAll()
+        let directory = root.appendingPathComponent(meta.key.contentHash)
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        #expect(await store.diskBytes == 0)
+    }
 }
