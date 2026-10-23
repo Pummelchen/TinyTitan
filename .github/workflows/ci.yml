@@ -1067,6 +1067,13 @@ jobs:
           root = ENV.fetch('GITHUB_WORKSPACE', Dir.pwd)
           failures = 0
           checked = 0
+          # The scanner works on raw lines, so a bracketed Swift initializer inside
+          # a code span -- `[UInt64](repeating: 0, count: n)` -- matches the link
+          # pattern and gets reported as a broken link, and a fenced example block is
+          # scanned as prose. Neither is a link: in CommonMark a code span is literal
+          # text, and so is everything inside a fence. Both are dropped before
+          # matching. No real link is skipped -- an unmatched backtick leaves the rest
+          # of the line scannable, and only paired spans are removed. (AUD2-051)
           Dir.glob(File.join(root, '**', '*.md')).sort.each do |file|
             # Build output, the model store and installed dependencies are not
             # project docs. `node_modules` matters now that the JS toolchain is
@@ -1075,7 +1082,21 @@ jobs:
             next if file.include?('/.build/') || file.include?('/.qwen/') ||
                     file.include?('/node_modules/')
             dir = File.dirname(file)
-            File.readlines(file).each_with_index do |line, index|
+            fence = nil
+            File.readlines(file).each_with_index do |raw, index|
+              marker = raw.lstrip
+              if fence
+                fence = nil if marker.start_with?(fence)
+                next
+              end
+              if marker.start_with?('```')
+                fence = '```'
+                next
+              elsif marker.start_with?('~~~')
+                fence = '~~~'
+                next
+              end
+              line = raw.gsub(/(`+)(?:(?!\1).)*?\1/m, ' ')
               line.scan(/\[[^\]]*\]\(([^)]+)\)/) do |match|
                 target = match[0].strip
                 next if target.empty?
