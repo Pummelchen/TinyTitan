@@ -51,7 +51,7 @@
 #                    --yes alone does not install it, so an unattended run stays
 #                    a server and nothing else)
 #   --no-web         do not offer the browser chat window
-#   --version TAG    install that release instead of the newest (e.g. --version v5.7)
+#   --version TAG    install that release instead of the newest (e.g. --version v6.0)
 #   --from-source    clone and `swift build` instead of downloading a release.
 #                    For contributors; needs Xcode and takes much longer.
 #   --dir PATH       where --from-source clones to (default ~/TinyTitan)
@@ -135,7 +135,7 @@ TARGET_DIR="$DEFAULT_DIR"
 # effect that has to be asked for by name, with --web.
 WEB_MODE="ask"
 # Empty means "the newest release", which is what a person wants and what the
-# release runbook publishes. `--version v5.7` pins one; a contributor who wants
+# release runbook publishes. `--version v6.0` pins one; a contributor who wants
 # `main` builds from source instead.
 RELEASE_TAG=""
 FROM_SOURCE=0
@@ -146,7 +146,7 @@ while [[ $# -gt 0 ]]; do
     --no-model)  INSTALL_MODEL=0 ;;
     --web)       WEB_MODE="yes" ;;
     --no-web)    WEB_MODE="no" ;;
-    --version)   RELEASE_TAG="${2:?--version needs a tag like v5.7}"; shift ;;
+    --version)   RELEASE_TAG="${2:?--version needs a tag like v6.0}"; shift ;;
     --from-source) FROM_SOURCE=1 ;;
     --dir)       TARGET_DIR="${2:?--dir needs a path}"; shift ;;
     --help|-h)   sed -n '2,/^set -euo pipefail/p' "$0" | sed 's/^# \{0,1\}//' | sed '$d'; exit 0 ;;
@@ -418,7 +418,7 @@ else
     RELEASE_TAG="$(latest_tag)"
     [[ -n "$RELEASE_TAG" ]] \
       || die "Could not reach GitHub to find the newest release. Check your connection,
-     or name one yourself with --version v5.7, or build from a clone with --from-source."
+     or name one yourself with --version v6.0, or build from a clone with --from-source."
   fi
   install_from_release "$RELEASE_TAG"
   TOOLS_PATH="$SRC_PATH/tools"

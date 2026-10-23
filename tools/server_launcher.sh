@@ -68,6 +68,9 @@
 #              the rungs, so a value off the ladder fails at startup
 #   --kv <4|8|16>   KV-cache precision (default 8)
 #   --yarn          enable YaRN context scaling
+#   --calibration-profile <path>  apply a measured per-machine profile (written
+#              by `tinytitan calibrate`). Explicit flags win; a profile from
+#              another machine, context or model is refused at startup.
 #   --port <n>      default 8080 (TINYTITAN_PORT overrides)
 #   --concurrency <n>  generations served at once through one model (default 1:
 #              one at a time). A power of two up to 256 -- 1, 2, 4, 8, 16, ... --
@@ -105,10 +108,14 @@
 #              Measured 2026-10-19 on Ornith 35B-A3B: a 1,656-token conversation
 #              resumed after a restart prefills in 2.5 s at 4-bit and 4.1 s at
 #              8-bit, against 32 s and 56 s cold -- 13x less time to first token.
-#              Off by default because that state is derived from the prompt, so
-#              it is written to disk only where an operator asked for it.
+#              The directory is this project's own, so nothing is written outside
+#              it; --no-prompt-cache-disk keeps state in RAM only.
 #   --prompt-cache-disk-mib <n>  budget for that directory (default 2048 here).
 #   --no-prompt-cache-disk  leave nothing on disk; state stays in RAM only.
+#   --page-cache  let the routed-expert reader use the page cache instead of
+#              bounded reads. Measured +4.47% at 8-bit and -2.1% at 4-bit, and
+#              the memory footprint is no longer declared; the default is the
+#              runtime's own machine-size policy, which is bounded on this host.
 #   --mtp-model <dir>   attach a native speculative draft head. GPU only (the
 #              draft shares the target's embedding and head), and not a catalog
 #              entry, because a sidecar has no weights for the catalog to
@@ -199,6 +206,7 @@ CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
 RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
 PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""; PROMPT_CACHE_DISK_OFF=0
+CALIBRATION_PROFILE=""
 PAGE_CACHE=0
 # --install: fetch a model that is not on disk yet instead of stopping. The
 # default is to ask, because the download is 20-220 GB; a pipe or a dry run
@@ -252,6 +260,7 @@ while [[ $# -gt 0 ]]; do
     --page-cache) PAGE_CACHE=1; shift ;;
     --kv)       KV_ARG="${2:?--kv needs 4, 8 or 16}"; shift 2 ;;
     --yarn)     YARN=1; shift ;;
+    --calibration-profile) CALIBRATION_PROFILE="${2:?--calibration-profile needs a path}"; shift 2 ;;
     # The benchmark harnesses measure the prompt cache as a variable, so the
     # launcher has to be able to turn it off; `multi-prefix` (the default) is
     # the 256 MiB cache every published number was taken with.
@@ -296,6 +305,18 @@ if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
       echo "unknown --prompt-cache-disk-mib: $PROMPT_CACHE_DISK_MIB_ARG (a whole number of MiB)" >&2
       exit 2 ;;
   esac
+fi
+# A calibration profile is read at startup, so a missing or unreadable path is
+# refused here, before a model is resolved or a server is started.
+if [[ -n "$CALIBRATION_PROFILE" ]]; then
+  if [[ ! -f "$CALIBRATION_PROFILE" ]]; then
+    echo "ERROR: --calibration-profile not found: $CALIBRATION_PROFILE" >&2
+    exit 2
+  fi
+  if [[ ! -r "$CALIBRATION_PROFILE" ]]; then
+    echo "ERROR: --calibration-profile is not readable: $CALIBRATION_PROFILE" >&2
+    exit 2
+  fi
 fi
 
 # The resume cache is on by default, under the checkout. Measured 2026-10-19 on
@@ -1373,8 +1394,9 @@ case "$CACHE_ARG" in
   *) echo "unknown --prompt-cache: $CACHE_ARG (multi-prefix or off)" >&2; exit 2 ;;
 esac
 gpu_runtime=(--prompt-cache-mode "$prompt_cache_mode" --kv-bits "$kv_bits")
-# The disk tier is opt-in and forwarded verbatim; the server owns the budget and
-# the eviction. Both values were validated during parsing.
+# The disk tier is on by default (see the parser) and forwarded verbatim; the
+# server owns the budget and the eviction. Both values were validated during
+# parsing.
 if [[ -n "$PROMPT_CACHE_DISK_ARG" ]]; then
   gpu_runtime+=(--prompt-cache-disk "$PROMPT_CACHE_DISK_ARG")
   if [[ -n "$PROMPT_CACHE_DISK_MIB_ARG" ]]; then
@@ -1407,6 +1429,12 @@ if (( dynamic )); then
   server_cmd=("$BINARY" --models-dir "$MODELS_DIR" --model "$MODEL_ID_LAUNCH" --reasoning "$thinking_level" --port "$PORT")
 else
   server_cmd=("$BINARY" --model "$MODEL_DIR" --port "$PORT" --thinking "$( [[ "$thinking_level" == off ]] && echo off || echo on )")
+fi
+# The server validates the profile against this machine, context and model and
+# fills only the knobs no explicit flag set, so it is forwarded unchanged for
+# both engines; the log names what was applied and what had no switch.
+if [[ -n "$CALIBRATION_PROFILE" ]]; then
+  server_cmd+=(--calibration-profile "$CALIBRATION_PROFILE")
 fi
 
 if [[ "$MODEL_BACKEND" == "cpu" ]]; then

@@ -20,6 +20,7 @@ from __future__ import annotations
 import pathlib
 import re
 import subprocess
+import tempfile
 import unittest
 
 import launcher_fixture
@@ -269,6 +270,56 @@ class LeadingZeroPortTests(unittest.TestCase):
                 self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
         run = run_launcher(self.installs, *self.base, "--port", "1")
         self.assertIn("privileged", run.stderr)
+
+
+class CalibrationProfileFlagTests(unittest.TestCase):
+    """6.0's calibration profile is a server flag; the launcher forwards it.
+
+    The profile itself is validated by the server (machine, memory, context and
+    model), so the launcher's contract is narrow: pass the path through
+    unchanged, and refuse a path that cannot be read before anything starts.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        launcher_fixture.install_fixture(cls)
+
+    def setUp(self) -> None:
+        self.model = self.installs.first_gpu()
+        self.base = ("--client", "server", "--model", self.model)
+
+    def test_the_profile_is_forwarded_to_the_server(self) -> None:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix="-profile.json", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write("{}")
+            path = pathlib.Path(handle.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        run = run_launcher(self.installs, *self.base, "--calibration-profile", str(path))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("--calibration-profile", run.stdout)
+        self.assertIn(str(path), run.stdout)
+
+    def test_a_missing_profile_is_refused_before_starting(self) -> None:
+        missing = pathlib.Path(tempfile.gettempdir()) / "tinytitan-no-such-calibration.json"
+        run = run_launcher(self.installs, *self.base, "--calibration-profile", str(missing))
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("--calibration-profile not found", run.stderr)
+
+    def test_help_documents_the_6_0_flags_and_one_disk_default(self) -> None:
+        run = subprocess.run(
+            ["bash", str(LAUNCHER), "--help"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=60,
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("--calibration-profile", run.stdout)
+        self.assertIn("--page-cache", run.stdout)
+        # The disk tier became on-by-default; the help must not still say both.
+        self.assertIn("On by default", run.stdout)
+        self.assertNotIn("Off by default because that state is derived", run.stdout)
 
 
 if __name__ == "__main__":

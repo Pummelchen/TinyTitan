@@ -60,7 +60,8 @@ two-repeat run on a host carrying swap; a longer run is the way to settle the
 
 ## Loading and precedence (T17)
 
-Both front ends accept `--calibration-profile <path>`:
+The CLI and the server accept `--calibration-profile <path>`, and
+`tools/server_launcher.sh` forwards it unchanged:
 
 - The profile is read with the bounded metadata reader and validated; a corrupt
   or unsupported profile fails the launch with the validator's error.
