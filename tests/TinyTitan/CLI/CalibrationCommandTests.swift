@@ -112,6 +112,14 @@ import TinyTitanLib
         await #expect(throws: CalibrationCommandError.self) {
             _ = try await CalibrationCommand.run(CalibrationOptions())
         }
+        await #expect(throws: CalibrationCommandError.self) {
+            _ = try await CalibrationCommand.run(
+                CalibrationOptions(check: "/tmp/p", plan: true))
+        }
+        await #expect(throws: CalibrationCommandError.self) {
+            _ = try await CalibrationCommand.run(
+                CalibrationOptions(model: "/tmp/m", plan: true))
+        }
     }
 
     /// A toy install plus a profile whose machine and target match it, for the
@@ -205,6 +213,43 @@ import TinyTitanLib
         ])
         #expect(parsed.expertCacheSlots == nil)
         #expect(parsed.calibrationLogLine?.contains("not applied: boundedIO") == true)
+    }
+
+    /// The CLI binds the profile to the install it was given: a profile
+    /// measured for another checkpoint -- different id, family or width -- is
+    /// refused rather than applied.
+    @Test(arguments: ["modelID", "family", "weightBits"])
+    func foreignIdentityProfileIsRefused(_ field: String) throws {
+        let directory = try QwenToySynthetic.write(weightBits: 4)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let modelID =
+            field == "modelID" ? "another-model" : identity.modelID
+        let family =
+            field == "family"
+            ? (identity.family.rawValue == "qwen36" ? "qwen38" : "qwen36")
+            : identity.family.rawValue
+        let weightBits =
+            field == "weightBits"
+            ? (identity.weightBits == 4 ? 8 : 4)
+            : identity.weightBits
+        let profile = CalibrationProfile(
+            machine: CalibrationProfile.currentMachine(),
+            target: .init(
+                modelID: modelID, family: family, weightBits: weightBits,
+                contextTokens: 8192),
+            knobs: .init(),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = try writeProfile(profile)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", directory.path, "--prompt", "hi",
+                "--max-context", "8192",
+                "--calibration-profile", url.path,
+            ])
+        }
     }
 
     @Test func corruptProfileIsRefused() throws {

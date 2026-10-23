@@ -294,9 +294,12 @@ public struct ServerArguments: Equatable, Sendable {
                 }
                 kvCachePrecision = parsed
             case "--host-kv-window":
-                guard let parsed = Int(value), parsed > 0 else {
+                guard let parsed = Int(value),
+                    (1...RuntimeConfiguration.maximumContextTokens).contains(parsed)
+                else {
                     throw ServerArgumentError.invalid(
-                        "--host-kv-window must be a positive token count")
+                        "--host-kv-window must be a token count between 1 and "
+                            + "\(RuntimeConfiguration.maximumContextTokens)")
                 }
                 hostKVWindowTokens = parsed
             case "--thinking":
@@ -415,9 +418,22 @@ public struct ServerArguments: Equatable, Sendable {
             do {
                 let profile = try CalibrationProfile.load(
                     fileAt: URL(fileURLWithPath: path))
+                // The profile is evidence about one model; peeking the
+                // install's identity rejects a profile measured for a
+                // different checkpoint before its knobs are applied. A
+                // catalog server has no single model to bind to, so the
+                // check applies only when `--model` names one.
+                let identity =
+                    model.isEmpty
+                    ? nil
+                    : try ManifestReader.peekIdentity(
+                        directoryURL: URL(fileURLWithPath: model))
                 let application = try profile.application(
                     for: CalibrationProfile.currentMachine(),
                     contextTokens: maxContext,
+                    modelID: identity?.modelID,
+                    family: identity?.family.rawValue,
+                    weightBits: identity?.weightBits,
                     explicitPrefillChunkTokens: prefillChunkTokens,
                     explicitExpertCacheSlots: expertCacheSlots)
                 if prefillChunkTokens == nil {

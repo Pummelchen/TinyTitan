@@ -268,6 +268,11 @@ public enum CalibrationCommand {
             return 0
         }
         if options.plan {
+            // `--plan` prints the plan and ignores everything else; refusing
+            // the combination says so instead of silently dropping input.
+            if options.check != nil || options.model != nil {
+                throw CalibrationCommandError.conflictingInput
+            }
             print(planText())
             return 0
         }

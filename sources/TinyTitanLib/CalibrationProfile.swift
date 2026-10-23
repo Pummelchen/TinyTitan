@@ -216,6 +216,8 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         for machine: Machine,
         contextTokens: Int,
         modelID: String? = nil,
+        family: String? = nil,
+        weightBits: Int? = nil,
         explicitPrefillChunkTokens: Int?,
         explicitExpertCacheSlots: Int?
     ) throws -> CalibrationApplication {
@@ -227,6 +229,14 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
                     + "\(self.machine.memoryBytes) bytes, not "
                     + "\(machine.identifier)/\(machine.memoryBytes)")
         }
+        // A profile measured on one OS is not evidence about another: the
+        // scheduler and the Metal stack both change between releases, so an
+        // osVersion mismatch is a refusal, not a warning.
+        guard self.machine.osVersion == machine.osVersion else {
+            throw CalibrationProfileError.incompatibleMachine(
+                "profile is for macOS \(self.machine.osVersion), not "
+                    + "\(machine.osVersion)")
+        }
         guard target.contextTokens == contextTokens else {
             throw CalibrationProfileError.incompatibleTarget(
                 "profile is for context \(target.contextTokens), not \(contextTokens)")
@@ -234,6 +244,15 @@ public struct CalibrationProfile: Codable, Equatable, Sendable {
         if let modelID, target.modelID != modelID {
             throw CalibrationProfileError.incompatibleTarget(
                 "profile is for model \(target.modelID), not \(modelID)")
+        }
+        if let family, target.family != family {
+            throw CalibrationProfileError.incompatibleTarget(
+                "profile is for family \(target.family), not \(family)")
+        }
+        if let weightBits, target.weightBits != weightBits {
+            throw CalibrationProfileError.incompatibleTarget(
+                "profile is for \(target.weightBits)-bit weights, not "
+                    + "\(weightBits)-bit")
         }
         var ignored: [String] = []
         if knobs.boundedIO != nil { ignored.append("boundedIO") }

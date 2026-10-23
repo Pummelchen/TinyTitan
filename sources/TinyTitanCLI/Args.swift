@@ -438,6 +438,8 @@ extension Args {
                     for: CalibrationProfile.currentMachine(),
                     contextTokens: maxContext,
                     modelID: identity.modelID,
+                    family: identity.family.rawValue,
+                    weightBits: identity.weightBits,
                     explicitPrefillChunkTokens: explicitChunk,
                     explicitExpertCacheSlots: expertCacheSlots)
                 if prefillChunk == nil, let chunk = application.prefillChunkTokens {
