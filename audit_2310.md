@@ -1,9 +1,10 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-047 47/47 | done:31 open:15 blocked:1] DONE — a conflict refusal now
-names the flags it refuses; the calibration identity binding (AUD2-005), the
---plan conflict (AUD2-008), the host-KV window range (AUD2-017), the shared disk
-budget (AUD2-003), the bounded payload read (AUD2-006) and the fail-silent restore
+`[#AUD2-049 49/49 | done:32 open:16 blocked:1] DONE — a checkpoint load now
+persists its access across a restart; the conflict refusal that names its own
+flags (AUD2-047), the calibration identity binding (AUD2-005), the --plan
+conflict (AUD2-008), the host-KV window range (AUD2-017), the shared disk budget
+(AUD2-003), the bounded payload read (AUD2-006) and the fail-silent restore
 (AUD2-009) beneath it stand`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
@@ -11,9 +12,12 @@ Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
 a process record once its four passes were run; AUD2-040 to AUD2-044, the
 keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029,
 the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
-prompt-cache disk budget (AUD2-003) and the two reader/restore corrections
-(AUD2-006, 009) are closed with remediation commits, and none is merged, released
-or certified on a clean final revision.
+prompt-cache disk budget (AUD2-003), the two reader/restore corrections
+(AUD2-006, 009) and the persisted checkpoint access (AUD2-007) are closed with
+remediation commits, and none is merged, released or certified on a clean final
+revision. AUD2-048 (a diagnostic asymmetry found while closing AUD2-007) and
+AUD2-049 (the docs gate never reads this audit's own ledger) are opened in the
+same pass.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -27,8 +31,9 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `3191968`, which carries the AUD2-047 conflict diagnostic on top
-  of the AUD2-003/006/009 disk-budget and reader fixes at `6130898`, the
+- Measured HEAD: `92da15a`, which carries the AUD2-007 persisted-access fix on
+  top of the AUD2-047 conflict diagnostic at `3191968`, the
+  AUD2-003/006/009 disk-budget and reader fixes at `6130898`, the
   AUD2-005/008/017 calibration and validation fixes at `41d14ca`, the AUD2-029
   deletion-accounting fix at `7024d03`, the AUD2-046 indexing fix at `7740a42`, the
   AUD2-028 checkpoint validation at `c5e2e93`, the AUD2-026 sweep fix at
@@ -39,10 +44,10 @@ tier and status, including disproven claims and audit-introduced regressions.
   snapshot is this report and the ledger, not source. `9ca9942` is the exception
   disclosed in AUD2-017: it committed a test whose fix stayed in the working tree
   until `41d14ca`.
-- **47 records: 31 DONE, 15 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **11 OPEN, 2 PROGRESS, 2 AUDIT, 31 DONE, 1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 28 S2, 1 S3**. These are ledger
-  classifications, not a claim that all 47 records are confirmed product bugs.
+- **49 records: 32 DONE, 16 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **12 OPEN, 2 PROGRESS, 2 AUDIT, 32 DONE, 1 BLOCKED**.
+- Recorded severities: **2 S0, 16 S1, 28 S2, 3 S3**. These are ledger
+  classifications, not a claim that all 49 records are confirmed product bugs.
 - `OPEN` and `PROGRESS` remain unfinished. `AUDIT` retains a
   claim/disposition awaiting formal reconciliation. `BLOCKED` is not a passing
   verification.
@@ -57,11 +62,14 @@ tier and status, including disproven claims and audit-introduced regressions.
   AUD2-026, AUD2-028, AUD2-046, AUD2-029, the calibration/validation cluster
   (AUD2-005, AUD2-008, AUD2-017), the shared prompt-cache disk budget
   (AUD2-003), the bounded turn-store read (AUD2-006), the fail-silent streamed
-  restore (AUD2-009) and the conflict diagnostic (AUD2-047).
+  restore (AUD2-009), the conflict diagnostic (AUD2-047) and the persisted
+  checkpoint access (AUD2-007). AUD2-048 (the turn store discards its own LRU
+  touch failure) is opened as the S3 sibling of that last closure.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
   `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
   AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-046 is `7740a42`, AUD2-029 is
   `7024d03`, AUD2-005/008/017 are `41d14ca`, AUD2-003/006/009 are `6130898`,
+  AUD2-007 is `92da15a`,
   AUD2-033 is
   `71b40d7` (with the
   comment-only `d11be7c`) and the rANS cluster is
@@ -141,12 +149,12 @@ requirement was worked but its own definition of done is not met.
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898` each bundle three S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898` each bundle three S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 31 DONE, 15 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 32 DONE, 16 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 15 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 16 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -198,12 +206,19 @@ stays unchecked and the full current-tree review remains incomplete.
 
 ### Remediation and regression proof
 
-- [ ] Resolve the checkpoint records still open: crash leftovers (AUD2-001),
-  uncounted staging/backup directories (AUD2-002), allocation before integrity
-  verification (AUD2-004) and persisted eviction order (AUD2-007). The shared disk
-  budget (AUD2-003), the bounded turn-store read (AUD2-006), the fail-silent
-  streamed restore (AUD2-009) and failed-deletion accounting (AUD2-029) are closed
-  with commits on this branch.
+- [ ] Resolve the checkpoint records still open: crash leftovers and uncounted
+  staging/backup directories (AUD2-001), corrupt metadata that is never
+  reclaimed at startup (AUD2-002) and allocation before integrity
+  verification (AUD2-004). The shared disk budget (AUD2-003), the bounded
+  turn-store read (AUD2-006), the fail-silent streamed restore (AUD2-009), failed
+  deletion accounting (AUD2-029) and the persisted eviction order (AUD2-007) are
+  closed with commits on this branch.
+- [ ] Sweep and close the S3 diagnostic asymmetry the AUD2-007 fix exposed in the
+  turn store (AUD2-048): the same attribute write, reported by one store and
+  discarded with `try?` by the other.
+- [ ] Extend the `docs` gate's ledger-commit check to `AUDIT/ledger.json` and test
+  it against a rotted pointer (AUD2-049): the audit's own evidence currently
+  resolves nothing, while the gate's message says it resolved 222 references.
 - [ ] Fix the still-unhandled benchmark allocation-error cleanup path.
 - [ ] Complete before/after evidence and independent review for the expansion
   geometry records whose ledger evidence fields remain empty (AUD2-013, AUD2-014);
@@ -223,7 +238,7 @@ stays unchecked and the full current-tree review remains incomplete.
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
   timing footers. *(Partial: the serial suite now runs against a committed tree —
-  7 bundles, 2,003 tests, exit 0 at `3191968` — but the required-compiler 6.4.1
+  7 bundles, 2,004 tests, exit 0 at `92da15a` — but the required-compiler 6.4.1
   runs were recorded on the earlier dirty tree, and a clean-checkout run on the
   final revision remains outstanding.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
@@ -393,18 +408,38 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-007 — Restart eviction does not preserve actual access order
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift).
-- **Finding:** Restart LRU originally followed directory listing order, and
-  `removeAll` without indexing could remove nothing (no production caller was
-  identified for that latent case).
-- **Current evidence:** Index-before-save/removeAll and sorting modification
-  dates are patched, but access touches update only memory. Saving A/B, loading
-  A, restarting and saving C can still evict A. The existing restart test uses
-  manually backdated files, not persisted real access.
-- **Next:** Add the save/load/restart reproduction and persist eviction order;
-  retain the corrected 32-byte two-record fixture disclosure below.
+- **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift:352-377),
+  with the restart index it feeds in
+  [`PromptCheckpointStore+Maintenance.swift`](sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift:6).
+- **Finding:** The listing-order and unindexed-`removeAll` halves of this row
+  closed at `7740a42` (AUD2-046). What stayed was the access itself: `touchDisk`
+  reassigned `record.modificationDate` inside the actor's state and never wrote
+  to the filesystem, while `indexDiskIfNeeded` rebuilds a restarted store's LRU
+  from the directories' modification dates. Saving A then B, loading A,
+  restarting and filling the budget evicted A — the record that had just been
+  read. The existing restart test backdated its directories by hand, so it
+  proved the sort and never the touch.
+- **Current evidence:** `touchDisk` now persists the date with
+  `FileManager.setAttributes([.modificationDate:])` on the record's own
+  directory, the way the turn store does. Only `load` reaches it, and the
+  multi-prefix restore path
+  ([`ServerModelSession+PromptCache.swift:333`](sources/TinyTitanLib/ServerModelSession+PromptCache.swift:333))
+  calls `load`, so a served cache hit is the access that moves the record: the
+  defect was reachable in production, not latent. A failed attribute write keeps
+  the older date — ordering, not data — and is reported through
+  `ServerLog.diagnostic` rather than swallowed. RED: the new
+  `aLoadedRecordKeepsItsPlaceAcrossARestart` reports 2 issues on the unfixed
+  tree (34 tests, exit 1, `AUDIT/aud2-007-red.log`) — the loaded record was gone
+  and the untouched one survived. GREEN: the same 34 tests pass, exit 0
+  (`AUDIT/aud2-007-green.log`). The fixture pins both directories in the past
+  (epoch 0 and epoch 1) so the outcome rests on the access alone and not on
+  timestamp resolution.
+- **Sibling asymmetry found while closing this row:** the turn store persists
+  the same touch under `try?`, so its failure is silently discarded. Recorded
+  as **AUD2-048**, open.
+- **Commit:** `92da15a`. Not merged, released or verified on an independent host.
 
 ### AUD2-008 — Calibration plan mode silently ignores conflicting options
 
@@ -1383,6 +1418,48 @@ systems. Passing local tests never bypasses the final checklist above.
   edit cannot quietly drop it.
 - **Commit:** `3191968`. Not merged, released or verified on an independent host.
 
+### AUD2-048 — The turn store's LRU touch discards its own failure
+
+**S3 · Tier A · OPEN · TinyTitanLib**
+
+- **Location:** [turn store](sources/TinyTitanLib/ServerPromptStateStore.swift:405-422).
+- **Finding:** `touchDisk` updates the in-memory record, then on its background
+  disk queue writes the directory's modification date under `try?`. A failure —
+  read-only volume, `EACCES`, `EIO`, the directory replaced under the store —
+  leaves the date at save time, so the restarted LRU silently disagrees with the
+  in-process one and the touch that exists to protect a hot record does nothing.
+  Nothing is logged.
+- **Current evidence:** None yet; the row exists because closing AUD2-007 made
+  the two halves of one mechanism answer differently: the checkpoint store now
+  reports the same failure through `ServerLog.diagnostic` (`92da15a`) while the
+  turn store discards it. The fix is that one line's shape; the finding is the
+  silence, not the error handling. No correctness or data-loss impact measured.
+- **Next:** Sweep, then report the failure on the background queue.
+
+### AUD2-049 — The docs gate never reads this audit's own ledger
+
+**S2 · Tier A · OPEN · audit tooling**
+
+- **Location:** [docs-facts](tools/docs-facts.py:269-289) and
+  [`ledger_commit_evidence`](tools/docs-facts.py:321-360).
+- **Finding:** `ledger_totals()` lists its ledgers with
+  `git ls-files docs/audit-ledger.json` — a hardcoded path to the *prior*
+  (2026-10-06) ledger — and `ledger_commit_evidence()` iterates exactly that
+  list. `AUDIT/ledger.json`, which this report names the audit's authoritative
+  record, is never opened. The gate prints "222 ledger commit reference(s)
+  resolved" while reading none of this audit's 32 pointers, so a DONE row here
+  naming a nonexistent sha, prose, or nothing at all would still report ok.
+  AUD-209 is the reason the check exists: seven rotted commit fields in the
+  ledger it *does* read.
+- **Current evidence:** Checked by hand instead: all 32 `commit` references in
+  `AUDIT/ledger.json` resolve under `git cat-file -e <sha>^{commit}` and no DONE
+  row has an empty field. So the finding is that the gate would not see rot, not
+  that any exists today.
+- **Next:** Take ledger paths as a set that includes `AUDIT/ledger.json`, keep
+  the prose exemption, judge only the structured `commit` field, and add the test
+  that puts an unresolvable sha in a copy of this ledger and expects a FAIL —
+  without it the fix is a path list nothing checks.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -1492,6 +1569,20 @@ corrupt-record quarantine diagnostics the checkpoint test provokes on purpose) a
 all 18 lint gates exit 0 (`AUDIT/aud2-047-lint.log`, 18/18). Nothing ran a model,
 and `AUDIT/*.log` evidence stays in the gitignored audit tree, so these files are
 not delivered with the report.
+
+AUD2-007's test was written first and watched fail on the unfixed tree for the
+reported reason (34 tests, 2 issues, exit 1, `AUDIT/aud2-007-red.log`), then
+passed with the persisted touch (34 tests, exit 0, `AUDIT/aud2-007-green.log`).
+The fix commit `92da15a` was re-verified as the tree it records after
+`swift-format` reflowed the new fixture and a redundant comment line was dropped:
+full serial suite **7 bundles, 2,004 tests, exit 0**
+(`AUDIT/aud2-007-full.log`) and all 18 lint gates exit 0
+(`AUDIT/aud2-007-lint.log`, 18/18), with the focused checkpoint suite re-run on
+that committed tree. One scope note, because the row predates the split: the
+title used to carry "(latent: no production caller)". That was the `removeAll`
+half, which `7740a42` closed. The access half was never latent —
+`ServerModelSession+PromptCache.swift:333` restores through `load` — and the
+closure says so rather than narrowing the row.
 
 ### Full serial Swift run
 
@@ -1826,14 +1917,20 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **47 records: 31 DONE, 15 non-terminal (11 OPEN, 2 PROGRESS,
-2 AUDIT) and 1 BLOCKED**. The count has fallen at every recorded milestone — 36
-non-terminal at the last snapshot of this section, 21 after the rANS and checkpoint
-batches, 15 now — so §8's strictly-decreasing invariant is met, while the run has
+The ledger stands at **49 records: 32 DONE, 16 non-terminal (12 OPEN, 2 PROGRESS,
+2 AUDIT) and 1 BLOCKED**. The count has fallen at every earlier recorded
+milestone — 36 non-terminal at the last snapshot of this section, 21 after the
+rANS and checkpoint batches, 15 before this pass. It did not fall here: AUD2-007
+closed, and the two things its closing exposed (AUD2-048 in the sibling store,
+AUD2-049 in the gate that is supposed to check these pointers) were opened in the
+same pass, so one record left and two arrived and the count rose to 16. That is
+stated rather than smoothed over — §8's invariant is a record moving to a terminal
+status, and no net drain is claimed here. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
-claimed. Every non-terminal record left is either an S2 design gap that needs work
-this branch has not done (AUD2-001, 002, 004, 007, 013, 014, 034, 035, 036, 039,
-045), a claim awaiting formal reconciliation (AUD2-015, 016), a verification record
+claimed. Every
+non-terminal record left is either an S2 design gap that needs work
+this branch has not done (AUD2-001, 002, 004, 013, 014, 034, 035, 036, 039,
+045) or a gap in the audit's own tooling (AUD2-049), an S3 diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation (AUD2-015, 016), a verification record
 (AUD2-019, 031), or the external host (AUD2-038).
 
 Completed and evidenced here: recovery and hash verification of the original

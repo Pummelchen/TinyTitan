@@ -2,7 +2,7 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 47 | done: 31 | open: 15 | blocked: 1
+Tasks: 49 | done: 32 | open: 16 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
@@ -14,7 +14,7 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-004 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore+Disk.swift:94-110; sources/TinyTitanLib/ServerPromptStateStore+Disk.swift:12-37 | Checkpoint and pending turn-store readers materialize declared multi-GiB payloads before verifying hashes | OPEN | dev-mac (primary) |
 | AUD2-005 | S2 | A | TinyTitanLib | sources/TinyTitanLib/CalibrationProfile.swift:215-256; sources/TinyTitanServer/Core/ServerArguments.swift:418-440; sources/TinyTitanCLI/Args.swift:428-457 | Calibration profile application skips osVersion and (server path) modelID/family/weightBits checks | DONE | dev-mac (primary) |
 | AUD2-006 | S2 | A | TinyTitanLib | sources/TinyTitanLib/ServerPromptStateStore+Disk.swift:12-40 | readPayloadVerifying reads payload to EOF with no cap before size check (swapped/huge file read fully then rejected) | DONE | dev-mac (primary) |
-| AUD2-007 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:274,305,450 | Post-restart LRU order is directory-listing order; removeAll without prior index deletes nothing (latent: no production caller) | OPEN | dev-mac (primary) |
+| AUD2-007 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:227,352-377; sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift:6-60 | A checkpoint access did not survive a restart: touchDisk updated only the in-memory date, so the record read every session stayed the oldest on disk | DONE | dev-mac (primary) |
 | AUD2-008 | S2 | A | TinyTitanCLI | sources/TinyTitanCLI/CalibrationCommand.swift:270-276 | calibrate --plan silently ignores --check/--model | DONE | dev-mac (primary) |
 | AUD2-009 | S2 | A | TinyTitan | sources/TinyTitan/Runtime/KVCache/KVCacheManager+HostStreamingPrefill.swift:410-424; sources/TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift:96 | restoreStreamedSnapshot silently returns when length > hostArenaLengths[layer] (fail-open; currently unreachable behind KVCacheManager+Snapshot.swift:82 guard) | DONE | dev-mac (primary) |
 | AUD2-010 | S1 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:195-232; PreadExpertStreamer+RANS.swift:82-104 | Failed length-table pread leaves empty plans and zero payload size: expert decode silently skipped (stale weights) and payloadStride underestimated so the payload read overflows the staging MTLBuffer | DONE | dev-mac (primary) |
@@ -55,6 +55,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-045 | S2 | A | TinyTitan runtime/streaming | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:284-296; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:167-213 | A tiered layer is declared to publish a first stage that the tiered read branch never publishes | OPEN | dev-mac (primary) |
 | AUD2-046 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:305-361 | Lazy disk indexing evicts a record loaded before the first index first, and latches done when the directory listing fails | DONE | dev-mac (primary) |
 | AUD2-047 | S2 | A | TinyTitanCLI | sources/TinyTitanCLI/CalibrationCommand.swift:126,140-141,270-286 | conflictingInput is a single fixed string, so a --plan or --measure conflict is refused with a message about --model and --check | DONE | dev-mac (primary) |
+| AUD2-048 | S3 | A | TinyTitanLib | sources/TinyTitanLib/ServerPromptStateStore.swift:405-422 | The turn store's persisted LRU touch discards its own failure with try?, so a directory whose date never updates silently keeps its eviction place | OPEN | dev-mac (primary) |
+| AUD2-049 | S2 | A | audit tooling / docs gate | tools/docs-facts.py:269-289,321-360 | The docs gate's ledger-commit check reads only the prior audit's ledger, so this audit's 32 commit pointers are unchecked while its message says they resolved | OPEN | dev-mac (primary) |
 
 ## Evidence and dispositions
 
@@ -109,9 +111,11 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 ### AUD2-007
 
 - **discovered-by:** subagent manual pass + main-agent verification
-- **evidence-before:** Directory listing order previously determined restart eviction. Pending patch sorts by filesystem modification dates, but touchDisk only updates the in-memory date (PromptCheckpointStore.swift); no persistent touch occurs. Thus load A after saving A/B, restart, save C still treats A as oldest.
-- **fix-summary:** Pending patch indexes before removeAll/save and sorts restart records. Persisting access order remains unfixed.
-- **evidence-after:** Existing restart test manually backdates files and passes, but does not exercise save/load/restart access persistence. Static residual confirmed; dedicated restart-access reproduction remains pending. Keep OPEN.
+- **evidence-before:** Restart LRU originally followed directory listing order, and removeAll without indexing could remove nothing; both were closed at 7740a42 (AUD2-046). The residual named there stayed: touchDisk reassigned record.modificationDate in the actor's state only, while indexDiskIfNeeded orders a restarted store by the directories' own modification dates. Saving A then B, loading A, restarting and filling the budget therefore evicted A -- the record that had just been read -- and the existing restart test pinned the dates by hand, so it proved the sort but never the access.
+- **fix-summary:** touchDisk now persists the access the way the turn store does: it updates the record, then FileManager.setAttributes([.modificationDate:]) on the record directory. Only load reaches touchDisk, and the multi-prefix restore path (ServerModelSession+PromptCache.swift:333) calls load, so a served cache hit is the access that moves the record: the residual was reachable in production, not latent. A setAttributes failure keeps the older date, which costs ordering and not data, and it is reported through ServerLog.diagnostic instead of swallowed. No LRU side file and no format change.
+- **evidence-after:** aLoadedRecordKeepsItsPlaceAcrossARestart pins both directories in the past (epoch 0 for the loaded record, epoch 1 for the untouched one) so the outcome rests on the access alone and not on timestamp resolution. RED on the unfixed tree: 34 tests, 2 issues, exit 1 -- the loaded record was gone and the untouched one survived, exactly the reported defect (AUDIT/aud2-007-red.log). GREEN with the persisted touch: the same 34 tests pass, exit 0 (AUDIT/aud2-007-green.log). Full serial suite on the committed tree: 7 bundles, 2,004 tests, 0 failures, exit 0 (AUDIT/aud2-007-full.log); all 18 lint gates exit 0 (AUDIT/aud2-007-lint.log).
+- **disposition:** Fixed on the audit branch at 92da15a; not merged, released or verified on an independent host. The sibling asymmetry this fix exposed in the turn store is recorded as AUD2-048.
+- **commit:** 92da15a
 
 ### AUD2-008
 
@@ -433,6 +437,22 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-after:** RED: eachConflictRefusalNamesItsOwnFlags covers four combinations and records 3 issues -- --check --plan, --model --plan and --check --measure each fail because the message omits the flag the refusal is about (18 tests, exit 1, AUDIT/aud2-047-red.log). The --model --check case passed before and after and is disclosed as such: it is the one message that was already right. GREEN: the same 18 tests pass, exit 0 (AUDIT/aud2-047-green.log). Full serial suite 7 bundles 2,003 tests exit 0 (AUDIT/aud2-047-full.log) and 18/18 lint gates exit 0 (AUDIT/aud2-047-lint.log), both run on the tree this commit records.
 - **disposition:** Fixed on the audit branch at 3191968; not merged, released or verified on an independent host.
 - **commit:** 3191968
+
+### AUD2-048
+
+- **discovered-by:** main-agent sibling pass while closing AUD2-007
+- **evidence-before:** ServerPromptStateStore.touchDisk updates the in-memory record and then, on its background disk queue, calls FileManager.setAttributes([.modificationDate:]) under try?. A failure (read-only volume, EACCES, EIO, the directory replaced under the store) leaves the directory's date at its save time, so the restarted LRU order silently disagrees with the in-process one and the touch that exists to protect a hot record does nothing; nothing is logged. Same operation, two behaviours: the checkpoint store's touchDisk now reports the failure through ServerLog.diagnostic (AUD2-007, 92da15a) while the turn store discards it.
+- **fix-summary:** Pending. The one-line shape is the checkpoint store's: replace try? with do/catch and emit ServerLog.diagnostic on the background queue. Ordering is all the failure costs, so it stays non-fatal; the finding is the silence, not the error handling.
+- **evidence-after:** None yet; recorded so the finding is not lost.
+- **disposition:** Open. S3 diagnostic gap found while closing AUD2-007; no correctness or data-loss impact measured.
+
+### AUD2-049
+
+- **discovered-by:** main-agent checking whether tools/lint.sh docs would catch a rotted pointer in AUDIT/ledger.json
+- **evidence-before:** ledger_totals() lists ledgers with `git ls-files docs/audit-ledger.json` -- a hardcoded path to the 2026-10-06 ledger -- and ledger_commit_evidence() iterates exactly that list. AUDIT/ledger.json, which audit_2310.md names the audit's authoritative record, is never opened by either function. The gate prints `222 ledger commit reference(s) resolved` over the prior ledger alone, so a DONE row in this audit naming a nonexistent sha, a prose pointer or nothing at all would still report ok. AUD-209 is the reason the check exists: seven rotted commit fields in the ledger it does read.
+- **fix-summary:** Pending. The gate has to take the ledger paths as a set that includes AUDIT/ledger.json (tracked by `git add -f`), keep the existing exemption for quoted prose in the ledger's own text fields, and keep judging only the structured commit field. A test that puts an unresolvable sha in a copy of the current audit ledger and expects a FAIL is what proves the extension; without it the fix is a path list that nothing checks.
+- **evidence-after:** Manual pass on the current file (this session): 32 commit references in AUDIT/ledger.json, all resolve with `git cat-file -e <sha>^{commit}`, and no DONE row has an empty commit field. So no rot exists today -- the finding is that the gate would not see it, not that it is wrong now.
+- **disposition:** Open. Found while writing the AUD2-007 ledger row: the report's own evidence pointer is the least-checked thing in the audit.
 
 ## Verification notes
 
