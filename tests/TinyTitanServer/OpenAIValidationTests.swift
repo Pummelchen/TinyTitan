@@ -41,6 +41,30 @@ struct OpenAIValidationTests {
         #expect(validated.generationConfig.presencePenalty == 0)
     }
 
+    /// `min_p` is unsupported and the release notes promise it is refused. A
+    /// silent ignore would sample as if the filter were off while the client
+    /// believes it asked for one.
+    @Test func nonZeroMinPIsRefused() throws {
+        let data = Data(
+            #"{"model":"m","messages":[{"role":"user","content":"x"}],"min_p":0.1}"#.utf8)
+        let request = try JSONDecoder().decode(OpenAIChatRequest.self, from: data)
+        #expect(
+            throws: ServerRequestError.invalid(
+                message: "min_p is not implemented; every published row uses zero",
+                param: "min_p", code: "unsupported_value")
+        ) {
+            try OpenAIRequestValidator.validate(request, modelID: "m")
+        }
+    }
+
+    @Test func zeroMinPIsAccepted() throws {
+        let data = Data(
+            #"{"model":"m","messages":[{"role":"user","content":"x"}],"min_p":0}"#.utf8)
+        let request = try JSONDecoder().decode(OpenAIChatRequest.self, from: data)
+        let validated = try OpenAIRequestValidator.validate(request, modelID: "m")
+        #expect(validated.generationConfig.minP == 0)
+    }
+
     /// A caller that names no context window gets the native maximum, not the
     /// YaRN one and not a number typed in beside it.
     ///
@@ -1147,6 +1171,16 @@ struct ServerArgumentTests {
         }
         #expect(throws: RuntimeConfigurationError.self) {
             try RuntimeConfiguration(hostKVWindowTokens: 0)
+        }
+        #expect(throws: ServerArgumentError.self) {
+            try ServerArguments.parse([
+                "--model", "model.ssdai", "--host-kv-window",
+                String(RuntimeConfiguration.maximumContextTokens + 1),
+            ])
+        }
+        #expect(throws: RuntimeConfigurationError.self) {
+            try RuntimeConfiguration(
+                hostKVWindowTokens: RuntimeConfiguration.maximumContextTokens + 1)
         }
     }
 

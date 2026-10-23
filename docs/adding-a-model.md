@@ -52,8 +52,8 @@ Record, because each one has burned a release or a conversion before:
   sentence into its own deviations. Presence penalty is supported across OpenAI's
   `-2…2` on the wire and the same range on `--presence-penalty`, so what a card
   outside that range asks for is the deviation worth naming; what this runtime
-  still cannot do is `frequency_penalty` (refused unless zero) and `min_p`
-  (no filter implemented).
+  still cannot do is `frequency_penalty` and `min_p` (both refused unless zero;
+  neither filter is implemented).
 
 ## 1. Decide: wiring job or runtime job
 
