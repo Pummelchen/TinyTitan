@@ -4,7 +4,7 @@
 
 > Continue the TinyTitan work in this checkout. Read `AGENTS.md`, then
 > `docs/handover-tinytitan.md`, then the audit ledger
-> `docs/audit-2026-10-06/ledger.md`, then the wiki `Project-Tracker`.
+> `docs/audit-ledger.jsonledger.md`, then the wiki `Project-Tracker`.
 > **5.18 is cut and published** (`v5.18` → commit `ea5de8c`, 2026-10-05: the
 > launcher fetches a model that is not on disk, the menu offers the ones the
 > checkout lacks, and every long download, conversion and repack draws a real
@@ -124,7 +124,7 @@
 > day: the close is recorded on CI as the fresh clone once the run on the final head
 > is green, with the residual (the release build and the install flow, which CI does
 > not run) named as a permanent finding in
-> `docs/audit-2026-10-06/environment.md`.
+> `docs/audit-ledger.jsonenvironment.md`.
 >
 > The closure invariant was re-measured at `92a48c6`: all 209 DONE rows are `owner: ""` with
 > a commit, the blocked AUD-139 is the only row left naming an owner with no commit, and all
