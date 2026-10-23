@@ -176,6 +176,10 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
             reasoningEffort: choice.effort)
     }
 
+    @available(
+        *, deprecated,
+        message: "No caller (TT-051): callers index the router's choices map directly."
+    )
     public func reasoningChoice(for id: String) -> ReasoningChoice? { choices[id] }
 
     // MARK: - ServerInferenceBackend

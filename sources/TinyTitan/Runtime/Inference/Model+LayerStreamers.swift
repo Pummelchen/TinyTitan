@@ -84,6 +84,10 @@ extension Model {
 
     /// Drop a layer's expert cache. Safe once that layer's work is finished:
     /// the next use reopens it lazily, which is how it was created.
+    @available(
+        *, deprecated,
+        message: "No caller (TT-050). Remove unless layer-major prefill lands and calls it."
+    )
     public func releaseLayerStreamer(_ L: Int) {
         streamersQueue.sync {
             guard L >= 0, L < streamersBox.streamers.count else { return }
