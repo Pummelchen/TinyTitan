@@ -157,6 +157,55 @@ extension PreadExpertStreamerTests {
         }
     }
 
+    /// AUD2-045: the tiered read branch skips the phase-1 split, because a
+    /// tiered layer's experts are shorter than the slot stride. The operation
+    /// still declared `publishesFirstStage` from `phase1Bytes` alone, so
+    /// `encodeDecodeEarlyMissFixup` awaited a stage this branch never publishes
+    /// -- no hang (completion resumes the waiters) but no overlap either.
+    @Test func aTieredLayerDoesNotDeclareAFirstStageTheReadNeverPublishes() throws {
+        let url = try Self.writeSyntheticLayer()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let device = try MetalContext().device
+
+        let tiered = StreamLayout(
+            path: url.path,
+            streamOffset: Self.streamOffset,
+            streamSize: Self.streamSize,
+            expertsPerLayer: Self.numExperts,
+            expertStride: UInt64(Self.expertStride),
+            expertSizes: [
+                UInt64(Self.expertStride),
+                UInt64(Self.expertStride / 2),
+                UInt64(Self.expertStride),
+                UInt64(Self.expertStride),
+            ],
+            phase1Bytes: 1024)
+        let tieredStreamer = try PreadExpertStreamer(
+            layout: tiered, device: device, slotCount: 1)
+        let tieredOperation = try tieredStreamer.beginExpertCachePlan(
+            tieredStreamer.planExpertsCached(experts: [0]))
+        #expect(
+            !tieredOperation.publishesFirstStage,
+            "a tiered layer's read branch never publishes a first stage")
+        try tieredOperation.wait()
+
+        // Control: the same layer with uniform sizes does take the split, so the
+        // guard must not simply switch the stage off for every layer.
+        let split = StreamLayout(
+            path: url.path,
+            streamOffset: Self.streamOffset,
+            streamSize: Self.streamSize,
+            expertsPerLayer: Self.numExperts,
+            expertStride: UInt64(Self.expertStride),
+            phase1Bytes: 1024)
+        let splitStreamer = try PreadExpertStreamer(
+            layout: split, device: device, slotCount: 1)
+        let splitOperation = try splitStreamer.beginExpertCachePlan(
+            splitStreamer.planExpertsCached(experts: [0]))
+        #expect(splitOperation.publishesFirstStage, "a uniform split still publishes")
+        try splitOperation.wait()
+    }
+
     /// The split boundary must sit strictly inside the stride: a 0 or
     /// stride-sized boundary would make one of the two ranges empty and the
     /// reader refuses zero-length ranges.

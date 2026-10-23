@@ -169,8 +169,7 @@ extension PreadExpertStreamer {
         // expert's payload. When sizes vary, read exactly each expert's bytes
         // through the range fetch and skip the phase-1 split (its split point
         // is per-width, not per-layer).
-        let sizesAreUniform =
-            layout.expertSizes?.allSatisfy { $0 == layout.expertStride } ?? true
+        let sizesAreUniform = layout.hasUniformExpertSizes
         if !sizesAreUniform, let sizes = layout.expertSizes {
             let counts = plan.misses.map { miss -> Int in
                 let expert = plan.experts[miss]

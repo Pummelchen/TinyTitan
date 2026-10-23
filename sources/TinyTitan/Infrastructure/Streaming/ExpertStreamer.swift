@@ -53,6 +53,21 @@ public struct StreamLayout: Sendable {
     /// stride, which the streamer refuses anything else for.
     public let phase1Bytes: UInt64?
 
+    /// Whether every expert fills the slot stride. A tiered layer stores cold
+    /// experts shorter than the slot, so the bounded reader reads each expert's
+    /// own length and skips the phase-1 split.
+    package var hasUniformExpertSizes: Bool {
+        expertSizes?.allSatisfy { $0 == expertStride } ?? true
+    }
+
+    /// Whether the bounded reader can publish the phase-1 stage for this layer:
+    /// the split needs a phase boundary *and* uniform expert sizes. A tiered
+    /// layer's read branch never calls `firstStage`, so declaring a stage there
+    /// makes the early-miss fixup await the whole load (AUD2-045).
+    package var splitsPhase1: Bool {
+        phase1Bytes != nil && hasUniformExpertSizes
+    }
+
     /// Per-expert compressed frames, when this layer's blobs are compressed.
     ///
     /// `nil` means the layer is stored raw and every expert is `expertStride`

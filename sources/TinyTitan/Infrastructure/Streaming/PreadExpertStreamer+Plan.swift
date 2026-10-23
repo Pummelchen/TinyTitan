@@ -292,7 +292,7 @@ extension PreadExpertStreamer {
             eventCoordinator: eventCoordinator,
             backendSignalsEvent: false,
             publishesFirstStage:
-                boundedReader != nil && layout.phase1Bytes != nil)
+                boundedReader != nil && layout.splitsPhase1)
         ExpertIOScheduler.shared.submit { [self, operation] in
             operation.markInFlight()
             do {
