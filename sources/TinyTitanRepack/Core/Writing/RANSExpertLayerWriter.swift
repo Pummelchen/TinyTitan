@@ -71,7 +71,9 @@ public struct RANSExpertLayerResult: Sendable, Equatable {
 /// pay 512 bytes a block and, for the near-uniform mantissa planes, expand);
 /// the second encodes and writes the payload, then the sidecar.
 public enum RANSExpertLayerWriter {
-    package static let scaleBits: UInt8 = 14
+    /// Written into the sidecar header; `ExpertRANSIndex.decode` refuses any
+    /// other value, so the writer's scale and the decoder's are one constant.
+    package static let scaleBits: UInt8 = ExpertRANSIndex.implementedScaleBits
     package static let modelTotal = 1 << Int(scaleBits)
 
     public static func write(

@@ -258,8 +258,8 @@ let package = Package(
         .testTarget(
             name: "TinyTitanTests",
             dependencies: [
-                "TinyTitan", "TinyTitanValidationSupport", "TinyTitanRepackCore",
-                "TinyTitanCLICore", "TinyTitanLib",
+                "TinyTitan", "TinyTitanFormat", "TinyTitanValidationSupport",
+                "TinyTitanRepackCore", "TinyTitanCLICore", "TinyTitanLib",
             ],
             path: "tests/TinyTitan",
             resources: [

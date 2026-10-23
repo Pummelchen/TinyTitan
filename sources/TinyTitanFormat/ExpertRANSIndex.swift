@@ -23,6 +23,10 @@ import Foundation
 package enum ExpertRANSIndex {
     package static let magic: [UInt8] = Array("TTRX".utf8)
     package static let currentVersion: UInt16 = 1
+    /// The scale the decoder (host reference loop and GPU kernel) implements.
+    /// `RANSExpertLayerWriter` is the only producer, and it writes 14; the
+    /// constant lives here so reader and writer cannot drift apart silently.
+    package static let implementedScaleBits: UInt8 = 14
     package static let headerBytes = 16
     package static let blockBytes = 24
     package static let maximumBlockCount = 64
@@ -89,7 +93,7 @@ package enum ExpertRANSIndex {
             case .unsupportedVersion(let version):
                 return "expert rANS index version \(version) is not readable here"
             case .badScaleBits(let bits):
-                return "expert rANS index scale \(bits) is outside 8...16"
+                return "expert rANS index scale \(bits) is not the implemented scale 14"
             case .badBlockCount(let count):
                 return "expert rANS index declares \(count) blocks an expert"
             case .truncated(let expected, let got):
@@ -154,7 +158,11 @@ package enum ExpertRANSIndex {
             throw Failure.unsupportedVersion(version)
         }
         let scaleBits = bytes[6]
-        guard (8...16).contains(scaleBits) else {
+        // The GPU kernel is compiled for one scale: a 16,384-entry slot table,
+        // `state & 16383`, `state >> 14`, renormalisation at 2^23. A sidecar
+        // declaring any other scale would pass a range check and decode to
+        // garbage, so the reader accepts exactly the scale the writer emits.
+        guard scaleBits == Self.implementedScaleBits else {
             throw Failure.badScaleBits(scaleBits)
         }
         let blockCount = Int(bytes[7])
@@ -187,13 +195,14 @@ package enum ExpertRANSIndex {
             cursor += 512
         }
         var experts: [[Block]] = []
+        var payloadRuns: [(expert: Int, start: UInt64, end: UInt64)] = []
         experts.reserveCapacity(expertCount)
         for expert in 0..<expertCount {
             var blocks: [Block] = []
             blocks.reserveCapacity(blockCount)
             // Payload offsets are absolute in the layer file; one expert's
             // blocks are contiguous relative to *its own* first block.
-            var expectedOffset: UInt64?
+            var expectedOffset: UInt64 = 0
             for index in 0..<blockCount {
                 let payloadOffset = read(UInt64.self, bytes, at: cursor)
                 let payloadLength = read(UInt32.self, bytes, at: cursor + 8)
@@ -217,17 +226,18 @@ package enum ExpertRANSIndex {
                 guard Int(role) < blockCount else {
                     throw Failure.badBlock(expert: expert, block: index, reason: "role \(role)")
                 }
-                guard payloadOffset + UInt64(payloadLength) <= payloadSize else {
+                let (payloadEnd, overflow) = payloadOffset.addingReportingOverflow(
+                    UInt64(payloadLength))
+                guard !overflow, payloadEnd <= payloadSize else {
                     throw Failure.badBlock(
                         expert: expert, block: index, reason: "payload exceeds the file")
                 }
-                // Blocks of one expert are written back to back.
-                if let expectedOffset, payloadOffset != expectedOffset {
+                if index > 0, payloadOffset != expectedOffset {
                     throw Failure.badBlock(
                         expert: expert, block: index,
                         reason: "payload starts at \(payloadOffset), expected \(expectedOffset)")
                 }
-                expectedOffset = payloadOffset + UInt64(payloadLength)
+                expectedOffset = payloadEnd
                 blocks.append(
                     Block(
                         payloadOffset: payloadOffset, payloadLength: payloadLength,
@@ -235,7 +245,16 @@ package enum ExpertRANSIndex {
                         stride: stride, role: role))
                 cursor += blockBytes
             }
+            payloadRuns.append((expert, blocks[0].payloadOffset, expectedOffset))
             experts.append(blocks)
+        }
+        payloadRuns.sort { $0.start < $1.start }
+        for (previous, current) in zip(payloadRuns, payloadRuns.dropFirst()) {
+            guard current.start >= previous.end else {
+                throw Failure.badBlock(
+                    expert: current.expert, block: 0,
+                    reason: "payload overlaps expert \(previous.expert)")
+            }
         }
         return Layout(scaleBits: scaleBits, models: models, blocks: experts)
     }

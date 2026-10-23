@@ -21,7 +21,7 @@ extension PreadExpertStreamer {
                 experts: misses.map { plan.experts[$0] },
                 slots: misses.map { plan.assignedSlots[$0] },
                 resources: resources,
-                firstStage: start == 0 ? firstStage : nil)
+                firstStage: end == plan.misses.count ? firstStage : nil)
             start = end
         }
     }
@@ -91,11 +91,12 @@ extension PreadExpertStreamer {
         let tRead = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         try readRanges(offsets: sourceOffsets, counts: counts, into: destinations)
         let tReadDone = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        // One expert's descriptors live in their own aligned region.
-        let descriptorStride = resources.layout.models.count * 256 * 32
+        let descriptorWords = RANSStreamPlan.descriptorWords
+        let descriptorStride = resources.layout.models.count * 256 * descriptorWords * 4
         let descriptorPointer = resources.descriptors.contents()
 
         for phase in 0...1 {
+            resources.failure.contents().storeBytes(of: UInt32(0), as: UInt32.self)
             guard let command = resources.queue.makeCommandBuffer() else {
                 throw ModelError.internalInconsistency(detail: "rANS command buffer unavailable")
             }
@@ -104,21 +105,19 @@ extension PreadExpertStreamer {
                 guard !plans.isEmpty else { continue }
                 let region = descriptorPointer.advanced(
                     by: position * descriptorStride
-                ).bindMemory(to: UInt32.self, capacity: plans.count * 8)
+                ).bindMemory(to: UInt32.self, capacity: plans.count * descriptorWords)
                 for (index, plan) in plans.enumerated() {
-                    var payloadOffset =
-                        plan.payloadOffset
-                        + UInt32(position * resources.payloadStride)
-                    region[index * 8] = payloadOffset
-                    region[index * 8 + 1] = plan.tableOffset
-                    region[index * 8 + 2] =
-                        plan.outputOffset + UInt32(offsets[position])
-                    region[index * 8 + 3] = plan.stride
-                    region[index * 8 + 4] = plan.symbolCount
-                    region[index * 8 + 5] = plan.streamIndex
-                    region[index * 8 + 6] = plan.streamCount
-                    region[index * 8 + 7] = plan.slotOffset
-                    payloadOffset = 0
+                    let base = index * descriptorWords
+                    let payloadBase = UInt32(position * resources.payloadStride)
+                    region[base] = plan.payloadOffset + payloadBase
+                    region[base + 1] = plan.tableOffset
+                    region[base + 2] = plan.outputOffset + UInt32(offsets[position])
+                    region[base + 3] = plan.stride
+                    region[base + 4] = plan.symbolCount
+                    region[base + 5] = plan.streamIndex
+                    region[base + 6] = plan.streamCount
+                    region[base + 7] = plan.slotOffset
+                    region[base + 8] = plan.payloadEnd + payloadBase
                 }
                 guard let encoder = command.makeComputeCommandEncoder() else {
                     throw ModelError.internalInconsistency(
@@ -131,6 +130,7 @@ extension PreadExpertStreamer {
                     resources.descriptors, offset: position * descriptorStride, index: 2)
                 encoder.setBuffer(outputs[position], offset: 0, index: 3)
                 encoder.setBuffer(resources.slotTables, offset: 0, index: 4)
+                encoder.setBuffer(resources.failure, offset: 0, index: 5)
                 encoder.dispatchThreads(
                     MTLSize(width: plans.count, height: 1, depth: 1),
                     threadsPerThreadgroup: MTLSize(width: 128, height: 1, depth: 1))
@@ -153,6 +153,9 @@ extension PreadExpertStreamer {
             if let error = command.error {
                 throw ModelError.internalInconsistency(
                     detail: "rANS decode failed: \(error)")
+            }
+            guard resources.failure.contents().load(as: UInt32.self) == 0 else {
+                throw ModelError.indexCorrupt(detail: "rANS stream exhausted during decode")
             }
             if phase == 0 { firstStage?() }
         }
