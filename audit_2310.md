@@ -1,12 +1,13 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-041 41/41 | done:2 open:38 blocked:1 new:2] OPEN — file the facade-hunt
-findings: min_p is silently ignored on the wire; the QSA diagnostic names a
-feature that exists`
+`[#AUD2-041 41/41 | done:4 open:36 blocked:1 new:2] DONE — refuse non-zero min_p
+on the wire and name the real cause in the QSA refusal; the section-6
+unused-code sweep is next`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
-One documentation record, AUD2-032, is closed because the brief it concerned has
-now been recovered and preserved.
+Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-040 and AUD2-041
+are closed with remediation commits, and neither is merged, released or certified
+on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -20,22 +21,26 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `164e84a08de5d434f95a90d552ceeff608581caa`, **with uncommitted
-  source and test changes**. That commit alone does not contain the tested fixes.
-- **41 records: 2 DONE, 38 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **21 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 2 DONE,
+- Measured HEAD: `dc5272952e45c696f086487293cc2ca4c04e9e94`, which carries the
+  AUD2-040 and AUD2-041 fixes. **The tree also carries uncommitted source and
+  test changes** belonging to records still in START/PROGRESS/TEST, so that
+  commit alone does not contain every tested fix.
+- **41 records: 4 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 4 DONE,
   1 BLOCKED**.
 - Recorded severities: **2 S0, 16 S1, 23 S2**. These are ledger classifications,
-  not a claim that all 39 records are confirmed outstanding product bugs.
+  not a claim that all 41 records are confirmed product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
   AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
-  runtime defects. AUD2-022 (Swift 6.4.1) and AUD2-032 (brief recovery) are DONE;
-  neither closes a product defect.
-- No product issue has a remediation commit recorded. No fix is represented here
-  as merged, released, or certified on a clean final revision.
+  runtime defects. AUD2-022 (Swift 6.4.1) and AUD2-032 (brief recovery) are DONE
+  and neither closes a product defect; AUD2-040 (stale diagnostic) and AUD2-041
+  (`min_p` accepted and ignored) are DONE with remediation commits.
+- AUD2-040 is `dc52729` and AUD2-041 is `9ca9942`, both on the audit branch. No
+  fix is represented here as merged, released, or certified on a clean final
+  revision.
 
 Sources are [baseline](AUDIT/baseline.md), [environment](AUDIT/environment.md),
 [scope and tiers](AUDIT/scope-tiers.md), and
@@ -101,18 +106,18 @@ requirement was worked but its own definition of done is not met.
 | §4 L5 | Performance pass on Tier A and profiler-identified hot paths | **Not recorded** | AUD2-037 |
 | §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
 | §4 L7 | Ops pass per deployable service | **Not recorded** | AUD2-037 |
-| §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, two outcomes filed | AUD2-037, AUD2-040, AUD2-041 |
+| §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | **Not recorded** | AUD2-037 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
-| §8 | Ledger schema and S0/S1 gates | Partial — schema met; no product record has passed TEST→AUDIT→DONE | [ledger](AUDIT/ledger.md) |
+| §8 | Ledger schema and S0/S1 gates | Partial — schema met; AUD2-041 is the first S1 through TEST→AUDIT→DONE, no S0 has | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — audit commits are focused; no remediation commits exist | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729` (AUD2-040) and `9ca9942` (AUD2-041) are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress | This report |
 | §11 | Phase C drain to zero | Not started — no product record is DONE | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 35 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 36 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -854,7 +859,8 @@ systems. Passing local tests never bypasses the final checklist above.
   capability checks are real. The hunt produced two findings — AUD2-041 (S1, a
   sampling parameter documented as refused that the wire never reads) and
   AUD2-040 (S2, a diagnostic that names a feature as unimplemented when it is
-  implemented and the guard is unreachable).
+  implemented and the guard is unreachable). Both are now DONE (`9ca9942`,
+  `dc52729`), each with a failing-then-passing test.
 - **Next:** Run the remaining three passes — §6 Tier-A unused code, L5 performance
   and L7 ops — at Tier A depth, file every finding they produce with its own ID,
   and only then mark this record DONE. A facade found on a production path is S0
@@ -916,7 +922,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-040 — The QSA error text names a feature as unimplemented that is implemented
 
-**S2 · Tier A · OPEN · facade hunt / stale diagnostic**
+**S2 · Tier A · DONE · facade hunt / stale diagnostic**
 
 - **Location:** [QSAExactness.swift:80-89](sources/TinyTitan/Runtime/Family/QSAExactness.swift#L80),
   raised by `requireQSAExact`
@@ -938,12 +944,16 @@ systems. Passing local tests never bypasses the final checklist above.
   `requireQSADensePrefill` already states the guard "only fires for a family that
   declares a sparse indexer without one being built — which nothing does today",
   which the description contradicts.
-- **Next:** Rewrite the description to state the actual condition, keeping the
-  guard as defence in depth.
+- **Resolution (`dc52729`):** The description and doc comment now say this model's
+  indexer was not built and point at the load diagnostics, keeping the guard as
+  defence in depth. The new test `refusalNamesTheRealCause` pins that the text
+  does not claim the feature is unimplemented. RED on the old text, GREEN after;
+  `QSAExactnessTests` 8/8, full serial suite 7 bundles / 1,988 tests / exit 0, and
+  all 18 lint gates pass.
 
 ### AUD2-041 — `min_p` is documented as refused but the request model never reads it
 
-**S1 · Tier A · OPEN · untrusted-input validation**
+**S1 · Tier A · DONE · untrusted-input validation**
 
 - **Location:** [OpenAIModels.swift](sources/TinyTitanLib/OpenAIModels.swift),
   [OpenAIRequestValidator.swift:300](sources/TinyTitanLib/OpenAIRequestValidator.swift#L300),
@@ -966,9 +976,14 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Current evidence:** Static proof above. Reproduction: a
   `/v1/chat/completions` body containing `"min_p":0.1` is accepted and sampled
   exactly as without it — the documented refusal never fires.
-- **Next:** Decode `min_p` and refuse a non-zero value with a 400
-  `unsupported_value`, as the release note promises, and pin both the refusal and
-  the accepted zero in the OpenAI validation suite.
+- **Resolution (`9ca9942`):** `OpenAIChatRequest` decodes `min_p`, and
+  `OpenAIRequestValidator` refuses a non-zero value with a 400
+  `unsupported_value`, as the release note promises;
+  [adding-a-model.md](docs/adding-a-model.md) now says both filters are refused
+  unless zero. RED: a `"min_p":0.1` body validated with minP `0.0`. GREEN:
+  `nonZeroMinPIsRefused` and `zeroMinPIsAccepted` pass, 44 tests in the OpenAI
+  validation suites, full serial suite 7 bundles / 1,988 tests / exit 0, all 18
+  lint gates pass, and no S0/S1 gate item was waived.
 
 ## Recorded verification and its limits
 
@@ -1309,12 +1324,11 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **38 non-terminal records** (21 OPEN, 2 START, 3 PROGRESS,
-10 TEST, 2 AUDIT), two DONE records and one BLOCKED. This milestone adds records
-rather than draining them, which §8's closure invariant forbids *at a convergence
-milestone*. The run has never reached Phase C, let alone Phase D, so no
-convergence milestone is claimed and the invariant is not yet due; it applies once
-the open count starts being driven to zero.
+The ledger stands at **36 non-terminal records** (19 OPEN, 2 START, 3 PROGRESS,
+10 TEST, 2 AUDIT), four DONE records and one BLOCKED. The §5 facade hunt's two
+findings are now DONE with remediation commits, so this milestone drains two
+records; the run has still never reached Phase C, let alone Phase D, so no
+convergence milestone is claimed and §8's invariant is not yet due.
 
 Completed and evidenced here: recovery and hash verification of the original
 brief, the debug and release builds plus the full serial suite under the required

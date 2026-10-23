@@ -2,7 +2,7 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 41 | done: 2 | open: 38 | blocked: 1
+Tasks: 41 | done: 4 | open: 36 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
@@ -47,8 +47,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-037 | S1 | A | audit process | AUDIT/audit-brief.md (sections 5, 6, L5, L7); audit_2310.md | Four brief-mandated passes have no recorded evidence: facade hunt, Tier-A unused code, L5 performance and L7 ops | OPEN | dev-mac (primary) |
 | AUD2-038 | S1 | A | audit process / Phase E | AUDIT/audit-brief.md (sections 1b, 11 Phase E, 12); AUDIT/environment.md | No independent host exists for the Phase E whole-repository verification | BLOCKED | dev-mac (primary) |
 | AUD2-039 | S2 | B | build/toolchain | Package.swift:29; AUDIT/environment.md; AUDIT/baseline.md | Swift 6.4.1 keg adds 49 linker deployment-target warnings against a zero-warning baseline | OPEN | dev-mac (primary) |
-| AUD2-040 | S2 | A | TinyTitan runtime / QSA | sources/TinyTitan/Runtime/Family/QSAExactness.swift:80-89 | QSAIndexerRequired tells the user the indexer is not implemented; it is implemented, and the guard that raises it is unreachable | OPEN | dev-mac (primary) |
-| AUD2-041 | S1 | A | TinyTitanLib / OpenAI request parsing | sources/TinyTitanLib/OpenAIModels.swift:1-120; docs/release-notes-v5.10.md:56 | min_p is documented as accepted-but-must-be-zero and is instead silently ignored on the HTTP request path | OPEN | dev-mac (primary) |
+| AUD2-040 | S2 | A | TinyTitan runtime / QSA | sources/TinyTitan/Runtime/Family/QSAExactness.swift:80-89 | QSAIndexerRequired tells the user the indexer is not implemented; it is implemented, and the guard that raises it is unreachable | DONE | dev-mac (primary) |
+| AUD2-041 | S1 | A | TinyTitanLib / OpenAI request parsing | sources/TinyTitanLib/OpenAIModels.swift:1-120; docs/release-notes-v5.10.md:56 | min_p is documented as accepted-but-must-be-zero and is instead silently ignored on the HTTP request path | DONE | dev-mac (primary) |
 
 ## Evidence and dispositions
 
@@ -296,15 +296,17 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 
 - **discovered-by:** section 5 facade hunt (AUD2-037)
 - **evidence-before:** Static: the indexer exists (sources/TinyTitan/Kernels/Attention/QSAIndexer.swift) and is built when the family enables one (RealForwardRunner+BuildCore.swift:321-330, `try QSAIndexer(...)`; RealForwardRunner.swift:336 `staged` traps if the builder never set it). qsaExactness is derived from the same flag (RealForwardRunner+QSA.swift:373-377), and requireQSAExact returns early unless `qsaIndexer == nil && exactness != nil` (RealForwardRunner+QSA.swift:396-405) -- a combination the current builder cannot produce, because an enabled indexer is either constructed or throws during load. The description at QSAExactness.swift:80-89 is therefore both unreachable today and factually wrong: it says 'The QSA indexer is not implemented yet' and tells the operator to shorten the prompt, when the implemented indexer and a shorter prompt are not the issue. No test pins the string (`grep -rn 'not implemented yet' tests/` is empty).
-- **fix-summary:** No fix applied yet.
-- **evidence-after:** Pending.
+- **fix-summary:** Rewrite QSAIndexerRequired's description and doc comment to name the real condition (the model's indexer was not built) and to point at the load diagnostics, keeping the guard. A new test, refusalNamesTheRealCause, pins that the text does not claim the indexer is unimplemented.
+- **evidence-after:** RED: tests/TinyTitan/Runtime/QSAExactnessTests.swift:76-77 failed on the old text (`contains("was not built")` false, `!contains("not implemented")` false). GREEN after the rewrite: swift test --no-parallel --filter QSAExactnessTests -> 8 tests in 1 suite, passed. Cold re-read: the guard and the doc comment now agree, and refusalNamesTheRealCause fails if the description ever claims the feature is missing again. Full serial suite on the working tree after both fixes: swift test --no-parallel -> 7 bundles, 1,988 tests, 0 failures, exit 0 (AUDIT/aud2-041-full-tests-final.log; the tree before these two tests measured 1,985). tools/lint.sh -> 18/18 gates ok, exit 0 (AUDIT/aud2-041-lint.log), docs gate re-run after the doc correction. Toolchain in force: Apple Swift 6.4 (swiftlang-6.4.0.34.1), Xcode 27.1, arm64-apple-macosx27.0.0; Package.swift:320 swiftLanguageModes [.v6] with -warnings-as-errors on every target, so the green build is a zero-warning build.
+- **commit:** dc5272952e45c696f086487293cc2ca4c04e9e94
 
 ### AUD2-041
 
 - **discovered-by:** section 5 facade hunt (AUD2-037)
 - **evidence-before:** docs/release-notes-v5.10.md:56 states '`min_p` is accepted but must be zero: the filter does not exist, and refusing beats sampling as if it did'. docs/adding-a-model.md:55-56 repeats that min_p is unsupported. The claim is false at the wire: OpenAIChatRequest (sources/TinyTitanLib/OpenAIModels.swift:1-120) declares no minP field and no `min_p` coding key, and the server decodes request bodies with a plain JSONDecoder() (HTTPServerHandler+Chat.swift:25), whose default behaviour is to ignore unknown keys. OpenAIRequestValidator passes only `effectiveSampling.minP` (OpenAIRequestValidator.swift:300), and every sampled row in GenerationDefaults sets minP = 0 (SamplerTypes.swift:18-21, :33, :52...), so a client-sent min_p of any value never reaches the engine. The engine's own refusal (GenerationConfig.validate, SamplerTypes.swift:179-183) is reachable only from embedder code and is pinned by tests/TinyTitan/Kernels/Sampling/SampleTopK64Tests.swift:24; nothing pins the HTTP path. Reproduction: POST /v1/chat/completions with "min_p":0.1 returns a normal completion sampled as if min_p were 0.
-- **fix-summary:** No fix applied yet.
-- **evidence-after:** Pending.
+- **fix-summary:** Decode min_p in OpenAIChatRequest (field, initializer parameter, `min_p` coding key) and refuse a non-zero value in OpenAIRequestValidator with a 400 unsupported_value, matching the release note. Tests nonZeroMinPIsRefused and zeroMinPIsAccepted pin the refusal and the accepted zero.
+- **evidence-after:** RED: swift test --no-parallel --filter OpenAIValidationTests -> nonZeroMinPIsRefused failed because a min_p=0.1 body was accepted and produced a validated request with minP 0.0 (the silent ignore itself). GREEN after the fix: 44 tests in 3 suites, passed; nonZeroMinPIsRefused pins the 400 unsupported_value and zeroMinPIsAccepted pins that an explicit zero still works. AUDIT gate: cold re-read of the three-file diff (field, coding key, validator guard after frequency_penalty; nil and 0 accepted, any other value refused); the two documents that stated the contract (release notes v5.10:56, adding-a-model.md:55) now agree with the code; "min_p" appears in no other source or doc. Full serial suite on the working tree after both fixes: swift test --no-parallel -> 7 bundles, 1,988 tests, 0 failures, exit 0 (AUDIT/aud2-041-full-tests-final.log; the tree before these two tests measured 1,985). tools/lint.sh -> 18/18 gates ok, exit 0 (AUDIT/aud2-041-lint.log), docs gate re-run after the doc correction. Toolchain in force: Apple Swift 6.4 (swiftlang-6.4.0.34.1), Xcode 27.1, arm64-apple-macosx27.0.0; Package.swift:320 swiftLanguageModes [.v6] with -warnings-as-errors on every target, so the green build is a zero-warning build.
+- **commit:** 9ca9942598d984180c08f7859075af5365bb2395
 
 ## Verification notes
 
