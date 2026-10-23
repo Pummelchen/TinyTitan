@@ -1,6 +1,6 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-049 51/51 | done:37 open:13 blocked:1] DONE — the docs gate now reads every
+`[#AUD2-049 49/51 | done:37 open:13 blocked:1 new:0] DONE — the docs gate now reads every
 tracked audit ledger and counts each from its own task rows, so this audit's
 `AUDIT/ledger.json` is checked instead of resolving nothing (AUD2-049); the CI
 markdown-link step, which had never run over these records, now reads code spans and
@@ -17,7 +17,7 @@ binding (AUD2-005), the --plan conflict (AUD2-008), the host-KV window range
 (AUD2-017), the shared disk budget (AUD2-003), the bounded payload read (AUD2-006)
 and the fail-silent restore (AUD2-009) beneath it stand; the 37 closed records are
 integrated into `main` by operator decision of 2026-10-24, with Phase E unrun, no
-release and 14 records still non-terminal`
+release and 13 records still non-terminal`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
@@ -176,15 +176,15 @@ requirement was worked but its own definition of done is not met.
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
-| §8 | Non-terminal count strictly decreasing at every milestone | Met at this milestone (16 → 15), not across the run: the AUD2-007 pass moved it 15 → 16 because sibling discovery is expected to add records, and that reversal is disclosed in the closing summary rather than netted away | Ledger |
-| §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
+| §8 | Non-terminal count strictly decreasing at every milestone | Met at this milestone (14 → 13), not across the run: sibling discovery moved it 15 → 16 at the AUD2-007 pass, and AUD2-051's filing moved it 14 → 15. Both reversals are disclosed in the closing summary rather than netted away | Ledger |
+| §9 | Ledger is the single source; report generated from it | Partial — `AUDIT/ledger.md` is generated from `ledger.json`; this report's issue notes are maintained by hand, and the `docs` gate checks its ledger counts and commit pointers against the ledger, not the rest of the prose | [ledger](AUDIT/ledger.md) |
 | §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a`, `8acc6f8` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898`/`8acc6f8` each bundle S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 37 DONE, 14 non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED) | Ledger |
+| §11 | Phase C drain to zero | In progress — 37 DONE, 13 non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS), 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038; 14 non-terminal records |
-| §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038 (BLOCKED); 13 non-terminal records |
+| §13 | The `[#id n/total …] STATUS — title` status line | Met — the line carries the brief's `n/total` and `done`/`open`/`blocked`/`new` fields; `new:0` counts records filed since the previous milestone report, and none were filed in this one | Status line at the top |
 
 ### Full current-tree review
 
@@ -334,11 +334,13 @@ that fix at `6335058` and its records commit are the only changes reflected in t
 counts below, and no other finding's status moves.
 
 - **What lands:** the commits this branch carries over `origin/main`
-  (`5bcceee`) — 64 files and 7,729 insertions/deletions measured at `904032c`, plus
-  AUD2-049's fix and this records commit — i.e. the fixes of the
-  **37 DONE** records, the three tooling/CI changes (AUD2-031's merged coverage
-  export, AUD2-051's link checker and AUD2-049's per-ledger docs gate), the new
-  tests, and the audit's own documents
+  (`5bcceee`). At `afcd297` the branch carried 46 commits and, excluding
+  `main`'s own `.github/traffic.json` badge commit, 64 files, 7,729 insertions and
+  350 deletions; `904032c` added this decision section, and `6335058`/`417eabd`
+  add AUD2-049's docs-gate fix and its records. The branch therefore carries the
+  fixes of the **37 DONE** records (36 at `afcd297`), the three tooling/CI changes
+  (AUD2-031's merged coverage export, AUD2-051's link checker and AUD2-049's
+  per-ledger docs gate), the new tests, and the audit's own documents
   (`audit_2310.md`, `AUDIT/*.md`, `AUDIT/ledger.json`, `tools/coverage-export.sh`).
   `main` had moved by one commit the branch does not have
   (`5bcceee`, a `.github/traffic.json` badge refresh); `git merge-tree` predicts no
@@ -346,8 +348,8 @@ counts below, and no other finding's status moves.
 - **What is *not* claimed by the merge:** Phase E never runs. §1b, §11 and §12's
   single final verification on an independent host stays **Not met**, AUD2-038 stays
   **BLOCKED** — an operator directive to ship is not a host, and closing the record
-  on this decision would be the scope-narrowing §0 forbids — and 14 records remain
-  non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS, 1 BLOCKED). §12 completion, Phase D
+  on this decision would be the scope-narrowing §0 forbids — and 13 records remain
+  non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS). §12 completion, Phase D
   convergence and any release remain unclaimed. Nothing in this section should be
   read as "certified on a clean final revision": every measurement below was taken on
   this host, most of them against a dirty tree.
@@ -375,7 +377,7 @@ counts below, and no other finding's status moves.
   are not edited afterwards to make the merge look cleaner than it was.
 - **After the merge:** `audit/2026-10-23` is deleted on the remote and locally, so
   the branch ref stops being the place work continues; the commits stay reachable
-  through `main`'s merge. The 14 non-terminal records continue from
+  through `main`'s merge. The 13 non-terminal records and the one BLOCKED record continue from
   `AUDIT/ledger.json` on `main`, on a fresh branch cut from it. The raw evidence logs
   named above live in the gitignored `AUDIT/` tree and are **not** in the merge — that
   is the still-open *"preserve required raw evidence in a reviewable delivery form"*
@@ -1378,7 +1380,7 @@ systems. Passing local tests never bypasses the final checklist above.
   stderr, and rollback is the documented install-receipt re-issue. Startup
   configuration validation was complete except for the port, which was checked
   only by the bind that runs after the load — filed as AUD2-044 and fixed.
-- **Resolution:** all four passes now have recorded evidence, and each defect
+- **Resolution (`75ef8bd`):** all four passes now have recorded evidence, and each defect
   they found has its own id and disposition: AUD2-040 and AUD2-041 (section 5),
   AUD2-042 and AUD2-043 (section 6), AUD2-044 (L7). Nothing was waived and no
   pass was replaced by a proxy.
@@ -2394,15 +2396,16 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **51 records: 37 DONE, 14 non-terminal (10 OPEN, 2 AUDIT,
-1 PROGRESS, 1 BLOCKED)** — counted from `AUDIT/ledger.json` itself, not restated.
-The count has fallen at every earlier recorded
-milestone — 36 non-terminal at the last snapshot of this section, 21 after the
+The ledger stands at **51 records: 37 DONE, 13 non-terminal (10 OPEN, 2 AUDIT,
+1 PROGRESS), 1 BLOCKED** — counted from `AUDIT/ledger.json` itself, not restated.
+`BLOCKED` is terminal under §8 and is therefore named apart from the non-terminal
+count. The count has fallen at every closure milestone, rising only when new
+records were filed: 36 non-terminal after the early sweep, 21 after the
 rANS and checkpoint batches, 15 before the AUD2-007 pass, which closed one record
-and opened two to land at 16. It fell again at AUD2-013/014 and then once more when
-AUD2-031 closed (`a9f680a` 16 non-terminal → `b719a4a` 15), rose to 16 when
-AUD2-051 was filed (`8bd3695`) and returned to 15 when it closed (`afcd297`), and
-fell to 14 when AUD2-049 closed (`6335058`). That is stated
+and opened two to land at 16. It fell to 15 at the AUD2-013/014 closure
+(`a9f680a`) and to 14 when AUD2-031 closed (`b719a4a`), rose to 15 when
+AUD2-051 was filed (`8bd3695`) and returned to 14 when it closed (`afcd297`), and
+fell to 13 when AUD2-049 closed (`6335058`). That is stated
 rather than smoothed over — §8's invariant is a record moving to a terminal
 status, and one record's closure at one milestone is not convergence. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
@@ -2413,7 +2416,7 @@ this audit has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
 045) or a gap in the audit's own tooling and tests (AUD2-050), an S3
 diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation
 (AUD2-015, 016), a verification record
-(AUD2-019), or the external host (AUD2-038).
+(AUD2-019), or the external host (AUD2-038, the one BLOCKED record).
 
 Completed and evidenced here: recovery and hash verification of the original
 brief, the debug and release builds plus the full serial suite under the required
