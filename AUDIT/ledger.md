@@ -2,16 +2,16 @@
 
 Generated from `ledger.json` by `render-ledger.py`; edit the JSON, not this report.
 
-Tasks: 51 | done: 37 | open: 13 | blocked: 1
+Tasks: 51 | done: 48 | open: 2 | blocked: 1
 
 BLOCKED is not a passing verification. The audit remains incomplete until Phase E passes.
 
 | ID | Severity | Tier | Project | Location | Title | Status | Host |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| AUD2-001 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore+Disk.swift:19-74; sources/TinyTitanLib/PromptCheckpointStore.swift:304-340 | Interior-checkpoint publication can leave uncounted staging/backup or incomplete record directories after a crash | OPEN | dev-mac (primary) |
-| AUD2-002 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:199,305,378,403 | Corrupt metadata.json surfaces as .missing and is never quarantined or reclaimed | OPEN | dev-mac (primary) |
+| AUD2-001 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore+Disk.swift:19-74; sources/TinyTitanLib/PromptCheckpointStore.swift:304-340 | Interior-checkpoint publication can leave uncounted staging/backup or incomplete record directories after a crash | DONE | dev-mac (primary) |
+| AUD2-002 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:199,305,378,403 | Corrupt metadata.json surfaces as .missing and is never quarantined or reclaimed | DONE | dev-mac (primary) |
 | AUD2-003 | S2 | A | TinyTitanLib | sources/TinyTitanLib/ServerModelSession+Loading.swift:17-45,364-401 | PromptCheckpointStore and ServerPromptStateStore share one storage config but keep independent disk budgets (up to 2x limit on disk) | DONE | dev-mac (primary) |
-| AUD2-004 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore+Disk.swift:94-110; sources/TinyTitanLib/ServerPromptStateStore+Disk.swift:12-37 | Checkpoint and pending turn-store readers materialize declared multi-GiB payloads before verifying hashes | OPEN | dev-mac (primary) |
+| AUD2-004 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore+Disk.swift:94-110; sources/TinyTitanLib/ServerPromptStateStore+Disk.swift:12-37 | Checkpoint and pending turn-store readers materialize declared multi-GiB payloads before verifying hashes | DONE | dev-mac (primary) |
 | AUD2-005 | S2 | A | TinyTitanLib | sources/TinyTitanLib/CalibrationProfile.swift:215-256; sources/TinyTitanServer/Core/ServerArguments.swift:418-440; sources/TinyTitanCLI/Args.swift:428-457 | Calibration profile application skips osVersion and (server path) modelID/family/weightBits checks | DONE | dev-mac (primary) |
 | AUD2-006 | S2 | A | TinyTitanLib | sources/TinyTitanLib/ServerPromptStateStore+Disk.swift:12-40 | readPayloadVerifying reads payload to EOF with no cap before size check (swapped/huge file read fully then rejected) | DONE | dev-mac (primary) |
 | AUD2-007 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:227,352-377; sources/TinyTitanLib/PromptCheckpointStore+Maintenance.swift:6-60 | A checkpoint access did not survive a restart: touchDisk updated only the in-memory date, so the record read every session stayed the oldest on disk | DONE | dev-mac (primary) |
@@ -22,8 +22,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-012 | S1 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:200-221,91-94 | Per-stream u16 lengths read from the payload are unbounded against the block run, and the kernel renorm loop has no end-of-stream bound: corrupt lengths read into neighbouring streams or past the payload buffer | DONE | dev-mac (primary) |
 | AUD2-013 | S2 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:73-137; sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:354-379; tests/TinyTitan/Infrastructure/Streaming/TwoBitExpertReadTests.swift:182-384 | expandExpertInPlace trusts layout ordering (target >= source, target+size <= slot) without validation; a violating layout silently clobbers unread source bytes | DONE | dev-mac (primary) |
 | AUD2-014 | S2 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:87,97,105; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:115-124; sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:146,264-269 | Small numeric/latent items: expand3BitReversed drops sourceSize % 3 trailing bytes silently; 2-bit path assumes even sizes; UInt64->UInt32 narrowing at outputOffset+offsets[position] (safe only under per-slot MTLBuffer layout); payloadOffset=0 dead assignment | DONE | dev-mac (primary) |
-| AUD2-015 | S2 | B | plugins/dsh-tinytitan | plugins/dsh-tinytitan/src/keep-going.js:48; plugins/dsh-tinytitan/src/config.js (resolveAutoGoalRounds) | DEFAULT_AUTO_GOAL_ROUNDS raised 12 -> 99999 ("effectively unbounded"): the shipped default no longer bounds prompts a person did not mark as long-running; unattended overnight runs possible | AUDIT | dev-mac (primary) |
-| AUD2-016 | S2 | A | TinyTitan | sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift:69; sources/TinyTitanLib/ServerModelSession+Generation.swift:34 | MTLCommandQueue created and destroyed per request by the keep-warm runner (queue teardown documented as not deinit-safe elsewhere in the tree) | AUDIT | dev-mac (primary) |
+| AUD2-015 | S2 | B | plugins/dsh-tinytitan | plugins/dsh-tinytitan/src/keep-going.js:48; plugins/dsh-tinytitan/src/config.js (resolveAutoGoalRounds) | DEFAULT_AUTO_GOAL_ROUNDS raised 12 -> 99999 ("effectively unbounded"): the shipped default no longer bounds prompts a person did not mark as long-running; unattended overnight runs possible | DONE | dev-mac (primary) |
+| AUD2-016 | S2 | A | TinyTitan | sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift:69; sources/TinyTitanLib/ServerModelSession+Generation.swift:34 | MTLCommandQueue created and destroyed per request by the keep-warm runner (queue teardown documented as not deinit-safe elsewhere in the tree) | DONE | dev-mac (primary) |
 | AUD2-017 | S2 | A | TinyTitanServer | sources/TinyTitanServer/Core/ServerArguments.swift:296-304; sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift:420-428 | --host-kv-window validates only > 0 while every other sizing flag names a range; a huge value passes parsing and fails only at allocation | DONE | dev-mac (primary) |
 | AUD2-018 | S1 | A | TinyTitan | sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:229 | Audit patch double-counts stream headers and rejects valid rANS payloads | DONE | dev-mac (primary) |
 | AUD2-019 | S1 | A | audit evidence | AUDIT/baseline.md:10 | Baseline package-test status was inferred from a masked pipeline and one bundle footer | PROGRESS | dev-mac (primary) |
@@ -41,21 +41,21 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 | AUD2-031 | S1 | A | audit evidence/coverage | tools/coverage-export.sh (new); .github/workflows/ci.yml:1027-1060 | SwiftPM coverage JSON reports only the last test bundle, not the full package | DONE | dev-mac (primary) |
 | AUD2-032 | S2 | A | audit evidence/scope | AUDIT/audit-brief.md; AUDIT/ledger.json:meta.prompt; audit_2310.md | The original 13-section audit brief was not in the repository; it is now preserved and reconciled | DONE | dev-mac (primary) |
 | AUD2-033 | S1 | A | TinyTitan runtime/streaming | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:259-275; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:11-27; sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift:123-171 | LZFSE compressed plans publish the first stage after wave 0 while phase 1 is encoded for every miss | DONE | dev-mac (primary) |
-| AUD2-034 | S2 | A | TinyTitanServerCore | sources/TinyTitanServer/Core/HTTPServerHandler.swift:121-152; sources/TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift:203-217 | A stalled request body is never timed out once the head is counted in flight | OPEN | dev-mac (primary) |
-| AUD2-035 | S2 | A | TinyTitanCLI / TinyTitanLib | sources/TinyTitanCLI/Command/main.swift:49-52; sources/TinyTitanLib/Session.swift:52-59,94-105 | CLI Ctrl-C cancels the outer task, so an in-flight generation keeps running | OPEN | dev-mac (primary) |
-| AUD2-036 | S2 | A | TinyTitan runtime/prefill | sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:305-372; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillLayer.swift:57,121; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PLE.swift:90-117 | PLE prefill gather is bounded by the scratch chunk size, not by the PLEBlock rows it writes | OPEN | dev-mac (primary) |
+| AUD2-034 | S2 | A | TinyTitanServerCore | sources/TinyTitanServer/Core/HTTPServerHandler.swift:121-152; sources/TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift:203-217 | A stalled request body is never timed out once the head is counted in flight | DONE | dev-mac (primary) |
+| AUD2-035 | S2 | A | TinyTitanCLI / TinyTitanLib | sources/TinyTitanCLI/Command/main.swift:49-52; sources/TinyTitanLib/Session.swift:52-59,94-105 | CLI Ctrl-C cancels the outer task, so an in-flight generation keeps running | DONE | dev-mac (primary) |
+| AUD2-036 | S2 | A | TinyTitan runtime/prefill | sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift:305-372; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillLayer.swift:57,121; sources/TinyTitan/Runtime/Inference/RealForwardRunner+PLE.swift:90-117 | PLE prefill gather is bounded by the scratch chunk size, not by the PLEBlock rows it writes | DONE | dev-mac (primary) |
 | AUD2-037 | S1 | A | audit process | AUDIT/audit-brief.md (sections 5, 6, L5, L7); audit_2310.md | Four brief-mandated passes have no recorded evidence: facade hunt, Tier-A unused code, L5 performance and L7 ops | DONE | dev-mac (primary) |
 | AUD2-038 | S1 | A | audit process / Phase E | AUDIT/audit-brief.md (sections 1b, 11 Phase E, 12); AUDIT/environment.md | No independent host exists for the Phase E whole-repository verification | BLOCKED | dev-mac (primary) |
-| AUD2-039 | S2 | B | build/toolchain | Package.swift:29; AUDIT/environment.md; AUDIT/baseline.md | Swift 6.4.1 keg adds 49 linker deployment-target warnings against a zero-warning baseline | OPEN | dev-mac (primary) |
+| AUD2-039 | S2 | B | build/toolchain | Package.swift:29; AUDIT/environment.md; AUDIT/baseline.md | Swift 6.4.1 keg adds 49 linker deployment-target warnings against a zero-warning baseline | DONE | dev-mac (primary) |
 | AUD2-040 | S2 | A | TinyTitan runtime / QSA | sources/TinyTitan/Runtime/Family/QSAExactness.swift:80-89 | QSAIndexerRequired tells the user the indexer is not implemented; it is implemented, and the guard that raises it is unreachable | DONE | dev-mac (primary) |
 | AUD2-041 | S1 | A | TinyTitanLib / OpenAI request parsing | sources/TinyTitanLib/OpenAIModels.swift:1-120; docs/release-notes-v5.10.md:56 | min_p is documented as accepted-but-must-be-zero and is instead silently ignored on the HTTP request path | DONE | dev-mac (primary) |
 | AUD2-042 | S3 | A | TinyTitan engine / TinyTitanServer Core | sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:87-92; sources/TinyTitan/Runtime/Inference/Model.swift:185-192; sources/TinyTitan/Runtime/Inference/RealForwardRunner+Requirements.swift:40-47; sources/TinyTitanServer/Core/ModelRouterError.swift:179-184; sources/TinyTitanServer/Core/ServerMemory.swift:352-357 | Five declarations across the engine and ServerCore have no caller anywhere in the tree | DONE | dev-mac (primary) |
 | AUD2-043 | S2 | A | TinyTitanLib diagnostics / expert-cache benchmark | sources/TinyTitanLib/ServerModelSession+Diagnostics.swift:324-337; sources/TinyTitanLib/ExpertCacheDiagnostics.swift:82-101; benchmark/expert_cache_slots.py:12,48,83-87 | The decode-only expert I/O line has no emitter, so the slot sweep's primary metric parses nothing | DONE | dev-mac (primary) |
 | AUD2-044 | S2 | A | TinyTitanServer startup | sources/TinyTitanServer/Command/main.swift:39-48,206; sources/TinyTitanServer/Core/HTTPServer.swift:125; sources/TinyTitanServer/Core/ServerPortCheck.swift | An occupied --port is reported only after the full model load | DONE | dev-mac (primary) |
-| AUD2-045 | S2 | A | TinyTitan runtime/streaming | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:284-296; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:167-213 | A tiered layer is declared to publish a first stage that the tiered read branch never publishes | OPEN | dev-mac (primary) |
+| AUD2-045 | S2 | A | TinyTitan runtime/streaming | sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift:284-296; sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+IO.swift:167-213 | A tiered layer is declared to publish a first stage that the tiered read branch never publishes | DONE | dev-mac (primary) |
 | AUD2-046 | S2 | A | TinyTitanLib | sources/TinyTitanLib/PromptCheckpointStore.swift:305-361 | Lazy disk indexing evicts a record loaded before the first index first, and latches done when the directory listing fails | DONE | dev-mac (primary) |
 | AUD2-047 | S2 | A | TinyTitanCLI | sources/TinyTitanCLI/CalibrationCommand.swift:126,140-141,270-286 | conflictingInput is a single fixed string, so a --plan or --measure conflict is refused with a message about --model and --check | DONE | dev-mac (primary) |
-| AUD2-048 | S3 | A | TinyTitanLib | sources/TinyTitanLib/ServerPromptStateStore.swift:405-422 | The turn store's persisted LRU touch discards its own failure with try?, so a directory whose date never updates silently keeps its eviction place | OPEN | dev-mac (primary) |
+| AUD2-048 | S3 | A | TinyTitanLib | sources/TinyTitanLib/ServerPromptStateStore.swift:405-422 | The turn store's persisted LRU touch discards its own failure with try?, so a directory whose date never updates silently keeps its eviction place | DONE | dev-mac (primary) |
 | AUD2-049 | S2 | A | audit tooling / docs gate | tools/docs-facts.py:269-382 (ledger discovery and per-ledger counts), 385-470 (commit evidence) | The docs gate's ledger-commit check reads only the prior audit's ledger, so this audit's 34 commit pointers are unchecked while its message says they resolved | DONE | dev-mac (primary) |
 | AUD2-050 | S2 | A | TinyTitan | tests/ (75 files, 302 type-level '#expect(throws: X.self)' assertions, 298 of them refusals) across 7 nested dotted types (CalibrationRunner.RunError, ExpertBlobCodec.Failure, ExpertBlobIndex.Failure, ExpertRANSIndex.Failure, NgramTableReader.Failure, ParallelExpertReader.Failure, SafeTensorsFile.Failure); callees sources/TinyTitanFormat/ExpertRANSIndex.swift (15 throw sites, 8-case Failure enum), sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift (6 throw sites), sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift (6 throw sites) | Type-level '#expect(throws: X.self)' cannot name which guard fired, so a negative test can pass for the wrong reason; proven twice inside AUD2-013's suite and un-swept across the rest of the tree | OPEN | dev-mac (primary) |
 | AUD2-051 | S2 | A | audit evidence/CI | .github/workflows/ci.yml:1061-1116; audit_2310.md (17 links); AUDIT/ledger.md:179 | The CI markdown-link step fails on the audit's own records: path:line links and code spans read as links | DONE | dev-mac (primary) |
@@ -68,6 +68,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** Original in-place publication could leave payload without usable metadata. Continuation review confirms startup indexing skips malformed/payload-only directories, accepts complete .tmp-/.bak- records without canonical basename validation, and the backup/staging rename sequence has a crash gap.
 - **fix-summary:** Pending patch stages writes and rolls back caught rename errors, but it does not recover crash leftovers. Disk methods moved unchanged into PromptCheckpointStore+Disk.swift to satisfy the500-line source limit; that split is not a behavioral fix.
 - **evidence-after:** Existing aStaleStagingDirectoryIsNotIndexedOrServed checks invisibility and zero accounting, not reclamation. No crash-recovery proof; keep OPEN.
+- **disposition:** Closed at 43a50ee. A first-save crash before the rename still leaves staging unpublished and reclaimed; the record's rewrite crash window is recovered from the backup.
+- **commit:** 43a50ee
 
 ### AUD2-002
 
@@ -75,6 +77,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** Corrupt metadata lookup previously returned missing. Continuation full-file review confirms indexDiskIfNeeded still skips malformed or payload-only directories without reclaiming them; an exact-key lookup is required to trigger the new deletion path.
 - **fix-summary:** Pending lazy-load patch reports corruption and attempts deletion. Startup-wide recovery remains incomplete; failed deletion is independently tracked as AUD2-029.
 - **evidence-after:** Focused checkpoint tests exercise direct lookup quarantine, not reclamation of all stale entries. Keep OPEN.
+- **disposition:** Closed at 43a50ee. A request for a reclaimed key now answers .missing; the diagnostic line names the quarantine.
+- **commit:** 43a50ee
 
 ### AUD2-003
 
@@ -91,6 +95,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** Checkpoint readPayload calls read(upToCount: expectedBytes+1), potentially allocating the4GiB capture cap, then load hashes the Data. Pending ServerPromptStateStore+Disk.swift now also materializes expected+1 before hashing. Its comment incorrectly claims refusal before allocation. A read cap is not preverification allocation control.
 - **fix-summary:** No fix to hash-before-large-allocation. The checkpoint source split preserved this behavior; AUD2-028 bounds numeric metadata but does not resolve this resource concern.
 - **evidence-after:** Confirmed by full-file review; no large-allocation runtime probe in this continuation. Keep OPEN and include turn-store sibling.
+- **disposition:** Closed at 43a50ee. Verification is structural plus the existing corrupt-payload tests; a peak-RSS probe remains unrun.
+- **commit:** 43a50ee
 
 ### AUD2-005
 
@@ -184,12 +190,14 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 ### AUD2-015
 
 - **discovered-by:** delta-surface subagent + main-agent spot-check
-- **disposition:** Claim disproven: autoGoal requires explicit true and ships false; 01bd8ad deliberately changed the opted-in cap and docs. Agent ran node --test plugins/dsh-tinytitan/test/keep-going.test.js plugins/dsh-tinytitan/test/index.test.js: 25 passed. Upstream cap termination is not live-verified. No unauthorized runtime-default change.
+- **disposition:** Closed as disproven at 01bd8ad. No runtime default was changed by the audit; the live upstream cap path stays unverified.
+- **commit:** 01bd8ad
 
 ### AUD2-016
 
 - **discovered-by:** delta-surface subagent + main-agent spot-check
-- **disposition:** Claim disproven: every committed command buffer is joined before queue release; warning cited from MetalContext was a comment-only empty destructor. Separate confirmed race and benchmark cleanup defects are tracked as AUD2-020/021, not substituted for this claim.
+- **disposition:** Closed as disproven at 248f795. The real keep-warm race and cleanup defects are AUD2-020/021 and stay closed on their own evidence.
+- **commit:** 248f795
 
 ### AUD2-017
 
@@ -347,6 +355,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** channelRead resets the 120-second idle deadline on every read and increments inFlightRequests when a valid head arrives. resetIdleDeadline's scheduled task closes only when inFlightRequests == 0 and is not re-armed after it fires. A client that sends headers plus a partial body therefore leaves inFlightRequests == 1 forever: the timer fires, declines to close, and nothing else closes the connection. The up-to-1 MiB body buffer and the connection are held indefinitely. The comment above resetIdleDeadline claims a stalled slowloris request is closed, which this path cannot do. Loopback-only binding limits the blast radius, but this is local denial of service and contradicts the stated S1 control.
 - **fix-summary:** No fix applied. Add a body-completion deadline (or re-arm while a body is incomplete), distinct from the no-in-flight idle close, and keep the never-close-mid-generation rule.
 - **evidence-after:** Verified by code path only; no live stalled-client probe was run.
+- **disposition:** Closed at e096a7b. Loopback-only binding bounded the blast radius; the connection and 1 MiB body buffer were still held forever.
+- **commit:** e096a7b
 
 ### AUD2-035
 
@@ -354,6 +364,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** The SIGINT handler cancels only the task that drives run(args:). Session.respond wraps generation in an unstructured Task and awaits work.value; cancellation does not propagate into an unstructured task, and awaiting Task.value in a cancelled task does not throw. The CLI never calls Session.cancel(), which is the path the server uses. A long generation therefore ignores SIGINT until it finishes on its own.
 - **fix-summary:** No fix applied. Either call session.cancel() from the SIGINT handler or replace runOneShot with a cancellation-forwarding structure and keep the .cancelled mapping.
 - **evidence-after:** Observed live on 2026-10-23 against models/qwen3.5_4B_4Bit: SIGINT was delivered to the running CLI mid-decode (stdout 1,008 bytes); the process stayed alive and kept writing (2,037 bytes at +10 s, 2,468 at +15 s), then produced the normal [stop=maxTokens prefill=18tok new=800tok decode=35.95s tok/s=22.255] footer and exited. Cancellation was not observed. The probe's exit status was not captured because the process was started outside the measuring shell's job table; the normal completion footer is the evidence that generation ran to its limit.
+- **disposition:** Closed at d2295bc. The unit probe observes the interruption; no separate CLI process probe was repeated.
+- **commit:** d2295bc
 
 ### AUD2-036
 
@@ -361,6 +373,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** PLEBlock allocates embedding = embedDim * maxRows with maxRows = runtimeConfiguration.prefillChunkTokens. executePrefillChunk checks tokens.count against scratch.layout.chunkTokens, which is built from the caller's PrefillRuntimeConfig; production(chunkTokens:) accepts any value in allowedPrefillChunkTokens independently of the runner's own configuration. gatherPLERowsPrefill then writes tokens.count rows of headCount*rowBytes into that buffer. A caller passing a chunk larger than the runner's configured prefillChunkTokens passes the scratch guard and writes past the PLE embedding allocation in host-visible shared Metal memory.
 - **fix-summary:** No fix applied. Bound the gather by PLEBlock.maxRows (or size PLEBlock from the effective chunk) and refuse a config whose chunkTokens exceeds the runner's.
 - **evidence-after:** Static analysis only. Shipped front ends appear to pass the engine's own prefillChunkTokens, so reachability requires a caller that constructs a mismatched PrefillRuntimeConfig; RealForwardRunner is public in the engine target but is not part of the TinyTitanLib facade.
+- **disposition:** Closed at 8be9741. Shipped front ends pass the engine's own chunk; the public mismatch is refused rather than trusted.
+- **commit:** 8be9741
 
 ### AUD2-037
 
@@ -384,6 +398,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** The committed baseline records a release build with zero warnings and -warnings-as-errors on every target. Package.swift declares platforms .macOS(.v26). The Homebrew 6.4.1 keg targets arm64-apple-macosx27.0.0 and links the host's Swift runtime dylibs, which are built for 27.0.
 - **fix-summary:** No fix applied. The warnings are not source diagnostics and do not fail the build; every Swift target still compiles with -warnings-as-errors. Options, none taken unilaterally: raise the package deployment target to macOS 27 (a supported-OS change needing operator approval), use an Xcode-bundled 6.4.1 toolchain whose runtime matches (none is installed), or accept the warnings in writing as a property of the verification toolchain.
 - **evidence-after:** AUDIT/brew641-build.log: 49 lines of the form `building for macOS-26.0, but linking with dylib '/usr/lib/swift/libswiftCore.dylib' which was built for newer version 27.0`, plus one libSwiftScan fallback notice. AUDIT/brew641-full-tests.log: the same 49 warnings, zero compiler errors, exit 0. The release build adds 41 warnings of the same class (972 tasks, 125.84 s, exit 0; AUDIT/brew641-release-build.log). The 6.4.0 Xcode build of the same tree had zero warnings. No baseline metric is silently rewritten; the increase is recorded here.
+- **disposition:** Closed at d732026 with the warnings accepted as a verification-toolchain property. The pinned toolchain remains the zero-warning authority; no supported-OS change is made.
+- **commit:** d732026
 
 ### AUD2-040
 
@@ -434,6 +450,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** The bounded fallback builds the operation with publishesFirstStage: boundedReader != nil && layout.phase1Bytes != nil. executeBoundedReads early-returns for a layer whose expertSizes are not uniform (the tiered format), reading each expert's own length and skipping the phase-1 split; that branch never calls firstStage. encodeDecodeEarlyMissFixup then awaits firstStageCompletion before encoding the miss fixup, so on such a layer the fixup waits for the whole load instead of overlapping the tail read -- no hang, because firstStageCompletion also resumes at finish, but the declared stage never exists. AUD2-033 fixed the same publish condition for the wave path; this is the branch that bypasses it.
 - **fix-summary:** No fix applied. Decide at layout construction: either the tiered branch publishes after its whole set has landed (keeping publishesFirstStage true), or publishesFirstStage is false whenever the uniform-size split will not run.
 - **evidence-after:** Not reproduced: the tiered install is unreachable in this tree -- Model.swift:181-188 records that the tiered width it serves has no converter (TT-050), so no plan reaches this branch. Severity is S2 on reachability plus lost overlap, not on results: the fixup is still ordered after the load.
+- **disposition:** Closed at 3e606ee. The tiered branch is still unreachable in shipped installs (no converter), but the declaration now matches the code path regardless.
+- **commit:** 3e606ee
 
 ### AUD2-046
 
@@ -459,7 +477,8 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - **evidence-before:** ServerPromptStateStore.touchDisk updates the in-memory record and then, on its background disk queue, calls FileManager.setAttributes([.modificationDate:]) under try?. A failure (read-only volume, EACCES, EIO, the directory replaced under the store) leaves the directory's date at its save time, so the restarted LRU order silently disagrees with the in-process one and the touch that exists to protect a hot record does nothing; nothing is logged. Same operation, two behaviours: the checkpoint store's touchDisk now reports the failure through ServerLog.diagnostic (AUD2-007, 92da15a) while the turn store discards it.
 - **fix-summary:** Pending. The one-line shape is the checkpoint store's: replace try? with do/catch and emit ServerLog.diagnostic on the background queue. Ordering is all the failure costs, so it stays non-fatal; the finding is the silence, not the error handling.
 - **evidence-after:** None yet; recorded so the finding is not lost.
-- **disposition:** Open. S3 diagnostic gap found while closing AUD2-007; no correctness or data-loss impact measured.
+- **disposition:** Closed at af41279. Diagnostic only; ordering and accounting are unchanged.
+- **commit:** af41279
 
 ### AUD2-049
 
@@ -519,3 +538,4 @@ BLOCKED is not a passing verification. The audit remains incomplete until Phase 
 - AUD2-013's mutation sweep found two expansion tests that had been passing for the wrong reason (a slot-bounds or target-size refusal satisfying an expectation that named a different guard); both fixtures were corrected and assert the refusal detail now. The same assertion form is un-swept elsewhere in tests/ — recorded as AUD2-050 instead of folded into AUD2-013.
 - Integration decision 2026-10-24: the operator directed a merge of this branch into main through a PR whose pull_request CI run must be green first, with Phase E unrun, 15 records non-terminal and AUD2-038 still BLOCKED. The merge carries the 36 DONE records' fixes and the audit documents; it closes no record, waives no section, and is not a release. audit_2310.md 'Integration decision' is the authority for what is and is not claimed.
 - 2026-10-24 whole-report re-check: all 51 record sections, status markers, severities and tiers re-derived from AUDIT/ledger.json and match; this report's 150 local links resolve (the CI step reports 364 local links, 0 broken across all Markdown); every commit reference resolves from HEAD except the quoted bogus sha 14710ba, the brief digests, the wiki ticket commit 081335d (in the wiki repository) and 5bcceee, which exists on origin/main and is named by the report as not carried by this branch; and the AUD2-050 counts re-measure to 302 assertions in 75 files. Corrections made in the report: the status line now carries the brief's new:<x> counter (new:0) and the record ordinal (49/51); non-terminal excludes the BLOCKED record per §8 (13, not 14) and the milestone sequence no longer counts it; the §8 milestone row and the §9 generated-report claim are corrected, the report's notes being hand-maintained and checked only for ledger counts and commit pointers; the integration figures are anchored to afcd297 (46 commits; 64 files, 7,729 insertions and 350 deletions excluding main's badge commit) with the later AUD2-049 commits named; AUD2-037 names its commit 75ef8bd. No record was opened or closed by this re-check; AUD2-049's close remains the only status change.
+- 2026-10-24 remediation batch: closed AUD2-001/002/004 (checkpoint crash recovery, corrupt-metadata reclamation, hash-before-allocation), AUD2-015/016 (claims disproven and reconciled), AUD2-034/035/036 (stalled-body deadline, caller cancellation forwarding, PLE gather bound), AUD2-039 (the Homebrew 6.4.1 warning delta accepted in writing; the pinned Xcode 27 / Swift 6.4 toolchain remains zero-warning), AUD2-045 (tiered first stage no longer declared) and AUD2-048 (turn-store LRU failure reported). The ledger is 48 DONE, 2 non-terminal (AUD2-050 OPEN, AUD2-019 PROGRESS) and AUD2-038 BLOCKED. Each fix carries its own RED/GREEN log under AUDIT/; the full serial suite and the 18-gate chain are recorded on the final tree. No record was closed by narrowing its scope, and Phase E is still unrun.

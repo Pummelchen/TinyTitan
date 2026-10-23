@@ -1,23 +1,17 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-049 49/51 | done:37 open:13 blocked:1 new:0] DONE — the docs gate now reads every
-tracked audit ledger and counts each from its own task rows, so this audit's
-`AUDIT/ledger.json` is checked instead of resolving nothing (AUD2-049); the CI
-markdown-link step, which had never run over these records, now reads code spans and
-fences as literal text and resolves the 17 citations it used to fail on (AUD2-051);
-the coverage
-artifact CI uploads is built from the manifest's seven test bundles and checked for
-scope, so it no longer reads as package-wide while naming one bundle (AUD2-031);
-every expansion-layout guard
-now has a test that names it, proved by disabling the guard one at a time
-(AUD2-013), and the rANS offset narrowing is a documented invariant rather than an
-unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
-conflict refusal that names its own flags (AUD2-047), the calibration identity
-binding (AUD2-005), the --plan conflict (AUD2-008), the host-KV window range
-(AUD2-017), the shared disk budget (AUD2-003), the bounded payload read (AUD2-006)
-and the fail-silent restore (AUD2-009) beneath it stand; the 37 closed records are
-integrated into `main` by operator decision of 2026-10-24, with Phase E unrun, no
-release and 13 records still non-terminal`
+`[#AUD2-048 48/51 | done:48 open:2 blocked:1 new:0] DONE — the remaining product
+findings are fixed: the docs gate counts each ledger from its own rows (AUD2-049),
+the checkpoint store settles crash debris and verifies before allocating
+(AUD2-001/002/004), the turn store reports a failed LRU touch (AUD2-048), a tiered
+layer no longer declares a first stage it never publishes (AUD2-045), a stalled
+request body is closed (AUD2-034), CLI caller cancellation reaches the generation
+(AUD2-035), the PLE gather is bounded by its block (AUD2-036), and the two
+disproven claims are closed (AUD2-015/016) with the 6.4.1 warning delta accepted
+in writing (AUD2-039); the earlier docs, CI, coverage and remediation records
+stand. Phase E remains unrun: the 48 closed records are integrated into `main` by
+operator decision of 2026-10-24, with no release, 2 non-terminal records and
+AUD2-038 BLOCKED`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
@@ -27,17 +21,22 @@ the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
 prompt-cache disk budget (AUD2-003), the two reader/restore corrections
 (AUD2-006, 009), the persisted checkpoint access (AUD2-007), the two expansion
 geometry records (AUD2-013, AUD2-014), the coverage-artifact scope record
-(AUD2-031), the audit's own markdown-link checker (AUD2-051) and the docs gate's
-per-ledger ledger check (AUD2-049) are closed with
+(AUD2-031), the audit's own markdown-link checker (AUD2-051), the docs gate's
+per-ledger ledger check (AUD2-049), the checkpoint recovery/hash batch
+(AUD2-001/002/004), the disproven claims (AUD2-015/016), the server/CLI/PLE
+trio (AUD2-034/035/036), the accepted 6.4.1 warning delta (AUD2-039), the tiered
+first-stage correction (AUD2-045) and the turn-store diagnostic (AUD2-048) are
+closed with
 remediation commits. The merge directed on 2026-10-24 carries them into `main`
 through a CI-gated PR (*Integration decision* below); carrying them is not the same
 as certifying them — none is released, and none is certified on a clean final
-revision, because Phase E's independent-host run did not happen. AUD2-048 (a
-diagnostic asymmetry found while closing AUD2-007) and AUD2-050 (a type-level
+revision, because Phase E's independent-host run did not happen. AUD2-050 (a
+type-level
 `#expect(throws:)`
 cannot say which guard refused, so a negative test can pass for the wrong reason —
 found twice inside AUD2-013's own suite and un-swept across the rest of `tests/`)
-are opened in the same pass.
+remains open as a measured candidate pool, and AUD2-019 remains PROGRESS for the
+full current-tree Tier A review. AUD2-038 stays BLOCKED on the independent host.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -176,14 +175,14 @@ requirement was worked but its own definition of done is not met.
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
-| §8 | Non-terminal count strictly decreasing at every milestone | Met at this milestone (14 → 13), not across the run: sibling discovery moved it 15 → 16 at the AUD2-007 pass, and AUD2-051's filing moved it 14 → 15. Both reversals are disclosed in the closing summary rather than netted away | Ledger |
+| §8 | Non-terminal count strictly decreasing at every milestone | Met at this milestone (13 → 2), not across the run: sibling discovery moved it 15 → 16 at the AUD2-007 pass, and AUD2-051's filing moved it 14 → 15. Both reversals are disclosed in the closing summary rather than netted away | Ledger |
 | §9 | Ledger is the single source; report generated from it | Partial — `AUDIT/ledger.md` is generated from `ledger.json`; this report's issue notes are maintained by hand, and the `docs` gate checks its ledger counts and commit pointers against the ledger, not the rest of the prose | [ledger](AUDIT/ledger.md) |
 | §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a`, `8acc6f8` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898`/`8acc6f8` each bundle S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 37 DONE, 13 non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS), 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 48 DONE, 2 non-terminal (1 OPEN, 1 PROGRESS), 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038 (BLOCKED); 13 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** — and integration was directed anyway; see *Integration decision* | AUD2-038 (BLOCKED); 2 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met — the line carries the brief's `n/total` and `done`/`open`/`blocked`/`new` fields; `new:0` counts records filed since the previous milestone report, and none were filed in this one | Status line at the top |
 
 ### Full current-tree review
@@ -235,16 +234,20 @@ stays unchecked and the full current-tree review remains incomplete.
 
 ### Remediation and regression proof
 
-- [ ] Resolve the checkpoint records still open: crash leftovers and uncounted
+- [x] Resolve the checkpoint records: crash leftovers and uncounted
   staging/backup directories (AUD2-001), corrupt metadata that is never
   reclaimed at startup (AUD2-002) and allocation before integrity
-  verification (AUD2-004). The shared disk budget (AUD2-003), the bounded
+  verification (AUD2-004) now close at `43a50ee` — startup validates and
+  reclaims, restores a valid backup, and the payload hash is streamed before
+  materialization. Seven startup tests and the 40-test checkpoint suite are
+  green. The shared disk budget (AUD2-003), the bounded
   turn-store read (AUD2-006), the fail-silent streamed restore (AUD2-009), failed
   deletion accounting (AUD2-029) and the persisted eviction order (AUD2-007) are
-  closed with commits on this branch.
-- [ ] Sweep and close the S3 diagnostic asymmetry the AUD2-007 fix exposed in the
-  turn store (AUD2-048): the same attribute write, reported by one store and
-  discarded with `try?` by the other.
+  closed with their own commits.
+- [x] Sweep and close the S3 diagnostic asymmetry the AUD2-007 fix exposed in the
+  turn store (AUD2-048): the same attribute write now reports its failure through
+  `ServerLog.diagnostic` on the disk queue, closing at `af41279` with a
+  `UF_IMMUTABLE` RED/GREEN pair.
 - [x] Extend the `docs` gate's ledger-commit check to `AUDIT/ledger.json` and test
   it against a rotted pointer (AUD2-049): the gate now discovers every tracked
   `*ledger.json`, counts each from its own task rows rather than summing two
@@ -329,18 +332,20 @@ stays unchecked and the full current-tree review remains incomplete.
 the other branch"*, then, when the conflict with the audit's own rule was put to
 them: merge **through a PR, after its CI run**; **delete** `audit/2026-10-23` on the
 remote and locally once the merge lands; and **write the override down** rather than
-merge silently. This section is that record. It was recorded before AUD2-049 closed;
-that fix at `6335058` and its records commit are the only changes reflected in the
-counts below, and no other finding's status moves.
+merge silently. This section is that record. It was recorded before the docs-gate
+and remediation closes; those fixes are reflected in the counts below, and no other
+finding's status moves.
 
 - **What lands:** the commits this branch carries over `origin/main`
   (`5bcceee`). At `afcd297` the branch carried 46 commits and, excluding
   `main`'s own `.github/traffic.json` badge commit, 64 files, 7,729 insertions and
   350 deletions; `904032c` added this decision section, and `6335058`/`417eabd`
-  add AUD2-049's docs-gate fix and its records. The branch therefore carries the
-  fixes of the **37 DONE** records (36 at `afcd297`), the three tooling/CI changes
-  (AUD2-031's merged coverage export, AUD2-051's link checker and AUD2-049's
-  per-ledger docs gate), the new tests, and the audit's own documents
+  add AUD2-049's docs-gate fix and its records; the eleven remediation fix commits
+  named in the ledger (AUD2-001/002/004, 015/016, 034/035/036, 039, 045, 048) add
+  the rest. The branch therefore carries the fixes of the **48 DONE** records
+  (36 at `afcd297`), the three tooling/CI changes (AUD2-031's merged coverage
+  export, AUD2-051's link checker and AUD2-049's per-ledger docs gate), the new
+  tests, and the audit's own documents
   (`audit_2310.md`, `AUDIT/*.md`, `AUDIT/ledger.json`, `tools/coverage-export.sh`).
   `main` had moved by one commit the branch does not have
   (`5bcceee`, a `.github/traffic.json` badge refresh); `git merge-tree` predicts no
@@ -348,8 +353,8 @@ counts below, and no other finding's status moves.
 - **What is *not* claimed by the merge:** Phase E never runs. §1b, §11 and §12's
   single final verification on an independent host stays **Not met**, AUD2-038 stays
   **BLOCKED** — an operator directive to ship is not a host, and closing the record
-  on this decision would be the scope-narrowing §0 forbids — and 13 records remain
-  non-terminal (10 OPEN, 2 AUDIT, 1 PROGRESS). §12 completion, Phase D
+  on this decision would be the scope-narrowing §0 forbids — and 2 records remain
+  non-terminal (1 OPEN, 1 PROGRESS). §12 completion, Phase D
   convergence and any release remain unclaimed. Nothing in this section should be
   read as "certified on a clean final revision": every measurement below was taken on
   this host, most of them against a dirty tree.
@@ -377,7 +382,7 @@ counts below, and no other finding's status moves.
   are not edited afterwards to make the merge look cleaner than it was.
 - **After the merge:** `audit/2026-10-23` is deleted on the remote and locally, so
   the branch ref stops being the place work continues; the commits stay reachable
-  through `main`'s merge. The 13 non-terminal records and the one BLOCKED record continue from
+  through `main`'s merge. The 2 non-terminal records and the one BLOCKED record continue from
   `AUDIT/ledger.json` on `main`, on a fresh branch cut from it. The raw evidence logs
   named above live in the gitignored `AUDIT/` tree and are **not** in the merge — that
   is the still-open *"preserve required raw evidence in a reviewable delivery form"*
@@ -392,7 +397,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-001 — Checkpoint publication leaves crash leftovers
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
 - **Location:** [checkpoint disk I/O](sources/TinyTitanLib/PromptCheckpointStore+Disk.swift)
   and [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift).
@@ -402,12 +407,10 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Current evidence:** Pending staging/rename rollback handles caught errors,
   not crash recovery. The stale-staging test proves invisibility and zero
   accounting, not reclamation. Splitting disk methods was code motion only.
-- **Next:** Reproduce interrupted publication/restart states and implement tested
-  recovery, reclamation and canonical directory validation.
-
+- **Resolution (`43a50ee`):** startup indexing validates a canonical record as a whole — metadata decodes and validates, its key hashes to the directory name, and payload/auxiliary are regular files of exactly the declared size. Anything else is quarantined and reclaimed with a diagnostic; unpublished `.tmp-` staging is reclaimed, and the newest valid `.bak-` is restored when the canonical directory is missing. Seven startup tests fail on the old index with 11 issues and pass after the fix; the 40-test checkpoint suite is green (`AUDIT/aud2-001-002-red.log`, `AUDIT/aud2-001-002-green.log`, `AUDIT/aud2-001-002-suite.log`).
 ### AUD2-002 — Corrupt checkpoint metadata is not reclaimed at startup
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
 - **Location:** [checkpoint store](sources/TinyTitanLib/PromptCheckpointStore.swift).
 - **Finding:** Corrupt metadata originally surfaced as missing and stayed on
@@ -415,9 +418,7 @@ systems. Passing local tests never bypasses the final checklist above.
   startup indexing still skips malformed or payload-only directories.
 - **Current evidence:** Direct-lookup quarantine tests do not establish global
   startup reclamation. Failed deletion is separately recorded as AUD2-029.
-- **Next:** Add startup-wide corruption/reclamation tests and fix recovery without
-  hiding bytes when deletion fails.
-
+- **Resolution (`43a50ee`):** corrupt or payload-only canonical directories are no longer skipped by indexing; they are deleted and named through `ServerLog.diagnostic`, so their bytes are reclaimed at startup. A request for a reclaimed key answers `.missing`; direct lookup keeps its own quarantine. The startup tests and the 40-test checkpoint suite are green (`AUDIT/aud2-001-002-suite.log`).
 ### AUD2-003 — Shared prompt storage can exceed its disk budget
 
 **S2 · Tier A · DONE · TinyTitanLib**
@@ -448,7 +449,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-004 — Large payloads are allocated before integrity verification
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
 - **Location:** [checkpoint disk I/O](sources/TinyTitanLib/PromptCheckpointStore+Disk.swift)
   and [turn-store disk I/O](sources/TinyTitanLib/ServerPromptStateStore+Disk.swift).
@@ -460,11 +461,7 @@ systems. Passing local tests never bypasses the final checklist above.
   The overstating comment was corrected in `6130898` alongside AUD2-006: the cap
   bounds the read to what the metadata declares, and the declared bytes are
   still materialized because the caller needs the payload.
-- **Next:** Design a bounded integrity-verification path for both readers and
-  prove corrupt/oversized input is refused without the large materialization.
-  This needs a streaming loader: `readPayload` returns the bytes it verified,
-  so verification cannot precede materialization through the current API.
-
+- **Resolution (`43a50ee`):** `load` now streams `Sha256Verifier.hashFile` over the payload (and auxiliary) before materializing it, and `readPayload` checks the file size and reads exactly the declared size instead of `expected + 1`. A corrupt or swapped multi-GiB record is refused before the payload-sized allocation. Verification is structural plus the existing corrupt-payload tests; no allocation probe is claimed.
 ### AUD2-005 — Calibration applicability checks are incomplete
 
 **S2 · Tier A · DONE · TinyTitanLib**
@@ -791,7 +788,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-015 — Claimed runaway default is disproven
 
-**S2 · Tier B · AUDIT · plugins/dsh-tinytitan**
+**S2 · Tier B · DONE · plugins/dsh-tinytitan**
 
 - **Location:** [keep-going](plugins/dsh-tinytitan/src/keep-going.js) and
   [configuration](plugins/dsh-tinytitan/src/config.js).
@@ -801,12 +798,10 @@ systems. Passing local tests never bypasses the final checklist above.
   Commit `01bd8ad` deliberately changed the opted-in cap and documentation.
   The recorded agent run of the keep-going/index suites passed 25 Node tests;
   upstream live cap termination was not verified. No default was changed here.
-- **Next:** Finalize the evidence-backed disproven disposition, retaining the
-  live-runtime limitation instead of substituting an unrequested default change.
-
+- **Closed (`01bd8ad`):** the claim is disproven and the disposition is final. `autoGoal` resolves only from `config.autoGoal === true` and ships false; `resolveConfig({autoGoal: "true"})` is false. Re-ran `node --test plugins/dsh-tinytitan/test/keep-going.test.js plugins/dsh-tinytitan/test/index.test.js`: 25 passed, 0 failed (`AUDIT/aud2-015-node.log`). The 99,999 cap applies only after a profile opts in. Upstream live cap termination remains unverified.
 ### AUD2-016 — Claimed unsafe per-request Metal queue teardown is disproven
 
-**S2 · Tier A · AUDIT · TinyTitan**
+**S2 · Tier A · DONE · TinyTitan**
 
 - **Location:** [keep-warm runner](sources/TinyTitan/Infrastructure/Metal/GPUKeepWarmRunner.swift)
   and [session generation](sources/TinyTitanLib/ServerModelSession+Generation.swift).
@@ -815,9 +810,7 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Disposition/evidence:** Committed command buffers are joined before queue
   release. The cited destructor was empty except for a comment, not proof of a
   teardown defect. The separate real race and cleanup defects are AUD2-020/021.
-- **Next:** Finalize this claim's disproven disposition without treating either
-  sibling fix as evidence for the original allegation.
-
+- **Closed (`248f795`):** the claim is disproven and the disposition is final. The runner creates one queue per (opt-in) runner, commits and `waitUntilCompleted()`-joins every buffer, and `stop()` joins the stream thread before the queue is released. `GPUKeepWarmRunnerTests` performs 128 immediate start/stop lifecycles and passes (3 tests); the audit's TSan run over the same suite is recorded in AUD2-020. The cited destructor was comment-only.
 ### AUD2-017 — Host KV window accepts impractically large sizes
 
 **S2 · Tier A · DONE · TinyTitanServer**
@@ -1242,7 +1235,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-034 — A stalled request body is never timed out once its head is in flight
 
-**S2 · Tier A · OPEN · TinyTitanServerCore**
+**S2 · Tier A · DONE · TinyTitanServerCore**
 
 - **Location:** [HTTP handler](sources/TinyTitanServer/Core/HTTPServerHandler.swift)
   (lines 117–152) and [deadline plumbing](sources/TinyTitanServer/Core/HTTPServerHandler+Plumbing.swift)
@@ -1259,13 +1252,10 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Current evidence:** Verified by code path only; no live stalled-client probe
   was run. Loopback-only binding limits the blast radius, but this is local denial
   of service and contradicts the stated control.
-- **Next:** No fix applied. Add a body-completion deadline (or re-arm while a body
-  is incomplete), distinct from the no-in-flight idle close, and keep the
-  never-close-mid-generation rule.
-
+- **Resolution (`e096a7b`):** the deadline now separates a stalled upload (head arrived, body incomplete → close) from a generation (head consumed → never close, re-arm instead of disarming). The timeout is injectable for tests. RED was the old rule leaving the close future pending while the never-close control passed; GREEN is both tests plus the 30-test `HTTPServerTests` suite (`AUDIT/aud2-034-red.log`, `-green.log`, `-suite.log`).
 ### AUD2-035 — CLI Ctrl-C cancels the outer task, so an in-flight generation keeps running
 
-**S2 · Tier A · OPEN · TinyTitanCLI / TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanCLI / TinyTitanLib**
 
 - **Location:** [CLI signal handler](sources/TinyTitanCLI/Command/main.swift)
   (lines 49–52) and [session one-shot](sources/TinyTitanLib/Session.swift)
@@ -1284,13 +1274,10 @@ systems. Passing local tests never bypasses the final checklist above.
   and exited. No cancellation occurred. The exit status was not captured because
   the process was started outside the measuring shell's job table; the normal
   completion footer is the evidence that generation ran to its limit.
-- **Next:** No fix applied. Either call `session.cancel()` from the SIGINT handler,
-  or replace `runOneShot` with a cancellation-forwarding structure and keep the
-  `.cancelled` mapping; then add a probe that observes the interruption.
-
+- **Resolution (`d2295bc`):** `Session.runOneShot` wraps the await in `withTaskCancellationHandler` and cancels the generation task from `onCancel`, keeping the `.cancelled` mapping. Cancelling the caller — the CLI's SIGINT path — now stops generation. RED: the caller-cancelled probe returned a summary after 669 tokens; GREEN: it ends in `.cancelled` after 4.3 s, and the five-test `LibraryContractTests` suite passes (`AUDIT/aud2-035-red.log`, `-green.log`, `-suite.log`).
 ### AUD2-036 — PLE prefill gather is bounded by the scratch chunk, not the PLEBlock rows
 
-**S2 · Tier A · OPEN · TinyTitan runtime/prefill**
+**S2 · Tier A · DONE · TinyTitan runtime/prefill**
 
 - **Location:** [PLE block construction](sources/TinyTitan/Runtime/Inference/RealForwardRunner+BuildCore.swift)
   (line 309), [chunk guard](sources/TinyTitan/Runtime/Inference/RealForwardRunner+PrefillLayer.swift)
@@ -1312,10 +1299,7 @@ systems. Passing local tests never bypasses the final checklist above.
   engine's own `prefillChunkTokens`, so reachability requires a caller that
   constructs a mismatched `PrefillRuntimeConfig`; `RealForwardRunner` is public in
   the engine target but is not part of the `TinyTitanLib` facade.
-- **Next:** No fix applied. Bound the gather by `PLEBlock.maxRows` (or size
-  `PLEBlock` from the effective chunk) and refuse a config whose `chunkTokens`
-  exceeds the runner's.
-
+- **Resolution (`8be9741`):** `gatherPLERowsPrefill` calls `PLEPrefillGather.validate(rows:maxRows:)`, refusing a row count above `PLEBlock.maxRows` before writing. This closes the mismatch between a caller-supplied `PrefillRuntimeConfig` chunk and the runner's own `prefillChunkTokens`. Three tests cover the bound and 27 PLE/prefill neighbours pass; reachability still requires a mismatched caller config, and no live overrun probe is claimed (`AUDIT/aud2-036-green.log`, `-neighbours.log`).
 ### AUD2-037 — Four brief-mandated passes have no recorded evidence
 
 **S1 · Tier A · DONE · audit process**
@@ -1420,7 +1404,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-039 — Swift 6.4.1 keg adds 49 linker warnings to a zero-warning baseline
 
-**S2 · Tier B · OPEN · build/toolchain**
+**S2 · Tier B · DONE · build/toolchain**
 
 - **Location:** [Package.swift](Package.swift) line 29 (`.macOS(.v26)`),
   [environment](AUDIT/environment.md) and [baseline](AUDIT/baseline.md).
@@ -1441,9 +1425,7 @@ systems. Passing local tests never bypasses the final checklist above.
   set, so it needs an operator decision), use an Xcode-bundled 6.4.1 toolchain
   whose runtime matches (none is installed), or accept the warnings in writing as
   a property of the audit's verification toolchain.
-- **Next:** No change applied. The project's shipping toolchain remains Xcode 27 /
-  Swift 6.4; this record exists so the warning delta is not lost.
-
+- **Closed (`d732026`):** the warnings are accepted in writing as a property of the optional Homebrew Swift 6.4.1 verification toolchain, not of the shipped build. The pinned Xcode 27 / Swift 6.4.0 toolchain builds and tests the tree with zero warnings, and `-warnings-as-errors` still governs every target; raising the deployment target to macOS 27 to silence the keg would change the supported OS. The 49/41-warning measurements stand (`AUDIT/brew641-build.log`, `-full-tests.log`, `-release-build.log`).
 ### AUD2-040 — The QSA error text names a feature as unimplemented that is implemented
 
 **S2 · Tier A · DONE · facade hunt / stale diagnostic**
@@ -1599,7 +1581,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-045 — A tiered layer declares a first stage its read branch never publishes
 
-**S2 · Tier A · OPEN · TinyTitan runtime/streaming**
+**S2 · Tier A · DONE · TinyTitan runtime/streaming**
 
 - **Location:**
   [plan construction](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Plan.swift)
@@ -1620,10 +1602,7 @@ systems. Passing local tests never bypasses the final checklist above.
   records that the tiered width it serves has no converter (TT-050) — so no plan
   reaches the branch. Severity is S2 on reachability plus lost overlap, not on
   results: the fixup is still ordered after the load.
-- **Next:** Decide at layout construction: either the tiered branch publishes
-  after its whole set has landed (keeping `publishesFirstStage` true), or
-  `publishesFirstStage` is false whenever the uniform-size split will not run.
-
+- **Resolution (`3e606ee`):** `StreamLayout` now owns `hasUniformExpertSizes` and `splitsPhase1` (phase boundary and uniform sizes); the planner declares `publishesFirstStage` from `splitsPhase1`, and the bounded read branch uses the same uniformity predicate. A tiered layer no longer declares a stage its branch never publishes. RED read `publishesFirstStage == true`; GREEN passes with the 29-test streamer suite and the 8-test compressed split suite (`AUDIT/aud2-045-red.log`, `-green.log`, `-suite.log`, `-compressed.log`).
 ### AUD2-046 — Lazy checkpoint indexing evicts a pre-index load first and latches on a failed listing
 
 **S2 · Tier A · DONE · TinyTitanLib**
@@ -1679,7 +1658,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-048 — The turn store's LRU touch discards its own failure
 
-**S3 · Tier A · OPEN · TinyTitanLib**
+**S3 · Tier A · DONE · TinyTitanLib**
 
 - **Location:** [turn store](sources/TinyTitanLib/ServerPromptStateStore.swift#L405-L422).
 - **Finding:** `touchDisk` updates the in-memory record, then on its background
@@ -1693,8 +1672,7 @@ systems. Passing local tests never bypasses the final checklist above.
   reports the same failure through `ServerLog.diagnostic` (`92da15a`) while the
   turn store discards it. The fix is that one line's shape; the finding is the
   silence, not the error handling. No correctness or data-loss impact measured.
-- **Next:** Sweep, then report the failure on the background queue.
-
+- **Resolution (`af41279`):** `touchDisk` wraps the modification-date write in `do`/`catch` and reports a failure through `ServerLog.diagnostic` on the same background disk queue, matching the checkpoint store. It stays non-fatal. RED: the `UF_IMMUTABLE` fixture captured no line under the old `try?`; GREEN: the diagnostic names the entry and the 12-test suite passes (`AUDIT/aud2-048-red.log`, `-green.log`, `-suite.log`).
 ### AUD2-049 — The docs gate never reads this audit's own ledger
 
 **S2 · Tier A · DONE · audit tooling**
@@ -2396,40 +2374,40 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **51 records: 37 DONE, 13 non-terminal (10 OPEN, 2 AUDIT,
-1 PROGRESS), 1 BLOCKED** — counted from `AUDIT/ledger.json` itself, not restated.
+The ledger stands at **51 records: 48 DONE, 2 non-terminal (1 OPEN, 1 PROGRESS),
+1 BLOCKED** — counted from `AUDIT/ledger.json` itself, not restated.
 `BLOCKED` is terminal under §8 and is therefore named apart from the non-terminal
 count. The count has fallen at every closure milestone, rising only when new
 records were filed: 36 non-terminal after the early sweep, 21 after the
 rANS and checkpoint batches, 15 before the AUD2-007 pass, which closed one record
 and opened two to land at 16. It fell to 15 at the AUD2-013/014 closure
 (`a9f680a`) and to 14 when AUD2-031 closed (`b719a4a`), rose to 15 when
-AUD2-051 was filed (`8bd3695`) and returned to 14 when it closed (`afcd297`), and
-fell to 13 when AUD2-049 closed (`6335058`). That is stated
+AUD2-051 was filed (`8bd3695`) and returned to 14 when it closed (`afcd297`),
+fell to 13 when AUD2-049 closed (`6335058`), and fell to 2 when the remediation
+batch closed eleven records.
+That is stated
 rather than smoothed over — §8's invariant is a record moving to a terminal
 status, and one record's closure at one milestone is not convergence. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
-claimed. The integration decision below moves these 37 closed records into `main`;
-it changes none of these counts and closes no record. Every
-non-terminal record left is either an S2 design gap that needs work
-this audit has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
-045) or a gap in the audit's own tooling and tests (AUD2-050), an S3
-diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation
-(AUD2-015, 016), a verification record
-(AUD2-019), or the external host (AUD2-038, the one BLOCKED record).
+claimed. The integration decision below moves these 48 closed records into `main`;
+it changes none of these counts and closes no record. The two
+non-terminal records left are a test-adequacy pool that has not been mutation-
+swept (AUD2-050, OPEN) and the full current-tree Tier A review (AUD2-019,
+PROGRESS); the one BLOCKED record is the external host (AUD2-038).
 
 Completed and evidenced here: recovery and hash verification of the original
 brief, the debug and release builds plus the full serial suite under the required
 Swift 6.4.1 compiler, the unmasked full serial suite under 6.4.0, the 6.4.0
 release build, the 18-gate lint run, the corrected seven-object coverage export,
-the CI artifact inspection, the ornith-8 golden check, four of the five
-library-contract tests, the live CLI SIGINT probe, and the four brief-mandated
+the CI artifact inspection, the ornith-8 golden check, the five
+library-contract tests (including the caller-cancellation probe), and the four
+brief-mandated
 passes (AUD2-037). Still incomplete:
-the module-by-module Tier A review,
+the module-by-module Tier A review (AUD2-019),
 clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
-dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
-remediation of every OPEN/PROGRESS/AUDIT record — including AUD2-035, which the
-probe confirms but does not fix. This report is a faithful snapshot of that state,
+dependency reconciliation, durable CI coverage, release-only/opt-in paths, the
+un-swept type-level throw assertions (AUD2-050), and Phase E on an independent
+host (AUD2-038). This report is a faithful snapshot of that state,
 not a Phase E certificate.
 
 The following repository constraints still apply:
