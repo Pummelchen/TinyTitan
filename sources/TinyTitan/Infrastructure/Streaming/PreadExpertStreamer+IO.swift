@@ -270,7 +270,7 @@ extension PreadExpertStreamer {
                 experts: misses.map { plan.experts[$0] },
                 frames: frames,
                 into: misses.map { slotPointers[plan.assignedSlots[$0]] },
-                firstStage: start == 0 ? firstStage : nil)
+                firstStage: end == plan.misses.count ? firstStage : nil)
             start = end
         }
     }
