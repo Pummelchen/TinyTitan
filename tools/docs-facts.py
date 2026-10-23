@@ -266,36 +266,88 @@ def check_counts(path, paragraphs, want):
     return rows
 
 
-def ledger_totals():
-    """The audit ledgers' own `counts`, summed. Returns (rows, done, open,
-    blocked, paths); an empty path list means there is no ledger to compare to."""
-    rc, out, _ = sh("git", "ls-files", "docs/audit-ledger.json")
-    paths = sorted(out.splitlines()) if rc == 0 else []
-    total = [0, 0, 0, 0]
+def counts_from_tasks(tasks):
+    """A ledger's (rows, closed, open, blocked), counted from its own statuses.
+
+    `open` is every row that is neither closed nor blocked, which is the shape the
+    prior ledger's own `counts` block uses (210/210/0/0). The 2026-10-23 ledger
+    also carries OPEN, AUDIT and PROGRESS rows and publishes no `counts` at all, so
+    a status named later counts as open until it is taught otherwise: an
+    unrecognised row cannot silently leave the total."""
+    total = len(tasks)
+    closed = sum(1 for task in tasks if task.get("status") == "DONE")
+    blocked = sum(1 for task in tasks if task.get("status") == "BLOCKED")
+    return (total, closed, total - closed - blocked, blocked)
+
+
+LEDGER_FIELDS = ("total", "done", "open", "blocked")
+
+
+def ledger_counts(root=None):
+    """Every tracked audit ledger, counted from its own task rows.
+
+    The gate once listed its ledgers with a literal `git ls-files
+    docs/audit-ledger.json`, so this audit's own `AUDIT/ledger.json` was opened by
+    nothing while the message said the ledger's references resolved (AUD2-049).
+    Widening that one path is not the fix: two ledgers describe two audits, so their
+    totals must never be added, and this audit's ledger has no `counts` block at
+    all. Each ledger is therefore discovered by name and counted from its own
+    `tasks`; a ledger that does publish `counts` has them checked against the rows
+    rather than trusted, because a restated count is exactly what this gate is for.
+    Returns ({rel: (rows, closed, open, blocked)}, paths, errors); an empty path
+    list means there is no ledger to compare to."""
+    repo = str(root) if root is not None else ROOT
+    rc, out, _ = sh_in(repo, "git", "ls-files", "*ledger.json")
+    paths = sorted(path for path in out.splitlines() if path) if rc == 0 else []
+    counts = {}
     errors = []
     for rel in paths:
         try:
-            with open(os.path.join(ROOT, rel), encoding="utf-8") as handle:
-                counts = json.load(handle).get("counts", {})
+            with open(os.path.join(repo, rel), encoding="utf-8") as handle:
+                ledger = json.load(handle)
         except (OSError, ValueError) as error:
-            errors.append(f"FAIL cannot read {rel}: {error}")
+            errors.append(f"FAIL cannot read {rel} for its counts: {error}")
             continue
-        for index, key in enumerate(("total", "done", "open", "blocked")):
-            total[index] += counts.get(key, 0)
-    return tuple(total), paths, errors
+        if not isinstance(ledger, dict):
+            errors.append(f"FAIL {rel}: its top level is not a JSON object")
+            continue
+        tasks = ledger.get("tasks")
+        if not isinstance(tasks, list) or not tasks:
+            errors.append(f"FAIL {rel}: derived no task rows to count")
+            continue
+        derived = counts_from_tasks(tasks)
+        counts[rel] = derived
+        declared = ledger.get("counts")
+        if declared is None:
+            continue
+        try:
+            claimed = tuple(int(declared[key]) for key in LEDGER_FIELDS)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            errors.append(f"FAIL {rel}: its counts block does not name four integers")
+            continue
+        if claimed != derived:
+            errors.append(
+                f"FAIL {rel}: its counts block says {claimed[0]} rows / "
+                f"{claimed[1]} closed / {claimed[2]} open / {claimed[3]} blocked; "
+                f"its own {derived[0]} task rows count {derived[0]} rows / "
+                f"{derived[1]} closed / {derived[2]} open / {derived[3]} blocked"
+            )
+    return counts, paths, errors
 
 
 LEDGER_COUNTS = re.compile(r"(\d+) rows / (\d+) closed / (\d+) open / (\d+) blocked")
 
 
-def check_ledger_counts(path, paragraphs, totals, ledgers):
-    """The handover restates the audit ledger's `counts`. That table is derived,
-    and this audit has already shipped a commit whose printed counts disagreed
-    with the file they described, so the restatement is checked against it."""
+def check_ledger_counts(path, paragraphs, counts):
+    """The handover restates an audit ledger's counts. Every restatement is judged
+    against the ledger it describes, never against a sum of every ledger tracked
+    here: the prior audit's 210/210/0/0 and this audit's own totals are two
+    different records, and adding them is a number that belongs to neither. When
+    the surrounding text names exactly one known ledger, the claim is checked
+    against that ledger alone; otherwise it may describe any one of them."""
     rows = []
-    if not ledgers:
+    if not counts:
         return rows
-    want = list(totals)
     for start, text, heading in paragraphs:
         if is_history(heading):
             continue
@@ -304,13 +356,28 @@ def check_ledger_counts(path, paragraphs, totals, ledgers):
             line = prefix + text[match.end() :].split("\n", 1)[0]
             if quoted_at(line, len(prefix)):
                 continue
-            if [int(group) for group in match.groups()] == want:
+            claim = tuple(int(group) for group in match.groups())
+            window = text[max(0, match.start() - 300) : match.end() + 300]
+            named = [rel for rel in counts if rel in window]
+            candidates = named if len(named) == 1 else list(counts)
+            if any(claim == counts[rel] for rel in candidates):
                 continue
-            line = start + text[: match.start()].count("\n")
+            number = start + text[: match.start()].count("\n")
+            if len(named) == 1:
+                got = counts[named[0]]
+                rows.append(
+                    f"{kind_for(path)} {path}:{number}: says “{match.group(0)}”; "
+                    f"{named[0]} has {got[0]} rows / {got[1]} closed / "
+                    f"{got[2]} open / {got[3]} blocked"
+                )
+                continue
+            detail = "; ".join(
+                f"{rel} has {got[0]} rows / {got[1]} closed / {got[2]} open / {got[3]} blocked"
+                for rel, got in sorted(counts.items())
+            )
             rows.append(
-                f"{kind_for(path)} {path}:{line}: says “{match.group(0)}”; the "
-                f"ledger(s) {', '.join(ledgers)} total {want[0]} rows / "
-                f"{want[1]} closed / {want[2]} open / {want[3]} blocked"
+                f"{kind_for(path)} {path}:{number}: says “{match.group(0)}”; "
+                f"no tracked ledger counts that ({detail})"
             )
     return rows
 
@@ -346,9 +413,7 @@ def ledger_commit_evidence(ledgers, root=None):
     repo = str(root) if root is not None else ROOT
     lines = []
     if not ledgers:
-        lines.append(
-            "FAIL no docs/audit-ledger.json is tracked, so no commit reference could be read"
-        )
+        lines.append("FAIL no audit ledger is tracked, so no commit reference could be read")
         return lines, 0
     checked = 0
     # CI ran this on `fe19203` over `actions/checkout`'s default depth of one commit
@@ -358,15 +423,23 @@ def ledger_commit_evidence(ledgers, root=None):
     for rel in ledgers:
         try:
             with open(os.path.join(repo, rel), encoding="utf-8") as handle:
-                tasks = json.load(handle).get("tasks", [])
+                ledger = json.load(handle)
         except (OSError, ValueError) as error:
             lines.append(f"FAIL cannot read {rel} for its commit references: {error}")
             continue
+        if not isinstance(ledger, dict):
+            lines.append(f"FAIL {rel}: its top level is not a JSON object")
+            continue
+        tasks = ledger.get("tasks", [])
         if not tasks:
             lines.append(f"FAIL {rel}: derived no task rows to check")
             continue
         for task in tasks:
-            field = str(task.get("commit", ""))
+            # A ledger may write `null` for a row that recorded no fix, which is the
+            # blank-field exception; `str(None)` is the prose pointer "None" and was
+            # refused as one when this audit's ledger was first read.
+            commit = task.get("commit")
+            field = "" if commit is None else str(commit)
             if not field.strip():
                 # The blank exception belongs to rows that recorded no fix. A DONE
                 # row claims one, and an empty field there is a row that lost its
@@ -591,8 +664,8 @@ def check_derived_counts(path, paragraphs):
                 if quoted_at(line, len(prefix)):
                     continue
                 if kind == "rows":
-                    # "62 rows / 58 closed" is the ledger count, and
-                    # check_ledger_counts already judges it against ledger.json.
+                    # "62 rows / 58 closed" is a ledger count, and
+                    # check_ledger_counts judges it against each ledger's own rows.
                     if LEDGER_TAIL.match(text[match.end() :]):
                         continue
                     source = find_baseline(text, match)
@@ -807,7 +880,7 @@ def main():
     modes, checks, problems = gate_set()
     docs, everything, listing = tracked_docs()
     rows = list(problems) + list(listing)
-    totals, ledgers, ledger_errors = ledger_totals()
+    counts, ledgers, ledger_errors = ledger_counts()
     rows += ledger_errors
     commit_lines, commits_checked = ledger_commit_evidence(ledgers)
     rows += commit_lines
@@ -832,7 +905,7 @@ def main():
         paragraphs = paragraphs_of(text.splitlines())
         rows += check_counts(path, paragraphs, len(checks))
         rows += check_names(path, paragraphs, modes)
-        rows += check_ledger_counts(path, paragraphs, totals, ledgers)
+        rows += check_ledger_counts(path, paragraphs, counts)
         rows += check_derived_counts(path, paragraphs)
         rows += check_tag_citations(path, paragraphs)
 
