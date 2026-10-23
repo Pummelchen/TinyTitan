@@ -1,17 +1,19 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-029 46/46 | done:24 open:21 blocked:1 new:4] DONE — a checkpoint
-deletion that fails keeps its bytes charged: eviction stops instead of rotating,
-remove keeps the record, removeAll keeps the survivors; the checkpoint
-validation, quarantine and indexing fixes beneath it stand`
+`[#AUD2-047 47/47 | done:31 open:15 blocked:1] DONE — a conflict refusal now
+names the flags it refuses; the calibration identity binding (AUD2-005), the
+--plan conflict (AUD2-008), the host-KV window range (AUD2-017), the shared disk
+budget (AUD2-003), the bounded payload read (AUD2-006) and the fail-silent restore
+(AUD2-009) beneath it stand`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
 a process record once its four passes were run; AUD2-040 to AUD2-044, the
-keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029
-and the rANS cluster (AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are
-closed with remediation commits, and none is merged, released or certified on a
-clean final revision.
+keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029,
+the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
+prompt-cache disk budget (AUD2-003) and the two reader/restore corrections
+(AUD2-006, 009) are closed with remediation commits, and none is merged, released
+or certified on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -25,20 +27,23 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `7024d03`, which carries the AUD2-029 deletion-accounting fix
-  on top of the AUD2-046 indexing fix at `7740a42`, the
+- Measured HEAD: `3191968`, which carries the AUD2-047 conflict diagnostic on top
+  of the AUD2-003/006/009 disk-budget and reader fixes at `6130898`, the
+  AUD2-005/008/017 calibration and validation fixes at `41d14ca`, the AUD2-029
+  deletion-accounting fix at `7024d03`, the AUD2-046 indexing fix at `7740a42`, the
   AUD2-028 checkpoint validation at `c5e2e93`, the AUD2-026 sweep fix at
   `5deb70a`, the keep-warm fixes, the AUD2-033
   final-wave publish and its comment correction, the rANS cluster at `61de182`,
   the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
-  **The tree also carries uncommitted source and test changes** belonging to
-  records still in START/PROGRESS, so that commit alone does not contain every
-  tested fix.
-- **46 records: 24 DONE, 21 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **17 OPEN, 2 PROGRESS, 2 AUDIT, 24 DONE, 1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 27 S2, 1 S3**. These are ledger
-  classifications, not a claim that all 46 records are confirmed product bugs.
-- `OPEN`, `START` and `PROGRESS` remain unfinished. `AUDIT` retains a
+  Every fix recorded as DONE is committed; what remains uncommitted at this
+  snapshot is this report and the ledger, not source. `9ca9942` is the exception
+  disclosed in AUD2-017: it committed a test whose fix stayed in the working tree
+  until `41d14ca`.
+- **47 records: 31 DONE, 15 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **11 OPEN, 2 PROGRESS, 2 AUDIT, 31 DONE, 1 BLOCKED**.
+- Recorded severities: **2 S0, 16 S1, 28 S2, 1 S3**. These are ledger
+  classifications, not a claim that all 47 records are confirmed product bugs.
+- `OPEN` and `PROGRESS` remain unfinished. `AUDIT` retains a
   claim/disposition awaiting formal reconciliation. `BLOCKED` is not a passing
   verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
@@ -49,11 +54,15 @@ tier and status, including disproven claims and audit-introduced regressions.
   (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
   and AUD2-044 (late port validation) are DONE with remediation commits, as are
   the nine rANS records closed at `61de182`, AUD2-020, AUD2-021, AUD2-033,
-  AUD2-026, AUD2-028, AUD2-046 and AUD2-029.
+  AUD2-026, AUD2-028, AUD2-046, AUD2-029, the calibration/validation cluster
+  (AUD2-005, AUD2-008, AUD2-017), the shared prompt-cache disk budget
+  (AUD2-003), the bounded turn-store read (AUD2-006), the fail-silent streamed
+  restore (AUD2-009) and the conflict diagnostic (AUD2-047).
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
   `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
   AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-046 is `7740a42`, AUD2-029 is
-  `7024d03`, AUD2-033 is
+  `7024d03`, AUD2-005/008/017 are `41d14ca`, AUD2-003/006/009 are `6130898`,
+  AUD2-033 is
   `71b40d7` (with the
   comment-only `d11be7c`) and the rANS cluster is
   `61de182`, all on the audit branch. Removal tickets
@@ -66,10 +75,11 @@ Sources are [baseline](AUDIT/baseline.md), [environment](AUDIT/environment.md),
 [tool-enforcement proofs](AUDIT/tool-coverage.md). Raw logs and generated coverage
 artifacts named below are **local evidence under the gitignored `AUDIT/` tree**;
 not all are tracked or available in a clean clone. Results and limitations are
-therefore included inline. Several linked source/test files are also still
-untracked pending audit changes; adding this report does not add those changes.
+therefore included inline. Every source and test change recorded as DONE is
+committed on this branch; the only files that stay local are the raw logs named
+above.
 Source links identify files, not a promise that old ledger line numbers still
-match after pending edits.
+match after the fixes landed.
 
 ## Audit completion checklist
 
@@ -131,12 +141,12 @@ requirement was worked but its own definition of done is not met.
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; fixes for records still in START/PROGRESS remain uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898` each bundle three S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 24 DONE, 21 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 31 DONE, 15 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 21 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 15 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -188,12 +198,17 @@ stays unchecked and the full current-tree review remains incomplete.
 
 ### Remediation and regression proof
 
-- [ ] Resolve checkpoint crash recovery, startup reclamation, persisted shared
-  budgets, allocation-before-hash, persistent LRU and failed-deletion accounting.
+- [ ] Resolve the checkpoint records still open: crash leftovers (AUD2-001),
+  uncounted staging/backup directories (AUD2-002), allocation before integrity
+  verification (AUD2-004) and persisted eviction order (AUD2-007). The shared disk
+  budget (AUD2-003), the bounded turn-store read (AUD2-006), the fail-silent
+  streamed restore (AUD2-009) and failed-deletion accounting (AUD2-029) are closed
+  with commits on this branch.
 - [ ] Fix the still-unhandled benchmark allocation-error cleanup path.
-- [ ] Complete before/after evidence and independent review for pending
-  calibration, CLI, snapshot, sizing, expansion and rANS read-error patches whose
-  individual ledger evidence fields remain empty.
+- [ ] Complete before/after evidence and independent review for the expansion
+  geometry records whose ledger evidence fields remain empty (AUD2-013, AUD2-014);
+  the calibration, CLI, snapshot and sizing patches in that group now carry their
+  own RED/GREEN runs (`41d14ca`, `6130898`, `3191968`).
 - [ ] Retain valid RED/GREEN evidence for every behavior change, both invalid-input
   refusal and valid-input acceptance, without weakening tests.
 - [ ] Close the remaining targeted test gaps: indexed-then-mutated checkpoint
@@ -207,9 +222,10 @@ stays unchecked and the full current-tree review remains incomplete.
 
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
-  timing footers. *(Partial: the release build and the serial suite both now run
-  under the required 6.4.1 compiler, but on the dirty tree; the clean-final-
-  revision run remains outstanding.)*
+  timing footers. *(Partial: the serial suite now runs against a committed tree —
+  7 bundles, 2,003 tests, exit 0 at `3191968` — but the required-compiler 6.4.1
+  runs were recorded on the earlier dirty tree, and a clean-checkout run on the
+  final revision remains outstanding.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
   sanitizer results do not certify later edits.
 - [ ] Reconcile Python 3.13/3.14/3.15 runtime verification with the pinned
@@ -273,19 +289,31 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-003 — Shared prompt storage can exceed its disk budget
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [session loading](sources/TinyTitanLib/ServerModelSession+Loading.swift).
-- **Finding:** Both stores originally received the full shared disk allowance.
-  The pending half-budget split only handles simultaneously enabled stores;
-  disabling checkpoints leaves persisted checkpoint bytes outside the active
-  turn-store budget.
-- **Current evidence:**
-  [storage-budget tests](tests/TinyTitanLib/ServerModelSessionStorageBudgetTests.swift)
-  verify arithmetic, not actual occupancy across restart/disable transitions.
-  The residual was reviewed statically; its transition reproduction is pending.
-- **Next:** Reproduce save/restart/disable occupancy and enforce the combined
-  limit over persisted as well as active stores.
+- **Location:** [session loading](sources/TinyTitanLib/ServerModelSession+Loading.swift)
+  (lines 17–45, 364–401).
+- **Finding:** Both prompt stores are handed one `ServerPromptCacheStorageConfiguration`
+  over one directory and each evicts only its own records, so each with the full
+  `--prompt-cache-disk-mib` allowed the pair to occupy twice it. The residual the
+  review added: with checkpoints disabled the checkpoint store is never
+  constructed, so records left by an earlier enabled run are charged to nobody —
+  a half-budget checkpoint cache beside a full-budget turn store reaches 1.5x.
+- **Current evidence:** The split (`promptCachePerStoreDiskLimit`) gives each
+  store half while both exist; `reclaimStaleCheckpoints` deletes what an earlier
+  enabled run left and returns the bytes that refused deletion, which are then
+  subtracted from the turn store's share; and with checkpoints on the store
+  indexes at startup, so a restart over its half is evicted before the turn
+  store fills the other. RED is compile-only and disclosed as such — the tests
+  do not build against the pre-fix tree because the seam is new (exit 1,
+  `AUDIT/aud2-003-red.log`) — so the bound rests on the arithmetic and on the
+  four helper-level tests (exit 0, `AUDIT/aud2-003-green.log`), not on an
+  occupancy reproduction across a restart.
+- **Limits:** `load`'s startup indexing needs a model to reach and has no unit
+  seam; it is recorded as reviewed and compiled. AUD2-004 (verify before
+  materializing) and AUD2-001/002 (crash-gap and quarantine reachability) stay
+  open and are not closed by this budget work.
+- **Commit:** `6130898`. Not merged, released or verified on an independent host.
 
 ### AUD2-004 — Large payloads are allocated before integrity verification
 
@@ -295,41 +323,73 @@ systems. Passing local tests never bypasses the final checklist above.
   and [turn-store disk I/O](sources/TinyTitanLib/ServerPromptStateStore+Disk.swift).
 - **Finding:** Reading `expectedBytes + 1` into Data before hashing can materialize
   multi-GiB untrusted payloads. A read cap does not establish integrity before a
-  large allocation; the turn-store comment overstates that protection.
+  large allocation; the turn-store comment claimed it did.
 - **Current evidence:** Confirmed by full-file review, without a large-allocation
   runtime probe. The numeric metadata guard in AUD2-028 does not fix this issue.
+  The overstating comment was corrected in `6130898` alongside AUD2-006: the cap
+  bounds the read to what the metadata declares, and the declared bytes are
+  still materialized because the caller needs the payload.
 - **Next:** Design a bounded integrity-verification path for both readers and
   prove corrupt/oversized input is refused without the large materialization.
+  This needs a streaming loader: `readPayload` returns the bytes it verified,
+  so verification cannot precede materialization through the current API.
 
 ### AUD2-005 — Calibration applicability checks are incomplete
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
 - **Location:** [calibration profile](sources/TinyTitanLib/CalibrationProfile.swift)
-  and [server arguments](sources/TinyTitanServer/Core/ServerArguments.swift).
-- **Finding:** The reported paths omitted OS-version validation and, on the
-  server, model ID, family and weight-bit compatibility.
-- **Current evidence:** Pending validation patches and mismatch tests exist. The
-  corrected manifest fixtures retained existing assertions; the recorded focused
-  calibration run passed 41 tests, exit 0 (`calibration-focused.log`). This row's
-  before/fix/after fields remain empty, so the original title is not a reliable
-  description of every current guard and the patch is not formally closed.
-- **Next:** Reconcile the exact checks and both entry paths with valid before/after
-  evidence and independent review, then update the ledger disposition.
+  (lines 215–256), [server arguments](sources/TinyTitanServer/Core/ServerArguments.swift)
+  (lines 418–440) and [CLI arguments](sources/TinyTitanCLI/Args.swift)
+  (lines 428–457).
+- **Finding:** `application(for:contextTokens:modelID:...)` compared machine
+  identifier, memory and context only, and the server path passed no modelID at
+  all: a profile measured on another macOS release, or for another family or
+  weight width, was applied to the install in front of it.
+- **Current evidence:** `osVersion` is now a refusal and `family`/`weightBits`
+  are compared beside `modelID`; the CLI passes the identity it already peeked
+  and the server peeks the manifest, skipping the binding only when no `--model`
+  names an install (a catalog launch has no single model to bind to). RED: with
+  the three source files reverted, the foreign-OS profile and all three
+  foreign-identity profiles parse to a usable `ServerArguments` instead of
+  throwing (7 tests, 4 issues, exit 1, `AUDIT/aud2-005-red.log`).
+- **Sibling-arm disclosure:** the CLI arm's first test varied `modelID` only and
+  **passed against the unfixed tree**, because `modelID` was already checked —
+  an invalid RED, replaced by a parameterized test over `modelID`, `family` and
+  `weightBits`, which then failed for exactly the two new arms (2 issues, exit 1,
+  `AUDIT/aud2-005-cli-red.log`) and passes with the fix (17 tests, exit 0,
+  `AUDIT/aud2-005-cli-green.log`). The server tests now build a toy install the
+  real `ManifestReader` accepts instead of pointing at `/tmp/model`.
+- **Commit:** `41d14ca`. Not merged, released or verified on an independent host.
 
 ### AUD2-006 — Turn-store payload reader was unbounded until EOF
 
-**S2 · Tier A · OPEN · TinyTitanLib**
+**S2 · Tier A · DONE · TinyTitanLib**
 
-- **Location:** [turn-store disk I/O](sources/TinyTitanLib/ServerPromptStateStore+Disk.swift).
-- **Finding:** The original reader consumed a swapped or huge file fully before
-  comparing its size with metadata.
-- **Current evidence:** A pending `expected + 1` read cap addresses a different
-  condition from the allocation-before-hash issue in AUD2-004. The individual
-  before/fix/after evidence fields remain empty.
-- **Next:** Prove oversized and swapped-file refusal on the actual reader and
-  record focused evidence without conflating a size cap with preallocation
-  integrity verification.
+- **Location:** [turn-store disk I/O](sources/TinyTitanLib/ServerPromptStateStore+Disk.swift)
+  (lines 12–40).
+- **Finding:** `readPayloadVerifying` looped `handle.read(upToCount: 1 MiB)` to
+  EOF, appended everything into one `Data` and hashed it, and only then compared
+  the length against the declared `payloadBytes` — a payload file swapped for a
+  larger one after indexing was fully read and allocated before being refused.
+- **Current evidence:** The reader now asks the handle for `expected + 1` bytes
+  and stops there; further reads happen only to fill a short file, so over-sized
+  input is refused on the 1-byte overshoot. The comment written with that change
+  claimed the bytes were refused before being allocated, which AUD2-004 correctly
+  called false: the declared bytes are still materialized because the caller needs
+  the payload, and the cap bounds the read to what the metadata declares rather
+  than to what the file is. The comment now says that, and the two issues are
+  kept separate: this row is the read bound, AUD2-004 is verify-before-materialize
+  and stays open.
+- **Disclosed as a pin, not a RED:** the new test
+  `swappedOversizedDiskPayloadIsRefusedAtTheDeclaredSize` indexes a valid record,
+  grows its payload to a 16 MiB sparse file and asserts `loadSnapshot` fails
+  closed and the record is removed (11 turn-store tests, exit 0,
+  `AUDIT/aud2-006-green.log`) — but the pre-fix reader also refused that file,
+  having first read all of it. The bound itself rests on the read call taking
+  `expected + 1`, not on an assertion; memory is not observable from a unit test
+  and no model run applies.
+- **Commit:** `6130898`. Not merged, released or verified on an independent host.
 
 ### AUD2-007 — Restart eviction does not preserve actual access order
 
@@ -348,30 +408,51 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-008 — Calibration plan mode silently ignores conflicting options
 
-**S2 · Tier A · OPEN · TinyTitanCLI**
+**S2 · Tier A · DONE · TinyTitanCLI**
 
-- **Location:** [calibration command](sources/TinyTitanCLI/CalibrationCommand.swift).
-- **Finding:** `calibrate --plan` silently ignored `--check`/`--model`.
-- **Current evidence:** Pending command/test changes exist; this row's specific
-  before/fix/after evidence remains blank. A full-suite pass alone does not prove
-  every literal option combination has the intended behavior.
-- **Next:** Verify the reported invocations, document accepted/refused combinations
-  and reconcile focused regression evidence and review.
+- **Location:** [calibration command](sources/TinyTitanCLI/CalibrationCommand.swift)
+  (lines 270–276).
+- **Finding:** `run` checked `--check`, then `--calibrate`, then `--plan`, so
+  `calibrate --plan --check <path>` printed the plan and discarded the check
+  file, and `--plan --model <path>` ignored the model — with no diagnostic for
+  either.
+- **Current evidence:** The `--plan` branch refuses `--check` and `--model` with
+  `CalibrationCommandError.conflictingInput` before printing. Precedence between
+  the existing modes is unchanged; only the silently-ignored combination became an
+  error. RED: the two new expectations report "an error was expected but none was
+  thrown" (16 tests, 2 issues, exit 1, `AUDIT/aud2-008-red.log`); with the fix the
+  same 16 tests pass (`AUDIT/aud2-008-green.log`).
+- **Sibling defect found while closing this row:** all three conflict sites shared
+  one message written for `--model` with `--check`, so the new `--plan` refusals
+  told the user about a flag they had not passed. Recorded as **AUD2-047** and
+  fixed in the same pass.
+- **Commit:** `41d14ca`. Not merged, released or verified on an independent host.
 
 ### AUD2-009 — Streamed snapshot restoration can fail silently
 
-**S2 · Tier A · OPEN · TinyTitan**
+**S2 · Tier A · DONE · TinyTitan**
 
 - **Location:** [streamed restore](sources/TinyTitan/Runtime/KVCache/KVCacheManager+HostStreamingPrefill.swift)
-  and [snapshot caller](sources/TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift).
-- **Finding:** The inner restore returned silently when length exceeded the
-  stored host-arena length. The outer snapshot guard makes the originally
-  reported condition currently unreachable through that caller.
-- **Current evidence:** A pending throwing path/caller change exists; the row's
-  evidence fields remain empty. This is not a reproduced reachable inference
-  failure merely because the inner behavior was wrong.
-- **Next:** Verify propagation and all callers with focused tests; explicitly
-  distinguish the guarded latent case from any reachable sibling.
+  (lines 410–424) and [snapshot caller](sources/TinyTitan/Runtime/KVCache/KVCacheManager+Snapshot.swift:96).
+- **Finding:** `restoreStreamedSnapshot` returned silently when
+  `hostK[layer]`/`hostV[layer]` was missing or `length` exceeded
+  `hostArenaLengths[layer]`. The caller in `KVCacheManager+Snapshot` guards the
+  segment length, so the originally reported condition is unreachable through it;
+  the hazard is that a restore which copied nothing can still be reported as a
+  successful restore, with the window map left describing rows the arena does not
+  hold.
+- **Current evidence:** The function now throws
+  `InferenceStateSnapshotError.invalidLayout`, its sole caller propagates with
+  `try`, and the comment records why the guard is a throw rather than a return: it
+  is the backstop that keeps the caller's guard from becoming load-bearing.
+  Behavior on every reachable path is unchanged.
+- **Disclosed as a gap, not coverage:** there is no unit seam — reaching it needs
+  a live `KVCacheManager` with a host arena, which a model-free test cannot
+  construct, and the only reachable caller sits behind the guard this replaces.
+  The signature change is verified by the build and by the full serial suite
+  (7 bundles, 2,002 tests, exit 0, `AUDIT/aud2-pending-full.log`), not by a test
+  that asserts the throw.
+- **Commit:** `6130898`. Not merged, released or verified on an independent host.
 
 ### AUD2-010 — Failed rANS length reads can skip decoding or undersize staging
 
@@ -382,11 +463,17 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Finding:** A failed length-table `pread` could leave empty plans and zero
   payload size, silently preserving stale weights and underestimating the Metal
   staging buffer needed for the subsequent payload read.
-- **Current evidence:** Pending fail-closed changes and synthetic truncated-read
-  tests exist. The final focused rANS run passed, but this row's individual
-  before/fix/after fields have not been reconciled.
-- **Next:** Trace length-table failure through buffer sizing, read and publication;
-  retain focused failure evidence and independently verify refusal before use.
+- **Current evidence:** A failed length-table `pread` is collected as a failure and
+  thrown at layer open, so an empty plan with a zero payload size can no longer
+  reach the wave loop. The RED was demonstrated on the fix itself — restoring the
+  old `else { return }` made `refusesTruncatedPayload` fail with "an error was
+  expected but none was thrown" (`AUDIT/aud2-010-red.log`, exit 1) — and the
+  committed file restored before the paired GREEN (exit 0,
+  `AUDIT/aud2-010-green.log`). The cold re-read at the AUDIT stage confirmed writer,
+  reader and kernel agree on the 8-byte header and that the overlap check compares
+  adjacent runs in start order.
+- **Next:** Preserve this evidence in final cold review and certification; no live
+  model run exercises the guard, so an untrusted-sidecar run remains outstanding.
 
 ### AUD2-011 — rANS scale values unsupported by the decoder were accepted
 
@@ -425,9 +512,10 @@ systems. Passing local tests never bypasses the final checklist above.
 - **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift).
 - **Finding:** An invalid target order or range can overwrite unread packed
   source bytes or exceed the slot during in-place expansion.
-- **Current evidence:** A pending validator and tests exist. Three earlier
-  negative fixtures described valid layouts; their original failed runs are
-  withdrawn, not retained as defect evidence. The row's evidence fields are blank.
+- **Current evidence:** A validator and tests are in the tree and committed, but
+  this row's ledger evidence fields are still blank, so the closure is not
+  evidenced. Three earlier negative fixtures described valid layouts; their
+  original failed runs are withdrawn, not retained as defect evidence.
 - **Next:** Reconcile valid refusal and acceptance cases for ordering, overlap and
   slot bounds, then review sibling expansion paths before disposition.
 
@@ -477,17 +565,32 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-017 — Host KV window accepts impractically large sizes
 
-**S2 · Tier A · OPEN · TinyTitanServer**
+**S2 · Tier A · DONE · TinyTitanServer**
 
-- **Location:** [server arguments](sources/TinyTitanServer/Core/ServerArguments.swift),
-  [runtime configuration](sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift)
-  and [CLI arguments](sources/TinyTitanCLI/Args.swift).
-- **Finding:** `--host-kv-window` checked only positivity, permitting huge values
-  to fail much later at allocation instead of at input validation.
-- **Current evidence:** Pending range checks/tests exist, but the individual
-  before/fix/after evidence remains empty.
-- **Next:** Verify documented boundaries and overflow handling through server,
-  CLI and programmatic configuration; reconcile focused evidence and review.
+- **Location:** [server arguments](sources/TinyTitanServer/Core/ServerArguments.swift)
+  (lines 296–304) and [runtime configuration](sources/TinyTitan/Runtime/Configuration/RuntimeConfiguration.swift)
+  (lines 420–428).
+- **Finding:** `--host-kv-window` accepted any positive `Int` while every other
+  sizing flag names its range, so `999999999` parsed, was stored, and failed only
+  when the per-layer, per-slot arena was allocated — after the model had been
+  opened. `RuntimeConfiguration` applied the same `> 0` test.
+- **Current evidence:** Both now require 1 through
+  `RuntimeConfiguration.maximumContextTokens`: a window larger than the largest
+  context the engine serves cannot hold a meaningful selection, and the error text
+  names the bound it enforces. RED: with the two source files reverted,
+  `parsesHostKVWindow` records 2 issues — the parse and the `RuntimeConfiguration`
+  init both accept `maximumContextTokens + 1` (exit 1, `AUDIT/aud2-017-red.log`);
+  with the fix it passes (exit 0, `AUDIT/aud2-017-green.log`).
+- **Deviation disclosed:** those expectations were committed in `9ca9942` while the
+  source fix stayed in the working tree, so that test failed on every commit from
+  `9ca9942` through `7024d03`, and the full-suite runs recorded against those
+  commits passed only because of the uncommitted fix. `41d14ca` lands the fix, and
+  the suite was re-run on the committed tree.
+- **Limits:** the CLI arm does not carry this flag (`Args.swift` has no
+  `--host-kv-window`), so the two validated surfaces are the server parse and the
+  programmatic initializer; the bound itself is a sizing ceiling, not an overflow
+  guard.
+- **Commit:** `41d14ca`. Not merged, released or verified on an independent host.
 
 ### AUD2-018 — An audit patch double-counted rANS stream headers
 
@@ -1254,6 +1357,32 @@ systems. Passing local tests never bypasses the final checklist above.
   a regular file (ENOTDIR), so it does not depend on runner permissions.
 - **Commit:** `7740a42`. Not merged, released or verified on an independent host.
 
+### AUD2-047 — A calibrate conflict is refused with a message about the wrong flags
+
+**S2 · Tier A · DONE · TinyTitanCLI**
+
+- **Location:** [calibration command](sources/TinyTitanCLI/CalibrationCommand.swift)
+  (lines 126, 140–141 and 270–286).
+- **Finding:** `CalibrationCommandError.conflictingInput` carried no payload and
+  its `description` was written for one site: "calibrate accepts either --model
+  or --check, not both". All three conflict sites threw it, so `--plan --check`,
+  `--plan --model` and `--measure --check` each printed advice about flags the
+  user never passed — the first two are the refusals AUD2-008 just added, so the
+  new refusal was correct and its diagnostic was not.
+- **Current evidence:** The case now carries the two flag names and renders
+  "calibrate --plan and --check cannot be combined"; each of the four sites passes
+  its own pair. Only the `--plan` branch's shape changed (one `||` test became
+  two), the refusals themselves are the ones already made, and mode precedence is
+  untouched. RED: `eachConflictRefusalNamesItsOwnFlags` covers four combinations
+  and records 3 issues — `--check --plan`, `--model --plan` and `--check --measure`
+  each fail because the message omits the flag the refusal is about (18 tests,
+  exit 1, `AUDIT/aud2-047-red.log`). GREEN: the same 18 tests pass, exit 0
+  (`AUDIT/aud2-047-green.log`).
+- **Disclosed:** the `--model --check` case passed before and after the change; it
+  is the one message that was already right, and it is kept in the test so a later
+  edit cannot quietly drop it.
+- **Commit:** `3191968`. Not merged, released or verified on an independent host.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -1331,6 +1460,38 @@ exit 1, `AUDIT/aud2-029-red.log`) and passed after the fix (33 checkpoint tests,
 exit 0, `AUDIT/aud2-029-green.log`). The fix commit `7024d03` carries the full
 serial suite (**7 bundles, 1,998 tests, exit 0**, `AUDIT/aud2-029-full.log`) and
 all 18 lint gates (`AUDIT/aud2-029-lint.log`, 18/18).
+
+Six records (AUD2-003, 005, 006, 008, 009, 017) were found already fixed in the
+working tree with no ledger status — the previous session's uncommitted work. They
+were taken over rather than trusted: each was mapped to its record, re-read in
+full, and given a before/after run. Five landed at `41d14ca` and `6130898`; the
+tree carrying both was verified with the full serial suite (**7 bundles, 2,002
+tests, exit 0**, `AUDIT/aud2-pending-full.log`) and all 18 lint gates (exit 0,
+`AUDIT/aud2-pending-lint.log`). Three disclosures ride with them: AUD2-003 has no
+behavioral RED (its seam is new, so the unfixed tree fails to compile, not
+asserts); AUD2-006's new test is a pin, not a RED, because the pre-fix reader also
+refused the oversized file after reading all of it; and AUD2-009 has no unit seam
+at all and is recorded as reviewed and compiled. The last of these is a real gap,
+not a formality — a guard that catches a defect and has no test is half a fix, and
+these rows say so instead of borrowing the suite pass as proof.
+
+AUD2-017's deviation is a history defect, not just a missing test: its
+expectations were committed in `9ca9942` while the source fix stayed uncommitted,
+so `parsesHostKVWindow` failed on every commit from `9ca9942` through `7024d03` and
+the full-suite runs recorded against those commits passed only because the
+working tree carried the fix. `41d14ca` lands the fix and the suite was re-run on
+that committed tree; the earlier "green" runs are withdrawn as evidence that those
+commits were sound.
+
+AUD2-047 was written test-first on the tree `6130898` left: 18 tests with 3 issues,
+exit 1 (`AUDIT/aud2-047-red.log`), and 18 tests passing, exit 0
+(`AUDIT/aud2-047-green.log`). The fix commit `3191968` was verified as the tree it
+records — full serial suite **7 bundles, 2,003 tests, exit 0**
+(`AUDIT/aud2-047-full.log`; the only two lines in that log matching `error:` are the
+corrupt-record quarantine diagnostics the checkpoint test provokes on purpose) and
+all 18 lint gates exit 0 (`AUDIT/aud2-047-lint.log`, 18/18). Nothing ran a model,
+and `AUDIT/*.log` evidence stays in the gitignored audit tree, so these files are
+not delivered with the report.
 
 ### Full serial Swift run
 
@@ -1638,9 +1799,12 @@ unfixed; remote artifacts have not been inspected.
 ## Continuation boundaries
 
 Continue from the recorded issue evidence, not from a claim that passing tests
-means all bugs are fixed. Preserve uncommitted work and the invalid-evidence
-history. Do not close a static claim without the required reproduction/review,
-replace a disproven claim with its sibling, or treat absent evidence as a pass.
+means all bugs are fixed. Six records were found this session already fixed in the
+working tree with no ledger status; they were taken over, re-proved and committed
+rather than trusted — keep doing that, and never discard uncommitted work or the
+invalid-evidence history. Do not close a static claim without the required
+reproduction/review, replace a disproven claim with its sibling, or treat absent
+evidence as a pass.
 
 At this snapshot **the audit is not complete, and it cannot be certified complete
 from inside the tree.** The blocks are external or unrun:
@@ -1662,11 +1826,15 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **36 non-terminal records** (19 OPEN, 2 START, 3 PROGRESS,
-10 TEST, 2 AUDIT), four DONE records and one BLOCKED. The §5 facade hunt's two
-findings are now DONE with remediation commits, so this milestone drains two
-records; the run has still never reached Phase C, let alone Phase D, so no
-convergence milestone is claimed and §8's invariant is not yet due.
+The ledger stands at **47 records: 31 DONE, 15 non-terminal (11 OPEN, 2 PROGRESS,
+2 AUDIT) and 1 BLOCKED**. The count has fallen at every recorded milestone — 36
+non-terminal at the last snapshot of this section, 21 after the rANS and checkpoint
+batches, 15 now — so §8's strictly-decreasing invariant is met, while the run has
+still never reached Phase C, let alone Phase D, and no convergence milestone is
+claimed. Every non-terminal record left is either an S2 design gap that needs work
+this branch has not done (AUD2-001, 002, 004, 007, 013, 014, 034, 035, 036, 039,
+045), a claim awaiting formal reconciliation (AUD2-015, 016), a verification record
+(AUD2-019, 031), or the external host (AUD2-038).
 
 Completed and evidenced here: recovery and hash verification of the original
 brief, the debug and release builds plus the full serial suite under the required
@@ -1678,7 +1846,7 @@ passes (AUD2-037). Still incomplete:
 the module-by-module Tier A review,
 clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
 dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
-remediation of every OPEN/START/PROGRESS record — including AUD2-035, which the
+remediation of every OPEN/PROGRESS/AUDIT record — including AUD2-035, which the
 probe confirms but does not fix. This report is a faithful snapshot of that state,
 not a Phase E certificate.
 
