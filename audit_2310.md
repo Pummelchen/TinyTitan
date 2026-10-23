@@ -1,14 +1,16 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-044 44/44 | done:8 open:35 blocked:1 new:2] DONE — the four brief-mandated
-passes are recorded: L5 found no hot-path defect, L7 found an occupied port that
-was reported only after the full model load and it is fixed`
+`[#AUD2-024 44/44 | done:17 open:26 blocked:1 new:2] DONE — the rANS cluster is
+closed at 61de182: both S0s and seven related S1/S2 records, with geometry bound
+to the tensor layout, publication held to the final wave, and the scale, stream
+and overlap guards proven by tests`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
-a process record once its four passes were run; AUD2-040, AUD2-041, AUD2-042,
-AUD2-043 and AUD2-044 are closed with remediation commits, and none is merged,
-released or certified on a clean final revision.
+a process record once its four passes were run; AUD2-040 to AUD2-044 and the
+rANS cluster (AUD2-010, 011, 012, 018, 023, 024, 025, 027, 030) are closed with
+remediation commits, and none is merged, released or certified on a clean final
+revision.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -22,12 +24,13 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `3ac4699cc86c149045c4d17817986ff35636f052`, which carries the
-  AUD2-044 fix on top of the AUD2-040 to AUD2-043 chain. **The tree also carries
-  uncommitted source and test changes** belonging to records still in
-  START/PROGRESS/TEST, so that commit alone does not contain every tested fix.
-- **44 records: 8 DONE, 35 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **18 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 8 DONE,
+- Measured HEAD: `61de182f1d3e141e92314f079cf1f0e606fcb647`, which carries the
+  rANS cluster on top of the AUD2-044 fix and the AUD2-040 to AUD2-043 chain.
+  **The tree also carries uncommitted source and test changes** belonging to
+  records still in START/PROGRESS/TEST, so that commit alone does not contain
+  every tested fix.
+- **44 records: 17 DONE, 26 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **17 OPEN, 2 START, 2 PROGRESS, 3 TEST, 2 AUDIT, 17 DONE,
   1 BLOCKED**.
 - Recorded severities: **2 S0, 16 S1, 25 S2, 1 S3**. These are ledger
   classifications, not a claim that all 44 records are confirmed product bugs.
@@ -40,9 +43,11 @@ tier and status, including disproven claims and audit-introduced regressions.
   (the four brief-mandated passes) are DONE and close no product defect;
   AUD2-040 (stale diagnostic), AUD2-041 (`min_p` accepted and ignored), AUD2-042
   (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
-  and AUD2-044 (late port validation) are DONE with remediation commits.
+  and AUD2-044 (late port validation) are DONE with remediation commits, as are
+  the nine rANS records closed at `61de182`.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
-  `c8d04c4` and AUD2-044 is `3ac4699`, all on the audit branch. Removal tickets
+  `c8d04c4`, AUD2-044 is `3ac4699` and the rANS cluster is `61de182`, all on the
+  audit branch. Removal tickets
   TT-050 and TT-051 are filed in the project tracker (wiki commit `081335d`). No
   fix is represented here as merged, released, or certified on a clean final
   revision.
@@ -114,15 +119,15 @@ requirement was worked but its own definition of done is not met.
 | §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
-| §8 | Ledger schema and S0/S1 gates | Partial — schema met; AUD2-041 is the first S1 through TEST→AUDIT→DONE, no S0 has | [ledger](AUDIT/ledger.md) |
+| §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage; their fixes share one commit, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4` and `3ac4699` are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one; the rest of the tree's fixes are still uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 8 DONE, 35 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 17 DONE, 26 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 35 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 26 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -361,7 +366,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-010 — Failed rANS length reads can skip decoding or undersize staging
 
-**S1 · Tier A · OPEN · TinyTitan**
+**S1 · Tier A · DONE · TinyTitan**
 
 - **Location:** [rANS decoder](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift)
   and [rANS streamer](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift).
@@ -376,7 +381,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-011 — rANS scale values unsupported by the decoder were accepted
 
-**S1 · Tier A · PROGRESS · TinyTitanFormat/TinyTitan**
+**S1 · Tier A · DONE · TinyTitanFormat/TinyTitan**
 
 - **Location:** [rANS index](sources/TinyTitanFormat/ExpertRANSIndex.swift),
   [decoder](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift) and
@@ -391,7 +396,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-012 — rANS stream lengths and GPU renormalization were unbounded
 
-**S1 · Tier A · TEST · TinyTitan**
+**S1 · Tier A · DONE · TinyTitan**
 
 - **Location:** [rANS decoder](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift).
 - **Finding:** Corrupt per-stream lengths could cross block/stream boundaries,
@@ -477,7 +482,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-018 — An audit patch double-counted rANS stream headers
 
-**S1 · Tier A · TEST · TinyTitan**
+**S1 · Tier A · DONE · TinyTitan**
 
 - **Location:** [rANS decoder](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift).
 - **Finding:** Writer lengths already include the eight-byte header; adding it
@@ -563,7 +568,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-023 — rANS publishes before all expert waves are decoded
 
-**S0 · Tier A · TEST · TinyTitan**
+**S0 · Tier A · DONE · TinyTitan**
 
 - **Location:** [rANS streamer](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift)
   and [MoE consumer](sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift).
@@ -578,7 +583,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-024 — rANS output geometry is not bound to inference's tensor layout
 
-**S0 · Tier A · TEST · TinyTitan/TinyTitanFormat**
+**S0 · Tier A · DONE · TinyTitan/TinyTitanFormat**
 
 - **Location:** [rANS model validation](sources/TinyTitan/Runtime/Inference/Model+RANS.swift)
   and [layer opening](sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift).
@@ -596,7 +601,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-025 — rANS payload endpoint arithmetic can trap on overflow
 
-**S1 · Tier A · TEST · TinyTitanFormat**
+**S1 · Tier A · DONE · TinyTitanFormat**
 
 - **Location:** [rANS index](sources/TinyTitanFormat/ExpertRANSIndex.swift).
 - **Finding:** Adding an untrusted UInt64 offset and positive length before
@@ -627,7 +632,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-027 — Different rANS experts can alias compressed payload runs
 
-**S1 · Tier A · TEST · TinyTitanFormat**
+**S1 · Tier A · DONE · TinyTitanFormat**
 
 - **Location:** [rANS index](sources/TinyTitanFormat/ExpertRANSIndex.swift).
 - **Finding:** Within-expert contiguity checks did not reject exact or partial
@@ -672,7 +677,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-030 — An intermediate geometry guard rejected equivalent bit widths
 
-**S2 · Tier A · TEST · TinyTitan**
+**S2 · Tier A · DONE · TinyTitan**
 
 - **Location:** [rANS model validation](sources/TinyTitan/Runtime/Inference/Model+RANS.swift).
 - **Finding:** Literal dictionary equality compared optional `bits` spelling;
@@ -1135,6 +1140,17 @@ python3 listener on 127.0.0.1:18451 and exited 2 in 0.43 s
 (`AUDIT/aud2-044-live-occupied.err`), the control arm on 18452 answered
 `/health {"status":"ok"}` and exited 0 on SIGTERM
 (`AUDIT/aud2-044-live-free.out`, `-health.json`).
+
+The rANS cluster at `61de182` was audited the same day: cold re-read of the whole
+diff, then a focused rerun of the affected suites (**27 tests in 4 suites, exit
+0**, `AUDIT/aud2-023-024-audit.log`); the full serial suite and the 18 lint gates
+above ran on exactly that tree. AUD2-010's RED was demonstrated on the fix
+itself — restoring its old `else { return }` made `refusesTruncatedPayload` fail
+with `an error was expected but none was thrown` (`AUDIT/aud2-010-red.log`, exit
+1) — and the committed file was restored before the paired GREEN (exit 0,
+`AUDIT/aud2-010-green.log`). No live model run exercises these guards: they are
+untrusted-sidecar paths, and the writer-to-GPU round trips in the suite stand in
+for a real sidecar.
 
 ### Full serial Swift run
 

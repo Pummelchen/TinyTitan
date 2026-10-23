@@ -23,7 +23,8 @@
    "2026-10-23 brief recovery: the operator supplied the original 13-section brief. It is preserved verbatim in AUDIT/audit-brief.md with a provenance header; the trailing 17,800 bytes hash to the supplied SHA-256. AUD2-032 is closed as documentation. Reconciliation against the brief added AUD2-037 (section 5 facade hunt, section 6 Tier-A unused code, L5 performance and L7 ops have no recorded pass) and AUD2-038 (no independent host for the Phase E whole-repository verification). The ledger is still in Phase B discovery, so no convergence milestone is claimed and section 8's strictly-decreasing closure invariant is not yet due.",
    "2026-10-23 Swift 6.4.1 correction: the earlier AUD2-022 inventory searched only Xcode/CommandLineTools and missed Homebrew's keg-only swift 6.4.1. The keg builds and tests the package (exit 0, all seven bundles, same 11 skips). Its 49 linker deployment-target warnings are filed as AUD2-039 because the baseline had zero warnings. Both the error and the resulting regression are recorded rather than smoothed over.",
    "The 2026-10-23 section-6 sweep ran over the Tier A modules and the code this audit orphaned. It filed AUD2-042 (five declarations with no caller, deprecated with removal tickets TT-050/TT-051) and AUD2-043 (the decode-only expert I/O line lost its only reporter in 0cdba76 while its benchmark still parsed it, restored in the library). Neither changes inference; AUD2-043 restores a measurement the slot sweep depends on.",
-   "2026-10-23 L5/L7: the two remaining brief-mandated passes ran over the Tier A hot paths and the one deployable service. L5 found no N+1, unbounded collection, missing stream or blocking call and claims no new measurement; L7 found one startup-validation gap (AUD2-044, fixed at 3ac4699 and live-probed) and no further finding in health, shutdown, structured errors or rollback. AUD2-037 is therefore DONE; its commit field is backfilled on the next ledger commit, as AUD2-032's was."
+   "2026-10-23 L5/L7: the two remaining brief-mandated passes ran over the Tier A hot paths and the one deployable service. L5 found no N+1, unbounded collection, missing stream or blocking call and claims no new measurement; L7 found one startup-validation gap (AUD2-044, fixed at 3ac4699 and live-probed) and no further finding in health, shutdown, structured errors or rollback. AUD2-037 is therefore DONE; its commit field is backfilled on the next ledger commit, as AUD2-032's was.",
+   "2026-10-23 rANS cluster commit 61de182: the two S0 records (AUD2-023, AUD2-024) share the rANS call path with six S1 records, so their hunks interleave in the same functions and they share one focused commit rather than nine artificial splits. That is a recorded deviation from one-commit-per-record; every record's own diff, test and cold-read are named in its evidence-after. AUD2-010's RED was demonstrated on the fix itself by restoring the old branch and observing the failure, with the committed file restored before the GREEN run."
   ],
   "fields": "id | severity | tier | project | file:line | title | category | status | host | discovered-by | evidence-before | fix-summary | evidence-after | commit | blocked-reason",
   "brief_file": "AUDIT/audit-brief.md",
@@ -191,14 +192,15 @@
    "file": "sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:195-232; PreadExpertStreamer+RANS.swift:82-104",
    "title": "Failed length-table pread leaves empty plans and zero payload size: expert decode silently skipped (stale weights) and payloadStride underestimated so the payload read overflows the staging MTLBuffer",
    "category": "error-handling/memory-safety",
-   "status": "OPEN",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "RANS/C-kernel subagent pass + main-agent verification",
    "evidence-before": "",
-   "fix-summary": "",
-   "evidence-after": "",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "Collect a failed length-table pread and throw at layer open instead of returning an empty plan with a zero payload size.",
+   "evidence-after": "DONE at 61de182: an unreadable stream-length table is collected as a failure and thrown at layer open (empty plans and zero payload size can no longer reach the wave loop). RED demonstrated on the fix by restoring the old `else { return }`: refusesTruncatedPayload failed with 'an error was expected but none was thrown' (AUDIT/aud2-010-red.log, exit 1); with the fix GREEN (AUDIT/aud2-010-green.log, exit 0). AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-011",
@@ -208,14 +210,15 @@
    "file": "sources/TinyTitanFormat/ExpertRANSIndex.swift:156-159; sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:91-98,168",
    "title": "scaleBits validated 8...16 but the decoder implements only 14 (16383/>>14/2^23 hardcoded): a sidecar with another scale passes validation and decodes to garbage weights",
    "category": "writer-reader-asymmetry",
-   "status": "PROGRESS",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "RANS/C-kernel subagent pass + main-agent verification",
    "evidence-before": "New test tests/TinyTitanRepack/Core/Format/ExpertRANSIndexDecodeTests.swift failed pre-fix: scaleBits 13 and 15 both accepted (\"an error was expected but none was thrown\", 2 issues).",
    "fix-summary": "ExpertRANSIndex.decode now requires scaleBits == ExpertRANSIndex.implementedScaleBits (14), the scale the GPU kernel and the reference decoder implement; RANSExpertLayerWriter.scaleBits is now defined as the same constant so reader and writer cannot drift.",
-   "evidence-after": "Post-fix run: 4 tests in 2 suites passed (new decode suite + the existing writer round-trip, which proves the constant alignment did not change the emitted bytes). Final focused rANS run passed19tests/3suites, and the post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log). Full-scope review, clean commit and PhaseE remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "Post-fix run: 4 tests in 2 suites passed (new decode suite + the existing writer round-trip, which proves the constant alignment did not change the emitted bytes). Final focused rANS run passed19tests/3suites, and the post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log). Full-scope review, clean commit and PhaseE remain pending. DONE at 61de182 (the fix is the same commit that carries the S0 pair): ExpertRANSIndex.implementedScaleBits = 14 is the reader's only accepted value and RANSExpertLayerWriter.scaleBits is defined from it. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-012",
@@ -226,14 +229,15 @@
    "title": "Per-stream u16 lengths read from the payload are unbounded against the block run, and the kernel renorm loop has no end-of-stream bound: corrupt lengths read into neighbouring streams or past the payload buffer",
    "category": "untrusted-input/memory-safety",
    "verification": "AUDIT/rans-block-red.log: after removing double-counted header, short-header and cross-block refusal assertions fail. AUDIT/rans-kernel-red.log: writer/GPU round-trip passes, corrupted first stream returns success and publishes (2 failed assertions). With per-block length>=8 guard and per-stream GPU payloadEnd+atomic failure checked before publish, AUDIT/rans-kernel-green.log: 11 tests in 3 suites pass, exit0. Recovery with original bytes also succeeds. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log). Full-scope cold review, clean commit and PhaseE remain pending.",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "RANS/C-kernel subagent pass + main-agent verification",
    "evidence-before": "",
-   "fix-summary": "",
-   "evidence-after": "",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "Bound each stream by its block and the kernel renormalisation loop by the stream payloadEnd; report exhaustion and refuse to publish.",
+   "evidence-after": "DONE at 61de182: each stream must be at least its 8-byte header and end inside its own block, and the kernel bounds the renormalisation loop by the stream's payloadEnd, recording an exhausted stream in a device flag the host checks before publishing. refusesLengthsPastTheRun, exactStreamLengthsIncludeTheirHeaders, aStreamShorterThanItsHeaderIsRefused and aStreamCannotConsumeTheNextBlocksBytes plus the writer-to-GPU exhaustion round trip pass in the 27-test focused run. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-013",
@@ -331,14 +335,15 @@
    "title": "Audit patch double-counts stream headers and rejects valid rANS payloads",
    "category": "audit-regression",
    "verification": "AUDIT/rans-header-red.log exit1: exact-fit 36-byte block wrongly rejected as stream ending44. AUDIT/rans-block-red.log: same positive test passes after eliminating extra8. AUDIT/rans-kernel-green.log exit0: 11tests3suites including actual writer-to-GPU round-trip. Earlier two-stream fixture corrected from64 to4096 symbols and payload helper now writes declared stream lengths; original misleading refusal pass withdrawn.",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "main-agent cold review against actual writer",
    "evidence-before": "RANSExpertLayerWriter.encodeBlock writes UInt16(data.count), including the eight-byte header; current guard checks streamOffset + 8 + length. Expected: accept exact block tiling, require each length >= 8, reject a stream crossing its own block even if within the expert run.",
-   "fix-summary": "",
-   "evidence-after": "",
-   "commit": null,
-   "blocked-reason": null
+   "fix-summary": "Stream offsets start after the length table and lengths include the 8-byte header, which is what the writer emits.",
+   "evidence-after": "DONE at 61de182: the plan's stream offset starts after the u16 length table and each declared length covers the 8-byte header, so an exact-fit block is accepted (exactStreamLengthsIncludeTheirHeaders) and the writer-to-GPU round trip still passes. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-019",
@@ -416,14 +421,15 @@
    "file": "sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:17-24; sources/TinyTitan/Runtime/Inference/RealForwardRunner+DecodeMoEPhase1.swift:133-177",
    "title": "rANS publishes gate/up after the first wave while later experts are still undecoded",
    "category": "incorrect-results/concurrency",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent rANS review, main-agent full-file verification",
    "evidence-before": "executeRANSPlan forwards firstStage only when start==0, but the consumer immediately dispatches all miss slots. maximumWave is eight; Qwen3.8 routes ten experts. Expected: publish only once every miss has completed phase0, and never after a failed earlier wave. Earlier RED evidence and fixture corrections remain in AUDIT/rans-waves-red-confirmed.log and its companion logs.",
    "fix-summary": "Pending streamer patch gates firstStage on the final wave, after successful phase0 completion of every preceding wave.",
-   "evidence-after": "Independent narrow rANS review found no further publication defect. AUDIT/rans-validation-final.log exit0 includes firstStagePublishesOnlyAfterEveryWavesFrontIsReady and aLaterWaveFailureDoesNotPublishAnIncompletePlan. Synthetic GPU evidence only; no live model check. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "Independent narrow rANS review found no further publication defect. AUDIT/rans-validation-final.log exit0 includes firstStagePublishesOnlyAfterEveryWavesFrontIsReady and aLaterWaveFailureDoesNotPublishAnIncompletePlan. Synthetic GPU evidence only; no live model check. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending. DONE at 61de182: the streamer forwards firstStage only when end == plan.misses.count, and the kernel's exhausted-stream flag is checked before publication, so a failed wave can never publish an incomplete plan. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-024",
@@ -433,14 +439,15 @@
    "file": "sources/TinyTitan/Runtime/Inference/Model+RANS.swift:5-64; sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:136-137",
    "title": "rANS sidecar output geometry is not bound to the tensor layout used by inference",
    "category": "incorrect-results/untrusted-input",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent rANS review, main-agent full-file verification",
    "evidence-before": "Original reader checked individual output bounds and role<blockCount only. Earlier patch matched blocks against each expert's own metadata, but a coordinated later-expert layout and sidecar gate/down offset swap still passed. ModelExpertIO.routedExpertOffsets uses expert0 for all slots. AUDIT/rans-cross-expert-red.log: new coordinated-swap refusal failed because no error was thrown, exit1. Earlier geometry fixture caveats remain in the original logs.",
    "fix-summary": "At layer open, require matching named tensor offsets, sizes, dtypes and shapes across experts, then verify each sidecar block's offset/count/stride/role against its tensor. Optional bits annotations are excluded because schema validation already resolves their effective widths and checks byte sizes; the overly strict intermediate check is AUD2-030.",
-   "evidence-after": "AUDIT/rans-validation-final.log exit0:19 tests/3 suites, including coordinated-swap refusal, eight sidecar-geometry mismatch cases, writer geometry with BF16 planes, equivalent implicit-width acceptance, GPU/reference round trips. Tests are synthetic; no live model/golden run. Independent follow-up verified schema/caller ordering with no actionable concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "AUDIT/rans-validation-final.log exit0:19 tests/3 suites, including coordinated-swap refusal, eight sidecar-geometry mismatch cases, writer geometry with BF16 planes, equivalent implicit-width acceptance, GPU/reference round trips. Tests are synthetic; no live model/golden run. Independent follow-up verified schema/caller ordering with no actionable concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending. DONE at 61de182: Model+RANS.swift requires every expert's tensors to match expert 0 (offset, size, dtype, shape) and binds each sidecar block's rawOffset, symbolCount, stride and role to the tensor it decodes; the reader also refuses an unimplemented scale, an overflowing payload end and overlapping expert runs. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-025",
@@ -450,14 +457,15 @@
    "file": "sources/TinyTitanFormat/ExpertRANSIndex.swift:228-238",
    "title": "Untrusted rANS payload offset addition can overflow before validation",
    "category": "numeric-safety",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "main-agent full-file review",
    "evidence-before": "payloadOffset is decoded as UInt64 and added to UInt32 length in a trapping expression before comparison with payloadSize. UInt64.max plus a positive length crashes instead of throwing badBlock. The original refusal test remained unfixed and crashed TinyTitanRepackTests in AUDIT/continuation-full-swift-tests.log (exit1, signal5), corroborating AUDIT/rans-overflow-red.log.",
    "fix-summary": "Use addingReportingOverflow once, reject overflow or file overrun, and reuse the checked endpoint for continuity and expert-run checks.",
-   "evidence-after": "Original refusesOverflowingPayloadRange assertion unchanged and passes in AUDIT/rans-validation-green.log and rans-validation-final.log, both exit0. Independent narrow review found no issue in checked addition. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "Original refusesOverflowingPayloadRange assertion unchanged and passes in AUDIT/rans-validation-green.log and rans-validation-final.log, both exit0. Independent narrow review found no issue in checked addition. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending. DONE at 61de182: the checked addition is the version in this commit; refusesOverflowingPayloadRange passes in the 27-test focused run. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-026",
@@ -484,14 +492,15 @@
    "file": "sources/TinyTitanFormat/ExpertRANSIndex.swift:197-259",
    "title": "rANS sidecar permits overlapping compressed payload runs for distinct experts",
    "category": "incorrect-results/untrusted-input",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent rANS review, main-agent writer/reader verification and regression tests",
    "evidence-before": "AUDIT/rans-cross-expert-red.log: refusesOverlappingExpertPayloads at offsets0 and2 both failed because no error was thrown, exit1. The writer emits distinct contiguous expert runs, but the reader only checked contiguity within each expert.",
    "fix-summary": "Sort validated expert payload ranges and reject adjacent overlaps without assuming expert ordering in the payload file. Shared payloads are not emitted by the writer.",
-   "evidence-after": "TMPDIR=\"$PWD/AUDIT/scratch\" xcrun swift test --no-parallel --filter 'RANS|rANS' exited0, AUDIT/rans-validation-green.log: 18 tests in3 suites, including both overlap cases, original overflow refusal, writer/reference/GPU round trips and multi-wave publication. Final focused19-test run also passed (rans-validation-final.log); independent review found no further range-check concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "TMPDIR=\"$PWD/AUDIT/scratch\" xcrun swift test --no-parallel --filter 'RANS|rANS' exited0, AUDIT/rans-validation-green.log: 18 tests in3 suites, including both overlap cases, original overflow refusal, writer/reference/GPU round trips and multi-wave publication. Final focused19-test run also passed (rans-validation-final.log); independent review found no further range-check concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending. DONE at 61de182: payload runs are sorted by start and adjacent overlap is refused; both offsets in refusesOverlappingExpertPayloads pass. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-028",
@@ -535,14 +544,15 @@
    "file": "sources/TinyTitan/Runtime/Inference/Model+RANS.swift:14-29",
    "title": "Intermediate canonical rANS guard rejects equivalent omitted and explicit-default width annotations",
    "category": "audit-regression/compatibility",
-   "status": "TEST",
+   "status": "DONE",
    "host": "dev-mac (primary)",
    "discovered-by": "independent review of continuation patch, main-agent schema verification and regression test",
    "evidence-before": "Full SubTensorEntry dictionary equality compares optional bits literally. Schema validation accepts omitted bits as the manifest default and checks the resulting byte size. New modelLoaderAcceptsImplicitWidthWithIdenticalGeometry failed with indexCorrupt, AUDIT/rans-implicit-width-red.log exit1. The earlier18-test rANS pass did not cover this valid representation.",
    "fix-summary": "Compare named tensor offset,size,dtype,shape, not optional width spelling. Existing model-open validation ensures effective widths agree with shapes and sizes. No manifest argument or public API change needed.",
-   "evidence-after": "AUDIT/rans-validation-final.log:19 tests/3 suites passed, exit0, including new acceptance and unchanged coordinated geometry-swap refusal. Independent follow-up verified the schema/caller ordering and found no actionable concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending.",
-   "commit": null,
-   "blocked-reason": null
+   "evidence-after": "AUDIT/rans-validation-final.log:19 tests/3 suites passed, exit0, including new acceptance and unchanged coordinated geometry-swap refusal. Independent follow-up verified the schema/caller ordering and found no actionable concern. Post-format full serial suite exited0 with1974passed/11skipped (AUDIT/continuation-full-swift-tests-postformat.log); exact6.4.1/model/PhaseE checks remain pending. DONE at 61de182: the geometry comparison names offset, size, dtype and shape and leaves the optional width spelling out; modelLoaderAcceptsImplicitWidthWithIdenticalGeometry and the eight mismatch cases pass. AUDIT stage 2026-10-23: cold re-read of the diff found the guard where it belongs (writer, reader and kernel now agree on the 8-byte stream header, the implemented scale is one constant, and the overlap check compares adjacent runs in start order, which is sufficient because every run's end is at or after its start). Focused rerun: 27 tests in 4 suites, exit 0 (AUDIT/aud2-023-024-audit.log). Full serial suite on the same tree: 7 bundles, 1,992 tests, exit 0 (AUDIT/aud2-044-full-tests.log); 18/18 lint gates exit 0 (AUDIT/aud2-044-lint.log); no new TODO/FIXME in the changed files and Package.swift only added a test-target dependency, so the Swift 6 language mode is unchanged.",
+   "commit": "61de182f1d3e141e92314f079cf1f0e606fcb647",
+   "blocked-reason": null,
+   "disposition": "Fixed on the branch at 61de182; not merged, released or verified on an independent host."
   },
   {
    "id": "AUD2-031",
