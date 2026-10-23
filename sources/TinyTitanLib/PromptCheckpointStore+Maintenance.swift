@@ -94,31 +94,41 @@ extension PromptCheckpointStore {
     /// swap is restored when the canonical directory is missing -- the crash
     /// window between the two renames -- and deleted as stale otherwise. `.tmp-`
     /// staging is never published: those are writes that did not commit.
+    private static let directoryKeys: Set<URLResourceKey> = [
+        .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey,
+    ]
+
     func indexDiskIfNeeded() {
         guard !diskIndexed else { return }
         guard let root = configuration.diskDirectory else {
             diskIndexed = true
             return
         }
-        let keys: Set<URLResourceKey> = [
-            .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey,
-        ]
         // A failed listing is not "nothing to index": leaving the flag clear
         // lets a later call retry, where latching it would strand every
         // record on disk for the store's lifetime.
         guard
             let entries = try? fileManager.contentsOfDirectory(
-                at: root, includingPropertiesForKeys: Array(keys))
+                at: root, includingPropertiesForKeys: Array(Self.directoryKeys))
         else { return }
         diskIndexed = true
+        mergeIntoIndex(settleDiskEntries(entries, root: root))
+    }
 
+    /// Validates the listing, reclaims crash debris, restores a recoverable
+    /// backup, and returns the records that may be indexed. Split out of
+    /// `indexDiskIfNeeded` to keep each function under the length gate.
+    private func settleDiskEntries(
+        _ entries: [URL], root: URL
+    ) -> [(record: DiskRecord, date: Date)] {
         var valid: [String: (record: DiskRecord, date: Date)] = [:]
         var backups: [(hash: String, directory: URL, date: Date)] = []
         var staged: [(directory: URL, reason: String)] = []
         var rejected: [(directory: URL, reason: String)] = []
         for directory in entries {
             guard
-                let values = try? directory.resourceValues(forKeys: keys),
+                let values = try? directory.resourceValues(
+                    forKeys: Self.directoryKeys),
                 values.isDirectory == true, values.isSymbolicLink != true
             else { continue }
             let name = directory.lastPathComponent
@@ -194,16 +204,17 @@ extension PromptCheckpointStore {
         for entry in staged {
             reclaim(entry.directory, reason: entry.reason)
         }
+        return valid.values.sorted { $0.date < $1.date }
+    }
 
-        let loaded = valid.values.sorted { $0.date < $1.date }
+    /// Merges the validated listing into the in-memory index in one date order,
+    /// then applies the disk budget. A record `load` found before this index is
+    /// already in `state.disk`; appending the listing behind it would make the
+    /// most recently loaded record the first eviction candidate.
+    private func mergeIntoIndex(_ loaded: [(record: DiskRecord, date: Date)]) {
         // Restart LRU order is the directories' modification dates, not the
         // volume's listing order — the turn store applies the same rule, and
         // a listing order would evict an arbitrary record first.
-        // A record `load` found before this index is already in `state.disk`;
-        // appending the listing behind it would make the most recently loaded
-        // record the first eviction candidate. Both sides carry a date -- the
-        // filesystem's for indexed records, the write or touch time for the
-        // in-process ones -- so one merged order is well defined.
         var order: [(key: PromptCheckpointKey, date: Date)] =
             state.diskLRU.compactMap { key in
                 state.disk[key].map { (key, $0.modificationDate) }
