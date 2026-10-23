@@ -300,15 +300,18 @@ toolchain: `/opt/homebrew/opt/swift/bin/swift` reports
 ```bash
 TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build \
   --scratch-path .build/brew641 --disable-automatic-resolution
+TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build -c release \
+  --scratch-path .build/brew641-release --disable-automatic-resolution
 TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
   /opt/homebrew/opt/swift/bin/swift test --scratch-path .build/brew641 --no-parallel
 ```
 
 | Metric | 6.4.0 baseline tree | 6.4.1 keg |
 | --- | --- | --- |
-| Build | exit 0, 306/306 release tasks, 0 warnings | exit 0, 1,258 debug tasks, 72.81 s, 0 compiler errors, 49 linker warnings |
+| Build (debug) | exit 0, 306/306 release tasks, 0 warnings | exit 0, 1,258 tasks, 72.81 s, 0 compiler errors, 49 linker warnings |
+| Build (release) | exit 0, 306/306, 0 warnings | exit 0, 972 tasks, 125.84 s, 0 compiler errors, 41 linker warnings |
 | Tests | 1,985 counted, 1,974 passed, 11 skipped | 1,985 counted, same 11 skips, all seven bundles passed |
-| Warnings | 0 | 49 linker deployment-target warnings |
+| Warnings | 0 | 49 debug / 41 release linker deployment-target warnings |
 | Lint | 18/18 gates | 18/18 gates (`AUDIT/brew641-lint.log`) |
 
 Bundle footers under 6.4.1: 949/150 suites in 61.754 s, 422/48 in 19.696 s,

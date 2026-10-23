@@ -75,6 +75,8 @@ TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
 
 - Build: **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks,
   **zero compiler errors**.
+- Release build: **exit 0**, `Build complete! (125.84 sec)`, 972 tasks,
+  **zero compiler errors** (`AUDIT/brew641-release-build.log`).
 - Tests: **exit 0**, seven bundles, 1,985 counted tests, the same 11 skips as the
   6.4.0 run, **zero compiler errors** (`AUDIT/brew641-full-tests.log`).
 - The keg's SwiftPM emits `warning: Unable to locate libSwiftScan` and falls back

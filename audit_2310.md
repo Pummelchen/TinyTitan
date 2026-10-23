@@ -182,9 +182,9 @@ stays unchecked and the full current-tree review remains incomplete.
 
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
-  timing footers. *(Partial: the serial suite now runs under the required 6.4.1
-  compiler on the dirty tree; the 6.4.1 release build has not been run, and the
-  clean-final-revision run remains outstanding.)*
+  timing footers. *(Partial: the release build and the serial suite both now run
+  under the required 6.4.1 compiler, but on the dirty tree; the clean-final-
+  revision run remains outstanding.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
   sanitizer results do not certify later edits.
 - [ ] Reconcile Python 3.13/3.14/3.15 runtime verification with the pinned
@@ -538,14 +538,16 @@ systems. Passing local tests never bypasses the final checklist above.
   `Swift version 6.4.1 (swift-6.4.1-RELEASE)`, target
   `arm64-apple-macosx27.0.0`. `xcrun swift` remains Xcode's 6.4.0, so 6.4.1 runs
   invoke the keg by absolute path.
-- **Evidence:** Build **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks, zero
-  compiler errors. Full serial suite **exit 0**, all seven bundles, 1,985 counted
-  tests, the same 11 skips as the 6.4.0 run, zero compiler errors. Both used
-  `--scratch-path .build/brew641`, leaving the main build tree untouched. The
-  language standard is unchanged: `swiftLanguageModes: [.v6]` plus
+- **Evidence:** Debug build **exit 0**, `Build complete! (72.81 sec)`, 1,258
+  tasks; release build **exit 0**, `Build complete! (125.84 sec)`, 972 tasks;
+  both with zero compiler errors. Full serial suite **exit 0**, all seven bundles,
+  1,985 counted tests, the same 11 skips as the 6.4.0 run, zero compiler errors.
+  All used `--scratch-path .build/brew641*`, leaving the main build tree untouched.
+  The language standard is unchanged: `swiftLanguageModes: [.v6]` plus
   `-warnings-as-errors` on every target.
-- **Regression:** The keg adds **49 linker deployment-target warnings** against a
-  zero-warning baseline. Filed as AUD2-039 rather than smoothed over.
+- **Regression:** The keg adds **49 debug / 41 release linker deployment-target
+  warnings** against a zero-warning baseline. Filed as AUD2-039 rather than
+  smoothed over.
 - **Commit:** `250a03a` on `audit/2026-10-23`.
 
 ### AUD2-023 — rANS publishes before all expert waves are decoded
@@ -888,9 +890,10 @@ systems. Passing local tests never bypasses the final checklist above.
   even though no source changed.
 - **Current evidence:** `AUDIT/brew641-build.log` and
   `AUDIT/brew641-full-tests.log`: 49 warning lines, all of this one class, plus a
-  `libSwiftScan` fallback notice. Zero compiler errors; `-warnings-as-errors`
-  still governs compilation, so these are linker notices rather than suppressed
-  source diagnostics.
+  `libSwiftScan` fallback notice. `AUDIT/brew641-release-build.log`: 41 warnings
+  of the same class (972 tasks, 125.84 s). Zero compiler errors in every run;
+  `-warnings-as-errors` still governs compilation, so these are linker notices
+  rather than suppressed source diagnostics.
 - **Options:** raise the deployment target to macOS 27 (changes the supported OS
   set, so it needs an operator decision), use an Xcode-bundled 6.4.1 toolchain
   whose runtime matches (none is installed), or accept the warnings in writing as
@@ -1052,12 +1055,16 @@ toolchain. Exact commands from the repository root:
 /opt/homebrew/opt/swift/bin/swift --version          # 6.4.1 (swift-6.4.1-RELEASE)
 TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build \
   --scratch-path .build/brew641 --disable-automatic-resolution
+TMPDIR="$PWD/AUDIT/scratch" /opt/homebrew/opt/swift/bin/swift build -c release \
+  --scratch-path .build/brew641-release --disable-automatic-resolution
 TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL \
   /opt/homebrew/opt/swift/bin/swift test --scratch-path .build/brew641 --no-parallel
 ```
 
-- Build: **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks, **zero compiler
-  errors**, **49 linker warnings**.
+- Debug build: **exit 0**, `Build complete! (72.81 sec)`, 1,258 tasks, **zero
+  compiler errors**, **49 linker warnings**.
+- Release build: **exit 0**, `Build complete! (125.84 sec)`, 972 tasks, **zero
+  compiler errors**, **41 linker warnings** (`AUDIT/brew641-release-build.log`).
 - Tests: **exit 0**; seven bundles passed (949/150 suites in 61.754 s, 422/48 in
   19.696 s, 168/25 in 4.011 s, 189/23 in 0.456 s, 96/16 in 1.141 s, 63/14 in
   1.067 s, 98/10 in 0.917 s); **1,985 counted tests** with the same 11 skips as
@@ -1240,11 +1247,12 @@ convergence milestone is claimed and the invariant is not yet due; it applies on
 the open count starts being driven to zero.
 
 Completed and evidenced here: recovery and hash verification of the original
-brief, the build and full serial suite under the required Swift 6.4.1 compiler,
-the unmasked full serial suite under 6.4.0, the release build, the 18-gate lint
-run, the corrected seven-object coverage export, the CI artifact inspection, the
-ornith-8 golden check, four of the five library-contract tests and the live CLI
-SIGINT probe. Still incomplete: reconciliation of the ledger against the four
+brief, the debug and release builds plus the full serial suite under the required
+Swift 6.4.1 compiler, the unmasked full serial suite under 6.4.0, the 6.4.0
+release build, the 18-gate lint run, the corrected seven-object coverage export,
+the CI artifact inspection, the ornith-8 golden check, four of the five
+library-contract tests and the live CLI SIGINT probe. Still incomplete:
+reconciliation of the ledger against the four
 passes the brief names (AUD2-037), the module-by-module Tier A review,
 clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
 dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
