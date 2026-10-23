@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import TinyTitan
@@ -289,6 +290,45 @@ struct ServerPromptStateStoreTests {
                 gdnSegmentLengths: [3],
                 payloadBytes: payload.count),
             payload: payload)
+    }
+
+    /// AUD2-048: the persisted LRU touch is not fatal, but a failure that changes
+    /// restart order must not be silent. The checkpoint store reports the same
+    /// write through `ServerLog.diagnostic` (AUD2-007); the turn store answered
+    /// with `try?`, so a read-only volume or a replaced directory left the hot
+    /// record looking untouched with nothing in the log to say why.
+    @Test func aFailedDiskTouchIsReportedRatherThanSwallowed() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let entry = makeEntry(tokens: [1])
+        let store = try ServerPromptStateStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: root, diskLimitBytes: 1_024))
+        _ = await store.save(
+            entry: entry,
+            snapshot: makeSnapshot(position: 1, payload: Data(repeating: 1, count: 6)))
+
+        // UF_IMMUTABLE makes the directory's own attributes refuse the write while
+        // leaving the entry readable, which is the failure shape a read-only volume
+        // or a directory replaced under the store presents.
+        let directory = root.appendingPathComponent(entry.id.uuidString.lowercased())
+        #expect(chflags(directory.path, UInt32(UF_IMMUTABLE)) == 0)
+        defer { chflags(directory.path, 0) }
+
+        let lines = Mutex<[String]>([])
+        ServerLog.useSink { line in lines.withLock { $0.append(line) } }
+        defer { ServerLog.useSink(nil) }
+
+        store.touchDisk(entry.id)
+        var message: String?
+        for _ in 0..<100 {
+            message = lines.withLock { captured in
+                captured.first { $0.contains("could not record access on \(entry.id)") }
+            }
+            if message != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(message != nil, "the dropped LRU touch must be logged, not swallowed")
     }
 
     private func temporaryDirectory() -> URL {
