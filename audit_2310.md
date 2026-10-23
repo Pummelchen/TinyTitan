@@ -1,12 +1,13 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-043 43/43 | done:6 open:36 blocked:1 new:2] DONE — the section-6 sweep is
-filed: five unreferenced declarations deprecated behind removal tickets, and the
-decode-only expert I/O line restored; L5 performance and L7 ops are next`
+`[#AUD2-044 44/44 | done:8 open:35 blocked:1 new:2] DONE — the four brief-mandated
+passes are recorded: L5 found no hot-path defect, L7 found an occupied port that
+was reported only after the full model load and it is fixed`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
-Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-040, AUD2-041,
-AUD2-042 and AUD2-043 are closed with remediation commits, and none is merged,
+Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
+a process record once its four passes were run; AUD2-040, AUD2-041, AUD2-042,
+AUD2-043 and AUD2-044 are closed with remediation commits, and none is merged,
 released or certified on a clean final revision.
 
 This is the requested dated checklist and issue report, not a second project
@@ -21,28 +22,30 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `c8d04c45e84a1509555d96e5337d74ee9e73bcf2`, which carries the
-  AUD2-040, AUD2-041, AUD2-042 and AUD2-043 fixes. **The tree also carries
+- Measured HEAD: `3ac4699cc86c149045c4d17817986ff35636f052`, which carries the
+  AUD2-044 fix on top of the AUD2-040 to AUD2-043 chain. **The tree also carries
   uncommitted source and test changes** belonging to records still in
   START/PROGRESS/TEST, so that commit alone does not contain every tested fix.
-- **43 records: 6 DONE, 36 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **19 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 6 DONE,
+- **44 records: 8 DONE, 35 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **18 OPEN, 2 START, 3 PROGRESS, 10 TEST, 2 AUDIT, 8 DONE,
   1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 24 S2, 1 S3**. These are ledger
-  classifications, not a claim that all 43 records are confirmed product bugs.
+- Recorded severities: **2 S0, 16 S1, 25 S2, 1 S3**. These are ledger
+  classifications, not a claim that all 44 records are confirmed product bugs.
 - `OPEN`, `START` and `PROGRESS` remain unfinished; `TEST` means local remediation
   evidence exists, not closure. `AUDIT` retains a claim/disposition awaiting formal
   reconciliation. `BLOCKED` is not a passing verification.
 - AUD2-015 and AUD2-016 were disproven as originally stated. AUD2-019, AUD2-022,
   AUD2-031, AUD2-037 and AUD2-038 concern verification, rather than independent
-  runtime defects. AUD2-022 (Swift 6.4.1) and AUD2-032 (brief recovery) are DONE
-  and neither closes a product defect; AUD2-040 (stale diagnostic), AUD2-041
-  (`min_p` accepted and ignored), AUD2-042 (five unreferenced declarations) and
-  AUD2-043 (an orphaned expert-I/O diagnostic) are DONE with remediation commits.
-- AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98` and
-  AUD2-043 is `c8d04c4`, all on the audit branch. Removal tickets TT-050 and
-  TT-051 are filed in the project tracker (wiki commit `081335d`). No fix is
-  represented here as merged, released, or certified on a clean final revision.
+  runtime defects. AUD2-022 (Swift 6.4.1), AUD2-032 (brief recovery) and AUD2-037
+  (the four brief-mandated passes) are DONE and close no product defect;
+  AUD2-040 (stale diagnostic), AUD2-041 (`min_p` accepted and ignored), AUD2-042
+  (five unreferenced declarations), AUD2-043 (an orphaned expert-I/O diagnostic)
+  and AUD2-044 (late port validation) are DONE with remediation commits.
+- AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
+  `c8d04c4` and AUD2-044 is `3ac4699`, all on the audit branch. Removal tickets
+  TT-050 and TT-051 are filed in the project tracker (wiki commit `081335d`). No
+  fix is represented here as merged, released, or certified on a clean final
+  revision.
 
 Sources are [baseline](AUDIT/baseline.md), [environment](AUDIT/environment.md),
 [scope and tiers](AUDIT/scope-tiers.md), and
@@ -78,7 +81,7 @@ item does not mean no work happened there; it means completion is not evidenced.
   original 13-section brief before claiming Phase E completion. *(The brief was
   recovered and is preserved verbatim; the reconciliation table below records
   what is evidenced, what is missing and what is blocked. Reconciliation is not
-  completion: see AUD2-037 and AUD2-038.)*
+  completion: see AUD2-038.)*
 - [x] Verify the package under the requested Swift 6.4.1 compiler. *(Homebrew keg
   6.4.1 built the package and ran the full serial suite, both exit 0. Its 49
   linker warnings are tracked as AUD2-039.)*
@@ -105,21 +108,21 @@ requirement was worked but its own definition of done is not met.
 | §2 | Inventory, 2-hop dependency graph, trust boundaries, tier table | Met | [scope and tiers](AUDIT/scope-tiers.md) |
 | §3 | Baseline with actual language mode, warnings, tests, lint, CVEs, secret scan | Partial — baseline exists and was re-measured; the 6.4.1 build adds 49 linker warnings (AUD2-039) | [baseline](AUDIT/baseline.md) |
 | §4 L0–L4 | Repository, architecture, module, line and security passes at tier depth | Partial — rANS, checkpoint, server, CLI, PLE and Metal areas reviewed; no complete Tier A batch review | Issue record below |
-| §4 L5 | Performance pass on Tier A and profiler-identified hot paths | **Not recorded** | AUD2-037 |
+| §4 L5 | Performance pass on Tier A and profiler-identified hot paths | Met — no N+1, unbounded collection, missing stream or blocking request-path call; no new measurement taken or claimed | AUD2-037 |
 | §4 L6 | Coverage gaps, failure paths, tests that assert nothing, cross-project contracts | Partial — coverage export corrected; contract tests partly run | AUD2-031, this report |
-| §4 L7 | Ops pass per deployable service | **Not recorded** | AUD2-037 |
+| §4 L7 | Ops pass per deployable service | Met — health, signals, graceful shutdown, structured errors and rollback checked; the one startup-validation gap is fixed | AUD2-037, AUD2-044 |
 | §5 | Facade hunt with a production-path facade as S0 | Partial — the hunt ran 2026-10-23; no production-path facade found, both outcomes now fixed and DONE | AUD2-037, AUD2-040, AUD2-041 |
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Partial — schema met; AUD2-041 is the first S1 through TEST→AUDIT→DONE, no S0 has | [ledger](AUDIT/ledger.md) |
 | §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98` and `c8d04c4` are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4` and `3ac4699` are focused remediation commits; the rest of the tree's fixes are still uncommitted | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
-| §11 | Phase B L0–L7 loop | In progress | This report |
-| §11 | Phase C drain to zero | Not started — no product record is DONE | Ledger |
+| §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
+| §11 | Phase C drain to zero | In progress — 8 DONE, 35 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 36 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 35 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -831,7 +834,7 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-037 — Four brief-mandated passes have no recorded evidence
 
-**S1 · Tier A · OPEN · audit process**
+**S1 · Tier A · DONE · audit process**
 
 - **Location:** [original brief](AUDIT/audit-brief.md), §5, §6, L5 and L7; this
   report.
@@ -875,10 +878,28 @@ systems. Passing local tests never bypasses the final checklist above.
   no reporter while `benchmark/expert_cache_slots.py` still parsed the line as
   its primary metric. The reporter is restored in the library and the line was
   observed on a live run, with the benchmark's own regex matching it.
-- **Next:** Run the remaining two passes — L5 performance and L7 ops — at Tier A
-  depth, file every finding they produce with its own ID, and only then mark this
-  record DONE. A facade found on a production path is S0 and takes priority over
-  the remaining S1 work.
+- **Progress (2026-10-23, L5/L7):** the last two passes ran at Tier A depth.
+  **L5 performance** covered the expert-streaming hot path and its cache plan,
+  the sampler, SSE emission, prefill tile scheduling and the C kernels: no N+1
+  pattern (the request path issues no query; the single per-request disk read is
+  one prompt-state file), no repeated-I/O defect on top of the design (the cache
+  plan matches experts against resident slots in O(experts × slots) with arrays
+  sized by those two counts, and the C reader's one allocation happens at open,
+  not per read), no unbounded memory or collection (the response store is
+  LRU-bounded at 256, the SSE outbox carries a capacity and an overflow flag, KV
+  and prompt-cache memory come from the RAM budget), streaming where the brief
+  asks, and no blocking call on the request path. No performance measurement was
+  taken in this pass and none is claimed. **L7 ops** covered the one deployable
+  service: `/health` answers from process state without loading a lazy model,
+  SIGINT/SIGTERM run a graceful shutdown that cancels and awaits request tasks
+  and exits 0, request errors are structured JSON, argument errors exit 2 on
+  stderr, and rollback is the documented install-receipt re-issue. Startup
+  configuration validation was complete except for the port, which was checked
+  only by the bind that runs after the load — filed as AUD2-044 and fixed.
+- **Resolution:** all four passes now have recorded evidence, and each defect
+  they found has its own id and disposition: AUD2-040 and AUD2-041 (section 5),
+  AUD2-042 and AUD2-043 (section 6), AUD2-044 (L7). Nothing was waived and no
+  pass was replaced by a proxy.
 
 ### AUD2-038 — No independent host exists for the Phase E verification
 
@@ -1057,6 +1078,36 @@ systems. Passing local tests never bypasses the final checklist above.
   (76.6% hit) 2.02 GiB = 259.1 MiB/token`, and the benchmark's regex matched it
   with groups `('2575','785','76.6','2.02','259.1')`.
 
+### AUD2-044 — An occupied --port is reported only after the full model load
+
+**S2 · Tier A · DONE · ops / startup validation**
+
+- **Location:**
+  [main.swift:39-48](sources/TinyTitanServer/Command/main.swift#L39),
+  [main.swift:206](sources/TinyTitanServer/Command/main.swift#L206),
+  [HTTPServer.swift:125](sources/TinyTitanServer/Core/HTTPServer.swift#L125),
+  [ServerPortCheck.swift](sources/TinyTitanServer/Core/ServerPortCheck.swift).
+- **Finding:** `ServerArguments` validates the port's range but nothing asked
+  whether it was free. The only listener binds at `HTTPServer.swift:125`, from a
+  call that runs *after* `routing.preload()` has loaded the initial install —
+  36.9 GB for the default ornith 8-bit. A second server started on a busy port
+  therefore paid the whole load before it heard that the port was taken, and
+  under `--lazy-load` the refusal landed in the first request instead. The
+  brief's L7 startup-configuration item was satisfied for every option except
+  this one.
+- **Resolution (`3ac4699`):** `ServerPortCheck.isAvailable(port:)` probes
+  127.0.0.1 with a socket, `SO_REUSEADDR` (matching the listener, so a restart
+  whose connections are in `TIME_WAIT` is not falsely refused), `inet_pton` and
+  a bind, treating only `EADDRINUSE` as unavailable and failing open on every
+  other probe error so the real bind stays authoritative. `main` calls it as the
+  first act of the serving block and exits 2 with the same `error: ` shape the
+  argument errors use. RED against the missing type; GREEN 2/2 (listener present
+  → unavailable; port free again after close); full suite 7 bundles / 1,992
+  tests / exit 0; 18/18 lint gates. Live: an occupied 18451 made the release
+  binary exit 2 in 0.43 s with `error: --port 18451 is already in use on
+  127.0.0.1` and empty stdout, while the control on a free port served
+  `/health {"status":"ok"}` and exited 0 on SIGTERM.
+
 ## Recorded verification and its limits
 
 These are recorded 2026-10-23 runs, not tests rerun merely to write this document.
@@ -1074,6 +1125,16 @@ expert-I/O probe is `AUDIT/aud2-043-live.log`; it used the installed
 qwen3.8-flash-next 4-bit under the machine's 12 GiB limit, and its preflight was
 macOS 27.0.1, Xcode 27.1, 99 GiB free and 76% memory free with no other model
 process running.
+
+The AUD2-044 fix was verified the same way: full serial suite (`swift test
+--no-parallel`, **7 bundles, 1,992 tests, 0 failures, exit 0**,
+`AUDIT/aud2-044-full-tests.log`) and all 18 lint gates (`tools/lint.sh`, exit 0,
+`AUDIT/aud2-044-lint.log`). Its live probe used the installed qwen3.5 4-bit under
+`--lazy-load`, so no model was loaded in either arm; the refusal arm had a
+python3 listener on 127.0.0.1:18451 and exited 2 in 0.43 s
+(`AUDIT/aud2-044-live-occupied.err`), the control arm on 18452 answered
+`/health {"status":"ok"}` and exited 0 on SIGTERM
+(`AUDIT/aud2-044-live-free.out`, `-health.json`).
 
 ### Full serial Swift run
 
@@ -1416,9 +1477,9 @@ brief, the debug and release builds plus the full serial suite under the require
 Swift 6.4.1 compiler, the unmasked full serial suite under 6.4.0, the 6.4.0
 release build, the 18-gate lint run, the corrected seven-object coverage export,
 the CI artifact inspection, the ornith-8 golden check, four of the five
-library-contract tests and the live CLI SIGINT probe. Still incomplete:
-reconciliation of the ledger against the remaining
-passes the brief names (AUD2-037), the module-by-module Tier A review,
+library-contract tests, the live CLI SIGINT probe, and the four brief-mandated
+passes (AUD2-037). Still incomplete:
+the module-by-module Tier A review,
 clean-commit CI certification, fresh sanitizer runs on the final edits, the Python
 dependency reconciliation, durable CI coverage, release-only/opt-in paths, and
 remediation of every OPEN/START/PROGRESS record — including AUD2-035, which the
