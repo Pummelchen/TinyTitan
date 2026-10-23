@@ -1,11 +1,13 @@
 # Pre-production audit — 23 October 2026
 
-`[#AUD2-049 49/49 | done:32 open:16 blocked:1] DONE — a checkpoint load now
-persists its access across a restart; the conflict refusal that names its own
-flags (AUD2-047), the calibration identity binding (AUD2-005), the --plan
-conflict (AUD2-008), the host-KV window range (AUD2-017), the shared disk budget
-(AUD2-003), the bounded payload read (AUD2-006) and the fail-silent restore
-(AUD2-009) beneath it stand`
+`[#AUD2-050 50/50 | done:34 open:15 blocked:1] DONE — every expansion-layout guard
+now has a test that names it, proved by disabling the guard one at a time
+(AUD2-013), and the rANS offset narrowing is a documented invariant rather than an
+unexamined trust (AUD2-014); the persisted checkpoint access (AUD2-007), the
+conflict refusal that names its own flags (AUD2-047), the calibration identity
+binding (AUD2-005), the --plan conflict (AUD2-008), the host-KV window range
+(AUD2-017), the shared disk budget (AUD2-003), the bounded payload read (AUD2-006)
+and the fail-silent restore (AUD2-009) beneath it stand`
 
 **Audit incomplete. Known defects remain. No product defect is formally closed.**
 Two documentation records (AUD2-022, AUD2-032) are closed; AUD2-037 is closed as
@@ -13,11 +15,14 @@ a process record once its four passes were run; AUD2-040 to AUD2-044, the
 keep-warm pair (AUD2-020, 021), AUD2-033, AUD2-026, AUD2-028, AUD2-046, AUD2-029,
 the pending calibration/validation cluster (AUD2-005, 008, 017, 047), the shared
 prompt-cache disk budget (AUD2-003), the two reader/restore corrections
-(AUD2-006, 009) and the persisted checkpoint access (AUD2-007) are closed with
-remediation commits, and none is merged, released or certified on a clean final
-revision. AUD2-048 (a diagnostic asymmetry found while closing AUD2-007) and
-AUD2-049 (the docs gate never reads this audit's own ledger) are opened in the
-same pass.
+(AUD2-006, 009), the persisted checkpoint access (AUD2-007) and the two expansion
+geometry records (AUD2-013, AUD2-014) are closed with remediation commits, and
+none is merged, released or certified on a clean final revision. AUD2-048 (a
+diagnostic asymmetry found while closing AUD2-007), AUD2-049 (the docs gate never
+reads this audit's own ledger) and AUD2-050 (a type-level `#expect(throws:)`
+cannot say which guard refused, so a negative test can pass for the wrong reason —
+found twice inside AUD2-013's own suite and un-swept across the rest of `tests/`)
+are opened in the same pass.
 
 This is the requested dated checklist and issue report, not a second project
 backlog. [AUDIT/ledger.json](AUDIT/ledger.json) remains the audit's authoritative
@@ -31,8 +36,9 @@ tier and status, including disproven claims and audit-introduced regressions.
   at [AUDIT/audit-brief.md](AUDIT/audit-brief.md) (operator attachment, 13
   sections, SHA-256 `0390fa3d…aec3e2`).
 - Branch: `audit/2026-10-23`; audit base: `4816a84`.
-- Measured HEAD: `92da15a`, which carries the AUD2-007 persisted-access fix on
-  top of the AUD2-047 conflict diagnostic at `3191968`, the
+- Measured HEAD: `8acc6f8`, which carries the AUD2-013/014 expansion-test pins on
+  top of the AUD2-007 persisted-access fix at `92da15a`, the
+  AUD2-047 conflict diagnostic at `3191968`, the
   AUD2-003/006/009 disk-budget and reader fixes at `6130898`, the
   AUD2-005/008/017 calibration and validation fixes at `41d14ca`, the AUD2-029
   deletion-accounting fix at `7024d03`, the AUD2-046 indexing fix at `7740a42`, the
@@ -44,10 +50,14 @@ tier and status, including disproven claims and audit-introduced regressions.
   snapshot is this report and the ledger, not source. `9ca9942` is the exception
   disclosed in AUD2-017: it committed a test whose fix stayed in the working tree
   until `41d14ca`.
-- **49 records: 32 DONE, 16 unresolved/non-blocked, 1 BLOCKED.**
-- Exact statuses: **12 OPEN, 2 PROGRESS, 2 AUDIT, 32 DONE, 1 BLOCKED**.
-- Recorded severities: **2 S0, 16 S1, 28 S2, 3 S3**. These are ledger
-  classifications, not a claim that all 49 records are confirmed product bugs.
+- **50 records: 34 DONE, 15 unresolved/non-blocked, 1 BLOCKED.**
+- Exact statuses: **11 OPEN, 2 PROGRESS, 2 AUDIT, 34 DONE, 1 BLOCKED**.
+- Recorded severities: **2 S0, 16 S1, 30 S2, 2 S3**. These are ledger
+  classifications, not a claim that all 50 records are confirmed product bugs.
+  Deviation: this line read "28 S2, 3 S3" at `615203a` and did not match the
+  ledger it restates, which held 29 S2 and 2 S3 in those 49 records — AUD2-049
+  is the finding that nothing checks it. Corrected here and re-derived from
+  `AUDIT/ledger.json` rather than from the previous sentence.
 - `OPEN` and `PROGRESS` remain unfinished. `AUDIT` retains a
   claim/disposition awaiting formal reconciliation. `BLOCKED` is not a passing
   verification.
@@ -62,14 +72,18 @@ tier and status, including disproven claims and audit-introduced regressions.
   AUD2-026, AUD2-028, AUD2-046, AUD2-029, the calibration/validation cluster
   (AUD2-005, AUD2-008, AUD2-017), the shared prompt-cache disk budget
   (AUD2-003), the bounded turn-store read (AUD2-006), the fail-silent streamed
-  restore (AUD2-009), the conflict diagnostic (AUD2-047) and the persisted
-  checkpoint access (AUD2-007). AUD2-048 (the turn store discards its own LRU
-  touch failure) is opened as the S3 sibling of that last closure.
+  restore (AUD2-009), the conflict diagnostic (AUD2-047), the persisted
+  checkpoint access (AUD2-007) and the two expansion geometry records
+  (AUD2-013, AUD2-014) — the last two closing on mutation proof rather than on a
+  guard's existence. AUD2-048 (the turn store discards its own LRU touch failure)
+  is opened as the S3 sibling of the AUD2-007 closure, and AUD2-050 (a
+  type-level `#expect(throws:)` cannot name which guard refused) as the
+  tree-wide sibling of the AUD2-013 one.
 - AUD2-040 is `dc52729`, AUD2-041 is `9ca9942`, AUD2-042 is `ccfee98`, AUD2-043 is
   `c8d04c4`, AUD2-044 is `3ac4699`, AUD2-020 is `3842d8d`, AUD2-021 is `3098fdd`,
   AUD2-026 is `5deb70a`, AUD2-028 is `c5e2e93`, AUD2-046 is `7740a42`, AUD2-029 is
   `7024d03`, AUD2-005/008/017 are `41d14ca`, AUD2-003/006/009 are `6130898`,
-  AUD2-007 is `92da15a`,
+  AUD2-007 is `92da15a`, AUD2-013/014 are `8acc6f8`,
   AUD2-033 is
   `71b40d7` (with the
   comment-only `d11be7c`) and the rANS cluster is
@@ -147,14 +161,14 @@ requirement was worked but its own definition of done is not met.
 | §6 | Unused code limited to Tier A and audit-orphaned code | Met for the sweep — five unreferenced declarations deprecated behind TT-050/TT-051, one orphaned diagnostic restored and live-verified | AUD2-042, AUD2-043 |
 | §7 | Severity order S0 → S3, nothing dropped | Met in classification; remediation is not done | Ledger |
 | §8 | Ledger schema and S0/S1 gates | Met for the closed records — both S0s and the rANS S1s ran every stage, and AUD2-020/021/033 each carry their own fix commit; the rANS fixes share one, a deviation recorded in the ledger notes | [ledger](AUDIT/ledger.md) |
-| §8 | Non-terminal count strictly decreasing at every milestone | Not yet due — the run is still in Phase B discovery, and these milestones add the records discovery finds | Ledger notes |
+| §8 | Non-terminal count strictly decreasing at every milestone | Met at this milestone (16 → 15), not across the run: the AUD2-007 pass moved it 15 → 16 because sibling discovery is expected to add records, and that reversal is disclosed in the closing summary rather than netted away | Ledger |
 | §9 | Ledger is the single source; report generated from it | Met | [ledger](AUDIT/ledger.md) |
-| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898` each bundle three S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
+| §10 | One focused commit per S0/S1; audit branch only | Partial — `dc52729`, `9ca9942`, `ccfee98`, `c8d04c4`, `3ac4699`, `3842d8d`, `3098fdd`, `71b40d7`, `c5e2e93`, `7740a42`, `7024d03`, `41d14ca`, `6130898`, `92da15a`, `8acc6f8` and `61de182` are focused commits, but the rANS cluster merges nine interleaved records into one and `41d14ca`/`6130898`/`8acc6f8` each bundle S2 records, which §10 allows; `9ca9942` carries a test whose fix landed only in `41d14ca` (AUD2-017) | `git log` |
 | §11 | Phase A inventory/baseline/environment | Met | Committed |
 | §11 | Phase B L0–L7 loop | In progress — every pass now has recorded work | This report |
-| §11 | Phase C drain to zero | In progress — 32 DONE, 16 non-terminal, 1 BLOCKED | Ledger |
+| §11 | Phase C drain to zero | In progress — 34 DONE, 15 non-terminal, 1 BLOCKED | Ledger |
 | §11 | Phase D convergence | Not started — requires zero open | Ledger |
-| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 16 non-terminal records |
+| §11, §12 | Phase E clean run on the independent host, open count zero | **Not met** | AUD2-038; 15 non-terminal records |
 | §13 | The `[#id n/total …] STATUS — title` status line | Met | Status line at the top |
 
 ### Full current-tree review
@@ -219,11 +233,24 @@ stays unchecked and the full current-tree review remains incomplete.
 - [ ] Extend the `docs` gate's ledger-commit check to `AUDIT/ledger.json` and test
   it against a rotted pointer (AUD2-049): the audit's own evidence currently
   resolves nothing, while the gate's message says it resolved 222 references.
-- [ ] Fix the still-unhandled benchmark allocation-error cleanup path.
-- [ ] Complete before/after evidence and independent review for the expansion
-  geometry records whose ledger evidence fields remain empty (AUD2-013, AUD2-014);
-  the calibration, CLI, snapshot and sizing patches in that group now carry their
-  own RED/GREEN runs (`41d14ca`, `6130898`, `3191968`).
+- [ ] Give the benchmark allocation-error cleanup path a test. The path itself is
+  closed — AUD2-021 is DONE at `3098fdd`, with `keepWarmStopped` and a `defer` so
+  every throw inside the cadence loop unwinds through a `stop()` — but its own
+  ledger row discloses that no unit seam forces a command-buffer allocation
+  failure, because `requireCommandBuffer` throws only when Metal returns nil and
+  the production function takes the real queue. What is missing is an injected
+  queue, not a fix; the current evidence is compile, review and the suite.
+- [x] Complete before/after evidence for the expansion geometry records: AUD2-013
+  and AUD2-014 now carry their `evidence-before`, `fix-summary` and
+  `evidence-after` and close at `8acc6f8` on mutation proof — each of the eight
+  layout guards disabled in turn, with the two tests that stayed green doing so
+  because their fixture was refused by a different check. Independent (cold)
+  review is still outstanding and belongs to the Phase E item below, not here.
+  The calibration, CLI, snapshot and sizing patches in that group carry their own
+  RED/GREEN runs (`41d14ca`, `6130898`, `3191968`).
+- [ ] Sweep the tree-wide sibling of that defect (AUD2-050): 298 type-level
+  `#expect(throws: <Type>.self)` refusals in 75 test files cannot name which guard
+  fired, the form that let two expansion tests pass for the wrong reason.
 - [ ] Retain valid RED/GREEN evidence for every behavior change, both invalid-input
   refusal and valid-input acceptance, without weakening tests.
 - [ ] Close the remaining targeted test gaps: indexed-then-mutated checkpoint
@@ -237,10 +264,12 @@ stays unchecked and the full current-tree review remains incomplete.
 
 - [ ] Run the release build and full serial test suite on the final source
   revision and required compiler; preserve exact commands, exit codes and full
-  timing footers. *(Partial: the serial suite now runs against a committed tree —
-  7 bundles, 2,004 tests, exit 0 at `92da15a` — but the required-compiler 6.4.1
-  runs were recorded on the earlier dirty tree, and a clean-checkout run on the
-  final revision remains outstanding.)*
+  timing footers. *(Partial: the serial suite runs against a committed tree — most
+  recently **7 bundles, 2,007 tests, exit 0** at `8acc6f8`, with the exact command,
+  the `xcrun` Swift 6.4 (`swiftlang-6.4.0.34.1`) and `git rev-parse HEAD` stamped
+  into `AUDIT/aud2-013-full-final.log`. What is still missing is the other half:
+  the required-compiler **6.4.1 keg** runs were recorded on an earlier dirty tree,
+  and a clean-checkout run on the final revision has not been made at all.)*
 - [ ] Rerun relevant TSan and C ASan/UBSan suites on that final revision; older
   sanitizer results do not certify later edits.
 - [ ] Reconcile Python 3.13/3.14/3.15 runtime verification with the pinned
@@ -542,32 +571,136 @@ systems. Passing local tests never bypasses the final checklist above.
 
 ### AUD2-013 — In-place expansion trusts unsafe source/destination geometry
 
-**S2 · Tier A · OPEN · TinyTitan**
+**S2 · Tier A · DONE · TinyTitan**
 
-- **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift).
+- **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:73-137),
+  with the one map builder that feeds it
+  ([`Model+LayerStreamers.swift:354-379`](sources/TinyTitan/Runtime/Inference/Model+LayerStreamers.swift:354))
+  and the [suite that pins it](tests/TinyTitan/Infrastructure/Streaming/TwoBitExpertReadTests.swift:182).
 - **Finding:** An invalid target order or range can overwrite unread packed
   source bytes or exceed the slot during in-place expansion.
-- **Current evidence:** A validator and tests are in the tree and committed, but
-  this row's ledger evidence fields are still blank, so the closure is not
-  evidenced. Three earlier negative fixtures described valid layouts; their
-  original failed runs are withdrawn, not retained as defect evidence.
-- **Next:** Reconcile valid refusal and acceptance cases for ordering, overlap and
-  slot bounds, then review sibling expansion paths before disposition.
+- **Current evidence:** `validateExpansionLayout` went in at `61de182` with the
+  rANS geometry work and runs once per expert while the layer's maps are built,
+  before any expert is streamed, over the manifest's own sub-tensor offsets and
+  sizes — untrusted file data. It refuses a negative offset or size, a target
+  before its source, a region outside the slot, a 3-bit size that is not a whole
+  number of groups, a rescaled size that is not a whole number of bf16 values, a
+  target size that does not match the transform, a write into a lower tensor's
+  unread source, and two tensors sharing a target region.
+  What this row still lacked was proof that any of those eight refusals is
+  *tested*. The suite at `615203a` held six tests, and reading it against the
+  validator showed three guards with no case at all — a negative offset or size,
+  an odd rescaled size, a 3-bit leftover group. Pins for the first two were
+  written before the sweep (eight tests), then every guard was disabled in turn
+  and `ExpansionLayoutValidationTests` re-run
+  (`AUDIT/aud2-013-mutation.log`, `AUDIT/agent-notes/mutate-sweep-stdout.log`;
+  drivers `AUDIT/agent-notes/mutate-expansion-guards.sh` and `mutate-one.py`).
+  **Five of the eight failed exactly the test named for them** — M1 negative
+  offset/size, M2 target before source, M5 odd rescale, M6 size match, M7
+  unread-source overlap. Three proved nothing, and none of the three was a guard
+  gap:
+  - **M4** (3-bit whole group) left all eight green, because the tree's only
+    3-bit negative case (source size 4, target size 6) is equally refused by the
+    size-match guard, so nothing distinguished the two.
+  - **M8** (shared target region) also left every test green, because
+    `tensorsThatShareATargetRegionAreRefused`'s second tensor sat at target
+    offset 4 with source offset 8 and the bounds guard at `:77-80` refused the
+    map on its `targetOffset >= sourceOffset` clause — long before the overlap
+    check it is named for. That guard is one `else` over four clauses sharing one
+    message ("violates the slot bounds"), which is exactly why
+    `#expect(throws: ModelError.self)` could not express that the test had been
+    passing for the wrong reason.
+  - **M3** was an invalid mutation, not a gap: as first written it *tightened*
+    the bound to `<= -1`, which no layout can satisfy, so the run failed
+    `sizesThatDoNotMatchTheTransformAreRefused` and the positive
+    `theConverterLayoutIsValid` (3 issues) instead of the bounds test. **M3b**
+    relaxes the bound instead and fails exactly both cases of
+    `aRegionOutsideTheSlotIsRefused` (2 issues,
+    `AUDIT/mutate-aud2-013-m3b-full.log`).
+  Added `aThreeBitTensorWithALeftoverGroupIsRefused` (7 source bytes are two
+  whole groups, so 8 target bytes satisfies every guard except the group check),
+  rebuilt the shared-target fixture so both targets sit at or beyond their own
+  source while the write regions overlap, and routed both through a
+  `refusalDetail` helper that asserts the `indexCorrupt` detail names the guard.
+  Re-running each now fails exactly the one test that names it — 1 issue in each
+  run (`AUDIT/mutate-aud2-013-m4-recheck-full.log`,
+  `AUDIT/mutate-aud2-013-m8-recheck-full.log`), not a broadening failure. The M1
+  and M5 pins were found by reading the suite, not by mutation: the sweep only
+  confirms them, and what mutation alone revealed is M4 and M8.
+  `TwoBitExpand.swift` is byte-identical to HEAD after the sweep
+  (`git diff --exit-code` on the file, clean), and the sweep's own log records
+  the restore after every mutation.
+- **Verification:** `ExpansionLayoutValidationTests` and `TwoBitExpertReadTests`
+  together — 9 tests in 2 suites pass on the fixed tree
+  (`AUDIT/aud2-013-green-9.log`); the three streaming suites together
+  26 tests in 3 suites (`AUDIT/aud2-013-streaming-suite.log`); the full serial
+  suite re-run on the commit this record names —
+  `TMPDIR="$PWD/AUDIT/scratch" env -u TINYTITAN_LIBRARY_CONTRACT_MODEL xcrun swift
+  test --no-parallel`, Xcode 27 Swift `swiftlang-6.4.0.34.1`, **7 bundles, 2,007
+  tests, all passed, `FULL_EXIT=0`**, command and `git rev-parse HEAD` stamped in
+  the log header (`AUDIT/aud2-013-full-final.log`; the earlier
+  `AUDIT/aud2-013-full.log`/`.exit` hold the same tree before the commit) — and all
+  18 lint gates exit 0 on the same tree (`AUDIT/aud2-013-lint-final.log`). No
+  production behaviour changed in this record, so no golden-baseline run: the
+  change is test-side plus one doc comment.
+- **Commit:** `8acc6f8`. Not merged, released or verified on an independent host.
 
 ### AUD2-014 — Expansion group sizes and offset narrowing need separate proof
 
-**S2 · Tier A · OPEN · TinyTitan**
+**S2 · Tier A · DONE · TinyTitan**
 
-- **Location:** [packed-weight expansion](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift)
-  and [rANS streamer](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift).
+- **Location:** [expansion guards](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:87-105),
+  [descriptor writes](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+RANS.swift:115-124),
+  [staging geometry](sources/TinyTitan/Infrastructure/Streaming/RANSDecode.swift:262-279).
 - **Finding:** The recorded group contains silent three-bit trailing-byte loss,
   two-bit even-size assumptions, UInt64-to-UInt32 output-offset narrowing, and a
   dead zero assignment to payloadOffset.
-- **Current evidence:** Some cases are latent or safe only under the per-slot
-  Metal-buffer invariant. Individual evidence fields are empty; this is not four
-  demonstrated crashes. Existing ID/grouping is preserved for reconciliation.
-- **Next:** Prove or refute each subclaim with exact size/range invariants and
-  tests, separating cleanups from behavioral defects without reusing this ID.
+- **Current evidence, sub-claim by sub-claim:**
+  - **(a) 3-bit trailing bytes.** `expand3BitReversed` decodes
+    `sourceSize / 3` groups, so a run with a leftover byte would leave it
+    undecoded in the slot. The whole-group guard refuses such a map at load, and
+    the mutation above is what shows a test now distinguishes that guard from the
+    size-match guard. The truncation is unreachable, not merely unlikely.
+  - **(b) 2-bit even sizes.** A 2-bit expansion needs no evenness of its own
+    (`targetSize == sourceSize * 2` is exact for any size, and the size-match
+    guard at `:105` enforces it — caught by M6); the evenness that does matter is
+    the rescaled bf16 block, where `rescaleBF16InPlace` divides `bytes / 2`
+    halves and an odd size would leave the last byte unscaled. Guarded at `:97`
+    and pinned by `anOddRescaledTensorIsRefused` (caught by M5).
+  - **(c) UInt64→UInt32 narrowing.** Two sites: the staging base
+    `UInt32(position * resources.payloadStride)` (`:115`) and the slot base
+    `UInt32(offsets[position])` (`:118`). The stride is
+    `max(1, maximumPayload)` where every expert's run is clamped inside the
+    payload file by `payloadEnd <= payloadSize` at decode
+    ([`ExpertRANSIndex.swift:229-234`](sources/TinyTitanFormat/ExpertRANSIndex.swift:229)),
+    and the staging buffer is allocated at `stride * maximumWave` with
+    `maximumWave = 8`, so overflowing a 32-bit base needs one expert's compressed
+    run above 4 GiB / 8 = 512 MiB — a multi-gigabyte layer sidecar — and Swift's
+    `UInt32` arithmetic traps on overflow rather than wrapping, so even that
+    fails as a clean crash at layer open instead of a wrong descriptor.
+    `offsets` is `[UInt64]` because Metal buffer offsets are, and every
+    construction site in this tree gives zero: each slot is its own
+    `makeBuffer(bytesNoCopy:)` with `bufferOffsets.append(0)`
+    ([`PreadExpertStreamer.swift:340-350`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer.swift:340)),
+    and the ring's speculative path passes
+    `offsets: [UInt64](repeating: 0, count:)`
+    ([`PreadExpertStreamer+Prefetch.swift:46`](sources/TinyTitan/Infrastructure/Streaming/PreadExpertStreamer+Prefetch.swift:46)).
+    No speculative guard was added — a `stride * 8 > UInt32.max` check would
+    police a state the payload-file clamp already prevents, and the repo rule is
+    not to validate scenarios that cannot happen. The constraint a future
+    shared-buffer caller would break is now stated on `decodeRANSInto`.
+    **Limitation, stated plainly:** this bound is arithmetic over the current
+    format, not an empirical test — no test builds a 512 MiB expert run, because
+    that needs a file of that size.
+  - **(d) dead `payloadOffset = 0`.** Already gone: `git log -S` shows it
+    introduced at `d651fd9` and removed at `61de182`, in the same hunk that
+    replaced the fixed-width `region[index * 8 + n]` writes with
+    `descriptorWords`-based ones. No `payloadOffset = 0` remains under `sources/`.
+- **Verification:** the streaming suites and full serial suite named under
+  AUD2-013 cover the guard halves; the narrowing half is a documented invariant
+  plus this analysis, and the only production edit in this record is that
+  comment, which cannot change numerics — so, again, no golden-baseline run.
+- **Commit:** `8acc6f8`. Not merged, released or verified on an independent host.
 
 ### AUD2-015 — Claimed runaway default is disproven
 
@@ -1447,18 +1580,67 @@ systems. Passing local tests never bypasses the final checklist above.
   (2026-10-06) ledger — and `ledger_commit_evidence()` iterates exactly that
   list. `AUDIT/ledger.json`, which this report names the audit's authoritative
   record, is never opened. The gate prints "222 ledger commit reference(s)
-  resolved" while reading none of this audit's 32 pointers, so a DONE row here
+  resolved" while reading none of this audit's 34 pointers, so a DONE row here
   naming a nonexistent sha, prose, or nothing at all would still report ok.
   AUD-209 is the reason the check exists: seven rotted commit fields in the
   ledger it *does* read.
-- **Current evidence:** Checked by hand instead: all 32 `commit` references in
-  `AUDIT/ledger.json` resolve under `git cat-file -e <sha>^{commit}` and no DONE
-  row has an empty field. So the finding is that the gate would not see rot, not
-  that any exists today.
+- **Current evidence:** Checked by hand twice this session, because the gate
+  cannot check it: all 34 `commit` references in `AUDIT/ledger.json` resolve
+  under `git cat-file -e <sha>^{commit}` and no DONE row has an empty field (32
+  before `8acc6f8` gave AUD2-013 and AUD2-014 theirs). Re-running
+  `bash tools/lint.sh docs` after that commit prints the *same* 222 — every one
+  of them from `docs/audit-ledger.json`. So the finding is that the gate would
+  not see rot, not that any exists today.
 - **Next:** Take ledger paths as a set that includes `AUDIT/ledger.json`, keep
   the prose exemption, judge only the structured `commit` field, and add the test
   that puts an unresolvable sha in a copy of this ledger and expects a FAIL —
   without it the fix is a path list nothing checks.
+
+### AUD2-050 — A type-level `#expect(throws:)` cannot say which guard refused
+
+**S2 · Tier A · OPEN · TinyTitan**
+
+- **Location:** `tests/` — **302** type-level `#expect(throws: <Type>.self)`
+  assertions across **75** files, 298 of them refusals (4 are the
+  `throws: Never.self` acceptance form), against callees including
+  [`ExpertRANSIndex.decode`](sources/TinyTitanFormat/ExpertRANSIndex.swift) (15
+  throw sites behind an 8-case `Failure` enum),
+  [`TwoBitExpand.validateExpansionLayout`](sources/TinyTitan/Infrastructure/Streaming/TwoBitExpand.swift:73-137)
+  (6) and
+  [`Model+SchemaValidation`](sources/TinyTitan/Runtime/Inference/Model+SchemaValidation.swift)
+  (6).
+- **Finding:** `#expect(throws: ModelError.self)` is satisfied by *any* refusal
+  from the callee, so a fixture aimed at one guard passes when a different guard
+  refuses it. The test reports green, the guard it names stays unpinned, and
+  nothing in the output says so.
+- **Current evidence:** Proven twice inside the suite closed under AUD2-013:
+  disabling the 3-bit whole-group guard left every test passing because the only
+  3-bit negative case is equally refused by the target-size guard, and
+  `tensorsThatShareATargetRegionAreRefused` had been refused by the slot bounds
+  long before the overlap check it names. Both were fixed there, with a
+  `refusalDetail` helper that asserts the `indexCorrupt` detail names the guard.
+  The rest of the tree has not been swept: the pool is counted on the current
+  tests, not modelled — 39 `ModelError`, 37 `RepackError` and 32 written against a
+  nested type (`ExpertRANSIndex.Failure` 4, `ExpertBlobIndex.Failure` 7,
+  `NgramTableReader.Failure` 8 among 7 such types), with
+  `grep -rnE 'expect\(throws: [A-Za-z_.]+\.self\)' tests/`. **That is a candidate
+  pool, not a defect count:** the form is harmless where the callee has one throw
+  site and wrong only where a second site can answer for the first. No test
+  outside AUD2-013's own suite has been mutation-tested yet, and this record
+  claims no product defect — it records that the tree's negative tests are
+  un-verified in the specific way AUD2-013 proved two of them were.
+  Deviation on the count, same class as the finding: the first measurement used
+  `[A-Za-z]+` before `.self`, which cannot match a dotted name, and reported 270
+  assertions in 68 files — it missed all 32 nested-type assertions, including the
+  `ExpertRANSIndex.Failure` cases this record names as its worst instance.
+  Re-measured with `[A-Za-z_.]+` to the 302 / 75 above, and the generator
+  (`AUDIT/agent-notes/apply-aud2-013.py`) carries the same fix so the ledger row
+  regenerates to what it claims.
+- **Next:** Mutation-sweep the pool the way AUD2-013 was swept — disable one
+  throw site at a time and require the test that names it to fail — and where a
+  fixture is refused by the wrong site, move the fixture or assert the case or
+  detail that names the guard. Fixing this in the suite this audit already
+  touched is not enough; the same form is what hid the two wrong-reason tests.
 
 ## Recorded verification and its limits
 
@@ -1583,6 +1765,34 @@ title used to carry "(latent: no production caller)". That was the `removeAll`
 half, which `7740a42` closed. The access half was never latent —
 `ServerModelSession+PromptCache.swift:333` restores through `load` — and the
 closure says so rather than narrowing the row.
+
+AUD2-013 and AUD2-014 were proved rather than asserted, and the proving method is
+recorded because it is the part that transfers: the validator at `61de182` was
+left as it stood (no production edit except one doc comment) and each of its eight
+guards was disabled in turn, `ExpansionLayoutValidationTests` re-run, the file
+restored and verified byte-identical after every mutation
+(`AUDIT/aud2-013-mutation.log`, `AUDIT/agent-notes/mutate-sweep-stdout.log`,
+`AUDIT/mutate-*-full.log`). Five guards failed exactly the test named for them;
+M4 and M8 failed nothing because their fixtures were refused by a different clause,
+and M3 failed the wrong tests because a bound nothing can satisfy proves nothing.
+The focused result is 9 tests in 2 suites exit 0
+(`AUDIT/aud2-013-green-9.log`), the streaming suites 26 tests in 3 suites
+(`AUDIT/aud2-013-streaming-suite.log`), and the commit `8acc6f8` was then re-run
+whole: full serial suite **7 bundles, 2,007 tests, exit 0**
+(`AUDIT/aud2-013-full-final.log`, whose header carries the exact command, the
+`xcrun` Swift 6.4 `swiftlang-6.4.0.34.1` and the HEAD it ran on) and all 18 lint
+gates exit 0 (`AUDIT/aud2-013-lint-final.log`, 18/18). `swift build -c release`
+on that same tree reports `Build complete! (109.85 sec)` with `BUILD_EXIT=0`
+(`AUDIT/aud2-013-release-build.log`, stamped with HEAD `8acc6f8` and the only
+dirty files being this report and the two ledger files). The gates then ran a
+second time after the report and ledger edits below: 18/18, `LINT_EXIT=0`
+(`AUDIT/aud2-013-lint-final2.log`). The second run is what makes the edits above
+safe to land without a third: no gate reads either file — `grep -rn audit_2310
+tools/ .github/workflows/` returns nothing, and `tools/docs-facts.py` reads only
+`docs/audit-ledger.json`, which is AUD2-049. No model ran: nothing in this pair
+touches numerics, which is why no golden-baseline check is claimed.
+Sibling audit under the brief's §5 turned up the tree-wide version of the same
+test defect and it was filed as AUD2-050 rather than folded into this closure.
 
 ### Full serial Swift run
 
@@ -1886,6 +2096,39 @@ unfixed; remote artifacts have not been inspected.
 - The statement that remote CI artifact contents had not been inspected is
   superseded: a fresh artifact was downloaded and shown to contain one bundle and
   27 files, which confirms AUD2-031 rather than closing it.
+- Two tests in `ExpansionLayoutValidationTests` had been **passing for the wrong
+  reason**, and that is disclosed rather than quietly fixed:
+  `tensorsThatShareATargetRegionAreRefused` was refused by the slot-bounds check
+  (its second tensor sat at target offset 4 below source offset 8), never reaching
+  the overlap guard it is named for, and the only 3-bit negative case (source 4 →
+  target 6) was equally refused by the target-size check, so removing the
+  whole-group guard changed nothing. Every test-file change closing AUD2-013 is
+  inventoried: `refusalDetail` added (asserts the `indexCorrupt` *detail*, not
+  just the error type); the shared-target fixture rebuilt so both targets sit at
+  or beyond their own source; `aThreeBitTensorWithALeftoverGroupIsRefused`,
+  `anOddRescaledTensorIsRefused` and `aNegativeSourceOffsetOrSizeIsRefused` added;
+  one comment corrected ("Six source bytes are exactly two groups of four"). **No
+  assertion was weakened and no test removed** — the sweep removed a production
+  guard temporarily, never a test. Assertions that mutation showed were already
+  honest kept their original `#expect(throws: ModelError.self)` form.
+- One mutation was invalid as evidence and is disclosed as such: M3 as first
+  written *tightened* the slot bound past any satisfiable value
+  (`<= expertStride` became `<= -1`), so it failed
+  `sizesThatDoNotMatchTheTransformAreRefused` and the positive
+  `theConverterLayoutIsValid` — 3 issues, exit 1 (`AUDIT/aud2-013-mutation.log`) —
+  and never isolated `aRegionOutsideTheSlotIsRefused`, because a bound nothing can
+  satisfy makes every layout throw. M3b relaxes the bound instead and fails
+  exactly that one test, both its cases (`AUDIT/mutate-aud2-013-m3b-full.log`, 2
+  issues, lines 336 and 341). The sweep driver's line-based `grep -qF` check could
+  also not verify a multi-line replacement, which is why M8 was re-run through
+  `AUDIT/agent-notes/mutate-one.py`, an applier that asserts the pattern occurs
+  exactly once and restores the file in a `finally`.
+- The AUD2-050 count was first measured as 270 assertions in 68 files with
+  `expect\(throws: [A-Za-z]+\.self\)`, a pattern that cannot match a dotted type
+  name and so missed all 32 nested-type assertions — including the
+  `ExpertRANSIndex.Failure` cases the record itself cites as its worst instance.
+  Re-measured with `[A-Za-z_.]+` to 302 in 75 files, in both the ledger row and the
+  generator script. The old numbers are withdrawn.
 
 ## Continuation boundaries
 
@@ -1917,20 +2160,22 @@ The Swift 6.4.1 question is no longer a blocker: Homebrew's keg-only 6.4.1 built
 the package and passed the full serial suite (AUD2-022, DONE). It did surface a
 new build-hygiene finding, AUD2-039.
 
-The ledger stands at **49 records: 32 DONE, 16 non-terminal (12 OPEN, 2 PROGRESS,
+The ledger stands at **50 records: 34 DONE, 15 non-terminal (11 OPEN, 2 PROGRESS,
 2 AUDIT) and 1 BLOCKED**. The count has fallen at every earlier recorded
 milestone — 36 non-terminal at the last snapshot of this section, 21 after the
-rANS and checkpoint batches, 15 before this pass. It did not fall here: AUD2-007
-closed, and the two things its closing exposed (AUD2-048 in the sibling store,
-AUD2-049 in the gate that is supposed to check these pointers) were opened in the
-same pass, so one record left and two arrived and the count rose to 16. That is
-stated rather than smoothed over — §8's invariant is a record moving to a terminal
-status, and no net drain is claimed here. The run has
+rANS and checkpoint batches, 15 before the AUD2-007 pass, which closed one record
+and opened two to land at 16. It fell again here: AUD2-013 and AUD2-014 closed
+with evidence and one new record (AUD2-050, the tree-wide sibling of the
+wrong-reason tests AUD2-013's sweep proved) arrived, so 16 → 15. That is stated
+rather than smoothed over — §8's invariant is a record moving to a terminal
+status, and one net drain at one milestone is not convergence. The run has
 still never reached Phase C, let alone Phase D, and no convergence milestone is
 claimed. Every
 non-terminal record left is either an S2 design gap that needs work
-this branch has not done (AUD2-001, 002, 004, 013, 014, 034, 035, 036, 039,
-045) or a gap in the audit's own tooling (AUD2-049), an S3 diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation (AUD2-015, 016), a verification record
+this branch has not done (AUD2-001, 002, 004, 034, 035, 036, 039,
+045) or a gap in the audit's own tooling and tests (AUD2-049, AUD2-050), an S3
+diagnostic asymmetry (AUD2-048), a claim awaiting formal reconciliation
+(AUD2-015, 016), a verification record
 (AUD2-019, 031), or the external host (AUD2-038).
 
 Completed and evidenced here: recovery and hash verification of the original
