@@ -413,7 +413,10 @@ extension ServerModelSession {
             }
             promptStateStore = store
             if checkpointsEnabled {
-                let checkpoints = try PromptCheckpointStore(
+                // Process-wide per storage configuration: a model reload in
+                // the same server must see the system prefix the previous
+                // session captured, even with the disk tier off (K1).
+                let checkpoints = try PromptCheckpointStore.sharedInstance(
                     configuration: storage)
                 // Index now rather than on first capture: a restart can find
                 // more checkpoint records than their half allows, and leaving

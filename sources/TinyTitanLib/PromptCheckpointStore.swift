@@ -102,10 +102,18 @@ actor PromptCheckpointStore {
 
     /// Saves one checkpoint. The metadata is validated against the payload
     /// before anything is written.
+    ///
+    /// `durable` asks for a disk copy as well as a RAM copy. Without it the
+    /// store keeps a payload in whichever tier holds it -- RAM when it fits --
+    /// which is right for a turn-local checkpoint and wrong for the shared
+    /// system prefix: a small prefix would never reach disk, and a restart
+    /// would lose exactly the entry K1 exists to keep. The turn store has
+    /// always written both tiers; this is the checkpoint store's equivalent.
     func save(
         _ metadata: PromptCheckpointMetadata,
         snapshot: InferenceStateSnapshot,
-        auxiliary: InferenceAuxiliaryState? = nil
+        auxiliary: InferenceAuxiliaryState? = nil,
+        durable: Bool = false
     ) throws {
         try metadata.validate()
         guard snapshot.descriptor == metadata.descriptor else {
@@ -128,32 +136,43 @@ actor PromptCheckpointStore {
                 bytes: auxiliaryBytes, limit: Self.maximumAuxiliaryBytes)
         }
         let total = bytes + auxiliaryBytes
-        if total <= configuration.memoryLimitBytes {
+        let fitsMemory = total <= configuration.memoryLimitBytes
+        let fitsDisk =
+            configuration.diskDirectory != nil
+            && total <= configuration.diskLimitBytes
+        if fitsDisk, durable || !fitsMemory {
+            try writeDisk(
+                metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
+        } else if !fitsMemory {
+            // No tier can hold it: RAM is too small and there is no disk (or
+            // the payload is larger than the whole disk budget). Refuse rather
+            // than accept an entry nothing backs.
+            throw PromptCheckpointStoreError.exceedsLimit(
+                bytes: total,
+                limit: configuration.diskDirectory == nil
+                    ? configuration.memoryLimitBytes
+                    : configuration.diskLimitBytes)
+        }
+        if fitsMemory {
             insertMemory(
                 metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
-            return
         }
-        guard configuration.diskDirectory != nil else {
-            throw PromptCheckpointStoreError.exceedsLimit(
-                bytes: total, limit: configuration.memoryLimitBytes)
-        }
-        guard total <= configuration.diskLimitBytes else {
-            throw PromptCheckpointStoreError.exceedsLimit(
-                bytes: total, limit: configuration.diskLimitBytes)
-        }
-        try writeDisk(
-            metadata: metadata, snapshot: snapshot, auxiliary: auxiliary)
     }
 
     /// Loads a checkpoint and verifies it against `domain` and its content
     /// hash. A corrupt record is deleted and reported, never returned.
+    ///
+    /// `tier` is the tier this call actually read from, captured before a
+    /// disk record is promoted into memory: the shared-system log line has to
+    /// name where the bytes came from, not where a previous lookup left them.
     func load(
         _ key: PromptCheckpointKey,
         domain: ServerPromptCacheDomain
     ) throws -> (
         metadata: PromptCheckpointMetadata,
         snapshot: InferenceStateSnapshot,
-        auxiliary: InferenceAuxiliaryState?
+        auxiliary: InferenceAuxiliaryState?,
+        tier: String
     ) {
         if let record = state.memory[key] {
             guard record.metadata.domain == domain else {
@@ -161,7 +180,7 @@ actor PromptCheckpointStore {
             }
             try Self.verifyKey(record.metadata)
             touchMemory(key)
-            return (record.metadata, record.snapshot, record.auxiliary)
+            return (record.metadata, record.snapshot, record.auxiliary, "ram")
         }
         if state.disk[key] == nil {
             // A corrupt record is deleted and reported (see load's catch),
@@ -240,7 +259,7 @@ actor PromptCheckpointStore {
                     metadata: diskMetadata.metadata, snapshot: snapshot,
                     auxiliary: auxiliary)
             }
-            return (diskMetadata.metadata, snapshot, auxiliary)
+            return (diskMetadata.metadata, snapshot, auxiliary, "ssd")
         } catch let error as PromptCheckpointStoreError {
             remove(key)
             throw error
@@ -260,6 +279,31 @@ actor PromptCheckpointStore {
         // payload that is already there.
         guard configuration.diskDirectory != nil else { return false }
         return (try? diskRecordFromFileSystem(for: key)) != nil
+    }
+
+    /// The metadata for `key` without materializing its payload.
+    ///
+    /// The interior-checkpoint lookup asks this first, so a record captured
+    /// by another conversation is skipped without reading (and promoting) a
+    /// potentially large payload. Nil for a missing record, a different
+    /// domain, or one that cannot be read; `load` makes the same decision
+    /// again on the records this returns.
+    func metadataIfPresent(
+        _ key: PromptCheckpointKey,
+        domain: ServerPromptCacheDomain
+    ) -> PromptCheckpointMetadata? {
+        if let record = state.memory[key] {
+            return record.metadata.domain == domain ? record.metadata : nil
+        }
+        indexDiskIfNeeded()
+        if let record = state.disk[key] {
+            return record.metadata.domain == domain ? record.metadata : nil
+        }
+        guard configuration.diskDirectory != nil else { return nil }
+        guard let record = try? diskRecordFromFileSystem(for: key) else {
+            return nil
+        }
+        return record.metadata.domain == domain ? record.metadata : nil
     }
 
     /// Every checkpoint recorded for a domain, oldest first.

@@ -6,6 +6,11 @@ import TinyTitan
 enum PromptCheckpointKind: String, Codable, Sendable, Equatable, CaseIterable {
     /// End of the system message and tool schema.
     case systemEnd = "system-end"
+    /// The same boundary as `systemEnd`, captured so it can be reused by a
+    /// *different* conversation ("warm subagents"). The kind marks a record
+    /// whose only valid cross-conversation use is this system-only prefix;
+    /// same-conversation reuse still requires a matching conversation key.
+    case sharedSystem = "shared-system"
     /// First token of the latest user turn.
     case lastTurnStart = "last-turn-start"
     /// End of a completed assistant turn (the existing prompt-cache point).

@@ -259,6 +259,16 @@ extension ServerModelSession {
             {
                 return (promptIDs, .resume(cachedPromptTokens: restored))
             }
+            // No same-conversation checkpoint, but the system-end prefix may
+            // have been captured by an *earlier* conversation. This is the
+            // warm-subagent path: restore the shared system prefix and prefill
+            // only the user turn behind it.
+            if let shared = await restoreSharedSystemPrefix(
+                promptIDs: promptIDs,
+                messages: cacheRequest.messages)
+            {
+                return (promptIDs, .resume(cachedPromptTokens: shared))
+            }
             return (promptIDs, .reset)
         case .hit(let entryID, let effective, let cached):
             if entryID == activePromptCacheEntryID,
@@ -325,11 +335,27 @@ extension ServerModelSession {
             gridTokens: Self.checkpointGridTokens,
             includeMessageBoundaries: !Self.checkpointGridOnly
         ).sorted { $0.position > $1.position }
+        // Interior checkpoints describe one conversation. Two conversations
+        // can render a content-identical prefix (the system prompt is the
+        // common case), but only the system-end boundary is shareable across
+        // them; anything longer must belong to this conversation. The shared
+        // path below handles that one boundary.
+        let conversation = PromptCheckpointPlanner.conversationKey(
+            domain: promptCacheDomain, messages: messages)
         for boundary in boundaries {
             let prefix = Array(promptIDs.prefix(boundary.position))
             let key = PromptCheckpointKey.make(
                 domain: promptCacheDomain, prefixTokenIDs: prefix)
             do {
+                // Read the small metadata before the payload: a record this
+                // conversation cannot use is skipped without promoting it
+                // into memory, so the shared path's tier still names disk.
+                if let metadata = await store.metadataIfPresent(
+                    key, domain: promptCacheDomain),
+                    metadata.conversationKey != conversation
+                {
+                    continue
+                }
                 let loaded = try await store.load(
                     key, domain: promptCacheDomain)
                 guard loaded.metadata.position == boundary.position,
@@ -337,6 +363,12 @@ extension ServerModelSession {
                 else {
                     throw PromptCheckpointStoreError.invalidMetadata(
                         "checkpoint position or prefix does not match the request")
+                }
+                guard loaded.metadata.conversationKey == conversation else {
+                    // A valid record for another conversation, not a corrupt
+                    // one: leave it for the shared system path (or for that
+                    // conversation) instead of deleting it.
+                    continue
                 }
                 try runner.restoreInferenceState(
                     loaded.snapshot, auxiliary: loaded.auxiliary)

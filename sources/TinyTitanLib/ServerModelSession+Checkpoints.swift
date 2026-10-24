@@ -43,6 +43,13 @@ extension ServerModelSession {
         guard !boundaries.isEmpty else { return .none }
         let kinds = Dictionary(
             uniqueKeysWithValues: boundaries.map { ($0.position, $0.kind) })
+        // The system boundary is captured under its own kind so a later
+        // session can tell a shareable prefix from a conversation-local one.
+        // The position is the one the planner already uses; a single-user-turn
+        // chat labels it `.lastTurnStart`, which is why it is located
+        // separately rather than read back from the label.
+        let sharedSystemPosition = PromptCheckpointPlanner.systemEndPosition(
+            promptIDs: promptIDs, messages: messages, imStartID: imStartID)
         let captureRunner = runner
         let captureDomain = promptCacheDomain
         let capturePromptIDs = promptIDs
@@ -63,10 +70,13 @@ extension ServerModelSession {
                 let prefix = Array(capturePromptIDs.prefix(position))
                 let key = PromptCheckpointKey.make(
                     domain: captureDomain, prefixTokenIDs: prefix)
+                let kind: PromptCheckpointKind =
+                    position == sharedSystemPosition
+                    ? .sharedSystem : (kinds[position] ?? .lastTurnStart)
                 let metadata = PromptCheckpointMetadata(
                     key: key,
                     domain: captureDomain,
-                    kind: kinds[position] ?? .lastTurnStart,
+                    kind: kind,
                     conversationKey: conversation,
                     prefixTokenIDs: prefix,
                     descriptor: snapshot.descriptor)
@@ -76,7 +86,13 @@ extension ServerModelSession {
                     }
                     do {
                         try await checkpointStore.save(
-                            metadata, snapshot: snapshot, auxiliary: auxiliary)
+                            metadata,
+                            snapshot: snapshot,
+                            auxiliary: auxiliary,
+                            // A system prefix can be small enough to fit
+                            // RAM; the disk copy is what lets it survive a
+                            // restart, which is the point of sharing it.
+                            durable: metadata.kind == .sharedSystem)
                         ServerLog.diagnostic(
                             "TinyTitan prompt_checkpoint stored "
                                 + "kind=\(metadata.kind.rawValue) "
@@ -121,5 +137,33 @@ extension ServerModelSession {
             let value = Int(raw), value >= 1_024
         else { return nil }
         return value
+    }
+
+    /// Restore the system prefix a previous conversation captured.
+    ///
+    /// The generic interior restore runs first, because a conversation
+    /// reopened after a model reload may still restore a longer
+    /// same-conversation prefix. This is the cross-conversation fallback, and
+    /// it only ever restores the system-end boundary: no user or assistant
+    /// token can be inside a `.sharedSystem` entry.
+    func restoreSharedSystemPrefix(
+        promptIDs: [Int32],
+        messages: [GFTokenizer.Message]
+    ) async -> Int? {
+        guard promptCacheMode == .multiPrefix,
+            let store = promptCheckpointStore,
+            runner.supportsInferenceStateRestore,
+            let prefix = PromptCheckpointSharedSystem.prefix(
+                promptIDs: promptIDs,
+                messages: messages,
+                imStartID: tokenizer.imStartID,
+                domain: promptCacheDomain)
+        else { return nil }
+        return await PromptCheckpointSharedSystem.restore(
+            store: store,
+            domain: promptCacheDomain,
+            runner: runner,
+            prefix: prefix,
+            promptTokenCount: promptIDs.count)
     }
 }

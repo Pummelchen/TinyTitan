@@ -5,7 +5,7 @@ import Foundation
 //
 // Split out of `ServerPromptStateStore.swift` (2026-09-28) under the
 // 500-line-per-file rule (Task 8 of the cleanup runbook) as pure code motion.
-struct ServerPromptCacheStorageConfiguration: Sendable, Equatable {
+struct ServerPromptCacheStorageConfiguration: Sendable, Equatable, Hashable {
     let memoryLimitBytes: Int
     let diskDirectory: URL?
     let diskLimitBytes: Int
