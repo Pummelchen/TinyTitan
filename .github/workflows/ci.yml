@@ -77,10 +77,10 @@ jobs:
           echo "/tmp/swiftlint-0.65.1" >> "$GITHUB_PATH"
       - name: Plugin tests (harness-version pins)
         # The cheapest gate, and independent of the Swift build: the plugin
-        # suites run in about a second together. dsh-tinytitan asserts the one
-        # harness release it supports against both its `package.json` peer pins
-        # and the launcher's pin in `tools/dsh_local.sh`, so drift in either
-        # fails here in seconds rather than at a user's boot.
+        # suites run in about a second together. Each plugin asserts the one
+        # harness release it supports against its `package.json` peer pins and
+        # its gate constant, so drift in either fails here in seconds rather
+        # than at a user's boot.
         run: |
           for plugin in plugins/dsh-*; do
             [ -d "$plugin/test" ] || continue
@@ -189,11 +189,9 @@ jobs:
           /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
             test_prepare_agentworld test_tinytitan_quant_fidelity \
             test_reconcile_snapshot_verdict test_two_bit_pack
-      - name: Installer and launcher gates (private DSH isolation, model-menu and launcher choices)
-        # The installer and `tools/dsh_local.sh` promise a factory-new Mac stays
-        # untouched: one private root, no PATH or shell-rc edit, and npm, pnpm and
-        # the XDG caches redirected into it. These tests pin that contract —
-        # static checks plus a dry run that must write nothing — and the model
+      - name: Installer and launcher gates (model-menu and launcher choices)
+        # These tests pin the installer's and launcher's choice handling: a
+        # factory-new Mac is not written outside the install root, and the model
         # menu's answer handling (an EOF must not start the recommended
         # download). `test_install_models_batch_status` pins what the batch modes'
         # exit status means: both loops used to end on the row filter's own test,
@@ -299,7 +297,7 @@ jobs:
         # install fails rather than quietly skipping again.
         run: |
           cd benchmark
-          python3 -m unittest test_dsh_isolation test_dsh_route test_dsh_port_gate \
+          python3 -m unittest test_dsh_route \
             test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
             test_release_test_gate test_release_notes_compact \
@@ -308,12 +306,11 @@ jobs:
             test_model_process_guard \
             test_parity_harness_status \
             test_launcher_install test_launcher_ram test_launcher_port \
-            test_launcher_warm_gate \
             test_models_memory_gate \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \
             test_tinytitan_profile \
             launcher_fixture test_progress \
-            test_release_installer_verification test_dsh_node_digest test_supply_chain
+            test_release_installer_verification test_supply_chain
       - name: Release gates (the CI-green precondition)
         # `tools/ci-green.sh` is what stops a tag going out over a commit whose CI
         # has not passed — the gap that let v5.18 publish an hour after its own

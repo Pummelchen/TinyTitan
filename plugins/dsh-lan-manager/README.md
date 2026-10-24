@@ -173,13 +173,13 @@ routes from being reachable by anything the harness is later bound to expose.
 
 ## Supported harness version
 
-This plugin supports **exactly one DeepSeek Harness release: `0.2.1-rc.2`** —
+This plugin supports **exactly one DeepSeek Harness release: `0.2.1-rc.3`** —
 not older, not newer, and not a build from `main`. It registers a route into the
 harness web server and drives the harness through host services, so a release it
 has not been verified against is not something to guess at. It is the same release
-`dsh-tinytitan` supports and the one `tools/dsh_local.sh` installs; the bundle's
-own `version` is that same number rather than a number of its own, and
-`test/support.test.js` asserts the constants cannot drift apart.
+`dsh-tinytitan` supports; the bundle's own `version` is that same number rather
+than a number of its own, and `test/support.test.js` asserts the constants cannot
+drift apart.
 
 On any other release it **refuses to run**: one line naming both versions, and
 nothing else — no route registered, no discovery started. It never throws, so DSH

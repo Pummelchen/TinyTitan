@@ -14,7 +14,7 @@ named in `TT_FIXTURE`, so a missing digest is a missing file and a tampered
 artifact is a file whose bytes no longer match its published `.sha256`. The
 digests themselves are real SHA-256 sums and the real `shasum` does the checking,
 so these tests exercise the verification rather than a picture of it. Each run
-happens under a temporary `HOME` and `TINYTITAN_ROOT`, with `--no-model --no-web`,
+happens under a temporary `HOME` and `TINYTITAN_ROOT`, with `--no-model`,
 and `df` is stubbed so the disk question is never asked.
 
     cd benchmark && python3 -m unittest test_release_installer_verification -v
@@ -201,7 +201,6 @@ class InstallerRun:
                 str(INSTALLER),
                 "--yes",
                 "--no-model",
-                "--no-web",
                 "--version",
                 TAG,
             ],

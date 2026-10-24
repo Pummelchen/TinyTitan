@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-manager",
-  "version": "0.2.1-rc.2",
+  "version": "0.2.1-rc.3",
   "description": "LAN-scoped management API for DeepSeek Harness: list active workspaces and sessions, prompt specific or all sessions, and archive or delete them",
   "type": "module",
   "license": "MIT",

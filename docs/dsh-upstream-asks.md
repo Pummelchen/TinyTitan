@@ -14,9 +14,9 @@ disabled and discussions enabled**, so all three are Discussions in *Ideas*:
 
 The patches are small enough to apply locally meanwhile.
 
-> **Status note, 2026-09-30: not re-verified since.** The harness this project pins
-> has moved to `0.2.0-rc.2` (both plugins gate on it, and `tools/dsh_local.sh`
-> installs it). Everything below — the line numbers, the quoted behaviour and the
+> **Status note, 2026-10-24: not re-verified since.** The harness this project's
+> plugins pin has moved to `0.2.1-rc.3`; this project does not install a harness
+> of its own, so the user's DSH is the one to read. Everything below — the line numbers, the quoted behaviour and the
 > two replies — was read on `0.1.6-alpha.2` and is left as the record of that
 > version. Ask 1 is the one 0.2.0 was most likely to change, because that release
 > reworked the settings and preset planes; re-read the three asks against the

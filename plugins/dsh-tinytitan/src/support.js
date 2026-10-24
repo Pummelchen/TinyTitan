@@ -13,9 +13,8 @@
  * The supported range is therefore a single release. Older ones, later ones and
  * a harness built from `main` are out of support deliberately, not assumed to
  * work. `test/support.test.js` asserts {@link SUPPORTED_DSH_VERSION} against the
- * two places that cannot import it — this package's `peerDependencies` and the
- * launcher's pin in `tools/dsh_local.sh` — so widening one without the others
- * fails the suite.
+ * two places that cannot import it — this package's `peerDependencies` and its
+ * own `version` — so widening one without the others fails the suite.
  *
  * Detection is best-effort and answers `null` when it cannot tell, which
  * {@link supportDecision} reads as a refusal rather than as permission: this
@@ -29,7 +28,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 
 /** The one DeepSeek Harness release this plugin is written and tested against. */
-export const SUPPORTED_DSH_VERSION = "0.2.1-rc.2";
+export const SUPPORTED_DSH_VERSION = "0.2.1-rc.3";
 
 /** The package whose version is the harness's. */
 const HARNESS = "@deepseek-ai/dsh";

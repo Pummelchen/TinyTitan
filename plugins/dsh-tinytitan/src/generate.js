@@ -789,9 +789,9 @@ export const DEFAULT_MODEL_SETTINGS_NS = "agent-default-model";
 /**
  * Repair a default model that names an install the route no longer serves.
  *
- * `tools/dsh_local.sh` writes `agent-default-model` once, at install time, and
- * the harness migrates it into the profile patch. Nothing kept it in step with
- * the route afterwards, so changing which model the server runs left the window
+ * A route setup that writes `agent-default-model` once, at install time, leaves
+ * the harness pointing at it after the migration into the profile patch. Nothing
+ * kept it in step with the route afterwards, so changing which model the server runs left the window
  * pointed at an id the provider does not have: the picker showed the live model,
  * the composer sent the old one, and every turn died with
  * `pi-ai provider "tinytitan" has no configured model <id>` / `UNKNOWN_MODEL`.

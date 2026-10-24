@@ -15,8 +15,8 @@
 #
 # Nothing here needs Homebrew, Python, Node, git or Xcode. The engine is
 # downloaded built, from the newest published release; the tools that drive it
-# arrive as text; Node is fetched privately only if this Mac has none. The model
-# is the one thing a person chooses, and the installer asks for it with a list.
+# arrive as text. The model is the one thing a person chooses, and the installer
+# asks for it with a list.
 #
 # It checks the Mac, installs TinyTitan under ~/.tinytitan, asks which model to
 # download, and installs a `tinytitan` command that starts the server — then
@@ -24,18 +24,10 @@
 # Everything it creates is under ~/.tinytitan and ~/.local/bin, so removing those
 # two directories removes the install.
 #
-# It can also set up a **chat window**: TinyTitan's own DeepSeek Harness, a local
-# page with a prompt box that opens in the default browser, already pointed at
-# the server. That is offered once a model is installed, because a window with
-# nothing to load is not a working thing. It lives under ~/.tinytitan too, and is
-# kept entirely separate from any DeepSeek Harness you run yourself; see
-# tools/dsh_local.sh.
-#
 # Nothing here is destructive. It never deletes a model and never touches
 # anything outside its own folders:
-#   ~/.tinytitan                the engine, the tools, the models, the chat window
+#   ~/.tinytitan                the engine, the tools and the models
 #   ~/.local/bin/tinytitan      the command that starts the server
-#   ~/.local/bin/tinytitan-web  the command that starts it with the browser window
 #   ~/TinyTitan                 only with --from-source: the clone it builds in
 # Re-running it is safe: it replaces the engine and tools in place and keeps the
 # models.
@@ -47,10 +39,6 @@
 #                    (`tools/install_models.sh --choose`); through a pipe it
 #                    takes ornith15-8bit rather than hanging on a question.
 #   --no-model       install no model
-#   --web            also set up the browser chat window (asked interactively;
-#                    --yes alone does not install it, so an unattended run stays
-#                    a server and nothing else)
-#   --no-web         do not offer the browser chat window
 #   --version TAG    install that release instead of the newest (e.g. --version v6.0)
 #   --from-source    clone and `swift build` instead of downloading a release.
 #                    For contributors; needs Xcode and takes much longer.
@@ -130,10 +118,6 @@ MODEL="$DEFAULT_MODEL"
 MODEL_WAS_SET=0
 INSTALL_MODEL=1
 TARGET_DIR="$DEFAULT_DIR"
-# ask | yes | no. `--yes` deliberately does not imply `yes` here: pulling ~320 MB
-# of Node/DeepSeek Harness into someone's home on an unattended run is a side
-# effect that has to be asked for by name, with --web.
-WEB_MODE="ask"
 # Empty means "the newest release", which is what a person wants and what the
 # release runbook publishes. `--version v6.0` pins one; a contributor who wants
 # `main` builds from source instead.
@@ -144,8 +128,6 @@ while [[ $# -gt 0 ]]; do
     --yes|-y)    ASSUME_YES=1 ;;
     --model)     MODEL="${2:?--model needs a name}"; MODEL_WAS_SET=1; shift ;;
     --no-model)  INSTALL_MODEL=0 ;;
-    --web)       WEB_MODE="yes" ;;
-    --no-web)    WEB_MODE="no" ;;
     --version)   RELEASE_TAG="${2:?--version needs a tag like v6.0}"; shift ;;
     --from-source) FROM_SOURCE=1 ;;
     --dir)       TARGET_DIR="${2:?--dir needs a path}"; shift ;;
@@ -524,36 +506,6 @@ else
   echo "       $TOOLS_PATH/install_models.sh clean"
 fi
 
-# The chat window. Offered only once a model is on disk: the whole point is a
-# page that opens onto a model that is already there, and setting up 320 MB of
-# runtime for an empty picker helps nobody.
-WANT_WEB=0
-if ! installed_any; then
-  :
-elif [[ "$WEB_MODE" == "no" ]]; then
-  ok "Browser chat window: skipped (--no-web)"
-elif [[ "$WEB_MODE" == "yes" ]] \
-  || { (( ASSUME_YES == 0 )) && [[ -t 0 ]] \
-       && ask "Also set up a chat window in your browser?" yes; }; then
-  echo
-  if "$TOOLS_PATH/dsh_local.sh" ensure; then
-    WANT_WEB=1
-    cat > "$HOME/.local/bin/tinytitan-web" <<WEBRUNNER
-#!/bin/sh
-# Installed by tools/install_tinytitan.sh. Starts the server and opens
-# TinyTitan's own DeepSeek Harness in the browser.
-export TINYTITAN_BIN_DIR="$BIN_PATH_FINAL"
-export TINYTITAN_MODELS_DIR="$MODELS_PATH_FINAL"
-exec "$TOOLS_PATH/server_launcher.sh" --web "\$@"
-WEBRUNNER
-    chmod +x "$HOME/.local/bin/tinytitan-web"
-    ok "Chat window ready: ~/.local/bin/tinytitan-web"
-  else
-    warn "The chat window could not be set up; it does not affect the server."
-    warn "Retry any time with: $TOOLS_PATH/dsh_local.sh ensure"
-  fi
-fi
-
 # --- done -------------------------------------------------------------------
 echo
 # Hand over to the launcher whenever a person is there to watch: the launcher
@@ -562,42 +514,24 @@ echo
 # install prints the command instead, so a pipe never blocks on a server.
 if installed_any && (( ASSUME_YES == 0 )) && [[ -t 0 && -t 1 ]]; then
   if ask "Start the TinyTitan server now?" yes; then
-    if (( WANT_WEB )); then
-      say "Starting the model and opening the chat window in your browser."
-    else
-      say "Starting the server. Leave this window open; Ctrl-C stops it."
-    fi
+    say "Starting the server. Leave this window open; Ctrl-C stops it."
     echo
-    if (( WANT_WEB )); then
-      exec "$TOOLS_PATH/server_launcher.sh" --web
-    fi
     exec "$TOOLS_PATH/server_launcher.sh" --client server
   fi
 fi
 
 say "Done."
 echo
-if (( WANT_WEB )); then
-  echo "  Start TinyTitan with the browser chat window:"
-  echo "    ~/.local/bin/tinytitan-web"
-  echo "    (or: $TOOLS_PATH/server_launcher.sh --web)"
-  echo
-  echo "  A page opens in your browser with a prompt box, already pointed at"
-  echo "  the model. Keep the window open while you use it; Ctrl-C stops both."
-  echo "  The server alone is still:  ~/.local/bin/tinytitan"
-else
-  echo "  Start the TinyTitan server:"
-  echo "    ~/.local/bin/tinytitan"
-  echo "    (or: $TOOLS_PATH/server_launcher.sh)"
-  echo
-  echo "  It prints the base URL to point a client at - by default"
-  echo "  http://127.0.0.1:8080/v1 with any API key; --port changes the port."
-  echo "  Keep the window open while you use it; one model runs at a time."
-  echo
-  echo "  For a chat window in the browser instead, re-run this installer with"
-  echo "  --web, or run: $TOOLS_PATH/dsh_local.sh ensure"
-fi
+echo "  Start the TinyTitan server:"
+echo "    ~/.local/bin/tinytitan"
+echo "    (or: $TOOLS_PATH/server_launcher.sh)"
 echo
+echo "  It prints the base URL to point a client at - by default"
+echo "  http://127.0.0.1:8080/v1 with any API key; --port changes the port."
+echo "  Keep the window open while you use it; one model runs at a time."
+echo
+echo "  For the DeepSeek Harness integration, install the plugins under plugins/"
+echo "  into your own DSH profile; this project no longer installs one for you."
 echo "  New to this? Start here:"
 echo "    https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started"
 echo "  Questions and bug reports: https://github.com/Pummelchen/TinyTitan/issues"
