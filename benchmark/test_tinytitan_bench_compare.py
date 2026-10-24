@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import sys
 import tempfile
 import unittest
 
@@ -20,6 +21,9 @@ _spec = importlib.util.spec_from_file_location(
     "tinytitan_bench_compare", ROOT / "benchmark" / "tinytitan_bench_compare.py"
 )
 compare = importlib.util.module_from_spec(_spec)
+# dataclasses resolves annotations through sys.modules[cls.__module__]; a module
+# executed without being registered makes that lookup None on Python 3.13.
+sys.modules[_spec.name] = compare
 _spec.loader.exec_module(compare)
 
 PROMPTS = [("Basic fact", 25), ("Arithmetic", 27), ("Logic", 30)]
