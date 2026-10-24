@@ -334,6 +334,10 @@ extension ServerModelSession {
                 slots: effectiveSlots,
                 runtimeConfiguration: runtime)
         }
+        // K0: one line per model load naming the prefill tensor-ops path and
+        // why it was chosen. Written before the first request so the reason is
+        // in the startup log even if no generation runs.
+        ServerLog.diagnostic(runner.prefillTensorOpsLogLine)
         let scratches = try (0..<effectiveSlots).map { _ in
             try RawCompletionScratch(
                 context: context, vocab: model.config.vocabSize,

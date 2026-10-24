@@ -271,19 +271,16 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
         runtimeConfiguration: RuntimeConfiguration = .production,
         enableSpeculativeGDN: Bool = false
     ) throws {
-        let bp = Builder()
-        let cfg = model.config
-        let profile = try Self.buildCore(
-            bp, model: model, context: context, maxContext: maxContext, slots: slots,
+        try self.init(
+            model: model, context: context, maxContext: maxContext, slots: slots,
             runtimeConfiguration: runtimeConfiguration,
-            enableSpeculativeGDN: enableSpeculativeGDN)
-        try Self.buildScratch(bp, model: model, context: context, cfg: cfg, profile: profile)
-        self.init(bp)
+            enableSpeculativeGDN: enableSpeculativeGDN,
+            capabilities: nil)
     }
 
     /// The designated initializer: every stored property comes from the builder, and an
     /// unset field is a construction bug rather than a silently nil runner.
-    private init(_ bp: Builder) {
+    init(_ bp: Builder) {
         self.model = Self.staged(bp.model, "model")
         self.ctx = Self.staged(bp.ctx, "ctx")
         self.cfg = Self.staged(bp.cfg, "cfg")

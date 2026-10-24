@@ -82,8 +82,30 @@ final class PrefillAttention {
     /// K7: recorded once at init so an explicit TensorOps path request can
     /// throw the real reason instead of a bare `preconditionFailure`.
     private let tensorOpsUnavailableReason: String
+    /// K0: the capability seam and the switch are inputs, not properties of the
+    /// host, so tests can drive every branch without an Apple10 machine.
+    private let tensorOpsDecisionValue: TensorOpsDecision
 
-    init(context: MetalContext) throws {
+    /// What this kernel decided about tensor operations. Test-visible, and the
+    /// source of the one startup log line.
+    var tensorOpsDecision: TensorOpsDecision { tensorOpsDecisionValue }
+    var tensorOpsPipelineBuilt: Bool { psoFullTensorOps2DValidityV2 != nil }
+
+    /// - Parameters:
+    ///   - capabilities: what this machine can do; omitted, the live probe on
+    ///     `context.device`.
+    ///   - tensorOpsMode: `TINYTITAN_TENSOROPS`, already parsed; omitted, it is
+    ///     read from the environment here.
+    ///   - tensorOpsPipelineBuilder: how the tensor-ops pipeline is compiled.
+    ///     Omitted, `context.pipeline`; a test passes a throwing builder to
+    ///     prove the `on` fallback without depending on the host's shader
+    ///     compiler.
+    init(
+        context: MetalContext,
+        capabilities: HardwareCapabilities? = nil,
+        tensorOpsMode: TensorOpsMode? = nil,
+        tensorOpsPipelineBuilder: ((String) throws -> MTLComputePipelineState)? = nil
+    ) throws {
         self.context = context
         self.psoCausalTiled = try context.pipeline("attention_prefill_causal_tiled")
         // Tile-synchronised variant: one barrier per tile of keys instead of
@@ -108,19 +130,34 @@ final class PrefillAttention {
         empty.contents().bindMemory(to: UInt32.self, capacity: 1).pointee = 0
         empty.label = "prefillAttention.keepMask.unused"
         self.emptyKeepMask = empty
-        if context.device.supportsFamily(.apple10) {
+        let liveCapabilities = capabilities ?? HardwareCapabilities.probe(device: context.device)
+        let resolution = TensorOpsMode.resolve()
+        let mode = tensorOpsMode ?? resolution.mode
+        let note = tensorOpsMode == nil ? resolution.note : nil
+        let plan = TensorOpsPolicy.plan(
+            capabilities: liveCapabilities, mode: mode, note: note)
+        let buildPipeline = tensorOpsPipelineBuilder ?? { try context.pipeline($0) }
+        switch plan {
+        case .attempt(let reason):
             do {
-                self.psoFullTensorOps2DValidityV2 = try context.pipeline(
+                self.psoFullTensorOps2DValidityV2 = try buildPipeline(
                     "attention_prefill_full_tensorops_2d_validity_v2")
                 self.tensorOpsUnavailableReason = ""
+                self.tensorOpsDecisionValue = TensorOpsDecision(
+                    mode: mode, path: .tensorOps, reason: reason)
             } catch {
                 self.psoFullTensorOps2DValidityV2 = nil
                 self.tensorOpsUnavailableReason = "\(error)"
+                self.tensorOpsDecisionValue = TensorOpsDecision(
+                    mode: mode,
+                    path: .fallback,
+                    reason: "pipeline creation failed: \(error)")
             }
-        } else {
+        case .fallback(let reason):
             self.psoFullTensorOps2DValidityV2 = nil
-            self.tensorOpsUnavailableReason =
-                "device does not support Apple10 MPP tensor operations"
+            self.tensorOpsUnavailableReason = reason
+            self.tensorOpsDecisionValue = TensorOpsDecision(
+                mode: mode, path: .fallback, reason: reason)
         }
     }
 

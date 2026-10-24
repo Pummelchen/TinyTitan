@@ -12,7 +12,8 @@ extension RealForwardRunner {
     /// reads hoisted into the builder first.
     static func buildCore(
         _ bp: Builder, model: Model, context: MetalContext, maxContext: Int, slots: Int,
-        runtimeConfiguration: RuntimeConfiguration, enableSpeculativeGDN: Bool
+        runtimeConfiguration: RuntimeConfiguration, enableSpeculativeGDN: Bool,
+        capabilities: HardwareCapabilities? = nil
     ) throws -> ModelProfile {
         bp.model = model
         bp.ctx = context
@@ -275,7 +276,8 @@ extension RealForwardRunner {
         bp.prefillQKVEpilogue = try PrefillQKVEpilogue(
             context: context,
             yarn: yarnParameters)
-        bp.prefillAttention = try PrefillAttention(context: context)
+        bp.prefillAttention = try PrefillAttention(
+            context: context, capabilities: capabilities)
         bp.prefillRouter = try PrefillRouter(
             context: context,
             weightBits: model.effectiveRouterWeightBits)

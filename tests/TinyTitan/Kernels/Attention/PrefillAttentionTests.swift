@@ -206,6 +206,102 @@ private let apple10TensorOpsAvailable: Bool = {
         }
     }
 
+    // MARK: - K0: capability seam
+
+    /// The live probe answers for the host; a test must be able to ask for a
+    /// machine that does not exist here. These four tests drive every policy
+    /// branch from synthetic capabilities, so they pass on M1-M6 alike.
+    @Test func syntheticApple10CapabilityBuildsTheTensorPipeline() throws {
+        let ctx = try MetalContext()
+        let prefill = try PrefillAttention(
+            context: ctx,
+            capabilities: Self.capabilities(apple10: true),
+            tensorOpsMode: .auto,
+            tensorOpsPipelineBuilder: { _ in
+                try ctx.pipeline("attention_prefill_causal_tiled")
+            })
+        #expect(prefill.tensorOpsPipelineBuilt)
+        #expect(prefill.tensorOpsDecision.path == .tensorOps)
+        #expect(prefill.tensorOpsDecision.reason.contains("Apple10"))
+    }
+
+    @Test func offNeverBuildsTheTensorPipelineEvenOnApple10() throws {
+        let ctx = try MetalContext()
+        var builderCalls = 0
+        let prefill = try PrefillAttention(
+            context: ctx,
+            capabilities: Self.capabilities(apple10: true),
+            tensorOpsMode: .off,
+            tensorOpsPipelineBuilder: { _ in
+                builderCalls += 1
+                return try ctx.pipeline("attention_prefill_causal_tiled")
+            })
+        #expect(builderCalls == 0)
+        #expect(!prefill.tensorOpsPipelineBuilt)
+        #expect(prefill.tensorOpsDecision.path == .fallback)
+        #expect(prefill.tensorOpsDecision.reason.contains("off"))
+        let fixture = Self.makeFixture(
+            start: 16,
+            chunk: 2,
+            window: 0,
+            seed: 0xA881,
+            headDim: 512,
+            qHeads: 16,
+            kvHeads: 2)
+        let baseline = try Self.runKernel(fixture, path: .causalTiled)
+        let off = try Self.runKernel(
+            fixture,
+            path: .fullTensorOps2DPreferred,
+            capabilities: Self.capabilities(apple10: true),
+            tensorOpsMode: .off)
+        #expect(off == baseline)
+    }
+
+    @Test func onFallsBackWhenPipelineCreationFails() throws {
+        struct InjectedFailure: Error {}
+        let ctx = try MetalContext()
+        let prefill = try PrefillAttention(
+            context: ctx,
+            capabilities: Self.capabilities(apple10: false),
+            tensorOpsMode: .on,
+            tensorOpsPipelineBuilder: { _ in throw InjectedFailure() })
+        #expect(!prefill.tensorOpsPipelineBuilt)
+        #expect(prefill.tensorOpsDecision.path == .fallback)
+        #expect(prefill.tensorOpsDecision.reason.contains("pipeline creation failed"))
+    }
+
+    /// The M3 path is the no-capability path: the tensor kernel is not built
+    /// and the preferred request produces exactly the scalar tiled output.
+    @Test func syntheticNonApple10KeepsTheScalarPrefillPath() throws {
+        let fixture = Self.makeFixture(
+            start: 32,
+            chunk: 2,
+            window: 0,
+            seed: 0xA880,
+            headDim: 512,
+            qHeads: 16,
+            kvHeads: 2)
+        let baseline = try Self.runKernel(fixture, path: .causalTiled)
+        let preferred = try Self.runKernel(
+            fixture,
+            path: .fullTensorOps2DPreferred,
+            capabilities: Self.capabilities(apple10: false),
+            tensorOpsMode: .auto)
+        #expect(preferred == baseline)
+    }
+
+    private static func capabilities(apple10: Bool) -> HardwareCapabilities {
+        HardwareCapabilities(
+            chipModel: "MacTest,1",
+            gpuName: "Synthetic GPU",
+            gpuFamily: apple10 ? .apple10 : .apple9,
+            supportsApple10TensorOps: apple10,
+            metal4Available: true,
+            anePresent: true,
+            physicalMemoryBytes: 24 << 30,
+            osVersion: "26.0.0")
+    }
+
     private static func makeFixture(
         start: Int,
         chunk: Int,
@@ -260,10 +356,17 @@ private let apple10TensorOpsAvailable: Bool = {
     private static func runKernel(
         _ fixture: Fixture,
         kvRingCapacity: UInt32 = 0,
-        path: RuntimePrefillAttentionPath = .causalTiled
+        path: RuntimePrefillAttentionPath = .causalTiled,
+        capabilities: HardwareCapabilities? = nil,
+        tensorOpsMode: TensorOpsMode? = nil,
+        pipelineBuilder: ((String) throws -> MTLComputePipelineState)? = nil
     ) throws -> [Float] {
         let ctx = try MetalContext()
-        let prefill = try PrefillAttention(context: ctx)
+        let prefill = try PrefillAttention(
+            context: ctx,
+            capabilities: capabilities,
+            tensorOpsMode: tensorOpsMode,
+            tensorOpsPipelineBuilder: pipelineBuilder)
         let qPrefix = 17
         let kPrefix = 19
         let vPrefix = 23
