@@ -152,9 +152,7 @@ let package = Package(
             // The CLI is a front end of the library (phase A2 of
             // `docs/plan-embedded-library.md`), so it depends on the facade it
             // drives. `TinyTitan` stays for the few value types `Args` parses.
-            // `TinyTitanFormat` is named because the memory-profile contract is
-            // a format type, and `doctor` reports it rather than restating it.
-            dependencies: ["TinyTitan", "TinyTitanLib", "TinyTitanFormat"],
+            dependencies: ["TinyTitan", "TinyTitanLib"],
             path: "sources/TinyTitanCLI",
             exclude: ["Command"],
             swiftSettings: tinytitanLanguageStandard
@@ -211,7 +209,6 @@ let package = Package(
             dependencies: [
                 "TinyTitanLib",
                 "TinyTitan",
-                "TinyTitanFormat",
                 "TinyTitanMemory",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),

@@ -1,6 +1,5 @@
 import Foundation
 import TinyTitan
-import TinyTitanFormat
 import TinyTitanLib
 
 /// Reads a `models/` tree without loading a model or touching its weights.
@@ -164,16 +163,6 @@ enum DoctorModelScanner {
             ?? defaultPrefillChunkTokens(
                 family: identity.family,
                 fallback: RuntimeConfiguration.production.prefillChunkTokens)
-        // The fit above already accounts for the profile: `weightBits` selects
-        // its ModelProfile row, and the manifest's smaller expert stride halves
-        // the slot bytes. The note states the part the arithmetic cannot: the
-        // 2-bit quality experiment failed model-wide, so this is a diagnostic
-        // row until a quality run exists.
-        let note: String? =
-            identity.memoryProfile == .lowmem
-            ? "experimental 2-bit routed experts: quality unverified, serving "
-                + "requires \(SSDAIMemoryProfile.experimentalOptInVariable)=1"
-            : nil
         return .success(
             DoctorReport.Model(
                 id: identity.modelID,
@@ -187,7 +176,7 @@ enum DoctorModelScanner {
                 pageCache: DoctorReport.Model.PageCache(
                     policy: pageCache.policy.rawValue,
                     reason: pageCache.reason),
-                note: note))
+                note: nil))
     }
 
     private static func probeSnapshot(

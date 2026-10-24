@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import TinyTitanFormat
 
 @testable import TinyTitan
 @testable import TinyTitanLib
@@ -36,8 +35,7 @@ private enum CatalogFixture {
     /// A manifest the real reader accepts, with the family and width under test.
     static func install(
         _ root: URL, _ name: String, modelID: String, family: String,
-        bits: Int, tokenizer: Bool = true,
-        memoryProfile: String? = nil
+        bits: Int, tokenizer: Bool = true
     ) throws {
         let url = try directory(root, name)
         let arch: [String: Any] = [
@@ -49,22 +47,21 @@ private enum CatalogFixture {
             "tieWordEmbeddings": false, "attentionKEqV": false, "hiddenActivation": "silu",
             "fullAttentionLayerMask": [2, 1, 2, 1], "family": family,
         ]
-        var manifest: [String: Any] = [
-            "magic": "SSDAI", "versionMajor": 1, "versionMinor": 0,
-            "flags": ["streamingPresent": true], "modelID": modelID, "arch": arch,
-            "files": [
-                "model_weights.bin": [
-                    "size": 1024, "sha256": String(repeating: "0", count: 64),
-                ]
-            ],
-            "expertsPerLayer": 8, "numLayers": 4, "expertStride": 16384,
-            "quant": [
-                "embedding": slot(8), "attention": slot(8), "router": slot(8),
-                "sharedExpert": slot(bits), "routedExpert": slot(bits),
-            ],
-        ]
-        if let memoryProfile { manifest["memoryProfile"] = memoryProfile }
-        try write(manifest, to: url.appendingPathComponent("manifest.json"))
+        try write(
+            [
+                "magic": "SSDAI", "versionMajor": 1, "versionMinor": 0,
+                "flags": ["streamingPresent": true], "modelID": modelID, "arch": arch,
+                "files": [
+                    "model_weights.bin": [
+                        "size": 1024, "sha256": String(repeating: "0", count: 64),
+                    ]
+                ],
+                "expertsPerLayer": 8, "numLayers": 4, "expertStride": 16384,
+                "quant": [
+                    "embedding": slot(8), "attention": slot(8), "router": slot(8),
+                    "sharedExpert": slot(bits), "routedExpert": slot(bits),
+                ],
+            ] as [String: Any], to: url.appendingPathComponent("manifest.json"))
         if tokenizer {
             let folder = try directory(url, "tokenizer")
             try Data("{}".utf8).write(to: folder.appendingPathComponent("tokenizer.json"))
@@ -372,33 +369,5 @@ struct ModelCatalogTests {
             CatalogFixture.cpuConfig(),
             to: root.appendingPathComponent("config.json"))
         #expect(try ModelCatalog.snapshotFamily(root) == .qwen35Dense)
-    }
-
-    /// The 2-bit profile is mechanically loadable but its quality is
-    /// unverified, so the catalog refuses it without the explicit switch and
-    /// never offers it as an ordinary model.
-    @Test func aLowMemoryInstallNeedsTheExperimentalSwitch() throws {
-        let root = try CatalogFixture.root()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try CatalogFixture.install(
-            root, "qwen3.6_35B_A3B_2Bit", modelID: "qwen3.6-35b-a3b",
-            family: "qwen36", bits: 2, memoryProfile: "lowmem")
-
-        let refused = ModelCatalog.scan(directory: root, environment: [:])
-        #expect(refused.entries.isEmpty)
-        #expect(
-            refused.skipped.contains {
-                $0.reason.contains("TINYTITAN_ALLOW_EXPERIMENTAL_LOWMEM")
-            },
-            "the skip reason must name the switch: \(refused.skipped)")
-
-        let enabled = ModelCatalog.scan(
-            directory: root,
-            environment: ["TINYTITAN_ALLOW_EXPERIMENTAL_LOWMEM": "1"])
-        let entry = try #require(enabled.entries.first)
-        #expect(entry.id == "qwen3.6-35b-a3b_2-Bit")
-        #expect(entry.quant == 2)
-        #expect(entry.memoryProfile == .lowmem)
-        #expect(entry.name.contains("experimental"))
     }
 }

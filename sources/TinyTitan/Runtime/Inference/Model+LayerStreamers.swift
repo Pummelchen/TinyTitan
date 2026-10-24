@@ -159,8 +159,7 @@ extension Model {
         let layout = try Self.streamLayout(
             url: url, packed: packedExpertsLayout, layer: L,
             streamSize: streamSize, phase1Bytes: phase1Bytes,
-            compressed: compressed, rans: rans, ransPhases: ransPhases,
-            expandColdExperts: manifest.memoryProfile != .lowmem)
+            compressed: compressed, rans: rans, ransPhases: ransPhases)
         let slotCount: Int
         switch streamingMode {
         case .pread(let configuredSlotCount):
@@ -353,14 +352,8 @@ extension Model {
     /// from expert 0, which the converter keeps at the wide layout; a cold
     /// expert lists its own compact source offsets against them.
     static func expertTensorMaps(
-        forLayer layer: Int, layout: PackedExpertsLayout,
-        expandColdExperts: Bool
+        forLayer layer: Int, layout: PackedExpertsLayout
     ) throws -> [[ExpertBlobTensor]] {
-        // A lowmem layer stores 2-bit experts that the MoE kernels read at 2
-        // bits. Expanding them would double the write past the slot, so the
-        // profile has to turn the transform off rather than let the per-tensor
-        // annotation alone select it.
-        guard expandColdExperts else { return [] }
         let experts = layout.layers[layer].experts
         guard let target = experts.first?.subTensors else { return [] }
         var maps: [[ExpertBlobTensor]] = []
@@ -393,7 +386,7 @@ extension Model {
         url: URL, packed: PackedExpertsLayout, layer: Int,
         streamSize: UInt64, phase1Bytes: UInt64?,
         compressed: ExpertBlobIndex.Layout?, rans: ExpertRANSIndex.Layout?,
-        ransPhases: [UInt8], expandColdExperts: Bool
+        ransPhases: [UInt8]
     ) throws -> StreamLayout {
         StreamLayout(
             path: url.path,
@@ -406,9 +399,7 @@ extension Model {
             expertSizes: compressed == nil && rans == nil
                 ? packed.layers[layer].experts.map(\.size) : nil,
             expertTensors: compressed == nil && rans == nil
-                ? try Self.expertTensorMaps(
-                    forLayer: layer, layout: packed,
-                    expandColdExperts: expandColdExperts)
+                ? try Self.expertTensorMaps(forLayer: layer, layout: packed)
                 : nil,
             phase1Bytes: phase1Bytes,
             compressedFrames: compressed?.entries.map(\.frames),

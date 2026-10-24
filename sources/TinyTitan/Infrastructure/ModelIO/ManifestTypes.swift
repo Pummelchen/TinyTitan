@@ -149,11 +149,6 @@ public struct Manifest: Decodable, Equatable, Sendable {
     public let sourceSnapshotHash: String?
     public let arch: ManifestArch
     public let quant: ManifestQuant?
-    /// The routed-expert memory profile. Absent means `standard`, which is
-    /// every install written before the field existed. Optional so a decoder
-    /// of this type (the runtime reads the wire struct, but the conformance is
-    /// public) keeps accepting those older documents.
-    public let memoryProfile: SSDAIMemoryProfile?
     /// Per-tensor width overrides, keyed by tensor stem ("language_model
     /// .model.layers.3.self_attn.k_proj" -> 8). Absent when the build has no
     /// overrides, and in manifests written before this existed.
@@ -162,10 +157,6 @@ public struct Manifest: Decodable, Equatable, Sendable {
     public let expertsPerLayer: Int
     public let numLayers: Int
     public let expertStride: UInt64
-
-    public var resolvedMemoryProfile: SSDAIMemoryProfile {
-        memoryProfile ?? .standard
-    }
 }
 
 public struct ManifestIdentity: Equatable, Sendable {
@@ -174,17 +165,4 @@ public struct ManifestIdentity: Equatable, Sendable {
     /// Routed-expert width, which is what "a 4-bit model" names: the experts
     /// are almost all of the payload.
     public let weightBits: Int
-    /// `standard` for every pre-existing install; `lowmem` when the manifest
-    /// declares 2-bit routed experts read at 2 bits.
-    public let memoryProfile: SSDAIMemoryProfile
-
-    public init(
-        modelID: String, family: ModelFamily, weightBits: Int,
-        memoryProfile: SSDAIMemoryProfile = .standard
-    ) {
-        self.modelID = modelID
-        self.family = family
-        self.weightBits = weightBits
-        self.memoryProfile = memoryProfile
-    }
 }

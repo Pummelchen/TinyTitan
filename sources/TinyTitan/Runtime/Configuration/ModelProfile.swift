@@ -198,47 +198,6 @@ public struct ModelProfile: Sendable, Equatable {
                 GenerationDefaults.qwen38Thinking,
                 true, true, false, false, true
             ),
-            // 2-bit routed experts, the `lowmem` install profile. The MoE
-            // kernels take the width as a function constant and the fused and
-            // prefill pipelines already accept 2 bits, so a slot is half the
-            // bytes of its 4-bit counterpart.
-            //
-            // The budget is the 4-bit row's *halved*, which keeps the slot
-            // count — the quantity the routing working set is measured in —
-            // unchanged at half the RAM. That is arithmetic from the row
-            // above, **not** a measurement of this profile, and the decode
-            // knobs are inherited for the same reason (the ring is
-            // width-independent). The install's quality is unverified and a
-            // model-wide 2-bit cold tier was measured to diverge
-            // (docs/residency-and-bottleneck-verdict-2026-10-20.md); the
-            // catalog serves these rows only behind
-            // TINYTITAN_ALLOW_EXPERIMENTAL_LOWMEM=1.
-            Key("qwen3.6-35b-a3b", 2): (
-                5 << 30, 1, 4_096,
-                GenerationDefaults.Sampling(
-                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
-                true, true, false, false, true
-            ),
-            Key("ornith-1.5-35b-a3b", 2): (
-                5 << 30, 1, 4_096, GenerationDefaults.house, true, true, false, false, true
-            ),
-            Key("qwen-agentworld", 2): (
-                5 << 30, 1, 4_096,
-                GenerationDefaults.Sampling(
-                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
-                true, true, false, false, true
-            ),
-            Key("kat-coder-v2.5", 2): (
-                5 << 30, 1, 4_096,
-                GenerationDefaults.Sampling(
-                    temperature: 1.0, topK: GenerationDefaults.topK, topP: 0.95),
-                true, true, false, false, true
-            ),
-            Key("qwen3.8-flash-next", 2): (
-                6 << 30, 1, 2_048,
-                GenerationDefaults.qwen38Thinking,
-                true, true, false, false, true
-            ),
         ]
 
     /// Environment switches applied last. Read once per process.

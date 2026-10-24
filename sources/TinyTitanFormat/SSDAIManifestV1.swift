@@ -314,11 +314,6 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
     package let sourceSnapshotHash: String?
     package let arch: SSDAIManifestArchV1
     package let quant: SSDAIManifestQuantV1?
-    /// The routed-expert memory profile. Absent in every install written
-    /// before this field existed, and absent in a standard install now: only
-    /// `lowmem` is written, so a standard manifest stays byte-identical to the
-    /// one the same source produced before the field landed.
-    package let memoryProfile: SSDAIMemoryProfile?
     package let files: [String: SSDAIManifestFileV1]
     package let expertsPerLayer: Int
     package let numLayers: Int
@@ -331,7 +326,6 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
         flags: [String: Bool], modelID: String,
         sourceSnapshotHash: String?, arch: SSDAIManifestArchV1,
         quant: SSDAIManifestQuantV1?,
-        memoryProfile: SSDAIMemoryProfile? = nil,
         files: [String: SSDAIManifestFileV1],
         expertsPerLayer: Int, numLayers: Int, expertStride: UInt64
     ) {
@@ -343,7 +337,6 @@ package struct SSDAIManifestV1: Codable, Equatable, Sendable {
         self.sourceSnapshotHash = sourceSnapshotHash
         self.arch = arch
         self.quant = quant
-        self.memoryProfile = memoryProfile
         self.files = files
         self.expertsPerLayer = expertsPerLayer
         self.numLayers = numLayers
@@ -440,7 +433,6 @@ package enum SSDAIManifestCodec {
                 }
             }
         }
-        try manifest.validateMemoryProfile()
         let reservedFiles = SSDAIInstallFileNames.reserved
         let filePaths = manifest.files.keys.sorted()
         var canonicalPaths: [String: String] = [:]

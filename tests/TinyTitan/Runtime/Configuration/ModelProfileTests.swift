@@ -13,36 +13,14 @@ import Testing
 
     @Test func everyShippedInstallHasItsOwnRow() {
         for (id, family) in Self.shipped {
-            // 2 is the lowmem profile: a distinct row, not a fallback.
-            for bits in [2, 4, 8] {
+            for bits in [4, 8] {
                 let p = ModelProfile.resolve(
                     modelID: id, family: family, weightBits: bits, environment: [:])
                 #expect(p.isTabled, "\(id) \(bits)-bit falls back to its family")
                 #expect(p.key == ModelProfile.Key(id, bits))
             }
         }
-        #expect(ModelProfile.table.count == 15)
-    }
-
-    @Test func lowMemoryRowsHalveTheExpertSlotBudget() {
-        // A 2-bit slot is half the bytes of its 4-bit counterpart, so the same
-        // slot count -- the quantity the routing working set is measured in --
-        // costs half the cache. This is arithmetic from the 4-bit row, not a
-        // measurement of the 2-bit profile.
-        for (id, family, fourBitBytes) in [
-            ("qwen3.6-35b-a3b", ModelFamily.qwen36, 10 << 30),
-            ("ornith-1.5-35b-a3b", .qwen36, 10 << 30),
-            ("qwen-agentworld", .qwen36, 10 << 30),
-            ("kat-coder-v2.5", .qwen36, 10 << 30),
-            ("qwen3.8-flash-next", .qwen38flash, 12 << 30),
-        ] {
-            let low = ModelProfile.resolve(
-                modelID: id, family: family, weightBits: 2, environment: [:])
-            #expect(low.isTabled, "\(id) lowmem falls back")
-            #expect(low.expertCacheBudgetBytes == fourBitBytes / 2, "\(id)")
-            // The decode ring is width-independent and stays at depth 1.
-            #expect(low.prefetchDepth == 1)
-        }
+        #expect(ModelProfile.table.count == 10)
     }
 
     @Test func modelsSharingAFamilyResolveIndependently() {
@@ -108,7 +86,7 @@ import Testing
             ("ornith-1.5-35b-a3b", .qwen36, GenerationDefaults.house),
         ]
         for (id, family, sampling) in expected {
-            for bits in [2, 4, 8] {
+            for bits in [4, 8] {
                 let p = ModelProfile.resolve(
                     modelID: id, family: family, weightBits: bits, environment: [:])
                 #expect(p.sampling == sampling, "\(id) \(bits)-bit")

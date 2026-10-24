@@ -1,6 +1,5 @@
 import Foundation
 import TinyTitan
-import TinyTitanFormat
 import TinyTitanLib
 
 /// Every model a models directory holds that this server can actually serve,
@@ -94,9 +93,6 @@ public struct ModelCatalog: Sendable {
         /// whatever the server was configured for.
         public let contextLimit: Int?
         public let sizeBytes: Int64
-        /// The routed-expert memory profile the manifest declares. `standard`
-        /// for every install that predates the field.
-        public let memoryProfile: SSDAIMemoryProfile
         /// Every engine that can serve this install, most-preferred first.
         ///
         /// One for almost everything -- a MoE family is GPU-only and a snapshot
@@ -109,8 +105,7 @@ public struct ModelCatalog: Sendable {
         package init(
             id: String, name: String, kind: Kind, quant: Int, path: URL,
             sampling: GenerationDefaults.Sampling, contextLimit: Int? = nil,
-            sizeBytes: Int64 = 0, engines: [Backend]? = nil,
-            memoryProfile: SSDAIMemoryProfile = .standard
+            sizeBytes: Int64 = 0, engines: [Backend]? = nil
         ) {
             self.id = id
             self.name = name
@@ -120,7 +115,6 @@ public struct ModelCatalog: Sendable {
             self.sampling = sampling
             self.contextLimit = contextLimit
             self.sizeBytes = sizeBytes
-            self.memoryProfile = memoryProfile
             // Defaulting to the entry's own engine keeps every existing caller
             // (and every earlier catalog) meaning what it meant.
             self.engines = engines ?? [kind.backend]
@@ -141,7 +135,7 @@ public struct ModelCatalog: Sendable {
                 name: "\(name) (\(backend.rawValue.uppercased()))",
                 kind: kind, quant: quant, path: path, sampling: sampling,
                 contextLimit: contextLimit, sizeBytes: sizeBytes,
-                engines: engines, memoryProfile: memoryProfile)
+                engines: engines)
         }
     }
 
@@ -164,8 +158,7 @@ public struct ModelCatalog: Sendable {
 
     public static func scan(
         directory: URL,
-        fileManager: FileManager = .default,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        fileManager: FileManager = .default
     ) -> ModelCatalog {
         let root = directory.standardizedFileURL
         var catalog = ModelCatalog(directory: root, entries: [])
@@ -188,7 +181,7 @@ public struct ModelCatalog: Sendable {
             else {
                 continue
             }
-            catalog.add(probing: target, environment: environment)
+            catalog.add(probing: target)
         }
         catalog.entries.sort { lhs, rhs in
             lhs.backend == rhs.backend ? lhs.id < rhs.id : lhs.backend == .gpu
@@ -199,12 +192,9 @@ public struct ModelCatalog: Sendable {
     /// Probes one directory and adds it, or records why it was skipped.
     /// Returns the entry when one was added.
     @discardableResult
-    public mutating func add(
-        probing directory: URL,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> Entry? {
+    public mutating func add(probing directory: URL) -> Entry? {
         let path = directory.standardizedFileURL
-        switch Self.probe(path, environment: environment) {
+        switch Self.probe(path) {
         case .success(let entry):
             if let existing = entries.first(where: { $0.id == entry.id }) {
                 skipped.append(
@@ -226,13 +216,10 @@ public struct ModelCatalog: Sendable {
         let reason: String
     }
 
-    static func probe(
-        _ directory: URL,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> Result<Entry, ProbeFailure> {
+    static func probe(_ directory: URL) -> Result<Entry, ProbeFailure> {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: directory.appendingPathComponent("manifest.json").path) {
-            return probeInstall(directory, environment: environment)
+            return probeInstall(directory)
         }
         if fileManager.fileExists(atPath: directory.appendingPathComponent("config.json").path) {
             return probeSnapshot(directory)
@@ -242,30 +229,12 @@ public struct ModelCatalog: Sendable {
                 reason: "neither manifest.json (a GPU install) nor config.json (a CPU snapshot)"))
     }
 
-    private static func probeInstall(
-        _ directory: URL,
-        environment: [String: String]
-    ) -> Result<Entry, ProbeFailure> {
+    private static func probeInstall(_ directory: URL) -> Result<Entry, ProbeFailure> {
         let identity: ManifestIdentity
         do {
             identity = try ManifestReader.peekIdentity(directoryURL: directory)
         } catch {
             return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
-        }
-        // The lowmem profile is mechanically supported but its quality is not
-        // established -- a model-wide 2-bit cold tier was measured to diverge
-        // (docs/residency-and-bottleneck-verdict-2026-10-20.md). Serving it
-        // takes an explicit switch so a model that loads is not silently a
-        // different, degenerate model than the operator asked for.
-        guard identity.memoryProfile.isServable(environment: environment) else {
-            return .failure(
-                ProbeFailure(
-                    reason:
-                        "\(identity.memoryProfile.rawValue) install (2-bit routed "
-                        + "experts) is experimental and not served; set "
-                        + "\(SSDAIMemoryProfile.experimentalOptInVariable)=1 to "
-                        + "enable it. Quality is unverified; see "
-                        + "docs/lowmem-2bit-experts.md"))
         }
         switch identity.family {
         case .qwen36MTP, .qwen38flashMTP:
@@ -290,13 +259,10 @@ public struct ModelCatalog: Sendable {
         let base = ServerModelIdentity.base(
             manifestModelID: identity.modelID,
             family: identity.family)
-        let name = displayNames[base] ?? base
         return .success(
             Entry(
                 id: id,
-                name:
-                    identity.memoryProfile == .lowmem
-                    ? "\(name) (2-bit experts, experimental)" : name,
+                name: displayNames[base] ?? base,
                 // A dense install is served by the GPU engine by default now that
                 // the family is implemented there, and by the CPU engine when the
                 // request (or the launch) names it -- `engines` is what says both
@@ -306,8 +272,79 @@ public struct ModelCatalog: Sendable {
                 path: directory,
                 sampling: ModelProfile.resolve(identity: identity).sampling,
                 sizeBytes: sizeOnDisk(directory),
-                engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : nil,
-                memoryProfile: identity.memoryProfile))
+                engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : nil))
+    }
+
+    /// A scanned directory's `config.json`, read under the manifest's bound.
+    /// A probe walks every directory the scan finds, so the file in front of it
+    /// is not a document this server was told to load, and it can be far larger
+    /// than the bound before the bound is applied: a bound that checks the bytes
+    /// *after* the read has already paid for them. K17: the size is `fstat`'d on
+    /// the descriptor being read, so the cap fires before the allocation and
+    /// still belongs to the file actually read.
+    static func readSnapshotConfig(
+        _ directory: URL,
+        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
+    ) throws -> Data {
+        do {
+            return try BoundedMetadataRead.read(
+                fileAt: directory.appendingPathComponent("config.json"),
+                maxBytes: maxBytes)
+        } catch ModelError.metadataOverBound(let document, let bytes, let cap) {
+            // The catalog's own error type, because the probe below catches it
+            // and turns it into the skip reason a scan reports.
+            throw CPUModelBackend.CPUBackendError.unsupported(
+                "\(document) is \(bytes) bytes, over the \(cap)-byte metadata bound")
+        }
+    }
+
+    private static func probeSnapshot(_ directory: URL) -> Result<Entry, ProbeFailure> {
+        let config: [String: Any]
+        do {
+            let data = try readSnapshotConfig(directory)
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .failure(ProbeFailure(reason: "config.json is not a JSON object"))
+            }
+            config = object
+        } catch let error as CPUModelBackend.CPUBackendError {
+            return .failure(ProbeFailure(reason: "\(error)"))
+        } catch {
+            return .failure(ProbeFailure(reason: "unreadable config.json: \(error)"))
+        }
+        let modelType = config["model_type"] as? String
+        guard let family = CPUModelFamily.resolve(modelType: modelType) else {
+            return .failure(ProbeFailure(reason: CPUModelFamily.refusal(modelType: modelType)))
+        }
+        guard let quantization = config["quantization"] as? [String: Any],
+            let bits = quantization["bits"] as? Int
+        else {
+            return .failure(
+                ProbeFailure(
+                    reason:
+                        "config.json has no quantization block; the CPU engine serves affine snapshots"
+                ))
+        }
+        // Snapshots are written in place by a converter, so a config can
+        // exist before the rest of the directory does.
+        for required in ["model.safetensors.index.json", "tokenizer.json"]
+        where !FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(required).path)
+        {
+            return .failure(ProbeFailure(reason: "incomplete snapshot: no \(required)"))
+        }
+        let declared = (config["model_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let id = declared ?? directory.lastPathComponent
+        let name = (config["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
+        return .success(
+            Entry(
+                id: id,
+                name: name,
+                kind: .cpu(family),
+                quant: bits,
+                path: directory,
+                sampling: family.samplingDefaults,
+                contextLimit: config["max_position_embeddings"] as? Int,
+                sizeBytes: sizeOnDisk(directory)))
     }
 
     /// A single-model CPU server's family, for fitting `--reasoning` to it

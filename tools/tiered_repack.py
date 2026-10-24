@@ -1,43 +1,24 @@
 #!/usr/bin/env python3
-"""Build a lower-footprint install from a 4-bit one.
+"""Build a tiered install from a 4-bit one: hot experts wide, cold experts 2-bit.
 
-Two profiles:
-
-- `tiered` (default): hot experts stay at 4 bits, cold experts are remapped to
-  2 bits and the runtime expands each cold blob into a 4-bit slot with
-  `q4' = 5 * q2` and `scale / 5`. Experts are not uniform and expert 0 stays
-  wide because the expansion targets its offsets.
-
-- `lowmem`: every routed expert is requantized to a **uniform native 2-bit**
-  blob (`q2 = round(q4 / 5)`, `scale / 5`, bias unchanged) packed in the MoE
-  kernels' little-endian order. No expansion runs: the kernels take the width
-  as a function constant. The manifest declares
-  `"memoryProfile": "lowmem"` and `routedExpert.weightBits = 2`, so the
-  install advertises itself as `_2-Bit`.
-
-The 2-bit quality result is negative: a model-wide cold tier was measured to
-diverge (docs/residency-and-bottleneck-verdict-2026-10-20.md). The `lowmem`
-profile is therefore experimental and the catalog refuses to serve it without
-`TINYTITAN_ALLOW_EXPERIMENTAL_LOWMEM=1`.
+The runtime expands a cold expert with `q4' = 5 * q2` and `scale / 5`, so this
+tool keeps each cold expert's existing scales and biases and only remaps values
+with `q2 = round(q4 / 5)` (see benchmark/two_bit_pack.py). A hot expert's blob
+is copied verbatim.
 
     python tools/tiered_repack.py \
         --model models/ornith-1.5_35B_A3B_4Bit \
         --hot-profile /tmp/hot50.json \
         --out models/ornith-1.5_35B_A3B_4Bit-tiered
 
-    python tools/tiered_repack.py --profile lowmem \
-        --model models/ornith-1.5_35B_A3B_4Bit \
-        --out models/ornith-1.5_35B_A3B_2Bit-lowmem
-
 Only the layer files and `packed_experts/layout.json` are rewritten; the
-resident weights are hard-linked, the tokenizer and any root passthrough files
-are copied, and the manifest's file sizes and sha256 are updated. No
-`verified-install.json` is written; issue one with
-`TinyTitanRepack --verify-install --input-ssdai <out>`.
+resident weights are hard-linked, the tokenizer is copied, and the manifest's
+file sizes and sha256 are updated so the engine's own verification passes.
+No `verified-install.json` is written (it is only required under the strict
+integrity policy).
 
-`--layers 0` is a smoke test for the tiered profile: layer 0 is tiered and the
-rest are copied verbatim, which produces a loadable install in a fraction of
-the time. The lowmem profile is all-or-nothing (`--layers all`).
+`--layers 0` is a smoke test: layer 0 is tiered and the rest are copied
+verbatim, which produces a loadable install in a fraction of the time.
 """
 
 from __future__ import annotations
@@ -51,12 +32,7 @@ import shutil
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "benchmark"))
-from two_bit_pack import (  # noqa: E402
-    rescale_bf16,
-    remap_4bit_to_2bit,
-    remap_4bit_to_2bit_native,
-    remap_4bit_to_3bit,
-)
+from two_bit_pack import remap_4bit_to_2bit, remap_4bit_to_3bit  # noqa: E402
 
 ALIGN = 16_384
 
@@ -131,157 +107,28 @@ def tier_layer(
     return bytes(out), entries
 
 
-def lowmem_layer(source: bytes, experts: list[dict]) -> tuple[bytes, list[dict], int]:
-    """Rewrite one layer as *uniform native 2-bit* experts.
-
-    Unlike `tier_layer`, nothing is expanded later: the MoE kernels take the
-    width as a function constant and read 2-bit values directly, so every
-    weight is packed in the kernel's little-endian order and its group scale is
-    multiplied by five (`q2*(5s) == (5*q2)*s`). Each expert occupies one
-    uniform, page-aligned slot; there is no hot sentinel because expert 0 is
-    also 2-bit and the offsets struct it provides is the layout every expert
-    uses.
-
-    Returns the new file bytes, the new expert entries, and the slot stride.
-    """
-    if not experts:
-        return b"", [], 0
-    ordered = sorted(experts, key=lambda entry: entry["expert"])
-    template = ordered[0]
-    template_tensors = sorted(template["tensors"].items(), key=lambda kv: kv[1]["offset"])
-    # A uniform layer has the same tensor geometry in every expert; check that
-    # before writing anything, because a per-expert size difference would make
-    # the single stride below wrong for the rest of the file.
-    for entry in ordered:
-        if set(entry["tensors"]) != set(template["tensors"]):
-            raise ValueError(
-                f"expert {entry['expert']} has a different tensor set than expert "
-                f"{template['expert']}; lowmem needs a uniform layer"
-            )
-        for name, tensor in template["tensors"].items():
-            if entry["tensors"][name]["size"] != tensor["size"]:
-                raise ValueError(
-                    f"expert {entry['expert']} tensor {name} is "
-                    f"{entry['tensors'][name]['size']} bytes, not {tensor['size']}"
-                )
-
-    def rewrite(entry: dict) -> tuple[bytearray, dict[str, dict]]:
-        """One expert's blob and the tensor map every expert shares."""
-        tensors: dict[str, dict] = {}
-        blob = bytearray()
-        base = entry["offset"]
-        for name, tensor in template_tensors:
-            component = name.rsplit("_", 1)[-1]
-            data = source[base + tensor["offset"] : base + tensor["offset"] + tensor["size"]]
-            bits: int | None
-            if tensor["dtype"] == "U32":
-                if tensor.get("bits") != 4:
-                    raise ValueError(
-                        f"{name} is {tensor.get('bits')}-bit; the lowmem converter "
-                        f"only requantizes a 4-bit source install"
-                    )
-                data = remap_4bit_to_2bit_native(data)
-                bits = 2
-            elif component == "scales":
-                # q2 = round(q4/5) spans 0...3, so the group needs 5x the
-                # source scale to cover the same range:
-                # q2*(5s) + b == (5*q2)*s + b.
-                data = rescale_bf16(data, 5.0)
-                bits = None
-            else:
-                bits = None
-            tensors[name] = {
-                "offset": len(blob),
-                "size": len(data),
-                "dtype": tensor["dtype"],
-                "shape": tensor["shape"],
-            }
-            if bits is not None:
-                tensors[name]["bits"] = bits
-            blob.extend(data)
-        return blob, tensors
-
-    blobs: list[bytearray] = []
-    shared_tensors: dict[str, dict] = {}
-    for position, entry in enumerate(ordered):
-        blob, tensors = rewrite(entry)
-        if position == 0:
-            shared_tensors = tensors
-            blobs.append(blob)
-        else:
-            if tensors != shared_tensors:
-                raise ValueError(
-                    f"expert {entry['expert']} rewrote to a different tensor map; "
-                    f"the layer is not uniform"
-                )
-            blobs.append(blob)
-
-    lengths = {len(blob) for blob in blobs}
-    if len(lengths) != 1:
-        raise ValueError(f"lowmem experts disagree on blob length: {sorted(lengths)}")
-    length = lengths.pop()
-    stride = (length + ALIGN - 1) // ALIGN * ALIGN
-    if stride == 0:
-        raise ValueError("an expert blob is empty")
-    padding = b"\x00" * (stride - length)
-    out = bytearray()
-    entries: list[dict] = []
-    for position, (entry, blob) in enumerate(zip(ordered, blobs, strict=False)):
-        out += blob
-        out += padding
-        entries.append(
-            {
-                "expert": entry["expert"],
-                "offset": position * stride,
-                "size": stride,
-                "tensors": shared_tensors,
-            }
-        )
-    return bytes(out), entries, stride
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
+    ap.add_argument("--hot-profile", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument(
-        "--profile",
-        choices=("tiered", "lowmem"),
-        default="tiered",
-        help="tiered: hot wide/cold expanded; lowmem: uniform native 2-bit",
-    )
-    ap.add_argument(
-        "--hot-profile",
-        help="tiered only: JSON with one hot set per layer",
-    )
     ap.add_argument(
         "--cold-bits",
         type=int,
         default=2,
         choices=(2, 3),
-        help="tiered only: width of the cold tier (2 or 3 bits)",
+        help="width of the cold tier: 2 or 3 bits",
     )
-    ap.add_argument("--layers", default="all", help="tiered only: 'all' or layer indices to tier")
+    ap.add_argument(
+        "--layers", default="all", help="'all' or a comma-separated list of layer indices to tier"
+    )
     args = ap.parse_args()
-
-    if args.profile == "tiered" and not args.hot_profile:
-        ap.error("--profile tiered needs --hot-profile")
-    if args.profile == "lowmem" and args.hot_profile:
-        ap.error("--profile lowmem tiers every expert; drop --hot-profile")
-    if args.profile == "lowmem" and args.layers != "all":
-        ap.error("--profile lowmem is all-or-nothing; only --layers all is valid")
-    if args.profile == "lowmem" and args.cold_bits != 2:
-        ap.error("--profile lowmem is the 2-bit profile; --cold-bits 3 is tiered-only")
 
     model = pathlib.Path(args.model)
     out = pathlib.Path(args.out)
     manifest = json.loads((model / "manifest.json").read_text())
     layout = json.loads((model / "packed_experts" / "layout.json").read_text())
-    hot_profile = (
-        json.loads(pathlib.Path(args.hot_profile).read_text(encoding="utf-8"))
-        if args.hot_profile
-        else None
-    )
+    profile = json.loads(pathlib.Path(args.hot_profile).read_text(encoding="utf-8"))
 
     tiered = set(range(len(layout["layers"])))
     if args.layers != "all":
@@ -299,22 +146,8 @@ def main() -> int:
             shutil.copy2(model / "model_weights.bin", out / "model_weights.bin")
     for name in ("tokenizer",):
         shutil.copytree(model / name, out / name)
-    # Root passthrough files (the PLE constants and n-gram table) are payload
-    # the manifest already hashes; a lowmem install of Qwen3.8-Flash-Next is
-    # unloadable without them. Hard-link so a 20 GB table is not copied.
-    for relative in manifest["files"]:
-        if "/" in relative or relative in ("model_weights.bin", "manifest.json"):
-            continue
-        source_file = model / relative
-        if not source_file.is_file():
-            continue
-        try:
-            os.link(source_file, out / relative)
-        except OSError:
-            shutil.copy2(source_file, out / relative)
 
     new_layers = []
-    strides: set[int] = set()
     for layer in layout["layers"]:
         index = layer["layer"]
         source_path = model / "packed_experts" / layer["file"]
@@ -330,13 +163,8 @@ def main() -> int:
                 entry["size"] = destination.stat().st_size
                 entry["sha256"] = sha256_of(destination)
             new_layers.append(layer)
-        elif args.profile == "lowmem":
-            data, entries, stride = lowmem_layer(source_path.read_bytes(), layer["experts"])
-            strides.add(stride)
-            destination.write_bytes(data)
-            new_layers.append({"layer": index, "file": layer["file"], "experts": entries})
         else:
-            hot = set(hot_profile["layers"][str(index)]["hot"])
+            hot = set(profile["layers"][str(index)]["hot"])
             data, entries = tier_layer(
                 source_path.read_bytes(), layer["experts"], hot, index, cold_bits=args.cold_bits
             )
@@ -347,25 +175,6 @@ def main() -> int:
             entry["size"] = destination.stat().st_size
             entry["sha256"] = sha256_of(destination)
             print(f"layer {index:02d}: {entry['size'] / 1e6:.1f} MB")
-
-    if args.profile == "lowmem":
-        if len(strides) != 1:
-            raise ValueError(f"lowmem layers disagree on stride: {sorted(strides)}")
-        stride = strides.pop()
-        # One uniform slot per expert, and the manifest/layout must both name
-        # that stride: the runtime reads the slot capacity from the manifest
-        # and each expert's own size from the layout.
-        layout["expertStride"] = stride
-        manifest["expertStride"] = stride
-        manifest["memoryProfile"] = "lowmem"
-        quant = manifest.get("quant")
-        if not isinstance(quant, dict) or "routedExpert" not in quant:
-            raise ValueError("source manifest has no quant.routedExpert slot")
-        quant["routedExpert"]["weightBits"] = 2
-        quant["routedExpert"]["scheme"] = "affine"
-        quant["routedExpert"]["scaleType"] = "BF16"
-        quant["routedExpert"]["biasType"] = "BF16"
-        # The per-expert U32 tensors carry their own bits: 2.
 
     layout["layers"] = new_layers
     layout_bytes = json.dumps(layout, separators=(",", ":")).encode()
