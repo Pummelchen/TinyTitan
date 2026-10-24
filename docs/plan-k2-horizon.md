@@ -31,6 +31,27 @@ index, `generation_config.json`, `tokenizer_config.json` and
 The quantized installs this would produce are roughly 18-19 GB at 4-bit and
 36-37 GB at 8-bit; the source is 74.9 GB and this host has 178 GB free.
 
+## The conversion plan, measured
+
+`tools/prepare_k2_horizon.py --plan` fetches the config, the index and the
+safetensors headers (no weights) and classifies all 16,998 tensors. It reports:
+
+| | 4-bit | 8-bit |
+| --- | ---: | ---: |
+| MoE experts (13,500 tensors) | 14.93 GB | 28.20 GB |
+| MoVA value experts (2,880) | 4.25 GB | 8.02 GB |
+| attention (285) | 0.94 GB | 1.76 GB |
+| embedding + untied head | 1.36 GB | 1.36 GB |
+| MLP + shared experts (141) | 0.20 GB | 0.38 GB |
+| routers, norms, biases kept bf16 | 38 MB | 38 MB |
+| **snapshot** | **~21.7 GB** | **~39.8 GB** |
+
+Every quantized last dimension is a multiple of the 64-element group; the
+only tensors that would have failed are the 100-wide router biases, which the
+plan keeps at bf16. The install TinyTitanRepack writes afterwards is a second
+copy, so the peak disk for the 8-bit path is the source download plus ~40 GB
+of snapshot plus ~40 GB of install.
+
 ## What a layer does
 
 Layers 0-2 are dense; layers 3-47 are sparse.
