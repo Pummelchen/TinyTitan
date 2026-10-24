@@ -102,15 +102,6 @@ Per-version measurements and the method live on the wiki
 | KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.91 tok/s** | NA | 32.60 | NA |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | NA | 25% |
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | NA | 25% |
-Terminal-Bench is an agentic benchmark and is scaffold-dependent; these are
-model-level scores, not per-quantization measurements. TB 2.x values use the
-Terminus-2 harness: Qwen 3.6 is TB 2.0 (41.6), Ornith and KAT-Coder are TB 2.1
-(67.8 and 32.60; KAT-Coder's card averages Terminus-2 and Claude Code to 41.02).
-Qwen3.8-Flash-Next's 25% is TB 4.0 from Artificial Analysis. `NA` means no
-reputable published score for that model. Sources: the Qwen, Ornith and
-KAT-Coder model cards and <https://artificialanalysis.ai>.
-
-
 ## Documentation
 
 - [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)
