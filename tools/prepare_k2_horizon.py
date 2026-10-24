@@ -266,6 +266,143 @@ def convert(source: Path, output: Path, width: int) -> None:
     )
 
 
+# --- streaming HF conversion ------------------------------------------------
+
+SHARD_LIMIT_BYTES = 1_000_000_000
+TOKENIZER_FILES = (
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "chat_template.jinja",
+    "generation_config.json",
+)
+
+
+class ShardWriter:
+    """Accumulates converted tensors into <= 1 GB safetensors shards."""
+
+    def __init__(self, output: Path):
+        self.output = output
+        self.pending: dict = {}
+        self.pending_bytes = 0
+        self.count = 0
+        self.index: dict[str, str] = {}
+        self.total_bytes = 0
+
+    def add(self, name: str, value) -> None:
+        self.pending[name] = value
+        self.pending_bytes += int(value.nbytes)
+        if self.pending_bytes >= SHARD_LIMIT_BYTES:
+            self.flush()
+
+    def flush(self) -> None:
+        if not self.pending:
+            return
+        from safetensors.numpy import save_file
+
+        self.count += 1
+        filename = f"model-{self.count:05d}.safetensors"
+        save_file(self.pending, str(self.output / filename))
+        for name in self.pending:
+            self.index[name] = filename
+        self.total_bytes += self.pending_bytes
+        self.pending = {}
+        self.pending_bytes = 0
+
+    def finish(self) -> None:
+        self.flush()
+        (self.output / "model.safetensors.index.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {"total_size": self.total_bytes},
+                    "weight_map": self.index,
+                }
+            )
+        )
+
+
+def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
+    """Download each shard, convert it at every width, then delete it."""
+    import ml_dtypes
+    from safetensors import safe_open
+
+    config = fetch_json("config.json")
+    index = fetch_json("model.safetensors.index.json")
+    shards = sorted(set(index["weight_map"].values()))
+    work.mkdir(parents=True, exist_ok=True)
+    outputs = {}
+    for width in widths:
+        directory = output.with_name(f"{output.name}-{width}bit")
+        if directory.exists() and any(directory.iterdir()):
+            raise SystemExit(f"{directory} is not empty; remove it before converting")
+        directory.mkdir(parents=True, exist_ok=True)
+        outputs[width] = (directory, ShardWriter(directory))
+
+    for position, shard in enumerate(shards, 1):
+        local = work / shard
+        if not local.exists() or local.stat().st_size == 0:
+            print(f"[{position}/{len(shards)}] downloading {shard}", flush=True)
+            result = subprocess.run(
+                [
+                    "curl",
+                    "-sfL",
+                    "--http1.1",
+                    "-C",
+                    "-",
+                    "--retry",
+                    "5",
+                    "--retry-delay",
+                    "5",
+                    "--retry-all-errors",
+                    "-o",
+                    str(local),
+                    f"{BASE}/{shard}",
+                ],
+                check=False,
+            )
+            if result.returncode != 0:
+                raise SystemExit(f"download failed for {shard} (curl {result.returncode})")
+        print(f"[{position}/{len(shards)}] converting {shard}", flush=True)
+        with safe_open(str(local), framework="numpy") as handle:
+            for name in handle.keys():
+                value = handle.get_tensor(name)
+                for width, (_directory, writer) in outputs.items():
+                    bits = bits_for(name, width)
+                    if bits is None:
+                        writer.add(name, value.astype(ml_dtypes.bfloat16))
+                        continue
+                    packed, scale, bias = quantize_affine(value, bits)
+                    stem = name[: -len(".weight")]
+                    writer.add(name, packed)
+                    writer.add(stem + ".scales", scale)
+                    writer.add(stem + ".biases", bias)
+        local.unlink()
+
+    for width, (directory, writer) in outputs.items():
+        writer.finish()
+        overrides = {}
+        for name in writer.index:
+            if not name.endswith(".weight"):
+                continue
+            bits = bits_for(name, width)
+            if bits is not None and bits != width:
+                overrides[name[: -len(".weight")]] = {"bits": bits, "group_size": GROUP_SIZE}
+        text = dict(config)
+        text["quantization"] = {
+            "bits": width,
+            "group_size": GROUP_SIZE,
+            "mode": "affine",
+            **overrides,
+        }
+        (directory / "config.json").write_text(json.dumps(text, indent=1))
+        tokenizer = directory / "tokenizer"
+        tokenizer.mkdir(exist_ok=True)
+        for remote in TOKENIZER_FILES:
+            raw = fetch(remote)
+            (tokenizer / remote).write_bytes(raw)
+        print(f"wrote {directory} ({len(writer.index)} tensors)", flush=True)
+
+
 # --- self test --------------------------------------------------------------
 
 
@@ -299,6 +436,14 @@ def build_fixture(root: Path) -> None:
         "decoder_sparse_step": 1,
         "tie_word_embeddings": False,
         "rope_parameters": {"rope_theta": 10000000.0},
+        "eos_token_id": [1],
+        "max_position_embeddings": 512,
+        "attention_gate_func": "softplus",
+        "rms_norm_eps": 1e-6,
+        "layernorm_num_groups": 2,
+        "router_scaling_factor": 2.5,
+        "moe_gate_bias": True,
+        "norm_topk_prob": True,
     }
     root.mkdir(parents=True, exist_ok=True)
     (root / "config.json").write_text(json.dumps(config, indent=1))
@@ -422,12 +567,32 @@ def main() -> int:
     parser.add_argument(
         "--self-test", action="store_true", help="convert a tiny fixture checkpoint"
     )
+    parser.add_argument(
+        "--fixture", type=Path, help="write a tiny K2 checkpoint and its 4-bit snapshot"
+    )
     parser.add_argument("--source", type=Path, help="local HF-style checkpoint directory")
+    parser.add_argument(
+        "--from-hf",
+        action="store_true",
+        help="download the pinned checkpoint shard by shard and convert it",
+    )
+    parser.add_argument("--work", type=Path, help="shard download directory for --from-hf")
     parser.add_argument("--output", type=Path, help="affine snapshot directory to write")
     parser.add_argument("--bits", nargs="+", type=int, choices=(4, 8), default=[4, 8])
     args = parser.parse_args()
     if args.self_test:
         return self_test()
+    if args.fixture is not None:
+        build_fixture(args.fixture)
+        converted = args.fixture.with_name(args.fixture.name + "-4bit")
+        convert(args.fixture, converted, 4)
+        print(f"wrote {args.fixture} and {converted}")
+        return 0
+    if args.from_hf:
+        if args.output is None or args.work is None:
+            parser.error("--from-hf needs --output and --work")
+        convert_hf(args.output, args.work, sorted(set(args.bits)))
+        return 0
     if args.source is not None or args.output is not None:
         if args.source is None or args.output is None:
             parser.error("--source and --output go together")
