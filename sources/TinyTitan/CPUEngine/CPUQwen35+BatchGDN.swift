@@ -53,6 +53,7 @@ extension CPUQwen35 {
         var readout = [Float](repeating: 0, count: tokens * valueWidth)
         var state = recurrent[layer] ?? [Float](repeating: 0, count: hv * dv * dk)
         var tail = convolution[layer] ?? [Float](repeating: 0, count: (kernel - 1) * convDim)
+        var siluScratch = [Float](repeating: 0, count: convDim)
         let inverse = 1 / Float(dv).squareRoot()
 
         for row in 0..<tokens {
@@ -64,7 +65,12 @@ extension CPUQwen35 {
                     total += taps[channel * kernel + step] * tail[step * convDim + channel]
                 }
                 total += taps[channel * kernel + kernel - 1] * mixed[mixedBase + channel]
-                convolved[channel] = CPUOps.silu(total)
+                convolved[channel] = total
+            }
+            convolved.withUnsafeMutableBufferPointer { values in
+                siluScratch.withUnsafeMutableBufferPointer { scratch in
+                    CPUOps.siluInPlace(values, scratch: scratch)
+                }
             }
             tail.removeFirst(convDim)
             tail.append(contentsOf: mixed[mixedBase..<(mixedBase + convDim)])
@@ -157,11 +163,42 @@ extension CPUQwen35 {
                                                 let stateBase = stateBuffer.baseAddress,
                                                 let readoutBase = readoutBuffer.baseAddress
                                             else { return }
-                                            tinytitan_delta_rule(
-                                                queryBase, keyBase, valueBase, aBase, bBase,
-                                                logBase, biasBase,
-                                                heads, keyHeads, dk, dv, inverse,
-                                                stateBase, readoutBase + rowBase)
+                                            // Heads are independent: the state
+                                            // of one is not read by another, so
+                                            // a row-split is exact. One head per
+                                            // worker would make the dispatch
+                                            // cost larger than the work.
+                                            let usable = max(1, min(threads, heads / 8))
+                                            let output = readoutBase + rowBase
+                                            if usable <= 1 {
+                                                tinytitan_delta_rule(
+                                                    queryBase, keyBase, valueBase, aBase, bBase,
+                                                    logBase, biasBase,
+                                                    heads, keyHeads, dk, dv, inverse,
+                                                    stateBase, output)
+                                            } else {
+                                                let chunk = (heads + usable - 1) / usable
+                                                nonisolated(unsafe) let q = queryBase
+                                                nonisolated(unsafe) let k = keyBase
+                                                nonisolated(unsafe) let v = valueBase
+                                                nonisolated(unsafe) let a = aBase
+                                                nonisolated(unsafe) let b = bBase
+                                                nonisolated(unsafe) let log = logBase
+                                                nonisolated(unsafe) let bias = biasBase
+                                                nonisolated(unsafe) let statePointer = stateBase
+                                                nonisolated(unsafe) let outPointer = output
+                                                DispatchQueue.concurrentPerform(
+                                                    iterations: usable
+                                                ) { slice in
+                                                    let first = slice * chunk
+                                                    guard first < heads else { return }
+                                                    let count = min(chunk, heads - first)
+                                                    tinytitan_delta_rule_range(
+                                                        q, k, v, a, b, log, bias,
+                                                        heads, keyHeads, dk, dv, inverse,
+                                                        first, count, statePointer, outPointer)
+                                                }
+                                            }
                                         }
                                     }
                                 }

@@ -119,26 +119,38 @@ state across chunks; every dense projection goes through `CPUBatchedMatmul`
 value products; the gated-DeltaNet convolution and recurrence stay token-ordered,
 with the recurrence in a C/NEON kernel (`tinytitan_delta_rule`) because it was
 three quarters of the prefill once the projections were cheap.
-`TINYTITAN_CPU_PREFILL=token` restores the per-token path for a real-model A/B,
-and prompts shorter than 32 tokens stay on the per-token path: dequantizing the
-whole model for a handful of tokens costs more than reading each weight a
-handful of times.
+`TINYTITAN_CPU_PREFILL=token` restores the per-token path and `=batch` forces
+the batched one, which is how the two were compared below the automatic
+threshold. Prompts shorter than 12 tokens stay on the per-token path:
+dequantizing the whole model for a handful of tokens costs more than reading
+each weight a handful of times. Measured with twelve prompts per size on both
+the 2B and the 4B, ten tokens favour the per-token path by 0.06 s (2B) and
+0.41 s (4B) per prompt, while fifteen favour the batched path by 0.17 s and
+0.28 s, so the crossover sits between them.
 
 Measured on the installed 2B 4-bit with greedy decoding; the prompt is the
 repeated pangram, and the times include model load and the generated tokens:
 
 | Prompt tokens | Per-token path | Batched | Speedup | Output |
 | --- | ---: | ---: | ---: | --- |
-| 641 | 33.9 s | **4.5 s** | 7.5x | identical |
-| 2,201 | 139.7 s | **12.1 s** | 11.5x | identical |
-| ~4,000 | — | **22.7 s** | — | timing only |
-| ~7,000 | — | **53.0 s** | — | timing only |
+| 641 | 31.9 s | **4.1 s** | 7.8x | identical |
+| 2,201 | 139.7 s | **10.7 s** | 13.0x | identical |
+| ~4,000 | — | **18.9 s** | — | timing only |
+| ~7,000 | — | **35.1 s** | — | timing only |
 
 Once model load and the generated tokens are subtracted, that is roughly 4-5 ms
 per prompt token against 47-63 ms, and the 2.2K result lands inside the 6-16 s
 range this document predicted. The per-token figures at 4K and 7K grow because
-attention is quadratic and the score matrix is materialized per head; they are
-still several times below the per-token path.
+both the sequential recurrence and the quadratic attention scale with prompt
+length, and the recurrence is the larger of the two.
+
+That ordering came from profiling a 7K prompt rather than from the earlier
+guess: the gated-DeltaNet path was about two thirds of prefill and attention
+about a tenth. So the second pass was spent there, not on blocking the
+attention: the convolution's SiLU now runs through vForce over the whole
+prompt, and the delta rule's independent heads are split across the performance
+cores. The recurrence is still token-ordered; a chunked scan is the remaining
+lever and it is an algorithmic change, not a scheduling one.
 
 The quality gate is the output column: greedy text is byte-identical at 641 and
 2,201 tokens, and 2,201 crosses the 2,048-token chunk boundary, so a state

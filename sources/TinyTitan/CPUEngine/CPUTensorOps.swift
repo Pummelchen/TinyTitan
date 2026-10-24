@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import TinyTitanKernelsC
 
@@ -13,6 +14,29 @@ public enum CPUOps {
     @inline(__always)
     public static func silu(_ x: Float) -> Float {
         x / (1 + expf(-x))
+    }
+
+    /// `x / (1 + exp(-x))` for a whole buffer, through vForce.
+    ///
+    /// The scalar `silu` is fine for a gate vector in decode; a prefill calls
+    /// it once per channel per token, which is tens of millions of `expf`
+    /// calls for a long prompt. `scratch` is the caller's buffer of the same
+    /// length, reused across rows so this allocates nothing per token.
+    public static func siluInPlace(
+        _ values: UnsafeMutableBufferPointer<Float>,
+        scratch: UnsafeMutableBufferPointer<Float>
+    ) {
+        let count = values.count
+        guard count > 0, scratch.count >= count,
+            let input = values.baseAddress, let temp = scratch.baseAddress
+        else { return }
+        var n = Int32(count)
+        var one: Float = 1
+        vDSP_vneg(input, 1, temp, 1, vDSP_Length(count))
+        vvexpf(temp, temp, &n)
+        vDSP_vsadd(temp, 1, &one, temp, 1, vDSP_Length(count))
+        vvrecf(temp, temp, &n)
+        vDSP_vmul(input, 1, temp, 1, input, 1, vDSP_Length(count))
     }
 
     @inline(__always)

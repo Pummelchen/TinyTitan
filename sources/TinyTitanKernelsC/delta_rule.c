@@ -23,25 +23,31 @@ static inline float tinytitan_softplus(float x) {
     return log1pf(expf(-fabsf(x))) + fmaxf(x, 0.0f);
 }
 
-void tinytitan_delta_rule(const float *query,
-                          const float *key,
-                          const float *value,
-                          const float *a,
-                          const float *b,
-                          const float *decayLog,
-                          const float *decayBias,
-                          size_t heads,
-                          size_t keyHeads,
-                          size_t dk,
-                          size_t dv,
-                          float inverse,
-                          float *state,
-                          float *readout) {
+static void tinytitan_delta_rule_heads(const float *query,
+                                       const float *key,
+                                       const float *value,
+                                       const float *a,
+                                       const float *b,
+                                       const float *decayLog,
+                                       const float *decayBias,
+                                       size_t heads,
+                                       size_t keyHeads,
+                                       size_t dk,
+                                       size_t dv,
+                                       float inverse,
+                                       size_t firstHead,
+                                       size_t headCount,
+                                       float *state,
+                                       float *readout) {
     if (heads == 0 || keyHeads == 0 || dk == 0 || dv == 0 || heads % keyHeads != 0) {
         return;
     }
+    if (firstHead >= heads || headCount == 0 || firstHead + headCount > heads) {
+        return;
+    }
     const size_t repeats = heads / keyHeads;
-    for (size_t head = 0; head < heads; ++head) {
+    for (size_t local = 0; local < headCount; ++local) {
+        const size_t head = firstHead + local;
         const float beta = 1.0f / (1.0f + expf(-b[head]));
         const float x = a[head] + decayBias[head];
         const float decay = expf(-expf(decayLog[head]) * tinytitan_softplus(x));
@@ -82,4 +88,44 @@ void tinytitan_delta_rule(const float *query,
             readout[head * dv + index] = sum * inverse;
         }
     }
+}
+
+void tinytitan_delta_rule(const float *query,
+                          const float *key,
+                          const float *value,
+                          const float *a,
+                          const float *b,
+                          const float *decayLog,
+                          const float *decayBias,
+                          size_t heads,
+                          size_t keyHeads,
+                          size_t dk,
+                          size_t dv,
+                          float inverse,
+                          float *state,
+                          float *readout) {
+    tinytitan_delta_rule_heads(query, key, value, a, b, decayLog, decayBias,
+                               heads, keyHeads, dk, dv, inverse,
+                               0, heads, state, readout);
+}
+
+void tinytitan_delta_rule_range(const float *query,
+                                const float *key,
+                                const float *value,
+                                const float *a,
+                                const float *b,
+                                const float *decayLog,
+                                const float *decayBias,
+                                size_t heads,
+                                size_t keyHeads,
+                                size_t dk,
+                                size_t dv,
+                                float inverse,
+                                size_t firstHead,
+                                size_t headCount,
+                                float *state,
+                                float *readout) {
+    tinytitan_delta_rule_heads(query, key, value, a, b, decayLog, decayBias,
+                               heads, keyHeads, dk, dv, inverse,
+                               firstHead, headCount, state, readout);
 }

@@ -100,4 +100,24 @@ void tinytitan_delta_rule(const float *query,
                           float *state,
                           float *readout);
 
+/// The same rule over a contiguous head range, so a caller can split the
+/// independent heads across threads. Head indices are absolute; `state` and
+/// `readout` are the full arrays and each worker writes its own heads.
+void tinytitan_delta_rule_range(const float *query,
+                                const float *key,
+                                const float *value,
+                                const float *a,
+                                const float *b,
+                                const float *decayLog,
+                                const float *decayBias,
+                                size_t heads,
+                                size_t keyHeads,
+                                size_t dk,
+                                size_t dv,
+                                float inverse,
+                                size_t firstHead,
+                                size_t headCount,
+                                float *state,
+                                float *readout);
+
 #endif /* TINYTITAN_KERNELS_H */

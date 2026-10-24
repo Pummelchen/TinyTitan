@@ -12,8 +12,9 @@ import Foundation
 /// next, exactly as the per-token loop did. The gated-DeltaNet recurrence is
 /// still sequential inside a chunk; its projections are batched.
 ///
-/// `TINYTITAN_CPU_PREFILL=token` forces the per-token path, which is how the
-/// two are compared on a real model.
+/// `TINYTITAN_CPU_PREFILL=token` forces the per-token path and
+/// `TINYTITAN_CPU_PREFILL=batch` forces the batched one, which is how the two
+/// are compared on a real model at sizes below the automatic threshold.
 extension CPUQwen35 {
 
     /// Tokens one batched pass carries. Bounds the T-by-intermediate buffers
@@ -25,21 +26,24 @@ extension CPUQwen35 {
     /// Below this many tokens the per-token path wins. The batched path
     /// dequantizes every matrix in the model once; for a handful of prompt
     /// tokens that is more traffic than reading each weight a handful of
-    /// times, and a yes/no question to the side engine is that short.
-    static let prefillMinimumTokens = 32
+    /// times. Measured with twelve prompts per size on the 2B and 4B, ten
+    /// tokens favour the per-token path and fifteen favour the batched one,
+    /// so the crossover sits between them.
+    static let prefillMinimumTokens = 12
 
     /// Run prompt tokens through the batched path, returning the logits of
     /// the last one. A one-token prompt is just `step`.
     public func prefill(tokens: [Int]) throws -> [Float] {
         precondition(!tokens.isEmpty, "a prefill needs a prompt")
-        if tokens.count < Self.prefillMinimumTokens {
+        let mode = ProcessInfo.processInfo.environment["TINYTITAN_CPU_PREFILL"]
+        if tokens.count < Self.prefillMinimumTokens && mode != "batch" {
             var logits: [Float] = []
             for (index, token) in tokens.enumerated() {
                 logits = try step(token: token, needsLogits: index == tokens.count - 1)
             }
             return logits
         }
-        if ProcessInfo.processInfo.environment["TINYTITAN_CPU_PREFILL"] == "token" {
+        if mode == "token" {
             var logits: [Float] = []
             for (index, token) in tokens.enumerated() {
                 logits = try step(token: token, needsLogits: index == tokens.count - 1)
