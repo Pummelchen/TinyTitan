@@ -270,9 +270,15 @@ extension RealForwardRunner {
         bp.prefillQMM = try PrefillInt4QMM(
             context: context,
             weightBits: model.attentionWeightBits)
-        bp.prefillMPPAffineInt4 = MPPPrefillInt4QMM(
+        // K5: one capability-gated MPP candidate serves the QKV/input
+        // projections. The FFN block reuses it when the two roles share a
+        // width, and otherwise builds its own: the pipeline's function
+        // constant is the weight width, so the widths cannot share one.
+        let attentionTensorOps = MPPPrefillInt4QMM(
             context: context,
-            weightBits: model.attentionWeightBits)
+            weightBits: model.attentionWeightBits,
+            capabilities: capabilities)
+        bp.prefillMPPAffineInt4 = attentionTensorOps
         bp.prefillQKVEpilogue = try PrefillQKVEpilogue(
             context: context,
             yarn: yarnParameters)
@@ -284,7 +290,13 @@ extension RealForwardRunner {
         bp.prefillSharedExpert = try PrefillSharedExpert(
             context: context,
             weightBits: model.ffnWeightBits,
-            siluActivation: silu)
+            siluActivation: silu,
+            tensorOps: model.ffnWeightBits == model.attentionWeightBits
+                ? attentionTensorOps
+                : MPPPrefillInt4QMM(
+                    context: context,
+                    weightBits: model.ffnWeightBits,
+                    capabilities: capabilities))
         bp.prefillGroupedMoE = try PrefillGroupedRoutedMoE(
             context: context,
             siluActivation: silu,

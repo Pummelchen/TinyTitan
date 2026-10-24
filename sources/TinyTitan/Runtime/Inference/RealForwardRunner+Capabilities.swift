@@ -26,7 +26,22 @@ extension RealForwardRunner {
     /// K0: the one startup line the capability seam produces. The decision is
     /// recorded when the prefill kernel is built, so a forced `on` that fell
     /// back on a pipeline failure reports the fallback, not the attempt.
+    ///
+    /// K5: the projections and the FFN build their own tensor-ops pipelines
+    /// under the same policy, so each records a line too. They are emitted as
+    /// one diagnostic (the caller logs the string once) and the subject keeps
+    /// them distinguishable.
     package var prefillTensorOpsLogLine: String {
-        prefillAttention.tensorOpsDecision.logLine
+        var lines = [
+            prefillAttention.tensorOpsDecision.logLine(subject: "prefill attention")
+        ]
+        if let projections = prefillMPPAffineInt4 {
+            lines.append(
+                projections.tensorOpsDecision.logLine(subject: "prefill projections"))
+        }
+        if let ffn = prefillSharedExpert.tensorOpsDecision {
+            lines.append(ffn.logLine(subject: "prefill ffn"))
+        }
+        return lines.joined(separator: "\n")
     }
 }

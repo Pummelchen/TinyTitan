@@ -85,25 +85,39 @@ extension RealForwardRunner {
             }
             return
         }
-        if tokenCount >= 32, weightBits == 4,
-            family == .q || family == .kv || family == .o,
+        if family == .q || family == .kv || family == .o,
             let candidate = prefillMPPAffineInt4
         {
-            let path = try candidate.encode(
-                commandBuffer: commandBuffer,
-                weights: weights.buffer,
-                weightsOffset: Int(weights.offset),
-                scales: weights.buffer,
-                scalesOffset: Int(weights.scaleOffset),
-                biases: weights.buffer,
-                biasesOffset: Int(weights.biasOffset),
-                x: x,
-                y: y,
-                m: tokenCount,
-                n: rows,
-                k: columns)
-            if path == .affineThreadgroupF16 {
-                return
+            // K5: the same TensorOpsPolicy seam that gates attention gates
+            // these projections. `select` also enforces the MPP kernel's
+            // contiguity rules, so a promoted or padded layout keeps the
+            // scalar path instead of reading the wrong row.
+            let shape = MPPPrefillInt4QMM.Shape(
+                tokenCount: tokenCount,
+                rows: rows,
+                columns: columns,
+                weightBits: weightBits,
+                xStrideElements: xStrideElements,
+                yStrideElements: yStrideElements)
+            if candidate.select(shape).selected {
+                let path = try candidate.encode(
+                    commandBuffer: commandBuffer,
+                    weights: weights.buffer,
+                    weightsOffset: Int(weights.offset),
+                    scales: weights.buffer,
+                    scalesOffset: Int(weights.scaleOffset),
+                    biases: weights.buffer,
+                    biasesOffset: Int(weights.biasOffset),
+                    x: x,
+                    y: y,
+                    m: tokenCount,
+                    n: rows,
+                    k: columns,
+                    xStrideElements: xStrideElements,
+                    yStrideElements: yStrideElements)
+                if path == .affineThreadgroupF16 {
+                    return
+                }
             }
         }
         if useTwoRowProjection && tokenCount == 2

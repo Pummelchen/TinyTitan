@@ -14,12 +14,23 @@ final class PrefillSharedExpert {
     private let shared: SharedExpertRuntime
     private let qmm: MTLComputePipelineState?
     private let act: MTLComputePipelineState?
+    /// K5: the capability-gated MPP tensor-ops variant of the same matmul.
+    /// Nil when the block is built for a test that wants the scalar path only;
+    /// a non-nil candidate can still be unavailable (policy fallback), which
+    /// `ffnTensorOpsSelection` reports.
+    let tensorOps: MPPPrefillInt4QMM?
 
-    init(context: MetalContext, weightBits: Int = 8, siluActivation: Bool = false) throws {
+    init(
+        context: MetalContext,
+        weightBits: Int = 8,
+        siluActivation: Bool = false,
+        tensorOps: MPPPrefillInt4QMM? = nil
+    ) throws {
         self.shared = try SharedExpertRuntime(
             context: context,
             weightBits: weightBits,
             siluActivation: siluActivation)
+        self.tensorOps = tensorOps
         // Function constant 78 is FC_PREFILL_AFFINE_BITS; the kernel defaults
         // to 4 when it is unset, and the shared expert is int8.
         self.qmm = try? context.pipeline(
@@ -81,13 +92,27 @@ final class PrefillSharedExpert {
             && yStrideElements == Int(down.rows)
             && qmm != nil && act != nil
         if batched {
-            try encodeBatched(
-                cb: cb, x: x, xOffset: xOffset, y: y, yOffset: yOffset,
-                gate: gate, up: up, down: down,
-                scratchGate: scratchGate, scratchGateOffset: scratchGateOffset,
-                scratchUp: scratchUp, scratchUpOffset: scratchUpOffset,
-                scratchAct: scratchAct, scratchActOffset: scratchActOffset,
-                queryCount: queryCount)
+            let tensorOpsSelection = ffnTensorOpsSelection(
+                queryCount: queryCount,
+                d: Int(gate.cols),
+                intermediate: Int(gate.rows))
+            if tensorOpsSelection?.selected == true, let tensorOps {
+                try encodeBatchedTensorOps(
+                    cb: cb, x: x, xOffset: xOffset, y: y, yOffset: yOffset,
+                    gate: gate, up: up, down: down,
+                    scratchGate: scratchGate, scratchGateOffset: scratchGateOffset,
+                    scratchUp: scratchUp, scratchUpOffset: scratchUpOffset,
+                    scratchAct: scratchAct, scratchActOffset: scratchActOffset,
+                    queryCount: queryCount, tensorOps: tensorOps)
+            } else {
+                try encodeBatched(
+                    cb: cb, x: x, xOffset: xOffset, y: y, yOffset: yOffset,
+                    gate: gate, up: up, down: down,
+                    scratchGate: scratchGate, scratchGateOffset: scratchGateOffset,
+                    scratchUp: scratchUp, scratchUpOffset: scratchUpOffset,
+                    scratchAct: scratchAct, scratchActOffset: scratchActOffset,
+                    queryCount: queryCount)
+            }
             return
         }
 
@@ -109,6 +134,45 @@ final class PrefillSharedExpert {
                 scratchAct: scratchAct,
                 scratchActOffset: scratchActOffset)
         }
+    }
+
+    /// The policy's answer for the FFN's three matmuls, for the startup log.
+    /// Nil only when the block was built without a candidate at all; a
+    /// candidate that fell back still reports its fallback reason.
+    var tensorOpsDecision: TensorOpsDecision? { tensorOps?.tensorOpsDecision }
+
+    /// Whether the tensor-ops variant serves this block's gate, up and down
+    /// matmuls. All three must qualify: the activation between them reads the
+    /// same fp16 scratch, so a mixed path would only make the fallback harder
+    /// to reason about. Nil when the block has no candidate.
+    func ffnTensorOpsSelection(
+        queryCount: Int, d: Int, intermediate: Int
+    ) -> MPPPrefillInt4QMM.Selection? {
+        guard let tensorOps else { return nil }
+        // The batched path already proved X and Y are contiguous, and gate/up
+        // write [rows, intermediate] and down writes [rows, d] scratch.
+        let shapes = [
+            MPPPrefillInt4QMM.Shape(
+                tokenCount: queryCount, rows: intermediate, columns: d,
+                weightBits: tensorOps.weightBits,
+                xStrideElements: d, yStrideElements: intermediate),
+            MPPPrefillInt4QMM.Shape(
+                tokenCount: queryCount, rows: intermediate, columns: d,
+                weightBits: tensorOps.weightBits,
+                xStrideElements: d, yStrideElements: intermediate),
+            MPPPrefillInt4QMM.Shape(
+                tokenCount: queryCount, rows: d, columns: intermediate,
+                weightBits: tensorOps.weightBits,
+                xStrideElements: intermediate, yStrideElements: d),
+        ]
+        for shape in shapes {
+            let selection = tensorOps.select(shape)
+            if !selection.selected { return selection }
+        }
+        return MPPPrefillInt4QMM.Selection(
+            selected: true,
+            reason: "MPP gate/up/down, \(queryCount) rows, "
+                + "\(tensorOps.weightBits)-bit")
     }
 
     private func encodeBatched(
@@ -158,6 +222,89 @@ final class PrefillSharedExpert {
             input: scratchAct, inputOffset: scratchActOffset,
             output: y, outputOffset: yOffset,
             tokenCount: queryCount, rows: Int(down.rows), columns: Int(down.cols))
+    }
+
+    /// K5: the same three matmuls on the MPP tensor-ops kernel. `select`
+    /// already accepted all three shapes, so a refusal here is an internal
+    /// inconsistency, not a shape to fall back from: the command encoder for
+    /// gate/up may already have been recorded.
+    private func encodeBatchedTensorOps(
+        cb: MTLCommandBuffer,
+        x: MTLBuffer,
+        xOffset: Int,
+        y: MTLBuffer,
+        yOffset: Int,
+        gate: SharedExpertInt8Proj,
+        up: SharedExpertInt8Proj,
+        down: SharedExpertInt8Proj,
+        scratchGate: MTLBuffer,
+        scratchGateOffset: Int,
+        scratchUp: MTLBuffer,
+        scratchUpOffset: Int,
+        scratchAct: MTLBuffer,
+        scratchActOffset: Int,
+        queryCount: Int,
+        tensorOps: MPPPrefillInt4QMM
+    ) throws {
+        try encodeTensorOpsMatmul(
+            cb: cb, tensorOps: tensorOps,
+            projection: gate,
+            input: x, inputOffset: xOffset,
+            output: scratchGate, outputOffset: scratchGateOffset,
+            tokenCount: queryCount)
+        try encodeTensorOpsMatmul(
+            cb: cb, tensorOps: tensorOps,
+            projection: up,
+            input: x, inputOffset: xOffset,
+            output: scratchUp, outputOffset: scratchUpOffset,
+            tokenCount: queryCount)
+        try encodeActivation(
+            cb: cb,
+            gate: scratchGate, gateOffset: scratchGateOffset,
+            up: scratchUp, upOffset: scratchUpOffset,
+            out: scratchAct, outOffset: scratchActOffset,
+            count: queryCount * Int(gate.rows))
+        try encodeTensorOpsMatmul(
+            cb: cb, tensorOps: tensorOps,
+            projection: down,
+            input: scratchAct, inputOffset: scratchActOffset,
+            output: y, outputOffset: yOffset,
+            tokenCount: queryCount)
+    }
+
+    private func encodeTensorOpsMatmul(
+        cb: MTLCommandBuffer,
+        tensorOps: MPPPrefillInt4QMM,
+        projection: SharedExpertInt8Proj,
+        input: MTLBuffer,
+        inputOffset: Int,
+        output: MTLBuffer,
+        outputOffset: Int,
+        tokenCount: Int
+    ) throws {
+        let rows = Int(projection.rows)
+        let columns = Int(projection.cols)
+        let path = try tensorOps.encode(
+            commandBuffer: cb,
+            weights: projection.weights,
+            weightsOffset: projection.weightsOffset,
+            scales: projection.scales,
+            scalesOffset: projection.scalesOffset,
+            biases: projection.biases,
+            biasesOffset: projection.biasesOffset,
+            x: input,
+            xOffset: inputOffset,
+            y: output,
+            yOffset: outputOffset,
+            m: tokenCount,
+            n: rows,
+            k: columns,
+            xStrideElements: columns,
+            yStrideElements: rows)
+        guard path == .affineThreadgroupF16 else {
+            throw SharedExpertInt8Error.dimensionMismatch(
+                "MPP tensor-ops matmul declined a shape the block selected")
+        }
     }
 
     private func encodeQMM(

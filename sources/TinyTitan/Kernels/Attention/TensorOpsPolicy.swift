@@ -114,7 +114,13 @@ package struct TensorOpsDecision: Equatable, Sendable {
 
     /// One line for the startup log. The path is first so a reader can grep
     /// for `tensor-ops` or `fallback` without knowing the reason wording.
-    package var logLine: String {
-        "TinyTitan tensor-ops prefill: \(path.rawValue) mode=\(mode.rawValue) (\(reason))"
+    package var logLine: String { logLine(subject: "prefill") }
+
+    /// The same line naming a kernel family. K5 builds more than one
+    /// tensor-ops pipeline (attention, projections, FFN) and each records its
+    /// own decision, so the log has to say which one a fallback belongs to.
+    package func logLine(subject: String) -> String {
+        "TinyTitan tensor-ops \(subject): \(path.rawValue) "
+            + "mode=\(mode.rawValue) (\(reason))"
     }
 }
