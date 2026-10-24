@@ -149,6 +149,7 @@ public enum ManifestReader {
             throw ModelError.indexCorrupt(detail: "manifest modelID is empty")
         }
         let bits = wire.quant?.routedExpert.weightBits ?? 4
+        let profile = wire.resolvedMemoryProfile
         switch wire.arch.hiddenActivation {
         case "silu":
             break
@@ -167,7 +168,7 @@ public enum ManifestReader {
         {
             return ManifestIdentity(
                 modelID: wire.modelID, family: family,
-                weightBits: bits)
+                weightBits: bits, memoryProfile: profile)
         }
         let mtp = ArchConfig.qwen36MTP
         if wire.arch.numLayers == mtp.numLayers,
@@ -176,11 +177,11 @@ public enum ManifestReader {
         {
             return ManifestIdentity(
                 modelID: wire.modelID, family: .qwen36MTP,
-                weightBits: bits)
+                weightBits: bits, memoryProfile: profile)
         }
         return ManifestIdentity(
             modelID: wire.modelID, family: .qwen36,
-            weightBits: bits)
+            weightBits: bits, memoryProfile: profile)
     }
 
     static func validate(
@@ -193,7 +194,9 @@ public enum ManifestReader {
         }
         try validateArch(m.arch, minor: m.versionMinor, expected: expected)
         if let quant = m.quant {
-            try validateQuant(quant, family: expected.family)
+            try validateQuant(
+                quant, family: expected.family,
+                memoryProfile: m.resolvedMemoryProfile)
         } else if expected.numLayers == ArchConfig.qwen36_35B_A3B.numLayers,
             expected.hiddenSize == ArchConfig.qwen36_35B_A3B.hiddenSize
         {
@@ -224,7 +227,8 @@ public enum ManifestReader {
 
     private static func validateQuant(
         _ quant: ManifestQuant,
-        family: ModelFamily
+        family: ModelFamily,
+        memoryProfile: SSDAIMemoryProfile
     ) throws {
         let allowedRouterBits: Set<Int>
         switch family {
@@ -243,12 +247,18 @@ public enum ManifestReader {
             // table, so allow both rather than inventing a rule.
             allowedRouterBits = [4, 8]
         }
+        // A lowmem install stores its routed experts at 2 bits and reads them
+        // at 2 bits; every other install keeps the 4/8-bit kernels. Allowing 2
+        // for a standard install would send 2-bit blobs to a kernel compiled
+        // for another width, so the profile and the slot have to agree.
+        let routedExpertBits: Set<Int> =
+            memoryProfile == .lowmem ? [2] : Self.supportedWeightBits
         let slots: [(String, ManifestQuantSlot, Set<Int>)] = [
             ("embedding", quant.embedding, Self.supportedWeightBits),
             ("attention", quant.attention, Self.supportedWeightBits),
             ("router", quant.router, allowedRouterBits),
             ("sharedExpert", quant.sharedExpert, Self.supportedWeightBits),
-            ("routedExpert", quant.routedExpert, Self.supportedWeightBits),
+            ("routedExpert", quant.routedExpert, routedExpertBits),
         ]
         for (name, slot, allowedBits) in slots {
             // 6-bit was withdrawn rather than deprecated, so say so instead of
@@ -473,6 +483,7 @@ extension Manifest {
             sourceSnapshotHash: wire.sourceSnapshotHash,
             arch: ManifestArch(wire: wire.arch),
             quant: wire.quant.map(ManifestQuant.init(wire:)),
+            memoryProfile: wire.memoryProfile,
             quantOverrides: wire.quant?.overrides?.mapValues(\.weightBits) ?? [:],
             files: wire.files.mapValues(ManifestFileEntry.init(wire:)),
             expertsPerLayer: wire.expertsPerLayer,

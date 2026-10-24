@@ -137,6 +137,31 @@ would drop the open set of per-tensor keys, because the fixed slots are a
 `CodingKeys` enum and the overrides are not — which is exactly the bug that was
 shipped and then found by comparing `.ssdai` logits against the snapshot's.
 
+### `memoryProfile`: how the routed experts are stored
+
+Optional. Absent means `standard`, which is every install written before the
+field existed and every ordinary build now. The only value written today is
+`"lowmem"`, and it is written only for that profile, so a standard manifest is
+byte-identical to what the same source produced before the field landed.
+
+| Profile | Routed-expert storage | Resident slots |
+| --- | --- | --- |
+| `standard` (absent) | 4/8-bit, read by the kernels at that width; a tiered layer records cold experts in `layout.json` and the streamer expands them into the wide slot | 4 or 8 |
+| `lowmem` | **2-bit**, read by the MoE kernels at 2 bits; no expansion, one uniform stride, no compression | 4 or 8 (6-bit remains withdrawn) |
+
+A `lowmem` manifest must set `quant.routedExpert.weightBits` to `2`; a
+`standard` manifest must not. The pairing is enforced in three places with the
+same rule: `SSDAIManifestCodec.validate`, the runtime's
+`ManifestReader.validateQuant`, and `PackedExpertsLayout.validateMemoryProfile`
+(which also refuses a hot 4-bit expert, a compact offset or a compression
+marker inside a `lowmem` layer). The width is what names the install, so a
+2-bit build is `..._2-Bit` and does not collide with the 4-bit one.
+
+`lowmem` is experimental: the catalog refuses to serve it without
+`TINYTITAN_ALLOW_EXPERIMENTAL_LOWMEM=1`, because the project's model-wide
+2-bit quality result is negative. `docs/lowmem-2bit-experts.md` has the
+arithmetic, the conversion command and the exact unverified list.
+
 ### `arch` extension geometry
 
 Sixteen keys describe the parts of these families that are not in the core

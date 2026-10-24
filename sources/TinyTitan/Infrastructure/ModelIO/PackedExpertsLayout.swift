@@ -137,12 +137,16 @@ enum PackedExpertsLayoutReader {
             }.sorted { $0.expert < $1.expert }
             return LayerLayout(layer: layer.layer, file: layer.file, experts: experts)
         }
-        return PackedExpertsLayout(
+        let layout = PackedExpertsLayout(
             expertStride: wire.expertStride,
             numLayers: wire.numLayers,
             expertsPerLayer: wire.expertsPerLayer,
             compression: wire.compression,
             layers: layers)
+        if let manifest {
+            try layout.validateMemoryProfile(manifest)
+        }
+        return layout
     }
 
 }

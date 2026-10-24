@@ -35,7 +35,8 @@ enum SSDAIJSON {
         expertsPerLayer: Int,
         numLayers: Int,
         expertStride: UInt64,
-        bitWidths: QuantBitWidths
+        bitWidths: QuantBitWidths,
+        memoryProfile: SSDAIMemoryProfile = .standard
     ) throws -> Data {
         let arch = plan.arch
         var archDict: [String: Any] = [
@@ -113,7 +114,7 @@ enum SSDAIJSON {
             filesDict[path] = ["size": info.size, "sha256": info.sha256]
         }
 
-        let manifest: [String: Any] = [
+        var manifest: [String: Any] = [
             "magic": SSDAIJSON.magic,
             "versionMajor": SSDAIJSON.versionMajor,
             "versionMinor": SSDAIJSON.versionMinor,
@@ -131,6 +132,11 @@ enum SSDAIJSON {
             "numLayers": numLayers,
             "expertStride": expertStride,
         ]
+        // Only the non-default profile is written, so a standard repack emits
+        // the same bytes it did before this field existed.
+        if memoryProfile != .standard {
+            manifest["memoryProfile"] = memoryProfile.rawValue
+        }
         return try JSONSerialization.data(
             withJSONObject: manifest,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])

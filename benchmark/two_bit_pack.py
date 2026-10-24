@@ -64,6 +64,82 @@ def expanded_q4(data: bytes) -> np.ndarray:
     return np.array(out, dtype=np.int64)
 
 
+# --- Native 2-bit tier -----------------------------------------------------
+#
+# `tools/tiered_repack.py --profile lowmem` stores experts at 2 bits that the
+# MoE kernels read *at 2 bits*: `moe_affine_value` takes element `e` from bits
+# `[2e, 2e+2)` of the byte stream, so element 0 is the low pair. That is the
+# opposite packing from the expansion tier above (which puts element 0 in the
+# top pair so `TwoBitExpand` can rebuild a 4-bit byte low-nibble first). The
+# two streams are not interchangeable, hence a second LUT rather than a
+# rewrite of the first: the expansion tier is a measured, shipped capability
+# and must keep its bytes.
+
+_NATIVE_PAIR_LUT = np.zeros(65536, dtype=np.uint8)
+for _b0 in range(256):
+    for _b1 in range(256):
+        _v = (
+            _Q4_TO_Q2[_b0 & 0xF],
+            _Q4_TO_Q2[(_b0 >> 4) & 0xF],
+            _Q4_TO_Q2[_b1 & 0xF],
+            _Q4_TO_Q2[(_b1 >> 4) & 0xF],
+        )
+        # Element 0 occupies the low pair: the kernel's little-endian order.
+        _NATIVE_PAIR_LUT[(_b0 << 8) | _b1] = _v[0] | (_v[1] << 2) | (_v[2] << 4) | (_v[3] << 6)
+
+
+def remap_4bit_to_2bit_native(data: bytes) -> bytes:
+    """Remap a packed 4-bit stream to the kernel's 2-bit byte order.
+
+    `len(data)` must be even. One 2-bit byte holds four values; the 4-bit
+    stream holds two per byte. Element `k` lands in bits `[2k, 2k+2)`.
+    """
+    if len(data) % 2:
+        raise ValueError("4-bit stream must be an even number of bytes")
+    if not data:
+        return b""
+    source = np.frombuffer(data, dtype=np.uint8)
+    pairs = (source[0::2].astype(np.uint16) << 8) | source[1::2].astype(np.uint16)
+    return _NATIVE_PAIR_LUT[pairs].tobytes()
+
+
+def native_2bit_values(data: bytes) -> np.ndarray:
+    """The 2-bit values in the order `moe_affine_value` reads them."""
+    out = []
+    for byte in data:
+        out.extend(
+            (
+                byte & 0x3,
+                (byte >> 2) & 0x3,
+                (byte >> 4) & 0x3,
+                (byte >> 6) & 0x3,
+            )
+        )
+    return np.array(out, dtype=np.int64)
+
+
+def rescale_bf16(data: bytes, factor: float) -> bytes:
+    """Multiply BF16 values by `factor`, round-half-to-even.
+
+    A 4-bit group decodes as `q4 * scale + bias` with `q4` in 0...15. Its 2-bit
+    remap is `q2 = round(q4 / 5)`, so the 2-bit group must carry
+    `scale2 = 5 * scale`: then `q2 * scale2 + bias == (5*q2) * scale + bias`,
+    and `5*q2` is within two 4-bit steps of `q4`. Keeping the source scale
+    would shrink the group by five, which is not a quantisation error but a
+    different model.
+    """
+    if len(data) % 2:
+        raise ValueError("BF16 scales must be an even number of bytes")
+    if not data:
+        return b""
+    bits = np.frombuffer(data, dtype=np.uint16).astype(np.uint32)
+    values = (bits << 16).view(np.float32) * np.float32(factor)
+    raw = values.view(np.uint32).copy()
+    lsb = (raw >> 16) & 1
+    rounded = (raw + np.uint32(0x7FFF) + lsb) >> 16
+    return rounded.astype(np.uint16).tobytes()
+
+
 # --- 3-bit cold tier -------------------------------------------------------
 #
 # A 3-bit value expands to 4-bit with q4 = 2*q3 and scale/2, so
