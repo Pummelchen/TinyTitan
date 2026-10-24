@@ -93,15 +93,15 @@ measurement to take before sizing the work.
 
 ## Recommendation
 
-1. **Do it**, behind an opt-in flag, decode untouched. The quantized conversion
-   is cheap (10-12%), the numerics agree to 4e-6 relative, and the weight stream
-   is what prefill is made of.
+1. **Do it**, with the per-token path kept as an explicit fallback and decode
+   untouched. The quantized conversion is cheap (10-12%), the numerics agree to
+   4e-6 relative, and the weight stream is what prefill is made of.
 2. **Batch every dense projection**, including the gated-DeltaNet
    `in_proj_qkv`/`in_proj_z`/`out_proj`; batching only the softmax shapes leaves
    more than half the stream in the per-token loop.
-3. Keep the recurrence and attention per token in the first version, then batch
-   full-attention layers and use a chunked scan for the linear-attention layers
-   if the profile says they matter.
+3. Batch full-attention layers; keep the gated-DeltaNet recurrence token-ordered,
+   because it reads the previous token's state. A chunked scan of that recurrence
+   is the next lever if a profile says it matters again.
 4. Quality gate before shipping: greedy output identical or within the measured
    logit noise floor with zero top-1 divergence. The harness shows the batched
    arithmetic is a reassociation, but only the engine's own oracle can certify
@@ -109,3 +109,39 @@ measurement to take before sizing the work.
 5. No raw `.word` AMX encodings. Accelerate is the public route; on M4+ gate the
    standard SME path by capability and mark it unverified on this host, as 6.1
    did for tensor-op prefill.
+
+## Implemented, and what it measured
+
+The batched prefill is in the engine. `CPUQwen35.prefill(tokens:)` chunks a
+prompt at 2,048 tokens and carries the KV cache, convolution tail and recurrent
+state across chunks; every dense projection goes through `CPUBatchedMatmul`
+(dequantize once, one `cblas_sgemm`); full-attention layers batch their score and
+value products; the gated-DeltaNet convolution and recurrence stay token-ordered,
+with the recurrence in a C/NEON kernel (`tinytitan_delta_rule`) because it was
+three quarters of the prefill once the projections were cheap.
+`TINYTITAN_CPU_PREFILL=token` restores the per-token path for a real-model A/B,
+and prompts shorter than 32 tokens stay on the per-token path: dequantizing the
+whole model for a handful of tokens costs more than reading each weight a
+handful of times.
+
+Measured on the installed 2B 4-bit with greedy decoding; the prompt is the
+repeated pangram, and the times include model load and the generated tokens:
+
+| Prompt tokens | Per-token path | Batched | Speedup | Output |
+| --- | ---: | ---: | ---: | --- |
+| 641 | 33.9 s | **4.5 s** | 7.5x | identical |
+| 2,201 | 139.7 s | **12.1 s** | 11.5x | identical |
+| ~4,000 | — | **22.7 s** | — | timing only |
+| ~7,000 | — | **53.0 s** | — | timing only |
+
+Once model load and the generated tokens are subtracted, that is roughly 4-5 ms
+per prompt token against 47-63 ms, and the 2.2K result lands inside the 6-16 s
+range this document predicted. The per-token figures at 4K and 7K grow because
+attention is quadratic and the score matrix is materialized per head; they are
+still several times below the per-token path.
+
+The quality gate is the output column: greedy text is byte-identical at 641 and
+2,201 tokens, and 2,201 crosses the 2,048-token chunk boundary, so a state
+hand-off between chunks would show there. The C delta-rule kernel and the
+dequantized product are additionally checked against their scalar counterparts in
+`tests/TinyTitan/CPUEngine/CPUBatchedPrefillTests.swift`.

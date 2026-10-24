@@ -109,7 +109,11 @@ let package = Package(
                     "-Werror",
                 ])
             ],
-            swiftSettings: tinytitanLanguageStandard
+            swiftSettings: tinytitanLanguageStandard,
+            linkerSettings: [
+                // The batched CPU prefill's GEMM wrapper in dequant_affine.c.
+                .linkedFramework("Accelerate")
+            ]
         ),
         .target(
             name: "TinyTitan",

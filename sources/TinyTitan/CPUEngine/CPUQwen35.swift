@@ -10,10 +10,12 @@ import Foundation
 /// does not tie its output to the embedding, which `headWeightName` handles.
 ///
 /// The side-engine's model: small enough to stay resident beside a 35B, and
-/// run on cores the main engine leaves idle. It is a decode-only engine —
-/// there is no batched prefill, because everything it is for (distilling a
-/// session, checking a claim against the store) is a short prompt and a
-/// short answer, and a prompt is just decode with the output thrown away.
+/// run on cores the main engine leaves idle. Decode is one token at a time;
+/// a prompt goes through `prefill(tokens:)`, which unpacks each quantized
+/// matrix once and multiplies the whole chunk, then hands the KV cache and
+/// the delta-rule state to the decode loop unchanged. The per-token path
+/// remains reachable with `TINYTITAN_CPU_PREFILL=token`, which is how the two
+/// are compared on a real model.
 ///
 /// **Width is a scheduling decision.** Measured on this machine, a 35B
 /// generation slows by 3% when this reads at one thread and by 31% at four.
@@ -53,34 +55,34 @@ public final class CPUQwen35 {
     /// eight buys nothing and can lose.
     public var idleThreads: Int
 
-    private let prefix = "language_model.model."
-    private var position = 0
+    let prefix = "language_model.model."
+    var position = 0
 
     // Small tensors, read once and kept: 24 of each norm, the convolution
     // taps, and the delta rule's two per-head vectors.
-    private var inputNorm: [[Float]] = []
-    private var postNorm: [[Float]] = []
-    private var finalNorm: [Float] = []
-    private var gdnNorm: [Int: [Float]] = [:]
-    private var convTaps: [Int: [Float]] = [:]
-    private var aLog: [Int: [Float]] = [:]
-    private var dtBias: [Int: [Float]] = [:]
-    private var queryNorm: [Int: [Float]] = [:]
-    private var keyNorm: [Int: [Float]] = [:]
+    var inputNorm: [[Float]] = []
+    var postNorm: [[Float]] = []
+    var finalNorm: [Float] = []
+    var gdnNorm: [Int: [Float]] = [:]
+    var convTaps: [Int: [Float]] = [:]
+    var aLog: [Int: [Float]] = [:]
+    var dtBias: [Int: [Float]] = [:]
+    var queryNorm: [Int: [Float]] = [:]
+    var keyNorm: [Int: [Float]] = [:]
     /// The delta rule's two scalar-per-head projections, which the converter
     /// deliberately leaves at BF16: one row per value head (16 in the 2B, 32
     /// in the 4B), so quantizing them would save nothing and they feed an
     /// exponential, where a rounding error does not stay small.
-    private var deltaA: [Int: [Float]] = [:]
-    private var deltaB: [Int: [Float]] = [:]
+    var deltaA: [Int: [Float]] = [:]
+    var deltaB: [Int: [Float]] = [:]
 
     // Carried state. Every one of these is a place a wrong hand-off between
     // tokens can hide, which is why sequence parity is a separate gate from
     // position 0.
-    private var recurrent: [Int: [Float]] = [:]  // [Hv][Dv][Dk]
-    private var convolution: [Int: [Float]] = [:]  // [K-1][convDim]
-    private var keys: [Int: [Float]] = [:]  // [position][kvHeads * headDim]
-    private var values: [Int: [Float]] = [:]
+    var recurrent: [Int: [Float]] = [:]  // [Hv][Dv][Dk]
+    var convolution: [Int: [Float]] = [:]  // [K-1][convDim]
+    var keys: [Int: [Float]] = [:]  // [position][kvHeads * headDim]
+    var values: [Int: [Float]] = [:]
 
     public init(snapshot: AffineSnapshot, threads: Int? = nil) throws {
         self.snapshot = snapshot
@@ -185,11 +187,11 @@ public final class CPUQwen35 {
 
     // MARK: - blocks
 
-    private func matrix(_ name: String) throws -> AffineSnapshot.Matrix {
+    func matrix(_ name: String) throws -> AffineSnapshot.Matrix {
         try snapshot.matrix(name)
     }
 
-    private func project(_ matrix: AffineSnapshot.Matrix, _ x: [Float]) throws -> [Float] {
+    func project(_ matrix: AffineSnapshot.Matrix, _ x: [Float]) throws -> [Float] {
         var out = [Float](repeating: 0, count: matrix.rows)
         try x.withUnsafeBufferPointer { input in
             try out.withUnsafeMutableBufferPointer { output in
@@ -206,7 +208,7 @@ public final class CPUQwen35 {
 
     /// `out = W · x` for a small dense row-major matrix. Only the delta
     /// rule's two per-head projections come through here.
-    private func dense(_ weights: [Float], rows: Int, x: [Float]) -> [Float] {
+    func dense(_ weights: [Float], rows: Int, x: [Float]) -> [Float] {
         let columns = weights.count / rows
         var out = [Float](repeating: 0, count: rows)
         for row in 0..<rows {
@@ -218,7 +220,7 @@ public final class CPUQwen35 {
         return out
     }
 
-    private func embedding(of token: Int) throws -> [Float] {
+    func embedding(of token: Int) throws -> [Float] {
         let table = try matrix("\(prefix)embed_tokens.weight")
         precondition(token >= 0 && token < table.rows, "token \(token) out of range")
         return dequantize(row: token, of: table)
@@ -235,17 +237,17 @@ public final class CPUQwen35 {
     /// embedding prefix carries. Reading the table there would produce
     /// plausible-looking but wrong logits, so the flag is honoured rather
     /// than assumed.
-    private func headWeightName() -> String {
+    func headWeightName() -> String {
         snapshot.configuration.tiedEmbedding
             ? "\(prefix)embed_tokens.weight"
             : "language_model.lm_head.weight"
     }
 
-    private func head(_ h: [Float]) throws -> [Float] {
+    func head(_ h: [Float]) throws -> [Float] {
         try project(try matrix(headWeightName()), h)
     }
 
-    private func mlp(layer: Int, x: [Float]) throws -> [Float] {
+    func mlp(layer: Int, x: [Float]) throws -> [Float] {
         let stem = "\(prefix)layers.\(layer).mlp."
         var gate = try project(try matrix(stem + "gate_proj.weight"), x)
         let up = try project(try matrix(stem + "up_proj.weight"), x)
@@ -253,7 +255,7 @@ public final class CPUQwen35 {
         return try project(try matrix(stem + "down_proj.weight"), gate)
     }
 
-    private func attention(layer: Int, x: [Float]) throws -> [Float] {
+    func attention(layer: Int, x: [Float]) throws -> [Float] {
         let stem = "\(prefix)layers.\(layer).self_attn."
         let heads = configuration.heads
         let kvHeads = configuration.keyValueHeads
@@ -349,7 +351,7 @@ public final class CPUQwen35 {
         return try project(try matrix(stem + "o_proj.weight"), out)
     }
 
-    private func gatedDeltaNet(layer: Int, x: [Float]) throws -> [Float] {
+    func gatedDeltaNet(layer: Int, x: [Float]) throws -> [Float] {
         let stem = "\(prefix)layers.\(layer).linear_attn."
         let hk = configuration.linearKeyHeads
         let hv = configuration.linearValueHeads
@@ -472,10 +474,7 @@ public final class CPUQwen35 {
         onToken: ((Int) -> Bool)? = nil
     ) throws -> [Int] {
         precondition(!prompt.isEmpty, "a generation needs a prompt")
-        var logits: [Float] = []
-        for (index, token) in prompt.enumerated() {
-            logits = try step(token: token, needsLogits: index == prompt.count - 1)
-        }
+        var logits = try prefill(tokens: prompt)
         var produced: [Int] = []
         for _ in 0..<maximumTokens {
             var best = 0

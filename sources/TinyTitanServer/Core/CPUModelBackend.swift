@@ -217,10 +217,7 @@ public actor CPUModelBackend: ServerInferenceBackend, PromptCacheDescribing {
         let generator = sampler.makeGenerator()
 
         model.reset()
-        var logits: [Float] = []
-        for (index, token) in prompt.enumerated() {
-            logits = try model.step(token: token, needsLogits: index == prompt.count - 1)
-        }
+        var logits = try model.prefill(tokens: prompt)
         // What the penalties are measured against: the prompt is already in the
         // model's context, so a token the prompt used is a token the history
         // contains. The GPU sampler gets the same thing from its caller.

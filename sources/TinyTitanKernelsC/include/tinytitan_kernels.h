@@ -52,4 +52,52 @@ void tinytitan_int8_affine_gemv(const uint8_t *weights,
                             size_t n,
                             float *out);
 
+/// Materialize a quantized matrix as FP32, for a batched multiplication.
+///
+/// Same layout and same affine factoring as the GEMV kernels (`q*scale+bias`
+/// per group of 64), but every element is written instead of consumed in
+/// place. `out` is `rows*n` floats; the caller splits rows across threads.
+void tinytitan_dequant_affine4(const uint8_t *weights,
+                               const uint16_t *scales,
+                               const uint16_t *biases,
+                               size_t rows,
+                               size_t n,
+                               float *out);
+
+void tinytitan_dequant_affine8(const uint8_t *weights,
+                               const uint16_t *scales,
+                               const uint16_t *biases,
+                               size_t rows,
+                               size_t n,
+                               float *out);
+
+/// Row-major matrix multiplication: `out = a * b`, with `b` transposed when
+/// `transposed_b` is non-zero (stored `columns`-by-`inner`), otherwise stored
+/// `inner`-by-`columns`. A thin wrapper over the platform BLAS so the
+/// deprecated CBLAS declaration stays out of Swift.
+void tinytitan_sgemm_rowmajor(int transposed_b, int rows, int columns, int inner,
+                              const float *a, const float *b, float *out);
+
+/// The gated-DeltaNet recurrence for one token.
+///
+/// `state` is `heads * dv * dk` floats and is updated in place; `readout` is
+/// `heads * dv` floats and is written. `key` and `query` are `keyHeads * dk`
+/// wide, and head `h` reads key head `h / (heads / keyHeads)` -- the
+/// consecutive-value-heads mapping the Swift path uses. `a`/`b` are the two
+/// per-head projections, `decayLog`/`decayBias` the per-head decay inputs.
+void tinytitan_delta_rule(const float *query,
+                          const float *key,
+                          const float *value,
+                          const float *a,
+                          const float *b,
+                          const float *decayLog,
+                          const float *decayBias,
+                          size_t heads,
+                          size_t keyHeads,
+                          size_t dk,
+                          size_t dv,
+                          float inverse,
+                          float *state,
+                          float *readout);
+
 #endif /* TINYTITAN_KERNELS_H */
