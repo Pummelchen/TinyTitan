@@ -14,6 +14,17 @@ if rawArgv.first == "calibrate" {
         exit(2)
     }
 }
+if rawArgv.first == "doctor" {
+    do {
+        let options = try DoctorOptions.parse(Array(rawArgv.dropFirst()))
+        exit(try DoctorCommand.run(options))
+    } catch {
+        FileHandle.standardError.write(Data("error: \(error)\n\n".utf8))
+        FileHandle.standardError.write(Data(DoctorOptions.usage.utf8))
+        FileHandle.standardError.write(Data("\n".utf8))
+        exit(2)
+    }
+}
 let parsedArgs: Args
 do {
     parsedArgs = try Args.parse(rawArgv)

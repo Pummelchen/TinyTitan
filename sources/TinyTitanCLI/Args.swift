@@ -154,6 +154,7 @@ extension Args {
         usage: TinyTitanCLI --model <dir> (--prompt <string> | --messages-file <path>) [options]
                TinyTitanCLI calibrate (--model <dir> [--max-context <tokens>] [--out <path>]
                                        | --check <path>)
+               TinyTitanCLI doctor [--json] [--models-dir <dir>]
 
         command:
           calibrate                  Write or validate a per-machine tuning

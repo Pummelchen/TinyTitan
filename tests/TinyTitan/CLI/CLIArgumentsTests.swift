@@ -199,6 +199,7 @@ import TinyTitan
             "--rdadvise", "--expert-cache-slots", "--prefill-chunk", "--concise",
             "--kv-bits", "--rope-scaling", "--thinking", "--reasoning-effort",
             "--calibration-profile", "--check", "--out",
+            "--json", "--models-dir",
         ]
         // The usage text also spells the `calibrate` subcommand's flags, so
         // the bracket and pipe delimiters around them are part of the scan.

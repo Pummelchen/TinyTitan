@@ -26,7 +26,7 @@ extension KVCacheManager {
             valueBytes: valueBytes[layer], groupSize: Self.quantizationGroupSize)
     }
 
-    static func rowLayout(
+    package static func rowLayout(
         elements: Int,
         precision: KVCachePrecision
     ) -> (stride: Int, valueBytes: Int) {

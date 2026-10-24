@@ -22,7 +22,7 @@ enum ServerInferenceError: Error, CustomStringConvertible {
 /// Prefill chunk size when the caller has not asked for one. Both families
 /// with a long-chunk default want it for the same reason -- routed experts are
 /// what prefill spends itself on, and a longer chunk amortizes them.
-func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
+package func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
     switch family {
     case .qwen36: return RuntimeConfiguration.qwenLongPrefillChunkTokens
     // 4,096 for Qwen3.8 too. Prefill's expert cache is inert -- a chunk routes
