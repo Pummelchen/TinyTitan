@@ -24,7 +24,7 @@
  * @module dsh-tinytitan/support
  */
 import { createRequire } from "node:module";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, parse } from "node:path";
 
 /** The one DeepSeek Harness release this plugin is written and tested against. */
@@ -138,8 +138,12 @@ export function dshVersion({ require: load, argv = process.argv, env = process.e
   // Finally the running harness's own entry point, when it is a file we can walk.
   const entry = argv?.[1];
   if (entry) {
-    const found = packageFrom(entry, HARNESS);
-    if (found?.version) return found.version;
+    try {
+      const found = packageFrom(realpathSync(entry), HARNESS);
+      if (found?.version) return found.version;
+    } catch {
+      // argv[1] can be a launcher symlink that does not resolve; fall through.
+    }
   }
   return null;
 }
