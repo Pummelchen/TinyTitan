@@ -175,4 +175,211 @@ import Testing
         #expect(abs(bf16(at: 12) - 1.0) < 1e-3)
         #expect(abs(bf16(at: 14) + 2.0) < 1e-3)
     }
+
+    /// The layout the in-place expansion trusts: a map whose write region
+    /// reaches into a lower tensor's unread source is refused at load, not
+    /// executed as a silent clobber.
+    @Suite struct ExpansionLayoutValidationTests {
+        private func tensor(
+            sourceOffset: Int, sourceSize: Int, targetOffset: Int,
+            targetSize: Int, bits: Int = 2, expands: Bool = true,
+            rescales: Bool = false
+        ) -> ExpertBlobTensor {
+            ExpertBlobTensor(
+                sourceOffset: sourceOffset, sourceSize: sourceSize,
+                targetOffset: targetOffset, targetSize: targetSize,
+                bits: bits, expands: expands, rescales: rescales)
+        }
+
+        /// The detail of the refusal a layout produces, or `nil` when the map is
+        /// accepted. Asserting `throws: ModelError.self` cannot tell one guard
+        /// from another, which is how a test can pass for the wrong reason: the
+        /// fixture this replaced was refused by the slot bounds long before the
+        /// overlap check it named.
+        private func refusalDetail(
+            _ tensors: [ExpertBlobTensor], expertStride: Int
+        ) -> String? {
+            do {
+                try TwoBitExpand.validateExpansionLayout(
+                    tensors, expertStride: expertStride)
+                return nil
+            } catch let error as ModelError {
+                guard case .indexCorrupt(let detail) = error else {
+                    return "unexpected ModelError: \(error)"
+                }
+                return detail
+            } catch {
+                return "unexpected error: \(error)"
+            }
+        }
+
+        @Test func theConverterLayoutIsValid() throws {
+            // The shape `compactBlobRewritesIntoTheFourBitLayout` runs with:
+            // a 2-bit weight that doubles, a rescaled scale block, a bias.
+            let tensors = [
+                tensor(sourceOffset: 0, sourceSize: 4, targetOffset: 0, targetSize: 8),
+                tensor(
+                    sourceOffset: 4, sourceSize: 4, targetOffset: 8,
+                    targetSize: 4, bits: 0, expands: false, rescales: true),
+                tensor(
+                    sourceOffset: 8, sourceSize: 4, targetOffset: 12,
+                    targetSize: 4, bits: 0, expands: false),
+            ]
+            #expect(throws: Never.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    tensors, expertStride: 16)
+            }
+        }
+
+        @Test func aTargetBeforeItsSourceIsRefused() {
+            let tensors = [
+                tensor(sourceOffset: 4, sourceSize: 4, targetOffset: 0, targetSize: 8)
+            ]
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    tensors, expertStride: 16)
+            }
+        }
+
+        @Test func aWriteIntoAnUnreadSourceIsRefused() {
+            // The weight at source 4 is processed first (highest source), and
+            // its write 4..<12 lands inside the scale's unread source 0..<10.
+            let tensors = [
+                tensor(sourceOffset: 4, sourceSize: 4, targetOffset: 4, targetSize: 8),
+                tensor(
+                    sourceOffset: 0, sourceSize: 10, targetOffset: 16,
+                    targetSize: 10, bits: 0, expands: false, rescales: true),
+            ]
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    tensors, expertStride: 32)
+            }
+        }
+
+        @Test func tensorsThatShareATargetRegionAreRefused() throws {
+            // Both targets sit at or beyond their own source, so the bounds
+            // guard accepts this map and only the overlap of the two write
+            // regions (8..<16 and 12..<16) refuses it. Processing from the
+            // highest source down writes 12..<16 first, then 8..<16 clobbers
+            // those bytes.
+            let tensors = [
+                tensor(sourceOffset: 0, sourceSize: 4, targetOffset: 8, targetSize: 8),
+                tensor(sourceOffset: 4, sourceSize: 2, targetOffset: 12, targetSize: 4),
+            ]
+            let detail = try #require(refusalDetail(tensors, expertStride: 32))
+            #expect(detail.contains("share a target region"))
+        }
+
+        /// `expand3BitReversed` decodes `sourceSize / 3` whole groups, so a
+        /// leftover byte is simply not expanded: seven source bytes are two
+        /// groups of four target bytes, which the size guard alone accepts. The
+        /// whole-group guard is the only thing that refuses it.
+        @Test func aThreeBitTensorWithALeftoverGroupIsRefused() throws {
+            let tensors = [
+                tensor(
+                    sourceOffset: 0, sourceSize: 7, targetOffset: 0,
+                    targetSize: 8, bits: 3)
+            ]
+            let detail = try #require(refusalDetail(tensors, expertStride: 16))
+            #expect(detail.contains("not a whole number of groups"))
+        }
+
+        @Test func sizesThatDoNotMatchTheTransformAreRefused() {
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [tensor(sourceOffset: 0, sourceSize: 4, targetOffset: 0, targetSize: 4)],
+                    expertStride: 16)
+            }
+            // Four source bytes are not a whole number of 3-bit groups.
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: 0, sourceSize: 4, targetOffset: 0, targetSize: 6, bits: 3)
+                    ],
+                    expertStride: 16)
+            }
+            // 3 source bytes are one group of four target bytes, not five.
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: 0, sourceSize: 3, targetOffset: 0, targetSize: 5, bits: 3)
+                    ],
+                    expertStride: 16)
+            }
+            // Six source bytes are exactly two groups of four.
+            #expect(throws: Never.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: 0, sourceSize: 6, targetOffset: 0, targetSize: 8, bits: 3)
+                    ],
+                    expertStride: 16)
+            }
+            // Three bytes are exactly one group of four.
+            #expect(throws: Never.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: 0, sourceSize: 3, targetOffset: 0, targetSize: 4, bits: 3)
+                    ],
+                    expertStride: 16)
+            }
+        }
+
+        /// A rescaled tensor is bf16 data: `rescaleBF16InPlace` divides
+        /// `bytes / 2` halves, so an odd size would silently leave the last
+        /// byte unscaled in the slot. The guard refuses it, and nothing pinned
+        /// that refusal before this test.
+        @Test func anOddRescaledTensorIsRefused() {
+            let tensors = [
+                tensor(
+                    sourceOffset: 0, sourceSize: 3, targetOffset: 4,
+                    targetSize: 3, bits: 0, expands: false, rescales: true)
+            ]
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    tensors, expertStride: 8)
+            }
+        }
+
+        /// The bounds guard also rejects a map that is not merely outside the
+        /// slot but negative: a `-1` source offset would index the slot before
+        /// its start and the `targetOffset >= sourceOffset` test alone would
+        /// accept it.
+        @Test func aNegativeSourceOffsetOrSizeIsRefused() {
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: -1, sourceSize: 4, targetOffset: 0,
+                            targetSize: 8)
+                    ],
+                    expertStride: 16)
+            }
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [
+                        tensor(
+                            sourceOffset: 0, sourceSize: -1, targetOffset: 0,
+                            targetSize: 8)
+                    ],
+                    expertStride: 16)
+            }
+        }
+
+        @Test func aRegionOutsideTheSlotIsRefused() {
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [tensor(sourceOffset: 0, sourceSize: 8, targetOffset: 0, targetSize: 16)],
+                    expertStride: 12)
+            }
+            #expect(throws: ModelError.self) {
+                try TwoBitExpand.validateExpansionLayout(
+                    [tensor(sourceOffset: 8, sourceSize: 8, targetOffset: 8, targetSize: 16)],
+                    expertStride: 16)
+            }
+        }
+    }
 }

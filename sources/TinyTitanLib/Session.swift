@@ -91,6 +91,12 @@ public actor Session {
     }
 
     /// Runs one generation in its own task so `cancel()` can reach it.
+    ///
+    /// The task is unstructured, so cancelling the caller does not cancel it by
+    /// itself: awaiting `Task.value` in a cancelled task returns normally. The
+    /// CLI's SIGINT handler cancels exactly the caller task, so cancellation is
+    /// forwarded here -- otherwise `Ctrl-C` left the generation decoding to its
+    /// token limit (AUD2-035).
     private func runOneShot(
         _ body: @escaping @Sendable () async throws -> GenerationSummary
     ) async throws -> GenerationSummary {
@@ -98,7 +104,11 @@ public actor Session {
         currentTask = work
         defer { currentTask = nil }
         do {
-            return try await work.value
+            return try await withTaskCancellationHandler {
+                try await work.value
+            } onCancel: {
+                work.cancel()
+            }
         } catch is CancellationError {
             throw TinyTitanError.cancelled
         }

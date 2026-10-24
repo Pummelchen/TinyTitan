@@ -16,24 +16,28 @@ extension ServerPromptStateStore {
         let expected = record.metadata.descriptor.payloadBytes
         let handle = try FileHandle(forReadingFrom: record.payload)
         defer { try? handle.close() }
-        var hasher = SHA256()
-        var payload = Data()
-        payload.reserveCapacity(expected)
-        while true {
+        // Never read past expected+1: a swapped payload larger than the
+        // declared size is refused on size, and the bytes it would have taken
+        // are never allocated. The declared bytes themselves are still
+        // materialized -- the caller needs the payload -- so this bounds the
+        // read to what the metadata claims, not to what the file is.
+        var data = try handle.read(upToCount: expected + 1) ?? Data()
+        while data.count < expected + 1 {
             guard let chunk = try handle.read(upToCount: 1_048_576),
                 !chunk.isEmpty
             else { break }
-            hasher.update(data: chunk)
-            payload.append(chunk)
+            data.append(chunk)
         }
-        guard payload.count == expected else {
+        guard data.count == expected else {
             throw ServerPromptStateStoreError.corrupt(entryID, "payload size mismatch")
         }
+        var hasher = SHA256()
+        hasher.update(data: data)
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         guard digest == record.metadata.payloadSHA256 else {
             throw ServerPromptStateStoreError.corrupt(entryID, "SHA-256 mismatch")
         }
-        return payload
+        return data
     }
 
     func readAuxiliaryVerifying(

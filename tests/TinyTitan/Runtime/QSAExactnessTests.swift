@@ -66,6 +66,17 @@ struct QSAExactnessTests {
         #expect(error.description.contains("--max-new"))
     }
 
+    @Test("The refusal names the missing indexer, not an unimplemented feature")
+    func refusalNamesTheRealCause() {
+        // The indexer is implemented; this error can only come from a family
+        // that declares one which was never built. The old text said the
+        // indexer did not exist and sent the operator to shorten a prompt for
+        // what would be a load defect.
+        let error = QSAIndexerRequired(visibleKeys: 2052, exactWindow: 2051)
+        #expect(error.description.contains("was not built"))
+        #expect(!error.description.contains("not implemented"))
+    }
+
     @Test("The window tracks the geometry rather than being hardcoded")
     func otherGeometries() {
         // compress 1: every block is complete, so the window is the budget.

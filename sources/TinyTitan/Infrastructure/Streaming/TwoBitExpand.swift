@@ -59,6 +59,83 @@ package struct ExpertBlobTensor {
 }
 
 extension TwoBitExpand {
+    /// The invariants `expandExpertInPlace` depends on, checked once where the
+    /// maps are built at load. A violating layout would not crash — it would
+    /// silently write over unread source bytes and decode wrong weights, so a
+    /// bad map is refused before any expert is streamed.
+    ///
+    /// The invariants: every region sits inside the slot; a move or rescale
+    /// keeps its size, a 2-bit expansion doubles it, a 3-bit one takes three
+    /// bytes to four with no remainder; every target offset is at or beyond
+    /// its source offset (the backwards loops rely on it); and processing
+    /// from the highest source offset down, no write region reaches into a
+    /// lower tensor's unread source.
+    static func validateExpansionLayout(
+        _ tensors: [ExpertBlobTensor], expertStride: Int
+    ) throws {
+        for tensor in tensors {
+            guard tensor.sourceOffset >= 0, tensor.sourceSize >= 0,
+                tensor.targetOffset >= tensor.sourceOffset,
+                tensor.sourceOffset + tensor.sourceSize <= expertStride,
+                tensor.targetOffset + tensor.targetSize <= expertStride
+            else {
+                throw ModelError.indexCorrupt(
+                    detail: "expert tensor layout violates the slot bounds")
+            }
+            let expectedTarget: Int
+            if tensor.expands, tensor.bits == 3 {
+                guard tensor.sourceSize % 3 == 0 else {
+                    throw ModelError.indexCorrupt(
+                        detail: "3-bit tensor size \(tensor.sourceSize) is not "
+                            + "a whole number of groups")
+                }
+                expectedTarget = tensor.sourceSize / 3 * 4
+            } else if tensor.expands {
+                expectedTarget = tensor.sourceSize * 2
+            } else {
+                if tensor.rescales {
+                    guard tensor.sourceSize % 2 == 0 else {
+                        throw ModelError.indexCorrupt(
+                            detail: "rescaled tensor size \(tensor.sourceSize) "
+                                + "is not a whole number of bf16 values")
+                    }
+                }
+                expectedTarget = tensor.sourceSize
+            }
+            guard tensor.targetSize == expectedTarget else {
+                throw ModelError.indexCorrupt(
+                    detail: "expert tensor target size \(tensor.targetSize) "
+                        + "does not match its source size \(tensor.sourceSize)")
+            }
+        }
+        // Processing runs from the highest source offset down, so a write is
+        // safe only if it misses every lower tensor's still-unread source and
+        // every already-written target. Consecutive pairs are not enough (a
+        // far-down write can reach past several tensors), so all pairs are
+        // checked; the map is small and this runs once at load.
+        for writer in tensors {
+            let writeEnd = writer.targetOffset + writer.targetSize
+            for reader in tensors where reader.sourceOffset != writer.sourceOffset {
+                if writer.targetOffset < reader.sourceOffset + reader.sourceSize,
+                    writeEnd > reader.sourceOffset,
+                    reader.sourceOffset < writer.sourceOffset
+                {
+                    throw ModelError.indexCorrupt(
+                        detail: "expert tensor at \(writer.sourceOffset) writes "
+                            + "into the unread source of the tensor at "
+                            + "\(reader.sourceOffset)")
+                }
+                if writer.targetOffset < reader.targetOffset + reader.targetSize,
+                    writeEnd > reader.targetOffset
+                {
+                    throw ModelError.indexCorrupt(
+                        detail: "expert tensors at \(writer.sourceOffset) and "
+                            + "\(reader.sourceOffset) share a target region")
+                }
+            }
+        }
+    }
+
     /// Rewrites a compact 2-bit expert blob into the 4-bit slot layout, in place.
     ///
     /// Tensors are processed from the highest source offset down. Every target

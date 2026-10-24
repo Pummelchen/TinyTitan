@@ -9,6 +9,20 @@ import Metal
 // Its two `private` view helpers moved with their only callers.
 // MARK: - PLE n-gram block
 
+/// AUD2-036: a prefill gather writes into an allocation sized by the runner's
+/// own `prefillChunkTokens`, while the chunk scheduler accepts a caller's
+/// `PrefillRuntimeConfig` independently. The write is refused here rather than
+/// allowed to run past the block's embedding buffer.
+enum PLEPrefillGather {
+    static func validate(rows: Int, maxRows: Int) throws {
+        guard rows <= maxRows else {
+            throw PrefillError.chunkedUnsupported(
+                "PLE prefill gather of \(rows) rows exceeds the \(maxRows)-row embedding buffer; the caller's chunk is larger than this runner's prefillChunkTokens"
+            )
+        }
+    }
+}
+
 extension RealForwardRunner {
     /// Reads this token's n-gram rows off storage into the block's input.
     ///
@@ -90,6 +104,13 @@ extension RealForwardRunner {
     func gatherPLERowsPrefill(tokens: ArraySlice<Int32>) throws {
         guard let ple = pleBlock, let hash = pleHash, let table = ngramTable
         else { return }
+        // The gather writes `tokens.count` rows into `ple.embedding`, which is
+        // `embedDim * ple.maxRows`. The scratch guard at the chunk entry bounds
+        // the caller's chunk, not this buffer: `PrefillRuntimeConfig.production`
+        // accepts any allowed chunk independently of the runner's own
+        // `prefillChunkTokens`, so a mismatched caller could ask for more rows
+        // than the block allocated (AUD2-036).
+        try PLEPrefillGather.validate(rows: tokens.count, maxRows: ple.maxRows)
         let rowBytes = hash.headCount * table.rowBytes
         // Two passes. Resolving a position's rows consumes the hash window, so
         // the addresses are inherently ordered even though the reads are not.

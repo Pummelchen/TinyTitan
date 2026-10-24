@@ -418,7 +418,17 @@ final class ServerPromptStateStore: @unchecked Sendable {
         let date = record.modificationDate
         let path = record.directory.path
         diskQueue.async { [self] in
-            try? self.fileManager.setAttributes([.modificationDate: date], ofItemAtPath: path)
+            do {
+                try self.fileManager.setAttributes(
+                    [.modificationDate: date], ofItemAtPath: path)
+            } catch {
+                // Not fatal: the record keeps its older date, so it is simply an
+                // earlier eviction candidate next restart. Say so rather than
+                // swallow it -- the checkpoint store reports the same failure
+                // (AUD2-007), and this one used to be dropped with `try?`.
+                ServerLog.diagnostic(
+                    "prompt state: could not record access on \(id): \(error)")
+            }
         }
     }
 

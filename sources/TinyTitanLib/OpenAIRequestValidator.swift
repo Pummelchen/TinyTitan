@@ -59,6 +59,14 @@ package enum OpenAIRequestValidator {
             throw invalid(
                 "frequency_penalty must be zero", "frequency_penalty", "unsupported_value")
         }
+        // The sampler has no min-p filter and every published row uses zero.
+        // The field has to be decoded to be refused; before it was, a client
+        // that asked for min-p got unfiltered sampling and no diagnostic.
+        guard request.minP == nil || request.minP == 0 else {
+            throw invalid(
+                "min_p is not implemented; every published row uses zero",
+                "min_p", "unsupported_value")
+        }
         // Reasoning effort is defined per family and fixed at model load
         // because it changes the rendered prompt. A request may not be able
         // to switch it, but it must never be refused for asking: coding

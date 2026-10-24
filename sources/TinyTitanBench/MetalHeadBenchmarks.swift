@@ -215,6 +215,13 @@ extension TinyTitanBench {
             )
         }
         keepWarm?.start()
+        // A thrown allocation below would otherwise leave the worker spinning
+        // until the process exits; the success path stops it on the next lines
+        // so the dispatch count it returns is still the one reported.
+        var keepWarmStopped = false
+        defer {
+            if !keepWarmStopped { _ = keepWarm?.stop() }
+        }
         for i in 0..<iterations {
             let cb = try requireCommandBuffer(queue)
             guard let enc = cb.makeComputeCommandEncoder() else {
@@ -244,6 +251,7 @@ extension TinyTitanBench {
             }
         }
         let spinDispatches = keepWarm.map { $0.stop() } ?? 0
+        keepWarmStopped = true
         let spinProbe = keepWarm?.probeMicroseconds ?? 0
         let per = gpuSeconds / Double(iterations - 1)
         let sorted = samples.sorted()
