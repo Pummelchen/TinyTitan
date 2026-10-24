@@ -31,6 +31,23 @@ index, `generation_config.json`, `tokenizer_config.json` and
 The quantized installs this would produce are roughly 18-19 GB at 4-bit and
 36-37 GB at 8-bit; the source is 74.9 GB and this host has 178 GB free.
 
+## Progress
+
+- **Planning** — `tools/prepare_k2_horizon.py --plan` classifies all 16,998
+  tensors and measures the snapshots (21.7 GB at 4-bit, 39.8 GB at 8-bit).
+- **Conversion (local data layer)** — `--source/--output/--bits` writes an
+  affine snapshot with the checkpoint's names, bf16 keeps and 8-bit
+  embedding/head; `--self-test` converts a tiny K2-shaped fixture and checks
+  the metadata and a round trip.
+- **Arch reader** — `RepackModelFamily.k2Horizon`, the K2 extension fields on
+  `ArchInfo` (MoVA experts, grouped norm, gate function, router bias and
+  scaling, dense layers) and `loadK2Horizon`, tested against the pinned
+  config's values.
+
+Not started: the repacker's tensor classification and layer planning for the
+two expert systems, the runtime family and kernels, the template/parsers, and
+the catalogue/golden wiring.
+
 ## The conversion plan, measured
 
 `tools/prepare_k2_horizon.py --plan` fetches the config, the index and the

@@ -10,6 +10,9 @@ enum RepackModelFamily: String, Sendable, Equatable {
     /// Qwen 3.5's dense text models (2B, 4B, 9B). A whole model, not a draft
     /// head, and the only family here whose weights carry no routed experts.
     case qwen35Dense = "qwen3_5_dense"
+    /// K2-Horizon's sparse family: 100 routed experts, a shared expert, a
+    /// grouped RMS norm, a softplus attention gate and MoVA value experts.
+    case k2Horizon = "k2_horizon"
     /// A draft sidecar is loaded beside a target and prompted through the
     /// target's tokenizer, so a local import of one carries no tokenizer of
     /// its own.
@@ -88,6 +91,19 @@ struct ArchInfo: Sendable, Equatable {
     /// Affine quantization group size of the source checkpoint.
     let quantGroupSize: Int
 
+    // K2-Horizon (MoVA) extensions. Defaults describe the Qwen families, so
+    // adding them here changes no existing contract.
+    let movaNumExperts: Int
+    let movaTopKExperts: Int
+    let normGroups: Int
+    let attentionGate: String
+    let routerScaling: Double
+    let routerHasBias: Bool
+    let movaRouterScaling: Double
+    let movaRouterHasBias: Bool
+    let movaActivation: String
+    let denseLayerIndices: [Int]
+
     init(
         hiddenSize: Int, intermediateSize: Int, moeIntermediateSize: Int,
         numHeads: Int, numKVHeads: Int, numFullKVHeads: Int,
@@ -110,7 +126,12 @@ struct ArchInfo: Sendable, Equatable {
         pleConvKernelSize: Int = 0, pleNgramSize: Int = 0,
         pleVocabSizeBase: Int = 0, pleHeadsPerNgram: Int = 0,
         pleVocabDivisor: Int = 0,
-        routerNormTopK: Bool = false, quantGroupSize: Int = 64
+        routerNormTopK: Bool = false, quantGroupSize: Int = 64,
+        movaNumExperts: Int = 0, movaTopKExperts: Int = 0,
+        normGroups: Int = 1, attentionGate: String = "sigmoid",
+        routerScaling: Double = 1, routerHasBias: Bool = false,
+        movaRouterScaling: Double = 1, movaRouterHasBias: Bool = false,
+        movaActivation: String = "silu", denseLayerIndices: [Int] = []
     ) {
         self.hiddenSize = hiddenSize
         self.intermediateSize = intermediateSize
@@ -162,6 +183,16 @@ struct ArchInfo: Sendable, Equatable {
         self.pleVocabDivisor = pleVocabDivisor
         self.routerNormTopK = routerNormTopK
         self.quantGroupSize = quantGroupSize
+        self.movaNumExperts = movaNumExperts
+        self.movaTopKExperts = movaTopKExperts
+        self.normGroups = normGroups
+        self.attentionGate = attentionGate
+        self.routerScaling = routerScaling
+        self.routerHasBias = routerHasBias
+        self.movaRouterScaling = movaRouterScaling
+        self.movaRouterHasBias = movaRouterHasBias
+        self.movaActivation = movaActivation
+        self.denseLayerIndices = denseLayerIndices
     }
 
     /// Whether this architecture has the extension geometry the manifest's
@@ -222,10 +253,13 @@ struct ArchInfo: Sendable, Equatable {
         if (root["model_type"] as? String) == "qwen4_exp" {
             return try loadQwen4Exp(configPath: configPath, tc: tc, root: root)
         }
+        if (root["model_type"] as? String) == "k2_horizon" {
+            return try loadK2Horizon(configPath: configPath, tc: tc)
+        }
         throw RepackError.configJsonInvalid(
             path: configPath,
             detail: "unsupported model_type (expected qwen3_5_moe, "
-                + "qwen3_5_mtp, qwen3_5_dense or qwen4_exp)")
+                + "qwen3_5_mtp, qwen3_5_dense, qwen4_exp or k2_horizon)")
     }
 
 }
