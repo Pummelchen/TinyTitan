@@ -120,4 +120,28 @@ void tinytitan_delta_rule_range(const float *query,
                                 float *state,
                                 float *readout);
 
+/// The same recurrence over a chunk of tokens for one head, using the unrolled
+/// form `benchmark/gdn_chunked_scan.py` checks. `queries`, `keys` and `values`
+/// point at token 0 of this head, with the strides between tokens; `alphas`
+/// and `betas` are per token for this head. `readouts` is written
+/// `tokens`-by-`dv`, `state` is updated in place. Returns 0 on success and 1
+/// if its scratch allocation failed (the sequential fallback still ran when
+/// `dv` fits the fixed buffer).
+int tinytitan_delta_rule_chunk(const float *queries,
+                               size_t queryStride,
+                               const float *keys,
+                               size_t keyStride,
+                               const float *values,
+                               size_t valueStride,
+                               const float *alphas,
+                               size_t alphaStride,
+                               const float *betas,
+                               size_t betaStride,
+                               size_t tokens,
+                               size_t dk,
+                               size_t dv,
+                               float *state,
+                               float *readouts,
+                               size_t readoutStride);
+
 #endif /* TINYTITAN_KERNELS_H */

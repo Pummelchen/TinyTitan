@@ -1,8 +1,11 @@
 # Plan: a chunked scan for the gated-DeltaNet recurrence
 
-Status: **algebra validated, C implementation not started.** The prototype is
+Status: **implemented and measured.** The prototype is
 `benchmark/gdn_chunked_scan.py`; it reproduces the scalar recurrence exactly
-(max error ~1e-14 on random cases).
+(max error ~1e-14 on random cases). The engine kernel is
+`tinytitan_delta_rule_chunk` in `sources/TinyTitanKernelsC/gdn_chunk.c`, wired
+into `gatedDeltaNetBatch` in chunks of 8 tokens by default
+(`TINYTITAN_GDN_CHUNK` overrides the length).
 
 ## Why
 
@@ -45,6 +48,33 @@ and the final state is
 
 `benchmark/gdn_chunked_scan.py` checks both forms on random cases (dv, dk and
 chunk are CLI flags) and exits non-zero if they differ by more than 1e-9.
+
+## Implemented, and what it measured
+
+The kernel computes `S_0 K^T | S_0 Q^T`, the Gram matrices and the final
+low-rank update as BLAS calls (the same wrapper the projections use); only the
+triangular pass is scalar. One correctness trap mattered: `A_t/A_s` must be
+computed as the backward product of the alphas between `s` and `t`, not by
+dividing `A_t` by `A_s` -- with a strong decay `A_s` underflows to zero and
+`0/0` poisons the state. The first version divided, and produced `!!!!!!!!` at
+chunk 32 on the real model while chunks 8 and 16 happened to pass.
+
+Measured on the 2B 4-bit, greedy, chunk 8:
+
+| Prompt tokens | Before the chunked scan | After |
+| --- | ---: | ---: |
+| 641 | 4.1 s | **3.9 s** |
+| 2,201 | 10.7 s | **8.9 s** |
+| ~4,000 | 18.9 s | **18.2 s** |
+| ~7,000 | 35.1 s | **30.6 s** |
+
+Greedy text is identical at 641 and 2,201 tokens, and on the 4B and both 9B
+widths. The win is smaller than the earlier "two thirds of prefill" suggested:
+after the per-token kernel was threaded and the SiLU vectorized, the state
+stream was no longer the binding cost. A fresh 7K profile puts the chunk
+kernel itself at about 7% of main-thread samples; the gated-DeltaNet layer's
+projections -- which go through the same BLAS path -- dominate it. The chunked
+scan is therefore kept for the traffic it saves, not as the next big lever.
 
 ## What it buys and what it costs
 

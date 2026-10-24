@@ -117,8 +117,9 @@ prompt at 2,048 tokens and carries the KV cache, convolution tail and recurrent
 state across chunks; every dense projection goes through `CPUBatchedMatmul`
 (dequantize once, one `cblas_sgemm`); full-attention layers batch their score and
 value products; the gated-DeltaNet convolution and recurrence stay token-ordered,
-with the recurrence in a C/NEON kernel (`tinytitan_delta_rule`) because it was
-three quarters of the prefill once the projections were cheap.
+with the recurrence in a chunked kernel (`tinytitan_delta_rule_chunk`, see
+`plan-gdn-chunked-scan.md`) because the token-ordered one was three quarters of
+the prefill once the projections were cheap.
 `TINYTITAN_CPU_PREFILL=token` restores the per-token path and `=batch` forces
 the batched one, which is how the two were compared below the automatic
 threshold. Prompts shorter than 12 tokens stay on the per-token path:
@@ -133,12 +134,12 @@ repeated pangram, and the times include model load and the generated tokens:
 
 | Prompt tokens | Per-token path | Batched | Speedup | Output |
 | --- | ---: | ---: | ---: | --- |
-| 641 | 31.9 s | **4.1 s** | 7.8x | identical |
-| 2,201 | 139.7 s | **10.7 s** | 13.0x | identical |
-| ~4,000 | — | **18.9 s** | — | timing only |
-| ~7,000 | — | **35.1 s** | — | timing only |
+| 641 | 31.9 s | **3.9 s** | 8.2x | identical |
+| 2,201 | 139.7 s | **8.9 s** | 15.7x | identical |
+| ~4,000 | — | **18.2 s** | — | timing only |
+| ~7,000 | — | **30.6 s** | — | timing only |
 
-Once model load and the generated tokens are subtracted, that is roughly 4-5 ms
+Once model load and the generated tokens are subtracted, that is roughly 3-4 ms
 per prompt token against 47-63 ms, and the 2.2K result lands inside the 6-16 s
 range this document predicted. The per-token figures at 4K and 7K grow because
 both the sequential recurrence and the quadratic attention scale with prompt

@@ -4,14 +4,22 @@ import TinyTitanKernelsC
 /// Batched gated-DeltaNet layers.
 ///
 /// The input projections and the two per-head scalar projections are batched
-/// GEMMs over the whole chunk. The convolution and the delta rule are not:
-/// both read state from the previous token, so they run token by token in
-/// order, exactly as `gatedDeltaNet` does. The delta rule itself is a C/NEON
-/// kernel (`tinytitan_delta_rule`) because it was three quarters of the
-/// prefill once the projections were cheap; its arithmetic is the decode
-/// path's, with the reduction vectorized. The output projection is batched
-/// again.
+/// GEMMs over the whole prompt. The convolution is computed per token (it is
+/// causal and cheap), and the delta rule runs over chunks of tokens with
+/// `tinytitan_delta_rule_chunk`: the unrolled form of the recurrence reads and
+/// writes each head's state once per chunk instead of once per token.
+/// `benchmark/gdn_chunked_scan.py` is the specification for that form, and
+/// `TINYTITAN_GDN_CHUNK` overrides the chunk length for the A/B.
 extension CPUQwen35 {
+
+    /// Tokens one delta-rule chunk carries. The state traffic falls with this
+    /// number while the within-chunk Gram work grows with its square, so the
+    /// default is a balance rather than a maximum; the environment variable
+    /// exists to re-measure it on another machine.
+    static var gdnChunkTokens: Int {
+        let raw = ProcessInfo.processInfo.environment["TINYTITAN_GDN_CHUNK"]
+        return max(1, min(128, Int(raw ?? "") ?? 8))
+    }
 
     func gatedDeltaNetBatch(layer: Int, x: [Float], tokens: Int) throws -> [Float] {
         let stem = "\(prefix)layers.\(layer).linear_attn."
@@ -53,57 +61,41 @@ extension CPUQwen35 {
         var readout = [Float](repeating: 0, count: tokens * valueWidth)
         var state = recurrent[layer] ?? [Float](repeating: 0, count: hv * dv * dk)
         var tail = convolution[layer] ?? [Float](repeating: 0, count: (kernel - 1) * convDim)
-        var siluScratch = [Float](repeating: 0, count: convDim)
         let inverse = 1 / Float(dv).squareRoot()
+        let repeats = hv / hk
 
-        for row in 0..<tokens {
-            let mixedBase = row * convDim
-            var convolved = [Float](repeating: 0, count: convDim)
-            for channel in 0..<convDim {
-                var total: Float = 0
-                for step in 0..<(kernel - 1) {
-                    total += taps[channel * kernel + step] * tail[step * convDim + channel]
-                }
-                total += taps[channel * kernel + kernel - 1] * mixed[mixedBase + channel]
-                convolved[channel] = total
-            }
+        let chunkLength = Self.gdnChunkTokens
+        var start = 0
+        while start < tokens {
+            let count = min(chunkLength, tokens - start)
+            var convolved = gdnConvolutionChunk(
+                mixed: mixed, taps: taps, tail: &tail, start: start, count: count,
+                convDim: convDim, kernel: kernel)
+            var siluScratch = [Float](repeating: 0, count: count * convDim)
             convolved.withUnsafeMutableBufferPointer { values in
                 siluScratch.withUnsafeMutableBufferPointer { scratch in
                     CPUOps.siluInPlace(values, scratch: scratch)
                 }
             }
-            tail.removeFirst(convDim)
-            tail.append(contentsOf: mixed[mixedBase..<(mixedBase + convDim)])
-
-            var query = Array(convolved[0..<keyWidth])
-            var key = Array(convolved[keyWidth..<(2 * keyWidth)])
-            let value = Array(convolved[(2 * keyWidth)...])
-            CPUOps.l2NormalizePerSlice(&query, width: dk, epsilon: configuration.normEpsilon)
-            CPUOps.l2NormalizePerSlice(&key, width: dk, epsilon: configuration.normEpsilon)
-            applyDeltaRule(
-                query: query, key: key, value: value,
-                a: Array(aRows[row * hv..<(row + 1) * hv]),
-                b: Array(bRows[row * hv..<(row + 1) * hv]),
-                decayLog: decayLog, decayBias: decayBias,
-                state: &state, readout: &readout, rowBase: row * valueWidth,
-                heads: hv, keyHeads: hk, dk: dk, dv: dv, inverse: inverse)
+            gdnNormalizeQueries(
+                &convolved, count: count, convDim: convDim, keyWidth: keyWidth, dk: dk)
+            let (alphas, betas) = gdnAlphaBeta(
+                aRows: aRows, bRows: bRows, decayLog: decayLog, decayBias: decayBias,
+                start: start, count: count, heads: hv)
+            gdnApplyChunk(
+                convolved: convolved, alphas: alphas, betas: betas,
+                count: count, convDim: convDim, keyWidth: keyWidth,
+                valueWidth: valueWidth, dk: dk, dv: dv, repeats: repeats,
+                state: &state, readout: &readout, readoutBase: start * valueWidth,
+                threads: threads)
+            start += count
         }
         recurrent[layer] = state
         convolution[layer] = tail
 
-        for row in 0..<tokens {
-            let base = row * valueWidth
-            var normalized = Array(readout[base..<(base + valueWidth)])
-            CPUOps.rmsNormPerSlice(
-                &normalized, width: dv, gamma: normGamma,
-                epsilon: configuration.normEpsilon)
-            for index in 0..<valueWidth {
-                normalized[index] *= CPUOps.silu(z[base + index])
-            }
-            for index in 0..<valueWidth {
-                readout[base + index] = normalized[index]
-            }
-        }
+        gdnNormalizeReadout(
+            readout: &readout, z: z, tokens: tokens, valueWidth: valueWidth, dv: dv,
+            normGamma: normGamma, epsilon: configuration.normEpsilon, inverse: inverse)
         return try CPUBatchedMatmul.multiply(
             try matrix(stem + "out_proj.weight"), x: readout, tokenCount: tokens, threads: threads)
     }
@@ -135,71 +127,120 @@ extension CPUQwen35 {
         return out
     }
 
-    /// One token's delta rule. The pointers stay inside this call; the C
-    /// kernel writes the updated state and this token's readout.
-    func applyDeltaRule(
-        query: [Float], key: [Float], value: [Float],
-        a: [Float], b: [Float],
-        decayLog: [Float], decayBias: [Float],
-        state: inout [Float], readout: inout [Float], rowBase: Int,
-        heads: Int, keyHeads: Int, dk: Int, dv: Int, inverse: Float
+    /// Builds one chunk's convolved rows and advances the carried window.
+    func gdnConvolutionChunk(
+        mixed: [Float], taps: [Float], tail: inout [Float],
+        start: Int, count: Int, convDim: Int, kernel: Int
+    ) -> [Float] {
+        var convolved = [Float](repeating: 0, count: count * convDim)
+        for local in 0..<count {
+            let mixedBase = (start + local) * convDim
+            let outBase = local * convDim
+            for channel in 0..<convDim {
+                var total: Float = 0
+                for step in 0..<(kernel - 1) {
+                    total += taps[channel * kernel + step] * tail[step * convDim + channel]
+                }
+                total += taps[channel * kernel + kernel - 1] * mixed[mixedBase + channel]
+                convolved[outBase + channel] = total
+            }
+            tail.removeFirst(convDim)
+            tail.append(contentsOf: mixed[mixedBase..<(mixedBase + convDim)])
+        }
+        return convolved
+    }
+
+    /// L2-normalizes the key and query slices of every token in the chunk.
+    func gdnNormalizeQueries(
+        _ convolved: inout [Float], count: Int, convDim: Int, keyWidth: Int, dk: Int
     ) {
-        query.withUnsafeBufferPointer { queryBuffer in
-            key.withUnsafeBufferPointer { keyBuffer in
-                value.withUnsafeBufferPointer { valueBuffer in
-                    a.withUnsafeBufferPointer { aBuffer in
-                        b.withUnsafeBufferPointer { bBuffer in
-                            decayLog.withUnsafeBufferPointer { logBuffer in
-                                decayBias.withUnsafeBufferPointer { biasBuffer in
-                                    state.withUnsafeMutableBufferPointer { stateBuffer in
-                                        readout.withUnsafeMutableBufferPointer { readoutBuffer in
-                                            guard let queryBase = queryBuffer.baseAddress,
-                                                let keyBase = keyBuffer.baseAddress,
-                                                let valueBase = valueBuffer.baseAddress,
-                                                let aBase = aBuffer.baseAddress,
-                                                let bBase = bBuffer.baseAddress,
-                                                let logBase = logBuffer.baseAddress,
-                                                let biasBase = biasBuffer.baseAddress,
-                                                let stateBase = stateBuffer.baseAddress,
-                                                let readoutBase = readoutBuffer.baseAddress
-                                            else { return }
-                                            // Heads are independent: the state
-                                            // of one is not read by another, so
-                                            // a row-split is exact. One head per
-                                            // worker would make the dispatch
-                                            // cost larger than the work.
-                                            let usable = max(1, min(threads, heads / 8))
-                                            let output = readoutBase + rowBase
-                                            if usable <= 1 {
-                                                tinytitan_delta_rule(
-                                                    queryBase, keyBase, valueBase, aBase, bBase,
-                                                    logBase, biasBase,
-                                                    heads, keyHeads, dk, dv, inverse,
-                                                    stateBase, output)
-                                            } else {
-                                                let chunk = (heads + usable - 1) / usable
-                                                nonisolated(unsafe) let q = queryBase
-                                                nonisolated(unsafe) let k = keyBase
-                                                nonisolated(unsafe) let v = valueBase
-                                                nonisolated(unsafe) let a = aBase
-                                                nonisolated(unsafe) let b = bBase
-                                                nonisolated(unsafe) let log = logBase
-                                                nonisolated(unsafe) let bias = biasBase
-                                                nonisolated(unsafe) let statePointer = stateBase
-                                                nonisolated(unsafe) let outPointer = output
-                                                DispatchQueue.concurrentPerform(
-                                                    iterations: usable
-                                                ) { slice in
-                                                    let first = slice * chunk
-                                                    guard first < heads else { return }
-                                                    let count = min(chunk, heads - first)
-                                                    tinytitan_delta_rule_range(
-                                                        q, k, v, a, b, log, bias,
-                                                        heads, keyHeads, dk, dv, inverse,
-                                                        first, count, statePointer, outPointer)
-                                                }
-                                            }
-                                        }
+        for local in 0..<count {
+            let base = local * convDim
+            var query = Array(convolved[base..<(base + keyWidth)])
+            CPUOps.l2NormalizePerSlice(
+                &query, width: dk, epsilon: configuration.normEpsilon)
+            for index in 0..<keyWidth { convolved[base + index] = query[index] }
+            var key = Array(convolved[(base + keyWidth)..<(base + 2 * keyWidth)])
+            CPUOps.l2NormalizePerSlice(
+                &key, width: dk, epsilon: configuration.normEpsilon)
+            for index in 0..<keyWidth { convolved[base + keyWidth + index] = key[index] }
+        }
+    }
+
+    /// Per-token decay and update rates for the chunk, one column per head.
+    func gdnAlphaBeta(
+        aRows: [Float], bRows: [Float], decayLog: [Float], decayBias: [Float],
+        start: Int, count: Int, heads: Int
+    ) -> ([Float], [Float]) {
+        var alphas = [Float](repeating: 0, count: count * heads)
+        var betas = [Float](repeating: 0, count: count * heads)
+        for local in 0..<count {
+            let row = start + local
+            for head in 0..<heads {
+                let decayInput = aRows[row * heads + head] + decayBias[head]
+                alphas[local * heads + head] =
+                    expf(-expf(decayLog[head]) * CPUOps.softplus(decayInput))
+                betas[local * heads + head] = CPUOps.sigmoid(bRows[row * heads + head])
+            }
+        }
+        return (alphas, betas)
+    }
+
+    /// Runs the chunked delta rule for every head, splitting heads across the
+    /// performance cores when there are enough of them.
+    func gdnApplyChunk(
+        convolved: [Float], alphas: [Float], betas: [Float],
+        count: Int, convDim: Int, keyWidth: Int, valueWidth: Int,
+        dk: Int, dv: Int, repeats: Int,
+        state: inout [Float], readout: inout [Float], readoutBase: Int, threads: Int
+    ) {
+        let usable = max(1, min(threads, (alphas.count / count) / 8))
+        let heads = alphas.count / count
+        convolved.withUnsafeBufferPointer { convolvedBuffer in
+            alphas.withUnsafeBufferPointer { alphaBuffer in
+                betas.withUnsafeBufferPointer { betaBuffer in
+                    state.withUnsafeMutableBufferPointer { stateBuffer in
+                        readout.withUnsafeMutableBufferPointer { outputBuffer in
+                            guard let convolvedBase = convolvedBuffer.baseAddress,
+                                let alphaBase = alphaBuffer.baseAddress,
+                                let betaBase = betaBuffer.baseAddress,
+                                let stateBase = stateBuffer.baseAddress,
+                                let outputBase = outputBuffer.baseAddress
+                            else { return }
+                            if usable <= 1 {
+                                for head in 0..<heads {
+                                    _ = tinytitan_delta_rule_chunk(
+                                        convolvedBase + (head / repeats) * dk, convDim,
+                                        convolvedBase + keyWidth + (head / repeats) * dk, convDim,
+                                        convolvedBase + 2 * keyWidth + head * dv, convDim,
+                                        alphaBase + head, heads,
+                                        betaBase + head, heads,
+                                        count, dk, dv,
+                                        stateBase + head * dv * dk,
+                                        outputBase + readoutBase + head * dv, valueWidth)
+                                }
+                            } else {
+                                let headChunk = (heads + usable - 1) / usable
+                                nonisolated(unsafe) let cBase = convolvedBase
+                                nonisolated(unsafe) let aBase = alphaBase
+                                nonisolated(unsafe) let bBase = betaBase
+                                nonisolated(unsafe) let sBase = stateBase
+                                nonisolated(unsafe) let oBase = outputBase
+                                let base = readoutBase
+                                DispatchQueue.concurrentPerform(iterations: usable) { slice in
+                                    let first = slice * headChunk
+                                    guard first < heads else { return }
+                                    let last = min(first + headChunk, heads)
+                                    for head in first..<last {
+                                        _ = tinytitan_delta_rule_chunk(
+                                            cBase + (head / repeats) * dk, convDim,
+                                            cBase + keyWidth + (head / repeats) * dk, convDim,
+                                            cBase + 2 * keyWidth + head * dv, convDim,
+                                            aBase + head, heads,
+                                            bBase + head, heads,
+                                            count, dk, dv,
+                                            sBase + head * dv * dk,
+                                            oBase + base + head * dv, valueWidth)
                                     }
                                 }
                             }
@@ -207,6 +248,23 @@ extension CPUQwen35 {
                     }
                 }
             }
+        }
+    }
+
+    /// The per-row norm, gate and inverse scaling after the recurrence.
+    func gdnNormalizeReadout(
+        readout: inout [Float], z: [Float], tokens: Int, valueWidth: Int, dv: Int,
+        normGamma: [Float], epsilon: Float, inverse: Float
+    ) {
+        for row in 0..<tokens {
+            let base = row * valueWidth
+            var normalized = Array(readout[base..<(base + valueWidth)])
+            for index in 0..<valueWidth { normalized[index] *= inverse }
+            CPUOps.rmsNormPerSlice(&normalized, width: dv, gamma: normGamma, epsilon: epsilon)
+            for index in 0..<valueWidth {
+                normalized[index] *= CPUOps.silu(z[base + index])
+            }
+            for index in 0..<valueWidth { readout[base + index] = normalized[index] }
         }
     }
 }

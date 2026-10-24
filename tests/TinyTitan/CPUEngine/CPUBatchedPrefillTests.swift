@@ -244,6 +244,84 @@ import TinyTitanKernelsC
         }
     }
 
+    /// The chunked delta rule against the token-ordered kernel it replaces.
+    @Test(arguments: [8, 16, 32])
+    func chunkedDeltaRuleMatchesTheTokenKernel(tokens: Int) {
+        let dk = 8
+        let dv = 4
+        var seed: UInt32 = 0xC0FF_EE01
+        func random() -> Float {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return Float(Int(seed >> 20) % 2001 - 1000) / 1000
+        }
+        let keys = (0..<(tokens * dk)).map { _ in random() }
+        let values = (0..<(tokens * dv)).map { _ in random() }
+        let queries = (0..<(tokens * dk)).map { _ in random() }
+        let a = (0..<tokens).map { _ in random() }
+        let b = (0..<tokens).map { _ in random() }
+        let decayLog: [Float] = [0.3]
+        let decayBias: [Float] = [0.1]
+        let alphas = (0..<tokens).map { index in
+            expf(-expf(decayLog[0]) * CPUOps.softplus(a[index] + decayBias[0]))
+        }
+        let betas = b.map { CPUOps.sigmoid($0) }
+
+        func allocated<T>(_ values: [T]) -> UnsafeMutablePointer<T> {
+            let pointer = UnsafeMutablePointer<T>.allocate(capacity: values.count)
+            values.withUnsafeBufferPointer { buffer in
+                if let base = buffer.baseAddress {
+                    pointer.initialize(from: base, count: buffer.count)
+                }
+            }
+            return pointer
+        }
+        let k = allocated(keys)
+        let v = allocated(values)
+        let q = allocated(queries)
+        let aPointer = allocated(a)
+        let bPointer = allocated(b)
+        let logPointer = allocated(decayLog)
+        let biasPointer = allocated(decayBias)
+        let alphaPointer = allocated(alphas)
+        let betaPointer = allocated(betas)
+        let tokenState = allocated([Float](repeating: 0, count: dv * dk))
+        let tokenReadout = allocated([Float](repeating: 0, count: tokens * dv))
+        let chunkState = allocated([Float](repeating: 0, count: dv * dk))
+        let chunkReadout = allocated([Float](repeating: 0, count: tokens * dv))
+        defer {
+            for pointer in [
+                UnsafeMutableRawPointer(k), UnsafeMutableRawPointer(v),
+                UnsafeMutableRawPointer(q), UnsafeMutableRawPointer(aPointer),
+                UnsafeMutableRawPointer(bPointer), UnsafeMutableRawPointer(logPointer),
+                UnsafeMutableRawPointer(biasPointer), UnsafeMutableRawPointer(alphaPointer),
+                UnsafeMutableRawPointer(betaPointer), UnsafeMutableRawPointer(tokenState),
+                UnsafeMutableRawPointer(tokenReadout), UnsafeMutableRawPointer(chunkState),
+                UnsafeMutableRawPointer(chunkReadout),
+            ] {
+                pointer.deallocate()
+            }
+        }
+
+        for index in 0..<tokens {
+            tinytitan_delta_rule(
+                q + index * dk, k + index * dk, v + index * dv,
+                aPointer + index, bPointer + index, logPointer, biasPointer,
+                1, 1, dk, dv, 1, tokenState, tokenReadout + index * dv)
+        }
+        _ = tinytitan_delta_rule_chunk(
+            q, dk, k, dk, v, dv, alphaPointer, 1, betaPointer, 1,
+            tokens, dk, dv, chunkState, chunkReadout, dv)
+
+        var worst: Float = 0
+        for index in 0..<(tokens * dv) {
+            worst = max(worst, abs(tokenReadout[index] - chunkReadout[index]))
+        }
+        #expect(worst < 1e-4, "readout worst \(worst) for \(tokens) tokens")
+        for index in 0..<(dv * dk) {
+            #expect(abs(tokenState[index] - chunkState[index]) < 1e-4)
+        }
+    }
+
     /// Row-wise RMS norm agrees with the existing per-vector one.
     @Test func rowWiseNormMatchesTheSingleRowNorm() {
         let width = 32
