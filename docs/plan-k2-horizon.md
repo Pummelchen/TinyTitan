@@ -52,6 +52,24 @@ plan keeps at bf16. The install TinyTitanRepack writes afterwards is a second
 copy, so the peak disk for the 8-bit path is the source download plus ~40 GB
 of snapshot plus ~40 GB of install.
 
+## The converter
+
+`tools/prepare_k2_horizon.py` has two working modes beyond `--plan`:
+
+- `--source <dir> --output <dir> --bits 4 8` converts a **local** HF-style
+  checkpoint into the affine snapshot layout. Names are preserved (the K2
+  reader is written against the checkpoint's spelling, so nothing is renamed or
+  fused), quantized matrices become packed `uint32` weights plus bf16
+  `.scales`/`.biases`, and routers, norms and biases stay bf16.
+- `--self-test` builds a tiny K2-shaped fixture (two layers, four experts, two
+  value experts), converts it at 4-bit and checks the base width, the group
+  size, the 8-bit embedding override, a quantize/dequantize round trip, and
+  that the router bias is unchanged bf16.
+
+The measured plan output and the self-test both pass; the download/streaming
+path for the real 74.9 GB checkpoint is not written yet, and no repacker or
+runtime reader exists for this snapshot.
+
 ## What a layer does
 
 Layers 0-2 are dense; layers 3-47 are sparse.
