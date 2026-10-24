@@ -81,3 +81,15 @@ This is the same conclusion T29's arithmetic predicted: at 70% acceptance the
 verify pass has to cost less than ~1.7× a scalar token, and the measured
 width-2 path costs 2.238×. The controller remains unwired; the sidecar is
 installed for a future verify-path rewrite, not because it is enabled.
+
+## K6 tree extension
+
+[plan-k6-tree-speculation.md](plan-k6-tree-speculation.md) (2026-10-24) extends
+this model to tree widths
+2/4/8. A W-row pass is priced at W row-verifications from the measured 2.238×
+two-row pass (1.119× per row, tree mask overhead set to 0 as the best case).
+The projection is 0.830× at the measured 1.857 emit rate, and the
+perfect-acceptance ceiling is 0.894× at every width because a pass can emit at
+most one token per verified row. Trees are rejected on paper before any
+implementation; the document records the break-even bars a future retest would
+have to measure.
