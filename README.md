@@ -135,6 +135,15 @@ mode is derived from the
 [Nail-Qwen3.6-35B-A3B](https://huggingface.co/peculiar-ragdoll/Nail-Qwen3.6-35B-A3B-MLX)
 chat template by [peculiar-ragdoll](https://huggingface.co/peculiar-ragdoll).
 
+**Project Maya:** the 6.0 checkpoint, calibration and machine-size cache work was
+carried under that name. The live ledger is
+[docs/maya-task-status.md](docs/maya-task-status.md); the closeout is
+[docs/maya-closeout-2026-10-22.md](docs/maya-closeout-2026-10-22.md).
+
+**Kapitsa:** the cross-session shared system-prefix cache and the M4+ tensor-ops
+prefill direction were informed by [nace-ai/kapitsa](https://github.com/nace-ai/kapitsa).
+No code is copied from it.
+
 **Related research:** [TinyTitan Datacenter](https://github.com/Pummelchen/TinyTitan_Datacenter)
 runs large MoE models across a cluster of Mac minis and Studios, keeping them on
 SSD/NVMe for near-linear scale of decode throughput.
