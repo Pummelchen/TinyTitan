@@ -1011,7 +1011,8 @@ jobs:
             test_heat_split_sim test_predictive_feeder_sim test_hot_experts \
             test_tinytitan_usecap_ab test_tinytitan_price_pair \
             test_tinytitan_round_budget test_tinytitan_gpu_contention \
-            test_tinytitan_host_path_split
+            test_tinytitan_host_path_split \
+            test_quality_floor test_tinytitan_bench_compare
       - name: T6 reply-check labels and the gate scorer
         # The reply-check measurement is only as good as its labels, and every
         # label comes from a detector a hand review already corrected. These
