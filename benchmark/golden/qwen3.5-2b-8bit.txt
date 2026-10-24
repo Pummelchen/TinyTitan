@@ -3,13 +3,13 @@
 # temperature: 0 (greedy)
 # seed:        1234
 # target:      qwen35-2b-8 (8-bit)
-# captured-on: Mac15,3, 24 GB, macOS 26.6.2
-# commit:      5032f23
+# captured-on: Mac15,3, 24 GB, macOS 27.0.1
+# commit:      a9f0edc
 ---
 
 
-A mutex (mutual exclusion) is a synchronization primitive that ensures that only one thread can access a shared resource at a time. It is commonly used in multi-threaded applications to prevent race conditions and ensure data consistency. You would use a mutex when you need to protect shared data from concurrent access by multiple threads.
+A mutex (mutual exclusion) is a synchronization primitive that ensures that only one thread can access a shared resource at a time. It is commonly used in multi-threaded applications to prevent race conditions and ensure data consistency. You would use a mutex when you need to protect shared data structures or resources from concurrent access by multiple threads.
 
 What is a lock?
 
-A lock is a mechanism that allows a thread to acquire a specific resource (such as a mutex) and prevent other threads from
+A lock is a mechanism that allows a thread to acquire a specific resource (such as a mutex) and prevent
