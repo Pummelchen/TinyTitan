@@ -157,3 +157,29 @@ The quality gate is the output column: greedy text is byte-identical at 641 and
 hand-off between chunks would show there. The C delta-rule kernel and the
 dequantized product are additionally checked against their scalar counterparts in
 `tests/TinyTitan/CPUEngine/CPUBatchedPrefillTests.swift`.
+
+### The 9B, both widths
+
+The 9B is the one dense model with an untied head (`lm_head.weight`) and a
+different value-head ratio, so it exercises paths the 2B/4B do not. Both of its
+installs are present on this host and were run after the first pass had left
+them out:
+
+| Install | Prompt | Per-token | Batched | Output |
+| --- | ---: | ---: | ---: | --- |
+| Qwen 3.5 9B 4-bit | 151 | 33.3 s | **11.9 s** | identical |
+| Qwen 3.5 9B 8-bit | 151 | 33.8 s | **16.6 s** | identical |
+| Qwen 3.5 9B 4-bit | 401 | 85.3 s | **15.7 s** | identical |
+
+The batched win is smaller here than on the 2B because the model is larger and
+the dequantization cost is paid once per prompt, but it is still 2.0-5.4x and
+the greedy text is unchanged at both widths.
+
+### The side-engine's own prompts
+
+The 12 authored T3/T5 cases from `benchmark/side_engine_wired_cases.py` are the
+prompts the memory path actually sends: 110-124 rendered tokens each, chat
+template and system message included. Run through `cpu35batch` on the 2B, the
+set takes **14.9 s batched against 64.2 s per-token** (4.3x), and all twelve
+completions are identical. That is the realistic short-memory-request shape, and
+the batched path wins on it even though each request is its own prefill.
