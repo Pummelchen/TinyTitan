@@ -86,22 +86,23 @@ Per-version measurements and the method live on the wiki
 
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** | NA | NA |
-| Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** | NA | NA |
-| Qwen 3.5 4B (dense) | 4-bit | **22.81 tok/s** | **7.54 tok/s** | NA | NA |
-| Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA | NA | NA |
-| Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8 | NA |
-| Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 41.6 | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.86 tok/s** | NA | 32.60 | NA |
-| Qwen 3.5 4B (dense) | 8-bit | **14.10 tok/s** | **7.85 tok/s** | NA | NA |
-| Qwen 3.5 9B (dense) | 4-bit | **12.88 tok/s** | **4.43 tok/s** | NA | NA |
-| Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 41.6 | NA |
-| Qwen-AgentWorld 35B-A3B | 8-bit | **12.28 tok/s** | NA | NA | NA |
-| Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8 | NA |
-| Qwen 3.5 9B (dense) | 8-bit | **7.80 tok/s** | **4.42 tok/s** | NA | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.91 tok/s** | NA | 32.60 | NA |
-| Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | NA | 25% |
-| Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | NA | 25% |
+| Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
+| Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
+| Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
+| Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
+| Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 52.5% (2.1) | NA |
+| Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 52.5% (2.1) | NA |
+| Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA | 39.55% (2.0) | NA |
+| Qwen-AgentWorld 35B-A3B | 8-bit | **12.28 tok/s** | NA | 39.55% (2.0) | NA |
+| KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.86 tok/s** | NA | 32.6% (2.1) | NA |
+| KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.91 tok/s** | NA | 32.6% (2.1) | NA |
+| Qwen 3.5 4B (dense) | 4-bit | **22.81 tok/s** | **7.54 tok/s** | 25.8% (2.1) | NA |
+| Qwen 3.5 4B (dense) | 8-bit | **14.10 tok/s** | **7.85 tok/s** | 25.8% (2.1) | NA |
+| Qwen 3.5 9B (dense) | 4-bit | **12.88 tok/s** | **4.43 tok/s** | 9.2% (2.0) | NA |
+| Qwen 3.5 9B (dense) | 8-bit | **7.80 tok/s** | **4.42 tok/s** | 9.2% (2.0) | NA |
+| Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** | 3.0% (2.1) | NA |
+| Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** | 3.0% (2.1) | NA |
+
 ## Documentation
 
 - [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)
