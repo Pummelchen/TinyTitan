@@ -48,11 +48,20 @@ matrix engine, not quantization.
   batched CPU prefill must reproduce the current greedy output (or stay within
   the measured logit noise floor with zero top-1 divergence) before it ships.
 
-## Recommendation
+## Recommendation, after the quantized follow-up
 
 Accelerate wins by ~25–29× over today's per-token CPU prefill on the linear
-layers, far above any plausible margin. The next step is a batched CPU prefill
-behind an opt-in flag, using Accelerate for the GEMM with the existing
-NEON/serial path as fallback; decode stays untouched. Raw AMX is not needed:
-Accelerate already reaches the matrix hardware, and the M4+ path should use
-standard SME rather than undocumented `.word` encodings.
+layers, far above any plausible margin. That ratio is linear layers against the
+*whole* per-token cost, though, so it is not a TTFT ratio: the non-linear share
+of the token stays in place, and the shipping weights are 4/8-bit, not the FP32
+this harness measured.
+
+`cpu-prefill-quant-gemm.md` is the follow-up measurement: with the real
+quantized kernels and the dequantization charged to the batched arm, the
+projections are 10–14× faster and the real CPU prefill of the installed 2B is
+47.4 ms/token, so batching every dense projection lands around 5–10× for TTFT
+rather than 25×. The next step is a batched CPU prefill behind an opt-in flag,
+using Accelerate for the GEMM with the existing NEON/serial path as fallback;
+decode stays untouched. Raw AMX is not needed: Accelerate already reaches the
+matrix hardware, and the M4+ path should use standard SME rather than
+undocumented `.word` encodings.
