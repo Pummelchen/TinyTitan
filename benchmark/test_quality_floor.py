@@ -11,6 +11,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import sys
 import tempfile
 import unittest
 
@@ -19,6 +20,9 @@ _spec = importlib.util.spec_from_file_location(
     "quality_floor", ROOT / "benchmark" / "quality_floor.py"
 )
 quality_floor = importlib.util.module_from_spec(_spec)
+# dataclasses resolves annotations through sys.modules[cls.__module__]; a
+# module executed without being registered makes that lookup None on 3.13.
+sys.modules[_spec.name] = quality_floor
 _spec.loader.exec_module(quality_floor)
 
 
