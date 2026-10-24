@@ -10,6 +10,41 @@ import Metal
 import TinyTitan
 
 extension ServerModelSession {
+    /// Interior checkpoints are on by default; the A/B benchmark can turn
+    /// them off without a second binary. They are only useful when a later
+    /// request edits the last turn, and their capture cost is real, so the
+    /// switch is part of the measured surface.
+    package static func checkpointsEnabled(environment: [String: String]) -> Bool {
+        environment["TINYTITAN_PROMPT_CHECKPOINTS"] != "0"
+    }
+
+    /// Both stores live under one disk root with independent eviction, so
+    /// when both exist they split the configured budget between them:
+    /// together they stay inside the operator's limit rather than doubling
+    /// it. A lone store keeps the whole budget.
+    package static func promptCachePerStoreDiskLimit(
+        total: Int, checkpointsEnabled: Bool
+    ) -> Int {
+        checkpointsEnabled ? total / 2 : total
+    }
+
+    /// A previous run with checkpoints enabled leaves their records in the
+    /// directory the turn store also indexes. With the feature off nothing
+    /// would charge or evict them, so they would sit beside a full-budget turn
+    /// store; delete what can be deleted and return the bytes that refused,
+    /// for the caller to keep inside the shared limit.
+    package static func reclaimStaleCheckpoints(
+        directory: URL?, totalDiskLimitBytes: Int
+    ) async throws -> Int {
+        guard let directory else { return 0 }
+        let stale = try PromptCheckpointStore(
+            configuration: ServerPromptCacheStorageConfiguration(
+                memoryLimitBytes: 0, diskDirectory: directory,
+                diskLimitBytes: 0))
+        await stale.removeAll()
+        return min(await stale.diskBytes, totalDiskLimitBytes)
+    }
+
     /// lint:allow-long a sequential construction pipeline: tokenizer, Metal
     /// context, runtime config, model, optional MTP sidecar, runner, scratch.
     /// Each step consumes the last, so extracting any of them would return a
@@ -344,10 +379,29 @@ extension ServerModelSession {
         let promptCheckpointStore: PromptCheckpointStore?
         let promptCache: ServerPromptCache
         if effectivePromptCacheMode == .multiPrefix {
+            // Interior checkpoints are on by default; the A/B benchmark can
+            // turn them off without a second binary. They are only useful
+            // when a later request edits the last turn, and their capture
+            // cost is real, so the switch is part of the measured surface.
+            let checkpointsEnabled = Self.checkpointsEnabled(
+                environment: ProcessInfo.processInfo.environment)
+            // Both stores index the same directory and evict only their own
+            // records, so their limits add: the pair may use the whole budget,
+            // never twice it. Checkpoints that could not be deleted stay
+            // charged against the turn store's share rather than vanishing
+            // from the accounting.
+            let checkpointSurvivorBytes =
+                checkpointsEnabled
+                ? 0
+                : try await Self.reclaimStaleCheckpoints(
+                    directory: promptCacheDiskDirectory,
+                    totalDiskLimitBytes: promptCacheDiskLimitBytes)
             let storage = ServerPromptCacheStorageConfiguration(
                 memoryLimitBytes: promptCacheMemoryLimitBytes,
                 diskDirectory: promptCacheDiskDirectory,
-                diskLimitBytes: promptCacheDiskLimitBytes)
+                diskLimitBytes: Self.promptCachePerStoreDiskLimit(
+                    total: promptCacheDiskLimitBytes - checkpointSurvivorBytes,
+                    checkpointsEnabled: checkpointsEnabled))
             let store = try ServerPromptStateStore(configuration: storage)
             let persisted = store.loadEntries(domain: promptCacheDomain)
             if persisted.count > promptCacheMaximumEntries {
@@ -358,17 +412,17 @@ extension ServerModelSession {
                         .map(\.id))
             }
             promptStateStore = store
-            // Interior checkpoints are on by default; the A/B benchmark can
-            // turn them off without a second binary. They are only useful
-            // when a later request edits the last turn, and their capture
-            // cost is real, so the switch is part of the measured surface.
-            if ProcessInfo.processInfo.environment[
-                "TINYTITAN_PROMPT_CHECKPOINTS"] == "0"
-            {
-                promptCheckpointStore = nil
-            } else {
-                promptCheckpointStore = try PromptCheckpointStore(
+            if checkpointsEnabled {
+                let checkpoints = try PromptCheckpointStore(
                     configuration: storage)
+                // Index now rather than on first capture: a restart can find
+                // more checkpoint records than their half allows, and leaving
+                // them until then lets both stores exceed the shared budget
+                // in the meantime.
+                await checkpoints.indexDiskIfNeeded()
+                promptCheckpointStore = checkpoints
+            } else {
+                promptCheckpointStore = nil
             }
             promptCache = ServerPromptCache(
                 maximumEntries: promptCacheMaximumEntries,

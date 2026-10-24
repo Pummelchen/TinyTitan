@@ -93,7 +93,7 @@ extension KVCacheManager {
                 else {
                     throw InferenceStateSnapshotError.invalidLayout
                 }
-                restoreStreamedSnapshot(
+                try restoreStreamedSnapshot(
                     layer: layer, source: source, length: kLength)
                 offset += 2 * kLength
                 segment += 2

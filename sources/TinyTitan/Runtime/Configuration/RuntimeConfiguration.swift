@@ -417,7 +417,12 @@ public struct RuntimeConfiguration: Sendable, Equatable {
         guard Self.supportedYaRNContextTokens.contains(yarnContextTokens) else {
             throw RuntimeConfigurationError.invalidYaRNContextTokens(yarnContextTokens)
         }
-        if let hostKVWindowTokens, hostKVWindowTokens <= 0 {
+        if let hostKVWindowTokens,
+            !(1...Self.maximumContextTokens).contains(hostKVWindowTokens)
+        {
+            // A window larger than the largest context this engine serves
+            // cannot hold a meaningful selection, and the arena it would size
+            // is per layer and per slot: refuse at parse, not at allocation.
             throw RuntimeConfigurationError.invalidHostKVWindowTokens(
                 hostKVWindowTokens)
         }

@@ -114,10 +114,14 @@
 > commits, no leaks found, 2.5 s), pip-audit 2.10.1 over `benchmark/requirements.txt`
 > (no known vulnerabilities) and npm audit over both plugin lockfiles (0
 > vulnerabilities each, verified to read the lockfile alone) -- and
-> `swift test --enable-code-coverage` rides the existing serial-test run, its llvm-cov
-> JSON uploaded as the `swift-code-coverage` artifact: reported, not gated, per the
+> `swift test --enable-code-coverage` rides the existing serial-test run, and
+> `tools/coverage-export.sh` merges its seven test bundles into one llvm-cov JSON
+> uploaded as the `swift-code-coverage` artifact: reported, not gated, per the
 > operator's call, with `if-no-files-found: error` so a coverage run that wrote no
-> report cannot read as a pass. CodeQL was already the SAST half. The supply-chain
+> report cannot read as a pass. Uploading SwiftPM's own `<bin-path>/codecov/*.json`
+> instead was the defect: that file names one test bundle, not the package
+> (AUD2-031, corrected after this paragraph was first written). CodeQL was already
+> the SAST half. The supply-chain
 > checkout takes `fetch-depth: 0` because its gitleaks step reads history; the
 > `thread-sanitizer` checkout stays at depth 1 -- measured, it runs no gate that reads history.
 > What the list carries now is Phase E only, which the operator answered the same

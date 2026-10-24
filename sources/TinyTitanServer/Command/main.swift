@@ -37,6 +37,15 @@ if arguments.catalogOnly, let directory = arguments.modelsDirectory {
 }
 
 do {
+    // The listener binds after the model is loaded, so an occupied port would
+    // otherwise cost a full multi-gigabyte load before it was reported. The
+    // bind below stays authoritative; this only moves the common refusal ahead
+    // of the load.
+    if !ServerPortCheck.isAvailable(port: arguments.port) {
+        FileHandle.standardError.write(
+            Data("error: --port \(arguments.port) is already in use on 127.0.0.1\n".utf8))
+        exit(2)
+    }
     let signals = ServerTerminationSignals()
     let modelURL = URL(fileURLWithPath: arguments.model).standardizedFileURL
     // Without --reasoning these are the --thinking / --reasoning-effort

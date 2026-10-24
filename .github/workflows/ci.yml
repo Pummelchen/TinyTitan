@@ -1025,21 +1025,35 @@ jobs:
         # `swift test` implicitly performs its own DEBUG build, which also
         # produces the `.build/debug/TinyTitanRepack` binary that RepackCLITests
         # spawns — no separate debug build step is needed. `--enable-code-coverage`
-        # rides the same run rather than paying for a second one: this toolchain's
-        # SwiftPM writes the llvm-cov JSON report directly to
-        # `.build/debug/codecov/`, which the step below uploads.
+        # rides the same run rather than paying for a second one. What that run
+        # leaves under `<bin-path>/codecov/` is *not* a package-wide report: on
+        # this toolchain the JSON SwiftPM writes there names a single test bundle
+        # (27 files, 503 functions, 4,095/4,256 lines) while the merged
+        # `default.profdata` beside it holds 11,984 functions, so the next step
+        # does the merge itself rather than uploading whatever landed. AUD2-031.
         run: swift test --no-parallel --enable-code-coverage
+      - name: Export one merged coverage report for the package
+        # Runs immediately after the suite, before anything rebuilds: llvm-cov
+        # silently drops an object newer than the profile ("no coverage data
+        # found"), which would export a short report that still parses. The script
+        # refuses that, takes its object list from `swift package dump-package`
+        # rather than globbing a build directory that carries stale bundles from
+        # removed products, and then proves the report is package-wide by
+        # exporting each bundle alone and requiring the merged file set to strictly
+        # contain every one of them.
+        run: tools/coverage-export.sh
       - name: Upload the coverage report as an artifact (not a gate)
         # The operator's 2026-10-11 call: coverage is a signal to read, not a
         # wall to hit, so nothing here asserts a threshold — a threshold with no
-        # baseline is a number invented to be failed. The artifact is what makes
-        # the report fetchable from the run page; `if-no-files-found: error`
-        # keeps a coverage run that wrote no report from reading as a pass, the
-        # same discipline every gate here applies to a scan that read nothing.
+        # baseline is a number invented to be failed. What *is* checked, in the
+        # step above, is that the artifact describes the whole package; the
+        # artifact line here just keeps a run that wrote no report from reading
+        # as a pass, the same discipline every gate applies to a scan that
+        # read nothing.
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: swift-code-coverage
-          path: .build/debug/codecov/*.json
+          path: .build/package-code-coverage.json
           if-no-files-found: error
       - name: Check Markdown links
         run: |
@@ -1050,6 +1064,13 @@ jobs:
           root = ENV.fetch('GITHUB_WORKSPACE', Dir.pwd)
           failures = 0
           checked = 0
+          # The scanner works on raw lines, so a bracketed Swift initializer inside
+          # a code span -- `[UInt64](repeating: 0, count: n)` -- matches the link
+          # pattern and gets reported as a broken link, and a fenced example block is
+          # scanned as prose. Neither is a link: in CommonMark a code span is literal
+          # text, and so is everything inside a fence. Both are dropped before
+          # matching. No real link is skipped -- an unmatched backtick leaves the rest
+          # of the line scannable, and only paired spans are removed. (AUD2-051)
           Dir.glob(File.join(root, '**', '*.md')).sort.each do |file|
             # Build output, the model store and installed dependencies are not
             # project docs. `node_modules` matters now that the JS toolchain is
@@ -1058,7 +1079,21 @@ jobs:
             next if file.include?('/.build/') || file.include?('/.qwen/') ||
                     file.include?('/node_modules/')
             dir = File.dirname(file)
-            File.readlines(file).each_with_index do |line, index|
+            fence = nil
+            File.readlines(file).each_with_index do |raw, index|
+              marker = raw.lstrip
+              if fence
+                fence = nil if marker.start_with?(fence)
+                next
+              end
+              if marker.start_with?('```')
+                fence = '```'
+                next
+              elsif marker.start_with?('~~~')
+                fence = '~~~'
+                next
+              end
+              line = raw.gsub(/(`+)(?:(?!\1).)*?\1/m, ' ')
               line.scan(/\[[^\]]*\]\(([^)]+)\)/) do |match|
                 target = match[0].strip
                 next if target.empty?

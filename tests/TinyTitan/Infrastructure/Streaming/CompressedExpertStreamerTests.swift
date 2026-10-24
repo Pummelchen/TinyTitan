@@ -253,6 +253,68 @@ struct CompressedExpertStreamerTests {
         }
     }
 
+    /// The runner commits GPU phase-1 work for every miss slot as soon as the
+    /// load publishes its first stage, so that publish has to follow the last
+    /// wave's fronts, not the first wave's. Ten misses is two waves.
+    @Test("A multi-wave compressed plan publishes after every wave's fronts")
+    func multiWavePlanPublishesAfterTheLastWave() throws {
+        let count = 10
+        let stride = 1_000
+        let split = 670
+        var file = Data()
+        var frames: [[ExpertBlobIndex.Blob]] = []
+        for expert in 0..<count {
+            var blobs: [ExpertBlobIndex.Blob] = []
+            for range in [0..<split, split..<stride] {
+                let raw = [UInt8](repeating: UInt8(expert), count: range.count)
+                let frame = try raw.withUnsafeBytes { buffer in
+                    try ExpertBlobCodec.compress(
+                        source: try #require(buffer.baseAddress), count: buffer.count)
+                }
+                blobs.append(
+                    .init(offset: UInt64(file.count), length: UInt32(frame.count)))
+                file.append(frame)
+            }
+            frames.append(blobs)
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("multi-wave-layer-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try file.write(to: url)
+        let device = try MetalContext().device
+        let layout = StreamLayout(
+            path: url.path,
+            streamOffset: 0,
+            streamSize: try Self.fileSize(url),
+            expertsPerLayer: count,
+            expertStride: UInt64(stride),
+            phase1Bytes: UInt64(split),
+            compressedFrames: frames)
+        let streamer = try PreadExpertStreamer(
+            layout: layout, device: device, slotCount: count)
+        let plan = try streamer.planExpertsCached(experts: Array(0..<count))
+        #expect(plan.misses.count == count)
+        // Poisoned, so a slot that has not been written to yet cannot read as
+        // a decoded front: every expert byte here is below 0xAA.
+        for slot in plan.assignedSlots {
+            memset(streamer.slotPointers[slot], 0xAA, stride)
+        }
+        var frontsWritten: [Bool] = []
+        _ = try streamer.executeExpertCachePlan(plan) {
+            frontsWritten = plan.assignedSlots.map { slot in
+                streamer.slotPointers[slot].load(as: UInt8.self) != 0xAA
+            }
+        }
+        #expect(frontsWritten == [Bool](repeating: true, count: count))
+        for (index, slot) in plan.assignedSlots.enumerated() {
+            let bytes = [UInt8](
+                UnsafeRawBufferPointer(
+                    start: streamer.slotPointers[slot], count: stride))
+            #expect(
+                bytes == [UInt8](repeating: UInt8(plan.experts[index]), count: stride))
+        }
+    }
+
     @Test("The asynchronous plan path decodes a compressed layer too")
     func asyncPlanDecodesCompressedExperts() throws {
         let (url, frames) = try Self.writeCompressedLayer(split: Self.split)

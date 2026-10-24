@@ -21,6 +21,10 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
     package let logprobs: Bool?
     package let presencePenalty: Float?
     package let frequencyPenalty: Float?
+    /// Decoded so a non-zero value can be refused: the sampler has no min-p
+    /// filter, and ignoring the field would sample as if it were zero while
+    /// the client believes it asked for one.
+    package let minP: Float?
     /// Requested reasoning-effort level. Validated against the served model
     /// family's chat template and the server's load-time profile.
     package let reasoningEffort: String?
@@ -72,6 +76,7 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         logprobs: Bool? = nil,
         presencePenalty: Float? = nil,
         frequencyPenalty: Float? = nil,
+        minP: Float? = nil,
         reasoningEffort: String? = nil,
         chatTemplateKwargs: OpenAIChatTemplateKwargs? = nil,
         reasoningBudgetTokens: Int? = nil,
@@ -97,6 +102,7 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         self.logprobs = logprobs
         self.presencePenalty = presencePenalty
         self.frequencyPenalty = frequencyPenalty
+        self.minP = minP
         self.reasoningEffort = reasoningEffort
         self.chatTemplateKwargs = chatTemplateKwargs
         self.reasoningBudgetTokens = reasoningBudgetTokens
@@ -116,6 +122,7 @@ package struct OpenAIChatRequest: Codable, Equatable, Sendable {
         case repetitionPenalty = "repetition_penalty"
         case presencePenalty = "presence_penalty"
         case frequencyPenalty = "frequency_penalty"
+        case minP = "min_p"
         case reasoningEffort = "reasoning_effort"
         case chatTemplateKwargs = "chat_template_kwargs"
         case reasoningBudgetTokens = "reasoning_budget_tokens"

@@ -12,9 +12,8 @@ import TinyTitanFormat
 // runs -- because that split is what keeps the decode inside the layer's window
 // instead of in front of it.
 
-/// One stream's decode arguments. The first eight fields are the kernel's
-/// `StreamDesc`; `phase` stays on the host.
 struct RANSStreamPlan {
+    static let descriptorWords = 9
     var payloadOffset: UInt32
     var tableOffset: UInt32
     var outputOffset: UInt32
@@ -23,18 +22,21 @@ struct RANSStreamPlan {
     var streamIndex: UInt32
     var streamCount: UInt32
     var slotOffset: UInt32
+    var payloadEnd: UInt32
     let phase: Int
 }
 
 /// The per-expert stream plans built by the parallel block loop at layer open.
 ///
-/// unchecked-invariant: every write to `plans` or `payloadSizes` happens while
-/// holding `lock`, and both are read only after `concurrentPerform` returns, so
-/// the unchecked conformance publishes slices that are complete.
+/// unchecked-invariant: every write to `plans`, `payloadSizes` or `failures`
+/// happens while holding `lock`, and both are read only after
+/// `concurrentPerform` returns, so the unchecked conformance publishes slices
+/// that are complete.
 private final class RANSPlanAccumulator: @unchecked Sendable {
     let lock = NSLock()
     var plans: [[RANSStreamPlan]]
     var payloadSizes: [Int]
+    var failures: [String] = []
 
     init(expertCount: Int) {
         plans = Array(repeating: [], count: expertCount)
@@ -70,6 +72,7 @@ private final class RANSGPU: @unchecked Sendable {
                 uint streamIndex;
                 uint streamCount;
                 uint slotOffset;
+                uint payloadEnd;
             };
             kernel void rans_decode(
                 device const uchar *payload [[buffer(0)]],
@@ -77,6 +80,7 @@ private final class RANSGPU: @unchecked Sendable {
                 constant StreamDesc *streams [[buffer(2)]],
                 device uchar *output [[buffer(3)]],
                 device const uint2 *slotTables [[buffer(4)]],
+                device atomic_uint *failure [[buffer(5)]],
                 uint gid [[thread_position_in_grid]])
             {
                 StreamDesc d = streams[gid];
@@ -89,6 +93,10 @@ private final class RANSGPU: @unchecked Sendable {
                 for (uint position = d.streamIndex; position < d.symbolCount;
                      position += d.streamCount) {
                     while (state < (1u << 23)) {
+                        if (data >= d.payloadEnd) {
+                            atomic_store_explicit(failure, 1u, memory_order_relaxed);
+                            return;
+                        }
                         state = (state << 8) | uint(payload[data]);
                         data += 1u;
                     }
@@ -134,6 +142,7 @@ final class RANSLayerResources: @unchecked Sendable {
     let payload: MTLBuffer
     let payloadStride: Int
     let descriptors: MTLBuffer
+    let failure: MTLBuffer
     let maximumWave = 8
     /// Stream plans per expert, payload offsets relative to that expert's run.
     let plans: [[RANSStreamPlan]]
@@ -201,11 +210,31 @@ final class RANSLayerResources: @unchecked Sendable {
                 guard
                     let (lengths, base, lengthBytes) = Self.lengthTable(
                         block: block, fd: fd, payloadPath: payloadPath)
-                else { return }
+                else {
+                    // A failed read cannot be skipped: an empty plan for the
+                    // expert would silently skip its decode and leave stale
+                    // weights in the slot, and a zero payload size would
+                    // understate the staging stride the wave is read into.
+                    accumulator.lock.lock()
+                    accumulator.failures.append(
+                        "expert \(expert) block \(index): stream-length table unreadable")
+                    accumulator.lock.unlock()
+                    return
+                }
                 let streams = ExpertRANSIndex.streams(symbolCount: Int(block.symbolCount))
                 var streamOffset = base + lengthBytes
                 for stream in 0..<streams {
                     let length = Int(lengths[stream * 2]) | Int(lengths[stream * 2 + 1]) << 8
+                    let blockEnd = base + Int(block.payloadLength)
+                    guard length >= 8, streamOffset + length <= blockEnd else {
+                        accumulator.lock.lock()
+                        accumulator.failures.append(
+                            "expert \(expert) block \(index) stream \(stream): "
+                                + "invalid stream range \(streamOffset)..<\(streamOffset + length) "
+                                + "for block ending at \(blockEnd)")
+                        accumulator.lock.unlock()
+                        return
+                    }
                     plans.append(
                         RANSStreamPlan(
                             payloadOffset: UInt32(streamOffset - runStart),
@@ -216,6 +245,7 @@ final class RANSLayerResources: @unchecked Sendable {
                             streamIndex: UInt32(stream),
                             streamCount: UInt32(streams),
                             slotOffset: UInt32(index * 16384),
+                            payloadEnd: UInt32(streamOffset + length - runStart),
                             phase: index < phases.count ? Int(phases[index]) : 0))
                     streamOffset += length
                 }
@@ -226,6 +256,9 @@ final class RANSLayerResources: @unchecked Sendable {
             accumulator.payloadSizes[expert] = payloadBytes
             accumulator.lock.unlock()
         }
+        if let first = accumulator.failures.first {
+            throw ModelError.indexCorrupt(detail: "rANS layer \(payloadPath): \(first)")
+        }
         let maximumPayload = accumulator.payloadSizes.max() ?? 0
         self.plans = accumulator.plans
         let stride = max(1, maximumPayload)
@@ -235,12 +268,15 @@ final class RANSLayerResources: @unchecked Sendable {
             let payloadBuffer = device.makeBuffer(
                 length: max(1, stride * maximumWave), options: .storageModeShared),
             let descriptorBuffer = device.makeBuffer(
-                length: max(1, maximumStreams * 8 * 4), options: .storageModeShared)
+                length: max(1, maximumStreams * RANSStreamPlan.descriptorWords * 4),
+                options: .storageModeShared),
+            let failureBuffer = device.makeBuffer(length: 4, options: .storageModeShared)
         else {
             throw ModelError.residentBufferWrapFailed
         }
         self.payload = payloadBuffer
         self.descriptors = descriptorBuffer
+        self.failure = failureBuffer
     }
 
     /// The payload byte run of one expert, for the bounded reader.

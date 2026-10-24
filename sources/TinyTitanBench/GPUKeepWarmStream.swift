@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import Synchronization
 
 /// Benchmark-only keep-warm stream: issues a one-threadgroup dispatch on its own
 /// command queue every `intervalUs` while the measured arm sleeps between
@@ -15,9 +16,8 @@ import Metal
 ///
 /// unchecked-invariant: `dispatches` is written only by the stream queue and
 /// read only after `stop()` has joined it; `probeMicroseconds` is written by
-/// `calibrate()` before `start()` and never again; `running` goes false ->
-/// true -> false and is never read on the measuring thread, so a stale read
-/// costs one extra iteration of a bench spinner.
+/// `calibrate()` before `start()` and never again.
+/// `running` is an atomic cross-thread flag.
 final class GPUKeepWarmStream: @unchecked Sendable {
     static let minimumIntervalUs = 100
     static let maximumIntervalUs = 20_000
@@ -35,7 +35,7 @@ final class GPUKeepWarmStream: @unchecked Sendable {
     private let interval: TimeInterval
     private let serial = DispatchQueue(label: "tinytitan.bench.keepwarm")
     private let finished = DispatchSemaphore(value: 0)
-    private var running = false
+    private let running = Atomic<Bool>(false)
     private var dispatches = 0
     private(set) var probeMicroseconds = 0.0
 
@@ -89,10 +89,10 @@ final class GPUKeepWarmStream: @unchecked Sendable {
     }
 
     func start() {
-        running = true
+        running.store(true, ordering: .releasing)
         serial.async { [weak self] in
             guard let self else { return }
-            while self.running {
+            while self.running.load(ordering: .acquiring) {
                 if let cb = self.queue.makeCommandBuffer() {
                     self.encode(cb)
                     cb.commit()
@@ -111,7 +111,7 @@ final class GPUKeepWarmStream: @unchecked Sendable {
     /// Number of dispatches the stream actually issued. Blocks until the stream
     /// thread has joined, so the count is final when it returns.
     func stop() -> Int {
-        running = false
+        running.store(false, ordering: .releasing)
         finished.wait()
         return dispatches
     }

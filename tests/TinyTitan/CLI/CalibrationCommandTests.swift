@@ -112,6 +112,42 @@ import TinyTitanLib
         await #expect(throws: CalibrationCommandError.self) {
             _ = try await CalibrationCommand.run(CalibrationOptions())
         }
+        await #expect(throws: CalibrationCommandError.self) {
+            _ = try await CalibrationCommand.run(
+                CalibrationOptions(check: "/tmp/p", plan: true))
+        }
+        await #expect(throws: CalibrationCommandError.self) {
+            _ = try await CalibrationCommand.run(
+                CalibrationOptions(model: "/tmp/m", plan: true))
+        }
+    }
+
+    /// Every conflict has to say which options it refuses. All three sites
+    /// shared one message written for `--model` with `--check`, so a refused
+    /// `--plan` or `--measure` combination printed advice about flags the user
+    /// never passed.
+    @Test func eachConflictRefusalNamesItsOwnFlags() async {
+        let conflicts: [(String, CalibrationOptions)] = [
+            ("--check --plan", CalibrationOptions(check: "/tmp/p", plan: true)),
+            ("--model --plan", CalibrationOptions(model: "/tmp/m", plan: true)),
+            ("--model --check", CalibrationOptions(model: "/tmp/m", check: "/tmp/p")),
+            ("--check --measure", CalibrationOptions(check: "/tmp/p", measure: true)),
+        ]
+        for (combined, options) in conflicts {
+            do {
+                _ = try await CalibrationCommand.run(options)
+                Issue.record("\(combined) was accepted; expected a refusal")
+            } catch let error as CalibrationCommandError {
+                for flag in combined.split(separator: " ") {
+                    #expect(
+                        error.description.contains(String(flag)),
+                        "\(combined) refused with \"\(error.description)\""
+                    )
+                }
+            } catch {
+                Issue.record("\(combined) threw \(error), not a CalibrationCommandError")
+            }
+        }
     }
 
     /// A toy install plus a profile whose machine and target match it, for the
@@ -205,6 +241,43 @@ import TinyTitanLib
         ])
         #expect(parsed.expertCacheSlots == nil)
         #expect(parsed.calibrationLogLine?.contains("not applied: boundedIO") == true)
+    }
+
+    /// The CLI binds the profile to the install it was given: a profile
+    /// measured for another checkpoint -- different id, family or width -- is
+    /// refused rather than applied.
+    @Test(arguments: ["modelID", "family", "weightBits"])
+    func foreignIdentityProfileIsRefused(_ field: String) throws {
+        let directory = try QwenToySynthetic.write(weightBits: 4)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let modelID =
+            field == "modelID" ? "another-model" : identity.modelID
+        let family =
+            field == "family"
+            ? (identity.family.rawValue == "qwen36" ? "qwen38" : "qwen36")
+            : identity.family.rawValue
+        let weightBits =
+            field == "weightBits"
+            ? (identity.weightBits == 4 ? 8 : 4)
+            : identity.weightBits
+        let profile = CalibrationProfile(
+            machine: CalibrationProfile.currentMachine(),
+            target: .init(
+                modelID: modelID, family: family, weightBits: weightBits,
+                contextTokens: 8192),
+            knobs: .init(),
+            measured: true, measuredAt: "2026-10-22T00:00:00Z",
+            source: "calibrate/1")
+        let url = try writeProfile(profile)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(throws: ArgsError.self) {
+            try Args.parse([
+                "--model", directory.path, "--prompt", "hi",
+                "--max-context", "8192",
+                "--calibration-profile", url.path,
+            ])
+        }
     }
 
     @Test func corruptProfileIsRefused() throws {

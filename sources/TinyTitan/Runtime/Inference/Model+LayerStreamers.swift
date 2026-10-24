@@ -84,6 +84,10 @@ extension Model {
 
     /// Drop a layer's expert cache. Safe once that layer's work is finished:
     /// the next use reopens it lazily, which is how it was created.
+    @available(
+        *, deprecated,
+        message: "No caller (TT-050). Remove unless layer-major prefill lands and calls it."
+    )
     public func releaseLayerStreamer(_ L: Int) {
         streamersQueue.sync {
             guard L >= 0, L < streamersBox.streamers.count else { return }
@@ -152,7 +156,7 @@ extension Model {
                 forLayer: L, layout: packedExpertsLayout,
                 compressed: compressed, url: url)
         }
-        let layout = Self.streamLayout(
+        let layout = try Self.streamLayout(
             url: url, packed: packedExpertsLayout, layer: L,
             streamSize: streamSize, phase1Bytes: phase1Bytes,
             compressed: compressed, rans: rans, ransPhases: ransPhases)
@@ -349,14 +353,18 @@ extension Model {
     /// expert lists its own compact source offsets against them.
     static func expertTensorMaps(
         forLayer layer: Int, layout: PackedExpertsLayout
-    ) -> [[ExpertBlobTensor]] {
+    ) throws -> [[ExpertBlobTensor]] {
         let experts = layout.layers[layer].experts
         guard let target = experts.first?.subTensors else { return [] }
-        return experts.map { expert in
+        var maps: [[ExpertBlobTensor]] = []
+        for expert in experts {
             guard let stored = expert.subTensors["gate"]?.bits,
                 stored == 2 || stored == 3
-            else { return [] }
-            return expert.subTensors.compactMap { name, tensor -> ExpertBlobTensor? in
+            else {
+                maps.append([])
+                continue
+            }
+            let tensors = expert.subTensors.compactMap { name, tensor -> ExpertBlobTensor? in
                 guard let wide = target[name] else { return nil }
                 return ExpertBlobTensor(
                     sourceOffset: Int(tensor.offset),
@@ -367,7 +375,11 @@ extension Model {
                     expands: name == "gate" || name == "up" || name == "down",
                     rescales: name.hasSuffix("_scales"))
             }
+            try TwoBitExpand.validateExpansionLayout(
+                tensors, expertStride: Int(layout.expertStride))
+            maps.append(tensors)
         }
+        return maps
     }
 
     static func streamLayout(
@@ -375,7 +387,7 @@ extension Model {
         streamSize: UInt64, phase1Bytes: UInt64?,
         compressed: ExpertBlobIndex.Layout?, rans: ExpertRANSIndex.Layout?,
         ransPhases: [UInt8]
-    ) -> StreamLayout {
+    ) throws -> StreamLayout {
         StreamLayout(
             path: url.path,
             streamOffset: 0,
@@ -387,58 +399,12 @@ extension Model {
             expertSizes: compressed == nil && rans == nil
                 ? packed.layers[layer].experts.map(\.size) : nil,
             expertTensors: compressed == nil && rans == nil
-                ? Self.expertTensorMaps(forLayer: layer, layout: packed) : nil,
+                ? try Self.expertTensorMaps(forLayer: layer, layout: packed)
+                : nil,
             phase1Bytes: phase1Bytes,
             compressedFrames: compressed?.entries.map(\.frames),
             compressedBlockBytes: compressed?.blockBytes ?? 0,
             rans: rans, ransPhases: ransPhases)
-    }
-
-    /// The rANS sidecar and per-block phases, or `(nil, [])` for a raw layer.
-    static func ransLayoutAndPhases(
-        forLayer layer: Int, layout: PackedExpertsLayout, url: URL
-    ) throws -> (ExpertRANSIndex.Layout?, [UInt8]) {
-        guard layout.compression == .rans else { return (nil, []) }
-        let rans = try ransLayout(
-            beside: url, expertsPerLayer: layout.expertsPerLayer,
-            expertStride: layout.expertStride)
-        return (rans, ransPhases(for: layout.layers[layer]))
-    }
-
-    /// Phase 0/1 per block index, in the writer's block order (sorted tensor
-    /// name, BF16 tensors contributing a mantissa and an exponent block).
-    static func ransPhases(for layer: LayerLayout) -> [UInt8] {
-        guard let expert = layer.experts.first else { return [] }
-        var phases: [UInt8] = []
-        for name in expert.subTensors.keys.sorted() {
-            guard let tensor = expert.subTensors[name] else { continue }
-            let phase: UInt8 = name.hasPrefix("down") ? 1 : 0
-            phases.append(phase)
-            if tensor.dtype == "BF16" { phases.append(phase) }
-        }
-        return phases
-    }
-
-    /// Reads and validates a layer's rANS sidecar.
-    static func ransLayout(
-        beside url: URL,
-        expertsPerLayer: Int,
-        expertStride: UInt64
-    ) throws -> ExpertRANSIndex.Layout {
-        let name = ExpertRANSIndex.sidecarName(forLayerFile: url.lastPathComponent)
-        let indexURL = url.deletingLastPathComponent().appendingPathComponent(name)
-        let cap = UInt64(
-            ExpertRANSIndex.headerBytes
-                + Int(ExpertRANSIndex.maximumBlockCount) * 512
-                + expertsPerLayer * Int(ExpertRANSIndex.maximumBlockCount)
-                * ExpertRANSIndex.blockBytes)
-        let data = try BoundedMetadataRead.read(fileAt: indexURL, maxBytes: cap)
-        let payloadSize =
-            try FileManager.default
-            .attributesOfItem(atPath: url.path)[.size] as? UInt64 ?? 0
-        return try ExpertRANSIndex.decode(
-            data, expectedExperts: expertsPerLayer,
-            expertStride: expertStride, payloadSize: payloadSize)
     }
 
     static func compressedLayout(

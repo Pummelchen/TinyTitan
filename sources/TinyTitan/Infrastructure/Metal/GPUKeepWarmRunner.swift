@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import Synchronization
 
 /// An opt-in second command queue that issues one micro-dispatch on a fixed
 /// period for the duration of a generation.
@@ -20,13 +21,10 @@ import Metal
 /// thread that wakes ~1600 times a second competes for the host cores the expert
 /// I/O threads use — §5v priced that competition at -15 % when it was the
 /// engine's own worker spinning.
-/// unchecked-invariant: `running` and `dispatches` are the only mutable state.
+/// unchecked-invariant: `running` is an atomic cross-thread flag.
 /// `dispatches` is written only on `serial` and read only after `stop()` has
-/// joined it; `running` is a one-way flag written by `start()`/`stop()` on the
-/// caller's thread and read by the stream thread between iterations, and a stale
-/// read costs one extra iteration of a spinner; every Metal object the stream
-/// touches is created in `init` and never mutated afterwards, and `serial` is
-/// the only encoder of the buffers it owns.
+/// joined it; every Metal object the worker touches is created in `init` and
+/// never mutated afterwards, and `serial` is the only encoder of the buffers it owns.
 package final class GPUKeepWarmRunner: @unchecked Sendable {
     private static let spinRows: UInt32 = 8
     private static let spinColumns: UInt32 = 2560
@@ -44,7 +42,7 @@ package final class GPUKeepWarmRunner: @unchecked Sendable {
     private let intervalUs: Int
     private let serial = DispatchQueue(label: "tinytitan.keepwarm", qos: .utility)
     private let finished = DispatchSemaphore(value: 0)
-    private var running = false
+    private let running = Atomic<Bool>(false)
     private var dispatches = 0
     private var startedAt = 0.0
 
@@ -100,11 +98,11 @@ package final class GPUKeepWarmRunner: @unchecked Sendable {
     }
 
     package func start() {
-        running = true
+        running.store(true, ordering: .releasing)
         startedAt = Date().timeIntervalSince1970
         serial.async { [weak self] in
             guard let self else { return }
-            while self.running {
+            while self.running.load(ordering: .acquiring) {
                 guard let cb = self.queue.makeCommandBuffer() else { break }
                 self.encode(cb)
                 cb.commit()
@@ -123,7 +121,7 @@ package final class GPUKeepWarmRunner: @unchecked Sendable {
     /// rate, because §5bk's nominal 200 us period was 616 us on the wire and a
     /// live arm can only be read against what it actually issued.
     package func stop() {
-        running = false
+        running.store(false, ordering: .releasing)
         finished.wait()
         let elapsed = Date().timeIntervalSince1970 - startedAt
         let issued = dispatches

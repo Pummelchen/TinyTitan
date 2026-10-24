@@ -169,8 +169,7 @@ extension PreadExpertStreamer {
         // expert's payload. When sizes vary, read exactly each expert's bytes
         // through the range fetch and skip the phase-1 split (its split point
         // is per-width, not per-layer).
-        let sizesAreUniform =
-            layout.expertSizes?.allSatisfy { $0 == layout.expertStride } ?? true
+        let sizesAreUniform = layout.hasUniformExpertSizes
         if !sizesAreUniform, let sizes = layout.expertSizes {
             let counts = plan.misses.map { miss -> Int in
                 let expert = plan.experts[miss]
@@ -248,11 +247,14 @@ extension PreadExpertStreamer {
         for index in plan.misses { try readPlanMiss(plan, index: index) }
     }
 
-    /// Decode every miss of a compressed plan into its slots, one wave a layer.
+    /// Decode every miss of a compressed plan into its slots, eight experts a
+    /// wave; a miss set no larger than that is a single wave.
     ///
-    /// The wave is the layer's whole miss set, and it is handed to
-    /// `decodeCompressedSet`, which reads it in one storage call and decodes
-    /// every block in parallel -- fronts, the phase-1 publish, then the tails.
+    /// Each wave is handed to `decodeCompressedSet`, which reads it in one
+    /// storage call and decodes every block in parallel -- fronts, then the
+    /// tails. The first stage is published from the wave that ends at the last
+    /// miss, because the consumer commits GPU work for every miss slot once it
+    /// fires.
     /// Measured on Ornith 4-bit: four-experts-at-a-time with per-frame ranges
     /// took 5-13 ms to read and 1.8 ms per expert to decode, against a raw path
     /// that reads 3-4 experts at 3.4 GB/s in ~2 ms.
@@ -270,7 +272,7 @@ extension PreadExpertStreamer {
                 experts: misses.map { plan.experts[$0] },
                 frames: frames,
                 into: misses.map { slotPointers[plan.assignedSlots[$0]] },
-                firstStage: start == 0 ? firstStage : nil)
+                firstStage: end == plan.misses.count ? firstStage : nil)
             start = end
         }
     }

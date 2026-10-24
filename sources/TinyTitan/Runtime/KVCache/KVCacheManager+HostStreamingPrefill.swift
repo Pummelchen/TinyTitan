@@ -409,10 +409,16 @@ extension KVCacheManager {
 
     func restoreStreamedSnapshot(
         layer: Int, source: UnsafeRawPointer, length: Int
-    ) {
+    ) throws {
+        // Returning silently here would leave the arena stale while the
+        // caller reports a successful restore — a fail-open backstop, so it
+        // throws instead. The caller's segment-length check makes this
+        // unreachable today; the throw is what keeps it that way.
         guard let k = hostK[layer], let v = hostV[layer],
             length <= hostArenaLengths[layer]
-        else { return }
+        else {
+            throw InferenceStateSnapshotError.invalidLayout
+        }
         memcpy(k, source, length)
         memcpy(v, source.advanced(by: length), length)
         // The window's map no longer describes the arena: every row must be
