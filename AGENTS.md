@@ -31,6 +31,15 @@ What needs a reason is *optimization*: do not start performance work, change
 runtime defaults, or alter numerics unless the user asked. Report results as
 measurements, not as ceilings, and treat an unexplained slowdown as a finding.
 
+**A performance improvement may not be bought with model quality.** A speed,
+memory or capacity change that degrades generated text, token choices, or logits
+beyond the measured noise floor is rejected: it is not a performance improvement,
+and it is not committed — not even behind an experimental flag. Before any
+performance claim, require golden text identity, or the checked prompt set with
+zero top-1 divergence and logits within the measured noise floor, together with a
+paired benchmark against the current default. If the quality check fails, record
+the measurement and reject the change.
+
 **Scope: an LLM engine and its local server, and nothing else.** The supported way
 to use a model is the loopback OpenAI-compatible server with a client the user
 already has — Zed, Codex, Claude Code, DeepSeek Harness, `curl`. There is
