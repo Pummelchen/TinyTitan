@@ -164,6 +164,62 @@ struct ManagedModelBackendTests {
             })
     }
 
+    /// The plan-free initializer is what K2's residency path uses: no
+    /// `ModelSessionPlan` exists for the family, so the wrapper takes the
+    /// facts, the context limit, the sampling row and a loader directly.
+    private func k2Backend(
+        idleTimeout: Duration? = nil,
+        recorder: LoadRecorder
+    ) -> ManagedModelBackend {
+        ManagedModelBackend(
+            facts: ModelSessionFacts(
+                modelID: "k2",
+                prefillChunkTokens: 0,
+                promptCacheMode: .off,
+                expertCacheSlots: 16),
+            maximumContext: 8_192,
+            samplingDefaults: GenerationDefaults.forFamily(.k2Horizon),
+            idleTimeout: idleTimeout,
+            loader: { context in
+                try recorder.record(context)
+                return StubBackend()
+            })
+    }
+
+    @Test func planFreeInitializerDefersAndReportsItsOwnFacts() async throws {
+        let recorder = LoadRecorder()
+        let managed = k2Backend(recorder: recorder)
+
+        // Before any load: the values a request is validated against.
+        #expect(managed.maximumContext == 8_192)
+        #expect(managed.samplingDefaults == GenerationDefaults.forFamily(.k2Horizon))
+        #expect(managed.samplingDefaults.temperature == 1.0)
+        #expect(recorder.loads == 0)
+
+        _ = try await managed.generate(request()) { _ in }
+        #expect(recorder.loads == 1)
+        #expect(recorder.contexts.count == 1)
+        // A second request reuses the resident backend rather than rebuilding.
+        _ = try await managed.generate(request()) { _ in }
+        #expect(recorder.loads == 1)
+    }
+
+    @Test func planFreeInitializerUnloadsAfterIdleAndReloads() async throws {
+        let recorder = LoadRecorder()
+        let managed = k2Backend(idleTimeout: .milliseconds(30), recorder: recorder)
+
+        _ = try await managed.generate(request()) { _ in }
+        #expect(recorder.loads == 1)
+        try await waitForUnload(managed, timeout: .seconds(2))
+
+        _ = try await managed.generate(request()) { _ in }
+        #expect(recorder.loads == 2)
+        // The reload reuses the process's Metal context: one shader compile,
+        // one queue, for the life of the process.
+        #expect(recorder.contexts.count == 2)
+        #expect(recorder.contexts[0] === recorder.contexts[1])
+    }
+
     // MARK: - Deferral
 
     @Test func doesNotLoadUntilTheFirstRequest() async throws {
