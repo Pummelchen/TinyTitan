@@ -13,6 +13,7 @@ public final class NemotronModel {
     public let install: NemotronInstall
     public let geometry: NemotronGeometry
     public let maxSequence: Int
+    public let matvec: NemotronMatvec
 
     private let workers: Int
     private var position = 0
@@ -30,6 +31,7 @@ public final class NemotronModel {
     private let latentAccumulator: UnsafeMutablePointer<Float>
     private let expertHidden: UnsafeMutablePointer<Float>
     private let expertOutput: UnsafeMutablePointer<Float>
+    private let expertBatch: UnsafeMutablePointer<Float>
     private let sharedOutput: UnsafeMutablePointer<Float>
     private let routerScores: UnsafeMutablePointer<Float>
     private let routerChoice: UnsafeMutablePointer<Float>
@@ -47,10 +49,14 @@ public final class NemotronModel {
     private var layerNormWeights: [Int: [Float]] = [:]
     private var mambaNormWeights: [Int: [Float]] = [:]
 
-    public init(install: NemotronInstall, maxSequence: Int) throws {
+    public init(
+        install: NemotronInstall, maxSequence: Int,
+        matvec: NemotronMatvec? = nil
+    ) throws {
         self.install = install
         self.geometry = install.geometry
         self.maxSequence = maxSequence
+        self.matvec = matvec ?? NemotronCPU(install: install)
         self.workers = max(1, min(8, ProcessInfo.processInfo.activeProcessorCount))
         let g = install.geometry
         convDimension = g.mambaIntermediate + 2 * g.mambaGroups * g.ssmStateSize
@@ -86,6 +92,7 @@ public final class NemotronModel {
         latentAccumulator = allocate(g.moeLatentSize)
         expertHidden = allocate(max(g.maxMoeIntermediate, g.moeSharedIntermediate))
         expertOutput = allocate(g.moeLatentSize)
+        expertBatch = allocate(max(1, g.topKExperts * g.maxMoeIntermediate))
         sharedOutput = allocate(g.hiddenSize)
         routerScores = allocate(max(g.maxExperts, 1))
         routerChoice = allocate(max(g.maxExperts, 1))
@@ -114,7 +121,7 @@ public final class NemotronModel {
         for pointer in [
             hidden, normalized, projection, convInput, convOutput, ssmY,
             mambaNormed, matrixOut, sequenceBuffer, latent, latentAccumulator,
-            expertHidden, expertOutput, sharedOutput, routerScores,
+            expertHidden, expertOutput, expertBatch, sharedOutput, routerScores,
             routerChoice, logits, mambaStates, convStates, keyValues,
         ] {
             pointer.deallocate()
@@ -147,11 +154,15 @@ public final class NemotronModel {
 
         // Embedding row, affine 8-bit in both installs.
         let embedding = try install.tensor("language_model.backbone.embeddings.weight")
-        try withTensorPointers(embedding) { weights, scales, biases in
-            tinytitan_affine_embedding_row(
-                weights, scales, biases, g.hiddenSize, embedding.bits ?? 8,
-                token, hidden)
-        }
+        let embeddingBytes = install.pointer(of: embedding)
+            .assumingMemoryBound(to: UInt8.self)
+        let embeddingScales = install.pointer(of: embedding, scale: true)
+            .assumingMemoryBound(to: UInt16.self)
+        let embeddingBiases = install.pointer(of: embedding, scale: false)
+            .assumingMemoryBound(to: UInt16.self)
+        tinytitan_affine_embedding_row(
+            embeddingBytes, embeddingScales, embeddingBiases, g.hiddenSize,
+            embedding.bits ?? 8, token, hidden)
 
         for layer in 0..<g.numLayers {
             switch g.layerKinds[layer] {
@@ -170,11 +181,7 @@ public final class NemotronModel {
                                   g.normEpsilon, normalized)
         }
         let head = try install.tensor("language_model.lm_head.weight")
-        try withTensorPointers(head) { weights, scales, biases in
-            gemv(weights, scales, biases, head.bits ?? 8,
-                 rows: g.vocabSize, columns: g.hiddenSize,
-                 x: normalized, y: logits)
-        }
+        matvec.gemv(head, x: normalized, y: logits)
         position += 1
         return Array(UnsafeBufferPointer(start: logits, count: g.vocabSize))
     }
@@ -191,11 +198,7 @@ public final class NemotronModel {
             }
         }
         let inProj = try install.tensor("\(prefix).in_proj.weight")
-        try withTensorPointers(inProj) { weights, scales, biases in
-            gemv(weights, scales, biases, inProj.bits ?? 4,
-                 rows: inProj.rows, columns: inProj.columns,
-                 x: normalized, y: projection)
-        }
+        matvec.gemv(inProj, x: normalized, y: projection)
         // Reference split: gate (z), the conv input, then dt.
         let gate = projection
         let convSource = projection + g.mambaIntermediate
@@ -237,11 +240,7 @@ public final class NemotronModel {
                 mambaNormed)
         }
         let outProj = try install.tensor("\(prefix).out_proj.weight")
-        try withTensorPointers(outProj) { weights, scales, biases in
-            gemv(weights, scales, biases, outProj.bits ?? 4,
-                 rows: g.hiddenSize, columns: g.mambaIntermediate,
-                 x: mambaNormed, y: matrixOut)
-        }
+        matvec.gemv(outProj, x: mambaNormed, y: matrixOut)
         add(matrixOut, to: hidden, count: g.hiddenSize)
     }
 
@@ -281,66 +280,38 @@ public final class NemotronModel {
         }
 
         let fc1 = try install.tensor("\(prefix).fc1_latent_proj.weight")
-        try withTensorPointers(fc1) { weights, scales, biases in
-            gemv(weights, scales, biases, fc1.bits ?? 4,
-                 rows: g.moeLatentSize, columns: g.hiddenSize,
-                 x: normalized, y: latent)
-        }
+        matvec.gemv(fc1, x: normalized, y: latent)
         latentAccumulator.update(repeating: 0, count: g.moeLatentSize)
         let sharedDown = try install.tensor("\(prefix).shared_experts.down_proj.weight")
         let sharedUp = try install.tensor("\(prefix).shared_experts.up_proj.weight")
         let latentWidth = g.moeLatentSize
-        for index in selected {
-            guard let up = experts.roles["up"], let down = experts.roles["down"],
-                let upScales = experts.roles["up_scales"],
-                let upBiases = experts.roles["up_biases"],
-                let downScales = experts.roles["down_scales"],
-                let downBiases = experts.roles["down_biases"]
-            else {
-                throw NemotronInstallError.layout("layer \(layer) expert roles are incomplete")
-            }
-            let base = try install.expertPointer(layer: layer, expert: index)
-            let weight = routerScores[index]
-            let upWeights = base.advanced(by: up.offset)
-                .assumingMemoryBound(to: UInt8.self)
-            let upScalePointer = base.advanced(by: upScales.offset)
-                .assumingMemoryBound(to: UInt16.self)
-            let upBiasPointer = base.advanced(by: upBiases.offset)
-                .assumingMemoryBound(to: UInt16.self)
-            let downWeights = base.advanced(by: down.offset)
-                .assumingMemoryBound(to: UInt8.self)
-            let downScalePointer = base.advanced(by: downScales.offset)
-                .assumingMemoryBound(to: UInt16.self)
-            let downBiasPointer = base.advanced(by: downBiases.offset)
-                .assumingMemoryBound(to: UInt16.self)
-            gemv(upWeights, upScalePointer, upBiasPointer, up.bits ?? 4,
-                 rows: up.shape[0], columns: up.shape[1],
-                 x: latent, y: expertHidden)
-            tinytitan_relu2_f32(expertHidden, up.shape[0], expertHidden)
-            gemv(downWeights, downScalePointer, downBiasPointer, down.bits ?? 4,
-                 rows: down.shape[0], columns: down.shape[1],
-                 x: expertHidden, y: expertOutput)
+        guard let upRole = experts.roles["up"], experts.roles["down"] != nil else {
+            throw NemotronInstallError.layout("layer \(layer) expert roles are incomplete")
+        }
+        let expertWidth = upRole.shape[0]
+        matvec.gemvExperts(
+            layer: layer, experts: selected, role: "up",
+            x: latent, xStride: 0, y: expertBatch)
+        for index in 0..<selected.count {
+            tinytitan_relu2_f32(
+                expertBatch + index * expertWidth, expertWidth,
+                expertBatch + index * expertWidth)
+        }
+        matvec.gemvExperts(
+            layer: layer, experts: selected, role: "down",
+            x: expertBatch, xStride: expertWidth, y: expertOutput)
+        for index in 0..<selected.count {
+            let weight = routerScores[selected[index]]
+            let row = expertOutput + index * latentWidth
             for element in 0..<latentWidth {
-                latentAccumulator[element] += weight * expertOutput[element]
+                latentAccumulator[element] += weight * row[element]
             }
         }
         let fc2 = try install.tensor("\(prefix).fc2_latent_proj.weight")
-        try withTensorPointers(fc2) { weights, scales, biases in
-            gemv(weights, scales, biases, fc2.bits ?? 4,
-                 rows: g.hiddenSize, columns: g.moeLatentSize,
-                 x: latentAccumulator, y: matrixOut)
-        }
-        try withTensorPointers(sharedUp) { weights, scales, biases in
-            gemv(weights, scales, biases, sharedUp.bits ?? 4,
-                 rows: g.moeSharedIntermediate, columns: g.hiddenSize,
-                 x: normalized, y: expertHidden)
-        }
+        matvec.gemv(fc2, x: latentAccumulator, y: matrixOut)
+        matvec.gemv(sharedUp, x: normalized, y: expertHidden)
         tinytitan_relu2_f32(expertHidden, g.moeSharedIntermediate, expertHidden)
-        try withTensorPointers(sharedDown) { weights, scales, biases in
-            gemv(weights, scales, biases, sharedDown.bits ?? 4,
-                 rows: g.hiddenSize, columns: g.moeSharedIntermediate,
-                 x: expertHidden, y: sharedOutput)
-        }
+        matvec.gemv(sharedDown, x: expertHidden, y: sharedOutput)
         for element in 0..<g.hiddenSize {
             hidden[element] += matrixOut[element] + sharedOutput[element]
         }
@@ -362,18 +333,9 @@ public final class NemotronModel {
         let query = projection
         let key = projection + g.attentionHeads * g.attentionHeadDim
         let value = key + g.attentionKVHeads * g.attentionHeadDim
-        try withTensorPointers(q) { weights, scales, biases in
-            gemv(weights, scales, biases, q.bits ?? 4,
-                 rows: q.rows, columns: q.columns, x: normalized, y: query)
-        }
-        try withTensorPointers(k) { weights, scales, biases in
-            gemv(weights, scales, biases, k.bits ?? 4,
-                 rows: k.rows, columns: k.columns, x: normalized, y: key)
-        }
-        try withTensorPointers(v) { weights, scales, biases in
-            gemv(weights, scales, biases, v.bits ?? 4,
-                 rows: v.rows, columns: v.columns, x: normalized, y: value)
-        }
+        matvec.gemv(q, x: normalized, y: query)
+        matvec.gemv(k, x: normalized, y: key)
+        matvec.gemv(v, x: normalized, y: value)
         let slot = g.attentionLayers.firstIndex(of: layer) ?? 0
         let headDim = g.attentionHeadDim
         let kvStride = maxSequence * g.attentionKVHeads * headDim
@@ -423,10 +385,7 @@ public final class NemotronModel {
                 query[head * headDim + d] = outHead[d]
             }
         }
-        try withTensorPointers(o) { weights, scales, biases in
-            gemv(weights, scales, biases, o.bits ?? 4,
-                 rows: o.rows, columns: o.columns, x: query, y: matrixOut)
-        }
+        matvec.gemv(o, x: query, y: matrixOut)
         add(matrixOut, to: hidden, count: g.hiddenSize)
     }
 
@@ -481,69 +440,14 @@ public final class NemotronModel {
         return selected
     }
 
+    /// The SSM heads are the only place this graph splits a step by hand. It is
+    /// deliberately serial: 128 heads x 64 x 128 is about a million operations
+    /// per layer, which is a few milliseconds, and a `concurrentPerform` here
+    /// would capture raw pointers in a `@Sendable` closure for that.
     private func parallel(heads: Int, _ body: (Int, Int) -> Void) {
-        if heads < workers || workers == 1 {
-            body(0, heads)
-            return
-        }
-        DispatchQueue.concurrentPerform(iterations: workers) { worker in
-            let first = worker * heads / workers
-            let end = (worker + 1) * heads / workers
-            if first < end { body(first, end - first) }
-        }
+        body(0, heads)
     }
 
-    private func withTensorPointers(
-        _ ref: NemotronTensorRef,
-        _ body: (UnsafePointer<UInt8>, UnsafePointer<UInt16>, UnsafePointer<UInt16>) throws -> Void
-    ) rethrows {
-        let base = install.pointer(of: ref)
-        try body(
-            base.assumingMemoryBound(to: UInt8.self),
-            install.pointer(of: ref, scale: true).assumingMemoryBound(to: UInt16.self),
-            install.pointer(of: ref, scale: false).assumingMemoryBound(to: UInt16.self))
-    }
-
-    private func gemv(
-        _ weights: UnsafePointer<UInt8>,
-        _ scales: UnsafePointer<UInt16>,
-        _ biases: UnsafePointer<UInt16>,
-        _ bits: Int,
-        rows: Int,
-        columns: Int,
-        x: UnsafePointer<Float>,
-        y: UnsafeMutablePointer<Float>
-    ) {
-        let groups = columns / 64
-        let workers = rows >= 256 ? self.workers : 1
-        if workers > 1 {
-            DispatchQueue.concurrentPerform(iterations: workers) { worker in
-                let first = worker * rows / workers
-                let count = (worker + 1) * rows / workers - first
-                if count <= 0 { return }
-                let rowBytes = columns * bits / 8
-                let weightPointer = weights.advanced(by: first * rowBytes)
-                let scalePointer = scales.advanced(by: first * groups)
-                let biasPointer = biases.advanced(by: first * groups)
-                let output = y.advanced(by: first)
-                if bits == 4 {
-                    tinytitan_int4_affine_gemv(
-                        weightPointer, scalePointer, biasPointer, x,
-                        count, columns, output)
-                } else {
-                    tinytitan_int8_affine_gemv(
-                        weightPointer, scalePointer, biasPointer, x,
-                        count, columns, output)
-                }
-            }
-        } else if bits == 4 {
-            tinytitan_int4_affine_gemv(
-                weights, scales, biases, x, rows, columns, y)
-        } else {
-            tinytitan_int8_affine_gemv(
-                weights, scales, biases, x, rows, columns, y)
-        }
-    }
 }
 
 extension NemotronInstall {

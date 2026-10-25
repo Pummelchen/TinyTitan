@@ -156,6 +156,16 @@ public final class NemotronInstall {
     private let weights: NemotronMappedFile
     private let layerFiles: [Int: NemotronMappedFile]
 
+    /// The mappings, for a matvec backend that wraps them in `MTLBuffer`s.
+    var weightsMapping: (base: UnsafeRawPointer, size: Int) {
+        (weights.base, weights.size)
+    }
+
+    func layerMapping(_ layer: Int) -> (base: UnsafeRawPointer, size: Int)? {
+        guard let file = layerFiles[layer] else { return nil }
+        return (file.base, file.size)
+    }
+
     public init(directory: URL) throws {
         self.directory = directory
         let manifestData = try Data(

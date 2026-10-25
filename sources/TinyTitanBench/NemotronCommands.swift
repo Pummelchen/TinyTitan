@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import TinyTitan
 
 /// `TinyTitanBench nemotron <install> "<prompt>" [n]`: the Nemotron 3.5 Bolt
@@ -10,7 +11,9 @@ import TinyTitan
 /// token-by-token, so the first number is the real TTFT and the second is
 /// steady-state decode.
 extension TinyTitanBench {
-    static func runNemotron(install path: String, prompt: String, limit: Int) throws {
+    static func runNemotron(
+        install path: String, prompt: String, limit: Int, gpu: Bool = false
+    ) throws {
         /// unchecked-invariant: written only inside the Task and read after
         /// `semaphore.wait()` orders it; no concurrent access.
         final class Box: @unchecked Sendable {
@@ -21,7 +24,8 @@ extension TinyTitanBench {
         Task {
             do {
                 try await runNemotronAsync(
-                    install: URL(fileURLWithPath: path), prompt: prompt, limit: limit)
+                    install: URL(fileURLWithPath: path), prompt: prompt,
+                    limit: limit, gpu: gpu)
             } catch {
                 box.error = error
             }
@@ -32,9 +36,17 @@ extension TinyTitanBench {
     }
 
     private static func runNemotronAsync(
-        install: URL, prompt: String, limit: Int
+        install: URL, prompt: String, limit: Int, gpu: Bool
     ) async throws {
         let loaded = try NemotronInstall(directory: install)
+        let backend: NemotronMatvec?
+        if gpu {
+            let context = try MetalContext()
+            print("device: \(context.device.name)")
+            backend = try NemotronMetal(install: loaded, context: context)
+        } else {
+            backend = nil
+        }
         let tokenizer = try await GFTokenizer.load(
             forModelDirectory: install, thinkingMode: .off)
         let chat = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_CHAT"] == "1"
@@ -51,7 +63,7 @@ extension TinyTitanBench {
             exit(2)
         }
         let model = try NemotronModel(
-            install: loaded, maxSequence: ids.count + limit + 8)
+            install: loaded, maxSequence: ids.count + limit + 8, matvec: backend)
 
         let prefillStart = Date()
         var logits: [Float] = []
@@ -83,6 +95,33 @@ extension TinyTitanBench {
         }
         print("tokens: " + produced.map { String(Int($0)) }.joined(separator: ","))
         print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
+    }
+
+    /// `TinyTitanBench nemotronlogits <install> <token,token,...> [--gpu]`:
+    /// the logits after a token prefix, with no tokenizer in the way. This is
+    /// the instrument the NumPy reference is compared against.
+    static func runNemotronLogits(install path: String, tokens: String, gpu: Bool) throws {
+        let loaded = try NemotronInstall(directory: URL(fileURLWithPath: path))
+        let backend: NemotronMatvec?
+        if gpu {
+            let context = try MetalContext()
+            backend = try NemotronMetal(install: loaded, context: context)
+        } else {
+            backend = nil
+        }
+        let ids = tokens.split(separator: ",").compactMap { Int($0) }
+        guard !ids.isEmpty else {
+            FileHandle.standardError.write(Data("no token ids\n".utf8))
+            exit(2)
+        }
+        let model = try NemotronModel(
+            install: loaded, maxSequence: ids.count + 8, matvec: backend)
+        var logits: [Float] = []
+        for token in ids { logits = try model.step(token: token) }
+        print(logits.map { String(format: "%.6f", $0) }.joined(separator: ","))
+        var best = 0
+        for index in logits.indices where logits[index] > logits[best] { best = index }
+        print("argmax \(best)")
     }
 
     /// `TinyTitanBench nemotroninfo <install>`: what the install declares and

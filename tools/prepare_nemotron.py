@@ -1015,7 +1015,9 @@ def install(args) -> int:
                     if match:
                         layer = int(match.group(1))
                         expert = int(match.group(2))
-                        role = match.group(3)
+                        # The owner names are `up_proj`/`down_proj`; the
+                        # install's roles are `up`/`down`.
+                        role = match.group(3).removesuffix("_proj")
                         for target in installs.values():
                             target.write_expert(layer, expert, role, value)
                     else:

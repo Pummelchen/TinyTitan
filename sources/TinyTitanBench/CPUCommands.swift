@@ -317,8 +317,10 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
-        case "nemotron":
-            // The Nemotron 3.5 Bolt text install: install, prompt, greedy limit.
+        case "nemotron", "nemotrongpu":
+            // The Nemotron 3.5 Bolt text install: install, prompt, greedy
+            // limit. `nemotrongpu` runs the same graph through the Metal GEMV
+            // kernels; `nemotron` keeps the C CPU path as the reference.
             let install =
                 CommandLine.arguments.count > 2
                 ? CommandLine.arguments[2]
@@ -329,7 +331,18 @@ extension TinyTitanBench {
             let limit =
                 CommandLine.arguments.count > 4
                 ? Int(CommandLine.arguments[4]) ?? 16 : 16
-            try runNemotron(install: install, prompt: prompt, limit: limit)
+            try runNemotron(
+                install: install, prompt: prompt, limit: limit,
+                gpu: CommandLine.arguments[1] == "nemotrongpu")
+        case "nemotronlogits":
+            let install =
+                CommandLine.arguments.count > 2
+                ? CommandLine.arguments[2]
+                : "models/nemotron-3.5-bolt_74B_A9B_4Bit"
+            let tokens = CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "5"
+            try runNemotronLogits(
+                install: install, tokens: tokens,
+                gpu: CommandLine.arguments.contains("--gpu"))
         case "nemotroninfo":
             let install =
                 CommandLine.arguments.count > 2
