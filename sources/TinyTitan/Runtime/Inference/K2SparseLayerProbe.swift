@@ -246,7 +246,16 @@ final class K2SparseLayerProbe {
             throw ModelError.internalInconsistency(
                 detail: "K2 MoE could not plan expert fetches for layer \(layer)")
         }
-        let blobs = try await model.fetchRoutedExperts(plan: plan)
+        // A plan with no misses is fully resident; reading the slots directly
+        // skips the async load operation, whose hop cost ~0.3 ms per layer --
+        // 45 of them is most of a decode token's idle time. The cache planner
+        // has already updated recency, so nothing else is owed.
+        let blobs: [TensorView]
+        if plan.misses.isEmpty {
+            blobs = try model.routedExpertBuffers(for: plan)
+        } else {
+            blobs = try await model.fetchRoutedExperts(plan: plan)
+        }
         var experts: [K2MoEStage.ExpertWeights] = []
         for (index, id) in plan.experts.enumerated() {
             let entry = try model.packedExpertsLayout.expert(
