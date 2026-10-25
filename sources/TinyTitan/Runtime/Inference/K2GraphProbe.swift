@@ -13,18 +13,29 @@ package final class K2GraphProbe {
     private let head: K2Head
     private let dense: [Int: K2DenseLayer]
     private let sparse: [Int: K2SparseLayerProbe]
+    /// The chunked prefill view of each dense layer, sharing that layer's K/V
+    /// cache so a chunk and a later decode step agree.
+    private let denseBatch: [Int: K2DenseBatch]
     private let context: MetalContext
     private let queue: MTLCommandQueue
+    private let maxSequence: Int
+    private let maxChunk: Int
     private let hiddenA: MTLBuffer
     private let hiddenB: MTLBuffer
+    private let chunkA: MTLBuffer
+    private let chunkB: MTLBuffer
 
     package init(
-        model: Model, context: MetalContext, maxSequence: Int
+        model: Model, context: MetalContext, maxSequence: Int,
+        maxChunk: Int = 16
     ) throws {
+        precondition(maxChunk > 0)
         let config = model.config
         self.config = config
         self.context = context
         self.queue = context.queue
+        self.maxSequence = maxSequence
+        self.maxChunk = maxChunk
         self.head = try K2Head(model: model, context: context)
         var dense: [Int: K2DenseLayer] = [:]
         var sparse: [Int: K2SparseLayerProbe] = [:]
@@ -41,6 +52,26 @@ package final class K2GraphProbe {
         }
         self.dense = dense
         self.sparse = sparse
+        // K2's dense layers are the prefix; the chunk path relies on that order
+        // (one command buffer embeds and runs them, then the sparse layers take
+        // over token by token).
+        if let lastDense = config.denseLayerIndices.max(),
+            let firstSparse = (0..<config.numLayers).first(where: {
+                !config.denseLayerIndices.contains($0)
+            }),
+            lastDense > firstSparse
+        {
+            throw ModelError.internalInconsistency(
+                detail: "K2 dense layers must precede the sparse layers")
+        }
+        var batches: [Int: K2DenseBatch] = [:]
+        for (layer, denseLayer) in dense {
+            batches[layer] = try K2DenseBatch(
+                model: model, context: context, layer: layer,
+                maxSequence: maxSequence, maxTokens: maxChunk,
+                kCache: denseLayer.kCache, vCache: denseLayer.vCache)
+        }
+        self.denseBatch = batches
         let hidden = config.hiddenSize
         func buffer(_ label: String) throws -> MTLBuffer {
             guard
@@ -54,6 +85,146 @@ package final class K2GraphProbe {
         }
         self.hiddenA = try buffer("k2.graph.hiddenA")
         self.hiddenB = try buffer("k2.graph.hiddenB")
+        guard
+            let chunkA = context.device.makeBuffer(
+                length: maxChunk * hidden * MemoryLayout<UInt16>.stride,
+                options: .storageModeShared),
+            let chunkB = context.device.makeBuffer(
+                length: maxChunk * hidden * MemoryLayout<UInt16>.stride,
+                options: .storageModeShared)
+        else {
+            throw MetalError.bufferAllocationFailed("k2.graph.chunk")
+        }
+        self.chunkA = chunkA
+        self.chunkB = chunkB
+    }
+
+    /// Prefill a chunk of tokens at consecutive positions and return the
+    /// logits of the last one.
+    ///
+    /// The dense prefix runs layer-major through `K2DenseBatch` (one command
+    /// buffer for the whole chunk), sharing the decode layers' K/V caches. The
+    /// sparse layers still run one token at a time -- their router ids and
+    /// expert fetches are per token -- so this is the scaffold for batching
+    /// them, not yet the whole win. Positions are absolute, so a caller may
+    /// start a chunk at any cached prefix boundary.
+    package func forwardChunk(
+        tokenIDs: [UInt32], basePosition: UInt32
+    ) async throws -> [Float] {
+        let started = Date()
+        let d = config.hiddenSize
+        let half = MemoryLayout<UInt16>.stride
+        let count = tokenIDs.count
+        guard count > 0, count <= maxChunk else {
+            throw ModelError.internalInconsistency(
+                detail: "K2 chunk of \(count) tokens exceeds its \(maxChunk)-token buffer")
+        }
+        guard Int(basePosition) + count <= maxSequence else {
+            throw ModelError.internalInconsistency(
+                detail:
+                    "K2 chunk positions \(basePosition)..\(basePosition + UInt32(count) - 1) exceed its \(maxSequence)-token cache"
+            )
+        }
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            for layer in sparse.values { layer.resetTimings() }
+        }
+        var current = chunkA
+        var next = chunkB
+        guard let cb = queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        for (index, token) in tokenIDs.enumerated() {
+            try head.encodeEmbedding(
+                commandBuffer: cb, tokenID: token, out: current,
+                outOffset: index * d * half)
+        }
+        for layer in config.denseLayerIndices.sorted() {
+            guard let batch = denseBatch[layer] else {
+                throw ModelError.internalInconsistency(
+                    detail: "dense layer \(layer) has no chunk path")
+            }
+            try batch.encode(
+                commandBuffer: cb, hidden: current, out: next,
+                basePosition: Int(basePosition), tokenCount: count)
+            swap(&current, &next)
+        }
+        cb.commit()
+        await cb.completed()
+        try checkFailure(cb)
+
+        for layer in 0..<config.numLayers where sparse[layer] != nil {
+            guard let probe = sparse[layer] else { continue }
+            for token in 0..<count {
+                let row = halves(
+                    from: current, offset: token * d * half, count: d)
+                let out = try await probe.run(
+                    queue: queue, hidden: row,
+                    position: Int(basePosition) + token)
+                write(out, into: next, offset: token * d * half)
+            }
+            swap(&current, &next)
+        }
+
+        // Only the last token's logits are read; its hidden state is the row
+        // the decode step would have produced.
+        guard let headCB = queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        guard let blit = headCB.makeBlitCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        blit.copy(
+            from: current, sourceOffset: (count - 1) * d * half,
+            to: hiddenA, destinationOffset: 0,
+            size: d * half)
+        blit.endEncoding()
+        try head.encodeLogits(commandBuffer: headCB, hidden: hiddenA)
+        headCB.commit()
+        await headCB.completed()
+        try checkFailure(headCB)
+        for layer in sparse.values { try layer.checkPendingError() }
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            let fetch = sparse.values.reduce(0.0) { $0 + $1.fetchSeconds }
+            let busy = sparse.values.reduce(0.0) { $0 + $1.gpuBusySeconds }
+            let total = Date().timeIntervalSince(started)
+            FileHandle.standardError.write(
+                Data(
+                    String(
+                        format:
+                            "k2 chunk: %d tokens %.3fs fetch %.3fs busy %.3fs\n",
+                        count, total, fetch, busy
+                    ).utf8))
+        }
+        return head.readLogits()
+    }
+
+    /// The chunk's dense phase has to complete before its rows feed the sparse
+    /// layers; a failed buffer would otherwise be read as valid halfs.
+    private func checkFailure(_ commandBuffer: MTLCommandBuffer) throws {
+        if let error = commandBuffer.error {
+            throw ModelError.internalInconsistency(
+                detail: "K2 chunk command buffer failed: \(error)")
+        }
+    }
+
+    private func halves(
+        from buffer: MTLBuffer, offset: Int, count: Int
+    ) -> [Float16] {
+        let base = buffer.contents()
+        return (0..<count).map {
+            base.load(
+                fromByteOffset: offset + $0 * MemoryLayout<Float16>.stride,
+                as: Float16.self)
+        }
+    }
+
+    private func write(_ values: [Float], into buffer: MTLBuffer, offset: Int) {
+        let halfs = values.map { Float16($0) }
+        halfs.withUnsafeBufferPointer { source in
+            if let base = source.baseAddress {
+                memcpy(buffer.contents() + offset, base, values.count * 2)
+            }
+        }
     }
 
     package func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {

@@ -31,10 +31,22 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   them, so a chunk prefill and a later token decode read the same rows;
   `chunkThenTokenSharesTheCache` writes 0–3 through the batch, decodes 4
   through the layer, and matches a token-only run over all five positions.
-- **Next**: give the graph a chunked prefill entry that uses `K2DenseBatch` for
-  layers 0-2 while the sparse layers still run per token (their caches are the
-  same per-layer buffers, so the chunk path must write those, not a copy), then
-  batched attention.
+- **Chunked graph entry** (done, dormant) — `K2GraphProbe.forwardChunk`
+  embeds a chunk, runs the dense prefix layer-major through the batch layers
+  (sharing the decode layers' caches) and the sparse layers per token, then
+  returns the last token's logits. `chunkPrefillMatchesTokenByToken` checks a
+  four-token chunk and two two-token chunks against four `forward` calls.
+  Measured on the real 4-bit install (163-token prompt, CLI, `--max-new 4`):
+  token path 31.84 s prefill, chunked 36.46 s — **slower**, because the sparse
+  layers still go through their CPU `run` path (a `[Float16]` in and out per
+  token per layer) while the token path chains GPU buffers. Three batched
+  dense layers cannot pay for 45 layers of those copies, so the runtime keeps
+  the token path and the entry stays unused until the sparse layers batch.
+- **Next**: a `K2SparseBatch` that batches the sparse layer's norm, q/k/gate,
+  attention, gate/o and shared expert over a chunk, keeps MoVA values and MoE
+  per token at first, and passes hidden rows between stages on the GPU (no CPU
+  round trips). That is where the prefill win is; only then wire
+  `forwardChunk` into `K2ProbeRuntime.prefill`.
 
 ## What exists today
 
