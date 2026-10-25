@@ -12,7 +12,8 @@ import TinyTitan
 /// steady-state decode.
 extension TinyTitanBench {
     static func runNemotron(
-        install path: String, prompt: String, limit: Int, gpu: Bool = false
+        install path: String, prompt: String, limit: Int, gpu: Bool = false,
+        graph: Bool = false
     ) throws {
         /// unchecked-invariant: written only inside the Task and read after
         /// `semaphore.wait()` orders it; no concurrent access.
@@ -25,7 +26,7 @@ extension TinyTitanBench {
             do {
                 try await runNemotronAsync(
                     install: URL(fileURLWithPath: path), prompt: prompt,
-                    limit: limit, gpu: gpu)
+                    limit: limit, gpu: gpu, graph: graph)
             } catch {
                 box.error = error
             }
@@ -36,17 +37,9 @@ extension TinyTitanBench {
     }
 
     private static func runNemotronAsync(
-        install: URL, prompt: String, limit: Int, gpu: Bool
+        install: URL, prompt: String, limit: Int, gpu: Bool, graph: Bool
     ) async throws {
         let loaded = try NemotronInstall(directory: install)
-        let backend: NemotronMatvec?
-        if gpu {
-            let context = try MetalContext()
-            print("device: \(context.device.name)")
-            backend = try NemotronMetal(install: loaded, context: context)
-        } else {
-            backend = nil
-        }
         let tokenizer = try await GFTokenizer.load(
             forModelDirectory: install, thinkingMode: .off)
         let chat = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_CHAT"] == "1"
@@ -62,15 +55,34 @@ extension TinyTitanBench {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
             exit(2)
         }
-        let model = try NemotronModel(
-            install: loaded, maxSequence: ids.count + limit + 8, matvec: backend)
+        let sequence = ids.count + limit + 8
+        let model: NemotronModel?
+        let graphModel: NemotronMetalGraph?
+        if graph || gpu {
+            let context = try MetalContext()
+            print("device: \(context.device.name)\(graph ? " (graph)" : "")")
+            if graph {
+                graphModel = try NemotronMetalGraph(
+                    install: loaded, context: context, maxSequence: sequence)
+                model = nil
+            } else {
+                graphModel = nil
+                model = try NemotronModel(
+                    install: loaded, maxSequence: sequence,
+                    matvec: try NemotronMetal(install: loaded, context: context))
+            }
+        } else {
+            graphModel = nil
+            model = try NemotronModel(install: loaded, maxSequence: sequence)
+        }
+        func advance(_ token: Int) throws -> [Float] {
+            if let graphModel { return try graphModel.step(token: token) }
+            return try model!.step(token: token)
+        }
 
         let prefillStart = Date()
         var logits: [Float] = []
-        for (index, token) in ids.enumerated() {
-            logits = try model.step(token: Int(token))
-            _ = index
-        }
+        for token in ids { logits = try advance(Int(token)) }
         let prefill = Date().timeIntervalSince(prefillStart)
 
         var produced: [Int32] = []
@@ -79,7 +91,7 @@ extension TinyTitanBench {
             guard let best = greedy(logits) else { break }
             if loaded.geometry.eosTokens.contains(best) { break }
             produced.append(Int32(best))
-            logits = try model.step(token: best)
+            logits = try advance(best)
         }
         let decode = Date().timeIntervalSince(decodeStart)
 
@@ -100,24 +112,36 @@ extension TinyTitanBench {
     /// `TinyTitanBench nemotronlogits <install> <token,token,...> [--gpu]`:
     /// the logits after a token prefix, with no tokenizer in the way. This is
     /// the instrument the NumPy reference is compared against.
-    static func runNemotronLogits(install path: String, tokens: String, gpu: Bool) throws {
+    static func runNemotronLogits(
+        install path: String, tokens: String, gpu: Bool, graph: Bool
+    ) throws {
         let loaded = try NemotronInstall(directory: URL(fileURLWithPath: path))
-        let backend: NemotronMatvec?
-        if gpu {
-            let context = try MetalContext()
-            backend = try NemotronMetal(install: loaded, context: context)
-        } else {
-            backend = nil
-        }
         let ids = tokens.split(separator: ",").compactMap { Int($0) }
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("no token ids\n".utf8))
             exit(2)
         }
+        let backend: NemotronMatvec?
+        var graphModel: NemotronMetalGraph?
+        if graph || gpu {
+            let context = try MetalContext()
+            if graph {
+                graphModel = try NemotronMetalGraph(
+                    install: loaded, context: context, maxSequence: ids.count + 8)
+                backend = nil
+            } else {
+                backend = try NemotronMetal(install: loaded, context: context)
+            }
+        } else {
+            backend = nil
+        }
         let model = try NemotronModel(
             install: loaded, maxSequence: ids.count + 8, matvec: backend)
         var logits: [Float] = []
-        for token in ids { logits = try model.step(token: token) }
+        for token in ids {
+            if let graphModel { logits = try graphModel.step(token: token) }
+            else { logits = try model.step(token: token) }
+        }
         print(logits.map { String(format: "%.6f", $0) }.joined(separator: ","))
         var best = 0
         for index in logits.indices where logits[index] > logits[best] { best = index }

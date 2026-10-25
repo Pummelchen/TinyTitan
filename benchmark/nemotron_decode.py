@@ -31,7 +31,7 @@ PREFILL = re.compile(r"prompt (\d+) tokens: ([\d.]+)s \(([\d.]+) tok/s\)")
 
 
 def run_arm(binary: str, install: str, prompt: str, limit: int, gpu: bool) -> dict:
-    command = [binary, "nemotrongpu" if gpu else "nemotron", install, prompt, str(limit)]
+    command = [binary, "nemotrongraph" if gpu else "nemotron", install, prompt, str(limit)]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         raise SystemExit(

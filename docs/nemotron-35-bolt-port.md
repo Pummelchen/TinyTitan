@@ -167,11 +167,24 @@ Two matvec backends, one graph:
 
 | Backend | GEMV | Status |
 | --- | --- | --- |
-| `NemotronCPU` | `tinytitan_int4/int8_affine_gemv` (NEON), rows split across cores | reference |
-| `NemotronMetal` | `dequant_int4_gemv_simd` / `dequant_int8_gemv_simd`, one no-copy `MTLBuffer` per mmap'd file, a layer's nine experts in one command buffer | measurement path |
+| `NemotronCPU` | `tinytitan_int4/int8_affine_gemv` (NEON), rows split across cores | validated reference |
+| `NemotronMetalGraph` | the same two shaders plus a Nemotron elementwise shader module; hidden state, Mamba state and KV cache stay on the GPU, one wait per MoE router (40 a token) | **GPU measurement path** |
+| `NemotronMetal` | the same GEMVs with a CPU-side norm/conv/scan between them | cross-check; launch-latency bound |
 
-The elementwise kernels (RMSNorm, gated RMSNorm, conv, SSM update, SiLU, relu²,
-BF16 router GEMV, embedding row) are in `TinyTitanKernelsC/nemotron_ops.c`.
+The CPU elementwise kernels (RMSNorm, gated RMSNorm, conv, SSM update, SiLU,
+relu², BF16 router GEMV, embedding row) are in
+`TinyTitanKernelsC/nemotron_ops.c`; the GPU graph's equivalents are in
+`sources/TinyTitan/Metal/Nemotron/nemotron.metal`.
+
+Two measurements decided the final GPU shape. The first version kept the CPU
+between GEMVs and cost ~4.3 s/token: an M3's GPU downclocks in the ~6 ms it is
+idle and each of ~350 waits then costs ~10 ms, against 0.8 ms for the same GEMV
+back to back. The second version moved the state to the GPU but still read
+file-backed mmaps from GPU code, and cost ~5.5 s/token: every 16 KB page fault
+was handled on the GPU's path. Copying the resident payload once at load and the
+nine routed expert blobs per layer into wired memory took the same real-geometry
+token from ~5.5 s to ~0.06 s of compute (zero-filled skeleton, 4-bit); the load
+pays ~1.7 s (4-bit, 5 GB) or ~4 s (8-bit, 8.45 GB).
 
 **Checked against an independent implementation.** `tools/nemotron_reference.py`
 is a NumPy transcription of the same reference forward that reads the same
@@ -182,9 +195,11 @@ both exercising their second and third steps:
 | Arm | max |logit difference| vs NumPy |
 | --- | ---: |
 | 4-bit CPU | **4.9e-7** |
-| 4-bit Metal | **3.4e-6** (FP16 GEMV) |
+| 4-bit Metal matvec | **3.4e-6** (FP16 GEMV) |
+| 4-bit Metal graph | **5.9e-6** (FP16 state and activations) |
 | 8-bit CPU | **5.0e-7** |
-| 8-bit Metal | **3.4e-6** |
+| 8-bit Metal matvec | **3.3e-6** |
+| 8-bit Metal graph | **3.9e-6** |
 
 The writer itself is checked before any 150 GB download: `tools/test_nemotron_writer.py`
 builds that toy install from scratch and the real `TinyTitanRepack --verify-install`
@@ -195,8 +210,8 @@ Commands:
 ```bash
 TinyTitanBench nemotroninfo models/nemotron-3.5-bolt_74B_A9B_4Bit
 TinyTitanBench nemotron      <install> "The capital of France is" 4   # CPU
-TinyTitanBench nemotrongpu   <install> "The capital of France is" 4   # Metal
-TinyTitanBench nemotronlogits <install> 5,7,9 [--gpu]                 # no tokenizer
+TinyTitanBench nemotrongraph <install> "The capital of France is" 4   # Metal, GPU-resident
+TinyTitanBench nemotronlogits <install> 5,7,9 [--gpu|--graph]         # no tokenizer
 benchmark/nemotron_decode.py --install4 ... --install8 ... --runs 1
 ```
 

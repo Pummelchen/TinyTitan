@@ -68,9 +68,8 @@ enum NemotronRun {
         }
         let limit = min(args.maxNew, args.maxContext)
         let context = try MetalContext()
-        let backend = try NemotronMetal(install: install, context: context)
-        let model = try NemotronModel(
-            install: install, maxSequence: ids.count + limit + 8, matvec: backend)
+        let model = try NemotronMetalGraph(
+            install: install, context: context, maxSequence: ids.count + limit + 8)
 
         let prefillStart = Date()
         var logits: [Float] = []
