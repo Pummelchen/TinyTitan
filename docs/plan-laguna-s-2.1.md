@@ -29,11 +29,32 @@ read from that checkpoint's `config.json`, `configuration_laguna.py`,
 | Tokens | BOS/EOS id 2, EOS also 24; `generation_config.json` asks temperature 1.0, top-p 1.0, top-k 20 |
 | Reasoning | `enable_thinking` boolean in the chat template; preserved thinking |
 
-The 4-bit install is ~66.5 GB and the 8-bit ~124.9 GB by the converter's own
-plan (`tools/prepare_laguna_s21.py --plan`); the source is 235 GB. This host
-has 201 GB free after the converter intermediates from the previous port were
-removed, so the two snapshots (178 GB) fit, and each install is written after
-the snapshot is complete.
+The 4-bit snapshot is ~66.5 GB and the 8-bit ~124.9 GB by the converter's own
+plan (`tools/prepare_laguna_s21.py --plan`); the source is 235 GB. Both
+snapshots fit on this host at once (178 GB), but a snapshot plus its install
+does not: 178 + 66 GB is over the free space. The repacker therefore imports
+each snapshot with `--consume-snapshot`, which deletes a source shard once the
+last copy that reads it has committed its digest. The install grows as the
+snapshot shrinks, so the peak is the snapshot set plus a few GB, and the final
+state is the two installs (178 GB) with the snapshots gone.
+
+    # Conversion: one streaming pass, both widths, resumable per layer.
+    python3 tools/prepare_laguna_s21.py --from-hf \
+        --output .build/laguna-affine --work .build/laguna-work --bits 4 8 --resume
+
+    # Each install grows into the space its snapshot releases.
+    TinyTitanRepack --input-snapshot .build/laguna-affine-4bit \
+        --model-id laguna-s-2.1-4bit --output models/laguna-s-2.1-4bit.ssdai \
+        --consume-snapshot
+    TinyTitanRepack --input-snapshot .build/laguna-affine-8bit \
+        --model-id laguna-s-2.1-8bit --output models/laguna-s-2.1-8bit.ssdai \
+        --consume-snapshot
+
+    # The decode numbers, one width at a time.
+    TinyTitanBench lagunagpu models/laguna-s-2.1-4bit.ssdai \
+        "The capital of France is" 4
+    TinyTitanBench lagunagpu models/laguna-s-2.1-8bit.ssdai \
+        "The capital of France is" 4
 
 ## What a layer does
 
@@ -116,12 +137,18 @@ template), so the number is comparable with the K2 and Qwen runs.
 | 4-bit | | | | |
 | 8-bit | | | | |
 
+The host is a base 8-core M3 MacBook Pro with 24 GB and a 1 GbE-class link
+shared with other work; the conversion is 235 GB over that link, one layer at
+a time, and a layer's 4.8 GB is fetched over several parallel range reads.
+
 ## Open
 
 - Serving graph: the server does not run Laguna; `lagunagpu` is the probe.
 - ANE prefill sidecar: not exported. The engine's ANE path is prefill-only;
-  the project has no ANE *decode*, so the decode numbers above are the GPU
-  probe's.
+  the project has no ANE *decode* path at all (the measurements in
+  `docs/qwen38-decode-12gb-measurements.md` call it unreachable), so the decode
+  numbers above are the GPU probe's. There is no ANE decode number to report
+  for any model, Laguna included.
 - Batched prefill: none; the probe decodes one token at a time.
 - Golden baseline: not captured. A baseline is valid per (machine, build,
   model); capture it once the installs are stable and a serving path exists.
