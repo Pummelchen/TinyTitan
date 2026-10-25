@@ -164,28 +164,39 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
     lock = __import__("threading").Lock()
 
     def fetch(offset: int, end: int) -> None:
-        nonlocal done
         cursor = offset
         while cursor <= end:
-            result = subprocess.run(
-                [
-                    "curl",
-                    "-sfL",
-                    "--http1.1",
-                    "--max-time",
-                    "600",
-                    *RETRY,
-                    "-r",
-                    f"{cursor}-{end}",
-                    f"{BASE}/{shard}",
-                ],
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode != 0 or not result.stdout:
+            result = None
+            for attempt in range(1, 6):
+                result = subprocess.run(
+                    [
+                        "curl",
+                        "-sfL",
+                        "--http1.1",
+                        "--max-time",
+                        "300",
+                        "--speed-limit",
+                        "32768",
+                        "--speed-time",
+                        "30",
+                        *RETRY,
+                        "-r",
+                        f"{cursor}-{end}",
+                        f"{BASE}/{shard}",
+                    ],
+                    capture_output=True,
+                    check=False,
+                )
+                if result.returncode == 0 and result.stdout:
+                    break
+                # A stalled CDN connection is routine when several checkpoints
+                # are in flight; back off and resume at the same byte rather
+                # than aborting a 150 GB run.
+                time.sleep(min(30, 5 * attempt))
+            if result is None or result.returncode != 0 or not result.stdout:
                 raise SystemExit(
                     f"cannot fetch {shard} bytes {cursor}-{end}: "
-                    f"{result.stderr.decode(errors='replace').strip()}"
+                    f"{(result.stderr.decode(errors='replace').strip()) if result else 'no response'}"
                 )
             pwrite_all(fd, result.stdout, cursor)
             cursor += len(result.stdout)
