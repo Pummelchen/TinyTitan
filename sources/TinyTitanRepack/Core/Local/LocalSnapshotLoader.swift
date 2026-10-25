@@ -15,6 +15,14 @@ public struct LocalSnapshotRepackOptions: Sendable {
     /// here in a way it would not be across arbitrary installs: the file being
     /// linked *is* the one that would have been copied.
     public let shareNgramTable: Bool
+    /// Delete each source shard as the last copy that reads it commits.
+    ///
+    /// The snapshot of a 118B model is ~125 GB and its install is another
+    /// ~125 GB; on a host that cannot hold both, this lets the install grow
+    /// into the space the source is releasing. It is opt-in and one-way: an
+    /// interrupted run leaves a partly consumed snapshot that cannot be
+    /// repacked again, which is why the default is off.
+    public let consumeSnapshot: Bool
     public let overwrite: Bool
     public let minFreeReserveBytes: UInt64
     public let rangeChunkBytes: Int
@@ -26,6 +34,7 @@ public struct LocalSnapshotRepackOptions: Sendable {
         modelID: String,
         draftHead: Bool = false,
         shareNgramTable: Bool = false,
+        consumeSnapshot: Bool = false,
         overwrite: Bool = false,
         minFreeReserveBytes: UInt64 = 1 * 1024 * 1024 * 1024,
         rangeChunkBytes: Int = RemoteChunkPolicy.defaultBytes,
@@ -36,6 +45,7 @@ public struct LocalSnapshotRepackOptions: Sendable {
         self.modelID = modelID
         self.draftHead = draftHead
         self.shareNgramTable = shareNgramTable
+        self.consumeSnapshot = consumeSnapshot
         self.overwrite = overwrite
         self.minFreeReserveBytes = minFreeReserveBytes
         self.rangeChunkBytes = rangeChunkBytes

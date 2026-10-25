@@ -273,7 +273,8 @@ extension RemoteStreamingRepacker {
                         to: paths.checkpointFile,
                         parentDirectory: paths.parentDirectory)
                 }
-            })
+            },
+            consumeSource: false)
         try checkpoint.write(
             to: paths.checkpointFile,
             parentDirectory: paths.parentDirectory)
