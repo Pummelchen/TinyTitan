@@ -83,7 +83,7 @@ extension ServerArguments {
           --thinking <off|on>    Ornith/Qwen reasoning mode (default off, or
                                  TINYTITAN_THINKING_MODE). The model does not expose
                                  low/medium/high effort levels.
-          --reasoning-effort <low|medium|xhigh>
+          --reasoning-effort <low|medium|high|xhigh>
                                  Reasoning-effort level (default unset, or
                                  TINYTITAN_REASONING_EFFORT). Requires --thinking on
                                  and a model family whose chat template defines

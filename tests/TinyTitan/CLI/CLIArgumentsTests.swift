@@ -165,17 +165,14 @@ import TinyTitan
         #expect(parsed.reasoningEffort == .low)
         let unset = try Args.parse(["--model", "m.ssdai", "--prompt", "hi"])
         #expect(unset.reasoningEffort == nil)
-        // The template defines low, medium, and xhigh; "high" does not exist.
-        #expect(
-            throws: ArgsError.invalidValue(
-                flag: "--reasoning-effort",
-                value: "high")
-        ) {
-            _ = try Args.parse([
-                "--model", "m.ssdai", "--prompt", "hi",
-                "--thinking", "on", "--reasoning-effort", "high",
-            ])
-        }
+        // The flag parses the union of the templates' levels; "high" is
+        // Qwen3.8's invalid one but K2-Horizon's default, and the family is
+        // checked against the installed manifest later.
+        let k2Level = try Args.parse([
+            "--model", "m.ssdai", "--prompt", "hi",
+            "--thinking", "on", "--reasoning-effort", "high",
+        ])
+        #expect(k2Level.reasoningEffort == .high)
     }
 
     @Test func reasoningEffortRequiresThinkingOn() {

@@ -4,14 +4,21 @@ import Foundation
 /// TinyTitan exposes exactly what the installed template implements: Ornith 1.5
 /// and Qwen 3.6 define only the binary `enable_thinking` switch, while the
 /// Qwen3.8-Flash-Next template additionally defines `reasoning_effort`
-/// low|medium|xhigh (default xhigh) while thinking is on. Verified against
-/// the pinned upstream `chat_template.jinja` on 2026-08-27; see
-/// docs/qwen38-flash-next-port.md. Re-verified 2026-09-11 against every
-/// installed template (Qwen 3.6, AgentWorld, Ornith 1.5, Qwen3.8, and the
-/// CPU engine's Qwen3.5): ReasoningLevelTemplateTests renders each one.
+/// low|medium|xhigh (default xhigh) and K2-Horizon defines low|medium|high
+/// (default high) while thinking is on. Verified against the pinned upstream
+/// `chat_template.jinja` on 2026-08-27; see docs/qwen38-flash-next-port.md and
+/// docs/plan-k2-horizon.md. Re-verified 2026-09-11 against every installed
+/// template (Qwen 3.6, AgentWorld, Ornith 1.5, Qwen3.8, and the CPU engine's
+/// Qwen3.5): ReasoningLevelTemplateTests renders each one.
 public enum ModelReasoningControl: Sendable, Equatable {
     case binaryThinking
-    case thinkingWithEffortLevels(defaultEffort: ModelReasoningEffort)
+    /// The levels the template accepts are listed, not inferred from the
+    /// enum's cases: Qwen3.8 accepts xhigh but not high, K2 accepts high but
+    /// not xhigh, and a family that advertised the other one's set would send
+    /// an effort its template raises on.
+    case thinkingWithEffortLevels(
+        defaultEffort: ModelReasoningEffort,
+        supported: [ModelReasoningEffort])
 }
 
 public enum ModelReasoningControlError: Error, Equatable, CustomStringConvertible {
@@ -22,8 +29,7 @@ public enum ModelReasoningControlError: Error, Equatable, CustomStringConvertibl
         switch self {
         case .effortUnsupported(let family, let effort):
             return "reasoning effort \(effort.rawValue) is not supported: the "
-                + "\(family.rawValue) chat template defines only the binary "
-                + "thinking off|on switch"
+                + "\(family.rawValue) chat template does not define that level"
         case .effortRequiresThinkingOn(let effort):
             return "reasoning effort \(effort.rawValue) requires thinking on; "
                 + "the chat template ignores effort while thinking is off"
@@ -34,10 +40,14 @@ public enum ModelReasoningControlError: Error, Equatable, CustomStringConvertibl
 extension ModelFamily {
     public var reasoningControl: ModelReasoningControl {
         switch self {
-        case .qwen36, .qwen36MTP, .qwen35Dense, .k2Horizon:
+        case .qwen36, .qwen36MTP, .qwen35Dense:
             return .binaryThinking
         case .qwen38flash, .qwen38flashMTP:
-            return .thinkingWithEffortLevels(defaultEffort: .xhigh)
+            return .thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])
+        case .k2Horizon:
+            return .thinkingWithEffortLevels(
+                defaultEffort: .high, supported: [.low, .medium, .high])
         }
     }
 
@@ -49,7 +59,7 @@ extension ModelFamily {
         effort: ModelReasoningEffort?
     ) -> ModelReasoningEffort? {
         guard thinkingMode.isEnabled,
-            case .thinkingWithEffortLevels(let defaultEffort) = reasoningControl
+            case .thinkingWithEffortLevels(let defaultEffort, _) = reasoningControl
         else {
             return nil
         }
@@ -68,10 +78,14 @@ extension ModelFamily {
         case .binaryThinking:
             throw ModelReasoningControlError.effortUnsupported(
                 family: self, effort: effort)
-        case .thinkingWithEffortLevels:
+        case .thinkingWithEffortLevels(_, let supported):
             guard thinkingMode.isEnabled else {
                 throw ModelReasoningControlError.effortRequiresThinkingOn(
                     effort: effort)
+            }
+            guard supported.contains(effort) else {
+                throw ModelReasoningControlError.effortUnsupported(
+                    family: self, effort: effort)
             }
         }
     }
@@ -115,6 +129,7 @@ public enum ReasoningLevel: String, CaseIterable, Sendable, Codable {
         switch effort {
         case .low: self = .low
         case .medium: self = .medium
+        case .high: self = .high
         case .xhigh: self = .xhigh
         }
     }
@@ -195,10 +210,9 @@ extension ModelReasoningControl {
     /// default effort and renders byte-identically to naming that effort, so
     /// offering both would put two entries on one prompt.
     ///
-    /// `ModelReasoningEffort` enumerates exactly what the one effort
-    /// template here (Qwen3.8) accepts; it raises on any other value. A
-    /// second effort family with a different set would need its own list in
-    /// the control case.
+    /// `ModelReasoningEffort` is the union of the shipped templates' levels;
+    /// each control carries the subset its own template accepts, because
+    /// Qwen3.8 raises on `high` and K2 raises on `xhigh`.
     /// Public because the server's request path maps a client's level to the
     /// nearest one the served model renders, and names the set it chose from
     /// in its log line.
@@ -206,8 +220,8 @@ extension ModelReasoningControl {
         switch self {
         case .binaryThinking:
             return [.off, .on]
-        case .thinkingWithEffortLevels:
-            return [.off] + ModelReasoningEffort.allCases.map(ReasoningLevel.init(effort:))
+        case .thinkingWithEffortLevels(_, let supported):
+            return [.off] + supported.map(ReasoningLevel.init(effort:))
         }
     }
 
@@ -219,7 +233,7 @@ extension ModelReasoningControl {
         switch self {
         case .binaryThinking:
             return .on
-        case .thinkingWithEffortLevels(let defaultEffort):
+        case .thinkingWithEffortLevels(let defaultEffort, _):
             return ReasoningLevel(effort: defaultEffort)
         }
     }

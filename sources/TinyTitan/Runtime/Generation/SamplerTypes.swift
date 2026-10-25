@@ -69,6 +69,10 @@ public enum GenerationDefaults {
         case .qwen35Dense:
             // Qwen 3.5 is a Qwen 3.6-lineage card: 0.6 / top-p 0.95.
             return Sampling(temperature: 0.6, topK: topK, topP: 0.95)
+        case .k2Horizon:
+            // The K2 model card asks for 1.0 / 0.95 at high reasoning effort;
+            // top-k is the runtime's usual 20 (the card names no top-k).
+            return Sampling(temperature: 1.0, topK: topK, topP: 0.95)
         default:
             return house
         }

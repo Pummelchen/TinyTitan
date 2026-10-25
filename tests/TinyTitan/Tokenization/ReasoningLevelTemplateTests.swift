@@ -174,7 +174,7 @@ struct ReasoningLevelTemplateTests {
                 try Self.render(tok, Self.context(.on, name))
             }
         }
-        for effort in ModelReasoningEffort.allCases {
+        for effort in [ModelReasoningEffort.low, .medium, .xhigh] {
             _ = try Self.render(tok, Self.context(.on, effort.rawValue))
         }
         // Why `.on` is not offered: it selects the default effort and renders

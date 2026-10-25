@@ -94,6 +94,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   four value GEMVs from the resident experts (4- or 8-bit), and `mova_combine_fp16`
   (SiLU before weighting). It is tested end to end against the CPU formula:
   8 experts at top-4, selection ids and a weighted value vector.
+- **Serving defaults** — K2 is an effort family: the template accepts
+  low|medium|high with `high` as its default, while Qwen3.8 keeps
+  low|medium|xhigh. `ModelReasoningEffort` gained `high`, and each
+  `ModelReasoningControl` now carries the subset its own template accepts, so
+  a request for the other family's level is refused instead of reaching a
+  template that raises. Sampling follows the model card: temperature 1.0,
+  top-p 0.95, top-k 20.
 - **Surfaces not wired** — the 52 KB template renders through the generic
   tokenizer (`TINYTITAN_K2_CHAT=1`), but the `k2_horizon` reason/tool parsers,
   the catalogue entry and a golden baseline are not implemented.

@@ -14,7 +14,12 @@ struct ReasoningControlTests {
         #expect(ModelFamily.qwen36MTP.reasoningControl == .binaryThinking)
         #expect(
             ModelFamily.qwen38flash.reasoningControl
-                == .thinkingWithEffortLevels(defaultEffort: .xhigh))
+                == .thinkingWithEffortLevels(
+                    defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
+        #expect(
+            ModelFamily.k2Horizon.reasoningControl
+                == .thinkingWithEffortLevels(
+                    defaultEffort: .high, supported: [.low, .medium, .high]))
     }
 
     @Test("Nil effort always validates")
@@ -75,7 +80,7 @@ struct ReasoningControlTests {
                 environment: ["TINYTITAN_REASONING_EFFORT": "XHigh"]) == .xhigh)
         #expect(
             ModelReasoningEffort.resolved(
-                environment: ["TINYTITAN_REASONING_EFFORT": "high"]) == nil)
+                environment: ["TINYTITAN_REASONING_EFFORT": "high"]) == .high)
     }
 
     // MARK: Thinking levels
@@ -90,7 +95,37 @@ struct ReasoningControlTests {
         #expect(
             ModelFamily.qwen38flashMTP.supportedReasoningLevels
                 == [.off, .low, .medium, .xhigh])
+        #expect(
+            ModelFamily.k2Horizon.supportedReasoningLevels
+                == [.off, .low, .medium, .high])
         #expect(CPUModelFamily.qwen35Dense.supportedReasoningLevels == [.off, .on])
+    }
+
+    /// The two effort families do not accept each other's levels: Qwen3.8
+    /// raises on `high`, K2 raises on `xhigh`. A shared enum plus a per-family
+    /// list is what keeps that from becoming a template exception at runtime.
+    @Test("Each effort family rejects the other's level")
+    func effortSetsAreNotInterchangeable() {
+        #expect(
+            throws: ModelReasoningControlError.effortUnsupported(
+                family: .qwen38flash, effort: .high)
+        ) {
+            try ModelFamily.qwen38flash.validateReasoning(
+                thinkingMode: .on, effort: .high)
+        }
+        #expect(
+            throws: ModelReasoningControlError.effortUnsupported(
+                family: .k2Horizon, effort: .xhigh)
+        ) {
+            try ModelFamily.k2Horizon.validateReasoning(
+                thinkingMode: .on, effort: .xhigh)
+        }
+        for effort in [ModelReasoningEffort.low, .medium, .high] {
+            #expect(throws: Never.self) {
+                try ModelFamily.k2Horizon.validateReasoning(
+                    thinkingMode: .on, effort: effort)
+            }
+        }
     }
 
     @Test("Levels map to the thinking switch and effort")
@@ -117,7 +152,10 @@ struct ReasoningControlTests {
 
     @Test("Every supported level yields settings the family validates")
     func mappedSettingsValidate() throws {
-        for family in [ModelFamily.qwen36, .qwen36MTP, .qwen38flash, .qwen38flashMTP] {
+        for family in [
+            ModelFamily.qwen36, .qwen36MTP, .qwen38flash,
+            .qwen38flashMTP, .k2Horizon,
+        ] {
             for level in family.supportedReasoningLevels {
                 let settings = try family.runtimeReasoning(for: level)
                 try family.validateReasoning(

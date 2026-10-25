@@ -311,7 +311,7 @@ public struct ServerArguments: Equatable, Sendable {
             case "--reasoning-effort":
                 guard let parsed = ModelReasoningEffort(rawValue: value) else {
                     throw ServerArgumentError.invalid(
-                        "--reasoning-effort must be low, medium, or xhigh")
+                        "--reasoning-effort must be low, medium, high, or xhigh")
                 }
                 reasoningEffort = parsed
                 effortWasSet = true

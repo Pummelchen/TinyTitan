@@ -1125,13 +1125,14 @@ struct ServerArgumentTests {
                 "--reasoning-effort", "medium",
             ])
         }
-        #expect(throws: ServerArgumentError.self) {
+        // "high" is K2's default effort, so it parses here; the family
+        // check against the manifest is what rejects it for Qwen3.8.
+        #expect(
             try ServerArguments.parse([
                 "--model", "model.ssdai",
                 "--thinking", "on",
                 "--reasoning-effort", "high",
-            ])
-        }
+            ]).reasoningEffort == .high)
     }
 
     /// Header parsing, on its own. Trimming and the empty case matter
