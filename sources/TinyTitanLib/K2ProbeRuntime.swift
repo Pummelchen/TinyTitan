@@ -34,22 +34,22 @@ package actor K2ProbeRuntime {
     private var cachedTokens: [Int32] = []
 
     /// How many prompt tokens the chunked prefill batches; 0 or 1 is the
-    /// token path, and that is the default.
+    /// token path.
     ///
-    /// Opt-in because the measurement says so. With each sparse layer's expert
-    /// fetch awaited before the next token's fetch (the safe order; the cache
-    /// reuses slots and running ahead corrupted the pending token's weights),
-    /// a 163-token prompt on 4-bit measured 34.9 s chunked against 33.3 s
-    /// token-by-token -- neutral to 5% slower -- so batching projections alone
-    /// does not pay. At 8-bit the same prompt is faster (85 s against
-    /// 107-134 s), but the affine GEMM's reduction order is not the GEMV's and
-    /// the greedy output flips three tokens on the golden prompt, which a
-    /// speed change may not buy. The win that was measured (12-15 s) came from
-    /// overlapping fetches over the cache's slots, and it was not correct.
+    /// 16 is the default for 4-bit installs. With the sparse batch fetching the
+    /// union of a chunk's selected experts once per layer, a 163-token prompt
+    /// measured a median 17.5 s chunked against 23.8 s token-by-token over
+    /// eight paired rounds (best 13.4 against 22.5), and the 24-token greedy
+    /// stream is byte-identical to the token path. At 8-bit the same prompt is
+    /// faster still, but the affine GEMM's reduction order is not the GEMV's
+    /// and the greedy output flips three tokens on the golden prompt, which a
+    /// speed change may not buy; that install stays on the token path.
+    /// `TINYTITAN_K2_CHUNK` overrides either way.
     private var chunkSize: Int {
+        let fallback = model.attentionWeightBits == 4 ? 16 : 1
         let requested =
             Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_CHUNK"] ?? "")
-            ?? 0
+            ?? fallback
         return max(1, min(requested, 16))
     }
 

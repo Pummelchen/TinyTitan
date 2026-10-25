@@ -15,8 +15,8 @@ import Metal
 ///   * RoPE and causal attention are per token by nature (positions advance,
 ///     one query each);
 ///   * MoE router and shared expert are per token — one `K2MoEStage` per slot
-///     so all the router ids survive until the fetch phase — and the routed
-///     experts are fetched and run per token, adding into the shared row.
+///     so all the router ids survive until the fetch phase. The routed experts
+///     are fetched as a group's union and dispatched per token against it.
 ///
 /// The MoE fetch is still the slow part; batching the projections is what this
 /// stage can do without changing routing.
@@ -39,6 +39,7 @@ final class K2SparseBatch {
     private let vExperts: [MoVAValueStage.ExpertWeights]
     private let moeStages: [K2MoEStage]
     private let sharedWeights: K2MoEStage.ExpertWeights
+    private let experts: K2SparseExpertDispatch
 
     private let normed: MTLBuffer
     private let q: MTLBuffer
@@ -139,6 +140,9 @@ final class K2SparseBatch {
         } else {
             self.vCache = try buffer(maxSequence * kvDim, "k2.sparseBatch.vCache")
         }
+        self.experts = try K2SparseExpertDispatch(
+            model: model, layer: layer, hiddenSize: hidden,
+            stages: moeStages, normed2: normed2, moeOut: moeOut)
     }
 
     private static func weightBits(
@@ -170,7 +174,7 @@ final class K2SparseBatch {
         try await projectionPhase(
             queue: queue, hidden: hidden, hiddenOffset: hiddenOffset,
             basePosition: basePosition, tokenCount: tokenCount)
-        try await expertPhase(queue: queue, tokenCount: tokenCount)
+        try await experts.encode(queue: queue, tokenCount: tokenCount)
         try await residualPhase(
             queue: queue, out: out, outOffset: outOffset,
             tokenCount: tokenCount)
@@ -338,54 +342,6 @@ final class K2SparseBatch {
                 commandBuffer: cb, hidden: normed2,
                 hiddenOffset: token * d * half, shared: sharedWeights,
                 out: moeOut, outOffset: token * d * half)
-        }
-    }
-
-    /// Per token: read that slot's router ids, fetch its experts, add the
-    /// routed pass into the shared-expert row.
-    ///
-    /// Each token's expert buffer is awaited before the next token's experts
-    /// are fetched. The cache hands out a fixed ring of slots and reuses them
-    /// on the next fetch, so a fetch that ran ahead of a pending dispatch would
-    /// overwrite weights the GPU had not read yet: the same chunk size then
-    /// produced different tokens from run to run at 8-bit, where the layer's
-    /// 16 slots are tightest. Correctness first; the projections for the whole
-    /// chunk are what still amortise.
-    private func expertPhase(
-        queue: MTLCommandQueue, tokenCount: Int
-    ) async throws {
-        let d = config.hiddenSize
-        let half = MemoryLayout<UInt16>.stride
-        for token in 0..<tokenCount {
-            let stage = moeStages[token]
-            let ids = stage.selectedExpertIDs()
-            guard
-                let plan = try model.planRoutedExperts(layer: layer, experts: ids)
-            else {
-                throw ModelError.internalInconsistency(
-                    detail: "K2 sparse batch could not plan expert fetches")
-            }
-            let blobs = try await model.fetchRoutedExperts(plan: plan)
-            var experts: [K2MoEStage.ExpertWeights] = []
-            for (index, id) in plan.experts.enumerated() {
-                let entry = try model.packedExpertsLayout.expert(
-                    layer: layer, expert: id)
-                experts.append(
-                    try K2MoEStage.expertWeights(blob: blobs[index], entry: entry))
-            }
-            guard let cb = queue.makeCommandBuffer() else {
-                throw MetalError.commandEncoderFailed
-            }
-            try stage.encodeFusedExperts(
-                commandBuffer: cb, hidden: normed2,
-                hiddenOffset: token * d * half, experts: experts, shared: nil,
-                out: moeOut, outOffset: token * d * half)
-            cb.commit()
-            await cb.completed()
-            if let error = cb.error {
-                throw ModelError.internalInconsistency(
-                    detail: "K2 sparse batch expert phase failed: \(error)")
-            }
         }
     }
 
