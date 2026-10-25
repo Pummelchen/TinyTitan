@@ -147,9 +147,15 @@ final class K2SparseLayerProbe {
         }
         let d = config.hiddenSize
 
+        let shared = K2MoEStage.ExpertWeights(
+            gate: try model.k2SharedGate(layer: layer),
+            up: try model.k2SharedUp(layer: layer),
+            down: try model.k2SharedDown(layer: layer))
         try await encodeEntry(queue: queue)
-        try await encodeAttention(queue: queue, position: position)
-        // Phase 3: fetch the selected experts, run them with the shared expert.
+        try await encodeAttention(
+            queue: queue, position: position, shared: shared)
+        // Phase 3: fetch the selected experts. The shared expert already ran in
+        // phase 2, so only the routed experts are encoded after the fetch.
         let fetchStart = Date()
         let ids = moe.selectedExpertIDs()
         guard
@@ -166,24 +172,22 @@ final class K2SparseLayerProbe {
             experts.append(
                 try K2MoEStage.expertWeights(blob: blobs[index], entry: entry))
         }
-        let shared = K2MoEStage.ExpertWeights(
-            gate: try model.k2SharedGate(layer: layer),
-            up: try model.k2SharedUp(layer: layer),
-            down: try model.k2SharedDown(layer: layer))
         fetchSeconds += Date().timeIntervalSince(fetchStart)
 
         let phaseStart2 = Date()
         guard let third = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
+        // `moeOut` already holds the shared expert from phase 2, so the routed
+        // pass adds to it in place.
         if fusedMoE {
             try moe.encodeFusedExperts(
                 commandBuffer: third, hidden: normed2,
-                experts: experts, shared: shared, out: moeOut)
+                experts: experts, shared: nil, out: moeOut)
         } else {
             try moe.encodeExperts(
                 commandBuffer: third, hidden: normed2,
-                experts: experts, shared: shared, out: moeOut)
+                experts: experts, shared: nil, out: moeOut)
         }
         try copy(third, from: h1, to: out, count: d)
         try elementwise.encodeResidualAdd(
@@ -245,9 +249,14 @@ final class K2SparseLayerProbe {
         gpuBusySeconds += max(0, first.gpuEndTime - first.gpuStartTime)
     }
 
-    private func encodeAttention(queue: MTLCommandQueue, position: Int) async throws {
+    private func encodeAttention(
+        queue: MTLCommandQueue, position: Int,
+        shared: K2MoEStage.ExpertWeights
+    ) async throws {
         // Phase 2: MoVA values, RoPE, cached attention, gate, o, residual,
-        // post-norm.
+        // post-norm, both routers and the shared expert. The shared expert does
+        // not depend on the routed fetch, so running it here leaves only the
+        // routed dispatches on the far side of the fetch.
         let d = config.hiddenSize
         let queryDim = config.numHeads * config.fullHeadDim
         let kvDim = config.numFullKVHeads * config.fullHeadDim
@@ -305,6 +314,8 @@ final class K2SparseLayerProbe {
             routerBias: moeBias.buffer,
             routerBiasOffset: Int(moeBias.offset),
             scaling: Float(config.routerScaling))
+        try moe.encodeSharedExpert(
+            commandBuffer: second, hidden: normed2, shared: shared, out: moeOut)
         encodeSeconds += Date().timeIntervalSince(phaseStart)
         second.commit()
         let gpuStart = Date()

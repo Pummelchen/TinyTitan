@@ -244,6 +244,24 @@ final class K2MoEStage {
         encoder.endEncoding()
     }
 
+    /// The shared expert alone, into `out`. The sparse layer encodes this in
+    /// its pre-fetch command buffer so the post-fetch work is only the routed
+    /// experts; `encodeFusedExperts` then adds them to `out` in place.
+    func encodeSharedExpert(
+        commandBuffer: MTLCommandBuffer,
+        hidden: MTLBuffer, hiddenOffset: Int = 0,
+        shared: ExpertWeights,
+        out: MTLBuffer, outOffset: Int = 0
+    ) throws {
+        try encodeSwiGLU(
+            commandBuffer: commandBuffer,
+            weights: shared,
+            x: hidden, xOffset: hiddenOffset,
+            gate: sharedGate, up: sharedUp, act: sharedAct,
+            y: out, yOffset: outOffset,
+            rows: hiddenSize, width: expertWidth)
+    }
+
     /// The same block as `encodeExperts`, dispatched as two shape-specific
     /// passes: every selected expert's gate/up/SiLU in one dispatch and every
     /// down projection plus the router-weighted sum in another. The experts are

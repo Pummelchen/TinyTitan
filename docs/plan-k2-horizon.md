@@ -145,6 +145,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   GPU-bound at 64 slots now, not fetch-bound, so the next levers are one
   command buffer per token instead of three per sparse layer, and overlap of
   the next layer's expert fetch with the current layer's GPU work.
+- **Shared expert before the fetch** — the shared expert depends only on the
+  post-attention hidden state, so it now runs in the attention command buffer
+  and the post-fetch buffer carries only the two routed dispatches. On 4-bit
+  with 16 decode tokens and the same prompt (two runs each): 5.76 s before,
+  5.01 s after (2.78 → 3.19 tok/s), same output. The entry and attention
+  buffers cannot merge as well: `MoVAValueStage.encodeValues` reads the value
+  router's ids on the CPU, so the router buffer has to complete first.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
