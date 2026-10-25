@@ -1,9 +1,39 @@
 # Nemotron 3.5 Bolt 74B-A9B — port record
 
-Status: **in progress.** This records what was read from the published
+Status: **conversion running.** This records what was read from the published
 checkpoint and the decisions the port follows. Nothing here is called
 supported until both installs exist, the runtime answers from them, and the
 decode numbers below are measured on this host.
+
+## 0. Progress
+
+Done and verified on the toy fixture:
+
+- the branch `nemotron-3.5-bolt` and this record;
+- `tools/prepare_nemotron.py`: geometry validation, per-layer expert census,
+  the direct `.ssdai` writer for both widths, and a resumable parallel shard
+  download;
+- `tools/test_nemotron_writer.py`: a 3-layer toy install accepted by the real
+  `TinyTitanRepack --verify-install` at 4 and 8 bits; its wrapper
+  `benchmark/test_nemotron_install.py` is in the Python suite;
+- `NemotronInstall` + `NemotronModel` + `NemotronCPU` + `NemotronMetal`, and
+  `tools/nemotron_reference.py`, with parity 4.9e-7 (CPU) / 3.4e-6 (GPU) on the
+  toy at both widths and across three tokens;
+- `TinyTitanBench nemotron|nemotrongpu|nemotronlogits|nemotroninfo` and the
+  `TinyTitanCLI` branch that serves a Nemotron install directly;
+- `benchmark/nemotron_decode.py`, the four-arm measurement script.
+
+Running now, and what follows it:
+
+1. `tools/prepare_nemotron.py --install` is writing both installs from the
+   pinned BF16 release (149.77 GB over a ~3-4 MB/s link, so hours). It resumes
+   per shard and per 64 MB chunk.
+2. When it finishes: `TinyTitanRepack --verify-install` on both directories,
+   then `TinyTitanBench nemotroninfo` on each.
+3. `benchmark/nemotron_decode.py --runs 1` for the four arms.
+4. The README table rows and the measured table in §3.
+5. A full `swift build -c release` and the Python gates, then the branch is
+   ready for `main`.
 
 Request: integrate
 [`nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB)
