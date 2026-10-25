@@ -25,6 +25,11 @@ extension Model {
         // layout that names experts was already refused when the layout decoded.
         guard layout.expertsPerLayer > 0, layout.expertStride > 0 else { return }
         for layer in layout.layers {
+            // A mixed install's dense layers carry no experts and no file. The
+            // per-layer count is what distinguishes that from a sparse layer
+            // whose blob the manifest forgot; the receipt has nothing to attest
+            // for a layer with no payload.
+            guard !layer.experts.isEmpty else { continue }
             let relativePath = "packed_experts/\(layer.file)"
             guard let manifestEntry = manifest.files[relativePath] else {
                 throw ModelError.trustedReceiptInvalid(
@@ -142,14 +147,18 @@ extension Model {
 
         switch config.family {
         case .k2Horizon:
-            // The identity reader and the layout validator know this family;
-            // the GPU graph does not. Refusing here keeps a K2 payload from
-            // reaching the Qwen runner, which would read its `gate_proj` as a
-            // packed q/gate and its MoVA layers as a `v_proj` model -- fluent
-            // nonsense rather than an error.
+            // Validate the whole install first: the schema is what says the
+            // packed layout and every resident tensor match the architecture.
+            // Serving then refuses by name, because the GPU graph does not
+            // exist yet -- and running a K2 payload through the Qwen runner
+            // would read its `gate_proj` as a packed q/gate and its MoVA layers
+            // as a `v_proj` model, fluent nonsense rather than an error.
+            try Self.validateK2Schema(
+                checks: checks, layout: layout, config: config,
+                quant: quant, overrides: manifest.quantOverrides)
             throw ModelError.unsupportedArchitecture(
-                detail: "K2-Horizon's GPU graph and kernels are not implemented yet; "
-                    + "the install format is supported, serving it is not. "
+                detail: "K2-Horizon's GPU graph is not implemented yet; "
+                    + "the install validates, serving it does not. "
                     + "See docs/plan-k2-horizon.md.")
         case .qwen35Dense:
             try Self.validateDenseSchema(

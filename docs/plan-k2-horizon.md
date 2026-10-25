@@ -64,10 +64,19 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   than defaulting, and `TensorSchema.k2Horizon` carries the checkpoint's
   tensor names. Manifest and layout validation now read per-layer expert
   counts, so the three dense layers are not demanded a packed-expert file
-  that was never written. Both installs pass the pre-graph checks with a
-  standalone verification; `Model.load` then refuses by name at
+  that was never written. `Model.load` then refuses by name at
   `validateRuntimeSchema` and the catalogue skips the directory with that
   reason, because the graph below does not exist.
+- **Resident schema** — `validateK2Schema` checks the whole install before the
+  graph refusal: embedding and head, the grouped-norm weights, every layer's
+  q/k/o and separate softplus-gate projection, the dense layers' `v_proj` and
+  SwiGLU MLP, the sparse layers' bf16 MoE router and selection bias, the 64
+  MoVA value experts, the 768-wide shared expert and the packed routed-expert
+  layout. `validateRoutedExpertLayout` now lets a declared dense layer be empty
+  and refuses experts on one; the trusted-receipt layer check has the same
+  allowance (both mixed-install gaps it closed were found by loading the real
+  installs). Both builds pass the schema phase under full SHA-256 and stop at
+  the graph refusal, which is the loader's current end state.
 - **GPU primitives** — the grouped two-way RMS norm is the existing
   `rmsnorm_bf16w_grouped` kernel with `headDim 1280, groupsPerRow 2`; no new
   norm work was needed. Two kernels are new and tested in isolation:

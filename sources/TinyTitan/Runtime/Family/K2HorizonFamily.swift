@@ -11,30 +11,99 @@ import Foundation
 /// plausible name would silently feed the wrong tensor.
 ///
 /// Sparse layers replace `v_proj` with MoVA: a `v_router` over 64 value
-/// experts. Those tensors are not in this schema because `TensorSchema` has no
-/// role for them yet; the GPU family adds the roles when the MoVA stage exists.
-extension TensorSchema {
-    private static func k2Layer(_ layer: Int, _ suffix: String) -> String {
+/// experts, whose weights live at `self_attn.v_experts.N`. The attention gate is
+/// a projection of its own (`self_attn.gate_proj`), not the packed [query ;
+/// gate] half Qwen writes into `q_proj`.
+enum K2HorizonTensors {
+    static let embedding = "model.embed_tokens.weight"
+    static let lmHead = "lm_head.weight"
+    static let finalNorm = "model.norm.weight"
+
+    static func name(_ layer: Int, _ suffix: String) -> String {
         "model.layers.\(layer).\(suffix)"
     }
 
+    static func inputNorm(_ layer: Int) -> String {
+        name(layer, "input_layernorm.weight")
+    }
+    static func postAttnNorm(_ layer: Int) -> String {
+        name(layer, "post_attention_layernorm.weight")
+    }
+    static func qProj(_ layer: Int) -> String {
+        name(layer, "self_attn.q_proj.weight")
+    }
+    static func kProj(_ layer: Int) -> String {
+        name(layer, "self_attn.k_proj.weight")
+    }
+    static func vProj(_ layer: Int) -> String {
+        name(layer, "self_attn.v_proj.weight")
+    }
+    static func oProj(_ layer: Int) -> String {
+        name(layer, "self_attn.o_proj.weight")
+    }
+    /// The softplus attention gate's projection, `hidden -> heads * headDim`.
+    static func attnGate(_ layer: Int) -> String {
+        name(layer, "self_attn.gate_proj.weight")
+    }
+
+    /// The 100-expert router and its selection-only bias, both bf16.
+    static func moeRouter(_ layer: Int) -> String {
+        name(layer, "mlp.gate.weight")
+    }
+    static func moeRouterBias(_ layer: Int) -> String {
+        name(layer, "mlp.gate.bias")
+    }
+    /// The single shared SwiGLU expert, `moeIntermediateSize` wide.
+    static func sharedGate(_ layer: Int) -> String {
+        name(layer, "mlp.shared_experts.gate_proj.weight")
+    }
+    static func sharedUp(_ layer: Int) -> String {
+        name(layer, "mlp.shared_experts.up_proj.weight")
+    }
+    static func sharedDown(_ layer: Int) -> String {
+        name(layer, "mlp.shared_experts.down_proj.weight")
+    }
+    /// The dense layers 0-2's SwiGLU MLP, `intermediateSize` wide.
+    static func denseGate(_ layer: Int) -> String {
+        name(layer, "mlp.gate_proj.weight")
+    }
+    static func denseUp(_ layer: Int) -> String {
+        name(layer, "mlp.up_proj.weight")
+    }
+    static func denseDown(_ layer: Int) -> String {
+        name(layer, "mlp.down_proj.weight")
+    }
+
+    /// MoVA's value router over the sparse layer's 64 value experts.
+    static func vRouter(_ layer: Int) -> String {
+        name(layer, "self_attn.v_router.weight")
+    }
+    static func vRouterBias(_ layer: Int) -> String {
+        name(layer, "self_attn.v_router.bias")
+    }
+    static func vExpert(_ layer: Int, _ expert: Int) -> String {
+        name(layer, "self_attn.v_experts.\(expert).weight")
+    }
+}
+
+extension TensorSchema {
     static let k2Horizon = TensorSchema(
-        embedding: "model.embed_tokens.weight",
-        lmHead: "lm_head.weight",
-        finalNorm: "model.norm.weight",
-        qProj: { k2Layer($0, "self_attn.q_proj.weight") },
-        kProj: { k2Layer($0, "self_attn.k_proj.weight") },
+        embedding: K2HorizonTensors.embedding,
+        lmHead: K2HorizonTensors.lmHead,
+        finalNorm: K2HorizonTensors.finalNorm,
+        qProj: { K2HorizonTensors.qProj($0) },
+        kProj: { K2HorizonTensors.kProj($0) },
         // Only the three dense layers carry a v_proj; sparse layers use MoVA.
-        vProj: { k2Layer($0, "self_attn.v_proj.weight") },
-        oProj: { k2Layer($0, "self_attn.o_proj.weight") },
-        router: { k2Layer($0, "mlp.gate.weight") },
-        sharedExpertGate: { k2Layer($0, "mlp.shared_experts.gate_proj.weight") },
-        sharedExpertUp: { k2Layer($0, "mlp.shared_experts.up_proj.weight") },
-        sharedExpertDown: { k2Layer($0, "mlp.shared_experts.down_proj.weight") },
+        vProj: { K2HorizonTensors.vProj($0) },
+        oProj: { K2HorizonTensors.oProj($0) },
+        router: { K2HorizonTensors.moeRouter($0) },
+        sharedExpertGate: { K2HorizonTensors.sharedGate($0) },
+        sharedExpertUp: { K2HorizonTensors.sharedUp($0) },
+        sharedExpertDown: { K2HorizonTensors.sharedDown($0) },
         // K2's shared expert has no sigmoid scalar gate; the role cannot exist.
         sharedExpertScalarGate: { _ in "k2_horizon.has_no_shared_expert_gate" },
-        inputNorm: { k2Layer($0, "input_layernorm.weight") },
-        postAttnNorm: { k2Layer($0, "post_attention_layernorm.weight") },
+        inputNorm: { K2HorizonTensors.inputNorm($0) },
+        postAttnNorm: { K2HorizonTensors.postAttnNorm($0) },
         qNorm: { _ in "k2_horizon.has_no_q_norm" },
         kNorm: { _ in "k2_horizon.has_no_k_norm" },
         gdnQKV: { _ in "k2_horizon.has_no_gdn" },

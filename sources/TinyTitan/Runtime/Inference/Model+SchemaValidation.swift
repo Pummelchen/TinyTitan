@@ -268,9 +268,22 @@ extension Model {
             ("down", config.hiddenSize, config.moeIntermediateSize),
         ]
         for layer in layout.layers {
-            guard !layer.experts.isEmpty else {
+            // K2's mixed install: its dense layers 0-2 carry no packed experts,
+            // and that is the layout's honest shape, not a missing blob. A
+            // layer the architecture calls dense must stay empty, and a routed
+            // layer must not be empty -- either way round the two claims
+            // disagree and the install is wrong.
+            let dense = config.denseLayerIndices.contains(layer.layer)
+            if layer.experts.isEmpty {
+                guard dense else {
+                    throw ModelError.indexCorrupt(
+                        detail: "routed layer \(layer.layer) has no experts")
+                }
+                continue
+            }
+            guard !dense else {
                 throw ModelError.indexCorrupt(
-                    detail: "routed layer \(layer.layer) has no experts")
+                    detail: "dense layer \(layer.layer) carries routed experts")
             }
             for (role, rows, columns) in routedShapes {
                 let sizes = try checks.affineSizes(
