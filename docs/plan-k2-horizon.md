@@ -33,6 +33,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
 
 ## Progress
 
+- **Runtime** — `K2Snapshot` + `K2Model` run the text path on the CPU:
+  grouped RMS norm, full RoPE, GQA with the softplus gate, dense SwiGLU for
+  layers 0-2, sparse MoE (sigmoid router with selection bias, top-8,
+  normalised and scaled by 2.5, plus the shared expert), and MoVA values
+  (top-4 of 64 experts, SiLU before weighting). `TinyTitanBench k2` drives it.
+  Checked against an independent numpy implementation of the same snapshot:
+  per-layer hidden states and logits agree to about 1e-6 on a tiny fixture.
 - **Planning** — `tools/prepare_k2_horizon.py --plan` classifies all 16,998
   tensors and measures the snapshots (21.7 GB at 4-bit, 39.8 GB at 8-bit).
 - **Conversion (local data layer)** — `--source/--output/--bits` writes an
@@ -68,6 +75,34 @@ only tensors that would have failed are the 100-wide router biases, which the
 plan keeps at bf16. The install TinyTitanRepack writes afterwards is a second
 copy, so the peak disk for the 8-bit path is the source download plus ~40 GB
 of snapshot plus ~40 GB of install.
+
+## Runtime path and benchmark
+
+`TinyTitanBench k2 <snapshot> "<prompt>" [n]` loads the snapshot, tokenizes
+through swift-transformers' generic `AutoTokenizer` (K2's tokenizer is a plain
+BPE and does not carry Qwen's special tokens), and prints prefill time and
+decode tokens per second. The snapshots were produced by
+`prepare_k2_horizon.py --from-hf`, which downloads the 74.9 GB checkpoint once
+and writes the 4-bit and 8-bit snapshots side by side.
+
+Measured on this host (M3, 24 GB), greedy:
+
+| Snapshot | Prompt | Prefill | Decode | Output |
+| --- | ---: | ---: | ---: | --- |
+| 4-bit (20 GB) | 5 tokens | 4.03 s | 2.46 tok/s | " Paris. The capital of France is Paris" |
+| 4-bit (20 GB) | 31 tokens | 12.74 s (2.4 tok/s) | 4.09 tok/s (4 tokens) | " The quick brown fox" |
+| 8-bit (37 GB) | 5 tokens | 14.11 s | 0.82 tok/s | " Paris. The capital of France is Paris" |
+| 8-bit (37 GB) | 8 tokens | 16.65 s | 0.91 tok/s (16 tokens) | " little girl named Lily. She loved..." |
+
+Both widths answer the capital question correctly and continue coherently.
+The 8-bit snapshot is larger than RAM, so the page cache streams it from disk;
+that is most of the difference. Prefill is token-by-token, so TTFT is roughly
+prompt length times the per-token cost.
+
+What this path does **not** have yet: server/CLI/catalog wiring, the 52 KB
+chat template and `k2_horizon` parsers, a receipt-bearing install under
+`models/`, and a batched prefill. The bench command is the current entry
+point.
 
 ## The converter
 
