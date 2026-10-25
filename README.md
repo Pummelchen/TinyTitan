@@ -77,24 +77,7 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 ## Benchmarks
 
-Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
-does not serve the model: the MoE families stream their experts on the GPU + ANE
-path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
-served from its GPU probe by the server (single model, no prompt cache or
-batching) rather than by the runner. Its rows below are `TinyTitanBench k2gpu`
-with 32 greedy decode tokens and a warm expert cache: **12.4 tok/s at 4-bit and
-2.0 tok/s at 8-bit**. The gap is memory capacity, not weight width: the 4-bit
-install is 21 GB and fits this host's 24 GB, so its 64-slot-per-layer expert
-cache holds most of each layer's 100 experts; the 8-bit install is 39 GB
-(27.6 GB of experts), only 16 slots per layer fit, and the other seven of each
-token's eight picks stream from disk. The served path is lower — it adds the
-request loop, detokenising and sampling to the same probe. K2-Horizon's score
-is from its
-[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
-Terminal-Bench 4.0 result is published for it. Per-version measurements and the
-method live on the wiki
-([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
-[Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
+Peak decode on a base 8-core M3 MacBook Pro with 24 GB. 
 
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
