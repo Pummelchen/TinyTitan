@@ -326,11 +326,16 @@ public struct ModelCatalog: Sendable {
         }
         // Snapshots are written in place by a converter, so a config can
         // exist before the rest of the directory does.
-        for required in ["model.safetensors.index.json", "tokenizer.json"]
+        for required in ["model.safetensors.index.json"]
         where !FileManager.default.fileExists(
             atPath: directory.appendingPathComponent(required).path)
         {
             return .failure(ProbeFailure(reason: "incomplete snapshot: no \(required)"))
+        }
+        // A snapshot may keep its tokenizer at the root or under `tokenizer/`;
+        // `resolvedTokenizerFolder` is the one reader that knows both.
+        guard GFTokenizer.resolvedTokenizerFolder(forModelDirectory: directory) != nil else {
+            return .failure(ProbeFailure(reason: "incomplete snapshot: no tokenizer.json"))
         }
         let declared = (config["model_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let id = declared ?? directory.lastPathComponent

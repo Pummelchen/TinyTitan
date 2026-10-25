@@ -104,6 +104,31 @@ generic tokenizer as well: `TINYTITAN_K2_CHAT=1` applies it and the model then
 answers in its instruction format (a chat request for "What is the capital of
 France?" tokenizes to 17 prompt tokens and decodes reasoning-style text).
 
+The model is also served through `TinyTitanServer`: `CPUModelFamily.k2Horizon`,
+a `K2ModelBackend` that renders the checkpoint's template, samples with the
+request's settings and streams content, a catalog entry for a snapshot under
+`models/`, and the card's sampling defaults (temperature 1.0, top-p 0.95).
+Verified on this host: a chat request of 22 prompt + 6 completion tokens
+returns HTTP 200 in 12.35 s and the model answers in its instruction format.
+The installs live at `models/k2-horizon-affine-4bit` (20 GB) and
+`models/k2-horizon-affine-8bit` (37 GB).
+
+### Why the CPU decode is ~2-3 tok/s
+
+The layer loop is 300-400 ms per token and the 250,624-row head is 15-30 ms;
+the engine is not spending its time in the logits. A token reads about 2.25 GB
+of active weights (attention, top-8 MoE experts, top-4 MoVA experts, shared
+expert), and the synthetic CPU GEMV measures 43 GB/s for a resident matrix —
+so with the model in RAM the same work would be ~50 ms/token, around 19 tok/s.
+The 4-bit snapshot is 20 GB and this host has 24 GB with the desktop already
+using several; `iostat` during decode shows the SSD doing 1.4-1.7 GB/s, and
+swap is 7.7 GB used. Decode is therefore memory-bound: the model does not fit,
+so experts stream from disk every token. The 8-bit snapshot (37 GB) is worse.
+A CPU-wide weight cache was tried and made it slower (it competes with the
+page cache and the swap), so it was removed. The path to 10-20 tok/s is a GPU
+implementation of the K2 layer graph (attention + softplus gate + MoVA +
+router), not a CPU tuning change; this host cannot hold the model resident.
+
 What this path does **not** have yet: server/CLI/catalog wiring, the 52 KB
 chat template and `k2_horizon` parsers, a receipt-bearing install under
 `models/`, and a batched prefill. The bench command is the current entry

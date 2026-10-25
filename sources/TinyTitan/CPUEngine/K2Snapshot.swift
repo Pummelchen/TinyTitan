@@ -249,4 +249,104 @@ public struct K2Snapshot: Sendable {
         }
         return values
     }
+
+    /// An LRU cache of the packed weights the model reads, copied out of the
+    /// mapped file so a repeated expert stays resident instead of being re-faulted
+    /// from disk.
+    ///
+    /// The 4-bit snapshot is 20 GB and the 8-bit one 37 GB; this host has 24 GB, so
+    /// the page cache alone cannot keep every expert. Decode re-reads about 2.7 GB
+    /// per token, and a `iostat` sample during a decode shows the SSD doing
+    /// 1.4-1.7 GB/s of it. A bounded cache of the hot subset trades memory for
+    /// that traffic; the budget is `TINYTITAN_K2_CACHE_MB` (default 6 GiB, 0
+    /// disables).
+    private final class WeightCache {
+
+        private struct Entry {
+            let weights: UnsafeMutableRawPointer
+            let scales: UnsafeMutableRawPointer
+            let biases: UnsafeMutableRawPointer
+            let weightBytes: Int
+            let scaleBytes: Int
+            let biasBytes: Int
+            let rows: Int
+            let columns: Int
+            let bits: Int
+            let groups: Int
+            var lastUse: UInt64
+        }
+
+        private var entries: [String: Entry] = [:]
+        private var usedBytes = 0
+        private let budgetBytes: Int
+        private var tick: UInt64 = 0
+
+        static func budgetFromEnvironment() -> Int {
+            let raw = ProcessInfo.processInfo.environment["TINYTITAN_K2_CACHE_MB"]
+            let megabytes = raw.flatMap(Int.init) ?? 6 * 1024
+            return max(0, megabytes) * 1024 * 1024
+        }
+
+        init(budgetBytes: Int) {
+            self.budgetBytes = budgetBytes
+        }
+
+        /// The cached matrix, or nil. Marks the entry most-recently used when hit.
+        func matrix(_ key: String) -> AffineSnapshot.Matrix? {
+            guard var entry = entries[key] else { return nil }
+            tick += 1
+            entry.lastUse = tick
+            entries[key] = entry
+            return AffineSnapshot.Matrix(
+                weights: UnsafeRawBufferPointer(start: entry.weights, count: entry.weightBytes),
+                scales: entry.scales.assumingMemoryBound(to: UInt16.self),
+                biases: entry.biases.assumingMemoryBound(to: UInt16.self),
+                rows: entry.rows, columns: entry.columns, bits: entry.bits, groupSize: 64)
+        }
+
+        /// Copy a matrix's three buffers in, evicting least-recently-used entries
+        /// until the budget allows it.
+        func insert(
+            key: String, weights: UnsafeRawBufferPointer, scales: UnsafeRawBufferPointer,
+            biases: UnsafeRawBufferPointer, rows: Int, columns: Int, bits: Int, groups: Int
+        ) {
+            guard budgetBytes > 0 else { return }
+            let weightBytes = weights.count
+            let scaleBytes = scales.count
+            let biasBytes = biases.count
+            let total = weightBytes + scaleBytes + biasBytes
+            guard total <= budgetBytes else { return }
+            evict(until: budgetBytes - total)
+            guard let weightCopy = allocate(weightBytes, from: weights),
+                let scaleCopy = allocate(scaleBytes, from: scales),
+                let biasCopy = allocate(biasBytes, from: biases)
+            else { return }
+            tick += 1
+            entries[key] = Entry(
+                weights: weightCopy, scales: scaleCopy, biases: biasCopy,
+                weightBytes: weightBytes, scaleBytes: scaleBytes, biasBytes: biasBytes,
+                rows: rows, columns: columns, bits: bits, groups: groups, lastUse: tick)
+            usedBytes += total
+        }
+
+        private func allocate(_ bytes: Int, from source: UnsafeRawBufferPointer)
+            -> UnsafeMutableRawPointer?
+        {
+            guard bytes > 0, let base = source.baseAddress else { return nil }
+            let pointer = UnsafeMutableRawPointer.allocate(byteCount: bytes, alignment: 64)
+            pointer.copyMemory(from: base, byteCount: bytes)
+            return pointer
+        }
+
+        private func evict(until target: Int) {
+            while usedBytes > target, !entries.isEmpty {
+                let victim = entries.min { $0.value.lastUse < $1.value.lastUse }?.key
+                guard let victim, let entry = entries.removeValue(forKey: victim) else { return }
+                entry.weights.deallocate()
+                entry.scales.deallocate()
+                entry.biases.deallocate()
+                usedBytes -= entry.weightBytes + entry.scaleBytes + entry.biasBytes
+            }
+        }
+    }
 }
