@@ -20,21 +20,12 @@ public enum CPUModelFamily: String, Sendable, CaseIterable {
     /// fourth layer, a fused attention output gate, partial rotary, and a
     /// tied embedding. Qwen3.5-2B is the model this was built against.
     case qwen35Dense = "qwen3_5_dense"
-
-    /// IFM's K2-Horizon-MoVA: a standard GQA attention with a softplus output
-    /// gate, grouped RMS norms, a 100-expert MoE at top-8 with a selection
-    /// bias, and 64 routed value experts inside the attention of the sparse
-    /// layers. Two layers in three of the architecture are unlike anything
-    /// above, which is why this is a family and not a config.
-    case k2Horizon = "k2_horizon"
-
     /// The `model_type` values that map here. The converter writes the
     /// canonical one; the originals carry their own.
     static let aliases: [String: CPUModelFamily] = [
         "qwen3_5_dense": .qwen35Dense,
         "qwen3_5_text": .qwen35Dense,
         "qwen3_5": .qwen35Dense,
-        "k2_horizon": .k2Horizon,
     ]
 
     public static func resolve(modelType: String?) -> CPUModelFamily? {
@@ -58,11 +49,6 @@ public enum CPUModelFamily: String, Sendable, CaseIterable {
     var reasoningControl: ModelReasoningControl {
         switch self {
         case .qwen35Dense: return .binaryThinking
-        // The K2 template renders `reasoning_effort` high|medium|low (default
-        // high); it has no off switch. Exposing effort levels would promise a
-        // mapping the request layer does not render yet, so it is described as
-        // the binary switch it effectively is.
-        case .k2Horizon: return .binaryThinking
         }
     }
 
@@ -90,10 +76,6 @@ public enum CPUModelFamily: String, Sendable, CaseIterable {
         case .qwen35Dense:
             return GenerationDefaults.Sampling(
                 temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95)
-        case .k2Horizon:
-            // The checkpoint's card: temperature 1.0, top-p 0.95, high effort.
-            return GenerationDefaults.Sampling(
-                temperature: 1.0, topK: GenerationDefaults.topK, topP: 0.95)
         }
     }
 }

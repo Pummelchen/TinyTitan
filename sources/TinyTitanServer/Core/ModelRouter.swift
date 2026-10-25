@@ -94,12 +94,7 @@ extension ModelRouter {
                     reasoningEffort: reasoning.effort,
                     mtpModelDirectory: nil)
                 return try await plan.makeSession(reusingContext: try await metal.context())
-            case .cpu(let family):
-                if family == .k2Horizon {
-                    return try await K2ModelBackend(
-                        snapshotDirectory: entry.path,
-                        maximumContext: arguments.maxContext)
-                }
+            case .cpu:
                 return try await CPUModelBackend(
                     snapshotDirectory: entry.path,
                     maximumContext: arguments.maxContext,

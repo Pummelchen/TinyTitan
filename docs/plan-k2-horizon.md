@@ -104,32 +104,49 @@ generic tokenizer as well: `TINYTITAN_K2_CHAT=1` applies it and the model then
 answers in its instruction format (a chat request for "What is the capital of
 France?" tokenizes to 17 prompt tokens and decodes reasoning-style text).
 
-The model is also served through `TinyTitanServer`: `CPUModelFamily.k2Horizon`,
-a `K2ModelBackend` that renders the checkpoint's template, samples with the
-request's settings and streams content, a catalog entry for a snapshot under
-`models/`, and the card's sampling defaults (temperature 1.0, top-p 0.95).
-Verified on this host: the same 22-prompt/6-completion chat request returns
-HTTP 200 in 12.35 s on the 4-bit install and 43.2 s on the 8-bit one (the
-larger snapshot streams harder), and the model answers in its instruction
-format.
-The installs live at `models/k2-horizon-affine-4bit` (20 GB) and
-`models/k2-horizon-affine-8bit` (37 GB).
+### Serving path: ANE prefill + GPU decode
 
-### Why the CPU decode is ~2-3 tok/s
+The CPU engine is only for the Qwen 3.5 dense 2B/4B/9B. Every other model runs
+ANE prefill and GPU decode, and K2 is no exception: its 36B snapshot cannot be
+served from the CPU path, and the temporary CPU server wiring was removed
+there is no `K2ModelBackend` and no `k2_horizon` CPU family any more. The CPU
+model described above stays as a numeric reference and a measurement harness
+(`TinyTitanBench k2`), not as a serving path; the snapshots under `models/`
+are not served today.
+
+### Why the CPU reference is ~2-3 tok/s
 
 The layer loop is 300-400 ms per token and the 250,624-row head is 15-30 ms;
 the engine is not spending its time in the logits. A token reads about 2.25 GB
 of active weights (attention, top-8 MoE experts, top-4 MoVA experts, shared
-expert), and the synthetic CPU GEMV measures 43 GB/s for a resident matrix —
+expert), and the synthetic CPU GEMV measures 43 GB/s for a resident matrix -
 so with the model in RAM the same work would be ~50 ms/token, around 19 tok/s.
-The 4-bit snapshot is 20 GB and this host has 24 GB with the desktop already
+The 4-bit snapshot is 20 GB and this host has 25.8 GB with the desktop already
 using several; `iostat` during decode shows the SSD doing 1.4-1.7 GB/s, and
 swap is 7.7 GB used. Decode is therefore memory-bound: the model does not fit,
-so experts stream from disk every token. The 8-bit snapshot (37 GB) is worse.
-A CPU-wide weight cache was tried and made it slower (it competes with the
-page cache and the swap), so it was removed. The path to 10-20 tok/s is a GPU
-implementation of the K2 layer graph (attention + softplus gate + MoVA +
-router), not a CPU tuning change; this host cannot hold the model resident.
+so experts stream from disk every token. The 8-bit snapshot (37 GB) is worse
+(0.8-0.9 tok/s). A CPU-wide weight cache was tried and made it slower (it
+competes with the page cache and the swap), so it was removed. This is the
+measurement that says the CPU is the wrong engine, not a tuning target.
+
+### The GPU/ANE port
+
+1. **Install format.** The repacker's planner stores one fused expert stack per
+   layer; K2 has two expert systems per sparse layer (100 MoE + 64 MoVA) plus a
+   separate attention gate and value router. The layer/expert layout and the
+   manifest need that shape before a GPU loader can exist.
+2. **GPU family and loader.** `ModelFamily.k2Horizon`, schema validation and
+   the per-layer graph on the existing Metal engine.
+3. **Kernels.** Grouped two-way RMS norm, the softplus attention gate, the
+   router's selection bias and 2.5 scaling, and - the new work - the MoVA value
+   experts (top-4 of 64 linear experts, SiLU, weighted sum) in prefill and
+   decode, with the same expert-streaming discipline as the MoE path.
+4. **ANE prefill.** An ANE sidecar graph for the K2 layer shape, exported and
+   verified by `tools/ane_sidecars.sh`; a GPU install without it has no ANE
+   prefill.
+5. **Surfaces.** The 52 KB template with `reasoning_effort` and three tool
+   formats, the `k2_horizon` reason/tool parsers, catalogue keys, receipt,
+   docs and goldens.
 
 What this path does **not** have yet: server/CLI/catalog wiring, the 52 KB
 chat template and `k2_horizon` parsers, a receipt-bearing install under
