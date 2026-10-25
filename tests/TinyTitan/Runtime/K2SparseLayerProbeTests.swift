@@ -160,4 +160,118 @@ import TinyTitanValidationSupport
         let rel = RelError.compute(actual: actual, reference: expected)
         #expect(rel < Tolerance.fp16Reduction, "relErr=\(rel)")
     }
+
+    @Test func secondTokenAttendsOverTheSparseCache() async throws {
+        let directory = try K2ToySynthetic.write(sparse: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = try ArchConfig.resolved(
+            forFamily: .k2Horizon, directoryURL: directory)
+        let ctx = try MetalContext()
+        let model = try Model.load(
+            directoryURL: directory, device: ctx.device, expecting: config,
+            integrityPolicy: .fullSha256)
+        let layer = config.numLayers - 1
+        let probe = try K2SparseLayerProbe(
+            model: model, context: ctx, layer: layer, maxSequence: 2)
+        var rng = SeedTree(0x5A17_0002).key("k2-sparse-cache")
+        let first = (0..<config.hiddenSize).map { _ in Float16(rng.uniform(-1, 1)) }
+        let second = (0..<config.hiddenSize).map { _ in Float16(rng.uniform(-1, 1)) }
+        _ = try await probe.run(queue: ctx.queue, hidden: first, position: 0)
+        let actual = try await probe.run(queue: ctx.queue, hidden: second, position: 1)
+
+        let d = config.hiddenSize
+        let queryDim = config.numHeads * config.fullHeadDim
+        let kvDim = config.numFullKVHeads * config.fullHeadDim
+        let width = config.moeIntermediateSize
+        let headsPerKV = config.numHeads / config.numFullKVHeads
+        let scale = Float(config.attentionScale)
+
+        struct State {
+            let q: [Float]
+            let k: [Float]
+            let v: [Float]
+            let gate: [Float]
+            let hidden: [Float]
+        }
+        func state(_ hidden: [Float], position: Int) -> State {
+            let normed = Self.groupNorm(hidden, groups: config.normGroups)
+            let q = Self.gemv(normed, rows: queryDim)
+            let k = Self.gemv(normed, rows: kvDim)
+            let gate = Self.gemv(normed, rows: queryDim)
+            let dot = normed.reduce(Float(0), +)
+            let expertValue = Float(Float16(dot * Self.weight))
+            let silu = Float(Float16(expertValue / (1 + exp(-expertValue))))
+            let v = [Float](repeating: Float(Float16(silu * 2.5)), count: kvDim)
+            let rotary = config.fullHeadDim * Int(config.partialRotaryFactor)
+            let ropeQ = RopeRef.applyNeox(
+                input: q, numTokens: 1, numHeads: config.numHeads,
+                headDim: config.fullHeadDim, rotatedPairs: rotary / 2,
+                position: position, theta: Float(config.fullRopeTheta))
+            let ropeK = RopeRef.applyNeox(
+                input: k, numTokens: 1, numHeads: config.numFullKVHeads,
+                headDim: config.fullHeadDim, rotatedPairs: rotary / 2,
+                position: position, theta: Float(config.fullRopeTheta))
+            return State(
+                q: ropeQ.map { Float(Float16($0)) },
+                k: ropeK.map { Float(Float16($0)) },
+                v: v, gate: gate, hidden: hidden)
+        }
+        let states = [
+            state(first.map(Float.init), position: 0),
+            state(second.map(Float.init), position: 1),
+        ]
+        let current = states[1]
+        var attn = [Float](repeating: 0, count: queryDim)
+        for head in 0..<config.numHeads {
+            let kvHead = head / headsPerKV
+            let q = Array(
+                current.q[(head * config.fullHeadDim)..<((head + 1) * config.fullHeadDim)])
+            var scores = [Float](repeating: 0, count: states.count)
+            for (index, state) in states.enumerated() {
+                let k = Array(
+                    state.k[(kvHead * config.fullHeadDim)..<((kvHead + 1) * config.fullHeadDim)])
+                scores[index] = zip(q, k).reduce(Float(0)) { $0 + $1.0 * $1.1 } * scale
+            }
+            let maximum = scores.max() ?? 0
+            let exps = scores.map { exp($0 - maximum) }
+            let total = exps.reduce(Float(0), +)
+            for (index, state) in states.enumerated() {
+                let p = exps[index] / total
+                let v = Array(
+                    state.v[(kvHead * config.fullHeadDim)..<((kvHead + 1) * config.fullHeadDim)])
+                for i in 0..<config.fullHeadDim {
+                    attn[head * config.fullHeadDim + i] += p * v[i]
+                }
+            }
+            for i in 0..<config.fullHeadDim {
+                let index = head * config.fullHeadDim + i
+                attn[index] = Float(Float16(attn[index] * Self.softplus(current.gate[index])))
+            }
+        }
+        let o = Self.gemv(attn, rows: d)
+        var h1 = [Float](repeating: 0, count: d)
+        for i in 0..<d { h1[i] = Float(Float16(current.hidden[i] + o[i])) }
+        let normed2 = Self.groupNorm(h1, groups: config.normGroups)
+
+        let plan = try #require(try model.planRoutedExperts(layer: layer, experts: [0]))
+        let blobs = try await model.fetchRoutedExperts(plan: plan)
+        let entry = try model.packedExpertsLayout.expert(layer: layer, expert: 0)
+        let weights = try K2MoEStage.expertWeights(blob: blobs[0], entry: entry)
+        let expertOut = Self.swiGLU(
+            gate: Self.dequant(weights.gate, rows: width, columns: d),
+            up: Self.dequant(weights.up, rows: width, columns: d),
+            down: Self.dequant(weights.down, rows: d, columns: width),
+            x: normed2)
+        let sharedOut = Self.swiGLU(
+            gate: Self.dequant(try model.k2SharedGate(layer: layer), rows: width, columns: d),
+            up: Self.dequant(try model.k2SharedUp(layer: layer), rows: width, columns: d),
+            down: Self.dequant(try model.k2SharedDown(layer: layer), rows: d, columns: width),
+            x: normed2)
+        let expertWeight = Float(Float16(2.5))
+        let expected = (0..<d).map {
+            Float(Float16(h1[$0] + sharedOut[$0] + expertWeight * expertOut[$0]))
+        }
+        let rel = RelError.compute(actual: actual, reference: expected)
+        #expect(rel < Tolerance.fp16Reduction, "relErr=\(rel)")
+    }
 }
