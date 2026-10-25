@@ -15,6 +15,13 @@ public struct LocalSnapshotRepackOptions: Sendable {
     /// here in a way it would not be across arbitrary installs: the file being
     /// linked *is* the one that would have been copied.
     public let shareNgramTable: Bool
+    /// Unlink each source shard once the last range that reads it has been
+    /// committed. The copy pass reads a shard's ranges in plan order and never
+    /// returns to it, so this is safe for a completed snapshot and halves the
+    /// peak disk of a checkpoint (129.8 GB) whose install (~125 GB) cannot
+    /// coexist with it. It is opt-in because it consumes the snapshot: a
+    /// failed repack after a retirement needs the snapshot rebuilt.
+    public let retireSourceShards: Bool
     public let overwrite: Bool
     public let minFreeReserveBytes: UInt64
     public let rangeChunkBytes: Int
@@ -26,6 +33,7 @@ public struct LocalSnapshotRepackOptions: Sendable {
         modelID: String,
         draftHead: Bool = false,
         shareNgramTable: Bool = false,
+        retireSourceShards: Bool = false,
         overwrite: Bool = false,
         minFreeReserveBytes: UInt64 = 1 * 1024 * 1024 * 1024,
         rangeChunkBytes: Int = RemoteChunkPolicy.defaultBytes,
@@ -36,6 +44,7 @@ public struct LocalSnapshotRepackOptions: Sendable {
         self.modelID = modelID
         self.draftHead = draftHead
         self.shareNgramTable = shareNgramTable
+        self.retireSourceShards = retireSourceShards
         self.overwrite = overwrite
         self.minFreeReserveBytes = minFreeReserveBytes
         self.rangeChunkBytes = rangeChunkBytes

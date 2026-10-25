@@ -168,6 +168,12 @@ row_staging_dirs() {
       # run, so every one of these is what the *other* width would consume.
       convert_qwen35moe)   printf 'reuse:%s\n' "$WORK/${preset}-affine-4bit" "$WORK/${preset}-affine-8bit" \
                                               "$WORK/${preset}-affine" "$WORK/${preset}-shards" ;;
+      # A 122B snapshot is 69.5 GB (4-bit) or 129.8 GB (8-bit). Nobody can reuse
+      # it -- the sibling width is a separate fetch by design -- so it goes as
+      # soon as its own install exists. The shard directory holds only partial
+      # shards by then (the converter deletes each converted one) and is dropped
+      # on the same terms.
+      convert_qwen35moe_solo) printf 'drop:%s\n' "$WORK/${preset}-affine-${_w}bit" "$WORK/${preset}-shards" ;;
       convert_qwen35)      printf 'drop:%s\n' "$WORK/${_n%-8bit}-affine-${_w}bit"
                            printf 'reuse:%s\n' "$WORK/${_n%-8bit}-shards" ;;
     esac
@@ -282,6 +288,15 @@ CATALOGUE=(
   "ornith15|ornith-1.5_35B_A3B_4Bit|4|convert_qwen35moe|ornith15|ornith15-8bit"
   "ornith15-8bit|ornith-1.5_35B_A3B_8Bit|8|convert_qwen35moe|ornith15|ornith15"
   "ornith15-mtp|ornith-1.5_35B_A3B_MTP_4Bit|4|prepare_ornith_mtp"
+  # Ornith-1.5-122B. Deliberately *not* a paired `convert_qwen35moe` row: one
+  # `--bits 4 8` pass would stage 69.5 GB and 129.8 GB of snapshots at once,
+  # and then a 120 GB install beside them, which no 24 GB/1 TB Mac can hold.
+  # The solo source converts the requested width only and drops its snapshot
+  # once the install exists, so each width costs one fetch (the source shards
+  # are streamed and deleted, never kept). An interrupted width resumes its
+  # own partial snapshot; the other width starts its own fetch.
+  "ornith122|ornith-1.5_122B_4Bit|4|convert_qwen35moe_solo|ornith122"
+  "ornith122-8bit|ornith-1.5_122B_8Bit|8|convert_qwen35moe_solo|ornith122"
   "qwen36|qwen3.6_35B_A3B_4Bit|4|convert_qwen35moe|qwen36|qwen36-8bit"
   "qwen36-8bit|qwen3.6_35B_A3B_8Bit|8|convert_qwen35moe|qwen36|qwen36"
   "qwen36-mtp|qwen3.6_35B_A3B_MTP_4Bit|4|convert_qwen36_mtp"
@@ -345,6 +360,7 @@ What a run costs
 Coverage
 
   Ornith 1.5 35B-A3B        4-bit, 8-bit, MTP draft
+  Ornith 1.5 122B           4-bit, 8-bit (one width per run)
   Qwen 3.6 35B-A3B          4-bit, 8-bit, MTP draft
   Qwen3.8-Flash-Next        4-bit, 8-bit, MTP draft
   Qwen-AgentWorld 35B-A3B   4-bit, 8-bit
@@ -365,6 +381,14 @@ Sources
                       `<name> both` installs 4-bit and 8-bit for the cost of
                       one fetch; one width alone already converts both and
                       keeps the other snapshot for a later run.
+  convert_qwen35moe_solo
+                      the same converter for Ornith-1.5-122B, one width per
+                      run. A 250 GB source cannot stage both snapshots (69.5
+                      and 129.8 GB) beside a 120 GB install, so the requested
+                      width converts alone, is repacked, and its snapshot is
+                      dropped. The source shards are streamed and deleted as
+                      they convert, so the fetch is repeated for the second
+                      width -- the disk is the constraint, not the link.
   convert_qwen35      tools/prepare_qwen35.py --size {2b,4b,9b}, then
                       TinyTitanRepack --input-snapshot. One fetch yields both
                       widths. These are the dense models, and the only ones
@@ -388,7 +412,7 @@ USAGE
 # fetched" — which is exactly how people read it. Every row downloads first.
 source_label() {
   case "$1" in
-    convert|convert_qwen35|convert_qwen35moe)
+    convert|convert_qwen35|convert_qwen35moe|convert_qwen35moe_solo)
       printf 'download + convert' ;;
     convert_qwen36_mtp|convert_qwen38_mtp|prepare_ornith_mtp)
       printf 'download + convert (draft head)' ;;
@@ -509,6 +533,9 @@ install_one() {
       local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
       local stream_gb=12
       [[ "$source" == convert_qwen35moe ]] && stream_gb=104
+      # The solo 122B path holds four 5 GB shards (TINYTITAN_FETCHERS=4, depth
+      # 2) plus the finished one being converted: ~24 GB, not the 35B's ~90.
+      [[ "$source" == convert_qwen35moe_solo ]] && stream_gb=24
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
         while IFS=: read -r _kind probe; do
@@ -638,6 +665,33 @@ install_one() {
         fi
         echo "installing $name -> models/$dir"
         "$BIN" --input-snapshot "$snap" \
+            --model-id "$model_id" --output "$MODELS/$dir"
+        ;;
+      convert_qwen35moe_solo)
+        # The 122B path. One width per run, because the two snapshots plus an
+        # install cannot coexist on a 1 TB Mac (69.5 + 129.8 + 120 GB). The
+        # converter streams the 250 GB source four shards at a time and deletes
+        # each as it converts, so the fetch is the only thing that repeats.
+        # A width that was already converted by hand is reused rather than
+        # fetched again; a partial snapshot is resumed by the converter.
+        [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
+        local preset="${preset_field:-${name%-8bit}}" model_id
+        case "$preset" in
+          ornith122) model_id="ornith-1.5-122b" ;;
+          *) echo "unknown large MoE preset: $preset" >&2; return 2 ;;
+        esac
+        local snap="$WORK/${preset}-affine-${width}bit"
+        if [[ ! -f "$snap/model.safetensors.index.json" ]]; then
+          echo "downloading and converting $preset at ${width}-bit (~250 GB fetch) -> $snap"
+          TINYTITAN_FETCHERS="${TINYTITAN_FETCHERS:-4}" \
+          TINYTITAN_PREFETCH_DEPTH="${TINYTITAN_PREFETCH_DEPTH:-2}" \
+            "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" --bits "$width" \
+              --output "$snap" --work "$WORK/${preset}-shards" || return 1
+        fi
+        echo "installing $name -> models/$dir"
+        # The source snapshot is consumed as the install is written: 130 GB of
+        # snapshot + a ~125 GB install cannot coexist on this class of Mac.
+        "$BIN" --input-snapshot "$snap" --retire-source-shards \
             --model-id "$model_id" --output "$MODELS/$dir"
         ;;
       prepare_ornith_mtp)

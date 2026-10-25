@@ -56,10 +56,11 @@ extension Model {
     /// the kernel do it.
     ///
     /// The bound is per kernel family because a model dispatches one or the
-    /// other: the MoE tiles are 2816 wide and the dense Qwen 3.5 9B (4096) never
-    /// reaches them, while its Gated-DeltaNet layers do reach the staging tile,
-    /// which is sized for 4096.
-    static let maximumThreadgroupTileWidth = 2816
+    /// other: the MoE tiles are 3072 wide (Ornith-1.5-122B's hidden size; the
+    /// 35B-A3B's 2048 and Qwen3.8's 2560 are below it) and the dense Qwen 3.5
+    /// 9B (4096) never reaches them, while its Gated-DeltaNet layers do reach
+    /// the staging tile, which is sized for 4096.
+    static let maximumThreadgroupTileWidth = 3072
     static let maximumDenseThreadgroupTileWidth = 4096
 
     /// Refuses model geometry the compiled kernels cannot serve.
@@ -134,13 +135,14 @@ extension Model {
                 detail: "manifest.quant is required by the executable runtime schema")
         }
         // The MoE and GDN kernels stage activations into fixed threadgroup tiles
-        // of 2816 elements (`kMoEXMaxD` in moe.metal, `xt[2816]` in gdn.metal),
+        // (`kMoEXMaxD` in moe.metal, `xt[kGDNActivationMaxD]` in gdn.metal),
         // and their staging loops are bounded by the configured hidden size. A
         // model wider than that writes past the tile into whatever shares the
         // threadgroup's memory -- undefined behaviour rather than a caught
-        // error, and reachable only by a config that has never shipped (every
-        // preset here is 2048, 2560 or 2816). This is the guard for the next
-        // family, and it is what lets the tile stay a compile-time constant.
+        // error. The shipped geometries are 2048, 2560 and 3072 (Ornith-1.5-122B),
+        // with the dense 9B's 4096 on the wider GDN tile; this is the guard for
+        // the next family, and it is what lets the tile stay a compile-time
+        // constant.
         try Self.validateExecutableGeometry(config)
 
         let checks = RuntimeSchemaChecks(residentIndex: residentIndex, quant: quant)

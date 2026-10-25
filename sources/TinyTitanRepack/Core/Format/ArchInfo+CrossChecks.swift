@@ -97,4 +97,61 @@ extension ArchInfo {
                     + "35B-A3B architecture contract")
         }
     }
+
+    /// Production Ornith-1.5-122B contract: the same Qwen3.5-MoE text
+    /// architecture as the 35B-A3B at hidden 3072 / 48 layers, 256 experts at
+    /// top-8, a 1024-wide expert and shared expert, 32 Q / 2 KV heads and
+    /// 16 GDN K / 64 V heads. The fields are read from the checkpoint's
+    /// `text_config`; this check refuses a 3072/48 config that does not agree
+    /// with the published geometry, which is the failure a silent re-shape
+    /// would otherwise produce. Other shapes are exempt, as for the 35B check.
+    static func crossCheckOrnith122(
+        _ a: ArchInfo,
+        configPath: String
+    ) throws {
+        guard a.hiddenSize == 3072, a.numLayers == 48 else { return }
+        var expectedMask = [UInt8](repeating: 2, count: 48)
+        for i in stride(from: 3, to: 48, by: 4) { expectedMask[i] = 1 }
+        let expected = ArchInfo(
+            hiddenSize: 3072,
+            intermediateSize: 1024,
+            moeIntermediateSize: 1024,
+            numHeads: 32,
+            numKVHeads: 2,
+            numFullKVHeads: 2,
+            headDim: 256,
+            fullHeadDim: 256,
+            vocabSize: 248_320,
+            slidingWindow: 0,
+            finalLogitSoftcap: 0.0,
+            ropeTheta: 10_000_000.0,
+            fullRopeTheta: 10_000_000.0,
+            partialRotaryFactor: 0.25,
+            numLayers: 48,
+            numExperts: 256,
+            topKExperts: 8,
+            tieWordEmbeddings: false,
+            attentionKEqV: false,
+            fullAttentionLayerMask: expectedMask,
+            hiddenActivation: "silu",
+            family: .qwen36,
+            attnOutputGate: true,
+            attentionScale: 0.0625,
+            embeddingScaledBySqrtHidden: false,
+            routerScaled: false,
+            ffnSandwichNorms: false,
+            sharedExpertGated: true,
+            ropeNeoxSubdim: true,
+            linearNumKHeads: 16,
+            linearNumVHeads: 64,
+            linearKeyHeadDim: 128,
+            linearValueHeadDim: 128,
+            linearConvKernelSize: 4)
+        guard a == expected else {
+            throw RepackError.configJsonInvalid(
+                path: configPath,
+                detail: "qwen3_5_moe config does not match the supported "
+                    + "Ornith-1.5-122B architecture contract")
+        }
+    }
 }

@@ -198,6 +198,30 @@ public struct ModelProfile: Sendable, Equatable {
                 GenerationDefaults.qwen38Thinking,
                 true, true, false, false, true
             ),
+            // Ornith-1.5-122B: the same qwen36 graph at hidden 3072 and 48
+            // layers, 256 experts top-8, so a routed-expert slot is 5.3 MB at
+            // 4-bit and 10.6 MB at 8-bit (against 2.5/4.9 MB for the 35B).
+            // A 10 GiB 4-bit cache is ~42 slots and an 8 GiB 8-bit cache ~32,
+            // the same ~16-21% of each layer's 256 experts qwen38's rows give;
+            // the 8-bit row is lower because the resident body is ~11 GB
+            // against ~6 GB, and the 24 GB host has to hold both. The inferred
+            // prefetch depth 1 follows qwen38: at this width the routed-expert
+            // read dominates the token. Sampling is the checkpoint's own
+            // `generation_config.json` (temperature 0.6, top-k 20, top-p 0.95),
+            // which is the house pair -- stated rather than borrowed so a later
+            // house change cannot move this model.
+            Key("ornith-1.5-122b", 4): (
+                10 << 30, 1, 2_048,
+                GenerationDefaults.Sampling(
+                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
+                true, true, false, false, true
+            ),
+            Key("ornith-1.5-122b", 8): (
+                8 << 30, 1, 2_048,
+                GenerationDefaults.Sampling(
+                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
+                true, true, false, false, true
+            ),
         ]
 
     /// Environment switches applied last. Read once per process.

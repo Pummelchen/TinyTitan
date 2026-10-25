@@ -12,7 +12,7 @@
 #
 #   <client>   server (default), or one of the coding clients:
 #              codex, claude, qwen, opencode, zed
-#   <model>    an install key (ornith|qwen36|agentworld|katcoder|qwen38, or
+#   <model>    an install key (ornith|ornith122|qwen36|agentworld|katcoder|qwen38, or
 #              qwen35-2b|qwen35-4b|qwen35-9b) optionally followed by 4|8, or a
 #              catalog id such as ornith-1.5-35b-a3b_8-Bit, which names its own
 #              width. A model that is not on disk is offered for download and
@@ -699,7 +699,7 @@ else
     fi
   else
     if ! tinytitan_resolve_model "$MODEL_ARG" 2>/dev/null; then
-      echo "unknown model: $MODEL_ARG (a model id, or ornith|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
+      echo "unknown model: $MODEL_ARG (a model id, or ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
       if (( dynamic )); then echo "installed: ${TINYTITAN_CAT_ID[*]+"${TINYTITAN_CAT_ID[*]}"}" >&2; fi
       exit 2
     fi

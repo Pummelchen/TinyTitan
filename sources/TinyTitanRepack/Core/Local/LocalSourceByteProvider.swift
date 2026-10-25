@@ -8,13 +8,16 @@ import Foundation
 final class LocalSourceByteProvider: SourceByteProvider {
     private let snapshotDirectory: String
     private let writeTileBytes: Int
+    private let retireSourceShards: Bool
 
     init(
         snapshotDirectory: String,
-        writeTileBytes: Int = WriterCore.tileBytes
+        writeTileBytes: Int = WriterCore.tileBytes,
+        retireSourceShards: Bool = false
     ) {
         self.snapshotDirectory = snapshotDirectory
         self.writeTileBytes = writeTileBytes
+        self.retireSourceShards = retireSourceShards
     }
 
     func copyBatch(
@@ -37,8 +40,18 @@ final class LocalSourceByteProvider: SourceByteProvider {
             for descriptor in outputDescriptors.values { close(descriptor) }
         }
         var copiedBytes: UInt64 = 0
+        var retirement = SourceRetirement(
+            copies: copies, enabled: retireSourceShards)
 
-        for copy in copies where !completedRangeIDs.contains(copy.id) {
+        for copy in copies {
+            // A range completed by an earlier attempt still counts against its
+            // shard's remaining bytes: the shard is retired only when every
+            // range that reads it has been copied, whether in this run or a
+            // previous one.
+            if completedRangeIDs.contains(copy.id) {
+                retirement.consume(copy) { try? resolvedSourcePath(copy.shardID) }
+                continue
+            }
             try Task.checkCancellation()
             let sourcePath = try resolvedSourcePath(copy.shardID)
             let sourceDescriptor = try Posix.openReadNoFollow(sourcePath)
@@ -92,6 +105,9 @@ final class LocalSourceByteProvider: SourceByteProvider {
                     destinationBytes: copy.destinations.reduce(0) { $0 + $1.size }))
             copiedBytes += copy.size
             progress(copiedBytes)
+            // Only after the range is committed: the shard that supplied it is
+            // no longer read by this plan.
+            retirement.consume(copy) { sourcePath }
         }
     }
 
@@ -177,5 +193,63 @@ final class LocalSourceByteProvider: SourceByteProvider {
             source += UInt64(count)
             destination += UInt64(count)
         }
+    }
+}
+
+/// Retires a local snapshot's source shards as their last range is committed.
+///
+/// A 122B snapshot and its install cannot both fit on a 1 TB Mac (129.8 GB +
+/// ~125 GB). The copy plan names every range a shard supplies, so once the last
+/// of them is committed nothing later reads that shard. Deleting it then turns
+/// the two-copy peak into roughly one copy: the space a deleted shard frees is
+/// the space the growing install needs.
+///
+/// The accounting is over the whole plan, not one batch: `copies` is the
+/// complete coalesced plan, and a range already completed by an earlier
+/// attempt still counts, because the shard must not be retired while a later
+/// range still names it. A shard is unlinked only after that count reaches
+/// zero, and only a safetensors shard (`model-*.safetensors`, or the
+/// single-file `model.safetensors`) can be unlinked -- an index, config or
+/// tokenizer is never a shard ID.
+///
+/// This is opt-in (`--retire-source-shards`) because it consumes the snapshot:
+/// if the repack fails after a shard has gone, the snapshot has to be
+/// regenerated before another attempt. That is the trade the 122B build makes,
+/// and the reason the install is verified before the marker is trusted.
+struct SourceRetirement {
+    private var remaining: [String: UInt64]
+    private let enabled: Bool
+
+    init(copies: [CoalescedRangeCopy], enabled: Bool) {
+        self.enabled = enabled
+        var bytes: [String: UInt64] = [:]
+        for copy in copies {
+            bytes[copy.shardID, default: 0] += copy.size
+        }
+        self.remaining = bytes
+    }
+
+    /// Account for one copied range; unlink its shard when nothing later reads
+    /// it. `sourcePath` is evaluated only on retirement, so the common path
+    /// does no filesystem work.
+    mutating func consume(_ copy: CoalescedRangeCopy, sourcePath: () -> String?) {
+        guard enabled, let left = remaining[copy.shardID] else { return }
+        let after = left > copy.size ? left - copy.size : 0
+        guard after == 0 else {
+            remaining[copy.shardID] = after
+            return
+        }
+        remaining.removeValue(forKey: copy.shardID)
+        guard let path = sourcePath(), Self.isSnapshotShard(path) else { return }
+        try? FileManager.default.removeItem(atPath: path)
+    }
+
+    static func isSnapshotShard(_ path: String) -> Bool {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        // The converter's shards are `model-00001-of-00062.safetensors`; a
+        // tiny snapshot is one plain `model.safetensors`. The index and the
+        // config are neither, which is what keeps them alive.
+        guard name.hasSuffix(".safetensors") else { return false }
+        return name.hasPrefix("model-") || name == "model.safetensors"
     }
 }

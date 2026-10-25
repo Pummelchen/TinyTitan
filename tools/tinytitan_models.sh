@@ -71,6 +71,8 @@ TINYTITAN_MODEL_CHOICES=(
   "qwen35-9b-8bit|Qwen 3.5 9B|8|11.0|Dense 9B at 8-bit."
   "qwen35-2b|Qwen 3.5 2B|4|2.3|Dense 2B: seconds to load. Weak at arithmetic and long instructions."
   "qwen35-2b-8bit|Qwen 3.5 2B|8|2.2|Dense 2B at 8-bit."
+  "ornith122-8bit|Ornith 1.5 122B|8|123.0|The 122B at 8-bit. Highest Terminal-Bench 2.1 score here; slowest decode."
+  "ornith122|Ornith 1.5 122B|4|66.0|The 122B at 4-bit: half the disk, and about twice the decode of 8-bit."
   "qwen38flash|Qwen3.8-Flash-Next 125B-A6B|4|162.0|The largest model, and the most disk."
   "qwen38flash-8bit|Qwen3.8-Flash-Next 125B-A6B|8|220.0|The largest model at 8-bit."
 )
@@ -140,6 +142,13 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_FAMILY=qwen36
       TINYTITAN_MODEL_ENGINES=gpu
       TINYTITAN_MODEL_THINKING="off,on" ;;
+    ornith122|ornith-1.5-122b|ornith1.5-122b)
+      TINYTITAN_MODEL_KEY=ornith122
+      TINYTITAN_MODEL_STEM="ornith-1.5_122B"
+      TINYTITAN_MODEL_LABEL="Ornith 1.5 122B"
+      TINYTITAN_MODEL_FAMILY=qwen36
+      TINYTITAN_MODEL_ENGINES=gpu
+      TINYTITAN_MODEL_THINKING="off,on" ;;
     qwen36|qwen3.6)
       TINYTITAN_MODEL_KEY=qwen36
       TINYTITAN_MODEL_STEM="qwen3.6_35B_A3B"
@@ -192,7 +201,7 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_ENGINES="gpu,cpu"
       TINYTITAN_MODEL_THINKING="off,on" ;;
     *)
-      echo "unknown AI model: ${1:-} (ornith|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
+      echo "unknown AI model: ${1:-} (ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
       return 2 ;;
   esac
 }
@@ -219,6 +228,7 @@ tinytitan_install_key() {
   local key
   case "${1:-}" in
     ornith-1.5_35B_A3B)            key=ornith15 ;;
+    ornith-1.5_122B)               key=ornith122 ;;
     qwen3.6_35B_A3B)               key=qwen36 ;;
     qwen-agentworld_35B_A3B)       key=agentworld ;;
     kat-coder-v2.5_35B_A3B)        key=katcoder ;;
@@ -293,7 +303,7 @@ tinytitan_model_port() {
 # Every model this checkout knows about, for help text and for the fallback
 # list when the server cannot report its catalog. One list: the catalog is
 # still the source of what is installed.
-TINYTITAN_ALL_MODELS=(ornith qwen36 agentworld katcoder qwen38 qwen35-2b qwen35-4b qwen35-9b)
+TINYTITAN_ALL_MODELS=(ornith ornith122 qwen36 agentworld katcoder qwen38 qwen35-2b qwen35-4b qwen35-9b)
 
 # --- Installed models, from the server's catalog -----------------------
 #

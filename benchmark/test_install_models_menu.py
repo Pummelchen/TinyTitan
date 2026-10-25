@@ -118,7 +118,7 @@ class MenuRowPaddingTests(unittest.TestCase):
         return (match.group(1) if match else "", result.stdout + result.stderr)
 
     def test_a_zero_padded_row_installs_the_row_its_digits_name(self) -> None:
-        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("016", "16")):
+        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("018", "18")):
             with self.subTest(reply=padded):
                 want, _ = self.installed(plain + "\n")
                 self.assertTrue(want, f"the plain reply {plain} names no row")
@@ -127,9 +127,9 @@ class MenuRowPaddingTests(unittest.TestCase):
                 self.assertNotIn("value too great for base", output)
 
     def test_a_padded_row_outside_the_list_still_refuses(self) -> None:
-        # Forcing the base is not a pass: 17 and 20 are still not rows, and 0 is
-        # still not a row, padded or not.
-        for reply in ("00", "017", "020"):
+        # Forcing the base is not a pass: 19 and 20 are still not rows (the
+        # catalogue has 18), and 0 is still not a row, padded or not.
+        for reply in ("00", "019", "020"):
             with self.subTest(reply=reply):
                 got, output = self.installed(reply + "\n")
                 self.assertEqual(got, "", output)

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import signal
 import struct
@@ -84,6 +85,15 @@ MODELS = {
     # the checkpoint was checked for vision tensors rather than trusted to lack
     # them.
     "katcoder": ("Kwaipilot/KAT-Coder-V2.5-Dev", "7be56fe773e72b6f5ca93c1ae45d828ddb893922"),
+    # Ornith-1.5-122B: the largest member of the family, the same text
+    # architecture at a wider geometry (hidden 3072, 48 layers, 256 experts at
+    # top-8, F=1024, 32 Q / 2 KV heads, 16 GDN K / 64 V heads). Verified
+    # against the pinned index rather than assumed: 1,949 tensors, of which 333
+    # are `model.visual.*` and 785 are `mtp.*` (both skipped, as on every other
+    # member), leaving 830 text tensors plus the untied `lm_head`. The routed
+    # experts are fused per layer, so this is the same conversion path as
+    # Ornith-1.5-35B-A3B -- no per-expert stacking.
+    "ornith122": ("ornith-ai/Ornith-1.5-122B", "7681ef608624e7532d8164128bcffdbdbaf1b1af"),
 }
 REPO = MODELS["agentworld"][0]
 COMMIT = MODELS["agentworld"][1]
@@ -744,8 +754,14 @@ def _sleep_unless_stopped(seconds: float) -> bool:
 # measured +47% and hold up to twenty source shards (~90 GB at 4.5 GB each).
 # Depth only caps the completed shards waiting for the converter, whose pass
 # over one is far shorter than its download.
-PREFETCH_DEPTH = 3
-FETCHERS = 20
+#
+# Both are overridable because the 122B width does not fit the 35B staging
+# budget: twenty in-flight 5 GB shards plus a 130 GB 8-bit output needs about
+# 230 GB, more than this class of Mac has. The defaults stay tuned for the
+# 35B models; a 122B run lowers them (see the `ornith122` rows in
+# tools/install_models.sh and docs/adding-a-model.md).
+PREFETCH_DEPTH = int(os.environ.get("TINYTITAN_PREFETCH_DEPTH", "3"))
+FETCHERS = int(os.environ.get("TINYTITAN_FETCHERS", "20"))
 
 
 def prefetch_shards(

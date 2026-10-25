@@ -196,4 +196,76 @@ struct ArchConfigManifestTests {
         #expect(config.linearAttention.keyHeadDim == 16)
         #expect(config.family == .qwen35Dense)
     }
+
+    /// `qwen36` used to be exactly one geometry (the 35B-A3B). Ornith-1.5-122B
+    /// is the same architecture at hidden 3072 / 48 layers, and a manifest that
+    /// declares that shape must resolve from its own declaration rather than be
+    /// validated against the 35B preset. The 35B path is unchanged: it still
+    /// short-circuits to the preset, which `presetShortCircuit` pins.
+    @Test("qwen36 resolves a 122B manifest at its own geometry")
+    func qwen36ReadsThe122BGeometry() throws {
+        var mask = [Int](repeating: 2, count: 48)
+        for i in stride(from: 3, to: 48, by: 4) { mask[i] = 1 }
+        let geometry: [String: Any] = [
+            "hiddenSize": 3072, "ffnIntermediate": 1024,
+            "moeIntermediateSize": 1024, "numHeads": 32,
+            "numKVHeads": 2, "numFullKVHeads": 2,
+            "headDim": 256, "fullHeadDim": 256, "vocabSize": 248_320,
+            "numLayers": 48, "numExperts": 256, "topKExperts": 8,
+            "fullAttentionLayerMask": mask,
+            "attnOutputGate": true, "attentionScale": 0.0625,
+            "embeddingScaledBySqrtHidden": false, "routerScaled": false,
+            "ffnSandwichNorms": false, "sharedExpertGated": true,
+            "ropeNeoxSubdim": true, "linearNumKHeads": 16,
+            "linearNumVHeads": 64, "linearKeyHeadDim": 128,
+            "linearValueHeadDim": 128, "linearConvKernelSize": 4,
+        ]
+        // A whole 48-layer file table, not `writeToyManifest`'s four: the
+        // reader validates the layout against `numLayers`, and an inconsistent
+        // fixture would be refused before the resolution branch was reached.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ornith122-resolve-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("packed_experts"),
+            withIntermediateDirectories: true)
+        var files: [String: [String: Any]] = [
+            "model_weights.bin": [
+                "size": 1024, "sha256": String(repeating: "0", count: 64),
+            ],
+            "packed_experts/layout.json": [
+                "size": 1024, "sha256": String(repeating: "0", count: 64),
+            ],
+        ]
+        for layer in 0..<48 {
+            files["packed_experts/layer_\(layer).bin"] = [
+                "size": 16384, "sha256": String(repeating: "0", count: 64),
+            ]
+        }
+        var arch = geometry
+        arch["hiddenActivation"] = "silu"
+        arch["tieWordEmbeddings"] = false
+        arch["attentionKEqV"] = false
+        arch["slidingWindow"] = 0
+        arch["finalLogitSoftcap"] = 0.0
+        arch["ropeTheta"] = 10_000_000.0
+        arch["fullRopeTheta"] = 10_000_000.0
+        arch["partialRotaryFactor"] = 0.25
+        let root: [String: Any] = [
+            "magic": "SSDAI", "versionMajor": 1, "versionMinor": 0,
+            "flags": ["streamingPresent": true, "turboQuantKV": false],
+            "modelID": "ornith-1.5-122b", "arch": arch, "files": files,
+            "expertsPerLayer": 256, "numLayers": 48, "expertStride": 16384,
+        ]
+        let data = try JSONSerialization.data(
+            withJSONObject: root, options: [.sortedKeys, .withoutEscapingSlashes])
+        try data.write(to: dir.appendingPathComponent("manifest.json"))
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = try ArchConfig.resolved(forFamily: .qwen36, directoryURL: dir)
+        #expect(config.hiddenSize == 3072)
+        #expect(config.numLayers == 48)
+        #expect(config.numExperts == 256)
+        #expect(config.numHeads == 32)
+        #expect(config.linearAttention.numVHeads == 64)
+        #expect(config.fullAttentionLayerMask.filter { $0 == 1 }.count == 12)
+    }
 }

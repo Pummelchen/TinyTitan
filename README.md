@@ -15,14 +15,14 @@ on the GPU or, optionally, the Apple Neural Engine. It ships a CLI, an
 installer/repacker, and a loopback OpenAI-compatible server with no MLX and no
 GGUF dependency.
 
-**Who it is for.** People on an M-series Mac who want to run a 35B — or a 125B —
-model locally on a machine that could never hold it in RAM, and developers who
-want a loopback OpenAI- or Anthropic-compatible endpoint for Codex, Claude Code,
-Qwen Code, OpenCode, Zed or the official SDKs. It is a terminal-first tool: the
-engine and its server are the product, and the DeepSeek Harness plugins are an
-optional client of that server. It is **not** a fine-tuning toolkit, a vision model, a
-GUI app, or a way to expose a model to your network — the server is
-`127.0.0.1`-only and has no authentication.
+**Who it is for.** People on an M-series Mac who want to run a 35B — or a
+122B/125B — model locally on a machine that could never hold it in RAM, and
+developers who want a loopback OpenAI- or Anthropic-compatible endpoint for
+Codex, Claude Code, Qwen Code, OpenCode, Zed or the official SDKs. It is a
+terminal-first tool: the engine and its server are the product, and the
+DeepSeek Harness plugins are an optional client of that server. It is **not** a
+fine-tuning toolkit, a vision model, a GUI app, or a way to expose a model to
+your network — the server is `127.0.0.1`-only and has no authentication.
 
 ## What this repository delivers
 
@@ -31,7 +31,7 @@ GUI app, or a way to expose a model to your network — the server is
    tokens through a callback. Same kernels, format reader and sampler as the
    engine, in your process — no subprocess, no HTTP, no model reimplementation.
 2. **The complete local LLM engine — `TinyTitanCLI` + `TinyTitanServer`.** Run a
-   35B or 125B model from the terminal and serve it on a loopback
+   35B, 122B or 125B model from the terminal and serve it on a loopback
    OpenAI-/Anthropic-compatible endpoint for Codex, Claude Code, Qwen Code,
    OpenCode, Zed or the official SDKs. Native Swift and Metal: no MLX, no GGUF.
 3. **DeepSeek Harness plugins — [`plugins/dsh-tinytitan`](plugins/dsh-tinytitan),
@@ -81,9 +81,11 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
 does not serve the model: the MoE families stream their experts on the GPU + ANE
 path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
 install-only today — its GPU graph is not implemented, so both of its decode
-columns are `NA`. K2-Horizon's score is from its
-[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
-Terminal-Bench 4.0 result is published for it. Per-version measurements and the
+columns are `NA`. K2-Horizon's and Ornith 1.5 122B's scores are from their model
+cards ([K2](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B),
+[122B](https://huggingface.co/ornith-ai/Ornith-1.5-122B)); neither publishes a
+Terminal-Bench 4.0 result, and 122B's 2.1 figure is the card's five-run Claude
+Code 2.1.126 average. Per-version measurements and the
 method live on the wiki
 ([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
 [Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).

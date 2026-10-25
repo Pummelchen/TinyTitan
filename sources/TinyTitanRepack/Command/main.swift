@@ -7,7 +7,7 @@ private let usage = """
     Usage:
       TinyTitanRepack [--model <\(supportedModelNames)>] --output <model.ssdai> [--overwrite] [--resume]
       TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id>
-                      --output <model.ssdai> [--overwrite] [--draft-head] [--share-ngram-table]
+                      --output <model.ssdai> [--overwrite] [--draft-head] [--share-ngram-table] [--retire-source-shards]
       TinyTitanRepack --discard-partial --output <model.ssdai>
       TinyTitanRepack --verify-install --input-ssdai <model.ssdai>  (--input-gturbo still accepted)
       TinyTitanRepack --compress-experts --input-ssdai <raw model.ssdai>
@@ -28,9 +28,12 @@ private let usage = """
     draft and does not support --resume because no network payload is involved.
     --draft-head imports only the draft head's tensors. --share-ngram-table
     hardlinks the snapshot's n-gram table rather than rebuilding it, which works
-    only when the staging directory and the install share a filesystem. Neither
-    flag means anything without --input-snapshot, and the repack refuses that
-    combination rather than ignoring it.
+    only when the staging directory and the install share a filesystem.
+    --retire-source-shards unlinks a snapshot shard once its last range has
+    been committed, so the snapshot is consumed as its install is written; it is
+    how a 130 GB 8-bit 122B snapshot and its 125 GB install coexist on one disk.
+    None of the three means anything without --input-snapshot, and the repack
+    refuses that combination rather than ignoring it.
     """
 
 private struct Arguments {
@@ -48,6 +51,7 @@ private struct Arguments {
     var localModelID: String?
     var draftHead = false
     var shareNgramTable = false
+    var retireSourceShards = false
 
     static func parse(_ values: [String]) throws -> Arguments {
         var parsed = Arguments()
@@ -100,6 +104,9 @@ private struct Arguments {
             case "--share-ngram-table":
                 parsed.shareNgramTable = true
                 index += 1
+            case "--retire-source-shards":
+                parsed.retireSourceShards = true
+                index += 1
             case "--output", "--input-ssdai", "--input-gturbo", "--input-snapshot", "--model-id":
                 guard index + 1 < values.count else {
                     throw ParseError.missingValue(flag)
@@ -124,9 +131,13 @@ private struct Arguments {
         }
         // Both are fields of `LocalSnapshotRepackOptions`, which the download,
         // discard and receipt routes have no parameter for.
-        guard (!parsed.draftHead && !parsed.shareNgramTable) || parsed.inputSnapshot != nil else {
+        guard
+            (!parsed.draftHead && !parsed.shareNgramTable && !parsed.retireSourceShards)
+                || parsed.inputSnapshot != nil
+        else {
             throw ParseError.invalidMode(
-                "--draft-head and --share-ngram-table apply only to --input-snapshot imports")
+                "--draft-head, --share-ngram-table and --retire-source-shards "
+                    + "apply only to --input-snapshot imports")
         }
         if parsed.discardPartial {
             guard parsed.output != nil else {
@@ -183,7 +194,7 @@ private struct Arguments {
             !verifyInstall
         else {
             throw ParseError.invalidMode(
-                "local snapshot import accepts only --input-snapshot, --model-id, --output, --draft-head, --share-ngram-table, and --overwrite"
+                "local snapshot import accepts only --input-snapshot, --model-id, --output, --draft-head, --share-ngram-table, --retire-source-shards, and --overwrite"
             )
         }
         return self
@@ -200,7 +211,8 @@ private struct Arguments {
             throw ParseError.missingRequired("--output")
         }
         guard !verifyInstall, !resume, !discardPartial, !modelExplicit,
-            inputSnapshot == nil, localModelID == nil, !draftHead, !shareNgramTable
+            inputSnapshot == nil, localModelID == nil, !draftHead, !shareNgramTable,
+            !retireSourceShards
         else {
             throw ParseError.invalidMode(
                 "--compress-experts accepts only --input-ssdai, --output and --overwrite")
@@ -309,6 +321,7 @@ private func run(_ values: [String]) async -> Int32 {
                     modelID: modelID,
                     draftHead: arguments.draftHead,
                     shareNgramTable: arguments.shareNgramTable,
+                    retireSourceShards: arguments.retireSourceShards,
                     overwrite: arguments.overwrite),
                 progress: { progress in progressDisplay.handle(progress) })
             print("Imported local snapshot")

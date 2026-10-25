@@ -38,6 +38,7 @@ MODELS = ROOT / "models"
 # it from the script under test would assert nothing.
 STEM_KEYS = {
     "ornith-1.5_35B_A3B": ("ornith15", "ornith15-8bit"),
+    "ornith-1.5_122B": ("ornith122", "ornith122-8bit"),
     "qwen3.6_35B_A3B": ("qwen36", "qwen36-8bit"),
     "qwen-agentworld_35B_A3B": ("agentworld", "agentworld-8bit"),
     "kat-coder-v2.5_35B_A3B": ("katcoder", "katcoder-8bit"),
@@ -52,6 +53,7 @@ STEM_KEYS = {
 # these, because `--model qwen38flash` is not a name the launcher knows.
 LAUNCHER_NAMES = {
     "ornith": "ornith15",
+    "ornith122": "ornith122",
     "qwen36": "qwen36",
     "agentworld": "agentworld",
     "katcoder": "katcoder",
@@ -250,7 +252,7 @@ class MissingOffersTests(unittest.TestCase):
         self.assertIn("ornith", names)
         self.assertIn("katcoder", names)
         self.assertIn("qwen38", names)
-        self.assertEqual(len(rows), 16, "eight models, two widths each")
+        self.assertEqual(len(rows), 18, "nine models, two widths each")
         for row in rows:
             self.assertIn(row[1], ("4", "8"))
             self.assertTrue(row[3], f"offer row has no label: {row}")
@@ -285,6 +287,7 @@ class MissingOffersTests(unittest.TestCase):
             root = pathlib.Path(directory)
             for stem in (
                 "ornith-1.5_35B_A3B",
+                "ornith-1.5_122B",
                 "qwen3.6_35B_A3B",
                 "qwen-agentworld_35B_A3B",
                 "kat-coder-v2.5_35B_A3B",
@@ -545,7 +548,7 @@ class MenuRowPaddingTests(unittest.TestCase):
     def test_a_padded_reply_past_the_end_still_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             models = pathlib.Path(empty)
-            for padded in ("017", "020"):
+            for padded in ("019", "020"):
                 with self.subTest(reply=padded):
                     pad = self.pick(padded, models)
                     combined = pad.stdout + pad.stderr

@@ -306,7 +306,8 @@ extension RemoteStreamingRepacker {
             try createOutputFiles(plan: plan, paths: paths)
             let provider = LocalSourceByteProvider(
                 snapshotDirectory: local.inputSnapshotDir,
-                writeTileBytes: local.writeTileBytes)
+                writeTileBytes: local.writeTileBytes,
+                retireSourceShards: local.retireSourceShards)
             progress(
                 .copyingPayload(
                     reusedBytes: 0,

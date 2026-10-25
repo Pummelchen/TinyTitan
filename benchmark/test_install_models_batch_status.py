@@ -8,10 +8,10 @@ failing, and makes `--all-8bit` exit 0 as long as the last 8-bit model happened
 to install — whatever happened to the seven before it. Measured on this
 machine's /bin/bash 3.2.57:
 
-    --all-8bit, qwen38flash-8bit failing -> 7 installed,  EXIT 0
-    --all-8bit, nothing failing          -> 8 installed,  EXIT 0
+    --all-8bit, qwen38flash-8bit failing -> 8 installed,  EXIT 0
+    --all-8bit, nothing failing          -> 9 installed,  EXIT 0
     --all-4bit, ornith15 failing         -> 10 installed, EXIT 1
-    --all-4bit, nothing failing          -> 11 installed, EXIT 1
+    --all-4bit, nothing failing          -> 12 installed, EXIT 1
 
 `--all-4bit` is the loud half of the defect and `--all-8bit` is the silent one:
 a gated checkpoint that refuses without an `HF_TOKEN` is a per-row failure, so
@@ -41,7 +41,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "install_models.sh"
 
-WIDTHS = {"4": 11, "8": 8}
+WIDTHS = {"4": 12, "8": 9}
 ROWS = re.compile(r'^\s*"([a-z0-9-]+)\|[^|]*\|([48])\|', re.M).findall(SCRIPT.read_text())
 CATALOGUE_WIDTHS = {name: width for name, width in ROWS}
 

@@ -44,7 +44,29 @@ extension ArchConfig {
         forFamily family: ModelFamily,
         directoryURL: URL
     ) throws -> ArchConfig {
-        if let preset = knownArchitectures[family] { return preset }
+        if let preset = knownArchitectures[family] {
+            // `qwen36` is no longer one geometry. It began as the 35B-A3B
+            // (hidden 2048, 40 layers), and Ornith-1.5-122B is the same
+            // architecture at hidden 3072 and 48 layers. Returning the 35B
+            // preset for the 122B install would validate the manifest against
+            // the wrong contract and refuse it; returning a *manifest-declared*
+            // ArchConfig for it keeps one family while allowing the second
+            // shape. The read is best-effort: a directory with no readable
+            // manifest falls through to the preset exactly as before (and the
+            // real load then reports why), so the preset path still answers
+            // without a manifest.
+            if family == .qwen36,
+                let manifest = try? ManifestReader.read(directoryURL: directoryURL),
+                manifest.arch.hiddenSize != preset.hiddenSize
+                    || manifest.arch.numLayers != preset.numLayers
+            {
+                // Every convention the kernels depend on is `required` by
+                // `from`, so a wider install cannot load with an assumed
+                // gate, attention scale or layer mask.
+                return try from(manifest: manifest.arch, family: family)
+            }
+            return preset
+        }
         // The families without a preset whose architecture is fully declared by
         // the manifest. Anything else keeps the previous behaviour: refused by
         // name, because there is no preset to load it at.
