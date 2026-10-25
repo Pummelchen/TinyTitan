@@ -521,12 +521,16 @@ _in_flight_lock = threading.Lock()
 # could not complete at all. The speed limit still aborts a dead connection.
 CHUNK_BYTES = 32 * 1024 * 1024
 CHUNK_TIMEOUT = 900
-CHUNK_ATTEMPTS = 8
+CHUNK_ATTEMPTS = 100
 # Chunks fetched concurrently within one shard. The CDN throttles a single
 # connection to well under 1 MB/s here, while sixteen concurrent ranged
 # requests measured ~5 MB/s aggregate; batching keeps the staging footprint to
 # a few hundred MB per shard instead of another whole shard.
 PARALLEL_CHUNKS = int(os.environ.get("TINYTITAN_PARALLEL_CHUNKS", "8"))
+# One parallel transfer's ceiling. Curl's own --retry restarts a 32 MB range and
+# can multiply this by five, so retries belong to this file, which resumes from
+# the bytes already on disk instead of refetching the range.
+PARALLEL_CHUNK_TIMEOUT = int(os.environ.get("TINYTITAN_PARALLEL_CHUNK_TIMEOUT", "180"))
 # Abort a transfer that has effectively stopped. A dead connection does not
 # always error: one was observed sitting in `S` with its chunk file static for
 # minutes and no curl retry firing, because nothing had timed out. curl only
@@ -684,75 +688,101 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
             for attempt in range(1, CHUNK_ATTEMPTS + 1):
                 if _stopping.is_set():
                     raise InterruptedError(f"{shard}: stopped before an attempt")
-                url = resolve_url(shard)
-                command = [
-                    "curl",
-                    "--parallel",
-                    "--parallel-max",
-                    str(PARALLEL_CHUNKS),
-                    "-fL",
-                    "--http1.1",
-                    "--retry",
-                    "5",
-                    "--retry-delay",
-                    "5",
-                    "--retry-all-errors",
-                    "--remove-on-error",
-                    "--max-time",
-                    str(CHUNK_TIMEOUT),
-                    "--speed-limit",
-                    str(CHUNK_MIN_BYTES_PER_SEC),
-                    "--speed-time",
-                    str(CHUNK_STALL_SECONDS),
-                ]
+                transfers: list[tuple[int, int, Path, Path, int]] = []
                 for start, want, chunk in pending:
-                    chunk.unlink(missing_ok=True)
-                    command += [
-                        "-r",
-                        f"{start}-{start + want - 1}",
-                        "--silent",
-                        "--show-error",
-                        "-o",
-                        str(chunk),
-                        url,
+                    have_chunk = chunk.stat().st_size if chunk.exists() else 0
+                    if have_chunk > want:
+                        chunk.unlink()
+                        have_chunk = 0
+                    if have_chunk == want:
+                        continue
+                    part = work / f".{shard}.part.{start}"
+                    part.unlink(missing_ok=True)
+                    transfers.append((start, want, chunk, part, have_chunk))
+                if transfers:
+                    command = [
+                        "curl",
+                        "--parallel",
+                        "--parallel-max",
+                        str(PARALLEL_CHUNKS),
+                        "-fL",
+                        "--http1.1",
+                        "--max-time",
+                        str(PARALLEL_CHUNK_TIMEOUT),
+                        "--speed-limit",
+                        str(CHUNK_MIN_BYTES_PER_SEC),
+                        "--speed-time",
+                        str(CHUNK_STALL_SECONDS),
                     ]
-                proc = subprocess.Popen(command)
-                with _in_flight_lock:
-                    _in_flight.add(proc)
-                try:
-                    code = proc.wait()
-                finally:
+                    for start, want, _chunk, part, have_chunk in transfers:
+                        # A fresh signature per range. One signed URL shared by
+                        # sixteen transfers is throttled by the CDN as one
+                        # object; sixteen independently resolved URLs are not.
+                        command += [
+                            "-r",
+                            f"{start + have_chunk}-{start + want - 1}",
+                            "--silent",
+                            "--show-error",
+                            "-o",
+                            str(part),
+                            resolve_url(shard),
+                        ]
+                    proc = subprocess.Popen(command)
                     with _in_flight_lock:
-                        _in_flight.discard(proc)
-                failed = [
-                    task
-                    for task in pending
-                    if not task[2].exists() or task[2].stat().st_size != task[1]
-                ]
-                if not failed:
+                        _in_flight.add(proc)
+                    try:
+                        code = proc.wait()
+                    finally:
+                        with _in_flight_lock:
+                            _in_flight.discard(proc)
+                    # A transfer that closed early still wrote bytes. Keep them;
+                    # the next attempt ranges from the new end instead of
+                    # refetching the chunk.
+                    for _start, _want, chunk, part, _have in transfers:
+                        if part.exists():
+                            data = part.read_bytes()
+                            if data:
+                                with open(chunk, "ab") as sink:
+                                    sink.write(data)
+                            part.unlink()
+                # Append the contiguous completed prefix and stop at the first
+                # chunk that is still short. Progress is never held hostage by
+                # a single slow range.
+                while tasks:
+                    start, want, chunk = tasks[0]
+                    have_chunk = chunk.stat().st_size if chunk.exists() else 0
+                    if have_chunk != want:
+                        break
+                    out.write(chunk.read_bytes())
+                    out.flush()
+                    chunk.unlink()
+                    if progress is not None:
+                        progress.add(want)
+                    tasks.pop(0)
+                    done = start + want
+                if not tasks:
                     break
-                got = sum(task[2].stat().st_size for task in pending if task[2].exists())
-                want_total = sum(task[1] for task in pending)
+                got = sum(
+                    min(
+                        task[2].stat().st_size if task[2].exists() else 0,
+                        task[1],
+                    )
+                    for task in tasks
+                )
+                want_total = sum(task[1] for task in tasks)
                 wait = min(15 * attempt, 120)
                 tell(
-                    f"    {shard}: {len(failed)}/{len(pending)} chunks short "
-                    f"({got}/{want_total} bytes, curl {code}, "
+                    f"    {shard}: {len(tasks)} chunks short "
+                    f"({got}/{want_total} bytes, curl {code if transfers else '-'}, "
                     f"attempt {attempt}/{CHUNK_ATTEMPTS}), waiting {wait} s"
                 )
-                pending = failed
+                pending = list(tasks)
                 if _sleep_unless_stopped(wait):
                     raise InterruptedError(f"{shard}: stopped while retrying")
             else:
                 raise RuntimeError(
-                    f"{shard}: {len(pending)} chunks failed after {CHUNK_ATTEMPTS} attempts"
+                    f"{shard}: {len(tasks)} chunks failed after {CHUNK_ATTEMPTS} attempts"
                 )
-            for _start, want, chunk in tasks:
-                out.write(chunk.read_bytes())
-                out.flush()
-                chunk.unlink()
-                if progress is not None:
-                    progress.add(want)
-            done = tasks[-1][0] + tasks[-1][1]
     if dest.stat().st_size != expected:
         raise RuntimeError(f"{shard}: finished at {dest.stat().st_size}, expected {expected}")
     return dest
