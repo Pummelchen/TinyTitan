@@ -22,7 +22,7 @@ INSTALL4="$ROOT/models/laguna-s-2.1-4bit.ssdai"
 INSTALL8="$ROOT/models/laguna-s-2.1-8bit.ssdai"
 PYTHON="${TINYTITAN_PYTHON:-python3}"
 PROMPT="The capital of France is"
-DEADLINE_SECONDS=$((36 * 3600))
+DEADLINE_SECONDS=$((96 * 3600))
 
 say() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
