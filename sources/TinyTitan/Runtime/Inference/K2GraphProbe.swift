@@ -5,8 +5,8 @@ import Metal
 /// in order, then the final norm and head.
 ///
 /// The sparse probe drives its own command buffers (its router ids have to
-/// cross to the CPU between phases), so this graph sequences each layer one at
-/// a time and carries the hidden state as halfs between them. That is the probe
+/// cross to the CPU to address the expert blobs), so this graph sequences each
+/// layer one at a time and carries the hidden state as halfs between them. That is the probe
 /// form of the loop, not the batched serving graph.
 package final class K2GraphProbe {
     private let config: ArchConfig
@@ -81,8 +81,7 @@ package final class K2GraphProbe {
             let encode = sparse.values.reduce(0.0) { $0 + $1.encodeSeconds }
             let gpu = sparse.values.reduce(0.0) { $0 + $1.gpuSeconds }
             let busy = sparse.values.reduce(0.0) { $0 + $1.gpuBusySeconds }
-            let entry = sparse.values.reduce(0.0) { $0 + $1.entryBusySeconds }
-            let attention = sparse.values.reduce(0.0) { $0 + $1.attentionBusySeconds }
+            let prefetch = sparse.values.reduce(0.0) { $0 + $1.prefetchBusySeconds }
             let experts = sparse.values.reduce(0.0) { $0 + $1.expertBusySeconds }
             let total = Date().timeIntervalSince(started)
             let rest = total - fetch - encode - gpu
@@ -90,8 +89,8 @@ package final class K2GraphProbe {
                 Data(
                     String(
                         format:
-                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs busy %.3fs (entry %.3fs attn %.3fs experts %.3fs) encode %.3fs other %.3fs\n",
-                        total, fetch, gpu, busy, entry, attention, experts, encode, rest
+                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs busy %.3fs (pre %.3fs experts %.3fs) encode %.3fs other %.3fs\n",
+                        total, fetch, gpu, busy, prefetch, experts, encode, rest
                     ).utf8))
         }
         return result

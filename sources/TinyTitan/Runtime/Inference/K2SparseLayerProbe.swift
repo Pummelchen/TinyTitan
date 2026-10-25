@@ -7,8 +7,10 @@ import Metal
 ///
 /// Probe-scoped like `K2DenseLayer`: the K/V cache is a plain FP16 buffer and
 /// the routed experts are fetched between command buffers, because the router's
-/// ids have to come back to the CPU to address the blobs. The full graph will
-/// keep the same two-phase shape.
+/// ids have to come back to the CPU to address the blobs. Everything before
+/// that read-back -- including the MoVA values, whose selection the shader
+/// resolves itself -- is one command buffer; the fetched experts are the
+/// second. That two-phase shape is what the full graph will keep.
 final class K2SparseLayerProbe {
     private let config: ArchConfig
     private let model: Model
@@ -45,10 +47,10 @@ final class K2SparseLayerProbe {
     private(set) var gpuSeconds: Double = 0
     private(set) var gpuBusySeconds: Double = 0
     /// The same busy time split by command buffer, so a timing line can say
-    /// whether the pre-fetch GPU work, the attention phase or the routed
-    /// experts dominate.
-    private(set) var entryBusySeconds: Double = 0
-    private(set) var attentionBusySeconds: Double = 0
+    /// whether the pre-fetch GPU work or the routed experts dominate. The
+    /// pre-fetch buffer holds everything up to the router read-back: norm,
+    /// q/k/gate, MoVA, attention and the shared expert.
+    private(set) var prefetchBusySeconds: Double = 0
     private(set) var expertBusySeconds: Double = 0
 
     /// Zero the per-token counters. The graph times one forward at a time; the
@@ -59,8 +61,7 @@ final class K2SparseLayerProbe {
         encodeSeconds = 0
         gpuSeconds = 0
         gpuBusySeconds = 0
-        entryBusySeconds = 0
-        attentionBusySeconds = 0
+        prefetchBusySeconds = 0
         expertBusySeconds = 0
     }
 
@@ -155,16 +156,16 @@ final class K2SparseLayerProbe {
             }
         }
         let d = config.hiddenSize
-
         let shared = K2MoEStage.ExpertWeights(
             gate: try model.k2SharedGate(layer: layer),
             up: try model.k2SharedUp(layer: layer),
             down: try model.k2SharedDown(layer: layer))
-        try await encodeEntry(queue: queue)
-        try await encodeAttention(
+
+        try await encodePrefetchPhase(
             queue: queue, position: position, shared: shared)
-        // Phase 3: fetch the selected experts. The shared expert already ran in
-        // phase 2, so only the routed experts are encoded after the fetch.
+        // Phase 2: the router ids are the only thing that has to come back to
+        // the CPU; the MoVA values resolve their own selection on the GPU, so
+        // everything up to the routed-expert fetch is one command buffer.
         let fetchStart = Date()
         let ids = moe.selectedExpertIDs()
         guard
@@ -187,7 +188,7 @@ final class K2SparseLayerProbe {
         guard let third = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
-        // `moeOut` already holds the shared expert from phase 2, so the routed
+        // `moeOut` already holds the shared expert from phase 1, so the routed
         // pass adds to it in place.
         if fusedMoE {
             try moe.encodeFusedExperts(
@@ -219,8 +220,16 @@ final class K2SparseLayerProbe {
         }
     }
 
-    private func encodeEntry(queue: MTLCommandQueue) async throws {
-        // Phase 1: norm, q/k/gate, both routers.
+    /// Everything that runs before the routed-expert fetch: norm, q/k/gate and
+    /// the MoVA router, then the value experts (selection resolved on the GPU),
+    /// RoPE, cached attention, the gate, o_proj, both residuals, the
+    /// post-attention norm, the MoE router and the shared expert. One command
+    /// buffer, because nothing in it needs the CPU.
+    private func encodePrefetchPhase(
+        queue: MTLCommandQueue,
+        position: Int,
+        shared: K2MoEStage.ExpertWeights
+    ) async throws {
         let d = config.hiddenSize
         let queryDim = config.numHeads * config.fullHeadDim
         let kvDim = config.numFullKVHeads * config.fullHeadDim
@@ -252,67 +261,41 @@ final class K2SparseLayerProbe {
             routerBiasOffset: Int(vRouterBias.offset),
             numExperts: config.mova.numExperts,
             scaling: Float(config.mova.routerScaling))
-        encodeSeconds += Date().timeIntervalSince(phaseStart)
-        first.commit()
-        let gpuStart = Date()
-        await first.completed()
-        gpuSeconds += Date().timeIntervalSince(gpuStart)
-        let firstBusy = max(0, first.gpuEndTime - first.gpuStartTime)
-        gpuBusySeconds += firstBusy
-        entryBusySeconds += firstBusy
-    }
-
-    private func encodeAttention(
-        queue: MTLCommandQueue, position: Int,
-        shared: K2MoEStage.ExpertWeights
-    ) async throws {
-        // Phase 2: MoVA values, RoPE, cached attention, gate, o, residual,
-        // post-norm, both routers and the shared expert. The shared expert does
-        // not depend on the routed fetch, so running it here leaves only the
-        // routed dispatches on the far side of the fetch.
-        let d = config.hiddenSize
-        let queryDim = config.numHeads * config.fullHeadDim
-        let kvDim = config.numFullKVHeads * config.fullHeadDim
-        let groups = max(1, config.normGroups)
-        let phaseStart = Date()
-        guard let second = queue.makeCommandBuffer() else {
-            throw MetalError.commandEncoderFailed
-        }
-        try mova.encodeValues(
-            commandBuffer: second, hidden: normed,
+        try mova.encodeRoutedValues(
+            commandBuffer: first, hidden: normed,
             experts: vExperts, out: v)
         let rotaryDim = UInt32(
             (Double(config.fullHeadDim) * config.partialRotaryFactor).rounded())
         try rope.encodeNeoxSubdim(
-            commandBuffer: second, data: q,
+            commandBuffer: first, data: q,
             position: UInt32(position), headDim: UInt32(config.fullHeadDim),
             numHeads: UInt32(config.numHeads), rotaryDim: rotaryDim,
             theta: Float(config.fullRopeTheta))
         try rope.encodeNeoxSubdim(
-            commandBuffer: second, data: k,
+            commandBuffer: first, data: k,
             position: UInt32(position), headDim: UInt32(config.fullHeadDim),
             numHeads: UInt32(config.numFullKVHeads), rotaryDim: rotaryDim,
             theta: Float(config.fullRopeTheta))
         let cacheBytes = position * kvDim * MemoryLayout<UInt16>.stride
-        try copy(second, from: k, to: kCache, toOffset: cacheBytes, count: kvDim)
-        try copy(second, from: v, to: vCache, toOffset: cacheBytes, count: kvDim)
+        try copy(first, from: k, to: kCache, toOffset: cacheBytes, count: kvDim)
+        try copy(first, from: v, to: vCache, toOffset: cacheBytes, count: kvDim)
         try attention.encodeFull(
-            commandBuffer: second,
+            commandBuffer: first,
             q: q, k: kCache, v: vCache, out: attn,
             headDim: UInt32(config.fullHeadDim),
             numQHeads: UInt32(config.numHeads),
             numKVHeads: UInt32(config.numFullKVHeads),
             seqLen: UInt32(position + 1), scale: Float(config.attentionScale))
         try elementwise.encodeSoftplusGateMul(
-            commandBuffer: second, out: attn, gate: gate, count: queryDim)
+            commandBuffer: first, out: attn, gate: gate, count: queryDim)
         try gemv(
-            second, try model.oProj(layer: layer), x: attn, y: oOut, rows: d, columns: queryDim)
-        try copy(second, from: input, to: h1, count: d)
+            first, try model.oProj(layer: layer), x: attn, y: oOut, rows: d, columns: queryDim)
+        try copy(first, from: input, to: h1, count: d)
         try elementwise.encodeResidualAdd(
-            commandBuffer: second, hidden: h1, delta: oOut, count: d)
+            commandBuffer: first, hidden: h1, delta: oOut, count: d)
         let postNorm = try model.postAttnNorm(layer: layer)
         try rms.encodeBF16WGrouped(
-            commandBuffer: second,
+            commandBuffer: first,
             x: h1, weight: postNorm.buffer,
             weightOffset: Int(postNorm.offset),
             out: normed2,
@@ -321,22 +304,22 @@ final class K2SparseLayerProbe {
         let moeRouter = try model.k2MoeRouter(layer: layer)
         let moeBias = try model.k2MoeRouterBias(layer: layer)
         try moe.encodeRouter(
-            commandBuffer: second, hidden: normed2,
+            commandBuffer: first, hidden: normed2,
             routerWeight: moeRouter.buffer,
             routerWeightOffset: Int(moeRouter.offset),
             routerBias: moeBias.buffer,
             routerBiasOffset: Int(moeBias.offset),
             scaling: Float(config.routerScaling))
         try moe.encodeSharedExpert(
-            commandBuffer: second, hidden: normed2, shared: shared, out: moeOut)
+            commandBuffer: first, hidden: normed2, shared: shared, out: moeOut)
         encodeSeconds += Date().timeIntervalSince(phaseStart)
-        second.commit()
+        first.commit()
         let gpuStart = Date()
-        await second.completed()
+        await first.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart)
-        let secondBusy = max(0, second.gpuEndTime - second.gpuStartTime)
-        gpuBusySeconds += secondBusy
-        attentionBusySeconds += secondBusy
+        let firstBusy = max(0, first.gpuEndTime - first.gpuStartTime)
+        gpuBusySeconds += firstBusy
+        prefetchBusySeconds += firstBusy
     }
 
     private func gemv(

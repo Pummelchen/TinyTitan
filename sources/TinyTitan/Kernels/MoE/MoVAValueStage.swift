@@ -47,6 +47,13 @@ final class MoVAValueStage {
     private let gemv: AffineQuantGEMV
     private let selection: K2RouterSelection
     private let combinePSO: MTLComputePipelineState
+    /// The value pass with the router's choice resolved on the GPU: the ids are
+    /// read from `indices` in the shader, so this can share a command buffer
+    /// with the selection instead of waiting for a CPU read-back.
+    private let routedPSO: MTLComputePipelineState
+    private let weightOffsets: MTLBuffer
+    private let scaleOffsets: MTLBuffer
+    private let biasOffsets: MTLBuffer
     private let hiddenSize: Int
     private let valueDim: Int
     private let maxExperts: Int
@@ -77,6 +84,12 @@ final class MoVAValueStage {
         self.gemv = try AffineQuantGEMV(context: context, weightBits: weightBits)
         self.selection = try K2RouterSelection(context: context)
         self.combinePSO = try context.pipeline("mova_combine_fp16")
+        let routedConstants: [MetalFunctionConstant] =
+            weightBits == 4
+            ? []
+            : [MetalFunctionConstant(index: 120, value: .uint32(UInt32(weightBits)))]
+        self.routedPSO = try context.pipeline(
+            "k2_mova_values_routed", constants: routedConstants)
 
         let device = context.device
         func make(_ length: Int, _ label: String) throws -> MTLBuffer {
@@ -97,6 +110,10 @@ final class MoVAValueStage {
         self.expertOutputs = try make(
             Self.topK * valueDim * MemoryLayout<UInt16>.stride,
             "mova.expertOutputs")
+        let tableLength = maxExperts * MemoryLayout<UInt64>.stride
+        self.weightOffsets = try make(tableLength, "mova.weightOffsets")
+        self.scaleOffsets = try make(tableLength, "mova.scaleOffsets")
+        self.biasOffsets = try make(tableLength, "mova.biasOffsets")
     }
 
     /// Router logits and selection. `hidden` is the post-attention normed
@@ -165,6 +182,77 @@ final class MoVAValueStage {
                 m: UInt32(valueDim), n: UInt32(hiddenSize))
         }
 
+        try encodeCombine(commandBuffer: commandBuffer, out: out, outOffset: outOffset)
+    }
+
+    /// The value pass when the selection is in the same command buffer: the
+    /// shader resolves the selected ids itself, indexing three offset tables
+    /// into the resident buffer. The experts must all be views of one buffer,
+    /// which is how an install maps them.
+    func encodeRoutedValues(
+        commandBuffer: MTLCommandBuffer,
+        hidden: MTLBuffer, hiddenOffset: Int = 0,
+        experts: [ExpertWeights],
+        out: MTLBuffer, outOffset: Int = 0
+    ) throws {
+        guard let resident = experts.first?.weights else {
+            throw ModelError.internalInconsistency(
+                detail: "MoVA has no value experts bound")
+        }
+        guard experts.count <= maxExperts else {
+            throw ModelError.internalInconsistency(
+                detail: "MoVA has \(experts.count) experts; the offset tables hold \(maxExperts)")
+        }
+        for expert in experts
+        where expert.weights !== resident || expert.scales !== resident
+            || expert.biases !== resident
+        {
+            throw ModelError.internalInconsistency(
+                detail: "MoVA routed values need every expert in one resident buffer")
+        }
+        let weightTable = weightOffsets.contents()
+        let scaleTable = scaleOffsets.contents()
+        let biasTable = biasOffsets.contents()
+        for (index, expert) in experts.enumerated() {
+            let offset = index * MemoryLayout<UInt64>.stride
+            weightTable.storeBytes(
+                of: UInt64(expert.weightsOffset), toByteOffset: offset,
+                as: UInt64.self)
+            scaleTable.storeBytes(
+                of: UInt64(expert.scalesOffset), toByteOffset: offset,
+                as: UInt64.self)
+            biasTable.storeBytes(
+                of: UInt64(expert.biasesOffset), toByteOffset: offset,
+                as: UInt64.self)
+        }
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(routedPSO)
+        encoder.setBuffer(resident, offset: 0, index: 0)
+        encoder.setBuffer(weightOffsets, offset: 0, index: 1)
+        encoder.setBuffer(scaleOffsets, offset: 0, index: 2)
+        encoder.setBuffer(biasOffsets, offset: 0, index: 3)
+        encoder.setBuffer(indices, offset: 0, index: 4)
+        encoder.setBuffer(hidden, offset: hiddenOffset, index: 5)
+        encoder.setBuffer(expertOutputs, offset: 0, index: 6)
+        var hiddenValue = UInt32(hiddenSize)
+        var rows = UInt32(valueDim)
+        var topK = UInt32(Self.topK)
+        encoder.setBytes(&hiddenValue, length: MemoryLayout<UInt32>.stride, index: 7)
+        encoder.setBytes(&rows, length: MemoryLayout<UInt32>.stride, index: 8)
+        encoder.setBytes(&topK, length: MemoryLayout<UInt32>.stride, index: 9)
+        encoder.dispatchThreadgroups(
+            MTLSize(width: (Self.topK * valueDim + 7) / 8, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        encoder.endEncoding()
+        try encodeCombine(commandBuffer: commandBuffer, out: out, outOffset: outOffset)
+    }
+
+    private func encodeCombine(
+        commandBuffer: MTLCommandBuffer,
+        out: MTLBuffer, outOffset: Int
+    ) throws {
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
             throw MetalError.commandEncoderFailed
         }

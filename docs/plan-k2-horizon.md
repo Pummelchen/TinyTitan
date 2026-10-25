@@ -157,6 +157,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
   levers are I/O overlap and fewer command-buffer round trips, not more kernel
   arithmetic. Both widths still produce the same tokens.
+- **Two command buffers per sparse layer** — the MoVA value pass used to read
+  its selected ids back to the CPU, which forced the router and the values into
+  separate buffers. `k2_mova_values_routed` resolves the ids from the GPU's
+  selection buffer and indexes three per-expert offset tables into the shared
+  resident buffer, so norm, q/k/gate, MoVA router and values, attention, the
+  MoE router and the shared expert are one command buffer and only the fetched
+  routed experts are a second (135 → 90 buffers per token). On the 4-bit
+  install, 16 decode tokens across three runs: 3.45-3.50 → 3.64-4.23 tok/s,
+  GPU busy 0.092 → 0.082 s/token (pre-fetch 0.055, experts 0.027); 8-bit
+  4 tokens 1.81 → 1.92 tok/s. Same token ids at both widths.
 - **Shared expert before the fetch** — the shared expert depends only on the
   post-attention hidden state, so it now runs in the attention command buffer
   and the post-fetch buffer carries only the two routed dispatches. On 4-bit
