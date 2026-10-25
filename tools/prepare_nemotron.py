@@ -173,7 +173,7 @@ def signed_url(shard: str) -> str:
     raise SystemExit(f"{shard}: no signed URL")
 
 
-def download(shard: str, work: Path, log=print, connections: int = 32) -> Path:
+def download(shard: str, work: Path, log=print, connections: int = 64) -> Path:
     """Fetch one shard as 8 MB part files, resuming each at its own byte.
 
     A part file is written by curl straight to disk (no captured stdout), so a
@@ -197,6 +197,11 @@ def download(shard: str, work: Path, log=print, connections: int = 32) -> Path:
         stalls = 0
         while True:
             have = part.stat().st_size if part.exists() else 0
+            if have > length:
+                # A range request that ignored its end downloaded past the
+                # part; the shard assembly must see exactly this range.
+                os.truncate(part, length)
+                have = length
             if have >= length:
                 break
             with open(part, "ab") as out:
@@ -251,13 +256,15 @@ def download(shard: str, work: Path, log=print, connections: int = 32) -> Path:
                 future.result()
         # Every part is complete; assemble the shard the converter opens.
         with open(destination, "wb") as out:
-            for offset, _ in spans:
+            for offset, end in spans:
                 with open(parts / f"{offset}", "rb") as part:
-                    while True:
-                        block = part.read(64 * 1024 * 1024)
+                    remaining = end - offset + 1
+                    while remaining > 0:
+                        block = part.read(min(64 * 1024 * 1024, remaining))
                         if not block:
                             break
                         out.write(block)
+                        remaining -= len(block)
     finally:
         pass
     for offset, _ in spans:
