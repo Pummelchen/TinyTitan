@@ -52,6 +52,11 @@ public struct GFTokenizer: @unchecked Sendable {
     let thinkEndMark: String
     let toolCallStartMark: String
     let toolCallEndMark: String
+    /// The outer `<ifm|tool_calls>` wrapper: present for K2, nil elsewhere.
+    public let toolCallsStartID: Int32?
+    public let toolCallsEndID: Int32?
+    let toolCallsStartMark: String
+    let toolCallsEndMark: String
 
     /// Tokens that stand for a control marker rather than for text: the ChatML
     /// turn and tool barriers, the channel markers, and every stop token.
@@ -70,6 +75,8 @@ public struct GFTokenizer: @unchecked Sendable {
         ]
         if let thinkStartID { ids.insert(thinkStartID) }
         if let thinkEndID { ids.insert(thinkEndID) }
+        if let toolCallsStartID { ids.insert(toolCallsStartID) }
+        if let toolCallsEndID { ids.insert(toolCallsEndID) }
         ids.formUnion(stopTokenIDs)
         return ids
     }
@@ -142,6 +149,10 @@ public struct GFTokenizer: @unchecked Sendable {
         self.thinkEndMark = resolved.thinkEndMark
         self.toolCallStartMark = resolved.toolCallStartMark
         self.toolCallEndMark = resolved.toolCallEndMark
+        self.toolCallsStartID = resolved.toolCallsStartID
+        self.toolCallsEndID = resolved.toolCallsEndID
+        self.toolCallsStartMark = resolved.toolCallsStartMark
+        self.toolCallsEndMark = resolved.toolCallsEndMark
         self.thinkingMode = thinkingMode
         // Every supported template ignores effort while thinking is off, so
         // an off-mode tokenizer stores none rather than an inert value.

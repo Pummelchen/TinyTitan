@@ -34,6 +34,10 @@ extension GFTokenizer {
         let endOfTurnID: Int32
         let toolCallStartID: Int32
         let toolCallEndID: Int32
+        /// The outer `<ifm|tool_calls>` wrapper K2 writes around one or more
+        /// inner calls. Optional: the ChatML families wrap nothing.
+        let toolCallsStartID: Int32?
+        let toolCallsEndID: Int32?
         let toolResponseID: Int32
         let toolResponseEndID: Int32
         let channelStartID: Int32
@@ -44,6 +48,8 @@ extension GFTokenizer {
         let thinkEndMark: String
         let toolCallStartMark: String
         let toolCallEndMark: String
+        let toolCallsStartMark: String
+        let toolCallsEndMark: String
         let stopTokenIDs: Set<Int32>
         let vocabSize: Int
     }
@@ -147,6 +153,8 @@ extension GFTokenizer {
             endOfTurnID: imEnd,
             toolCallStartID: toolCallStart,
             toolCallEndID: toolCallEnd,
+            toolCallsStartID: nil,
+            toolCallsEndID: nil,
             toolResponseID: toolResponse,
             toolResponseEndID: toolResponseEnd,
             channelStartID: thinkStart,
@@ -157,6 +165,8 @@ extension GFTokenizer {
             thinkEndMark: "</think>",
             toolCallStartMark: "<tool_call>",
             toolCallEndMark: "</tool_call>",
+            toolCallsStartMark: "",
+            toolCallsEndMark: "",
             stopTokenIDs: [imEnd, endOfText],
             // At least the model's padded embedding/lm_head rows; larger when
             // the tokenizer's own vocab (derived from `convertIdToToken`)
@@ -207,6 +217,8 @@ extension GFTokenizer {
             endOfTurnID: imEnd,
             toolCallStartID: toolCallStart,
             toolCallEndID: toolCallEnd,
+            toolCallsStartID: try? id("<ifm|tool_calls>"),
+            toolCallsEndID: try? id("</ifm|tool_calls>"),
             toolResponseID: toolResponse,
             toolResponseEndID: toolResponseEnd,
             channelStartID: thinkStart,
@@ -217,6 +229,8 @@ extension GFTokenizer {
             thinkEndMark: "</ifm|\(tag)>",
             toolCallStartMark: "<ifm|tool_call>",
             toolCallEndMark: "</ifm|tool_call>",
+            toolCallsStartMark: "<ifm|tool_calls>",
+            toolCallsEndMark: "</ifm|tool_calls>",
             stopTokenIDs: [imEnd, endOfText],
             vocabSize: max(Self.derivedVocabSize(tokenizer) ?? 0, 250_624))
     }

@@ -37,6 +37,10 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// so the answer reported here starts where the template's would.
     private var trimsLeadingNewlines = false
     private var toolTokens: [Int32]?
+    /// True between K2's `<ifm|tool_calls>` and `</ifm|tool_calls>`: text in
+    /// there is framing the template wrote, not the model's answer, so it is
+    /// dropped while the inner calls are parsed.
+    private var inToolWrapper = false
     private var emittedCalls = 0
     private var failed = false
 
@@ -142,6 +146,9 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// `<tool_call>`…`</tool_call>` buffer tokens for the Qwen parser.
     /// Everything else streams in whichever channel is open.
     private func consumeChatML(tokenID: Int32, delta: String) throws -> [StructuredAssistantEvent] {
+        if let events = try consumeToolCallsWrapper(tokenID: tokenID, delta: delta) {
+            return events
+        }
         if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
             return events
         }
@@ -160,6 +167,45 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
             return events
         }
         return channelEvents(delta)
+    }
+
+    /// K2's outer `<ifm|tool_calls>` wrapper. The model writes it around one or
+    /// more inner calls, and it is template framing: without suppressing it a
+    /// successful tool call still leaked `<ifm|tool_calls>` / `</ifm|tool_calls>`
+    /// into `content` (measured on the real install). Everything inside the
+    /// wrapper that is not an inner call is dropped, including the newlines the
+    /// template puts between them.
+    private func consumeToolCallsWrapper(
+        tokenID: Int32, delta: String
+    ) throws -> [StructuredAssistantEvent]? {
+        guard let startID = tokenizer.toolCallsStartID,
+            let endID = tokenizer.toolCallsEndID
+        else { return nil }
+        if tokenID == startID {
+            guard !inToolWrapper else {
+                failed = true
+                throw ToolCallParserError.malformed
+            }
+            let prefix = try boundaryPrefix(delta, marker: tokenizer.toolCallsStartMark)
+            let events = channelEvents(prefix)
+            inToolWrapper = true
+            return events
+        }
+        if tokenID == endID {
+            guard inToolWrapper else {
+                failed = true
+                throw ToolCallParserError.malformed
+            }
+            _ = try boundaryPrefix(delta, marker: tokenizer.toolCallsEndMark)
+            inToolWrapper = false
+            return []
+        }
+        guard inToolWrapper else { return nil }
+        if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
+            return events
+        }
+        // Whitespace and other framing inside the wrapper never reaches content.
+        return []
     }
 
     /// A tool marker, or a token inside an open call; nil for anything else.
@@ -228,7 +274,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// tail never becomes visible.
     public func consumeTail(_ text: String) throws -> [StructuredAssistantEvent] {
         guard !failed else { throw ToolCallParserError.malformed }
-        guard toolTokens == nil else { return [] }
+        guard toolTokens == nil, !inToolWrapper else { return [] }
         return channelEvents(text)
     }
 
@@ -256,7 +302,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     }
 
     public func finish() throws {
-        guard !failed, toolTokens == nil else {
+        guard !failed, toolTokens == nil, !inToolWrapper else {
             throw ToolCallParserError.malformed
         }
     }

@@ -502,11 +502,16 @@ extension TinyTitanBench {
             print("selftest history: FAILED (\(error))")
         }
 
-        for (label, text) in [("answer", answer), ("tool", tool)] {
+        // The template's own shape: the inner call inside the
+        // `<ifm|tool_calls>` wrapper, with newlines the decoder must drop.
+        let wrapped = "<ifm|tool_calls>\n" + tool + "\n</ifm|tool_calls>"
+        for (label, text) in [
+            ("answer", answer), ("tool", tool), ("wrapped", wrapped),
+        ] {
             let tokens = tokenizer.encode(text, addBOS: false)
             let report = try k2DecoderReport(
                 tokenizer: tokenizer, promptIDs: promptIDs, tokens: tokens,
-                allowedTools: label == "tool" ? ["get_weather"] : nil)
+                allowedTools: label == "answer" ? nil : ["get_weather"])
             print("selftest \(label): \(report)")
         }
     }

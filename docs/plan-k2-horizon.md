@@ -284,6 +284,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   stream yields `get_weather(city: "Paris")`. A real low-effort chat run
   (`TINYTITAN_K2_CHAT=1`) renders the prompt, closes `</ifm|think_faster>` and
   reports the answer as content.
+- **Tool call end to end** — with the JSON tool presentation the model was
+  asked "What is the weather in Paris? Use the get_weather tool." and emitted a
+  complete `<ifm|tool_calls>` block; the decoder parsed
+  `get_weather(city: "Paris")` from it. That run found one more leak: the outer
+  wrapper's markers streamed into `content` because the decoder only tracked
+  the inner `<ifm|tool_call>` pair. `StructuredAssistantDecoder` now suppresses
+  `<ifm|tool_calls>` / `</ifm|tool_calls>`, drops all framing text between them
+  (including the newlines the template writes), and fails closed on an
+  unterminated wrapper. The bench self-test gained a wrapped stream; content is
+  now empty and the call parses.
 - **Multi-turn history** — the checkpoint's template raises on any assistant
   message without a thinking field ("Assistant message is missing a thinking
   field"), so a replayed conversation could not be rendered at all: the first
