@@ -273,15 +273,29 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   wrapper. Values that the template writes as JSON literals become typed
   arguments; the type tag is informational. Tests cover the three grammars,
   multi-call blocks, unknown tools and malformed/oversized input.
-- **Surfaces not wired** — the 52 KB template renders through the generic
-  tokenizer (`TINYTITAN_K2_CHAT=1`), but the K2 decoder is not selected yet:
-  `StructuredAssistantDecoder` still looks for ChatML's `<think>`/`<tool_call>`
-  markers instead of K2's `<ifm|think>` / `<ifm|tool_call>`, so the parser has no
-  caller. The catalogue entry and a golden baseline are also missing.
+- **Decoder and tool surfaces wired** — `StructuredAssistantDecoder` resolves
+  the K2 think markers by effort and buffers `<ifm|tool_call>` bodies for
+  `K2ToolCallParser`. `k2gpu` now has two install-dependent checks:
+  `TINYTITAN_K2_DECODER=1` runs the generated tokens through the same decoder a
+  server uses and reports the reasoning/content/tool channels, and
+  `TINYTITAN_K2_DECODER_SELFTEST=1` feeds a canned answer stream and a canned
+  xml tool call through the real tokenizer. Both pass: the answer stream splits
+  into reasoning "Simple.\n" and content "The capital is Paris.", and the tool
+  stream yields `get_weather(city: "Paris")`. A real low-effort chat run
+  (`TINYTITAN_K2_CHAT=1`) renders the prompt, closes `</ifm|think_faster>` and
+  reports the answer as content.
+- **Tool prompts need JSON presentation** — rendering a tool prompt used to
+  throw `Cannot compare values of different types ({type: string} and true)`:
+  the checkpoint's markdown tool renderer tests schema nodes with
+  `is sameas true`, and swift-jinja implements `sameas` through
+  `compare(to:)`, which only orders numbers and strings. The tokenizer now
+  passes `tool_presentation_format: "json"` for the K2 dialect -- a mode the
+  template supports and renders through `tojson` -- so a tool prompt can be
+  built at all. The call format stays the template default (xml).
+- **Still missing** — the catalogue entry and a golden baseline.
 
-Next: the GPU family graph that calls these stages (dense layers first), the
-in-graph wiring of the MoVA stage for decode and prefill, the K2 decoder
-(markers plus the tool parser), the ANE prefill sidecar.
+Next: the runner graph (persistent GPU state, GPU-side router dispatch,
+prefetch overlap), batched prefill, and the ANE prefill sidecar.
 
 ## The conversion plan, measured
 

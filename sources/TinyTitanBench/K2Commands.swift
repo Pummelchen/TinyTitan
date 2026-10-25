@@ -195,10 +195,14 @@ extension TinyTitanBench {
             reasoningEffort: effort)
         let chat = ProcessInfo.processInfo.environment["TINYTITAN_K2_CHAT"] == "1"
         let ids: [Int32]
+        let decoderCheck =
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_DECODER"] == "1"
         if chat {
+            // The decoder check renders the prompt with a tool so the model
+            // sees the same surface a server request would.
             ids = try tokenizer.encodeToolChat(
                 messages: [GFTokenizer.Message(role: .user, content: prompt)],
-                tools: [])
+                tools: decoderCheck ? PromptTools.sample : [])
         } else {
             ids = tokenizer.encode(prompt, addBOS: false)
         }
@@ -301,5 +305,99 @@ extension TinyTitanBench {
         print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
         print(
             "raw: \(tokenizer.decode(produced, skipSpecialTokens: false))")
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_DECODER_SELFTEST"] == "1" {
+            try k2DecoderSelfTest(tokenizer: tokenizer)
+        }
+        if decoderCheck {
+            let allowed = chat ? Set(PromptTools.sample.map(\.name)) : nil
+            print(
+                "decoder: "
+                    + (try k2DecoderReport(
+                        tokenizer: tokenizer, promptIDs: ids,
+                        tokens: produced, allowedTools: allowed)))
+        }
+    }
+
+    /// A sample tool set for the chat path, so a tool-templated prompt can be
+    /// rendered and parsed without a server request.
+    private enum PromptTools {
+        static let sample: [GFTokenizer.FunctionDefinition] = [
+            GFTokenizer.FunctionDefinition(
+                name: "get_weather",
+                description: "Current weather for a city",
+                parameters: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "city": .object(["type": .string("string")])
+                    ]),
+                    "required": .array([.string("city")]),
+                ]))
+        ]
+    }
+
+    /// Run a token stream through the same structured decoder the server uses
+    /// and render its events, so the K2 think/tool surfaces are checked on the
+    /// real tokenizer instead of only in unit tests with a fixture.
+    private static func k2DecoderReport(
+        tokenizer: GFTokenizer,
+        promptIDs: [Int32],
+        tokens: [Int32],
+        allowedTools: Set<String>?
+    ) throws -> String {
+        let decoder = StructuredAssistantDecoder.forGeneration(
+            tokenizer: tokenizer, promptIDs: promptIDs,
+            allowedTools: allowedTools)
+        var detokenizer = GFDetokenizer(tokenizer: tokenizer)
+        var events: [StructuredAssistantEvent] = []
+        for id in tokens {
+            events += try decoder.consume(
+                tokenID: id, delta: detokenizer.push(id))
+        }
+        events += try decoder.consumeTail(detokenizer.flush())
+        try decoder.finish()
+        var reasoning = ""
+        var content = ""
+        var calls: [ParsedToolCall] = []
+        for event in events {
+            switch event {
+            case .reasoning(let text): reasoning += text
+            case .content(let text): content += text
+            case .toolCall(let call): calls.append(call)
+            }
+        }
+        var line = "reasoning=\(reasoning.debugDescription) content=\(content.debugDescription)"
+        if !calls.isEmpty {
+            line += " calls=" + calls.map { "\($0.name)(\($0.arguments))" }.joined(separator: ",")
+        }
+        return line
+    }
+
+    /// Feed two canned streams through the decoder with the real tokenizer:
+    /// one closes a thought and answers, one emits an xml tool call. This is
+    /// install-dependent, so it lives behind TINYTITAN_K2_DECODER_SELFTEST.
+    private static func k2DecoderSelfTest(tokenizer: GFTokenizer) throws {
+        let effort = ModelReasoningEffort.resolved() ?? .high
+        var tag = "think"
+        switch effort {
+        case .medium: tag = "think_fast"
+        case .low: tag = "think_faster"
+        case .high, .xhigh: tag = "think"
+        }
+        let promptIDs = tokenizer.encode(
+            "<|ifm|im_start|>assistant\n<ifm|\(tag)>\n", addBOS: false)
+
+        let answer = "Simple.\n</ifm|\(tag)>\nThe capital is Paris."
+        let tool =
+            "<ifm|tool_call>get_weather\n"
+            + "<ifm|arg_key>city</ifm|arg_key>\n"
+            + "<ifm|arg_value>Paris</ifm|arg_value>\n"
+            + "</ifm|tool_call>"
+        for (label, text) in [("answer", answer), ("tool", tool)] {
+            let tokens = tokenizer.encode(text, addBOS: false)
+            let report = try k2DecoderReport(
+                tokenizer: tokenizer, promptIDs: promptIDs, tokens: tokens,
+                allowedTools: label == "tool" ? ["get_weather"] : nil)
+            print("selftest \(label): \(report)")
+        }
     }
 }

@@ -159,9 +159,19 @@ public struct GFTokenizer: @unchecked Sendable {
     }
 
     private var templateContext: [String: any Sendable] {
-        Self.templateContext(
+        var context = Self.templateContext(
             thinkingEnabled: thinkingMode.isEnabled,
             reasoningEffort: reasoningEffort)
+        if dialect == .k2 {
+            // The checkpoint's markdown tool renderer compares schema nodes
+            // with `is sameas true`, and swift-jinja's `sameas` goes through
+            // `compare(to:)`, which throws for a mapping ("Cannot compare
+            // values of different types ({type: string} and true)"). JSON
+            // presentation is a mode the template itself supports and renders
+            // through `tojson`, so a tool prompt can be built at all.
+            context["tool_presentation_format"] = "json"
+        }
+        return context
     }
 
     /// Encode UTF-8 text to token IDs.
