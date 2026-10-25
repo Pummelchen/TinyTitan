@@ -72,8 +72,6 @@ Start the server with `tools/server_launcher.sh`; it prints the base URL and
 writes the client configuration. The full walkthrough is
 [Getting Started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started).
 
-Last verified: 2026-10-23 — release build and both `--help` commands in a fresh
-clone; the 2B install and a greedy 96-token CLI run on this host.
 
 ## Benchmarks
 
