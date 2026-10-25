@@ -373,7 +373,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   multi-turn follow-up reuses the shared user turn (174/211 tokens) and took
   12.6 s against 44.3 s cold. A different tokenizer render or a capacity
   rebuild drops the reuse, which is why a request that asks for more
-  `max_tokens` does not reuse anything the first time.
+  `max_tokens` does not reuse anything the first time. The assumption it rests
+  on is pinned in CI now:
+  `K2GraphProbeTests.continuingAfterAPrefixMatchesOneFullPass` forwards 7,8 and
+  then 9,10 on one sparse-toy graph and compares the logits with a single 0..3
+  pass (1e-6), and re-forwarding the last token at its own position is
+  idempotent.
 - **Warm start from the routing profile** — the backend persists the
   routed-expert profile the runner already uses (`expert-profile.bin` beside
   the install; `TINYTITAN_EXPERT_PROFILE=0` disables) after each request, and
