@@ -1,6 +1,14 @@
 import Foundation
 import Tokenizers
 
+/// The control-token dialect a tokenizer speaks.
+public enum TokenizerDialect: String, Sendable, Equatable {
+    /// Qwen/Ornith ChatML: `<|im_start|>`, `<think>`, `<tool_call>`.
+    case chatML
+    /// K2-Horizon: `<|ifm|im_start|>`, `<ifm|think>`, `<ifm|tool_call>`.
+    case k2
+}
+
 /// Tokenizer wrapper for the compatible Qwen3.5-MoE ChatML model family.
 ///
 /// Loads tokenizer sidecars in a completed `.ssdai/tokenizer/` directory.
@@ -36,6 +44,14 @@ public struct GFTokenizer: @unchecked Sendable {
     public let thinkEndID: Int32?
     public let stopTokenIDs: Set<Int32>
     public let vocabSize: Int
+    public let dialect: TokenizerDialect
+    /// The literal spellings of the markers, for the streaming decoder's
+    /// boundary check. The ids alone cannot answer "what text ended this
+    /// delta" when the two dialects spell the same slot differently.
+    let thinkStartMark: String
+    let thinkEndMark: String
+    let toolCallStartMark: String
+    let toolCallEndMark: String
 
     /// Tokens that stand for a control marker rather than for text: the ChatML
     /// turn and tool barriers, the channel markers, and every stop token.
@@ -67,13 +83,13 @@ public struct GFTokenizer: @unchecked Sendable {
     /// inject an effort sentence; binary templates inject nothing). Derived
     /// from the template so it owns the wording; the manual ChatML renderer
     /// mirrors it.
-    private let effortSystemInstruction: String?
+    let effortSystemInstruction: String?
 
     /// Generation-prompt suffix appended after the last message: derived from
     /// the tokenizer's bundled `chat_template.jinja`
     /// (`add_generation_prompt` with thinking disabled) when available,
     /// falling back to the pinned constant otherwise (R6).
-    private let generationSuffix: String
+    let generationSuffix: String
 
     @usableFromInline
     let tokenizer: any Tokenizer
@@ -100,7 +116,8 @@ public struct GFTokenizer: @unchecked Sendable {
         self.tokenizer = tokenizer
         self.byteLevelDecoderConfiguration = byteLevelDecoderConfiguration
 
-        let resolved = try Self.resolveChatMLTokens(tokenizer)
+        let resolved = try Self.resolveSpecialTokens(
+            tokenizer, reasoningEffort: reasoningEffort)
         try Self.validateStreamingDecoder(
             byteLevelDecoderConfiguration,
             tokenizer: tokenizer,
@@ -120,6 +137,11 @@ public struct GFTokenizer: @unchecked Sendable {
         self.thinkEndID = resolved.thinkEndID
         self.stopTokenIDs = resolved.stopTokenIDs
         self.vocabSize = resolved.vocabSize
+        self.dialect = resolved.dialect
+        self.thinkStartMark = resolved.thinkStartMark
+        self.thinkEndMark = resolved.thinkEndMark
+        self.toolCallStartMark = resolved.toolCallStartMark
+        self.toolCallEndMark = resolved.toolCallEndMark
         self.thinkingMode = thinkingMode
         // Every supported template ignores effort while thinking is off, so
         // an off-mode tokenizer stores none rather than an inert value.
@@ -337,86 +359,6 @@ public struct GFTokenizer: @unchecked Sendable {
         let reasoning = (beforeFirst.components(separatedBy: "<think>").last ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (reasoning, String(afterLast.drop(while: { $0 == "\n" })))
-    }
-
-    public func applyChatTemplate(_ messages: [Message]) throws -> String {
-        // Every message is rendered through the ChatML template before
-        // encoding; there is no other prompt path.
-        try chatMLChatTemplate(messages)
-    }
-
-    private func chatMLChatTemplate(_ messages: [Message]) throws -> String {
-        var s = ""
-        // Effort-aware templates open the conversation with the derived
-        // instruction: inside the leading system block when the chat has one,
-        // otherwise as a synthetic system block of its own. A leading
-        // `developer` message *is* that system block (`Role.templateRole`), so
-        // it must not also get a synthetic one in front of it.
-        let opensWithGuidance =
-            messages.first.map {
-                $0.role == .system || $0.role == .developer
-            } ?? false
-        if let instruction = effortSystemInstruction, !opensWithGuidance {
-            s += Self.imStartMark + "system\n" + instruction + Self.imEndMark + "\n"
-        }
-        // The bundled template's `ns.last_query_index`: the last user turn that
-        // is not a `<tool_response>` echo. Everything after it is the turn being
-        // *continued* rather than history, which is the distinction the assistant
-        // branch below turns on. Default is the final index, so a chat ending on a
-        // user turn has nothing after it.
-        var lastQueryIndex = messages.count - 1
-        for index in stride(from: messages.count - 1, through: 0, by: -1)
-        where messages[index].role == .user {
-            let trimmed = (messages[index].content ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("<tool_response>"), trimmed.hasSuffix("</tool_response>") {
-                continue
-            }
-            lastQueryIndex = index
-            break
-        }
-        for (index, message) in messages.enumerated() {
-            guard let rawContent = message.content else {
-                throw GFTokenizerError.invalidChatTemplate("text-only messages require content")
-            }
-            // The bundled Jinja template trims every message's rendered
-            // content (`render_content(...)|trim`); the manual renderer
-            // mirrors that exactly so both paths agree byte-for-byte.
-            var content = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
-            // `developer` is `system` in everything but name here
-            // (`Role.templateRole`), so it takes the same place rule and the
-            // same effort-instruction fold.
-            let isGuidance = message.role == .system || message.role == .developer
-            if isGuidance && index != 0 {
-                throw GFTokenizerError.invalidChatTemplate("system message must be first")
-            }
-            if index == 0, isGuidance,
-                let instruction = effortSystemInstruction
-            {
-                content = content.isEmpty ? instruction : instruction + "\n\n" + content
-            }
-            if message.role == .assistant {
-                // Historical assistant turns carry their reasoning *stripped*:
-                // the template takes everything after the last `</think>` as the
-                // answer and wraps it back in `<think>…</think>` only when the
-                // turn comes after the last real user query (the turn being
-                // continued). This renderer emitted the raw content, so a
-                // previous turn's whole chain of thought stayed in every prompt
-                // — context the template exists to remove, and a prompt shape
-                // the model was not trained on. `preserve_thinking`, which the
-                // template also honours, has no equivalent here.
-                let (reasoning, answer) = Self.splitThinking(content)
-                content =
-                    index > lastQueryIndex
-                    ? "<think>\n" + reasoning + "\n</think>\n\n" + answer
-                    : answer
-            }
-            s +=
-                Self.imStartMark + message.role.templateRole + "\n" + content + Self.imEndMark
-                + "\n"
-        }
-        s += generationSuffix
-        return s
     }
 
     public func encodeToolChat(

@@ -26,6 +26,7 @@ extension GFTokenizer {
     }
 
     struct ResolvedSpecialTokens {
+        let dialect: TokenizerDialect
         let imStartID: Int32
         let bosID: Int32
         let eosID: Int32
@@ -39,6 +40,10 @@ extension GFTokenizer {
         let channelEndID: Int32
         let thinkStartID: Int32?
         let thinkEndID: Int32?
+        let thinkStartMark: String
+        let thinkEndMark: String
+        let toolCallStartMark: String
+        let toolCallEndMark: String
         let stopTokenIDs: Set<Int32>
         let vocabSize: Int
     }
@@ -49,12 +54,12 @@ extension GFTokenizer {
         resolved: ResolvedSpecialTokens
     ) throws {
         let literalMarkers: [(Int32, String)] = [
-            (resolved.toolCallStartID, "<tool_call>"),
-            (resolved.toolCallEndID, "</tool_call>"),
+            (resolved.toolCallStartID, resolved.toolCallStartMark),
+            (resolved.toolCallEndID, resolved.toolCallEndMark),
             (resolved.toolResponseID, "<tool_response>"),
             (resolved.toolResponseEndID, "</tool_response>"),
-            (resolved.channelStartID, "<think>"),
-            (resolved.channelEndID, "</think>"),
+            (resolved.channelStartID, resolved.thinkStartMark),
+            (resolved.channelEndID, resolved.thinkEndMark),
         ]
         for (id, content) in literalMarkers {
             guard let added = decoder.addedTokens[id],
@@ -103,6 +108,16 @@ extension GFTokenizer {
         return nil
     }
 
+    /// The tokenizer's control dialect. ChatML is the Qwen/Ornith family;
+    /// K2-Horizon writes `<|ifm|…>` markers instead.
+    static func resolveSpecialTokens(
+        _ tokenizer: any Tokenizer,
+        reasoningEffort: ModelReasoningEffort?
+    ) throws -> ResolvedSpecialTokens {
+        if let chatML = try? resolveChatMLTokens(tokenizer) { return chatML }
+        return try resolveK2Tokens(tokenizer, effort: reasoningEffort ?? .high)
+    }
+
     static func resolveChatMLTokens(
         _ tokenizer: any Tokenizer
     ) throws -> ResolvedSpecialTokens {
@@ -124,6 +139,7 @@ extension GFTokenizer {
         let thinkStart = try id("<think>")
         let thinkEnd = try id("</think>")
         return ResolvedSpecialTokens(
+            dialect: .chatML,
             imStartID: imStart,
             bosID: endOfText,
             eosID: endOfText,
@@ -137,6 +153,10 @@ extension GFTokenizer {
             channelEndID: thinkEnd,
             thinkStartID: thinkStart,
             thinkEndID: thinkEnd,
+            thinkStartMark: "<think>",
+            thinkEndMark: "</think>",
+            toolCallStartMark: "<tool_call>",
+            toolCallEndMark: "</tool_call>",
             stopTokenIDs: [imEnd, endOfText],
             // At least the model's padded embedding/lm_head rows; larger when
             // the tokenizer's own vocab (derived from `convertIdToToken`)
@@ -144,5 +164,60 @@ extension GFTokenizer {
             vocabSize: max(
                 Self.derivedVocabSize(tokenizer) ?? 0,
                 Self.paddedLogitsVocabSize))
+    }
+
+    /// K2-Horizon's dialect: `<|ifm|im_start|>` turns, `<ifm|tool_call>` tool
+    /// blocks and `<ifm|think>` reasoning. The tool-call wrapper
+    /// (`<ifm|tool_calls>`) is left to `K2ToolCallParser`; the streaming
+    /// decoder buffers the inner call.
+    static func resolveK2Tokens(
+        _ tokenizer: any Tokenizer,
+        effort: ModelReasoningEffort
+    ) throws -> ResolvedSpecialTokens {
+        func id(_ token: String) throws -> Int32 {
+            guard let value = specialTokenID(tokenizer, token) else {
+                throw GFTokenizerError.missingSpecialToken(token)
+            }
+            return Int32(value)
+        }
+        let imStart = try id("<|ifm|im_start|>")
+        let imEnd = try id("<|ifm|im_end|>")
+        let endOfText = try id("<|ifm|endoftext|>")
+        let toolCallStart = try id("<ifm|tool_call>")
+        let toolCallEnd = try id("</ifm|tool_call>")
+        let toolResponse = try id("<tool_response>")
+        let toolResponseEnd = try id("</tool_response>")
+        // The generation prompt's tag is chosen by effort: high opens
+        // `<ifm|think>`, medium `<ifm|think_fast>`, low `<ifm|think_faster>`.
+        // The decoder has to follow the tag the prompt actually used.
+        let tag: String
+        switch effort {
+        case .medium: tag = "think_fast"
+        case .low: tag = "think_faster"
+        case .high, .xhigh: tag = "think"
+        }
+        let thinkStart = try id("<ifm|\(tag)>")
+        let thinkEnd = try id("</ifm|\(tag)>")
+        return ResolvedSpecialTokens(
+            dialect: .k2,
+            imStartID: imStart,
+            bosID: endOfText,
+            eosID: endOfText,
+            padID: endOfText,
+            endOfTurnID: imEnd,
+            toolCallStartID: toolCallStart,
+            toolCallEndID: toolCallEnd,
+            toolResponseID: toolResponse,
+            toolResponseEndID: toolResponseEnd,
+            channelStartID: thinkStart,
+            channelEndID: thinkEnd,
+            thinkStartID: thinkStart,
+            thinkEndID: thinkEnd,
+            thinkStartMark: "<ifm|\(tag)>",
+            thinkEndMark: "</ifm|\(tag)>",
+            toolCallStartMark: "<ifm|tool_call>",
+            toolCallEndMark: "</ifm|tool_call>",
+            stopTokenIDs: [imEnd, endOfText],
+            vocabSize: max(Self.derivedVocabSize(tokenizer) ?? 0, 250_624))
     }
 }

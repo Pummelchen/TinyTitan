@@ -146,14 +146,14 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
             return events
         }
         if tokenID == tokenizer.thinkStartID {
-            let prefix = try boundaryPrefix(delta, marker: "<think>")
+            let prefix = try boundaryPrefix(delta, marker: tokenizer.thinkStartMark)
             let events = channelEvents(prefix)
             channel = .thought
             trimsLeadingNewlines = false
             return events
         }
         if tokenID == tokenizer.thinkEndID {
-            let prefix = try boundaryPrefix(delta, marker: "</think>")
+            let prefix = try boundaryPrefix(delta, marker: tokenizer.thinkEndMark)
             let events = channelEvents(prefix)
             trimsLeadingNewlines = channel == .thought
             channel = .visible
@@ -172,7 +172,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
                 failed = true
                 throw ToolCallParserError.malformed
             }
-            let prefix = try boundaryPrefix(delta, marker: "<tool_call>")
+            let prefix = try boundaryPrefix(delta, marker: tokenizer.toolCallStartMark)
             let events = channelEvents(prefix)
             toolTokens = []
             return events
@@ -182,12 +182,30 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
                 failed = true
                 throw ToolCallParserError.malformed
             }
-            _ = try boundaryPrefix(delta, marker: "</tool_call>")
+            _ = try boundaryPrefix(delta, marker: tokenizer.toolCallEndMark)
             toolTokens = nil
             let text = tokenizer.decode(tokens, skipSpecialTokens: false)
             do {
-                let call = try QwenToolCallParser().parse(
-                    text, allowedTools: allowedTools, id: idGenerator())
+                let call: ParsedToolCall
+                switch tokenizer.dialect {
+                case .chatML:
+                    call = try QwenToolCallParser().parse(
+                        text, allowedTools: allowedTools, id: idGenerator())
+                case .k2:
+                    // The decoder buffers one inner call; the parser wants the
+                    // wrapper the template writes around it. Runtime prompts
+                    // ask for the default xml call body.
+                    let wrapped =
+                        "<ifm|tool_calls><ifm|tool_call>\(text)"
+                        + "</ifm|tool_call></ifm|tool_calls>"
+                    let calls = try K2ToolCallParser.parse(
+                        wrapped, allowedTools: allowedTools, format: .xml,
+                        makeID: idGenerator)
+                    guard calls.count == 1 else {
+                        throw ToolCallParserError.malformed
+                    }
+                    call = calls[0]
+                }
                 emittedCalls += 1
                 return [.toolCall(call)]
             } catch {

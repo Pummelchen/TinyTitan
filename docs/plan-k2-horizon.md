@@ -155,6 +155,14 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   `supportsThinkingOff` is false and a thinking-off request is refused rather
   than silently thinking. Sampling follows the model card: temperature 1.0,
   top-p 0.95, top-k 20.
+- **Tokenizer dialect** — `GFTokenizer` now resolves K2's control tokens
+  (`<|ifm|im_start|>`, `<|ifm|im_end|>`, `<|ifm|endoftext|>`,
+  `<ifm|tool_call>`, `<ifm|think>`) when the ChatML set is absent, records the
+  dialect and the marker spellings, and routes prompt rendering through the
+  installed template instead of the manual ChatML renderer. The think tag is
+  chosen by effort (`think`, `think_fast`, `think_faster`) so the decoder
+  follows the tag the prompt actually opened. Both installed K2 tokenizers
+  loaded and rendered at high/medium/low effort in a standalone check.
 - **Tool-call parsing** — `K2ToolCallParser` reads the checkpoint's
   `<ifm|tool_calls>` wrapper in all three formats its template offers (`json`,
   `xml`, default `xml`, and `xml_typed`), including several calls in one
