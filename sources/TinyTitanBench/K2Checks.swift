@@ -253,6 +253,19 @@ extension TinyTitanBench {
             print("selftest roundtrip: FAILED (\(error))")
         }
 
+        // The closing tag spelled as ordinary tokens, split across two of
+        // them: the ID-level decoder cannot see it, so the text-level fallback
+        // has to split the thought here.
+        var spelled: [Int32] = []
+        spelled += tokenizer.encode("Need the city.\n", addBOS: false)
+        spelled += tokenizer.encode("</ifm|", addBOS: false)
+        spelled += tokenizer.encode("\(tag)>", addBOS: false)
+        spelled += tokenizer.encode("\nParis", addBOS: false)
+        let spelledReport = try k2DecoderReport(
+            tokenizer: tokenizer, promptIDs: promptIDs, tokens: spelled,
+            allowedTools: nil)
+        print("selftest spelled: \(spelledReport)")
+
         for (label, text) in [
             ("answer", answer), ("tool", tool), ("wrapped", wrapped),
         ] {

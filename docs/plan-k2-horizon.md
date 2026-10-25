@@ -354,8 +354,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   a weight property, not an affordable allocation here). Measured on the 4-bit
   install: first 48-token reply 18.3 s (2.6 tok/s, cold cache), a later
   160-token reply 38.1 s (4.2 tok/s). One sampled reply (temperature 1.0) wrote
-  its closing think tag as ordinary text and the decoder left it in reasoning;
-  five later samples behaved, so text-spelled markers remain a known edge.
+  its closing think tag as ordinary text and the decoder left it in reasoning.
+  The decoder now holds back a suffix that could become the closing tag and
+  splits on it at the text level, so a tag spelled as tokens (even split across
+  two) closes the thought: the bench selftest feeds `</ifm|` + `think_faster>`
+  as separate tokens and gets reasoning "Need the city.\n" plus content
+  "Paris". A quoted tag inside a thought would close it early, which is the
+  accepted trade for the sampled case.
   A per-request graph costs 0.02 s to build (`maxSequence` = prompt + budget,
   reported under `TINYTITAN_K2_TIMING`), so it is not worth caching one. Warm
   served throughput matches the bench: a 32-token reply took 15.2 s on the
