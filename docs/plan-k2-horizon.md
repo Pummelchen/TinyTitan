@@ -92,6 +92,10 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   token that has to attend over the cached first. It is probe-sized caching,
   not the runner's paged/quantized manager; the same commit adds
   `Elementwise.encodeSiluMul` and the K2 gate/dense-MLP accessors.
+- **Input and output ends** — `K2Head` covers the embedding lookup
+  (`AffineQuantEmbeddingLookup` at the install's width, no `sqrt(hidden)`
+  scale), the grouped final norm and the untied `lm_head` GEMV, with a test
+  against the CPU formulas on the synthetic install.
 - **GPU primitives** — the grouped two-way RMS norm is the existing
   `rmsnorm_bf16w_grouped` kernel with `headDim 1280, groupsPerRow 2`; no new
   norm work was needed. Two kernels are new and tested in isolation:
