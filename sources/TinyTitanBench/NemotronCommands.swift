@@ -135,9 +135,13 @@ extension TinyTitanBench {
                 + "\(g.layerKinds.filter { $0 == .mamba }.count) mamba, "
                 + "\(g.layerKinds.filter { $0 == .moe }.count) moe, "
                 + "\(g.layerKinds.filter { $0 == .attention }.count) attention")
+        let carried = g.layerKinds.indices
+            .filter { g.layerKinds[$0] == .moe }
+            .map { g.expertCounts[$0] }
         print(
             "hidden \(g.hiddenSize), vocab \(g.vocabSize), latent \(g.moeLatentSize), "
-                + "experts \(g.expertCounts.min() ?? 0)...\(g.maxExperts) top-\(g.topKExperts)")
+                + "experts \(carried.min() ?? 0)...\(carried.max() ?? 0) "
+                + "top-\(g.topKExperts)")
         print(
             "mamba \(g.mambaHeads)x\(g.mambaHeadDim), state \(g.ssmStateSize), "
                 + "groups \(g.mambaGroups), conv \(g.convKernel)")

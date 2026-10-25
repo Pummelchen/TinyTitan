@@ -164,7 +164,11 @@ public final class NemotronModel {
             embeddingBytes, embeddingScales, embeddingBiases, g.hiddenSize,
             embedding.bits ?? 8, token, hidden)
 
-        for layer in 0..<g.numLayers {
+        // A debugging switch, not a serving knob: run a prefix of the stack so
+        // a shape or timing problem can be localized to one layer type.
+        let requested = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_LAYERS"]
+            .flatMap { Int($0) } ?? g.numLayers
+        for layer in 0..<min(g.numLayers, max(0, requested)) {
             switch g.layerKinds[layer] {
             case .mamba:
                 try runMambaLayer(layer)
