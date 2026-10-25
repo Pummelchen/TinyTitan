@@ -558,9 +558,20 @@ def expected_size(shard: str) -> int:
         raise RuntimeError(f"{shard}: header carries no tensors")
     payload = max(t["data_offsets"][1] for t in tensors.values())
     derived = 8 + header_len + payload
-    reported = subprocess.run(
-        ["curl", "-sIL", "--http1.1", *RETRY, url], capture_output=True, text=True, check=True
-    ).stdout
+    # The confirmation is useful, not load-bearing: `derived` comes from the
+    # shard's own tensor offsets and is length-checked on every chunk. A HEAD
+    # that fails or times out (rate limiting) must not abort a conversion whose
+    # range requests are working, so a missing answer skips the confirmation.
+    try:
+        reported = subprocess.run(
+            ["curl", "-sIL", "--http1.1", "--max-time", "30", *RETRY, url],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        reported = ""
     lengths = [
         int(line.split(":", 1)[1])
         for line in reported.splitlines()
@@ -584,9 +595,23 @@ def resolve_url(shard: str) -> str:
     end the whole run. That cost a 19 GB staging tree on 2026-10-17, after the
     chunked range fetches — which do retry — had survived two network drops.
     """
-    out = subprocess.run(
-        ["curl", "-sIL", *RETRY, f"{BASE}/{shard}"], capture_output=True, text=True, check=True
-    ).stdout
+    # A bounded HEAD, and a fallback that is still correct: `curl -L` follows
+    # the hub's redirect itself, so the unresolved URL works with `-r`. A HEAD
+    # that hangs (HF rate-limits them during a concurrent conversion) must not
+    # hold the whole run open — there is no `--max-time` in RETRY.
+    try:
+        proc = subprocess.run(
+            ["curl", "-sIL", "--max-time", "30", *RETRY, f"{BASE}/{shard}"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{BASE}/{shard}"
+    if proc.returncode != 0:
+        return f"{BASE}/{shard}"
+    out = proc.stdout
     locations = [
         line.split(":", 1)[1].strip()
         for line in out.splitlines()
