@@ -77,10 +77,14 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 ## Benchmarks
 
-Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means the CPU
-engine does not serve that model: the MoE families stream their experts on the
-GPU + ANE path, and only the dense Qwen 3.5 models run on either engine.
-Per-version measurements and the method live on the wiki
+Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
+does not serve the model: the MoE families stream their experts on the GPU + ANE
+path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
+install-only today — its GPU graph is not implemented, so both of its decode
+columns are `NA`. K2-Horizon's score is from its
+[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
+Terminal-Bench 4.0 result is published for it. Per-version measurements and the
+method live on the wiki
 ([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
 [Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
 
@@ -90,6 +94,8 @@ Per-version measurements and the method live on the wiki
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 4-bit | NA | NA | 58.6% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 8-bit | NA | NA | 58.6% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 52.5% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 52.5% (2.1) | NA |
 | Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA | 39.55% (2.0) | NA |
