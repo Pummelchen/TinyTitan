@@ -42,6 +42,14 @@ state is the two installs (178 GB) with the snapshots gone.
     python3 tools/prepare_laguna_s21.py --from-hf \
         --output .build/laguna-affine --work .build/laguna-work --bits 4 8 --resume
 
+    # Preflight: every tensor's name, shape and width, from headers only.
+    python3 tools/verify_laguna_snapshot.py \
+        --snapshot .build/laguna-affine-4bit --bits 4
+
+    # Unattended: wait for both snapshots, verify, import both widths,
+    # benchmark both. Safe to re-run.
+    tools/laguna_pipeline.sh
+
     # Each install grows into the space its snapshot releases.
     TinyTitanRepack --input-snapshot .build/laguna-affine-4bit \
         --model-id laguna-s-2.1-4bit --output models/laguna-s-2.1-4bit.ssdai \
