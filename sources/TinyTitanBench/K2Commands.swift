@@ -27,6 +27,8 @@ extension TinyTitanBench {
             }
             tokenizer = loaded
             if ProcessInfo.processInfo.environment["TINYTITAN_K2_CHAT"] == "1" {
+                // lint:allow-unbounded-read the checkpoint's own template: 52 KB,
+                // written by the converter, and read once per process.
                 let template = try String(
                     contentsOf: directory.appendingPathComponent("tokenizer/chat_template.jinja"),
                     encoding: .utf8)
