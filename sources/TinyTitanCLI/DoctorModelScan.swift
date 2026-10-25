@@ -88,6 +88,21 @@ enum DoctorModelScanner {
         let reason: String
     }
 
+    /// Why an installed family cannot be run on this build, or nil when it
+    /// can. Shared with `ModelCatalog`'s reasons in spirit, not in code: the
+    /// server target links NIO and doctor deliberately does not.
+    static func unsupportedInstallReason(_ family: ModelFamily) -> String? {
+        switch family {
+        case .qwen36MTP, .qwen38flashMTP:
+            return "MTP draft head, served only beside its target"
+        case .k2Horizon:
+            return "K2-Horizon's GPU graph is not implemented yet; the install "
+                + "validates but cannot be served (docs/plan-k2-horizon.md)"
+        case .qwen36, .qwen38flash, .qwen35Dense:
+            return nil
+        }
+    }
+
     private static func probeInstall(
         _ directory: URL,
         physicalMemory: UInt64,
@@ -103,12 +118,12 @@ enum DoctorModelScanner {
             return .failure(
                 ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }
-        // A draft head has no tokenizer and no layers to run on its own; the
-        // catalog skips it for the same reason.
-        if identity.family == .qwen36MTP || identity.family == .qwen38flashMTP {
-            return .failure(
-                ProbeFailure(
-                    reason: "MTP draft head, served only beside its target"))
+        // A family the runtime cannot serve is not a model this machine can
+        // run, whatever its memory fit says. The catalog skips the same set;
+        // doctor reporting K2 as a fit would send a person to launch a model
+        // that stops at Model.load's graph refusal.
+        if let reason = Self.unsupportedInstallReason(identity.family) {
+            return .failure(ProbeFailure(reason: reason))
         }
         let profile = ModelProfile.resolve(identity: identity)
         let routedExperts = manifest.expertsPerLayer > 0 && manifest.expertStride > 0

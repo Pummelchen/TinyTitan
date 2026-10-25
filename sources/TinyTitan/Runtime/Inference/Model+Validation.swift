@@ -147,19 +147,17 @@ extension Model {
 
         switch config.family {
         case .k2Horizon:
-            // Validate the whole install first: the schema is what says the
-            // packed layout and every resident tensor match the architecture.
-            // Serving then refuses by name, because the GPU graph does not
-            // exist yet -- and running a K2 payload through the Qwen runner
-            // would read its `gate_proj` as a packed q/gate and its MoVA layers
-            // as a `v_proj` model, fluent nonsense rather than an error.
+            // The install validates like any other; what does not exist is the
+            // GPU graph. `Model.load` may return the handle -- reading its
+            // tensors is useful and honest -- while RealForwardRunner refuses
+            // the family before it builds a Qwen-shaped graph from it.
             try Self.validateK2Schema(
                 checks: checks, layout: layout, config: config,
                 quant: quant, overrides: manifest.quantOverrides)
-            throw ModelError.unsupportedArchitecture(
-                detail: "K2-Horizon's GPU graph is not implemented yet; "
-                    + "the install validates, serving it does not. "
-                    + "See docs/plan-k2-horizon.md.")
+            // K2's schema is the whole check; the shared tail below asks for
+            // the Qwen layer roles (q_norm, packed q/gate) this family does not
+            // have.
+            return
         case .qwen35Dense:
             try Self.validateDenseSchema(
                 checks: checks, config: config,

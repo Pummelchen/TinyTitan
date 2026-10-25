@@ -161,6 +161,21 @@ struct ModelCatalogTests {
         #expect(skipped["half-written"]?.contains("incomplete") == true)
     }
 
+    /// K2's install is real and validates, but the catalogue must not offer
+    /// it: listing it would send a launch at a family whose runner refuses.
+    @Test func k2InstallIsSkippedWithTheGraphReason() throws {
+        let root = try CatalogFixture.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try CatalogFixture.install(
+            root, "k2-horizon-4bit", modelID: "k2-horizon-4bit",
+            family: "k2_horizon", bits: 4)
+        let catalog = ModelCatalog.scan(directory: root)
+        #expect(catalog.entries.isEmpty)
+        let reason = try #require(catalog.skipped.first?.reason)
+        #expect(reason.contains("not served yet"))
+        #expect(reason.contains("GPU graph"))
+    }
+
     @Test func skippedDirectoriesAreReportedOnceInOneNotice() throws {
         let root = try CatalogFixture.root()
         defer { try? FileManager.default.removeItem(at: root) }

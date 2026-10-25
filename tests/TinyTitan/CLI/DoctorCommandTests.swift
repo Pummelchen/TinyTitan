@@ -277,4 +277,18 @@ import TinyTitanLib
             try DoctorOptions.parse(["--models-dir"])
         }
     }
+
+    @Test func unsupportedFamiliesAreRefusedWithAReason() {
+        // A memory fit is not a capability claim: K2's install validates but
+        // its graph does not exist, and doctor must say that rather than list
+        // it as a model this machine can run.
+        let k2 = DoctorModelScanner.unsupportedInstallReason(.k2Horizon)
+        #expect(k2?.contains("GPU graph is not implemented") == true)
+        #expect(
+            DoctorModelScanner.unsupportedInstallReason(.qwen36MTP)?
+                .contains("MTP draft head") == true)
+        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen36) == nil)
+        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen38flash) == nil)
+        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen35Dense) == nil)
+    }
 }

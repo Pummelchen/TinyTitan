@@ -20,6 +20,16 @@ extension RealForwardRunner {
         let cfg = model.config
         bp.cfg = cfg
         bp.maxContext = maxContext
+        // K2's install loads and validates, but there is no layer graph for it
+        // yet. Refusing here, before any scratch is sized for a Qwen-shaped
+        // pipeline set, keeps a K2 payload from being run through kernels that
+        // would read its gate projection as a packed q/gate.
+        guard cfg.family != .k2Horizon else {
+            throw ModelError.unsupportedArchitecture(
+                detail: "K2-Horizon's GPU graph is not implemented yet; the "
+                    + "install loads and validates, serving it does not. "
+                    + "See docs/plan-k2-horizon.md.")
+        }
         precondition(
             slots > 0 && slots <= KVCacheManager.maximumSlots,
             "slots must be between 1 and \(KVCacheManager.maximumSlots)")
