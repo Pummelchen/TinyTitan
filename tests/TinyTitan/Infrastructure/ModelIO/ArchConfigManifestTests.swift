@@ -100,7 +100,10 @@ struct ArchConfigManifestTests {
     @Test("The dense family has no preset, which is why the manifest is read")
     func denseFamilyHasNoPreset() {
         #expect(ArchConfig.knownArchitectures[.qwen35Dense] == nil)
-        #expect(ArchConfig.knownArchitectures.count == 4)
+        // Laguna-S-2.1 has a checked preset, like the Qwen families; only the
+        // dense Qwen 3.5 sizes need the manifest.
+        #expect(ArchConfig.knownArchitectures[.laguna] == .lagunaS21)
+        #expect(ArchConfig.knownArchitectures.count == 5)
     }
 
     @Test("Geometry, mask and conventions come from the manifest")
