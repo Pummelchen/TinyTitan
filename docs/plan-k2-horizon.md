@@ -375,6 +375,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   12.6 s against 44.3 s cold. A different tokenizer render or a capacity
   rebuild drops the reuse, which is why a request that asks for more
   `max_tokens` does not reuse anything the first time.
+- **Disconnects stop generation** — the decode loop checks task cancellation
+  per token, and a prefill checks it between tokens. A client that goes away
+  therefore stops the GPU work instead of letting the full budget run out: a
+  512-token streaming request aborted after 3 s left no completion in the log
+  and the next request started immediately. A cancellation during prefill also
+  clears the K/V reuse record, because the positions it wrote no longer match
+  the recorded token stream.
 - **Serve smoke gate** — `tools/k2-serve-smoke.sh [install]` starts the release
   server on the single-model path and checks what a client uses: the model
   list, a chat completion, SSE streaming, the Responses API, a tool call and a

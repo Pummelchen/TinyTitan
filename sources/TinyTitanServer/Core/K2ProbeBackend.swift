@@ -169,12 +169,22 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
                         + "(capacity \(graphCapacity))\n").utf8))
         }
         var logits: [Float] = []
-        for position in reused..<promptIDs.count {
-            logits = try await graph.forward(
-                tokenID: UInt32(bitPattern: promptIDs[position]),
-                position: UInt32(position))
+        do {
+            for position in reused..<promptIDs.count {
+                try Task.checkCancellation()
+                logits = try await graph.forward(
+                    tokenID: UInt32(bitPattern: promptIDs[position]),
+                    position: UInt32(position))
+            }
+        } catch {
+            // The K/V for the positions this request just wrote does not match
+            // the recorded token stream, so the next request must not reuse a
+            // prefix. Clearing the record is enough: a full prefill overwrites
+            // every position it reads.
+            cachedTokens = []
+            throw error
         }
-        cachedTokens = Array(promptIDs.prefix(promptIDs.count))
+        cachedTokens = promptIDs
 
         let allowedTools =
             request.tools.isEmpty ? nil : Set(request.tools.map(\.name))
@@ -192,6 +202,10 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             Int(renderTokenizer.eosID), Int(renderTokenizer.endOfTurnID),
         ]
         while produced < budget {
+            // A disconnected client cancels the request task; stop spending
+            // GPU time on tokens nobody will read. The cache stays valid here:
+            // it is appended only after a token's forward completes.
+            try Task.checkCancellation()
             if let constraint = configuration.constraint {
                 let mask = constraint.allowedMask()
                 guard !mask.isEmpty else {
