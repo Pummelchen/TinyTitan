@@ -375,6 +375,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   12.6 s against 44.3 s cold. A different tokenizer render or a capacity
   rebuild drops the reuse, which is why a request that asks for more
   `max_tokens` does not reuse anything the first time.
+- **Serve smoke gate** — `tools/k2-serve-smoke.sh [install]` starts the release
+  server on the single-model path and checks what a client uses: the model
+  list, a chat completion, SSE streaming, the Responses API, a tool call and a
+  stop string. All six pass on the 4-bit install (chat answers "The capital of
+  France is **Paris**."; the tool call comes back as
+  `get_weather({"city":"Paris"})` with empty content; the stop string ends the
+  turn and is stripped). Manual, needs a GPU, never modifies the install.
 - **Still missing** — the runner graph the CLI and release goldens drive,
   prompt caching, batching and ANE. (The catalogue entry landed.)
 
