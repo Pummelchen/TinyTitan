@@ -361,12 +361,20 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   as separate tokens and gets reasoning "Need the city.\n" plus content
   "Paris". A quoted tag inside a thought would close it early, which is the
   accepted trade for the sampled case.
-  A per-request graph costs 0.02 s to build (`maxSequence` = prompt + budget,
-  reported under `TINYTITAN_K2_TIMING`), so it is not worth caching one. Warm
-  served throughput matches the bench: a 32-token reply took 15.2 s on the
-  first request and 8.36 s on the second (0.30 -> 0.164 s/forward, ~6.1
+  Warm served throughput matches the bench: a 32-token reply took 15.2 s on
+  the first request and 8.36 s on the second (0.30 -> 0.164 s/forward, ~6.1
   tok/s), against the bench's warm 0.181 s/forward. The earlier 17.7 s reading
   was a lazy model load plus a cold expert cache, not server overhead.
+- **Cross-request K/V reuse** — the backend keeps its graph (initial capacity
+  2,048 positions, ~0.4 GB; rebuilt only when a request needs more) and
+  continues from the longest token prefix it already holds. The layers read
+  their caches by position, so identical tokens at identical positions have
+  identical K/V. Measured: an identical 173-token prompt took 42.2 s cold and
+  4.97 s on the next request (reused 172/173, completion byte-identical); a
+  multi-turn follow-up reuses the shared user turn (174/211 tokens) and took
+  12.6 s against 44.3 s cold. A different tokenizer render or a capacity
+  rebuild drops the reuse, which is why a request that asks for more
+  `max_tokens` does not reuse anything the first time.
 - **Still missing** — the runner graph the CLI and release goldens drive,
   prompt caching, batching and ANE. (The catalogue entry landed.)
 

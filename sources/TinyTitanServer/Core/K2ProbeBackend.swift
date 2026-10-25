@@ -28,6 +28,10 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
     /// The context this path will serve, however long the checkpoint says it
     /// can. See the memory note above.
     public static let contextCeiling = 8_192
+    /// The graph's initial sequence capacity. K/V costs ~0.2 MB per position
+    /// across the 48 layers, so this reserves ~0.4 GB and covers a normal
+    /// multi-turn conversation without a rebuild.
+    static let minimumGraphCapacity = 2_048
 
     private let model: Model
     private let context: MetalContext
@@ -38,6 +42,17 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
     private let defaults: GenerationDefaults.Sampling
     private let slotCount: Int
     private var jsonTokenTable: JSONTokenTable?
+    /// The graph and the tokens whose K/V it currently holds. A request whose
+    /// prompt shares a prefix with the last one continues from that prefix
+    /// instead of re-forwarding it: the layers read the cache by position, so
+    /// identical tokens at identical positions have identical K/V.
+    ///
+    /// `nonisolated(unsafe)` because the graph is a non-Sendable class the
+    /// generation loop awaits; every access is inside this actor's `generate`,
+    /// which the actor serializes, so there is no second task to race.
+    nonisolated(unsafe) private var graph: K2GraphProbe?
+    private var graphCapacity = 0
+    private var cachedTokens: [Int32] = []
 
     public nonisolated var maximumContext: Int { contextLimit }
     public nonisolated var samplingDefaults: GenerationDefaults.Sampling { defaults }
@@ -125,19 +140,7 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         }
         let budget = min(
             request.maximumCompletionTokens, contextLimit - promptIDs.count)
-        var configuration = request.generationConfig
-        if let node = request.jsonSchema {
-            let table: JSONTokenTable
-            if let existing = jsonTokenTable {
-                table = existing
-            } else {
-                let made = JSONTokenTable(tokenizer: tokenizer)
-                jsonTokenTable = made
-                table = made
-            }
-            configuration.constraint = JSONConstraint(
-                table: table, node: node, vocab: tokenizer.vocabSize)
-        }
+        let configuration = structuredConfiguration(request)
         let sampler = CPUSampler(
             temperature: configuration.temperature,
             topP: configuration.topP ?? 1,
@@ -147,27 +150,31 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             seed: configuration.seed)
         let generator = sampler.makeGenerator()
 
-        // One graph per request, created and driven by this call's task; the
-        // probe has no cross-task state to share. `nonisolated(unsafe)` is the
-        // narrow opt-out for sending it into its own `forward` calls, not a
-        // claim that the graph is safe to use from two tasks at once.
-        let graphStart = Date()
-        nonisolated(unsafe) let graph = try K2GraphProbe(
-            model: model, context: context,
-            maxSequence: promptIDs.count + budget)
-        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+        try ensureGraph(needed: promptIDs.count + budget)
+        guard let graph else {
+            throw K2BackendError.unsupported("the probe graph is not resident")
+        }
+        // At least one token is always forwarded: its logits are what the
+        // sampler reads. Everything before it is K/V the previous request
+        // already computed from the same ids.
+        let reused = min(
+            Self.commonPrefixLength(promptIDs, cachedTokens),
+            max(0, promptIDs.count - 1))
+        if reused > 0,
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1"
+        {
             FileHandle.standardError.write(
                 Data(
-                    ("k2 server: graph built in "
-                        + String(format: "%.2f", Date().timeIntervalSince(graphStart))
-                        + "s (maxSequence \(promptIDs.count + budget))\n").utf8))
+                    ("k2 server: reused \(reused)/\(promptIDs.count) prompt tokens "
+                        + "(capacity \(graphCapacity))\n").utf8))
         }
         var logits: [Float] = []
-        for (position, token) in promptIDs.enumerated() {
+        for position in reused..<promptIDs.count {
             logits = try await graph.forward(
-                tokenID: UInt32(bitPattern: token),
+                tokenID: UInt32(bitPattern: promptIDs[position]),
                 position: UInt32(position))
         }
+        cachedTokens = Array(promptIDs.prefix(promptIDs.count))
 
         let allowedTools =
             request.tools.isEmpty ? nil : Set(request.tools.map(\.name))
@@ -215,20 +222,72 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             logits = try await graph.forward(
                 tokenID: UInt32(bitPattern: Int32(next)),
                 position: UInt32(position))
+            cachedTokens.append(Int32(next))
             position += 1
         }
         output.publish(
             try decoder.consumeTail(detokenizer.flush()), isToken: false)
         try decoder.finish()
         output.finish()
-        return ServerCompletion(
+        return completion(
+            promptTokens: promptIDs.count, produced: produced,
+            reason: reason, output: output)
+    }
+
+    /// The request's generation config with the structured-output constraint,
+    /// over a token table built once per backend.
+    private func structuredConfiguration(
+        _ request: ValidatedChatRequest
+    ) -> GenerationConfig {
+        var configuration = request.generationConfig
+        guard let node = request.jsonSchema else { return configuration }
+        let table: JSONTokenTable
+        if let existing = jsonTokenTable {
+            table = existing
+        } else {
+            let made = JSONTokenTable(tokenizer: tokenizer)
+            jsonTokenTable = made
+            table = made
+        }
+        configuration.constraint = JSONConstraint(
+            table: table, node: node, vocab: tokenizer.vocabSize)
+        return configuration
+    }
+
+    /// The resident graph, grown when a request needs more sequence positions.
+    /// Growth starts from `minimumGraphCapacity` so a normal conversation does
+    /// not rebuild on its second turn; a rebuild drops the K/V cache, which is
+    /// why the capacity is not this request's exact size.
+    private func ensureGraph(needed: Int) throws {
+        let wanted = min(contextLimit, max(needed, Self.minimumGraphCapacity))
+        guard graph == nil || needed > graphCapacity else { return }
+        let graphStart = Date()
+        graph = try K2GraphProbe(
+            model: model, context: context, maxSequence: wanted)
+        graphCapacity = wanted
+        cachedTokens = []
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            FileHandle.standardError.write(
+                Data(
+                    ("k2 server: graph built in "
+                        + String(format: "%.2f", Date().timeIntervalSince(graphStart))
+                        + "s (maxSequence \(wanted))\n").utf8))
+        }
+    }
+
+    /// The completion object, from the accumulated stream.
+    private func completion(
+        promptTokens: Int, produced: Int, reason: String,
+        output: AssistantOutput
+    ) -> ServerCompletion {
+        ServerCompletion(
             content: output.content,
             toolCalls: output.calls,
             finishReason: reason,
             usage: OpenAIUsage(
-                promptTokens: promptIDs.count,
+                promptTokens: promptTokens,
                 completionTokens: produced,
-                totalTokens: promptIDs.count + produced,
+                totalTokens: promptTokens + produced,
                 cachedTokens: 0,
                 reasoningTokens: output.reasoningTokens),
             stopSequence: output.matchedStop,
@@ -236,6 +295,15 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             // K2 is effort-only: a render always opens a thought block, so any
             // reasoning is requested.
             unrequestedReasoning: 0)
+    }
+
+    /// The number of leading token ids the two sequences share.
+    private static func commonPrefixLength(_ lhs: [Int32], _ rhs: [Int32]) -> Int {
+        var count = 0
+        while count < lhs.count, count < rhs.count, lhs[count] == rhs[count] {
+            count += 1
+        }
+        return count
     }
 
     private func resolvedTokenizer(
