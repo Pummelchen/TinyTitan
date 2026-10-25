@@ -168,6 +168,18 @@ import TinyTitanValidationSupport
         valueCB.waitUntilCompleted()
         let actual = Fp16Buffer.read(outBuf, count: Self.hidden)
 
+        // The fused two-dispatch form has to produce the same block.
+        let fusedBuf = try #require(Fp16Buffer.make(ctx.device, count: Self.hidden))
+        let fusedCB = try #require(ctx.queue.makeCommandBuffer())
+        try stage.encodeFusedExperts(
+            commandBuffer: fusedCB, hidden: xBuf,
+            experts: ids.map { expertViews[$0] }, shared: shared, out: fusedBuf)
+        fusedCB.commit()
+        fusedCB.waitUntilCompleted()
+        let fused = Fp16Buffer.read(fusedBuf, count: Self.hidden)
+        let fusedVsStaged = RelError.compute(actual: fused, reference: actual)
+        #expect(fusedVsStaged < Tolerance.fp16Reduction, "relErr=\(fusedVsStaged)")
+
         // Reference router.
         let logits = (0..<Self.experts).map { expert in
             (0..<Self.hidden).reduce(Float(0)) {
@@ -212,5 +224,7 @@ import TinyTitanValidationSupport
         }
         let rel = RelError.compute(actual: actual, reference: expected)
         #expect(rel < Tolerance.fp16Reduction, "relErr=\(rel) ids=\(ids)")
+        let fusedRel = RelError.compute(actual: fused, reference: expected)
+        #expect(fusedRel < Tolerance.fp16Reduction, "fused relErr=\(fusedRel)")
     }
 }

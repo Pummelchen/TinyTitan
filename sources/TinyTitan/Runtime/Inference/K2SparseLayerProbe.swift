@@ -23,6 +23,7 @@ final class K2SparseLayerProbe {
     private let bf16: BF16GEMV
     private let mova: MoVAValueStage
     private let moe: K2MoEStage
+    private let fusedMoE: Bool
     private let vExperts: [MoVAValueStage.ExpertWeights]
 
     private let input: MTLBuffer
@@ -43,6 +44,16 @@ final class K2SparseLayerProbe {
     private(set) var encodeSeconds: Double = 0
     private(set) var gpuSeconds: Double = 0
     private(set) var gpuBusySeconds: Double = 0
+
+    /// Zero the per-token counters. The graph times one forward at a time; the
+    /// probe is long-lived, so without this the timing line prints cumulative
+    /// sums next to a per-token total.
+    func resetTimings() {
+        fetchSeconds = 0
+        encodeSeconds = 0
+        gpuSeconds = 0
+        gpuBusySeconds = 0
+    }
 
     init(
         model: Model, context: MetalContext, layer: Int,
@@ -83,6 +94,9 @@ final class K2SparseLayerProbe {
             context: context, weightBits: routedBits,
             hiddenSize: hidden, expertWidth: config.moeIntermediateSize,
             numExperts: config.numExperts, topK: config.topKExperts)
+        // The fused two-dispatch pass is the default; the per-expert path stays
+        // available for A/B runs (`TINYTITAN_K2_FUSED_MOE=0`).
+        self.fusedMoE = ProcessInfo.processInfo.environment["TINYTITAN_K2_FUSED_MOE"] != "0"
         self.vExperts = try (0..<config.mova.numExperts).map { expert in
             let view = try model.k2VExpert(layer: layer, expert: expert)
             return MoVAValueStage.ExpertWeights(
@@ -162,9 +176,15 @@ final class K2SparseLayerProbe {
         guard let third = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
-        try moe.encodeExperts(
-            commandBuffer: third, hidden: normed2,
-            experts: experts, shared: shared, out: moeOut)
+        if fusedMoE {
+            try moe.encodeFusedExperts(
+                commandBuffer: third, hidden: normed2,
+                experts: experts, shared: shared, out: moeOut)
+        } else {
+            try moe.encodeExperts(
+                commandBuffer: third, hidden: normed2,
+                experts: experts, shared: shared, out: moeOut)
+        }
         try copy(third, from: h1, to: out, count: d)
         try elementwise.encodeResidualAdd(
             commandBuffer: third, hidden: out, delta: moeOut, count: d)

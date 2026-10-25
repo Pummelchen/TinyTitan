@@ -58,6 +58,9 @@ package final class K2GraphProbe {
 
     package func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {
         let started = Date()
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            for layer in sparse.values { layer.resetTimings() }
+        }
         var hidden = try await embed(tokenID: tokenID)
         for layer in 0..<config.numLayers {
             if let dense = dense[layer] {

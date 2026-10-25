@@ -60,6 +60,17 @@ final class K2MoEStage {
     private let selection: K2RouterSelection
     private let elementwise: Elementwise
     private let combinePSO: MTLComputePipelineState
+    /// The shape-specific fused pass: one dispatch for every selected expert's
+    /// gate/up/SiLU and one for their down projections, reading the experts
+    /// through argument buffers. The per-expert form above stays as the
+    /// reference path and the fallback.
+    private let fusedGateUpPSO: MTLComputePipelineState
+    private let fusedDownPSO: MTLComputePipelineState
+    private let fusedArgEncoder: MTLArgumentEncoder
+    private let gateArgs: MTLBuffer
+    private let upArgs: MTLBuffer
+    private let downArgs: MTLBuffer
+    private let fusedActs: MTLBuffer
     private let logits: MTLBuffer
     private let indices: MTLBuffer
     private let weights: MTLBuffer
@@ -91,6 +102,22 @@ final class K2MoEStage {
         self.selection = try K2RouterSelection(context: context)
         self.elementwise = try Elementwise(context: context)
         self.combinePSO = try context.pipeline("k2_moe_accumulate_fp16")
+        // 4-bit is the kernel's default; only 8-bit needs the constant.
+        let fusedConstants: [MetalFunctionConstant] =
+            weightBits == 4
+            ? []
+            : [MetalFunctionConstant(index: 120, value: .uint32(UInt32(weightBits)))]
+        self.fusedGateUpPSO = try context.pipeline(
+            "k2_moe_gate_up_act", constants: fusedConstants)
+        self.fusedDownPSO = try context.pipeline(
+            "k2_moe_down", constants: fusedConstants)
+        guard
+            let fusedFunction = context.library.makeFunction(
+                name: "k2_moe_gate_up_act")
+        else {
+            throw MetalError.missingFunction("k2_moe_gate_up_act")
+        }
+        self.fusedArgEncoder = fusedFunction.makeArgumentEncoder(bufferIndex: 0)
 
         func buffer(_ count: Int, _ label: String) throws -> MTLBuffer {
             guard
@@ -123,6 +150,11 @@ final class K2MoEStage {
         self.sharedGate = try buffer(expertWidth, "k2.moe.sharedGate")
         self.sharedUp = try buffer(expertWidth, "k2.moe.sharedUp")
         self.sharedAct = try buffer(expertWidth, "k2.moe.sharedAct")
+        self.fusedActs = try buffer(topK * expertWidth, "k2.moe.fusedActs")
+        let argumentLength = fusedArgEncoder.encodedLength
+        self.gateArgs = try rawBuffer(argumentLength, "k2.moe.gateArgs")
+        self.upArgs = try rawBuffer(argumentLength, "k2.moe.upArgs")
+        self.downArgs = try rawBuffer(argumentLength, "k2.moe.downArgs")
     }
 
     /// The router GEMV (float logits) and selection. `hidden` is the post-norm
@@ -210,6 +242,110 @@ final class K2MoEStage {
             MTLSize(width: hiddenSize, height: 1, depth: 1),
             threadsPerThreadgroup: MTLSize(width: width, height: 1, depth: 1))
         encoder.endEncoding()
+    }
+
+    /// The same block as `encodeExperts`, dispatched as two shape-specific
+    /// passes: every selected expert's gate/up/SiLU in one dispatch and every
+    /// down projection plus the router-weighted sum in another. The experts are
+    /// bound through argument buffers, so the whole top-k set costs two
+    /// encoders instead of four per expert.
+    ///
+    /// `out` receives the shared expert first; the down pass then adds the
+    /// routed sum to `out` in place. The caller adds the layer residual as
+    /// before.
+    func encodeFusedExperts(
+        commandBuffer: MTLCommandBuffer,
+        hidden: MTLBuffer, hiddenOffset: Int = 0,
+        experts: [ExpertWeights],
+        shared: ExpertWeights?,
+        out: MTLBuffer, outOffset: Int = 0
+    ) throws {
+        if let shared {
+            try encodeSwiGLU(
+                commandBuffer: commandBuffer,
+                weights: shared,
+                x: hidden, xOffset: hiddenOffset,
+                gate: sharedGate, up: sharedUp, act: sharedAct,
+                y: out, yOffset: outOffset,
+                rows: hiddenSize, width: expertWidth)
+        }
+        guard experts.count == topK else {
+            throw ModelError.internalInconsistency(
+                detail: "K2 MoE selected \(topK) experts, but \(experts.count) are bound")
+        }
+        encodeArguments(experts)
+
+        guard let gateUp = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        gateUp.setComputePipelineState(fusedGateUpPSO)
+        gateUp.setBuffer(gateArgs, offset: 0, index: 0)
+        gateUp.setBuffer(upArgs, offset: 0, index: 1)
+        gateUp.setBuffer(hidden, offset: hiddenOffset, index: 2)
+        gateUp.setBuffer(fusedActs, offset: 0, index: 3)
+        var d = UInt32(hiddenSize)
+        var f = UInt32(expertWidth)
+        var k = UInt32(topK)
+        gateUp.setBytes(&d, length: MemoryLayout<UInt32>.stride, index: 4)
+        gateUp.setBytes(&f, length: MemoryLayout<UInt32>.stride, index: 5)
+        gateUp.setBytes(&k, length: MemoryLayout<UInt32>.stride, index: 6)
+        for expert in experts {
+            gateUp.useResource(expert.gate.buffer, usage: .read)
+            gateUp.useResource(expert.up.buffer, usage: .read)
+        }
+        gateUp.dispatchThreadgroups(
+            MTLSize(width: (topK * expertWidth + 7) / 8, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        gateUp.endEncoding()
+
+        guard let down = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        down.setComputePipelineState(fusedDownPSO)
+        down.setBuffer(downArgs, offset: 0, index: 0)
+        down.setBuffer(fusedActs, offset: 0, index: 1)
+        down.setBuffer(weights, offset: 0, index: 2)
+        down.setBuffer(out, offset: outOffset, index: 3)
+        down.setBuffer(out, offset: outOffset, index: 4)
+        down.setBytes(&d, length: MemoryLayout<UInt32>.stride, index: 5)
+        down.setBytes(&f, length: MemoryLayout<UInt32>.stride, index: 6)
+        down.setBytes(&k, length: MemoryLayout<UInt32>.stride, index: 7)
+        for expert in experts {
+            down.useResource(expert.down.buffer, usage: .read)
+        }
+        down.dispatchThreadgroups(
+            MTLSize(width: (hiddenSize + 7) / 8, height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+        down.endEncoding()
+    }
+
+    /// `K2ExpertBuffers`'s pointer-array extent in moe.metal. The encoder's
+    /// argument indices are laid out as weights, then scales, then biases, each
+    /// `maxStreamedExperts` wide; this must stay in step with the shader.
+    private static let maxStreamedExperts = 16
+
+    /// Point the three argument buffers at the selected experts.
+    private func encodeArguments(_ experts: [ExpertWeights]) {
+        let roles: [(MTLBuffer, KeyPath<ExpertWeights, TensorView>)] = [
+            (gateArgs, \ExpertWeights.gate),
+            (upArgs, \ExpertWeights.up),
+            (downArgs, \ExpertWeights.down),
+        ]
+        for (args, role) in roles {
+            fusedArgEncoder.setArgumentBuffer(args, offset: 0)
+            for (slot, expert) in experts.enumerated() {
+                let view = expert[keyPath: role]
+                let plane = Self.maxStreamedExperts
+                fusedArgEncoder.setBuffer(
+                    view.buffer, offset: Int(view.offset), index: slot)
+                fusedArgEncoder.setBuffer(
+                    view.buffer, offset: Int(view.scaleOffset),
+                    index: plane + slot)
+                fusedArgEncoder.setBuffer(
+                    view.buffer, offset: Int(view.biasOffset),
+                    index: 2 * plane + slot)
+            }
+        }
     }
 
     private func encodeSwiGLU(

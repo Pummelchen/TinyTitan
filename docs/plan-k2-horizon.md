@@ -131,6 +131,20 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   measured **slower** (1.4 vs 2.6 tok/s): they are tuned for 512-wide experts,
   and K2's 768×2560 shape stages too little work per threadgroup. A fused
   kernel has to be written for this shape, not borrowed.
+- **K2-shaped fused routed experts** — `k2_moe_gate_up_act` and `k2_moe_down`
+  keep one simdgroup per output row and read the selected experts through
+  three argument buffers, so a whole top-8 set costs two dispatches per layer
+  instead of four per expert (32). The pass is now the sparse layer's default;
+  `TINYTITAN_K2_FUSED_MOE=0` restores the per-expert form for A/B runs. On the
+  real installs (greedy, 8 decode tokens on 4-bit and 4 on 8-bit, same prompt
+  and tokens): 4-bit 2.82 s → 2.53 s (2.83 → 3.16 tok/s), 8-bit 2.36 s →
+  2.21 s (1.70 → 1.81 tok/s); a later warm run measured 3.38 tok/s on 4-bit.
+  The timing line is now per forward (the counters were cumulative next to a
+  per-token total), which shows where the remaining time is: fetch 0.05-0.17 s,
+  GPU 0.14-0.23 s (busy 0.10-0.19 s), encode 0.005 s, other 0.02 s. Decode is
+  GPU-bound at 64 slots now, not fetch-bound, so the next levers are one
+  command buffer per token instead of three per sparse layer, and overlap of
+  the next layer's expert fetch with the current layer's GPU work.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
