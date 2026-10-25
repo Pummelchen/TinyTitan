@@ -114,12 +114,18 @@ def fetch_header(shard: str, timeout: int = 300) -> tuple[dict, int]:
 
 
 def download_piece(url: str, start: int, end: int, destination: Path) -> None:
-    """Fetch [start, end] into `destination`, continuing after short reads."""
+    """Fetch the half-open range [start, end) into `destination`.
+
+    `end` is exclusive, matching a safetensors header's `data_offsets[1]`.
+    Treating it as inclusive asks for one byte past EOF on the last range of
+    every shard; HF answers 416 and the whole resident phase fails on the last
+    byte.
+    """
     with open(destination, "wb") as out:
         position = start
-        while position <= end:
-            stop = min(position + CHUNK - 1, end)
-            expected = stop - position + 1
+        while position < end:
+            stop = min(position + CHUNK, end)
+            expected = stop - position
             part = destination.with_name(destination.name + ".part")
             attempt = 0
             while True:
@@ -133,7 +139,7 @@ def download_piece(url: str, start: int, end: int, destination: Path) -> None:
                         "--max-time",
                         "1800",
                         "-r",
-                        f"{position}-{stop}",
+                        f"{position}-{stop - 1}",
                         "-o",
                         str(part),
                         url,
@@ -146,17 +152,17 @@ def download_piece(url: str, start: int, end: int, destination: Path) -> None:
                 attempt += 1
                 if attempt >= 8:
                     raise SystemExit(
-                        f"download failed for {url} [{position}-{stop}] "
+                        f"download failed for {url} [{position}-{stop - 1}] "
                         f"(curl {result.returncode}, {got}/{expected} bytes)"
                     )
                 if got:
                     # Keep what arrived and continue from there.
                     out.write(part.read_bytes())
                     position += got
-                    if position > end:
+                    if position >= end:
                         break
-                    stop = min(position + CHUNK - 1, end)
-                    expected = stop - position + 1
+                    stop = min(position + CHUNK, end)
+                    expected = stop - position
                     log(f"    short read, continuing at {position}")
                 time.sleep(min(2**attempt, 30))
             if part.exists():
@@ -166,18 +172,23 @@ def download_piece(url: str, start: int, end: int, destination: Path) -> None:
 
 
 def download_range(remote: str, start: int, end: int, destination: Path) -> None:
-    """Fetch a long range over several connections, in order.
+    """Fetch a half-open range over several connections, in order.
 
     One connection gets a small share of a link several sessions are using:
-    measured on this host, four parallel range reads of the same shard finish
-    in a fraction of the wall time of one, and the sub-ranges concatenate in
-    order, so nothing about the result changes. Short ranges stay on one
-    connection to keep the request count down.
+    measured on this host, parallel range reads of the same shard finish in a
+    fraction of the wall time, and the sub-ranges concatenate in order, so
+    nothing about the result changes. Short ranges stay on one connection to
+    keep the request count down.
     """
     url = f"{BASE}/{remote}"
-    length = end - start + 1
+    length = end - start
+    if length <= 0:
+        raise SystemExit(f"empty download range [{start}, {end})")
     workers = min(16, max(1, length // (256 * 1024 * 1024)))
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() and destination.stat().st_size == length:
+        log(f"    {destination.name} is complete, skipping")
+        return
     if workers == 1:
         download_piece(url, start, end, destination)
         return
@@ -195,7 +206,7 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
 
     for index in range(workers):
         low = start + index * span
-        high = end if index == workers - 1 else low + span - 1
+        high = end if index == workers - 1 else low + span
         path = destination.with_name(f"{destination.name}.w{index}")
         pieces.append((path, low, high))
         thread = threading.Thread(target=fetch, args=(index, low, high), daemon=True)
@@ -214,7 +225,7 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
                         break
                     out.write(block)
             path.unlink()
-    expected = sum(high - low + 1 for _, low, high in pieces)
+    expected = sum(high - low for _, low, high in pieces)
     if destination.stat().st_size != expected:
         raise SystemExit(
             f"{destination} assembled to {destination.stat().st_size} bytes, expected {expected}"
@@ -681,10 +692,13 @@ def fetch_segments(index: HeaderIndex, names: list[str], prefix: Path) -> list[S
         entry = index.entries[name]
         by_shard.setdefault(entry["shard"], []).append((entry["start"], entry["end"]))
     segments: list[Segment] = []
-    for shard, ranges in sorted(by_shard.items()):
+    # The shard number must be in the name: a layer's experts (and the whole
+    # resident set) span more than one shard, and a per-shard position alone
+    # made the second shard's first segment overwrite the first shard's.
+    for shard_number, (shard, ranges) in enumerate(sorted(by_shard.items())):
         merged = merge_ranges(ranges)
         for position, (start, end) in enumerate(merged):
-            path = prefix.with_name(f"{prefix.name}-{position:03d}.bin")
+            path = prefix.with_name(f"{prefix.name}-{shard_number:02d}-{position:03d}.bin")
             log(f"    {shard} [{start}-{end}] ({(end - start) / 1e9:.2f} GB)")
             download_range(shard, start, end, path)
             segments.append(Segment(shard, path, start, end, 0))
