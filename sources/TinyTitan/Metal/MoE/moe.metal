@@ -1297,3 +1297,70 @@ kernel void moe_phase1_gate_up_act_u16load_v2(
         if (two) acts[slot1 * FF + f1] = half(moe_hidden_activation(g1) * u1);
     }
 }
+
+// K2-Horizon's router selection.
+//
+// This is not the Qwen softmax router. Scores are `sigmoid(logits)`; the bias
+// tensor is added ONLY to the ranking (it must not change the mixture weights);
+// the selected weights are the sigmoid scores renormalized over the top-k, then
+// multiplied by the family's `router_scaling_factor`. K2 uses the same
+// selection for its 100-expert MoE (top-8) and its 64-expert MoVA value router
+// (top-4), so the expert count and k are runtime arguments.
+//
+// The order is the CPU reference's and `router_topk_select_kn`'s: descending
+// selection score, lower expert index on ties. One thread does the scan, which
+// is what the reference does and what a 100-expert router can afford; the
+// dispatch is one 32-thread threadgroup like the Qwen selector.
+kernel void k2_router_topk_select_kn(
+    device const float*  logits      [[buffer(0)]],
+    device const bfloat* bias        [[buffer(1)]],
+    device uint*         out_indices [[buffer(2)]],
+    device half*         out_weights [[buffer(3)]],
+    constant uint&       num_experts [[buffer(4)]],
+    constant uint&       top_k       [[buffer(5)]],
+    constant float&      scaling     [[buffer(6)]],
+    uint tid [[thread_position_in_threadgroup]]
+) {
+    if (tid != 0) return;
+    const uint NE = router_fc_num_experts(num_experts);
+    const uint K = min(top_k, kMaxStreamedExperts);
+    if (K == 0) return;
+    uint top_idx[kMaxStreamedExperts];
+    float top_score[kMaxStreamedExperts];   // sigmoid score: the mixture weight
+    float top_rank[kMaxStreamedExperts];    // score + bias: the selection key
+    for (uint i = 0; i < K; ++i) {
+        top_idx[i] = 0u;
+        top_score[i] = -INFINITY;
+        top_rank[i] = -INFINITY;
+    }
+
+    for (uint e = 0; e < NE; ++e) {
+        const float s = 1.0f / (1.0f + exp(-logits[e]));
+        const float rank = s + float(bias[e]);
+        if (rank < top_rank[K - 1]) continue;
+        uint pos = K;
+        for (uint i = 0; i < K; ++i) {
+            if (rank > top_rank[i] || (rank == top_rank[i] && e < top_idx[i])) {
+                pos = i;
+                break;
+            }
+        }
+        if (pos >= K) continue;
+        for (uint i = K - 1; i > pos; --i) {
+            top_idx[i] = top_idx[i - 1];
+            top_score[i] = top_score[i - 1];
+            top_rank[i] = top_rank[i - 1];
+        }
+        top_idx[pos] = e;
+        top_score[pos] = s;
+        top_rank[pos] = rank;
+    }
+
+    float sum = 0.0f;
+    for (uint i = 0; i < K; ++i) sum += top_score[i];
+    const float norm = sum > 0.0f ? 1.0f / sum : 0.0f;
+    for (uint i = 0; i < K; ++i) {
+        out_indices[i] = top_idx[i];
+        out_weights[i] = half(top_score[i] * norm * scaling);
+    }
+}

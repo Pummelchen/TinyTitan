@@ -369,6 +369,13 @@ import TinyTitanValidationSupport
         try Self.run(groupDim: 2560, groups: 4, seed: 0x11CE)
     }
 
+    /// K2-Horizon's layer norm is two groups of 1280 inside one 2560-wide
+    /// hidden state, the other production user of this kernel.
+    @Test("K2-Horizon's shape: 2 groups of 1280")
+    func k2HorizonShape() throws {
+        try Self.run(groupDim: 1280, groups: 2, seed: 0x66BC)
+    }
+
     @Test("Smaller shapes")
     func smallShapes() throws {
         try Self.run(groupDim: 256, groups: 3, seed: 0x22DE)

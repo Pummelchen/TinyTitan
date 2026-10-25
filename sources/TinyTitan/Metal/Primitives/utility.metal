@@ -56,6 +56,27 @@ void sigmoid_gate_mul_fp16(
     out[tid] = half(float(out[tid]) / (1.0f + exp(-g)));
 }
 
+// out[i] *= softplus(gate[i]; beta = ln 2) — K2-Horizon's full-attention gate.
+//
+// softplus(x; beta) = log(1 + exp(beta*x)) / beta, evaluated in the
+// overflow-safe branch. At beta = ln 2 this is log2(1 + 2^x), which is what
+// the checkpoint's `attention_gate_func: softplus` computes; it is not the
+// sigmoid the Qwen families use, and substituting one for the other yields a
+// bounded, positive, wrong gate rather than a shape error.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void softplus_gate_mul_fp16(
+    device half*       out  [[buffer(0)]],
+    device const half* gate [[buffer(1)]],
+    constant uint&     count [[buffer(2)]],
+    uint               tid  [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    const float beta = 0.6931471805599453f;
+    const float s = beta * float(gate[tid]);
+    const float sp = s > 0.0f ? s + log(1.0f + exp(-s)) : log(1.0f + exp(s));
+    out[tid] = half(float(out[tid]) * (sp / beta));
+}
+
 // y[i] *= sigmoid(gate[0]) — Qwen 3.6 shared-expert scalar gate.
 [[kernel, max_total_threads_per_threadgroup(256)]]
 void sigmoid_scalar_mul_fp16(

@@ -149,6 +149,11 @@ struct K2ManifestTests {
         #expect(config.mova.routerHasBias)
         #expect(config.mova.activation == "silu")
         #expect(config.mova.enabled)
+        // The manifest here omits `routerNormTopK`, as the real 4-bit install
+        // does. K2's config normalizes the selected scores, so the family's
+        // fallback is true; defaulting it to the Qwen `false` would hand the
+        // router unnormalized weights.
+        #expect(config.routerNormTopK)
     }
 
     /// The dense layers have no `packed_experts/layer_0*.bin`; a validator that

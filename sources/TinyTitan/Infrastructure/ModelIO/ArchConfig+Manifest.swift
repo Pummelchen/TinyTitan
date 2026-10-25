@@ -80,10 +80,78 @@ extension ArchConfig {
             // states `sigmoid`. Declared here rather than defaulted from the
             // other one, which is the point the config type makes.
             outputGate: .silu)
-        // K2's shape. Every one of these is a convention the kernels depend on
-        // structurally, so K2 requires them; the dense family reads whatever it
-        // declares and defaults the rest, which keeps its manifests (whose
-        // extension keys predate these) loading unchanged.
+        let shape = try layerShape(manifest: arch, family: family)
+        return ArchConfig(
+            hiddenSize: arch.hiddenSize,
+            intermediateSize: arch.ffnIntermediate,
+            moeIntermediateSize: arch.moeIntermediateSize,
+            numHeads: arch.numHeads,
+            numKVHeads: arch.numKVHeads,
+            numFullKVHeads: arch.numFullKVHeads,
+            headDim: arch.headDim,
+            fullHeadDim: arch.fullHeadDim,
+            vocabSize: arch.vocabSize,
+            slidingWindow: arch.slidingWindow,
+            finalLogitSoftcap: arch.finalLogitSoftcap,
+            ropeTheta: arch.ropeTheta,
+            fullRopeTheta: arch.fullRopeTheta,
+            partialRotaryFactor: arch.partialRotaryFactor,
+            numLayers: arch.numLayers,
+            numExperts: arch.numExperts,
+            topKExperts: arch.topKExperts,
+            tieWordEmbeddings: arch.tieWordEmbeddings,
+            attentionKEqV: arch.attentionKEqV,
+            fullAttentionLayerMask: arch.fullAttentionLayerMask.map { UInt8($0) },
+            hiddenActivation: arch.hiddenActivation,
+            family: family,
+            attnOutputGate: try required(arch.attnOutputGate, "attnOutputGate"),
+            attentionScale: try required(arch.attentionScale, "attentionScale"),
+            embeddingScaledBySqrtHidden: try required(
+                arch.embeddingScaledBySqrtHidden,
+                "embeddingScaledBySqrtHidden"),
+            routerScaled: try required(arch.routerScaled, "routerScaled"),
+            ffnSandwichNorms: try required(arch.ffnSandwichNorms, "ffnSandwichNorms"),
+            sharedExpertGated: try required(arch.sharedExpertGated, "sharedExpertGated"),
+            ropeNeoxSubdim: try required(arch.ropeNeoxSubdim, "ropeNeoxSubdim"),
+            linearAttention: linear,
+            // K2 normalizes the selected sigmoid scores over the top-k
+            // (`norm_topk_prob` is true in its config). See `layerShape`.
+            routerNormTopK: shape.routerNormTopK,
+            quantGroupSize: arch.quantGroupSize ?? 64,
+            normGroups: shape.normGroups,
+            attentionGate: shape.attentionGate,
+            routerHasBias: shape.routerHasBias,
+            routerScaling: shape.routerScaling,
+            denseLayerIndices: shape.denseLayerIndices,
+            mova: shape.mova)
+    }
+
+    /// The family-dependent layer shape a manifest declares (K2's block).
+    ///
+    /// Split out of `from` under the 120-line gate. K2 requires every field by
+    /// name; a family without them reads what it declares and defaults the
+    /// rest, which keeps the dense manifests loading unchanged.
+    private struct ManifestLayerShape {
+        let attentionGate: AttentionGateFunction
+        let normGroups: Int
+        let denseLayerIndices: [Int]
+        let mova: MoVAConfig
+        let routerHasBias: Bool
+        let routerScaling: Double
+        let routerNormTopK: Bool
+    }
+
+    private static func layerShape(
+        manifest arch: ManifestArch,
+        family: ModelFamily
+    ) throws -> ManifestLayerShape {
+        func required<T>(_ value: T?, _ field: String) throws -> T {
+            guard let value else {
+                throw ArchResolutionError.manifestOmitsField(
+                    family: family.rawValue, field: field)
+            }
+            return value
+        }
         let isK2 = family == .k2Horizon
         func extensionValue<T>(
             _ value: T?, _ field: String, default fallback: @autoclosure () -> T
@@ -134,48 +202,20 @@ extension ArchConfig {
                     value: "\(mova.numExperts)/\(mova.topKExperts)")
             }
         }
-        return ArchConfig(
-            hiddenSize: arch.hiddenSize,
-            intermediateSize: arch.ffnIntermediate,
-            moeIntermediateSize: arch.moeIntermediateSize,
-            numHeads: arch.numHeads,
-            numKVHeads: arch.numKVHeads,
-            numFullKVHeads: arch.numFullKVHeads,
-            headDim: arch.headDim,
-            fullHeadDim: arch.fullHeadDim,
-            vocabSize: arch.vocabSize,
-            slidingWindow: arch.slidingWindow,
-            finalLogitSoftcap: arch.finalLogitSoftcap,
-            ropeTheta: arch.ropeTheta,
-            fullRopeTheta: arch.fullRopeTheta,
-            partialRotaryFactor: arch.partialRotaryFactor,
-            numLayers: arch.numLayers,
-            numExperts: arch.numExperts,
-            topKExperts: arch.topKExperts,
-            tieWordEmbeddings: arch.tieWordEmbeddings,
-            attentionKEqV: arch.attentionKEqV,
-            fullAttentionLayerMask: arch.fullAttentionLayerMask.map { UInt8($0) },
-            hiddenActivation: arch.hiddenActivation,
-            family: family,
-            attnOutputGate: try required(arch.attnOutputGate, "attnOutputGate"),
-            attentionScale: try required(arch.attentionScale, "attentionScale"),
-            embeddingScaledBySqrtHidden: try required(
-                arch.embeddingScaledBySqrtHidden,
-                "embeddingScaledBySqrtHidden"),
-            routerScaled: try required(arch.routerScaled, "routerScaled"),
-            ffnSandwichNorms: try required(arch.ffnSandwichNorms, "ffnSandwichNorms"),
-            sharedExpertGated: try required(arch.sharedExpertGated, "sharedExpertGated"),
-            ropeNeoxSubdim: try required(arch.ropeNeoxSubdim, "ropeNeoxSubdim"),
-            linearAttention: linear,
-            routerNormTopK: arch.routerNormTopK ?? false,
-            quantGroupSize: arch.quantGroupSize ?? 64,
-            normGroups: normGroups,
+        return ManifestLayerShape(
             attentionGate: attentionGate,
+            normGroups: normGroups,
+            denseLayerIndices: denseLayerIndices,
+            mova: mova,
             routerHasBias: try extensionValue(
                 arch.routerHasBias, "routerHasBias", default: false),
             routerScaling: try extensionValue(
                 arch.routerScaling, "routerScaling", default: 1),
-            denseLayerIndices: denseLayerIndices,
-            mova: mova)
+            // K2 normalizes the selected sigmoid scores over the top-k
+            // (`norm_topk_prob` is true in its config). The field was not
+            // written into older K2 manifests, and defaulting it to false would
+            // hand the router unnormalized scores -- a fluent, wrong mixture
+            // rather than an error. An explicit declaration still wins.
+            routerNormTopK: arch.routerNormTopK ?? isK2)
     }
 }

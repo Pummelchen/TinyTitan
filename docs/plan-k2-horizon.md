@@ -68,14 +68,24 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   standalone verification; `Model.load` then refuses by name at
   `validateRuntimeSchema` and the catalogue skips the directory with that
   reason, because the graph below does not exist.
+- **GPU primitives** — the grouped two-way RMS norm is the existing
+  `rmsnorm_bf16w_grouped` kernel with `headDim 1280, groupsPerRow 2`; no new
+  norm work was needed. Two kernels are new and tested in isolation:
+  `softplus_gate_mul_fp16` (K2's `softplus(x; beta = ln 2)` attention gate,
+  with the overflow-safe branch) and `k2_router_topk_select_kn` (sigmoid
+  scores, bias applied only to the ranking, top-k renormalization, `2.5`
+  scaling; the same kernel serves the 100-expert MoE at top-8 and the 64-expert
+  MoVA router at top-4). `K2RouterSelection` and
+  `Elementwise.encodeSoftplusGateMul` are the Swift entry points. The router's
+  `routerNormTopK` now defaults to true for K2 (older manifests, including both
+  installed ones, omit the key) and the repacker writes it for new installs.
 - **Surfaces not wired** — the 52 KB template renders through the generic
   tokenizer (`TINYTITAN_K2_CHAT=1`), but the `k2_horizon` reason/tool parsers,
   the catalogue entry and a golden baseline are not implemented.
 
-Next: the GPU family graph and kernels (grouped two-way RMS norm, softplus
-attention gate, router selection bias and scaling, and the MoVA value experts
-in prefill and decode with the existing expert-streaming discipline), then the
-ANE prefill sidecar and the template/parsers.
+Next: the GPU family graph that calls those primitives, then the MoVA value
+experts (top-4 of 64, SiLU before weighting, with the MoE streaming discipline)
+in prefill and decode, the ANE prefill sidecar and the template/parsers.
 
 ## The conversion plan, measured
 

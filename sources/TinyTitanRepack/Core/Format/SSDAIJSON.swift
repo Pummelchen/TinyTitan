@@ -158,6 +158,11 @@ enum SSDAIJSON {
             archDict["movaRouterHasBias"] = arch.movaRouterHasBias
             archDict["movaActivation"] = arch.movaActivation
             archDict["denseLayerIndices"] = arch.denseLayerIndices
+            // Not part of the K2 block until now, and the reader's fallback is
+            // false for every other family: a K2 install would have normalized
+            // nothing. It belongs here because K2's config states
+            // `norm_topk_prob: true`; write it so the manifest says it too.
+            archDict["routerNormTopK"] = arch.routerNormTopK
         }
         return archDict
     }

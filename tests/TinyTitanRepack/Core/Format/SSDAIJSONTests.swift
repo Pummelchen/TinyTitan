@@ -224,6 +224,46 @@ struct SSDAIJSONTests {
         }
     }
 
+    /// K2's config as `ArchInfo.loadK2Horizon` reads it.
+    private static func k2Arch() throws -> ArchInfo {
+        let text: [String: Any] = [
+            "hidden_size": 2_560, "intermediate_size": 6_144,
+            "moe_intermediate_size": 768, "num_hidden_layers": 48,
+            "num_attention_heads": 32, "num_key_value_heads": 8,
+            "head_dim": 128, "rope_head_dim": 128, "vocab_size": 250_624,
+            "num_experts": 100, "num_experts_per_tok": 8,
+            "mova_num_experts": 64, "mova_num_experts_per_tok": 4,
+            "layernorm_num_groups": 2, "attention_gate_func": "softplus",
+            "router_scaling_factor": 2.5, "moe_gate_bias": true,
+            "norm_topk_prob": true, "mlp_only_layers": [0, 1, 2],
+            "tie_word_embeddings": false, "hidden_act": "silu",
+            "rope_parameters": ["rope_theta": 10_000_000.0],
+        ]
+        let root: [String: Any] = [
+            "model_type": "k2_horizon", "text_config": text,
+        ]
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ssdaijson-k2-\(UUID().uuidString).json")
+        try JSONSerialization.data(withJSONObject: root).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        return try ArchInfo.load(configPath: url.path)
+    }
+
+    /// The K2 router normalizes its selected sigmoid scores. The writer used to
+    /// emit every K2 field except this one, and a reader that defaults it to
+    /// false (the Qwen value) would take the unnormalized scores as the
+    /// mixture weights.
+    @Test("A K2 manifest writes the router normalization and the gate function")
+    func k2ManifestCarriesItsLayerShape() throws {
+        let manifest = try Self.manifest(Self.plan(arch: Self.k2Arch()))
+        let arch = try Self.archDict(manifest)
+        #expect(arch["routerNormTopK"] as? Bool == true)
+        #expect(arch["attentionGate"] as? String == "softplus")
+        #expect(arch["normGroups"] as? Int == 2)
+        #expect(arch["denseLayerIndices"] as? [Int] == [0, 1, 2])
+        #expect(arch["movaNumExperts"] as? Int == 64)
+    }
+
     /// A quantized resident entry with no payload behind it: `quantObject`
     /// reads the name and the width, and nothing else.
     private static func entry(name: String, bits: Int) -> ResidentEntry {
