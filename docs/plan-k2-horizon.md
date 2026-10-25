@@ -79,6 +79,11 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   allowance (both mixed-install gaps it closed were found by loading the real
   installs). Both builds load under full SHA-256 and stop at the runner's graph
   refusal, which is the current end state.
+- **Synthetic install** — `K2ToySynthetic` builds a three-dense-layer K2
+  `.ssdai` (toy geometry, real manifest/layout/index machinery) so the loader
+  path is covered in CI: `K2ToyInstallTests` resolves the architecture, runs
+  the resident schema, maps the weights, and checks that the runner refuses
+  the family. It is the fixture the future graph tests will reuse.
 - **GPU primitives** — the grouped two-way RMS norm is the existing
   `rmsnorm_bf16w_grouped` kernel with `headDim 1280, groupsPerRow 2`; no new
   norm work was needed. Two kernels are new and tested in isolation:
