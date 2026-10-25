@@ -83,6 +83,20 @@ extension ModelRouter {
         let metal = SharedMetalContext()
         return { entry, reasoning in
             switch entry.kind {
+            case .gpu(.k2Horizon):
+                // K2 has a graph, but not the runner's: the probe is the
+                // engine, so the catalog path takes the same backend the
+                // single-model path does. No prompt cache, per-request graph.
+                let slots = Int(
+                    ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? ""
+                )
+                .flatMap { $0 > 0 ? $0 : nil }
+                return try await K2ProbeBackend(
+                    modelDirectory: entry.path,
+                    maximumContext: arguments.maxContext,
+                    thinking: reasoning.thinking,
+                    reasoningEffort: reasoning.effort,
+                    slots: slots)
             case .gpu:
                 // One plan factory for both front ends: a loader-built plan
                 // that drops a field is how `slots` silently stayed at one on

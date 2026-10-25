@@ -125,10 +125,15 @@ do {
             // residency line and a test all read the same
             // answer, and the CPU arm is testable without
             // a catalog on disk.
-            promptCacheMode: ServerModelSession.initialPromptCacheMode(
-                backend: initial.backend,
-                requested: arguments.promptCacheMode,
-                maxConcurrentSequences: concurrency))
+            // The probe backend keeps no prompt cache, so an entry the
+            // catalogue lists for it reports `.off` rather than the mode the
+            // server was asked for.
+            promptCacheMode: initial.kind == .gpu(.k2Horizon)
+                ? .off
+                : ServerModelSession.initialPromptCacheMode(
+                    backend: initial.backend,
+                    requested: arguments.promptCacheMode,
+                    maxConcurrentSequences: concurrency))
         reasoningProfile = routing.servedModel(named: initial.id)?.reasoningProfile
     } else if arguments.cpu {
         // A different engine entirely: no Metal context, no expert

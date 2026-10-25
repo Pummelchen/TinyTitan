@@ -1,7 +1,7 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
-Status: **the graph runs and the server serves it; the runner and the CLI do
-not.** Both installs load and validate, `K2GraphProbe` executes the real 36B on
+Status: **the graph runs and the server serves it, from a catalogue entry
+too; the runner and the CLI do not.** Both installs load and validate, `K2GraphProbe` executes the real 36B on
 Metal (dense layers plus the sparse MoVA layers, streamed routed experts,
 GPU-resolved MoVA selection), `TinyTitanBench k2gpu` decodes at ~4 tok/s cold
 and 10-13 tok/s steady state on this host, and `TinyTitanServer --model
@@ -339,10 +339,14 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   gate lists the two installs in `NON_GOLDEN_INSTALLS` with that reason; the
   bench check is the manual gate until the runner lands.
 - **Server path** — `K2ProbeBackend` is the probe behind
-  `ServerInferenceBackend`, the way `CPUModelBackend` is the CPU engine:
-  `TinyTitanServer --model models/k2-horizon-4bit.ssdai --reasoning high`
-  serves the OpenAI and Responses surfaces with no prompt cache, no batching and
-  plain FP16 KV caches. Each request builds its own graph, sampling uses the
+  `ServerInferenceBackend`, the way `CPUModelBackend` is the CPU engine. Both
+  server shapes serve it: `TinyTitanServer --model
+  models/k2-horizon-4bit.ssdai --reasoning high`, and the catalogue path
+  `--models-dir models --model k2-horizon_4-Bit`, where the scan lists
+  `k2-horizon_{4,8}-Bit` (family `k2_horizon`, thinking low/medium/high, the
+  card's sampling row, context capped at the probe's 8,192) and `ModelRouter`
+  picks the probe backend by family. No prompt cache, no batching, plain FP16
+  KV caches. Each request builds its own graph, sampling uses the
   card row (1.0 / top-p 0.95 / top-k 20 via `GenerationDefaults`), tools render
   through the installed template and the decoder parses calls, `json_schema`
   constraints apply, and context is capped at 8,192 tokens because the KV
@@ -352,9 +356,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   160-token reply 38.1 s (4.2 tok/s). One sampled reply (temperature 1.0) wrote
   its closing think tag as ordinary text and the decoder left it in reasoning;
   five later samples behaved, so text-spelled markers remain a known edge.
-- **Still missing** — a catalogue entry (the single-model `--model` path works,
-  but `--models-directory` still skips the family), the runner graph the CLI
-  drives, prompt caching, batching and ANE.
+  The catalogue path is slower per forward than the bench in the same process
+  shape (a 12-token reply took 17.7 s, per-forward 0.27-0.70 s against ~0.2 s in
+  `k2gpu`); the gap is server-side scheduling, not the kernels, and is the first
+  thing to profile before trusting serving throughput numbers.
+- **Still missing** — the runner graph the CLI and release goldens drive,
+  prompt caching, batching and ANE. (The catalogue entry landed.)
 
 Next: the runner graph (persistent GPU state, GPU-side router dispatch,
 prefetch overlap), batched prefill, and the ANE prefill sidecar.
