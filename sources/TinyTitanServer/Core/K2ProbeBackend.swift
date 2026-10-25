@@ -48,14 +48,11 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
 
     public enum K2BackendError: Error, CustomStringConvertible {
         case unsupported(String)
-        case promptTooLong(Int, Int)
         case emptyPrompt
 
         public var description: String {
             switch self {
             case .unsupported(let detail): detail
-            case .promptTooLong(let count, let limit):
-                "prompt is \(count) tokens and the context is \(limit)"
             case .emptyPrompt: "the prompt tokenized to nothing"
             }
         }
@@ -123,8 +120,14 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         let promptIDs = try encodePrompt(
             renderTokenizer, messages: request.messages, tools: request.tools)
         guard !promptIDs.isEmpty else { throw K2BackendError.emptyPrompt }
+        // A prompt past the probe's context is the client's error, not the
+        // server's: report it the way the other families do (400,
+        // context_length_exceeded) instead of failing the request with a 500.
         guard promptIDs.count < contextLimit else {
-            throw K2BackendError.promptTooLong(promptIDs.count, contextLimit)
+            throw ServerRequestError.invalid(
+                message:
+                    "prompt is \(promptIDs.count) tokens and the model's context is \(contextLimit)",
+                param: "messages", code: "context_length_exceeded")
         }
         let budget = min(
             request.maximumCompletionTokens, contextLimit - promptIDs.count)

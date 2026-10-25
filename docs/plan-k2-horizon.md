@@ -412,11 +412,13 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   and passing the render tokenizer per call fixed it.
 - **Serve smoke gate** — `tools/k2-serve-smoke.sh [install]` starts the release
   server on the single-model path and checks what a client uses: the model
-  list, a chat completion, SSE streaming, the Responses API, a tool call and a
-  stop string. All six pass on the 4-bit install (chat answers "The capital of
+  list, a chat completion, SSE streaming, the Responses API, a tool call, a
+  stop string and the context bound. All six pass on the 4-bit install (chat answers "The capital of
   France is **Paris**."; the tool call comes back as
   `get_weather({"city":"Paris"})` with empty content; the stop string ends the
-  turn and is stripped). Manual, needs a GPU, never modifies the install.
+  turn and is stripped; a 9,011-token prompt comes back as HTTP 400
+  `context_length_exceeded` naming both counts). Manual, needs a GPU, never
+  modifies the install.
 - **Still missing** — the runner graph itself (batched prefill, ANE, the
   runner's cache management). The CLI, the server and the bench all run the
   probe runtime today; the catalogue entry and the release golden landed.

@@ -165,6 +165,25 @@ else
   fail "stop string (status $status)" "$(cat "$LOG.stop" 2>/dev/null)"
 fi
 
+echo "== context bound"
+python3 - "$MODEL" > "$LOG.long.body" <<'PY'
+import json, sys
+print(json.dumps({
+    "model": sys.argv[1],
+    "messages": [{"role": "user", "content": "word " * 9000}],
+    "max_tokens": 8,
+}))
+PY
+status="$(curl -s --max-time 120 -o "$LOG.long" -w '%{http_code}' \
+  -H 'Content-Type: application/json' "$BASE/v1/chat/completions" \
+  --data-binary @"$LOG.long.body")"
+if [ "$status" = "400" ] \
+  && grep -q 'context_length_exceeded' "$LOG.long"; then
+  pass "overlong prompt is a 400 context_length_exceeded"
+else
+  fail "overlong prompt (status $status)" "$(cat "$LOG.long" 2>/dev/null)"
+fi
+
 if [ "$failures" -ne 0 ]; then
   echo "$failures check(s) failed"
   exit "$failures"
