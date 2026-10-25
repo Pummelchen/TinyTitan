@@ -24,7 +24,7 @@ extension RealForwardRunner {
         // yet. Refusing here, before any scratch is sized for a Qwen-shaped
         // pipeline set, keeps a K2 payload from being run through kernels that
         // would read its gate projection as a packed q/gate.
-        guard cfg.family != .k2Horizon else {
+        guard cfg.family != .k2Horizon && cfg.family != .laguna else {
             throw ModelError.unsupportedArchitecture(
                 detail: "K2-Horizon's GPU graph is not implemented yet; the "
                     + "install loads and validates, serving it does not. "

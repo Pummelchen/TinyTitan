@@ -53,7 +53,11 @@ final class Attention {
     /// Project ceilings for the split-KV partial scratch. `kAttnMaxHeadDim` in
     /// attention.metal is 512; the model has 16 Q heads; `maxChunks` bounds the
     /// split factor (and therefore the scratch size: 16·64·512 FP32 ≈ 2 MB).
-    static let maxQHeads = 32
+    // 96: Laguna-S-2.1's sliding-window layers run 72 query heads against 8
+    // KV heads, above the 32 the Qwen families needed. The scratch is
+    // maxQHeads x maxChunks floats plus maxQHeads x maxChunks x maxHeadDim
+    // for the output partials (~12 MB), allocated once per Attention.
+    static let maxQHeads = 96
     static let maxHeadDim = 512
     static let maxChunks = 64
     /// Full attention uses 16 base chunks by default.

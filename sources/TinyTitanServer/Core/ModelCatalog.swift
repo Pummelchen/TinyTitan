@@ -247,6 +247,14 @@ public struct ModelCatalog: Sendable {
                 ))
         case .qwen36, .qwen38flash, .qwen35Dense:
             break
+        case .laguna:
+            return .failure(
+                ProbeFailure(
+                    reason:
+                        "Laguna-S-2.1 (\(identity.family.rawValue)) is not served yet: "
+                        + "its decode probe exists, the server graph does not "
+                        + "(docs/plan-laguna-s-2.1.md)"
+                ))
         case .k2Horizon:
             // The install is real and its identity is honest, but the GPU graph
             // for this family does not exist yet. Listing it would offer a model

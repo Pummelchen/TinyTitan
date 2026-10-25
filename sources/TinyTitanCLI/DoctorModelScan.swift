@@ -98,6 +98,10 @@ enum DoctorModelScanner {
         case .k2Horizon:
             return "K2-Horizon's GPU graph is not implemented yet; the install "
                 + "validates but cannot be served (docs/plan-k2-horizon.md)"
+        case .laguna:
+            return "Laguna-S-2.1's decode probe is implemented; the serving "
+                + "graph is not, so the install validates but is not served "
+                + "(docs/plan-laguna-s-2.1.md)"
         case .qwen36, .qwen38flash, .qwen35Dense:
             return nil
         }

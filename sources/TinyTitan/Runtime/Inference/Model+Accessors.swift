@@ -86,6 +86,36 @@ extension Model {
     public func k2VExpert(layer L: Int, expert: Int) throws -> TensorView {
         try resident(name: K2HorizonTensors.vExpert(L, expert))
     }
+
+    // MARK: Laguna-S-2.1 roles
+
+    /// One softplus gate per query head (`hidden -> heads`), applied to that
+    /// head's 128 attention channels before o_proj.
+    public func lagunaAttentionGate(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.attnGate(L))
+    }
+    /// The aux-loss-free router selection bias, bf16, one per expert.
+    public func lagunaRouterBias(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.moeRouterBias(L))
+    }
+    public func lagunaDenseGate(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.denseGate(L))
+    }
+    public func lagunaDenseUp(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.denseUp(L))
+    }
+    public func lagunaDenseDown(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.denseDown(L))
+    }
+    public func lagunaSharedGate(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.sharedGate(L))
+    }
+    public func lagunaSharedUp(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.sharedUp(L))
+    }
+    public func lagunaSharedDown(layer L: Int) throws -> TensorView {
+        try resident(name: LagunaTensors.sharedDown(L))
+    }
     // MARK: Hyper-connection (Gated Residual) weights
     //
     // Present only on families whose `hyperConnections` is enabled; asking for

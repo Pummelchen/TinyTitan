@@ -317,6 +317,19 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
+        case "lagunagpu":
+            // The Laguna-S-2.1 install through the probe graph on Metal:
+            // install, prompt, greedy limit.
+            let install =
+                CommandLine.arguments.count > 2
+                ? CommandLine.arguments[2] : "models/laguna-s-2.1-4bit.ssdai"
+            let prompt =
+                CommandLine.arguments.count > 3
+                ? CommandLine.arguments[3] : "The capital of France is"
+            let limit =
+                CommandLine.arguments.count > 4
+                ? Int(CommandLine.arguments[4]) ?? 1 : 1
+            try runLagunaGPU(install: install, prompt: prompt, limit: limit)
         case "k2gpu":
             // The K2 install through the probe graph on Metal: install,
             // prompt, greedy limit.

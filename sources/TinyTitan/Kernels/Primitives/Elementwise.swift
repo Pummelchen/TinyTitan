@@ -7,6 +7,7 @@ import Metal
 final class Elementwise {
     private let sigmoidGateMulPSO: MTLComputePipelineState
     private let softplusGateMulPSO: MTLComputePipelineState
+    private let softplusGatePerHeadPSO: MTLComputePipelineState
     private let sigmoidScalarMulPSO: MTLComputePipelineState
     private let residualAddPSO: MTLComputePipelineState
     private let splitQGatePSO: MTLComputePipelineState
@@ -29,6 +30,8 @@ final class Elementwise {
     init(context: MetalContext) throws {
         self.sigmoidGateMulPSO = try context.pipeline("sigmoid_gate_mul_fp16")
         self.softplusGateMulPSO = try context.pipeline("softplus_gate_mul_fp16")
+        self.softplusGatePerHeadPSO = try context.pipeline(
+            "softplus_gate_per_head_mul_fp16")
         self.sigmoidScalarMulPSO = try context.pipeline("sigmoid_scalar_mul_fp16")
         self.residualAddPSO = try context.pipeline("residual_add_fp16")
         self.splitQGatePSO = try context.pipeline("split_q_gate_fp16")
@@ -195,6 +198,29 @@ final class Elementwise {
         var elementCount = UInt32(count)
         encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
         dispatch(encoder, pipeline: softplusGateMulPSO, threads: count)
+        encoder.endEncoding()
+    }
+
+    /// out[i] *= softplus(gate[head(i)]) — Laguna's per-head attention gate.
+    func encodeSoftplusGatePerHeadMul(
+        commandBuffer: MTLCommandBuffer,
+        out: MTLBuffer, outOffset: Int = 0,
+        gate: MTLBuffer, gateOffset: Int = 0,
+        count: Int,
+        headDim: Int
+    ) throws {
+        precondition(count % headDim == 0, "count must cover whole heads")
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(softplusGatePerHeadPSO)
+        encoder.setBuffer(out, offset: outOffset, index: 0)
+        encoder.setBuffer(gate, offset: gateOffset, index: 1)
+        var elementCount = UInt32(count)
+        var width = UInt32(headDim)
+        encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
+        encoder.setBytes(&width, length: MemoryLayout<UInt32>.size, index: 3)
+        dispatch(encoder, pipeline: softplusGatePerHeadPSO, threads: count)
         encoder.endEncoding()
     }
 

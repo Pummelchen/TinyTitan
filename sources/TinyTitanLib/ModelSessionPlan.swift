@@ -67,6 +67,7 @@ package enum ServerModelIdentity {
         // dense converter always writes one.
         case .qwen35Dense: return "qwen3.5-dense"
         case .k2Horizon: return "k2-horizon"
+        case .laguna: return "laguna-s-2-1"
         }
     }
 }

@@ -1,46 +1,6 @@
 import Foundation
 import Metal
 
-/// Model family discriminator. Selects the tensor-name contract, the layer
-/// graph shape, and family-specific kernel behavior. Stored in
-/// `manifest.json -> arch.family`; absent means the compatible Qwen3.5-MoE
-/// 35B-A3B baseline used by Qwen 3.6 and Ornith 1.5.
-public enum ModelFamily: String, Sendable, Equatable {
-    case qwen36 = "qwen36"
-    case qwen36MTP = "qwen36_mtp"
-    /// Qwen3.8-Flash-Next (`qwen4_exp` text config), 125B-A6B: 48 layers of
-    /// (3x gated-DeltaNet -> 1x sparse-indexed attention), 512 experts top-10,
-    /// hyper-connection residual streams, and hashed n-gram embeddings at
-    /// layer 1. Text-only; the checkpoint's vision tower is never repacked.
-    /// See docs/qwen38-flash-next-port.md for the verified design record.
-    case qwen38flash = "qwen38flash"
-    /// The Qwen3.8-Flash-Next draft head: one full-attention layer with its
-    /// own 512 experts, hyper-connection gates and indexer, plus two fusion
-    /// projections that combine the target's wide residual with the next
-    /// token's embedding. Shares the target's embedding and head.
-    case qwen38flashMTP = "qwen38flash_mtp"
-    /// Qwen 3.5's dense text models (2B, 4B, 9B), served by the CPU engine.
-    ///
-    /// Its own value rather than a reuse of `qwen36`: `ModelFamily` is what the
-    /// GPU loader dispatches on, so a dense model wearing the MoE family's name
-    /// would reach `Model.load` and the `qwen36` schema checks -- which demand
-    /// affine MoE-shaped tensors -- before the CPU engine saw it. The raw value
-    /// matches the `model_type` the converter writes.
-    case qwen35Dense = "qwen3_5_dense"
-    /// IFM K2-Horizon-MoVA-36B-A4B (`model_type: k2_horizon`).
-    ///
-    /// 48 layers, two expert systems per layer -- 100 routed SwiGLU experts at
-    /// top-8 and 64 MoVA value experts at top-4 inside attention -- a two-group
-    /// RMS norm, a softplus attention gate and a sigmoid router with a
-    /// selection bias and a 2.5 scale. Layers 0-2 are dense.
-    ///
-    /// The install format and the loader's identity reader know this family;
-    /// the GPU graph and kernels do not exist yet (see
-    /// `docs/plan-k2-horizon.md`), so `Model.load` refuses it by name at schema
-    /// validation rather than running a K2 payload through the Qwen graph.
-    case k2Horizon = "k2_horizon"
-}
-
 /// Compile-time architecture baseline. `manifest.json -> arch` must match this
 /// field-by-field at load time; mismatches throw `ModelError.archMismatch`.
 ///
@@ -124,6 +84,9 @@ public struct ArchConfig: Sendable, Equatable {
     public let denseLayerIndices: [Int]
     /// MoVA value-expert attention. `.none` for every non-K2 family.
     public let mova: MoVAConfig
+    /// Laguna's per-layer head counts, QK norms and RoPE dialects. `.none`
+    /// for every other family.
+    public let laguna: LagunaGeometry
 
     public init(
         hiddenSize: Int,
@@ -166,7 +129,8 @@ public struct ArchConfig: Sendable, Equatable {
         routerHasBias: Bool = false,
         routerScaling: Double = 1,
         denseLayerIndices: [Int] = [],
-        mova: MoVAConfig = .none
+        mova: MoVAConfig = .none,
+        laguna: LagunaGeometry = .none
     ) {
         self.hiddenSize = hiddenSize
         self.intermediateSize = intermediateSize
@@ -209,6 +173,7 @@ public struct ArchConfig: Sendable, Equatable {
         self.routerScaling = routerScaling
         self.denseLayerIndices = denseLayerIndices
         self.mova = mova
+        self.laguna = laguna
     }
 
     /// Canonical Qwen3.6-35B-A3B baseline: a 40-layer hybrid of 30
@@ -414,6 +379,7 @@ public struct ArchConfig: Sendable, Equatable {
         .qwen36MTP: .qwen36MTP,
         .qwen38flash: .qwen38FlashNext,
         .qwen38flashMTP: .qwen38FlashNextMTP,
+        .laguna: .lagunaS21,
     ]
 
     /// Resident INT4 GEMV shapes this architecture issues during decode, for

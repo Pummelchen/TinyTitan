@@ -59,6 +59,10 @@ extension ModelFamily {
         case .k2Horizon:
             return .effortOnly(
                 defaultEffort: .high, supported: [.low, .medium, .high])
+        case .laguna:
+            // Laguna's template takes `enable_thinking` as a boolean, so the
+            // runtime offers the ordinary on/off switch.
+            return .binaryThinking
         }
     }
 

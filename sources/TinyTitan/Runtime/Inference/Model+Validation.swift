@@ -141,6 +141,18 @@ extension Model {
         // error, and reachable only by a config that has never shipped (every
         // preset here is 2048, 2560 or 2816). This is the guard for the next
         // family, and it is what lets the tile stay a compile-time constant.
+        // Laguna has sliding-window layers and a hidden size above the MoE
+        // kernels' serving tile, both of which the probe handles and the
+        // serving runner refuses by name. Validate it on its own terms.
+        if config.family == .laguna {
+            try Self.validateExecutableLagunaGeometry(config)
+            let checks = RuntimeSchemaChecks(residentIndex: residentIndex, quant: quant)
+            try Self.validateLagunaSchema(
+                checks: checks, layout: layout, config: config,
+                quant: quant, overrides: manifest.quantOverrides)
+            return
+        }
+
         try Self.validateExecutableGeometry(config)
 
         let checks = RuntimeSchemaChecks(residentIndex: residentIndex, quant: quant)
@@ -157,6 +169,9 @@ extension Model {
             // K2's schema is the whole check; the shared tail below asks for
             // the Qwen layer roles (q_norm, packed q/gate) this family does not
             // have.
+            return
+        case .laguna:
+            // Handled before the shared geometry gate; unreachable.
             return
         case .qwen35Dense:
             try Self.validateDenseSchema(

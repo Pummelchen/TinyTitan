@@ -247,10 +247,10 @@ public enum ManifestReader {
             // to constrain. The slot still has to satisfy `validateQuant`'s
             // table, so allow both rather than inventing a rule.
             allowedRouterBits = [4, 8]
-        case .k2Horizon:
-            // K2's routers stay bf16 in the checkpoint; the install's slot still
-            // has to name a width the format accepts, and the runtime reads the
-            // tensor's actual dtype.
+        case .k2Horizon, .laguna:
+            // These routers stay bf16 in the checkpoint; the install's slot
+            // still has to name a width the format accepts, and the runtime
+            // reads the tensor's actual dtype.
             allowedRouterBits = [4, 8]
         }
         let slots: [(String, ManifestQuantSlot, Set<Int>)] = [
