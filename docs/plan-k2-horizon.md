@@ -99,6 +99,11 @@ The 8-bit snapshot is larger than RAM, so the page cache streams it from disk;
 that is most of the difference. Prefill is token-by-token, so TTFT is roughly
 prompt length times the per-token cost.
 
+The checkpoint's own 52 KB chat template renders through swift-transformers'
+generic tokenizer as well: `TINYTITAN_K2_CHAT=1` applies it and the model then
+answers in its instruction format (a chat request for "What is the capital of
+France?" tokenizes to 17 prompt tokens and decodes reasoning-style text).
+
 What this path does **not** have yet: server/CLI/catalog wiring, the 52 KB
 chat template and `k2_horizon` parsers, a receipt-bearing install under
 `models/`, and a batched prefill. The bench command is the current entry

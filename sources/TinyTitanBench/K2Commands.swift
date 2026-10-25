@@ -26,7 +26,15 @@ extension TinyTitanBench {
                 exit(2)
             }
             tokenizer = loaded
-            ids = loaded.encode(text: prompt, addSpecialTokens: false)
+            if ProcessInfo.processInfo.environment["TINYTITAN_K2_CHAT"] == "1" {
+                let template = try String(
+                    contentsOf: directory.appendingPathComponent("tokenizer/chat_template.jinja"),
+                    encoding: .utf8)
+                let messages: [Message] = [["role": "user", "content": prompt]]
+                ids = try loaded.applyChatTemplate(messages: messages, chatTemplate: template)
+            } else {
+                ids = loaded.encode(text: prompt, addSpecialTokens: false)
+            }
         }
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
