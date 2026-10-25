@@ -145,6 +145,18 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   GPU-bound at 64 slots now, not fetch-bound, so the next levers are one
   command buffer per token instead of three per sparse layer, and overlap of
   the next layer's expert fetch with the current layer's GPU work.
+- **Coalesced expert loads** — the fused kernels first read two elements per
+  lane per group, which issued twice the word transactions for the same bytes.
+  Each lane now consumes one 32-bit word (eight 4-bit or four 8-bit weights)
+  covering a whole 64-element group across eight (four-bit) or sixteen
+  (eight-bit) lanes, so a simdgroup's reads are one coalesced line and a lane's
+  scale and bias are single scalars. GPU busy time is now split by phase in the
+  timing line: on 4-bit over 21 forwards the experts phase fell from 0.92-0.96 s
+  to 0.63 s (0.044 → 0.030 s/token) and total busy from 2.15-2.24 s to 1.94 s.
+  End-to-end decode did not move under the current machine load: fetch
+  (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
+  levers are I/O overlap and fewer command-buffer round trips, not more kernel
+  arithmetic. Both widths still produce the same tokens.
 - **Shared expert before the fetch** — the shared expert depends only on the
   post-attention hidden state, so it now runs in the attention command buffer
   and the post-fetch buffer carries only the two routed dispatches. On 4-bit
