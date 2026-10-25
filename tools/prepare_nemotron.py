@@ -90,9 +90,7 @@ def fetch(remote: str, byte_range: str | None = None) -> bytes:
     command = ["curl", "-sfL", "--max-time", "180", *RETRY]
     if byte_range is not None:
         command += ["-r", byte_range]
-    result = subprocess.run(
-        [*command, f"{BASE}/{remote}"], capture_output=True, check=False
-    )
+    result = subprocess.run([*command, f"{BASE}/{remote}"], capture_output=True, check=False)
     if result.returncode != 0:
         raise SystemExit(
             f"cannot fetch {remote} (curl exited {result.returncode}): "
@@ -162,10 +160,7 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
     fd = os.open(destination, os.O_RDWR | os.O_CREAT, 0o644)
     os.ftruncate(fd, expected)
     started = time.monotonic()
-    done = sum(
-        min(CHUNK, expected - offset)
-        for offset in completed
-    )
+    done = sum(min(CHUNK, expected - offset) for offset in completed)
     lock = __import__("threading").Lock()
 
     def fetch(offset: int, end: int) -> None:
@@ -174,8 +169,15 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
         while cursor <= end:
             result = subprocess.run(
                 [
-                    "curl", "-sfL", "--http1.1", "--max-time", "600", *RETRY,
-                    "-r", f"{cursor}-{end}", f"{BASE}/{shard}",
+                    "curl",
+                    "-sfL",
+                    "--http1.1",
+                    "--max-time",
+                    "600",
+                    *RETRY,
+                    "-r",
+                    f"{cursor}-{end}",
+                    f"{BASE}/{shard}",
                 ],
                 capture_output=True,
                 check=False,
@@ -183,7 +185,8 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
             if result.returncode != 0 or not result.stdout:
                 raise SystemExit(
                     f"cannot fetch {shard} bytes {cursor}-{end}: "
-                    f"{result.stderr.decode(errors='replace').strip()}")
+                    f"{result.stderr.decode(errors='replace').strip()}"
+                )
             pwrite_all(fd, result.stdout, cursor)
             cursor += len(result.stdout)
         with lock:
@@ -194,12 +197,10 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
             log(
                 f"    {shard}: {done / 1e9:.2f}/{expected / 1e9:.2f} GB at "
                 f"{done / 1e6 / max(elapsed, 1e-6):.1f} MB/s "
-                f"({len(completed)}/{len(spans)} chunks)")
+                f"({len(completed)}/{len(spans)} chunks)"
+            )
 
-    spans = [
-        (offset, min(offset + CHUNK, expected) - 1)
-        for offset in range(0, expected, CHUNK)
-    ]
+    spans = [(offset, min(offset + CHUNK, expected) - 1) for offset in range(0, expected, CHUNK)]
     pending = [(start, end) for start, end in spans if start not in completed]
     try:
         from concurrent.futures import ThreadPoolExecutor
@@ -212,13 +213,13 @@ def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
         os.fsync(fd)
         os.close(fd)
     if destination.stat().st_size != expected:
-        raise SystemExit(
-            f"{shard}: size {destination.stat().st_size} != expected {expected}")
+        raise SystemExit(f"{shard}: size {destination.stat().st_size} != expected {expected}")
     state_path.unlink(missing_ok=True)
     elapsed = time.monotonic() - started
     log(
         f"    fetched {shard} ({expected / 1e9:.2f} GB, "
-        f"{expected / 1e6 / max(elapsed, 1e-6):.1f} MB/s)")
+        f"{expected / 1e6 / max(elapsed, 1e-6):.1f} MB/s)"
+    )
     return destination
 
 
@@ -272,7 +273,8 @@ def width_of(name: str, width: int) -> int | None:
 def validate_config(config: dict) -> dict:
     if config.get("model_type") != "nemotron_h_omni":
         raise SystemExit(
-            f"config model_type is {config.get('model_type')!r}, expected nemotron_h_omni")
+            f"config model_type is {config.get('model_type')!r}, expected nemotron_h_omni"
+        )
     text = config.get("llm_config")
     if not isinstance(text, dict):
         raise SystemExit("config has no llm_config (this checkpoint nests its text tower there)")
@@ -299,7 +301,9 @@ def validate_config(config: dict) -> dict:
     if text.get("moe_latent_size") != 1024:
         problems.append("moe_latent_size must be 1024")
     if problems:
-        raise SystemExit("checkpoint does not match the ported geometry:\n  " + "\n  ".join(problems))
+        raise SystemExit(
+            "checkpoint does not match the ported geometry:\n  " + "\n  ".join(problems)
+        )
     return text
 
 
@@ -337,9 +341,7 @@ def expert_census(text: dict, headers: dict[str, dict]) -> dict[int, int]:
             counts[int(match.group(1))] += 1
     layers = {layer: value // 2 for layer, value in counts.items()}
     block = [
-        entry["n_routed_experts"]
-        for entry in text["block_configs"]
-        if entry["block_type"] == "moe"
+        entry["n_routed_experts"] for entry in text["block_configs"] if entry["block_type"] == "moe"
     ]
     if len(layers) != 40:
         raise SystemExit(f"expected 40 MoE layers with routed experts, found {len(layers)}")
@@ -380,19 +382,20 @@ def plan() -> int:
                 continue
             bits = width_of(name, width)
             if bits is None:
-                resident += elements(meta["shape"]) * (
-                    4 if meta["dtype"] == "F32" else 2)
+                resident += elements(meta["shape"]) * (4 if meta["dtype"] == "F32" else 2)
             else:
                 resident += affine_bytes(elements(meta["shape"]), bits)
         # The install format carries one expert stride per install; the
         # verifier requires every layer file to be count * that stride, so the
         # widest expert blob is charged to every layer.
         global_stride = 0
-        for layer, count in layers.items():
+        for layer in layers:
             expert_width = text["block_configs"][layer]["moe_intermediate_size"]
             blob = 0
-            for shape in ((expert_width, text["moe_latent_size"]),
-                          (text["moe_latent_size"], expert_width)):
+            for shape in (
+                (expert_width, text["moe_latent_size"]),
+                (text["moe_latent_size"], expert_width),
+            ):
                 rows, cols = shape
                 blob += rows * cols * width // 8
                 blob += rows * (cols // GROUP_SIZE) * 4
@@ -534,15 +537,16 @@ def build_install_plan(
         key=resident_order,
     )
     index_size = round_up(
-        24 + len(resident_names) * 72
-        + sum(len(name.encode()) for name in resident_names))
+        24 + len(resident_names) * 72 + sum(len(name.encode()) for name in resident_names)
+    )
     cursor = index_size
     resident: list[ResidentTensor] = []
     for name in resident_names:
         shape = tuple(headers[name]["shape"])
         width = width_of(name, bits)
         entry = ResidentTensor(
-            name=name, shape=shape, source_dtype=headers[name]["dtype"], bits=width)
+            name=name, shape=shape, source_dtype=headers[name]["dtype"], bits=width
+        )
         if width is None:
             entry.size = elements(shape) * (4 if entry.source_dtype == "F32" else 2)
             entry.offset = cursor
@@ -564,8 +568,7 @@ def build_install_plan(
     per_layer: dict[int, LayerPlan] = {}
     for layer, kind in enumerate(text["layers_block_type"]):
         if layer not in layers:
-            per_layer[layer] = LayerPlan(
-                layer=layer, kind=kind, experts=0, stride=0, file_size=0)
+            per_layer[layer] = LayerPlan(layer=layer, kind=kind, experts=0, stride=0, file_size=0)
             continue
         block = text["block_configs"][layer]
         expert_width = block["moe_intermediate_size"]
@@ -577,10 +580,16 @@ def build_install_plan(
         ):
             rows, cols = shape
             tensor = ExpertTensor(
-                role=role, shape=shape, bits=bits, offset=cursor,
-                size=rows * cols * bits // 8, scale_offset=0,
+                role=role,
+                shape=shape,
+                bits=bits,
+                offset=cursor,
+                size=rows * cols * bits // 8,
+                scale_offset=0,
                 scale_size=rows * (cols // GROUP_SIZE) * 2,
-                bias_offset=0, bias_size=0)
+                bias_offset=0,
+                bias_size=0,
+            )
             cursor += tensor.size
             tensor.scale_offset = cursor
             cursor += tensor.scale_size
@@ -589,8 +598,13 @@ def build_install_plan(
             cursor += tensor.bias_size
             tensors.append(tensor)
         per_layer[layer] = LayerPlan(
-            layer=layer, kind=kind, experts=layers[layer],
-            stride=round_up(cursor), file_size=0, tensors=tensors)
+            layer=layer,
+            kind=kind,
+            experts=layers[layer],
+            stride=round_up(cursor),
+            file_size=0,
+            tensors=tensors,
+        )
 
     # The format's verifier accepts one expert stride per install and requires
     # every layer file to be exactly count * that stride.
@@ -624,12 +638,17 @@ class Install:
         (directory / "packed_experts").mkdir(parents=True, exist_ok=True)
         (directory / "tokenizer").mkdir(parents=True, exist_ok=True)
         self.index_size = round_up(
-            24 + len(self.resident_plan) * 72
-            + sum(len(entry.name.encode()) for entry in self.resident_plan))
+            24
+            + len(self.resident_plan) * 72
+            + sum(len(entry.name.encode()) for entry in self.resident_plan)
+        )
         last = max(
-            (entry.offset + entry.size + entry.scale_size + entry.bias_size
-             for entry in self.resident_plan),
-            default=self.index_size)
+            (
+                entry.offset + entry.size + entry.scale_size + entry.bias_size
+                for entry in self.resident_plan
+            ),
+            default=self.index_size,
+        )
         self.resident_size = last - self.index_size
         self.weights_fd = os.open(
             directory / "model_weights.bin",
@@ -668,9 +687,14 @@ class Install:
             pwrite_all(self.weights_fd, data, entry.offset)
             return
         self._write_quantized(
-            self.weights_fd, value, entry.bits,
-            entry.offset, entry.scale_offset, entry.bias_offset,
-            entry.size, name,
+            self.weights_fd,
+            value,
+            entry.bits,
+            entry.offset,
+            entry.scale_offset,
+            entry.bias_offset,
+            entry.size,
+            name,
         )
 
     def write_expert(self, layer: int, expert: int, role: str, value: np.ndarray) -> None:
@@ -679,34 +703,48 @@ class Install:
         base = expert * plan.stride
         if value.shape != tensor.shape:
             raise SystemExit(
-                f"layer {layer} expert {expert} {role}: shape {value.shape} != {tensor.shape}")
+                f"layer {layer} expert {expert} {role}: shape {value.shape} != {tensor.shape}"
+            )
         self._write_quantized(
-            self.layer_fds[layer], value, tensor.bits,
-            base + tensor.offset, base + tensor.scale_offset, base + tensor.bias_offset,
-            tensor.size, f"layer {layer} expert {expert} {role}",
+            self.layer_fds[layer],
+            value,
+            tensor.bits,
+            base + tensor.offset,
+            base + tensor.scale_offset,
+            base + tensor.bias_offset,
+            tensor.size,
+            f"layer {layer} expert {expert} {role}",
         )
 
     def _write_quantized(
-        self, fd: int, value: np.ndarray, bits: int,
-        weight_offset: int, scale_offset: int, bias_offset: int,
-        weight_bytes: int, label: str,
+        self,
+        fd: int,
+        value: np.ndarray,
+        bits: int,
+        weight_offset: int,
+        scale_offset: int,
+        bias_offset: int,
+        weight_bytes: int,
+        label: str,
     ) -> None:
         rows, cols = value.shape[0], value.shape[-1]
         packed_columns = cols * bits // 32
         rows_per_chunk = max(1, (32 * 1024 * 1024) // max(cols * 4, 1))
         produced = 0
         for start in range(0, rows, rows_per_chunk):
-            chunk = np.ascontiguousarray(value[start:start + rows_per_chunk])
+            chunk = np.ascontiguousarray(value[start : start + rows_per_chunk])
             packed, scale, bias = quantize_affine(chunk, bits)
             pwrite_all(
-                fd, np.ascontiguousarray(packed).tobytes(),
-                weight_offset + start * packed_columns * 4)
+                fd,
+                np.ascontiguousarray(packed).tobytes(),
+                weight_offset + start * packed_columns * 4,
+            )
             pwrite_all(
-                fd, bf16_uint16(scale).tobytes(),
-                scale_offset + start * (cols // GROUP_SIZE) * 2)
+                fd, bf16_uint16(scale).tobytes(), scale_offset + start * (cols // GROUP_SIZE) * 2
+            )
             pwrite_all(
-                fd, bf16_uint16(bias).tobytes(),
-                bias_offset + start * (cols // GROUP_SIZE) * 2)
+                fd, bf16_uint16(bias).tobytes(), bias_offset + start * (cols // GROUP_SIZE) * 2
+            )
             produced += packed.size * 4
         if produced != weight_bytes:
             raise SystemExit(f"{label}: wrote {produced} weight bytes, planned {weight_bytes}")
@@ -722,7 +760,8 @@ class Install:
         files = self._hash_files()
         manifest = self._manifest(text, index_sha, files)
         (self.directory / "manifest.json").write_text(
-            json.dumps(manifest, indent=1, sort_keys=True))
+            json.dumps(manifest, indent=1, sort_keys=True)
+        )
         return {
             "directory": str(self.directory),
             "bits": self.bits,
@@ -732,8 +771,7 @@ class Install:
         }
 
     def _resident_index(self) -> bytes:
-        header = struct.pack(
-            "<QQQ", self.index_size, self.resident_size, len(self.resident_plan))
+        header = struct.pack("<QQQ", self.index_size, self.resident_size, len(self.resident_plan))
         entries = bytearray()
         strings = bytearray()
         name_base = 24 + len(self.resident_plan) * 72
@@ -744,11 +782,20 @@ class Install:
             shape = list(entry.shape) + [0] * (4 - len(entry.shape))
             entries += struct.pack(
                 "<IHBBQQIIIIQQQQ",
-                name_offset, len(encoded), entry.index_dtype, 0,
-                entry.offset, entry.size,
-                shape[0], shape[1], shape[2], shape[3],
-                entry.scale_offset, entry.scale_size,
-                entry.bias_offset, entry.bias_size,
+                name_offset,
+                len(encoded),
+                entry.index_dtype,
+                0,
+                entry.offset,
+                entry.size,
+                shape[0],
+                shape[1],
+                shape[2],
+                shape[3],
+                entry.scale_offset,
+                entry.scale_size,
+                entry.bias_offset,
+                entry.bias_size,
             )
         body = header + bytes(entries) + bytes(strings)
         if len(body) > self.index_size:
@@ -782,18 +829,22 @@ class Install:
                             "dtype": "BF16",
                             "shape": [tensor.shape[0], tensor.shape[-1] // GROUP_SIZE],
                         }
-                    experts.append({
-                        "expert": expert,
-                        "offset": expert * layer_plan.stride,
-                        "size": layer_plan.stride,
-                        "tensors": tensors,
-                    })
-            layers.append({
-                "layer": layer,
-                "file": layer_plan.file_name,
-                "experts": experts,
-                "expertsPerLayer": layer_plan.experts,
-            })
+                    experts.append(
+                        {
+                            "expert": expert,
+                            "offset": expert * layer_plan.stride,
+                            "size": layer_plan.stride,
+                            "tensors": tensors,
+                        }
+                    )
+            layers.append(
+                {
+                    "layer": layer,
+                    "file": layer_plan.file_name,
+                    "experts": experts,
+                    "expertsPerLayer": layer_plan.experts,
+                }
+            )
         document = {
             "expertStride": self.global_stride,
             "numLayers": len(self.layer_plans),
@@ -801,7 +852,8 @@ class Install:
             "layers": layers,
         }
         (self.directory / "packed_experts" / "layout.json").write_text(
-            json.dumps(document, sort_keys=True))
+            json.dumps(document, sort_keys=True)
+        )
 
     def _tokenizer(self, source_config: dict) -> None:
         target = self.directory / "tokenizer"
@@ -830,13 +882,17 @@ class Install:
         ]
         top_k = max(
             entry["num_experts_per_tok"]
-            for entry in text["block_configs"] if entry["block_type"] == "moe")
+            for entry in text["block_configs"]
+            if entry["block_type"] == "moe"
+        )
         arch = {
             "hiddenSize": text["hidden_size"],
             "ffnIntermediate": text["moe_shared_expert_intermediate_size"],
             "moeIntermediateSize": max(
                 entry["moe_intermediate_size"]
-                for entry in text["block_configs"] if entry["block_type"] == "moe"),
+                for entry in text["block_configs"]
+                if entry["block_type"] == "moe"
+            ),
             "numHeads": text["num_attention_heads"],
             "numKVHeads": text["num_key_value_heads"],
             "numFullKVHeads": text["num_key_value_heads"],
@@ -891,8 +947,7 @@ class Install:
                 "routedScalingFactor": text["routed_scaling_factor"],
                 "expertCounts": expert_counts,
                 "moeIntermediateSizes": [
-                    entry.get("moe_intermediate_size", 0)
-                    for entry in text["block_configs"]
+                    entry.get("moe_intermediate_size", 0) for entry in text["block_configs"]
                 ],
                 "moeNormTopK": bool(text["norm_topk_prob"]),
                 "normEpsilon": text["layer_norm_epsilon"],
@@ -911,8 +966,10 @@ class Install:
         }
         quant: dict[str, dict] = {
             key: {
-                "weightBits": value, "scheme": "affine",
-                "scaleType": "BF16", "biasType": "BF16",
+                "weightBits": value,
+                "scheme": "affine",
+                "scaleType": "BF16",
+                "biasType": "BF16",
                 "groupSize": GROUP_SIZE,
             }
             for key, value in slots.items()
@@ -922,8 +979,10 @@ class Install:
                 continue
             stem = entry.name[: -len(".weight")] if entry.name.endswith(".weight") else entry.name
             quant[stem] = {
-                "weightBits": entry.bits, "scheme": "affine",
-                "scaleType": "BF16", "biasType": "BF16",
+                "weightBits": entry.bits,
+                "scheme": "affine",
+                "scaleType": "BF16",
+                "biasType": "BF16",
                 "groupSize": GROUP_SIZE,
             }
         experts_per_layer = max(expert_counts)
@@ -978,10 +1037,10 @@ def install(args) -> int:
     free = shutil.disk_usage(work).free
     print(
         f"installs need {sum(expected.values()) / 1e9:.2f} GB, "
-        f"free {free / 1e9:.2f} GB, reserve 8 GB")
+        f"free {free / 1e9:.2f} GB, reserve 8 GB"
+    )
     if free < needed:
-        raise SystemExit(
-            f"not enough disk: need {needed / 1e9:.2f} GB, have {free / 1e9:.2f} GB")
+        raise SystemExit(f"not enough disk: need {needed / 1e9:.2f} GB, have {free / 1e9:.2f} GB")
 
     installs = {
         4: Install(out4, 4, "nemotron-3.5-bolt-74b-a9b", plans[4]),
@@ -1001,8 +1060,7 @@ def install(args) -> int:
             if args.limit_shards and number > args.limit_shards:
                 break
             if shard in done:
-                written += sum(
-                    1 for name in headers if index["weight_map"][name] == shard)
+                written += sum(1 for name in headers if index["weight_map"][name] == shard)
                 continue
             print(f"  [{number}/{len(shards)}] {shard}")
             path = download(shard, work)
@@ -1031,7 +1089,8 @@ def install(args) -> int:
             rate = written / max(elapsed, 1e-6)
             print(
                 f"    {written}/{total_tensors} tensors, {rate:.0f} tensors/s, "
-                f"~{((total_tensors - written) / rate) / 60:.1f} min left")
+                f"~{((total_tensors - written) / rate) / 60:.1f} min left"
+            )
     except BaseException:
         for target in installs.values():
             for fd in [target.weights_fd, *target.layer_fds.values()]:
@@ -1052,15 +1111,20 @@ def install(args) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--plan", action="store_true", help="validate and measure; download no weights")
+    parser.add_argument(
+        "--plan", action="store_true", help="validate and measure; download no weights"
+    )
     parser.add_argument("--install", action="store_true", help="convert both widths")
     parser.add_argument("--out4", type=str)
     parser.add_argument("--out8", type=str)
     parser.add_argument("--work", type=str, default=".build/nemotron-src")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
-        "--limit-shards", type=int, default=0,
-        help="convert only the first N shards, to check the install format")
+        "--limit-shards",
+        type=int,
+        default=0,
+        help="convert only the first N shards, to check the install format",
+    )
     args = parser.parse_args()
     if args.plan:
         return plan()

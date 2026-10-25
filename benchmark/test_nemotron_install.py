@@ -40,6 +40,7 @@ class NemotronInstallFormatTests(unittest.TestCase):
             env=environment,
             capture_output=True,
             text=True,
+            check=False,
         )
         cls.result = result
 
@@ -47,7 +48,8 @@ class NemotronInstallFormatTests(unittest.TestCase):
         self.assertEqual(self.result.returncode, 0, self.result.stdout + self.result.stderr)
         for width in (4, 8):
             manifest = json.loads(
-                (ROOT / f".build/nemotron-toy-{width}bit/manifest.json").read_text())
+                (ROOT / f".build/nemotron-toy-{width}bit/manifest.json").read_text()
+            )
             self.assertEqual(manifest["magic"], "SSDAI")
             self.assertEqual(manifest["arch"]["family"], "nemotron_h")
             self.assertEqual(manifest["arch"]["numExperts"], manifest["expertsPerLayer"])
@@ -62,25 +64,28 @@ class NemotronInstallFormatTests(unittest.TestCase):
     def test_layout_covers_every_layer(self) -> None:
         for width in (4, 8):
             layout = json.loads(
-                (ROOT / f".build/nemotron-toy-{width}bit/packed_experts/layout.json")
-                .read_text())
+                (ROOT / f".build/nemotron-toy-{width}bit/packed_experts/layout.json").read_text()
+            )
             self.assertEqual(len(layout["layers"]), layout["numLayers"])
-            kinds = {
-                entry["layer"]: entry["expertsPerLayer"] for entry in layout["layers"]
-            }
+            kinds = {entry["layer"]: entry["expertsPerLayer"] for entry in layout["layers"]}
             self.assertEqual(kinds, {0: 0, 1: 8, 2: 0})
             self.assertEqual(layout["expertsPerLayer"], 8)
 
     def test_experts_are_two_roles(self) -> None:
         layout = json.loads(
-            (ROOT / ".build/nemotron-toy-4bit/packed_experts/layout.json").read_text())
+            (ROOT / ".build/nemotron-toy-4bit/packed_experts/layout.json").read_text()
+        )
         moe = next(entry for entry in layout["layers"] if entry["layer"] == 1)
         roles = set(moe["experts"][0]["tensors"])
         self.assertEqual(
             roles,
             {
-                "up", "up_scales", "up_biases",
-                "down", "down_scales", "down_biases",
+                "up",
+                "up_scales",
+                "up_biases",
+                "down",
+                "down_scales",
+                "down_biases",
             },
         )
 

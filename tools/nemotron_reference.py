@@ -40,8 +40,9 @@ def read_index(path: Path) -> dict[str, dict]:
         file_offset, size = struct.unpack_from("<QQ", raw, offset + 8)
         shape = struct.unpack_from("<IIII", raw, offset + 24)
         scale_offset, scale_size, bias_offset, bias_size = struct.unpack_from(
-            "<QQQQ", raw, offset + 40)
-        name = raw[name_offset:name_offset + name_length].decode()
+            "<QQQQ", raw, offset + 40
+        )
+        name = raw[name_offset : name_offset + name_length].decode()
         logical = [value for value in shape if value]
         bits = None
         if dtype == 0:
@@ -50,8 +51,12 @@ def read_index(path: Path) -> dict[str, dict]:
                 cells *= value
             bits = size * 8 // cells
         tensors[name] = {
-            "dtype": dtype, "shape": logical, "offset": file_offset,
-            "size": size, "scale_offset": scale_offset, "bias_offset": bias_offset,
+            "dtype": dtype,
+            "shape": logical,
+            "offset": file_offset,
+            "size": size,
+            "scale_offset": scale_offset,
+            "bias_offset": bias_offset,
             "bits": bits,
         }
     return tensors
@@ -64,8 +69,7 @@ class Install:
         self.arch = manifest["arch"]
         self.meta = self.arch["nemotronH"]
         self.tensors = read_index(directory / "model_weights.bin")
-        self.weights = np.memmap(
-            directory / "model_weights.bin", dtype=np.uint8, mode="r")
+        self.weights = np.memmap(directory / "model_weights.bin", dtype=np.uint8, mode="r")
         layout = json.loads((directory / "packed_experts/layout.json").read_text())
         self.stride = layout["expertStride"]
         self.layers: dict[int, dict] = {}
@@ -84,7 +88,7 @@ class Install:
     def vector(self, name: str) -> np.ndarray:
         entry = self.tensors[name]
         start = entry["offset"]
-        data = self.weights[start:start + entry["size"]]
+        data = self.weights[start : start + entry["size"]]
         if entry["dtype"] == 3:
             return np.frombuffer(data, dtype=np.float32).copy()
         return bf16(np.frombuffer(data, dtype=np.uint16))
@@ -94,12 +98,10 @@ class Install:
         rows, columns = entry["shape"]
         start = entry["offset"]
         if entry["bits"] is None:
-            data = bf16(np.frombuffer(
-                self.weights[start:start + entry["size"]], dtype=np.uint16))
+            data = bf16(np.frombuffer(self.weights[start : start + entry["size"]], dtype=np.uint16))
             return data.reshape(rows, columns).astype(np.float32)
         bits = entry["bits"]
-        packed = np.frombuffer(
-            self.weights[start:start + entry["size"]], dtype=np.uint8)
+        packed = np.frombuffer(self.weights[start : start + entry["size"]], dtype=np.uint8)
         if bits == 4:
             low = (packed & 0x0F).astype(np.float32)
             high = (packed >> 4).astype(np.float32)
@@ -110,23 +112,30 @@ class Install:
             q = packed.astype(np.float32)
         q = q.reshape(rows, columns)
         groups = columns // GROUP
-        scales = bf16(np.frombuffer(
-            self.weights[entry["scale_offset"]:entry["scale_offset"] + rows * groups * 2],
-            dtype=np.uint16)).reshape(rows, groups)
-        biases = bf16(np.frombuffer(
-            self.weights[entry["bias_offset"]:entry["bias_offset"] + rows * groups * 2],
-            dtype=np.uint16)).reshape(rows, groups)
-        return (q.reshape(rows, groups, GROUP)
-                * scales[:, :, None] + biases[:, :, None]).reshape(rows, columns)
+        scales = bf16(
+            np.frombuffer(
+                self.weights[entry["scale_offset"] : entry["scale_offset"] + rows * groups * 2],
+                dtype=np.uint16,
+            )
+        ).reshape(rows, groups)
+        biases = bf16(
+            np.frombuffer(
+                self.weights[entry["bias_offset"] : entry["bias_offset"] + rows * groups * 2],
+                dtype=np.uint16,
+            )
+        ).reshape(rows, groups)
+        return (q.reshape(rows, groups, GROUP) * scales[:, :, None] + biases[:, :, None]).reshape(
+            rows, columns
+        )
 
     def expert_block(self, layer: int, expert: int) -> np.memmap:
         if layer not in self.expert_maps:
             info = self.layers[layer]
             self.expert_maps[layer] = np.memmap(
-                self.directory / "packed_experts" / info["file"],
-                dtype=np.uint8, mode="r")
+                self.directory / "packed_experts" / info["file"], dtype=np.uint8, mode="r"
+            )
         base = expert * self.stride
-        return self.expert_maps[layer][base:base + self.stride]
+        return self.expert_maps[layer][base : base + self.stride]
 
     def expert_matrix(self, layer: int, expert: int, role: str) -> np.ndarray:
         blob = self.expert_block(layer, expert)
@@ -135,7 +144,8 @@ class Install:
         rows, columns = weight["shape"]
         bits = weight["bits"]
         packed = np.frombuffer(
-            blob[weight["offset"]:weight["offset"] + weight["size"]], dtype=np.uint8)
+            blob[weight["offset"] : weight["offset"] + weight["size"]], dtype=np.uint8
+        )
         if bits == 4:
             low = (packed & 0x0F).astype(np.float32)
             high = (packed >> 4).astype(np.float32)
@@ -145,30 +155,43 @@ class Install:
         else:
             q = packed.astype(np.float32)
         groups = columns // GROUP
-        scales = bf16(np.frombuffer(
-            blob[tensors[role + "_scales"]["offset"]:
-                 tensors[role + "_scales"]["offset"] + rows * groups * 2],
-            dtype=np.uint16)).reshape(rows, groups)
-        biases = bf16(np.frombuffer(
-            blob[tensors[role + "_biases"]["offset"]:
-                 tensors[role + "_biases"]["offset"] + rows * groups * 2],
-            dtype=np.uint16)).reshape(rows, groups)
-        return (q.reshape(rows, groups, GROUP)
-                * scales[:, :, None] + biases[:, :, None]).reshape(rows, columns)
+        scales = bf16(
+            np.frombuffer(
+                blob[
+                    tensors[role + "_scales"]["offset"] : tensors[role + "_scales"]["offset"]
+                    + rows * groups * 2
+                ],
+                dtype=np.uint16,
+            )
+        ).reshape(rows, groups)
+        biases = bf16(
+            np.frombuffer(
+                blob[
+                    tensors[role + "_biases"]["offset"] : tensors[role + "_biases"]["offset"]
+                    + rows * groups * 2
+                ],
+                dtype=np.uint16,
+            )
+        ).reshape(rows, groups)
+        return (q.reshape(rows, groups, GROUP) * scales[:, :, None] + biases[:, :, None]).reshape(
+            rows, columns
+        )
 
 
 def rmsnorm(x: np.ndarray, weight: np.ndarray, eps: float) -> np.ndarray:
     return x / np.sqrt(np.mean(x * x) + eps) * weight
 
 
-def rmsnorm_gated(x: np.ndarray, gate: np.ndarray, weight: np.ndarray,
-                  groups: int, eps: float) -> np.ndarray:
+def rmsnorm_gated(
+    x: np.ndarray, gate: np.ndarray, weight: np.ndarray, groups: int, eps: float
+) -> np.ndarray:
     out = np.empty_like(x)
     width = x.size // groups
     for g in range(groups):
-        part = x[g * width:(g + 1) * width]
-        out[g * width:(g + 1) * width] = (
-            part / np.sqrt(np.mean(part * part) + eps) * weight[g * width:(g + 1) * width])
+        part = x[g * width : (g + 1) * width]
+        out[g * width : (g + 1) * width] = (
+            part / np.sqrt(np.mean(part * part) + eps) * weight[g * width : (g + 1) * width]
+        )
     return out * (gate / (1.0 + np.exp(-gate)))
 
 
@@ -190,8 +213,8 @@ class Forward:
         state = self.meta["ssmStateSize"]
         self.layers = len(self.meta["layerKinds"])
         self.conv_state = np.zeros(
-            (self.layers, self.conv_channels(), self.meta["mambaConvKernel"]),
-            dtype=np.float32)
+            (self.layers, self.conv_channels(), self.meta["mambaConvKernel"]), dtype=np.float32
+        )
         self.ssm_state = np.zeros((self.layers, heads, head_dim, state), dtype=np.float32)
         self.kv = {}
         self.attention_heads = install.arch["numHeads"]
@@ -199,8 +222,10 @@ class Forward:
         self.attention_head_dim = install.arch["headDim"]
 
     def conv_channels(self) -> int:
-        return self.meta["mambaIntermediate"] + 2 * self.meta["mambaGroups"] * \
-            self.meta["ssmStateSize"]
+        return (
+            self.meta["mambaIntermediate"]
+            + 2 * self.meta["mambaGroups"] * self.meta["ssmStateSize"]
+        )
 
     def embedding(self, token: int) -> np.ndarray:
         name = "language_model.backbone.embeddings.weight"
@@ -208,23 +233,32 @@ class Forward:
         rows, columns = entry["shape"]
         groups = columns // GROUP
         start = entry["offset"] + token * (columns if entry["bits"] == 8 else columns // 2)
-        packed = np.frombuffer(self.install.weights[start:start + columns], dtype=np.uint8)
+        packed = np.frombuffer(self.install.weights[start : start + columns], dtype=np.uint8)
         q = packed.astype(np.float32)
-        scales = bf16(np.frombuffer(
-            self.install.weights[entry["scale_offset"] + token * groups * 2:
-                                 entry["scale_offset"] + (token + 1) * groups * 2],
-            dtype=np.uint16))
-        biases = bf16(np.frombuffer(
-            self.install.weights[entry["bias_offset"] + token * groups * 2:
-                                 entry["bias_offset"] + (token + 1) * groups * 2],
-            dtype=np.uint16))
+        scales = bf16(
+            np.frombuffer(
+                self.install.weights[
+                    entry["scale_offset"] + token * groups * 2 : entry["scale_offset"]
+                    + (token + 1) * groups * 2
+                ],
+                dtype=np.uint16,
+            )
+        )
+        biases = bf16(
+            np.frombuffer(
+                self.install.weights[
+                    entry["bias_offset"] + token * groups * 2 : entry["bias_offset"]
+                    + (token + 1) * groups * 2
+                ],
+                dtype=np.uint16,
+            )
+        )
         return (q.reshape(groups, GROUP) * scales[:, None] + biases[:, None]).reshape(columns)
 
     def step(self, token: int, position: int) -> np.ndarray:
         x = self.embedding(token).astype(np.float32)
         for layer, kind in enumerate(self.kinds):
-            norm = self.install.vector(
-                f"language_model.backbone.layers.{layer}.norm.weight")
+            norm = self.install.vector(f"language_model.backbone.layers.{layer}.norm.weight")
             normed = rmsnorm(x, norm, self.meta["normEpsilon"]).astype(np.float32)
             mixer = f"language_model.backbone.layers.{layer}.mixer"
             if kind == "mamba":
@@ -249,8 +283,8 @@ class Forward:
         conv_dim = self.conv_channels()
         projected = self.install.matrix(f"{mixer}.in_proj.weight") @ x
         gate = projected[:intermediate]
-        conv_in = projected[intermediate:intermediate + conv_dim]
-        dt = projected[intermediate + conv_dim:]
+        conv_in = projected[intermediate : intermediate + conv_dim]
+        dt = projected[intermediate + conv_dim :]
         conv_weight = self.install.vector(f"{mixer}.conv1d.weight").reshape(conv_dim, 4)
         conv_bias = self.install.vector(f"{mixer}.conv1d.bias")
         history = self.conv_state[layer]
@@ -260,8 +294,8 @@ class Forward:
         conv_out = np.sum(history * conv_weight, axis=1) + conv_bias
         conv_out = silu(conv_out)
         values = conv_out[:intermediate]
-        b = conv_out[intermediate:intermediate + groups * state_size]
-        c = conv_out[intermediate + groups * state_size:]
+        b = conv_out[intermediate : intermediate + groups * state_size]
+        c = conv_out[intermediate + groups * state_size :]
         a_log = self.install.vector(f"{mixer}.A_log")
         skip_d = self.install.vector(f"{mixer}.D")
         dt_bias = self.install.vector(f"{mixer}.dt_bias")
@@ -270,20 +304,21 @@ class Forward:
         for h in range(heads):
             group = h // (heads // groups)
             a = -math.exp(float(a_log[h]))
-            dt_value = max(
-                math.log1p(math.exp(float(dt[h] + dt_bias[h]))), meta["timeStepMin"])
+            dt_value = max(math.log1p(math.exp(float(dt[h] + dt_bias[h]))), meta["timeStepMin"])
             decay = math.exp(dt_value * a)
             state = head_states[h]
             state *= decay
-            state += (dt_value * b[group * state_size:(group + 1) * state_size])[None, :] \
-                * values[h * head_dim:(h + 1) * head_dim][:, None]
-            y[h * head_dim:(h + 1) * head_dim] = state @ c[
-                group * state_size:(group + 1) * state_size]
-            y[h * head_dim:(h + 1) * head_dim] += float(skip_d[h]) * values[
-                h * head_dim:(h + 1) * head_dim]
+            state += (dt_value * b[group * state_size : (group + 1) * state_size])[
+                None, :
+            ] * values[h * head_dim : (h + 1) * head_dim][:, None]
+            y[h * head_dim : (h + 1) * head_dim] = (
+                state @ c[group * state_size : (group + 1) * state_size]
+            )
+            y[h * head_dim : (h + 1) * head_dim] += (
+                float(skip_d[h]) * values[h * head_dim : (h + 1) * head_dim]
+            )
         weight = self.install.vector(f"{mixer}.norm.weight")
-        normalized = rmsnorm_gated(
-            y, gate, weight, groups, meta["mambaEpsilon"])
+        normalized = rmsnorm_gated(y, gate, weight, groups, meta["mambaEpsilon"])
         return self.install.matrix(f"{mixer}.out_proj.weight") @ normalized
 
     def top_k(self, values: np.ndarray, k: int) -> list[int]:
@@ -291,7 +326,6 @@ class Forward:
 
     def moe(self, layer: int, mixer: str, x: np.ndarray) -> np.ndarray:
         meta = self.meta
-        count = self.install.layers[layer]["count"]
         gate_weights = self.install.matrix(f"{mixer}.gate.weight")
         logits = gate_weights @ x
         scores = 1.0 / (1.0 + np.exp(-logits))
@@ -303,7 +337,7 @@ class Forward:
         weights *= meta["routedScalingFactor"]
         latent = self.install.matrix(f"{mixer}.fc1_latent_proj.weight") @ x
         accumulator = np.zeros(meta["moeLatentSize"], dtype=np.float32)
-        for expert, weight in zip(selected, weights):
+        for expert, weight in zip(selected, weights, strict=True):
             up = self.install.expert_matrix(layer, int(expert), "up") @ latent
             down = self.install.expert_matrix(layer, int(expert), "down") @ relu2(up)
             accumulator += weight * down
@@ -313,27 +347,29 @@ class Forward:
         return out + shared
 
     def attention(self, layer: int, mixer: str, x: np.ndarray, position: int) -> np.ndarray:
-        meta = self.meta
         heads = self.attention_heads
         kv_heads = self.attention_kv_heads
         head_dim = self.attention_head_dim
         q = (self.install.matrix(f"{mixer}.q_proj.weight") @ x).reshape(heads, head_dim)
         k = (self.install.matrix(f"{mixer}.k_proj.weight") @ x).reshape(kv_heads, head_dim)
         v = (self.install.matrix(f"{mixer}.v_proj.weight") @ x).reshape(kv_heads, head_dim)
-        cache = self.kv.setdefault(layer, {
-            "k": np.zeros((1024, kv_heads, head_dim), dtype=np.float32),
-            "v": np.zeros((1024, kv_heads, head_dim), dtype=np.float32),
-        })
+        cache = self.kv.setdefault(
+            layer,
+            {
+                "k": np.zeros((1024, kv_heads, head_dim), dtype=np.float32),
+                "v": np.zeros((1024, kv_heads, head_dim), dtype=np.float32),
+            },
+        )
         cache["k"][position] = k
         cache["v"][position] = v
         scale = 1.0 / math.sqrt(head_dim)
         out = np.empty((heads, head_dim), dtype=np.float32)
         for h in range(heads):
             kv_head = h // (heads // kv_heads)
-            scores = np.einsum("d,td->t", q[h], cache["k"][:position + 1, kv_head]) * scale
+            scores = np.einsum("d,td->t", q[h], cache["k"][: position + 1, kv_head]) * scale
             scores = np.exp(scores - scores.max())
             scores /= scores.sum()
-            out[h] = np.einsum("t,td->d", scores, cache["v"][:position + 1, kv_head])
+            out[h] = np.einsum("t,td->d", scores, cache["v"][: position + 1, kv_head])
         return self.install.matrix(f"{mixer}.o_proj.weight") @ out.reshape(-1)
 
 
@@ -349,7 +385,8 @@ def main() -> int:
     logits = None
     for position, token in enumerate(tokens):
         logits = forward.step(token, position)
-    assert logits is not None
+    if logits is None:
+        raise SystemExit("no tokens")
     if args.logits_out:
         np.save(args.logits_out, logits.astype(np.float32))
         print(f"wrote {logits.size} logits to {args.logits_out}")

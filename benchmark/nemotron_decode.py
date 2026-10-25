@@ -32,10 +32,9 @@ PREFILL = re.compile(r"prompt (\d+) tokens: ([\d.]+)s \(([\d.]+) tok/s\)")
 
 def run_arm(binary: str, install: str, prompt: str, limit: int, gpu: bool) -> dict:
     command = [binary, "nemotrongraph" if gpu else "nemotron", install, prompt, str(limit)]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        raise SystemExit(
-            f"{command[1]} failed ({result.returncode}):\n{result.stderr[-4000:]}")
+        raise SystemExit(f"{command[1]} failed ({result.returncode}):\n{result.stderr[-4000:]}")
     decode = DECODE.search(result.stdout)
     prefill = PREFILL.search(result.stdout)
     if not decode:
@@ -75,14 +74,16 @@ def main() -> int:
     table = []
     for arm in arms:
         rates = [run["decode_tps"] for run in arm["runs"]]
-        table.append({
-            "quant": arm["quant"],
-            "backend": arm["runs"][0]["backend"],
-            "decode_tps": statistics.median(rates),
-            "runs": rates,
-            "prefill_seconds": arm["runs"][0]["prefill_seconds"],
-            "output": arm["runs"][0]["output"],
-        })
+        table.append(
+            {
+                "quant": arm["quant"],
+                "backend": arm["runs"][0]["backend"],
+                "decode_tps": statistics.median(rates),
+                "runs": rates,
+                "prefill_seconds": arm["runs"][0]["prefill_seconds"],
+                "output": arm["runs"][0]["output"],
+            }
+        )
 
     print("| Quant | Backend | decode tok/s (median) | runs | prefill s |")
     print("| --- | --- | ---: | --- | ---: |")
@@ -91,9 +92,12 @@ def main() -> int:
         prefill = f"{row['prefill_seconds']:.2f}" if row["prefill_seconds"] is not None else "NA"
         print(
             f"| {row['quant']} | {row['backend']} | **{row['decode_tps']:.4f}** "
-            f"| {values} | {prefill} |")
+            f"| {values} | {prefill} |"
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"prompt": args.prompt, "limit": args.limit, "table": table}, indent=1))
+    args.out.write_text(
+        json.dumps({"prompt": args.prompt, "limit": args.limit, "table": table}, indent=1)
+    )
     print(f"\nwrote {args.out}")
     return 0
 

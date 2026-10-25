@@ -16,7 +16,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -26,10 +25,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import prepare_nemotron as nemotron  # noqa: E402
 
-VERIFIER = Path(
-    os.environ.get(
-        "TINYTITAN_REPACK",
-        str(ROOT / ".build/release/TinyTitanRepack")))
+VERIFIER = Path(os.environ.get("TINYTITAN_REPACK", str(ROOT / ".build/release/TinyTitanRepack")))
 
 HIDDEN = 128
 LATENT = 64
@@ -58,12 +54,11 @@ def fake_headers() -> dict[str, dict]:
         "language_model.backbone.norm_f.weight": bf16((HIDDEN,)),
         # layer 0: mamba
         "language_model.backbone.layers.0.norm.weight": bf16((HIDDEN,)),
-        "language_model.backbone.layers.0.mixer.in_proj.weight": bf16(
-            (IN_PROJECTION, HIDDEN)),
+        "language_model.backbone.layers.0.mixer.in_proj.weight": bf16((IN_PROJECTION, HIDDEN)),
         "language_model.backbone.layers.0.mixer.out_proj.weight": bf16(
-            (HIDDEN, MAMBA_INTERMEDIATE)),
-        "language_model.backbone.layers.0.mixer.conv1d.weight": bf16(
-            (CONV_DIMENSION, 1, 4)),
+            (HIDDEN, MAMBA_INTERMEDIATE)
+        ),
+        "language_model.backbone.layers.0.mixer.conv1d.weight": bf16((CONV_DIMENSION, 1, 4)),
         "language_model.backbone.layers.0.mixer.conv1d.bias": bf16((CONV_DIMENSION,)),
         "language_model.backbone.layers.0.mixer.A_log": bf16((MAMBA_HEADS,)),
         "language_model.backbone.layers.0.mixer.D": bf16((MAMBA_HEADS,)),
@@ -76,7 +71,9 @@ def fake_headers() -> dict[str, dict]:
         "language_model.backbone.layers.1.mixer.gate.weight": bf16((EXPERTS, HIDDEN)),
         "language_model.backbone.layers.1.mixer.gate.e_score_correction_bias": f32((EXPERTS,)),
         "language_model.backbone.layers.1.mixer.shared_experts.up_proj.weight": bf16((64, HIDDEN)),
-        "language_model.backbone.layers.1.mixer.shared_experts.down_proj.weight": bf16((HIDDEN, 64)),
+        "language_model.backbone.layers.1.mixer.shared_experts.down_proj.weight": bf16(
+            (HIDDEN, 64)
+        ),
         # layer 2: attention
         "language_model.backbone.layers.2.norm.weight": bf16((HIDDEN,)),
         "language_model.backbone.layers.2.mixer.q_proj.weight": bf16((HIDDEN, HIDDEN)),
@@ -86,9 +83,11 @@ def fake_headers() -> dict[str, dict]:
     }
     for expert in range(EXPERTS):
         headers[f"language_model.backbone.layers.1.mixer.experts.{expert}.up_proj.weight"] = bf16(
-            (EXPERT_WIDTH, LATENT))
+            (EXPERT_WIDTH, LATENT)
+        )
         headers[f"language_model.backbone.layers.1.mixer.experts.{expert}.down_proj.weight"] = bf16(
-            (LATENT, EXPERT_WIDTH))
+            (LATENT, EXPERT_WIDTH)
+        )
     return headers
 
 
@@ -117,8 +116,12 @@ def fake_text() -> dict:
         "layers_block_type": ["mamba", "moe", "attention"],
         "block_configs": [
             {"block_type": "mamba"},
-            {"block_type": "moe", "moe_intermediate_size": EXPERT_WIDTH,
-             "n_routed_experts": EXPERTS, "num_experts_per_tok": 2},
+            {
+                "block_type": "moe",
+                "moe_intermediate_size": EXPERT_WIDTH,
+                "n_routed_experts": EXPERTS,
+                "num_experts_per_tok": 2,
+            },
             {"block_type": "attention"},
         ],
     }
@@ -138,9 +141,7 @@ def fill(install: nemotron.Install, headers: dict[str, dict], bits: int) -> None
     for layer, plan in install.layer_plans.items():
         for expert in range(plan.experts):
             for tensor in plan.tensors:
-                install.write_expert(
-                    layer, expert, tensor.role,
-                    rng.normal(0, 0.02, tensor.shape))
+                install.write_expert(layer, expert, tensor.role, rng.normal(0, 0.02, tensor.shape))
 
 
 def build(directory: Path, bits: int) -> Path:
@@ -178,12 +179,16 @@ def main() -> int:
         manifest = json.loads((directory / "manifest.json").read_text())
         result = subprocess.run(
             [str(VERIFIER), "--verify-install", "--input-ssdai", str(directory)],
-            capture_output=True, text=True)
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         status = "ok" if result.returncode == 0 else "FAILED"
         print(
             f"{bits}-bit: {status}: {manifest['numLayers']} layers, "
             f"{manifest['expertsPerLayer']} experts declared, "
-            f"stride {manifest['expertStride']} -> {directory}")
+            f"stride {manifest['expertStride']} -> {directory}"
+        )
         if result.returncode != 0:
             failures += 1
             print(result.stdout[-4000:])
