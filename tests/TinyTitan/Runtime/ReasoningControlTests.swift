@@ -18,7 +18,7 @@ struct ReasoningControlTests {
                     defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         #expect(
             ModelFamily.k2Horizon.reasoningControl
-                == .thinkingWithEffortLevels(
+                == .effortOnly(
                     defaultEffort: .high, supported: [.low, .medium, .high]))
     }
 
@@ -97,7 +97,7 @@ struct ReasoningControlTests {
                 == [.off, .low, .medium, .xhigh])
         #expect(
             ModelFamily.k2Horizon.supportedReasoningLevels
-                == [.off, .low, .medium, .high])
+                == [.low, .medium, .high])
         #expect(CPUModelFamily.qwen35Dense.supportedReasoningLevels == [.off, .on])
     }
 
@@ -126,6 +126,15 @@ struct ReasoningControlTests {
                     thinkingMode: .on, effort: effort)
             }
         }
+        // K2 has no thinking-off prompt at all, even without an effort.
+        #expect(
+            throws: ModelReasoningControlError.thinkingRequired(family: .k2Horizon)
+        ) {
+            try ModelFamily.k2Horizon.validateReasoning(
+                thinkingMode: .off, effort: nil)
+        }
+        #expect(!ModelFamily.k2Horizon.supportsThinkingOff)
+        #expect(ModelFamily.qwen38flash.supportsThinkingOff)
     }
 
     @Test("Levels map to the thinking switch and effort")

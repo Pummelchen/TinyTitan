@@ -19,11 +19,19 @@ public enum ModelReasoningControl: Sendable, Equatable {
     case thinkingWithEffortLevels(
         defaultEffort: ModelReasoningEffort,
         supported: [ModelReasoningEffort])
+    /// An effort template with no closed form. K2's generation prompt always
+    /// opens a think tag and selects it from the effort (think / think_fast /
+    /// think_faster), so there is no thinking-off prompt to offer: `.off` is
+    /// not in `supported` and validating it is an error.
+    case effortOnly(
+        defaultEffort: ModelReasoningEffort,
+        supported: [ModelReasoningEffort])
 }
 
 public enum ModelReasoningControlError: Error, Equatable, CustomStringConvertible {
     case effortUnsupported(family: ModelFamily, effort: ModelReasoningEffort)
     case effortRequiresThinkingOn(effort: ModelReasoningEffort)
+    case thinkingRequired(family: ModelFamily)
 
     public var description: String {
         switch self {
@@ -33,6 +41,9 @@ public enum ModelReasoningControlError: Error, Equatable, CustomStringConvertibl
         case .effortRequiresThinkingOn(let effort):
             return "reasoning effort \(effort.rawValue) requires thinking on; "
                 + "the chat template ignores effort while thinking is off"
+        case .thinkingRequired(let family):
+            return "the \(family.rawValue) chat template has no thinking-off "
+                + "mode: its generation prompt always opens a think block"
         }
     }
 }
@@ -46,9 +57,17 @@ extension ModelFamily {
             return .thinkingWithEffortLevels(
                 defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])
         case .k2Horizon:
-            return .thinkingWithEffortLevels(
+            return .effortOnly(
                 defaultEffort: .high, supported: [.low, .medium, .high])
         }
+    }
+
+    /// Whether the template can render a turn that does not think. K2 cannot:
+    /// its generation prompt always opens a think block, so a configurator
+    /// must offer an effort rather than an off switch.
+    public var supportsThinkingOff: Bool {
+        if case .effortOnly = reasoningControl { return false }
+        return true
     }
 
     /// The effort a template applies for this family under the given
@@ -58,12 +77,13 @@ extension ModelFamily {
         thinkingMode: ModelThinkingMode,
         effort: ModelReasoningEffort?
     ) -> ModelReasoningEffort? {
-        guard thinkingMode.isEnabled,
-            case .thinkingWithEffortLevels(let defaultEffort, _) = reasoningControl
-        else {
+        switch reasoningControl {
+        case .binaryThinking:
             return nil
+        case .thinkingWithEffortLevels(let defaultEffort, _),
+            .effortOnly(let defaultEffort, _):
+            return thinkingMode.isEnabled ? effort ?? defaultEffort : nil
         }
-        return effort ?? defaultEffort
     }
 
     /// Rejects a reasoning-effort request this family's template does not
@@ -73,17 +93,27 @@ extension ModelFamily {
         thinkingMode: ModelThinkingMode,
         effort: ModelReasoningEffort?
     ) throws {
-        guard let effort else { return }
         switch reasoningControl {
         case .binaryThinking:
-            throw ModelReasoningControlError.effortUnsupported(
-                family: self, effort: effort)
+            if let effort {
+                throw ModelReasoningControlError.effortUnsupported(
+                    family: self, effort: effort)
+            }
         case .thinkingWithEffortLevels(_, let supported):
+            guard let effort else { return }
             guard thinkingMode.isEnabled else {
                 throw ModelReasoningControlError.effortRequiresThinkingOn(
                     effort: effort)
             }
             guard supported.contains(effort) else {
+                throw ModelReasoningControlError.effortUnsupported(
+                    family: self, effort: effort)
+            }
+        case .effortOnly(_, let supported):
+            guard thinkingMode.isEnabled else {
+                throw ModelReasoningControlError.thinkingRequired(family: self)
+            }
+            if let effort, !supported.contains(effort) {
                 throw ModelReasoningControlError.effortUnsupported(
                     family: self, effort: effort)
             }
@@ -222,6 +252,8 @@ extension ModelReasoningControl {
             return [.off, .on]
         case .thinkingWithEffortLevels(_, let supported):
             return [.off] + supported.map(ReasoningLevel.init(effort:))
+        case .effortOnly(_, let supported):
+            return supported.map(ReasoningLevel.init(effort:))
         }
     }
 
@@ -233,7 +265,8 @@ extension ModelReasoningControl {
         switch self {
         case .binaryThinking:
             return .on
-        case .thinkingWithEffortLevels(let defaultEffort, _):
+        case .thinkingWithEffortLevels(let defaultEffort, _),
+            .effortOnly(let defaultEffort, _):
             return ReasoningLevel(effort: defaultEffort)
         }
     }

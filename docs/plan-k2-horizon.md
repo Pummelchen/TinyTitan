@@ -99,7 +99,10 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   low|medium|xhigh. `ModelReasoningEffort` gained `high`, and each
   `ModelReasoningControl` now carries the subset its own template accepts, so
   a request for the other family's level is refused instead of reaching a
-  template that raises. Sampling follows the model card: temperature 1.0,
+  template that raises. K2 is the effort-only case: its generation prompt
+  always opens a think block (`<ifm|think>`, `_fast` or `_faster` by effort), so
+  `supportsThinkingOff` is false and a thinking-off request is refused rather
+  than silently thinking. Sampling follows the model card: temperature 1.0,
   top-p 0.95, top-k 20.
 - **Tool-call parsing** — `K2ToolCallParser` reads the checkpoint's
   `<ifm|tool_calls>` wrapper in all three formats its template offers (`json`,

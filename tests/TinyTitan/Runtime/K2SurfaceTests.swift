@@ -33,5 +33,8 @@ struct K2SurfaceTests {
         #expect(settings?.thinking == .on)
         #expect(settings?.effort == .high)
         #expect(ModelFamily.k2Horizon.reasoningControl.levelWhenOn == .high)
+        #expect(!ModelFamily.k2Horizon.supportsThinkingOff)
+        #expect(
+            ModelFamily.k2Horizon.supportedReasoningLevels == [.low, .medium, .high])
     }
 }
