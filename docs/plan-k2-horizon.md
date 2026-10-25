@@ -157,6 +157,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
   levers are I/O overlap and fewer command-buffer round trips, not more kernel
   arithmetic. Both widths still produce the same tokens.
+- **Startup re-hash** — the first token used to pay a full SHA-256 over every
+  expert layer as each layer opened: 15 GB of hashing, 8.2 s of the 8.3 s
+  prefill. `k2gpu` now validates the installer's receipt first (it is bound to
+  the manifest hash, the file list and the directory path) and falls back to
+  the full hash, reported in the output, when the receipt is missing, moved or
+  stale; `TINYTITAN_K2_FULL_VERIFY=1` forces the old path. The two receipts
+  under `models/` were re-issued in place with `TinyTitanRepack
+  --verify-install` because they had been written at the `/tmp` conversion
+  path. 4-bit 5-token prompt 8.14 s → 2.28 s (process wall 14.7 s → 9.7 s);
+  8-bit 17.2 s → 4.7 s, same tokens.
 - **Two command buffers per sparse layer** — the MoVA value pass used to read
   its selected ids back to the CPU, which forced the router and the values into
   separate buffers. `k2_mova_values_routed` resolves the ids from the GPU's

@@ -158,9 +158,37 @@ extension TinyTitanBench {
         let slots =
             Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? "")
             ?? defaultSlots
-        let model = try Model.load(
-            directoryURL: install, device: context.device, expecting: config,
-            streamingMode: .pread(slotCount: slots))
+        // Full SHA-256 over the payload is ~7.6 s of the first token's 8 s:
+        // the per-layer opens re-hash 15 GB before any expert is read. The
+        // receipt the installer writes is a complete alternative -- it is
+        // bound to the manifest hash, the file list and the directory path --
+        // so the fast path validates it first and falls back to the full hash
+        // (loudly) when it is missing, moved or stale. An invalid receipt
+        // still ends in the full verification, never in an unchecked load.
+        let forceFullVerify =
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_FULL_VERIFY"] == "1"
+        let model: Model
+        let integrityNote: String
+        if forceFullVerify {
+            model = try Model.load(
+                directoryURL: install, device: context.device, expecting: config,
+                streamingMode: .pread(slotCount: slots))
+            integrityNote = "integrity: full SHA-256 (TINYTITAN_K2_FULL_VERIFY=1)"
+        } else {
+            do {
+                model = try Model.load(
+                    directoryURL: install, device: context.device, expecting: config,
+                    streamingMode: .pread(slotCount: slots),
+                    integrityPolicy: .sizeCheckTrustedReceipt)
+                integrityNote = "integrity: trusted receipt"
+            } catch let error as ModelError {
+                guard case .trustedReceiptInvalid(let detail) = error else { throw error }
+                model = try Model.load(
+                    directoryURL: install, device: context.device, expecting: config,
+                    streamingMode: .pread(slotCount: slots))
+                integrityNote = "integrity: full SHA-256 (receipt rejected: \(detail))"
+            }
+        }
         let effort = ModelReasoningEffort.resolved() ?? .high
         let tokenizer = try await GFTokenizer.load(
             forModelDirectory: install, thinkingMode: .on,
@@ -210,6 +238,7 @@ extension TinyTitanBench {
             position += 1
         }
         let decode = Date().timeIntervalSince(decodeStart)
+        print(integrityNote)
         print(
             "prompt \(ids.count) tokens: \(String(format: "%.2f", prefill))s "
                 + "(\(String(format: "%.2f", Double(ids.count) / prefill)) tok/s)")
