@@ -18,8 +18,19 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   product. The shape guard is strict: a row must have a whole number of
   lane-group iterations (for 4-bit, `columns/64` divisible by 4) and at most
   32 of them — a half-covered row would otherwise dispatch and write nothing.
-- **Next**: wire this into batched dense prefill (layers 0–2 on the toy),
-  then batched attention.
+- **Batched dense layer** (done, not yet called) — `K2DenseBatch` runs one
+  dense layer over a chunk: the grouped norm (the kernel already takes a token
+  count), the four attention and three MLP projections through the GEMM with a
+  per-token GEMV fallback for shapes that do not tile, RoPE per token (its
+  scalar position cannot advance across a chunk), causal attention per token
+  with buffer offsets, and flat elementwise stages over the chunk. One blit
+  writes the chunk's K/V rows into consecutive cache positions.
+  `K2DenseBatchTests.chunkMatchesTheTokenPathAcrossTwoChunks` compares it with
+  `K2DenseLayer` for positions 0–3 and 4–7 on the sparse toy and they agree.
+- **Next**: give the graph a chunked prefill entry that uses `K2DenseBatch` for
+  layers 0-2 while the sparse layers still run per token (their caches are the
+  same per-layer buffers, so the chunk path must write those, not a copy), then
+  batched attention.
 
 ## What exists today
 
