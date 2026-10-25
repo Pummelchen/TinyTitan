@@ -54,7 +54,7 @@ BASE = f"https://huggingface.co/{REPO}/resolve/{REVISION}"
 GROUP_SIZE = 64
 PAGE = 16_384
 RETRY = ("--retry", "5", "--retry-delay", "2", "--retry-all-errors")
-CHUNK = 64 * 1024 * 1024
+CHUNK = 8 * 1024 * 1024
 
 # The production geometry this converter was written against. Anything that
 # disagrees is a different model wearing the same name, and refusing it here is
@@ -143,89 +143,131 @@ def remote_size(shard: str) -> int:
     return _SIZE_CACHE[shard]
 
 
-def download(shard: str, work: Path, log=print, connections: int = 6) -> Path:
-    """Fetch one shard with parallel ranged requests, resuming chunk by chunk.
+_SIGNED: dict[str, tuple[str, float]] = {}
 
-    The host's link is throttled per connection, so one curl gets ~1.4 MB/s and
-    six get ~4.3 MB/s on the same shard. A chunk is recorded as done only after
-    its bytes are written, so a killed run resumes at the first missing chunk
-    rather than trusting a pre-truncated file's length.
+
+def signed_url(shard: str) -> str:
+    """The CDN's signed URL for a shard, cached for a little under its expiry.
+
+    Range requests through `huggingface.co/.../resolve/...` pay a 302 per
+    connection and were throttled to tens of KB/s while this host had several
+    checkpoints in flight; the same ranges against the signed CDN URL reached
+    ~2 MB/s with sixteen connections. The URL expires, so a stale entry is
+    dropped and re-resolved rather than retried until the shard gives up.
+    """
+    cached = _SIGNED.get(shard)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    result = subprocess.run(
+        ["curl", "-sfIL", "--http1.1", "--max-time", "60", *RETRY, f"{BASE}/{shard}"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"cannot resolve {shard}")
+    for line in reversed(result.stdout.decode(errors="replace").splitlines()):
+        if line.lower().startswith("location:"):
+            url = line.split(":", 1)[1].strip()
+            _SIGNED[shard] = (url, time.monotonic() + 1800)
+            return url
+    raise SystemExit(f"{shard}: no signed URL")
+
+
+def download(shard: str, work: Path, log=print, connections: int = 32) -> Path:
+    """Fetch one shard as 8 MB part files, resuming each at its own byte.
+
+    A part file is written by curl straight to disk (no captured stdout), so a
+    timed-out range keeps every byte it fetched and the next attempt appends
+    from there. Once every part is exactly its range's length they are
+    concatenated into the shard, which is what the converter reads.
     """
     destination = work / shard
     expected = remote_size(shard)
-    state_path = work / f"{shard}.chunks.json"
-    completed: set[int] = set()
-    if state_path.exists():
-        completed = {int(value) for value in json.loads(state_path.read_text())}
-    fd = os.open(destination, os.O_RDWR | os.O_CREAT, 0o644)
-    os.ftruncate(fd, expected)
+    parts = work / f"{shard}.parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    spans = [(offset, min(offset + CHUNK, expected) - 1) for offset in range(0, expected, CHUNK)]
     started = time.monotonic()
-    done = sum(min(CHUNK, expected - offset) for offset in completed)
+    done = 0
     lock = __import__("threading").Lock()
 
     def fetch(offset: int, end: int) -> None:
-        cursor = offset
-        while cursor <= end:
-            result = None
-            for attempt in range(1, 6):
+        nonlocal done
+        length = end - offset + 1
+        part = parts / f"{offset}"
+        stalls = 0
+        while True:
+            have = part.stat().st_size if part.exists() else 0
+            if have >= length:
+                break
+            with open(part, "ab") as out:
                 result = subprocess.run(
                     [
                         "curl",
                         "-sfL",
                         "--http1.1",
                         "--max-time",
-                        "300",
-                        "--speed-limit",
-                        "32768",
-                        "--speed-time",
-                        "30",
-                        *RETRY,
+                        "600",
+                        "--retry",
+                        "0",
                         "-r",
-                        f"{cursor}-{end}",
-                        f"{BASE}/{shard}",
+                        f"{offset + have}-{end}",
+                        signed_url(shard),
                     ],
-                    capture_output=True,
+                    stdout=out,
+                    stderr=subprocess.PIPE,
                     check=False,
                 )
-                if result.returncode == 0 and result.stdout:
-                    break
-                # A stalled CDN connection is routine when several checkpoints
-                # are in flight; back off and resume at the same byte rather
-                # than aborting a 150 GB run.
-                time.sleep(min(30, 5 * attempt))
-            if result is None or result.returncode != 0 or not result.stdout:
-                raise SystemExit(
-                    f"cannot fetch {shard} bytes {cursor}-{end}: "
-                    f"{(result.stderr.decode(errors='replace').strip()) if result else 'no response'}"
+            after = part.stat().st_size if part.exists() else 0
+            if os.environ.get("TINYTITAN_NEMOTRON_DEBUG"):
+                log(
+                    f"      chunk {offset}: {after}/{length} "
+                    f"rc {result.returncode} err {result.stderr[:100]!r}"
                 )
-            pwrite_all(fd, result.stdout, cursor)
-            cursor += len(result.stdout)
-        with lock:
-            completed.add(offset)
-            done += end - offset + 1
-            state_path.write_text(json.dumps(sorted(completed)))
-            elapsed = time.monotonic() - started
-            log(
-                f"    {shard}: {done / 1e9:.2f}/{expected / 1e9:.2f} GB at "
-                f"{done / 1e6 / max(elapsed, 1e-6):.1f} MB/s "
-                f"({len(completed)}/{len(spans)} chunks)"
-            )
+            if after == have:
+                _SIGNED.pop(shard, None)
+                stalls += 1
+                if stalls >= 5:
+                    raise SystemExit(
+                        f"cannot fetch {shard} bytes {offset + have}-{end}: "
+                        f"{result.stderr.decode(errors='replace').strip()}"
+                    )
+                time.sleep(min(30, 5 * stalls))
+            else:
+                stalls = 0
+                with lock:
+                    done += after - have
+                    elapsed = time.monotonic() - started
+                    log(
+                        f"    {shard}: {done / 1e9:.2f}/{expected / 1e9:.2f} GB at "
+                        f"{done / 1e6 / max(elapsed, 1e-6):.1f} MB/s"
+                    )
 
-    spans = [(offset, min(offset + CHUNK, expected) - 1) for offset in range(0, expected, CHUNK)]
-    pending = [(start, end) for start, end in spans if start not in completed]
     try:
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=connections) as pool:
-            futures = [pool.submit(fetch, start, end) for start, end in pending]
+            futures = [pool.submit(fetch, start, end) for start, end in spans]
             for future in futures:
                 future.result()
+        # Every part is complete; assemble the shard the converter opens.
+        with open(destination, "wb") as out:
+            for offset, _ in spans:
+                with open(parts / f"{offset}", "rb") as part:
+                    while True:
+                        block = part.read(64 * 1024 * 1024)
+                        if not block:
+                            break
+                        out.write(block)
     finally:
-        os.fsync(fd)
-        os.close(fd)
+        pass
+    for offset, _ in spans:
+        (parts / f"{offset}").unlink(missing_ok=True)
+    try:
+        parts.rmdir()
+    except OSError:
+        pass
     if destination.stat().st_size != expected:
         raise SystemExit(f"{shard}: size {destination.stat().st_size} != expected {expected}")
-    state_path.unlink(missing_ok=True)
     elapsed = time.monotonic() - started
     log(
         f"    fetched {shard} ({expected / 1e9:.2f} GB, "
