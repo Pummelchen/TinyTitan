@@ -1,9 +1,25 @@
 # Plan: K2-Horizon runner phase (batched prefill, ANE)
 
-Status: **scoped, not started.** The install, the graph, the runtime and
-every front end exist and are gated; this document is the handoff for the one
-phase that is not: prefill is still one token at a time, and the family has no
-ANE sidecar.
+Status: **phase 1 started.** The install, the graph, the runtime and every
+front end exist and are gated. Phase 1's first kernel — the affine GEMM that
+holds a weight row in registers across a chunk of tokens — is implemented and
+tested (`AffineQuantGEMM`, `AffineQuantGEMMTests`); nothing calls it yet. The
+data flow below is unchanged; prefill is still one token at a time until the
+dense-layer wiring exists, and the family has no ANE sidecar.
+
+## Progress
+
+- **Affine GEMM** (done) — `affine_quant_gemm_simd` in
+  `Metal/Quant/dequant_affine.metal`, bound by `Kernels/Quant/AffineQuantGEMM`.
+  One simdgroup per row, the row's words/scales/biases in registers, a token
+  loop, output token-major `[tokens][rows]`. 4- and 8-bit; the lane mapping is
+  the coalesced GEMV's, so a chunk of one token equals the GEMV result and the
+  tests compare a chunk against N GEMV calls and against a dequantized dot
+  product. The shape guard is strict: a row must have a whole number of
+  lane-group iterations (for 4-bit, `columns/64` divisible by 4) and at most
+  32 of them — a half-covered row would otherwise dispatch and write nothing.
+- **Next**: wire this into batched dense prefill (layers 0–2 on the toy),
+  then batched attention.
 
 ## What exists today
 
@@ -131,7 +147,8 @@ catalogue needs cross-family scheduling. Catalogue residency already works
 - `swift test` (2,000+ tests; the K2 toy suites are the numeric contract).
 - `tools/lint.sh` (swift-format, lengths, docs, shellcheck, JS, python).
 - `tools/golden-baseline.sh --check k2-4 k2-8` on a machine with the installs.
-- `tools/k2-serve-smoke.sh` (seven checks).
+- `tools/k2-serve-smoke.sh` (models, chat, SSE, Responses, tool call, stop
+  string, context bound).
 - `TinyTitanCLI` raw and chat runs against the 4-bit install.
 
 ## First concrete steps
