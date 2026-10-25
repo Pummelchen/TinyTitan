@@ -141,54 +141,24 @@ extension Model {
         let checks = RuntimeSchemaChecks(residentIndex: residentIndex, quant: quant)
 
         switch config.family {
+        case .k2Horizon:
+            // The identity reader and the layout validator know this family;
+            // the GPU graph does not. Refusing here keeps a K2 payload from
+            // reaching the Qwen runner, which would read its `gate_proj` as a
+            // packed q/gate and its MoVA layers as a `v_proj` model -- fluent
+            // nonsense rather than an error.
+            throw ModelError.unsupportedArchitecture(
+                detail: "K2-Horizon's GPU graph and kernels are not implemented yet; "
+                    + "the install format is supported, serving it is not. "
+                    + "See docs/plan-k2-horizon.md.")
         case .qwen35Dense:
             try Self.validateDenseSchema(
                 checks: checks, config: config,
                 quant: quant, overrides: manifest.quantOverrides)
         case .qwen38flash:
-            // Embedding and head are 8-bit in this checkpoint while the body
-            // is 4-bit, so both are validated against the embedding slot the
-            // manifest declares rather than an assumed width.
-            try checks.requireAffine(
-                "model.language_model.embed_tokens.weight",
-                rows: config.vocabSize,
-                columns: config.hiddenSize,
-                slot: quant.embedding)
-            // `lm_head` sits at the archive root in this family, not under the
-            // language-model prefix.
-            try checks.requireAffine(
-                "lm_head.weight",
-                rows: config.vocabSize,
-                columns: config.hiddenSize,
-                slot: quant.embedding)
-            // The hyper-connection residual is the family's defining feature
-            // and the one thing whose absence would let a mis-repacked payload
-            // load and then compute a plain-residual model. Check the
-            // model-level mixer and one layer's worth of both sublayer gates.
-            let hcDim = config.hiddenSize * config.hyperConnections.count
-            try checks.requireBF16(
-                "model.language_model.hyper_connection_mixer.hc_norm",
-                count: hcDim)
-            for layer in 0..<config.numLayers {
-                try checks.requireBF16(
-                    "model.language_model.layers.\(layer)."
-                        + "attn_hyper_connection.hc_norm", count: hcDim)
-                try checks.requireBF16(
-                    "model.language_model.layers.\(layer)."
-                        + "mlp_hyper_connection.hc_norm", count: hcDim)
-            }
-            // The PLE block exists on exactly the configured layers, and its
-            // constants and table are passthrough files rather than tensors --
-            // their presence is the manifest's business, checked below.
-            for layer in config.ple.layerIndices {
-                try checks.requireBF16(
-                    "model.language_model.layers.\(layer).ple.conv1d",
-                    count: hcDim * config.ple.convKernelSize)
-            }
-            guard manifest.files[Qwen38FlashTensors.pleConstantsFile] != nil else {
-                throw ModelError.missingFile(
-                    name: Qwen38FlashTensors.pleConstantsFile)
-            }
+            try Self.validateQwen38Schema(
+                checks: checks, config: config, quant: quant,
+                manifest: manifest)
         case .qwen38flashMTP:
             try Self.validateQwen38DraftSchema(
                 checks: checks, quant: quant,
@@ -233,6 +203,62 @@ extension Model {
             checks: checks, layout: layout, config: config,
             quant: quant, overrides: manifest.quantOverrides)
 
+    }
+
+    /// Qwen3.8-Flash-Next's own tensors: the 8-bit embedding/head at their
+    /// family names, the hyper-connection gates and the PLE block.
+    ///
+    /// Split out of `validateRuntimeSchema` under the 120-line gate; it is the
+    /// one family branch large enough to be a read of its own.
+    private static func validateQwen38Schema(
+        checks: RuntimeSchemaChecks,
+        config: ArchConfig,
+        quant: ManifestQuant,
+        manifest: Manifest
+    ) throws {
+        // Embedding and head are 8-bit in this checkpoint while the body is
+        // 4-bit, so both are validated against the embedding slot the manifest
+        // declares rather than an assumed width.
+        try checks.requireAffine(
+            "model.language_model.embed_tokens.weight",
+            rows: config.vocabSize,
+            columns: config.hiddenSize,
+            slot: quant.embedding)
+        // `lm_head` sits at the archive root in this family, not under the
+        // language-model prefix.
+        try checks.requireAffine(
+            "lm_head.weight",
+            rows: config.vocabSize,
+            columns: config.hiddenSize,
+            slot: quant.embedding)
+        // The hyper-connection residual is the family's defining feature and
+        // the one thing whose absence would let a mis-repacked payload load and
+        // then compute a plain-residual model. Check the model-level mixer and
+        // one layer's worth of both sublayer gates.
+        let hcDim = config.hiddenSize * config.hyperConnections.count
+        try checks.requireBF16(
+            "model.language_model.hyper_connection_mixer.hc_norm",
+            count: hcDim)
+        for layer in 0..<config.numLayers {
+            try checks.requireBF16(
+                "model.language_model.layers.\(layer)."
+                    + "attn_hyper_connection.hc_norm", count: hcDim)
+            try checks.requireBF16(
+                "model.language_model.layers.\(layer)."
+                    + "mlp_hyper_connection.hc_norm", count: hcDim)
+        }
+        // The PLE block exists on exactly the configured layers, and its
+        // constants and table are passthrough files rather than tensors -- their
+        // presence is the manifest's business, checked below.
+        for layer in config.ple.layerIndices {
+            try checks.requireBF16(
+                "model.language_model.layers.\(layer).ple.conv1d",
+                count: hcDim * config.ple.convKernelSize)
+        }
+        guard manifest.files[Qwen38FlashTensors.pleConstantsFile] != nil else {
+            throw ModelError.missingFile(
+                name: Qwen38FlashTensors.pleConstantsFile)
+        }
     }
 
     /// The dense Qwen 3.5 family's own tensors.

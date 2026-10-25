@@ -66,6 +66,7 @@ package enum ServerModelIdentity {
         // Reached only for an install whose manifest carries no model id; the
         // dense converter always writes one.
         case .qwen35Dense: return "qwen3.5-dense"
+        case .k2Horizon: return "k2-horizon"
         }
     }
 }

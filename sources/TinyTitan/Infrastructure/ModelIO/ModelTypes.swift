@@ -27,6 +27,18 @@ public enum ModelFamily: String, Sendable, Equatable {
     /// affine MoE-shaped tensors -- before the CPU engine saw it. The raw value
     /// matches the `model_type` the converter writes.
     case qwen35Dense = "qwen3_5_dense"
+    /// IFM K2-Horizon-MoVA-36B-A4B (`model_type: k2_horizon`).
+    ///
+    /// 48 layers, two expert systems per layer -- 100 routed SwiGLU experts at
+    /// top-8 and 64 MoVA value experts at top-4 inside attention -- a two-group
+    /// RMS norm, a softplus attention gate and a sigmoid router with a
+    /// selection bias and a 2.5 scale. Layers 0-2 are dense.
+    ///
+    /// The install format and the loader's identity reader know this family;
+    /// the GPU graph and kernels do not exist yet (see
+    /// `docs/plan-k2-horizon.md`), so `Model.load` refuses it by name at schema
+    /// validation rather than running a K2 payload through the Qwen graph.
+    case k2Horizon = "k2_horizon"
 }
 
 /// Compile-time architecture baseline. `manifest.json -> arch` must match this
@@ -95,6 +107,24 @@ public struct ArchConfig: Sendable, Equatable {
     /// per-slot value; this is the architecture-level default for planning.
     public let quantGroupSize: Int
 
+    // K2-Horizon (MoVA) extensions. The defaults describe every Qwen family,
+    // so adding them changes no existing architecture contract.
+    /// RMS-norm groups inside one hidden width: each group normalizes over
+    /// `hiddenSize / normGroups` elements and scales with its own weight slice.
+    /// 1 is the ordinary whole-vector RMS norm.
+    public let normGroups: Int
+    /// The function applied to the attention output gate, when
+    /// `attnOutputGate` is true.
+    public let attentionGate: AttentionGateFunction
+    /// The routed-expert router carries a bias used only for selection.
+    public let routerHasBias: Bool
+    /// Multiplier on the renormalized top-k routing weights.
+    public let routerScaling: Double
+    /// Layers whose MLP is dense (no routed experts). Empty for a uniform MoE.
+    public let denseLayerIndices: [Int]
+    /// MoVA value-expert attention. `.none` for every non-K2 family.
+    public let mova: MoVAConfig
+
     public init(
         hiddenSize: Int,
         intermediateSize: Int,
@@ -130,7 +160,13 @@ public struct ArchConfig: Sendable, Equatable {
         sparseIndexer: SparseIndexerConfig = .none,
         ple: PLEConfig = .none,
         routerNormTopK: Bool = false,
-        quantGroupSize: Int = 64
+        quantGroupSize: Int = 64,
+        normGroups: Int = 1,
+        attentionGate: AttentionGateFunction = .sigmoid,
+        routerHasBias: Bool = false,
+        routerScaling: Double = 1,
+        denseLayerIndices: [Int] = [],
+        mova: MoVAConfig = .none
     ) {
         self.hiddenSize = hiddenSize
         self.intermediateSize = intermediateSize
@@ -167,6 +203,12 @@ public struct ArchConfig: Sendable, Equatable {
         self.ple = ple
         self.routerNormTopK = routerNormTopK
         self.quantGroupSize = quantGroupSize
+        self.normGroups = normGroups
+        self.attentionGate = attentionGate
+        self.routerHasBias = routerHasBias
+        self.routerScaling = routerScaling
+        self.denseLayerIndices = denseLayerIndices
+        self.mova = mova
     }
 
     /// Canonical Qwen3.6-35B-A3B baseline: a 40-layer hybrid of 30

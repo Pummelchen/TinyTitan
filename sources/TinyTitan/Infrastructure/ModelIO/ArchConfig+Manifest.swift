@@ -19,6 +19,7 @@ import Foundation
 public enum ArchResolutionError: Error, CustomStringConvertible {
     case unsupportedFamily(String)
     case manifestOmitsField(family: String, field: String)
+    case manifestDeclaresInvalidValue(family: String, field: String, value: String)
 
     public var description: String {
         switch self {
@@ -28,6 +29,9 @@ public enum ArchResolutionError: Error, CustomStringConvertible {
             return "the \(family) manifest does not declare \(field); this family's "
                 + "architecture is read from the manifest, and that field cannot be "
                 + "assumed without risking a silently wrong model"
+        case .manifestDeclaresInvalidValue(let family, let field, let value):
+            return "the \(family) manifest declares \(field)=\(value), which this "
+                + "runtime does not implement"
         }
     }
 }
@@ -41,9 +45,10 @@ extension ArchConfig {
         directoryURL: URL
     ) throws -> ArchConfig {
         if let preset = knownArchitectures[family] { return preset }
-        // Only the dense family is known to be readable this way. Anything else
-        // keeps the previous behaviour: refused by name.
-        guard family == .qwen35Dense else {
+        // The families without a preset whose architecture is fully declared by
+        // the manifest. Anything else keeps the previous behaviour: refused by
+        // name, because there is no preset to load it at.
+        guard family == .qwen35Dense || family == .k2Horizon else {
             throw ArchResolutionError.unsupportedFamily(family.rawValue)
         }
         // `read`, not `load`: this is precisely the case `load` cannot serve --
@@ -75,6 +80,60 @@ extension ArchConfig {
             // states `sigmoid`. Declared here rather than defaulted from the
             // other one, which is the point the config type makes.
             outputGate: .silu)
+        // K2's shape. Every one of these is a convention the kernels depend on
+        // structurally, so K2 requires them; the dense family reads whatever it
+        // declares and defaults the rest, which keeps its manifests (whose
+        // extension keys predate these) loading unchanged.
+        let isK2 = family == .k2Horizon
+        func extensionValue<T>(
+            _ value: T?, _ field: String, default fallback: @autoclosure () -> T
+        ) throws -> T {
+            if isK2 { return try required(value, field) }
+            return value ?? fallback()
+        }
+        let gateName = try extensionValue(
+            arch.attentionGate, "attentionGate", default: "sigmoid")
+        guard let attentionGate = AttentionGateFunction(rawValue: gateName) else {
+            throw ArchResolutionError.manifestDeclaresInvalidValue(
+                family: family.rawValue, field: "attentionGate", value: gateName)
+        }
+        let normGroups = try extensionValue(
+            arch.normGroups, "normGroups", default: 1)
+        guard normGroups > 0, arch.hiddenSize % normGroups == 0 else {
+            throw ArchResolutionError.manifestDeclaresInvalidValue(
+                family: family.rawValue, field: "normGroups",
+                value: "\(normGroups) (hiddenSize \(arch.hiddenSize))")
+        }
+        let denseLayerIndices = try extensionValue(
+            arch.denseLayerIndices, "denseLayerIndices", default: [])
+        guard denseLayerIndices.allSatisfy({ $0 >= 0 && $0 < arch.numLayers }),
+            Set(denseLayerIndices).count == denseLayerIndices.count,
+            denseLayerIndices == denseLayerIndices.sorted()
+        else {
+            throw ArchResolutionError.manifestDeclaresInvalidValue(
+                family: family.rawValue, field: "denseLayerIndices",
+                value: "\(denseLayerIndices)")
+        }
+        let mova = MoVAConfig(
+            numExperts: try extensionValue(
+                arch.movaNumExperts, "movaNumExperts", default: 0),
+            topKExperts: try extensionValue(
+                arch.movaTopKExperts, "movaTopKExperts", default: 0),
+            routerScaling: try extensionValue(
+                arch.movaRouterScaling, "movaRouterScaling", default: 1),
+            routerHasBias: try extensionValue(
+                arch.movaRouterHasBias, "movaRouterHasBias", default: false),
+            activation: try extensionValue(
+                arch.movaActivation, "movaActivation", default: "silu"))
+        if isK2 {
+            guard mova.numExperts > 0, mova.topKExperts > 0,
+                mova.topKExperts <= mova.numExperts
+            else {
+                throw ArchResolutionError.manifestDeclaresInvalidValue(
+                    family: family.rawValue, field: "movaNumExperts/topK",
+                    value: "\(mova.numExperts)/\(mova.topKExperts)")
+            }
+        }
         return ArchConfig(
             hiddenSize: arch.hiddenSize,
             intermediateSize: arch.ffnIntermediate,
@@ -109,6 +168,14 @@ extension ArchConfig {
             ropeNeoxSubdim: try required(arch.ropeNeoxSubdim, "ropeNeoxSubdim"),
             linearAttention: linear,
             routerNormTopK: arch.routerNormTopK ?? false,
-            quantGroupSize: arch.quantGroupSize ?? 64)
+            quantGroupSize: arch.quantGroupSize ?? 64,
+            normGroups: normGroups,
+            attentionGate: attentionGate,
+            routerHasBias: try extensionValue(
+                arch.routerHasBias, "routerHasBias", default: false),
+            routerScaling: try extensionValue(
+                arch.routerScaling, "routerScaling", default: 1),
+            denseLayerIndices: denseLayerIndices,
+            mova: mova)
     }
 }

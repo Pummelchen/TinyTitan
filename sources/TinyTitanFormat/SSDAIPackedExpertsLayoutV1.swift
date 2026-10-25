@@ -321,6 +321,16 @@ package enum SSDAIV1StructuralValidator {
         // agreement above is the real check for that case.
         guard expectedLayerSize > 0 else { return }
         for layer in layout.layers {
+            // A mixed install (K2's three dense layers, then 45 sparse ones)
+            // says per layer how many experts it carries. A layer with none has
+            // no packed file either, so it is not a missing entry -- the
+            // per-layer count is what makes that distinguishable from a sparse
+            // layer whose file the manifest forgot.
+            let layerCount = layer.expertsPerLayer ?? layout.expertsPerLayer
+            let layerCapacity = try ssdaiCheckedMultiply(
+                UInt64(layerCount), layout.expertStride,
+                field: "layout.layerSize")
+            guard layerCapacity > 0 else { continue }
             let path = "packed_experts/\(layer.file)"
             guard let size = manifestFileSizes[path] else {
                 throw TinyTitanFormatError.invalid(
@@ -343,7 +353,7 @@ package enum SSDAIV1StructuralValidator {
                     }
                     layerEnd = max(layerEnd, end)
                 }
-                guard size >= layerEnd, size <= expectedLayerSize else {
+                guard size >= layerEnd, size <= layerCapacity else {
                     throw TinyTitanFormatError.invalid(
                         field: "manifest.files.\(path)",
                         reason: "missing or wrong layer size")
@@ -365,12 +375,12 @@ package enum SSDAIV1StructuralValidator {
                 indexName = ExpertBlobIndex.sidecarName(forLayerFile: layer.file)
             }
             let indexPath = "packed_experts/\(indexName)"
-            guard size > 0, size < expectedLayerSize else {
+            guard size > 0, size < layerCapacity else {
                 throw TinyTitanFormatError.invalid(
                     field: "manifest.files.\(path)",
                     reason:
                         "compressed layer size \(size) is not smaller than the raw "
-                        + "\(expectedLayerSize) bytes; the install is not compressed")
+                        + "\(layerCapacity) bytes; the install is not compressed")
             }
             guard let indexSize = manifestFileSizes[indexPath], indexSize > 0 else {
                 throw TinyTitanFormatError.invalid(

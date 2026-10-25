@@ -257,6 +257,9 @@ public actor Engine {
                 throw TinyTitanError.unsupportedFamily(family: name)
             case .manifestOmitsField:
                 throw TinyTitanError.notAnInstall(directory)
+            case .manifestDeclaresInvalidValue(let family, let field, let value):
+                throw TinyTitanError.unsupportedFamily(
+                    family: "\(family) (\(field)=\(value))")
             }
         } catch {
             throw TinyTitanError.notAnInstall(directory)

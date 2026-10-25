@@ -68,6 +68,20 @@ public struct ManifestArch: Decodable, Equatable, Sendable {
     public let ffnSandwichNorms: Bool?
     public let sharedExpertGated: Bool?
     public let ropeNeoxSubdim: Bool?
+    /// K2-Horizon's layer shape. Optional for the same reason as the block
+    /// above; the K2 arch resolver requires every one of them by name, because
+    /// reading a softplus gate as a sigmoid or a 2.5 router scale as 1 produces
+    /// fluent nonsense rather than a shape error.
+    public let normGroups: Int?
+    public let attentionGate: String?
+    public let routerHasBias: Bool?
+    public let routerScaling: Double?
+    public let movaNumExperts: Int?
+    public let movaTopKExperts: Int?
+    public let movaRouterScaling: Double?
+    public let movaRouterHasBias: Bool?
+    public let movaActivation: String?
+    public let denseLayerIndices: [Int]?
     /// Gated-DeltaNet geometry. Optional for the same reason as the block
     /// above: manifests written before a reader needed them do not carry
     /// them, and decoding an absent key as nil is what keeps those installs

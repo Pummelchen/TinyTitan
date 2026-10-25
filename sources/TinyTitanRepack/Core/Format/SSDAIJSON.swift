@@ -38,6 +38,44 @@ enum SSDAIJSON {
         bitWidths: QuantBitWidths
     ) throws -> Data {
         let arch = plan.arch
+        let archDict = archDictionary(arch)
+        let quantDict = try quantObject(plan: plan, bitWidths: bitWidths)
+
+        var filesDict: [String: Any] = [:]
+        for (path, info) in files {
+            filesDict[path] = ["size": info.size, "sha256": info.sha256]
+        }
+
+        let manifest: [String: Any] = [
+            "magic": SSDAIJSON.magic,
+            "versionMajor": SSDAIJSON.versionMajor,
+            "versionMinor": SSDAIJSON.versionMinor,
+            "flags": [
+                "streamingPresent": plan.streamingPresent,
+                "turboQuantKV": plan.turboQuantKV,
+                "aneSharedExpert": plan.aneSharedExpert,
+            ],
+            "modelID": modelID,
+            "sourceSnapshotHash": sourceSnapshotHash,
+            "arch": archDict,
+            "quant": quantDict,
+            "files": filesDict,
+            "expertsPerLayer": expertsPerLayer,
+            "numLayers": numLayers,
+            "expertStride": expertStride,
+        ]
+        return try JSONSerialization.data(
+            withJSONObject: manifest,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+    }
+
+    /// The `arch` object, including the family extension fields.
+    ///
+    /// Split out of `encodeManifest` when K2's ten keys took that body past the
+    /// 120-line gate. The extension blocks are the part that grows with each
+    /// new family, so they live together rather than lengthening the document
+    /// assembly.
+    private static func archDictionary(_ arch: ArchInfo) -> [String: Any] {
         var archDict: [String: Any] = [
             "hiddenSize": arch.hiddenSize,
             "ffnIntermediate": arch.intermediateSize,
@@ -121,34 +159,7 @@ enum SSDAIJSON {
             archDict["movaActivation"] = arch.movaActivation
             archDict["denseLayerIndices"] = arch.denseLayerIndices
         }
-        let quantDict = try quantObject(plan: plan, bitWidths: bitWidths)
-
-        var filesDict: [String: Any] = [:]
-        for (path, info) in files {
-            filesDict[path] = ["size": info.size, "sha256": info.sha256]
-        }
-
-        let manifest: [String: Any] = [
-            "magic": SSDAIJSON.magic,
-            "versionMajor": SSDAIJSON.versionMajor,
-            "versionMinor": SSDAIJSON.versionMinor,
-            "flags": [
-                "streamingPresent": plan.streamingPresent,
-                "turboQuantKV": plan.turboQuantKV,
-                "aneSharedExpert": plan.aneSharedExpert,
-            ],
-            "modelID": modelID,
-            "sourceSnapshotHash": sourceSnapshotHash,
-            "arch": archDict,
-            "quant": quantDict,
-            "files": filesDict,
-            "expertsPerLayer": expertsPerLayer,
-            "numLayers": numLayers,
-            "expertStride": expertStride,
-        ]
-        return try JSONSerialization.data(
-            withJSONObject: manifest,
-            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+        return archDict
     }
 
     /// The `quant` object: the five width *slots*, plus one entry per

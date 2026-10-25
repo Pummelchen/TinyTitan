@@ -42,6 +42,19 @@ struct LayerLayout: Sendable {
     let layer: Int
     let file: String  // basename, e.g. "layer_00.bin"
     let experts: [ExpertEntry]
+    /// Per-layer expert count when it differs from the install-wide value;
+    /// `nil` means uniform. K2's dense layers carry 0 and its sparse layers 100.
+    let expertsPerLayer: Int?
+
+    init(
+        layer: Int, file: String, experts: [ExpertEntry],
+        expertsPerLayer: Int? = nil
+    ) {
+        self.layer = layer
+        self.file = file
+        self.experts = experts
+        self.expertsPerLayer = expertsPerLayer
+    }
 }
 
 struct PackedExpertsLayout: Sendable {
@@ -135,7 +148,9 @@ enum PackedExpertsLayoutReader {
                             bits: $0.bits)
                     })
             }.sorted { $0.expert < $1.expert }
-            return LayerLayout(layer: layer.layer, file: layer.file, experts: experts)
+            return LayerLayout(
+                layer: layer.layer, file: layer.file, experts: experts,
+                expertsPerLayer: layer.expertsPerLayer)
         }
         return PackedExpertsLayout(
             expertStride: wire.expertStride,

@@ -94,6 +94,54 @@ public struct PLEConfig: Sendable, Equatable {
     public var headDim: Int { ngramHeads > 0 ? embedDim / ngramHeads : 0 }
 }
 
+/// The elementwise function a family applies to the attention output gate.
+///
+/// `attnOutputGate` says whether a gate exists; this says which function turns
+/// the gate projection into a multiplier. Qwen's families use `sigmoid`, where
+/// reading a K2 install as `softplus` would still produce bounded, positive
+/// gates and fluent nonsense rather than a shape error -- so it is declared
+/// per family and read from the manifest, never assumed.
+public enum AttentionGateFunction: String, Sendable, Equatable {
+    case none
+    case sigmoid
+    case silu
+    case softplus
+}
+
+/// K2-Horizon's MoVA (mixture of value experts) attention block.
+///
+/// Every sparse layer replaces `v_proj` with a router over `numExperts` linear
+/// value experts: the selected `topKExperts` outputs pass through `activation`
+/// before the weighted sum. Routing is sigmoid, the router's bias is added only
+/// to the selection scores, and the chosen weights are scaled by
+/// `routerScaling`. Zeroed for architectures without MoVA.
+public struct MoVAConfig: Sendable, Equatable {
+    public let numExperts: Int
+    public let topKExperts: Int
+    public let routerScaling: Double
+    public let routerHasBias: Bool
+    public let activation: String
+
+    public init(
+        numExperts: Int,
+        topKExperts: Int,
+        routerScaling: Double,
+        routerHasBias: Bool,
+        activation: String
+    ) {
+        self.numExperts = numExperts
+        self.topKExperts = topKExperts
+        self.routerScaling = routerScaling
+        self.routerHasBias = routerHasBias
+        self.activation = activation
+    }
+
+    public static let none = MoVAConfig(
+        numExperts: 0, topKExperts: 0,
+        routerScaling: 1, routerHasBias: false, activation: "silu")
+    public var enabled: Bool { numExperts > 0 }
+}
+
 /// Gated-DeltaNet (linear attention) dimensions. Zeroed for architectures
 /// without linear-attention layers.
 public struct LinearAttentionConfig: Sendable, Equatable {

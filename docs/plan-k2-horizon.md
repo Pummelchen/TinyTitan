@@ -1,10 +1,10 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
-Status: **research complete; runtime not implemented.** This is not an
-"adding a model" wiring job in the sense of `adding-a-model.md` — the
-architecture is new. The checkpoint is `IFM/K2-Horizon-MoVA-36B-A4B`,
-Apache-2.0, ungated, at sha `e9ce717642b2074082875be233c02c729ba47960`
-(2026-10-14).
+Status: **install format and runtime identity complete; the GPU graph is not
+implemented.** This is not an "adding a model" wiring job in the sense of
+`adding-a-model.md` — the architecture is new. The checkpoint is
+`IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at sha
+`e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
 
 Everything below was read from the source at that sha: `config.json`,
 `configuration_k2_horizon.py`, `modeling_k2_horizon.py`, the safetensors
@@ -50,10 +50,32 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   `ArchInfo` (MoVA experts, grouped norm, gate function, router bias and
   scaling, dense layers) and `loadK2Horizon`, tested against the pinned
   config's values.
+- **Repacking and installs** — the two expert systems are laid out (the 100
+  MoE experts fused into one rank-3 tensor per layer and role, the MoVA value
+  experts resident), and both installs are written and verified:
+  `models/k2-horizon-4bit.ssdai` (21.8 GB) and
+  `models/k2-horizon-8bit.ssdai` (39.9 GB), 53 files each.
+- **Runtime identity and structural validation** — `ModelFamily.k2Horizon`
+  exists, so `ManifestReader.peekIdentity` reports the family instead of
+  falling through to `qwen36`. `ManifestArch`/`ArchConfig` decode the K2
+  fields from `manifest.arch` (`normGroups`, `attentionGate`,
+  `routerHasBias`, `routerScaling`, the MoVA set, `denseLayerIndices`);
+  `ArchConfig.resolved(forFamily: .k2Horizon)` requires them by name rather
+  than defaulting, and `TensorSchema.k2Horizon` carries the checkpoint's
+  tensor names. Manifest and layout validation now read per-layer expert
+  counts, so the three dense layers are not demanded a packed-expert file
+  that was never written. Both installs pass the pre-graph checks with a
+  standalone verification; `Model.load` then refuses by name at
+  `validateRuntimeSchema` and the catalogue skips the directory with that
+  reason, because the graph below does not exist.
+- **Surfaces not wired** — the 52 KB template renders through the generic
+  tokenizer (`TINYTITAN_K2_CHAT=1`), but the `k2_horizon` reason/tool parsers,
+  the catalogue entry and a golden baseline are not implemented.
 
-Not started: the repacker's tensor classification and layer planning for the
-two expert systems, the runtime family and kernels, the template/parsers, and
-the catalogue/golden wiring.
+Next: the GPU family graph and kernels (grouped two-way RMS norm, softplus
+attention gate, router selection bias and scaling, and the MoVA value experts
+in prefill and decode with the existing expert-streaming discipline), then the
+ANE prefill sidecar and the template/parsers.
 
 ## The conversion plan, measured
 
@@ -107,12 +129,12 @@ France?" tokenizes to 17 prompt tokens and decodes reasoning-style text).
 ### Serving path: ANE prefill + GPU decode
 
 The CPU engine is only for the Qwen 3.5 dense 2B/4B/9B. Every other model runs
-ANE prefill and GPU decode, and K2 is no exception: its 36B snapshot cannot be
-served from the CPU path, and the temporary CPU server wiring was removed
+ANE prefill and GPU decode, and K2 is no exception: its 36B model cannot be
+served from the CPU path, and the temporary CPU server wiring was removed --
 there is no `K2ModelBackend` and no `k2_horizon` CPU family any more. The CPU
 model described above stays as a numeric reference and a measurement harness
-(`TinyTitanBench k2`), not as a serving path; the snapshots under `models/`
-are not served today.
+(`TinyTitanBench k2`), not as a serving path; the K2 installs under `models/`
+are identified but not served today.
 
 ### Why the CPU reference is ~2-3 tok/s
 
@@ -169,10 +191,11 @@ Both installs are written and verified: `models/k2-horizon-4bit.ssdai`
    formats, the `k2_horizon` reason/tool parsers, catalogue keys, receipt,
    docs and goldens.
 
-What this path does **not** have yet: server/CLI/catalog wiring, the 52 KB
-chat template and `k2_horizon` parsers, a receipt-bearing install under
-`models/`, and a batched prefill. The bench command is the current entry
-point.
+What this path does **not** have yet: the GPU family graph and kernels,
+server/CLI/catalog serving, the `k2_horizon` reason/tool parsers, a golden
+baseline, and a batched prefill. The installs under `models/` carry their
+`verified-install.json`, and the bench command is still the only entry point
+that runs K2 at all.
 
 ## The converter
 
@@ -188,9 +211,11 @@ point.
   size, the 8-bit embedding override, a quantize/dequantize round trip, and
   that the router bias is unchanged bf16.
 
-The measured plan output and the self-test both pass; the download/streaming
-path for the real 74.9 GB checkpoint is not written yet, and no repacker or
-runtime reader exists for this snapshot.
+The measured plan output and the self-test both pass. `--from-hf` drives the
+streaming 74.9 GB download and writes the two snapshots, and the repacker then
+turns a snapshot into a `.ssdai` install (phase 1 above); the runtime reader
+for that install's identity and layout exists, the graph that would execute it
+does not.
 
 ## What a layer does
 
@@ -280,8 +305,16 @@ part most likely to force a change in the existing MoE kernel interface.
 
 ## Next step
 
-Phase 1: the converter and arch reader, plus a fixture checkpoint that
-round-trips a handful of tensors. That is a bounded piece of work and the
-only phase that does not depend on the runtime kernels. The 74.9 GB download
-should wait until phase 2 can load the result, unless the disk is needed for
-the fixture alone.
+Phase 2, the GPU family graph. The install is already loadable far enough to
+prove its identity, architecture, resident schema and per-layer expert layout;
+what does not exist is the layer graph that consumes them. The bounded first
+slice is the dense path: `ModelFamily.k2Horizon` on the existing Metal runner,
+a per-layer graph that runs layers 0-2 (grouped norm, GQA with the softplus
+gate, SwiGLU) and refuses the sparse layers, checked against the CPU
+`K2Snapshot`'s hidden states on a tiny fixture. The MoVA stage, the router's
+selection bias/scaling and the ANE prefill follow, in that order, because each
+one is a kernel surface the dense path does not need.
+
+The 74.9 GB source download is no longer on the critical path: the 4-bit and
+8-bit installs exist and are the runtime's input.
+

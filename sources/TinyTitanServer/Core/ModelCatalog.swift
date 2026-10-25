@@ -247,6 +247,17 @@ public struct ModelCatalog: Sendable {
                 ))
         case .qwen36, .qwen38flash, .qwen35Dense:
             break
+        case .k2Horizon:
+            // The install is real and its identity is honest, but the GPU graph
+            // for this family does not exist yet. Listing it would offer a model
+            // that fails at load; the reason is reported instead, per directory.
+            return .failure(
+                ProbeFailure(
+                    reason:
+                        "K2-Horizon (\(identity.family.rawValue)) is not served yet: "
+                        + "the GPU graph and kernels are not implemented "
+                        + "(docs/plan-k2-horizon.md)"
+                ))
         }
         guard GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil else {
             return .failure(
@@ -381,25 +392,6 @@ public struct ModelCatalog: Sendable {
         }
         return family
     }
-
-    /// Human names for the installs this project ships. A manifest carries an
-    /// id, not a name; an install outside this table is listed by its id.
-    static let displayNames: [String: String] = [
-        "qwen3.6-35b-a3b": "Qwen 3.6 35B-A3B",
-        "ornith-1.5-35b-a3b": "Ornith 1.5 35B-A3B",
-        "qwen-agentworld": "Qwen AgentWorld 35B-A3B",
-        "kat-coder-v2.5": "KAT-Coder-V2.5-Dev 35B-A3B",
-        "qwen3.8-flash-next": "Qwen 3.8 Flash Next 125B-A6B",
-        // The dense CPU models. Their snapshots carried these names in
-        // `config.json -> display_name`, which only the snapshot probe reads;
-        // the install probe has a manifest, and a manifest carries an id, not
-        // a name. Without these entries repacking them would silently rename
-        // them from "Qwen 3.5 9B" to "qwen3.5-9b" in the app and the server's
-        // /v1/models listing.
-        "qwen3.5-2b": "Qwen 3.5 2B",
-        "qwen3.5-4b": "Qwen 3.5 4B",
-        "qwen3.5-9b": "Qwen 3.5 9B",
-    ]
 
     /// Allocated bytes, so an APFS clone or a sparse file reports what it
     /// really occupies rather than its logical length.
