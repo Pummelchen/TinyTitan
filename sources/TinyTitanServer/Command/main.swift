@@ -176,34 +176,68 @@ do {
         // is a backend of its own, like the CPU path, because
         // `RealForwardRunner` sizes a Qwen-shaped pipeline set and refuses the
         // family. No prompt cache, no batching, plain FP16 KV caches.
-        let started = ContinuousClock.now
         let slots = Int(
             ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? ""
         )
         .flatMap { $0 > 0 ? $0 : nil }
-        let k2 = try await K2ProbeBackend(
-            modelDirectory: modelURL,
-            maximumContext: arguments.maxContext,
-            thinking: reasoning.thinking,
-            reasoningEffort: reasoning.effort,
-            slots: slots)
-        backend = k2
-        let elapsed = started.duration(to: .now)
-        let seconds =
-            Double(elapsed.components.seconds)
-            + Double(elapsed.components.attoseconds) / 1e18
+        let identity = try? ManifestReader.peekIdentity(directoryURL: modelURL)
+        let resolvedSlots = slots ?? ((identity?.weightBits ?? 4) == 4 ? 64 : 16)
+        let contextLimit = min(
+            arguments.maxContext, K2ProbeBackend.contextCeiling)
         let identifier =
             arguments.modelIDOverride
             ?? modelURL.lastPathComponent
-        facts = ModelSessionFacts(
+        let k2Facts = ModelSessionFacts(
             modelID: identifier,
             prefillChunkTokens: 0,
             promptCacheMode: .off,
-            expertCacheSlots: k2.expertCacheSlots)
-        print(
-            String(
-                format: "K2 probe engine: %@ in %.1fs, context %d, %d expert slots",
-                identifier, seconds, k2.maximumContext, k2.expertCacheSlots))
+            expertCacheSlots: resolvedSlots)
+        facts = k2Facts
+        if arguments.managesResidency {
+            // --lazy-load and --idle-unload-seconds work here too: the wrapper
+            // builds a probe on demand and drops it when idle, which is what
+            // returns the install's ~22 GB. The Metal context is reused across
+            // reloads.
+            let residency = ManagedModelBackend(
+                facts: k2Facts,
+                maximumContext: contextLimit,
+                samplingDefaults: GenerationDefaults.forFamily(.k2Horizon),
+                idleTimeout: arguments.idleUnloadSeconds > 0
+                    ? .seconds(arguments.idleUnloadSeconds) : nil,
+                loader: { context in
+                    try await K2ProbeBackend(
+                        modelDirectory: modelURL,
+                        maximumContext: contextLimit,
+                        thinking: reasoning.thinking,
+                        reasoningEffort: reasoning.effort,
+                        slots: slots,
+                        reusingContext: context)
+                })
+            managed = residency
+            backend = residency
+            print(
+                "K2 probe engine: \(identifier) loads on the first request"
+                    + (arguments.idleUnloadSeconds > 0
+                        ? ", unloads after \(arguments.idleUnloadSeconds)s idle"
+                        : ""))
+        } else {
+            let started = ContinuousClock.now
+            let k2 = try await K2ProbeBackend(
+                modelDirectory: modelURL,
+                maximumContext: contextLimit,
+                thinking: reasoning.thinking,
+                reasoningEffort: reasoning.effort,
+                slots: slots)
+            backend = k2
+            let elapsed = started.duration(to: .now)
+            let seconds =
+                Double(elapsed.components.seconds)
+                + Double(elapsed.components.attoseconds) / 1e18
+            print(
+                String(
+                    format: "K2 probe engine: %@ in %.1fs, context %d, %d expert slots",
+                    identifier, seconds, k2.maximumContext, k2.expertCacheSlots))
+        }
         reasoningProfile = ServerReasoningProfile(
             family: .k2Horizon,
             thinkingMode: reasoning.thinking,

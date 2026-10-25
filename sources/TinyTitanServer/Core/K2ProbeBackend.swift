@@ -67,7 +67,8 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         maximumContext: Int,
         thinking: ModelThinkingMode,
         reasoningEffort: ModelReasoningEffort?,
-        slots: Int? = nil
+        slots: Int? = nil,
+        reusingContext: MetalContext? = nil
     ) async throws {
         let config = try ArchConfig.resolved(
             forFamily: .k2Horizon, directoryURL: modelDirectory)
@@ -76,17 +77,17 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         guard resolvedSlots > 0 else {
             throw K2BackendError.unsupported("expert cache slots must be positive")
         }
-        let metal = try MetalContext()
+        let context = try reusingContext ?? MetalContext()
         let loaded: Model
         do {
             loaded = try Model.load(
-                directoryURL: modelDirectory, device: metal.device,
+                directoryURL: modelDirectory, device: context.device,
                 expecting: config, streamingMode: .pread(slotCount: resolvedSlots),
                 integrityPolicy: .sizeCheckTrustedReceipt)
         } catch let error as ModelError {
             guard case .trustedReceiptInvalid = error else { throw error }
             loaded = try Model.load(
-                directoryURL: modelDirectory, device: metal.device,
+                directoryURL: modelDirectory, device: context.device,
                 expecting: config, streamingMode: .pread(slotCount: resolvedSlots))
         }
         guard
@@ -106,7 +107,7 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         self.contextLimit = min(maximumContext, Self.contextCeiling)
         self.defaults = GenerationDefaults.forFamily(.k2Horizon)
         self.runtime = try K2ProbeRuntime(
-            model: loaded, context: metal, config: config,
+            model: loaded, context: context, config: config,
             contextLimit: self.contextLimit, slotCount: resolvedSlots,
             directory: modelDirectory)
         await runtime.warmExpertCache()

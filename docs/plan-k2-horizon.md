@@ -379,6 +379,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   then 9,10 on one sparse-toy graph and compares the logits with a single 0..3
   pass (1e-6), and re-forwarding the last token at its own position is
   idempotent.
+- **Lazy load and idle unload** — the single-model path now honours
+  `--lazy-load` and `--idle-unload-seconds` for K2 too: `ManagedModelBackend`
+  gained a plan-free initializer so it can wrap the probe backend, building it
+  on the first request and dropping it when idle (which returns the install's
+  ~22 GB and the expert cache; the Metal context is shared across reloads).
+  Measured on the 4-bit install: ready in 1 s with `--lazy-load`, first request
+  loads (`model loaded prompt_cache=off`) and answers, `--idle-unload-seconds 5`
+  logs `model unloaded` after the idle window, and the next request reloads and
+  answers the same. (`--models-dir` cannot be combined with
+  `--idle-unload-seconds`; that rule predates K2.)
 - **Warm start from the routing profile** — the backend persists the
   routed-expert profile the runner already uses (`expert-profile.bin` beside
   the install; `TINYTITAN_EXPERT_PROFILE=0` disables) after each request, and
