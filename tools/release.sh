@@ -253,6 +253,11 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 #
 #   * the MTP draft head -- a sidecar to a target whose own baseline already
 #     exercises it, not a served model.
+#   * the K2-Horizon installs -- they have no served path yet: the only entry
+#     point is `TinyTitanBench k2gpu`, which this gate does not drive, and
+#     `RealForwardRunner` refuses the family. Declared here so the coverage
+#     guard does not read "installed but unserved" as "silently unchecked";
+#     when the runner graph lands, replace these with `check_golden` targets.
 #
 # The dense Qwen 3.5 2B/4B/9B were listed here too, because they had no stored
 # baseline at all: a release verified them through neither path, and capturing
@@ -266,6 +271,8 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 NON_GOLDEN_INSTALLS="
   qwen3.8-flash-next_125B_A6B_MTP_4Bit
   ornith-1.5_35B_A3B_MTP_4Bit
+  k2-horizon-4bit.ssdai
+  k2-horizon-8bit.ssdai
 "
 NON_GOLDEN_SET=" $(printf '%s' "$NON_GOLDEN_INSTALLS" | tr -s '[:space:]' ' ') "
 
