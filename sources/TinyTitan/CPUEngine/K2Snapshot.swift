@@ -163,8 +163,8 @@ public struct K2Snapshot: Sendable {
     /// A quantized matrix by its weight name.
     public func matrix(_ name: String) throws -> AffineSnapshot.Matrix {
         let stem = name.hasSuffix(".weight") ? String(name.dropLast(".weight".count)) : name
-        let shard = try shard(name)
-        let entry = try shard.entry(name)
+        let file = try shard(name)
+        let entry = try file.entry(name)
         guard entry.shape.count == 2 else {
             throw SafeTensorsFile.Failure.malformed("\(name) is not a matrix")
         }
@@ -180,13 +180,15 @@ public struct K2Snapshot: Sendable {
                 "\(stem): width \(columns) at \(width) bits is not a whole number "
                     + "of \(groupSize)-element groups")
         }
-        let weights = try shard.bytes(name)
+        let weights = try file.bytes(name)
         guard weights.count == rows * columns * width / 8 else {
             throw SafeTensorsFile.Failure.malformed(
                 "\(stem): \(weights.count) packed bytes for \(rows)x\(columns) at \(width) bits")
         }
-        let scales = try shard.bytes(stem + ".scales")
-        let biases = try shard.bytes(stem + ".biases")
+        // A writer may flush between a weight and its companions, so they are
+        // looked up on their own shard rather than assumed to sit beside it.
+        let scales = try shard(stem + ".scales").bytes(stem + ".scales")
+        let biases = try shard(stem + ".biases").bytes(stem + ".biases")
         let groups = rows * (columns / groupSize)
         guard scales.count == groups * 2, biases.count == groups * 2,
             let scalesBase = scales.baseAddress?.assumingMemoryBound(to: UInt16.self),
@@ -206,19 +208,19 @@ public struct K2Snapshot: Sendable {
     /// apply, on one row.
     public func row(_ name: String, _ index: Int) throws -> [Float] {
         let stem = name.hasSuffix(".weight") ? String(name.dropLast(".weight".count)) : name
-        let shard = try shard(name)
-        let entry = try shard.entry(name)
+        let file = try shard(name)
+        let entry = try file.entry(name)
         let width = bits(forStem: stem)
         let lanes = 32 / width
         let columns = entry.shape[1] * lanes
         guard index >= 0, index < entry.shape[0] else {
             throw SafeTensorsFile.Failure.malformed("\(name): row \(index) out of range")
         }
-        let weights = try shard.bytes(name)
+        let weights = try file.bytes(name)
         let bytesPerRow = columns * width / 8
         let groups = columns / groupSize
-        let scales = try shard.bytes(stem + ".scales")
-        let biases = try shard.bytes(stem + ".biases")
+        let scales = try shard(stem + ".scales").bytes(stem + ".scales")
+        let biases = try shard(stem + ".biases").bytes(stem + ".biases")
         guard let weightsBase = weights.baseAddress?.assumingMemoryBound(to: UInt8.self),
             let scalesBase = scales.baseAddress?.assumingMemoryBound(to: UInt16.self),
             let biasesBase = biases.baseAddress?.assumingMemoryBound(to: UInt16.self)

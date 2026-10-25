@@ -1,5 +1,6 @@
 import Foundation
 import TinyTitan
+import Tokenizers
 
 /// `TinyTitanBench k2 <snapshot> "<prompt>" [n]`: the K2-Horizon CPU model,
 /// tokenizer and timings in one command.
@@ -14,18 +15,18 @@ extension TinyTitanBench {
         // A comma-separated list is taken as token ids, which is how the
         // tiny fixture (no tokenizer) is exercised.
         let numeric = prompt.split(separator: ",").allSatisfy { Int($0) != nil }
-        let tokenizer: GFTokenizer?
+        let tokenizer: Tokenizer?
         let ids: [Int]
         if numeric {
             tokenizer = nil
             ids = prompt.split(separator: ",").compactMap { Int($0) }
         } else {
-            guard let loaded = try loadTokenizer(directory) else {
+            guard let loaded = try loadK2Tokenizer(directory) else {
                 FileHandle.standardError.write(Data("no tokenizer in \(path)\n".utf8))
                 exit(2)
             }
             tokenizer = loaded
-            ids = loaded.encode(prompt, addBOS: false).map(Int.init)
+            ids = loaded.encode(text: prompt, addSpecialTokens: false)
         }
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
@@ -49,9 +50,12 @@ extension TinyTitanBench {
             logits = try model.step(token: best)
         }
         let decodeSeconds = Date().timeIntervalSince(decodeStart)
-        let text =
-            tokenizer?.decode(produced.map(Int32.init))
-            ?? produced.map(String.init).joined(separator: ",")
+        let text: String
+        if let tokenizer {
+            text = tokenizer.decode(tokens: produced, skipSpecialTokens: true)
+        } else {
+            text = produced.map { String($0) }.joined(separator: ",")
+        }
         print(
             "prompt \(ids.count) tokens: \(String(format: "%.2f", prefillSeconds))s "
                 + "(\(String(format: "%.1f", Double(ids.count) / prefillSeconds)) tok/s)")
@@ -66,5 +70,29 @@ extension TinyTitanBench {
         if ProcessInfo.processInfo.environment["TINYTITAN_K2_LOGITS"] == "1" {
             print("logits: " + logits.map { String(format: "%.6f", $0) }.joined(separator: ","))
         }
+    }
+
+    /// The generic swift-transformers tokenizer, for a checkpoint whose special
+    /// tokens are not Qwen's.
+    static func loadK2Tokenizer(_ directory: URL) throws -> Tokenizer? {
+        guard let folder = GFTokenizer.resolvedTokenizerFolder(forModelDirectory: directory)
+        else { return nil }
+        final class Box: @unchecked Sendable {
+            var value: Tokenizer?
+            var error: Error?
+        }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            do {
+                box.value = try await AutoTokenizer.from(modelFolder: folder)
+            } catch {
+                box.error = error
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if let error = box.error { throw error }
+        return box.value
     }
 }

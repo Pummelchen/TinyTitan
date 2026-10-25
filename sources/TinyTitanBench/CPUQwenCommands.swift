@@ -335,7 +335,11 @@ extension TinyTitanBench {
             return nil
         }
         Task {
-            box.value = try? await GFTokenizer.load(from: folder)
+            do {
+                box.value = try await GFTokenizer.load(from: folder)
+            } catch {
+                FileHandle.standardError.write(Data("tokenizer load failed: \(error)\n".utf8))
+            }
             semaphore.signal()
         }
         semaphore.wait()
