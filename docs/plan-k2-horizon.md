@@ -294,6 +294,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   (including the newlines the template writes), and fails closed on an
   unterminated wrapper. The bench self-test gained a wrapped stream; content is
   now empty and the call parses.
+  The round trip also works end to end (`TINYTITAN_K2_TOOL_LOOP=1`): the call is
+  put back into history with a canned tool response
+  (`{"city":"Paris","temp_c":21,"condition":"sunny"}`), the template renders the
+  assistant `tool_calls` message and the `.tool` turn (64 prompt tokens, call and
+  result both kept), and the model answers "The weather in Paris is currently
+  sunny with a temperature of 21 degrees Celsius."
 - **Multi-turn history** — the checkpoint's template raises on any assistant
   message without a thinking field ("Assistant message is missing a thinking
   field"), so a replayed conversation could not be rendered at all: the first

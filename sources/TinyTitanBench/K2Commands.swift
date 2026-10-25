@@ -246,6 +246,59 @@ extension TinyTitanBench {
                         tokenizer: tokenizer, promptIDs: ids,
                         tokens: run.produced, allowedTools: allowed)))
         }
+        if chat, decoderCheck,
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_TOOL_LOOP"] == "1"
+        {
+            try await k2ToolLoop(
+                model: model, context: context, tokenizer: tokenizer,
+                prompt: prompt, promptIDs: ids, firstRun: run.produced)
+        }
+    }
+
+    /// The second half of a tool round trip: take the call the model made, feed
+    /// a canned result back as history, and let the model answer with it. This
+    /// exercises the template's `tool_calls`/`tool` branches against the real
+    /// weights instead of only rendering them.
+    private static func k2ToolLoop(
+        model: Model, context: MetalContext, tokenizer: GFTokenizer,
+        prompt: String, promptIDs: [Int32], firstRun: [Int32]
+    ) async throws {
+        let allowed = Set(PromptTools.sample.map(\.name))
+        let decoded = try k2Decode(
+            tokenizer: tokenizer, promptIDs: promptIDs, tokens: firstRun,
+            allowedTools: allowed)
+        guard let call = decoded.calls.first else {
+            print("tool loop: no call emitted; nothing to continue")
+            return
+        }
+        let result = #"{"city": "Paris", "temp_c": 21, "condition": "sunny"}"#
+        let history: [GFTokenizer.Message] = [
+            GFTokenizer.Message(role: .user, content: prompt),
+            GFTokenizer.Message(
+                role: .assistant, content: decoded.content,
+                toolCalls: [
+                    GFTokenizer.HistoricalToolCall(
+                        id: call.id, name: call.name, arguments: call.arguments)
+                ],
+                reasoning: decoded.reasoning),
+            GFTokenizer.Message(
+                role: .tool, content: result, toolCallID: call.id,
+                name: call.name),
+        ]
+        let ids = try tokenizer.encodeToolChat(
+            messages: history, tools: PromptTools.sample)
+        let graph = try K2GraphProbe(
+            model: model, context: context, maxSequence: ids.count + 65)
+        let stops: Set<Int32> = [tokenizer.eosID, tokenizer.endOfTurnID]
+        let run = try await k2Generate(
+            graph: graph, ids: ids, limit: 64, stops: stops, repeatCount: 1)
+        let reply = try k2Decode(
+            tokenizer: tokenizer, promptIDs: ids, tokens: run.produced,
+            allowedTools: nil)
+        print(
+            "tool loop: \(call.name)(\(call.arguments)) -> \(result); "
+                + "reply=(\(reply.reasoning.debugDescription), "
+                + "\(reply.content.debugDescription))")
     }
 
     private struct K2Run {
@@ -426,12 +479,16 @@ extension TinyTitanBench {
     /// Run a token stream through the same structured decoder the server uses
     /// and render its events, so the K2 think/tool surfaces are checked on the
     /// real tokenizer instead of only in unit tests with a fixture.
-    private static func k2DecoderReport(
-        tokenizer: GFTokenizer,
-        promptIDs: [Int32],
-        tokens: [Int32],
+    private struct K2Decoded {
+        var reasoning = ""
+        var content = ""
+        var calls: [ParsedToolCall] = []
+    }
+
+    private static func k2Decode(
+        tokenizer: GFTokenizer, promptIDs: [Int32], tokens: [Int32],
         allowedTools: Set<String>?
-    ) throws -> String {
+    ) throws -> K2Decoded {
         let decoder = StructuredAssistantDecoder.forGeneration(
             tokenizer: tokenizer, promptIDs: promptIDs,
             allowedTools: allowedTools)
@@ -443,19 +500,33 @@ extension TinyTitanBench {
         }
         events += try decoder.consumeTail(detokenizer.flush())
         try decoder.finish()
-        var reasoning = ""
-        var content = ""
-        var calls: [ParsedToolCall] = []
+        var decoded = K2Decoded()
         for event in events {
             switch event {
-            case .reasoning(let text): reasoning += text
-            case .content(let text): content += text
-            case .toolCall(let call): calls.append(call)
+            case .reasoning(let text): decoded.reasoning += text
+            case .content(let text): decoded.content += text
+            case .toolCall(let call): decoded.calls.append(call)
             }
         }
-        var line = "reasoning=\(reasoning.debugDescription) content=\(content.debugDescription)"
-        if !calls.isEmpty {
-            line += " calls=" + calls.map { "\($0.name)(\($0.arguments))" }.joined(separator: ",")
+        return decoded
+    }
+
+    private static func k2DecoderReport(
+        tokenizer: GFTokenizer,
+        promptIDs: [Int32],
+        tokens: [Int32],
+        allowedTools: Set<String>?
+    ) throws -> String {
+        let decoded = try k2Decode(
+            tokenizer: tokenizer, promptIDs: promptIDs, tokens: tokens,
+            allowedTools: allowedTools)
+        var line =
+            "reasoning=\(decoded.reasoning.debugDescription) "
+            + "content=\(decoded.content.debugDescription)"
+        if !decoded.calls.isEmpty {
+            line +=
+                " calls="
+                + decoded.calls.map { "\($0.name)(\($0.arguments))" }.joined(separator: ",")
         }
         return line
     }
@@ -505,6 +576,33 @@ extension TinyTitanBench {
         // The template's own shape: the inner call inside the
         // `<ifm|tool_calls>` wrapper, with newlines the decoder must drop.
         let wrapped = "<ifm|tool_calls>\n" + tool + "\n</ifm|tool_calls>"
+        // A tool round trip: the assistant's call and the tool's response are
+        // both history by the time the next user turn is rendered.
+        let toolCall = GFTokenizer.HistoricalToolCall(
+            id: "call_1", name: "get_weather",
+            arguments: .object(["city": .string("Paris")]))
+        let roundTrip = [
+            GFTokenizer.Message(role: .user, content: "What is the weather in Paris?"),
+            GFTokenizer.Message(
+                role: .assistant, content: "", toolCalls: [toolCall],
+                reasoning: "Use the weather tool."),
+            GFTokenizer.Message(
+                role: .tool, content: #"{"temp_c": 21}"#,
+                toolCallID: "call_1", name: "get_weather"),
+            GFTokenizer.Message(role: .user, content: "And tomorrow?"),
+        ]
+        do {
+            let rendered = try tokenizer.applyChatTemplate(roundTrip)
+            let ids = tokenizer.encode(rendered, addBOS: false)
+            let hasCall = rendered.contains("get_weather")
+            let hasResult = rendered.contains("temp_c")
+            print(
+                "selftest roundtrip: rendered \(ids.count) prompt tokens, "
+                    + "call kept=\(hasCall), result kept=\(hasResult)")
+        } catch {
+            print("selftest roundtrip: FAILED (\(error))")
+        }
+
         for (label, text) in [
             ("answer", answer), ("tool", tool), ("wrapped", wrapped),
         ] {
