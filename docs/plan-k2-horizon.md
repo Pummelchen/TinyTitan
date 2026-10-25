@@ -79,13 +79,19 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   `Elementwise.encodeSoftplusGateMul` are the Swift entry points. The router's
   `routerNormTopK` now defaults to true for K2 (older manifests, including both
   installed ones, omit the key) and the repacker writes it for new installs.
+- **MoVA value stage** — `MoVAValueStage` runs the bf16 value-router GEMV
+  (float logits; `bf16_gemv_float_simd` is new because rounding logits to half
+  before the comparison could change the chosen experts), the selection kernel,
+  four value GEMVs from the resident experts (4- or 8-bit), and `mova_combine_fp16`
+  (SiLU before weighting). It is tested end to end against the CPU formula:
+  8 experts at top-4, selection ids and a weighted value vector.
 - **Surfaces not wired** — the 52 KB template renders through the generic
   tokenizer (`TINYTITAN_K2_CHAT=1`), but the `k2_horizon` reason/tool parsers,
   the catalogue entry and a golden baseline are not implemented.
 
-Next: the GPU family graph that calls those primitives, then the MoVA value
-experts (top-4 of 64, SiLU before weighting, with the MoE streaming discipline)
-in prefill and decode, the ANE prefill sidecar and the template/parsers.
+Next: the GPU family graph that calls these stages (dense layers first), the
+in-graph wiring of the MoVA stage for decode and prefill, the ANE prefill
+sidecar and the template/parsers.
 
 ## The conversion plan, measured
 

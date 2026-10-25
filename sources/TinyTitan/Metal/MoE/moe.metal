@@ -1364,3 +1364,27 @@ kernel void k2_router_topk_select_kn(
         out_weights[i] = half(top_score[i] * norm * scaling);
     }
 }
+
+// The MoVA value epilogue.
+//
+// K2's sparse layers replace `v_proj` with four selected value experts, each
+// `hidden -> kvHeads * headDim`, activated with SiLU before weighting. The
+// four GEMVs are separate dispatches (they read different resident weights);
+// this kernel is the part that has to see all four at once: it applies SiLU
+// and the router weights and sums them into the value states.
+kernel void mova_combine_fp16(
+    device const half* experts [[buffer(0)]],   // [4][count]
+    device const half* weights [[buffer(1)]],   // [4]
+    device half*       out     [[buffer(2)]],   // [count]
+    constant uint&     count   [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    float total = 0.0f;
+    for (uint slot = 0; slot < 4u; ++slot) {
+        const float v = float(experts[slot * count + tid]);
+        const float w = float(weights[slot]);
+        total += w * (v / (1.0f + exp(-v)));
+    }
+    out[tid] = half(total);
+}

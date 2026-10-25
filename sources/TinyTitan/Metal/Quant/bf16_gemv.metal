@@ -42,3 +42,37 @@ kernel void bf16_gemv_simd(
     accumulator = simd_sum(accumulator);
     if (lane == 0u) y[row] = half(accumulator);
 }
+
+// The same GEMV, but the logits stay float.
+//
+// A router needs full float logits: K2-Horizon's selection applies sigmoid and
+// a bias, and rounding the logits to half first would change the top-k order
+// near a tie -- a different expert set, not a different last bit. Every other
+// caller wants half activations and keeps `bf16_gemv_simd`.
+kernel void bf16_gemv_float_simd(
+    device const bfloat* weights [[buffer(0)]],
+    device const half*   x       [[buffer(1)]],
+    device float*        y       [[buffer(2)]],
+    constant uint&       rows    [[buffer(3)]],
+    constant uint&       columns [[buffer(4)]],
+    uint tg_idx [[threadgroup_position_in_grid]],
+    uint sg_idx [[simdgroup_index_in_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]]
+) {
+    constexpr uint rows_per_threadgroup = 8;
+    constexpr uint lanes = 32;
+    const uint row = tg_idx * rows_per_threadgroup + sg_idx;
+    if (row >= rows) return;
+
+    device const bfloat* row_weights = weights + row * columns;
+    float accumulator = 0.0f;
+    for (uint base = 0; base < columns; base += lanes * 2u) {
+        const uint first = base + lane * 2u;
+        accumulator = fma(float(row_weights[first]), float(x[first]),
+                          accumulator);
+        accumulator = fma(float(row_weights[first + 1u]), float(x[first + 1u]),
+                          accumulator);
+    }
+    accumulator = simd_sum(accumulator);
+    if (lane == 0u) y[row] = accumulator;
+}
