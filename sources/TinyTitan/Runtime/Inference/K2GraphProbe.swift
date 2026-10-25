@@ -61,94 +61,62 @@ package final class K2GraphProbe {
         if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
             for layer in sparse.values { layer.resetTimings() }
         }
-        var hidden = try await embed(tokenID: tokenID)
+        // The hidden state stays on the GPU for the whole token. A dense layer
+        // writes the other ping-pong buffer; a sparse layer writes its own
+        // output, which the next layer reads. Only the router ids and the final
+        // logits come back to the CPU.
+        guard let embed = queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        try head.encodeEmbedding(commandBuffer: embed, tokenID: tokenID, out: hiddenA)
+        embed.commit()
+        var current = hiddenA
         for layer in 0..<config.numLayers {
             if let dense = dense[layer] {
-                hidden = try await runDense(
-                    dense, hidden: hidden, position: position)
+                let out = current === hiddenA ? hiddenB : hiddenA
+                guard let cb = queue.makeCommandBuffer() else {
+                    throw MetalError.commandEncoderFailed
+                }
+                try dense.encode(
+                    commandBuffer: cb, hidden: current, out: out, position: position)
+                cb.commit()
+                current = out
             } else if let sparse = sparse[layer] {
-                hidden = try await sparse.run(
-                    queue: queue, hidden: hidden, position: Int(position)
-                ).map { Float16($0) }
+                try await sparse.prefetch(
+                    queue: queue, input: current, position: Int(position))
+                try await sparse.submitExperts(queue: queue)
+                current = sparse.output
             } else {
                 throw ModelError.internalInconsistency(
                     detail: "layer \(layer) is neither dense nor sparse")
             }
         }
-        let result = try await logits(hidden: hidden)
+        guard let headCB = queue.makeCommandBuffer() else {
+            throw MetalError.commandEncoderFailed
+        }
+        try head.encodeLogits(commandBuffer: headCB, hidden: current)
+        headCB.commit()
+        await headCB.completed()
+        // The expert phases are submitted without waits; surface any failure
+        // they reported before the token's logits are trusted.
+        for layer in sparse.values { try layer.checkPendingError() }
         if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
             let fetch = sparse.values.reduce(0.0) { $0 + $1.fetchSeconds }
             let encode = sparse.values.reduce(0.0) { $0 + $1.encodeSeconds }
-            let gpu = sparse.values.reduce(0.0) { $0 + $1.gpuSeconds }
             let busy = sparse.values.reduce(0.0) { $0 + $1.gpuBusySeconds }
             let prefetch = sparse.values.reduce(0.0) { $0 + $1.prefetchBusySeconds }
             let experts = sparse.values.reduce(0.0) { $0 + $1.expertBusySeconds }
             let total = Date().timeIntervalSince(started)
-            let rest = total - fetch - encode - gpu
+            let rest = total - fetch - encode - busy
             FileHandle.standardError.write(
                 Data(
                     String(
                         format:
-                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs busy %.3fs (pre %.3fs experts %.3fs) encode %.3fs other %.3fs\n",
-                        total, fetch, gpu, busy, prefetch, experts, encode, rest
+                            "k2 timing: total %.3fs fetch %.3fs busy %.3fs (pre %.3fs experts %.3fs) encode %.3fs other %.3fs\n",
+                        total, fetch, busy, prefetch, experts, encode, rest
                     ).utf8))
         }
-        return result
-    }
-
-    private func embed(tokenID: UInt32) async throws -> [Float16] {
-        guard let cb = queue.makeCommandBuffer() else {
-            throw MetalError.commandEncoderFailed
-        }
-        try head.encodeEmbedding(
-            commandBuffer: cb, tokenID: tokenID, out: hiddenA)
-        cb.commit()
-        await cb.completed()
-        return halves(from: hiddenA)
-    }
-
-    private func runDense(
-        _ layer: K2DenseLayer, hidden: [Float16], position: UInt32
-    ) async throws -> [Float16] {
-        guard let cb = queue.makeCommandBuffer() else {
-            throw MetalError.commandEncoderFailed
-        }
-        copy(hidden, into: hiddenA)
-        try layer.encode(
-            commandBuffer: cb, hidden: hiddenA, out: hiddenB,
-            position: position)
-        cb.commit()
-        await cb.completed()
-        return halves(from: hiddenB)
-    }
-
-    private func logits(hidden: [Float16]) async throws -> [Float] {
-        guard let cb = queue.makeCommandBuffer() else {
-            throw MetalError.commandEncoderFailed
-        }
-        copy(hidden, into: hiddenA)
-        try head.encodeLogits(commandBuffer: cb, hidden: hiddenA)
-        cb.commit()
-        await cb.completed()
         return head.readLogits()
     }
 
-    private func copy(_ values: [Float16], into buffer: MTLBuffer) {
-        values.withUnsafeBufferPointer { source in
-            if let base = source.baseAddress {
-                memcpy(
-                    buffer.contents(), base,
-                    values.count * MemoryLayout<Float16>.stride)
-            }
-        }
-    }
-
-    private func halves(from buffer: MTLBuffer) -> [Float16] {
-        let base = buffer.contents()
-        return (0..<config.hiddenSize).map {
-            base.load(
-                fromByteOffset: $0 * MemoryLayout<Float16>.stride,
-                as: Float16.self)
-        }
-    }
 }

@@ -157,6 +157,15 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
   levers are I/O overlap and fewer command-buffer round trips, not more kernel
   arithmetic. Both widths still produce the same tokens.
+- **Hidden state on the GPU** — the graph used to read every layer's output
+  back as `[Float]`, convert it, copy it into the next layer's input buffer and
+  wait for the expert command buffer before starting the next layer. Layers now
+  hand their output buffer straight on, the expert phase is submitted without a
+  wait (the queue order is the dependency), and only the router ids and the
+  final logits cross to the CPU. Interleaved A/B on 4-bit, 16 decode tokens,
+  three runs each: 4.85 s → 4.04 s (3.38 → 3.95 tok/s). GPU busy is accumulated
+  from the command buffers' completion handlers now, and a deferred expert
+  buffer's error is carried forward and rethrown rather than dropped.
 - **Startup re-hash** — the first token used to pay a full SHA-256 over every
   expert layer as each layer opened: 15 GB of hashing, 8.2 s of the 8.3 s
   prefill. `k2gpu` now validates the installer's receipt first (it is bound to

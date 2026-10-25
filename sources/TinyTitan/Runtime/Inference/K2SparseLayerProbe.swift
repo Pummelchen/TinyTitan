@@ -27,6 +27,7 @@ final class K2SparseLayerProbe {
     private let moe: K2MoEStage
     private let fusedMoE: Bool
     private let vExperts: [MoVAValueStage.ExpertWeights]
+    private let sharedWeights: K2MoEStage.ExpertWeights
 
     private let input: MTLBuffer
     private let normed: MTLBuffer
@@ -44,14 +45,46 @@ final class K2SparseLayerProbe {
     private let vCache: MTLBuffer
     private(set) var fetchSeconds: Double = 0
     private(set) var encodeSeconds: Double = 0
-    private(set) var gpuSeconds: Double = 0
-    private(set) var gpuBusySeconds: Double = 0
+    /// GPU busy time, accumulated from the command buffers' own timestamps in
+    /// their completion handlers: with the two phases pipelined there is no
+    /// single wait to time, so the buffer's own start/end is the measurement.
+    private let timingLock = NSLock()
+    private var busyTotal = 0.0
+    private var prefetchBusyTotal = 0.0
+    private var expertBusyTotal = 0.0
+    /// The expert phase is submitted without being awaited, so its failure has
+    /// to be carried to the next await rather than thrown from `submitExperts`.
+    private var pendingError: Error?
+
+    var gpuBusySeconds: Double {
+        timingLock.lock()
+        defer { timingLock.unlock() }
+        return busyTotal
+    }
     /// The same busy time split by command buffer, so a timing line can say
     /// whether the pre-fetch GPU work or the routed experts dominate. The
     /// pre-fetch buffer holds everything up to the router read-back: norm,
     /// q/k/gate, MoVA, attention and the shared expert.
-    private(set) var prefetchBusySeconds: Double = 0
-    private(set) var expertBusySeconds: Double = 0
+    var prefetchBusySeconds: Double {
+        timingLock.lock()
+        defer { timingLock.unlock() }
+        return prefetchBusyTotal
+    }
+    var expertBusySeconds: Double {
+        timingLock.lock()
+        defer { timingLock.unlock() }
+        return expertBusyTotal
+    }
+
+    /// Rethrow an expert command buffer's asynchronous failure (nil when the
+    /// buffers have all succeeded). `prefetch` calls this before reusing the
+    /// layer's buffers; the graph calls it once after the head.
+    func checkPendingError() throws {
+        timingLock.lock()
+        let error = pendingError
+        timingLock.unlock()
+        if let error { throw error }
+    }
 
     /// Zero the per-token counters. The graph times one forward at a time; the
     /// probe is long-lived, so without this the timing line prints cumulative
@@ -59,10 +92,12 @@ final class K2SparseLayerProbe {
     func resetTimings() {
         fetchSeconds = 0
         encodeSeconds = 0
-        gpuSeconds = 0
-        gpuBusySeconds = 0
-        prefetchBusySeconds = 0
-        expertBusySeconds = 0
+        timingLock.lock()
+        busyTotal = 0
+        prefetchBusyTotal = 0
+        expertBusyTotal = 0
+        pendingError = nil
+        timingLock.unlock()
     }
 
     init(
@@ -114,6 +149,10 @@ final class K2SparseLayerProbe {
                 scales: view.buffer, scalesOffset: Int(view.scaleOffset),
                 biases: view.buffer, biasesOffset: Int(view.biasOffset))
         }
+        self.sharedWeights = K2MoEStage.ExpertWeights(
+            gate: try model.k2SharedGate(layer: layer),
+            up: try model.k2SharedUp(layer: layer),
+            down: try model.k2SharedDown(layer: layer))
 
         func buffer(_ count: Int, _ label: String) throws -> MTLBuffer {
             guard
@@ -141,8 +180,13 @@ final class K2SparseLayerProbe {
         self.vCache = try buffer(maxSequence * kvDim, "k2.sparse.vCache")
     }
 
-    /// Run the layer for one token. The caller supplies the hidden state as
-    /// halfs; the return value is the layer's output.
+    /// The layer's output buffer, written by the routed-expert phase. The
+    /// graph passes it straight to the next layer instead of reading it back.
+    var output: MTLBuffer { out }
+
+    /// Run the layer for one token, hidden state in and out through the CPU.
+    /// The graph uses `prefetch`/`submitExperts` directly so the hidden state
+    /// stays on the GPU; this is the self-contained form the tests drive.
     func run(
         queue: MTLCommandQueue,
         hidden: [Float16],
@@ -155,17 +199,41 @@ final class K2SparseLayerProbe {
                 memcpy(input.contents(), base, config.hiddenSize * 2)
             }
         }
-        let d = config.hiddenSize
-        let shared = K2MoEStage.ExpertWeights(
-            gate: try model.k2SharedGate(layer: layer),
-            up: try model.k2SharedUp(layer: layer),
-            down: try model.k2SharedDown(layer: layer))
+        try await prefetch(queue: queue, input: input, position: position)
+        let experts = try await submitExperts(queue: queue)
+        await experts.completed()
+        let base = out.contents()
+        return (0..<config.hiddenSize).map {
+            Float(
+                base.load(
+                    fromByteOffset: $0 * MemoryLayout<UInt16>.stride,
+                    as: Float16.self))
+        }
+    }
 
+    /// Phase 1: norm, q/k/gate and the MoVA router, then the value experts
+    /// (selection resolved on the GPU), RoPE, cached attention, the gate,
+    /// o_proj, both residuals, the post-attention norm, the MoE router and the
+    /// shared expert. Awaits the command buffer, because the routed-expert ids
+    /// have to come back to the CPU to address the blobs.
+    func prefetch(
+        queue: MTLCommandQueue,
+        input source: MTLBuffer,
+        position: Int
+    ) async throws {
+        precondition(position < maxSequence)
+        try checkPendingError()
         try await encodePrefetchPhase(
-            queue: queue, position: position, shared: shared)
-        // Phase 2: the router ids are the only thing that has to come back to
-        // the CPU; the MoVA values resolve their own selection on the GPU, so
-        // everything up to the routed-expert fetch is one command buffer.
+            queue: queue, input: source, position: position)
+    }
+
+    /// Phase 2: read the router ids, fetch the selected experts, and submit the
+    /// routed pass. The returned command buffer is committed but not awaited,
+    /// so the next layer's phase 1 can be submitted behind it; the queue order
+    /// is the dependency.
+    @discardableResult
+    func submitExperts(queue: MTLCommandQueue) async throws -> MTLCommandBuffer {
+        let d = config.hiddenSize
         let fetchStart = Date()
         let ids = moe.selectedExpertIDs()
         guard
@@ -184,7 +252,7 @@ final class K2SparseLayerProbe {
         }
         fetchSeconds += Date().timeIntervalSince(fetchStart)
 
-        let phaseStart2 = Date()
+        let phaseStart = Date()
         guard let third = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
@@ -202,33 +270,26 @@ final class K2SparseLayerProbe {
         try copy(third, from: h1, to: out, count: d)
         try elementwise.encodeResidualAdd(
             commandBuffer: third, hidden: out, delta: moeOut, count: d)
-        encodeSeconds += Date().timeIntervalSince(phaseStart2)
-        third.commit()
-        let gpuStart2 = Date()
-        await third.completed()
-        gpuSeconds += Date().timeIntervalSince(gpuStart2)
-        let thirdBusy = max(0, third.gpuEndTime - third.gpuStartTime)
-        gpuBusySeconds += thirdBusy
-        expertBusySeconds += thirdBusy
-
-        let base = out.contents()
-        return (0..<d).map {
-            Float(
-                base.load(
-                    fromByteOffset: $0 * MemoryLayout<UInt16>.stride,
-                    as: Float16.self))
+        encodeSeconds += Date().timeIntervalSince(phaseStart)
+        // The completion handler is what records the GPU time now; the caller
+        // does not wait here.
+        third.addCompletedHandler { [weak self] buffer in
+            guard let self else { return }
+            let busy = max(0, buffer.gpuEndTime - buffer.gpuStartTime)
+            self.timingLock.lock()
+            self.busyTotal += busy
+            self.expertBusyTotal += busy
+            if let error = buffer.error { self.pendingError = error }
+            self.timingLock.unlock()
         }
+        third.commit()
+        return third
     }
 
-    /// Everything that runs before the routed-expert fetch: norm, q/k/gate and
-    /// the MoVA router, then the value experts (selection resolved on the GPU),
-    /// RoPE, cached attention, the gate, o_proj, both residuals, the
-    /// post-attention norm, the MoE router and the shared expert. One command
-    /// buffer, because nothing in it needs the CPU.
     private func encodePrefetchPhase(
         queue: MTLCommandQueue,
-        position: Int,
-        shared: K2MoEStage.ExpertWeights
+        input source: MTLBuffer,
+        position: Int
     ) async throws {
         let d = config.hiddenSize
         let queryDim = config.numHeads * config.fullHeadDim
@@ -241,7 +302,7 @@ final class K2SparseLayerProbe {
         let inputNorm = try model.inputNorm(layer: layer)
         try rms.encodeBF16WGrouped(
             commandBuffer: first,
-            x: input, weight: inputNorm.buffer,
+            x: source, weight: inputNorm.buffer,
             weightOffset: Int(inputNorm.offset),
             out: normed,
             groupDim: UInt32(d / groups), numGroups: groups,
@@ -290,7 +351,7 @@ final class K2SparseLayerProbe {
             commandBuffer: first, out: attn, gate: gate, count: queryDim)
         try gemv(
             first, try model.oProj(layer: layer), x: attn, y: oOut, rows: d, columns: queryDim)
-        try copy(first, from: input, to: h1, count: d)
+        try copy(first, from: source, to: h1, count: d)
         try elementwise.encodeResidualAdd(
             commandBuffer: first, hidden: h1, delta: oOut, count: d)
         let postNorm = try model.postAttnNorm(layer: layer)
@@ -311,15 +372,19 @@ final class K2SparseLayerProbe {
             routerBiasOffset: Int(moeBias.offset),
             scaling: Float(config.routerScaling))
         try moe.encodeSharedExpert(
-            commandBuffer: first, hidden: normed2, shared: shared, out: moeOut)
+            commandBuffer: first, hidden: normed2, shared: sharedWeights,
+            out: moeOut)
         encodeSeconds += Date().timeIntervalSince(phaseStart)
+        first.addCompletedHandler { [weak self] buffer in
+            guard let self else { return }
+            let busy = max(0, buffer.gpuEndTime - buffer.gpuStartTime)
+            self.timingLock.lock()
+            self.busyTotal += busy
+            self.prefetchBusyTotal += busy
+            self.timingLock.unlock()
+        }
         first.commit()
-        let gpuStart = Date()
         await first.completed()
-        gpuSeconds += Date().timeIntervalSince(gpuStart)
-        let firstBusy = max(0, first.gpuEndTime - first.gpuStartTime)
-        gpuBusySeconds += firstBusy
-        prefetchBusySeconds += firstBusy
     }
 
     private func gemv(
