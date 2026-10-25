@@ -44,6 +44,12 @@ final class K2SparseLayerProbe {
     private(set) var encodeSeconds: Double = 0
     private(set) var gpuSeconds: Double = 0
     private(set) var gpuBusySeconds: Double = 0
+    /// The same busy time split by command buffer, so a timing line can say
+    /// whether the pre-fetch GPU work, the attention phase or the routed
+    /// experts dominate.
+    private(set) var entryBusySeconds: Double = 0
+    private(set) var attentionBusySeconds: Double = 0
+    private(set) var expertBusySeconds: Double = 0
 
     /// Zero the per-token counters. The graph times one forward at a time; the
     /// probe is long-lived, so without this the timing line prints cumulative
@@ -53,6 +59,9 @@ final class K2SparseLayerProbe {
         encodeSeconds = 0
         gpuSeconds = 0
         gpuBusySeconds = 0
+        entryBusySeconds = 0
+        attentionBusySeconds = 0
+        expertBusySeconds = 0
     }
 
     init(
@@ -197,7 +206,9 @@ final class K2SparseLayerProbe {
         let gpuStart2 = Date()
         await third.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart2)
-        gpuBusySeconds += max(0, third.gpuEndTime - third.gpuStartTime)
+        let thirdBusy = max(0, third.gpuEndTime - third.gpuStartTime)
+        gpuBusySeconds += thirdBusy
+        expertBusySeconds += thirdBusy
 
         let base = out.contents()
         return (0..<d).map {
@@ -246,7 +257,9 @@ final class K2SparseLayerProbe {
         let gpuStart = Date()
         await first.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart)
-        gpuBusySeconds += max(0, first.gpuEndTime - first.gpuStartTime)
+        let firstBusy = max(0, first.gpuEndTime - first.gpuStartTime)
+        gpuBusySeconds += firstBusy
+        entryBusySeconds += firstBusy
     }
 
     private func encodeAttention(
@@ -321,7 +334,9 @@ final class K2SparseLayerProbe {
         let gpuStart = Date()
         await second.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart)
-        gpuBusySeconds += max(0, second.gpuEndTime - second.gpuStartTime)
+        let secondBusy = max(0, second.gpuEndTime - second.gpuStartTime)
+        gpuBusySeconds += secondBusy
+        attentionBusySeconds += secondBusy
     }
 
     private func gemv(
