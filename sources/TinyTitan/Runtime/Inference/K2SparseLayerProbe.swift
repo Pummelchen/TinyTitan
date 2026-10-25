@@ -42,6 +42,7 @@ final class K2SparseLayerProbe {
     private(set) var fetchSeconds: Double = 0
     private(set) var encodeSeconds: Double = 0
     private(set) var gpuSeconds: Double = 0
+    private(set) var gpuBusySeconds: Double = 0
 
     init(
         model: Model, context: MetalContext, layer: Int,
@@ -172,6 +173,7 @@ final class K2SparseLayerProbe {
         let gpuStart2 = Date()
         await third.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart2)
+        gpuBusySeconds += max(0, third.gpuEndTime - third.gpuStartTime)
 
         let base = out.contents()
         return (0..<d).map {
@@ -220,6 +222,7 @@ final class K2SparseLayerProbe {
         let gpuStart = Date()
         await first.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart)
+        gpuBusySeconds += max(0, first.gpuEndTime - first.gpuStartTime)
     }
 
     private func encodeAttention(queue: MTLCommandQueue, position: Int) async throws {
@@ -287,6 +290,7 @@ final class K2SparseLayerProbe {
         let gpuStart = Date()
         await second.completed()
         gpuSeconds += Date().timeIntervalSince(gpuStart)
+        gpuBusySeconds += max(0, second.gpuEndTime - second.gpuStartTime)
     }
 
     private func gemv(

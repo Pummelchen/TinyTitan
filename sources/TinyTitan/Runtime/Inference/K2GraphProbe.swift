@@ -77,14 +77,15 @@ package final class K2GraphProbe {
             let fetch = sparse.values.reduce(0.0) { $0 + $1.fetchSeconds }
             let encode = sparse.values.reduce(0.0) { $0 + $1.encodeSeconds }
             let gpu = sparse.values.reduce(0.0) { $0 + $1.gpuSeconds }
+            let busy = sparse.values.reduce(0.0) { $0 + $1.gpuBusySeconds }
             let total = Date().timeIntervalSince(started)
             let rest = total - fetch - encode - gpu
             FileHandle.standardError.write(
                 Data(
                     String(
                         format:
-                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs encode %.3fs other %.3fs\n",
-                        total, fetch, gpu, encode, rest
+                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs busy %.3fs encode %.3fs other %.3fs\n",
+                        total, fetch, gpu, busy, encode, rest
                     ).utf8))
         }
         return result

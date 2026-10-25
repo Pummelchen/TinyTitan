@@ -117,7 +117,9 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
 - **Why the probe is slow** — a 4-bit decode token at 8 expert slots measures
   ~0.22 s in expert fetch, ~0.22 s in GPU work and ~0.05 s in encode/sync
   (`TINYTITAN_K2_TIMING=1`). Raising the cache to 64 slots cuts those to
-  ~0.14 s and ~0.15 s (2.0 → 2.7 tok/s), so it is not one bottleneck: the probe
+  ~0.14 s and ~0.15 s (2.0 → 2.7 tok/s); the GPU's own busy time in that
+  decode step is ~0.11 s, so ~0.05 s is scheduling gap. It is not one
+  bottleneck: the probe
   commits and waits three command buffers per sparse layer (about 138 GPU
   round-trips per token), reads the router ids back per layer, fetches experts
   synchronously with no overlap, and runs every routed expert as three small
