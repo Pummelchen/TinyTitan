@@ -101,6 +101,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   and a two-token run checks the second token against every layer's cache; both
   logit vectors match the chained CPU reference. Sparse layers are refused by
   name, so a real 36B install still stops before the graph runs.
+- **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
+  embedding, dense and sparse layers in order, final norm and head. Each sparse
+  layer fetches its experts between phases, so the graph carries the hidden
+  state as halfs and runs one layer at a time; the test compares two tokens
+  against the same layers driven manually. It is the probe form of the serving
+  loop, not the batched one.
 - **Sparse layer** — `K2SparseLayerProbe` runs one sparse layer end to end:
   grouped norm, q/k and the separate gate, MoVA values from the four resident
   experts, cached gated attention, the bf16 MoE router, the fetched routed
