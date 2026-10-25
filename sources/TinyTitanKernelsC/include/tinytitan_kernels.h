@@ -144,4 +144,33 @@ int tinytitan_delta_rule_chunk(const float *queries,
                                float *readouts,
                                size_t readoutStride);
 
+/// Nemotron 3.5 Bolt's CPU elementwise kernels. See nemotron_ops.c.
+void tinytitan_rmsnorm_f32(const float *x, const float *weight, size_t n,
+                           float epsilon, float *out);
+void tinytitan_rmsnorm_gated_f32(const float *x, const float *gate,
+                                 const float *weight, size_t n, size_t group,
+                                 float epsilon, float *out);
+void tinytitan_silu_f32(const float *x, size_t n, float *out);
+void tinytitan_relu2_f32(const float *x, size_t n, float *out);
+/// `out[r] = sum_i bf16(weights[r][i]) * x[i]`, for the MoE router.
+void tinytitan_bf16_gemv(const uint16_t *weights, const float *x,
+                         size_t rows, size_t n, float *out);
+/// One row of an affine group-64 embedding table, dequantized to FP32.
+void tinytitan_affine_embedding_row(const uint8_t *weights,
+                                    const uint16_t *scales,
+                                    const uint16_t *biases, size_t columns,
+                                    size_t bits, size_t row, float *out);
+/// Shift the depthwise history, append `input`, convolve, add bias, SiLU.
+void tinytitan_mamba_conv_step(const float *input, const uint16_t *weight,
+                               const uint16_t *bias, size_t channels,
+                               size_t kernel, float *state, float *out);
+/// One Mamba-2 selective-scan step over a contiguous head range.
+void tinytitan_mamba_ssm_range(const float *x, const float *b, const float *c,
+                               const float *dt, const uint16_t *aLog,
+                               const uint16_t *skipD, const uint16_t *dtBias,
+                               size_t heads, size_t headDim, size_t stateSize,
+                               size_t groups, float timeStepMin,
+                               size_t firstHead, size_t headCount,
+                               float *state, float *y);
+
 #endif /* TINYTITAN_KERNELS_H */

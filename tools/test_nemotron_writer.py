@@ -36,6 +36,13 @@ LATENT = 64
 EXPERT_WIDTH = 128
 EXPERTS = 8
 VOCAB = 128
+MAMBA_HEADS = 4
+MAMBA_HEAD_DIM = 32
+MAMBA_STATE = 8
+MAMBA_GROUPS = 2
+MAMBA_INTERMEDIATE = MAMBA_HEADS * MAMBA_HEAD_DIM
+CONV_DIMENSION = MAMBA_INTERMEDIATE + 2 * MAMBA_GROUPS * MAMBA_STATE
+IN_PROJECTION = MAMBA_INTERMEDIATE + CONV_DIMENSION + MAMBA_HEADS
 
 
 def fake_headers() -> dict[str, dict]:
@@ -51,14 +58,17 @@ def fake_headers() -> dict[str, dict]:
         "language_model.backbone.norm_f.weight": bf16((HIDDEN,)),
         # layer 0: mamba
         "language_model.backbone.layers.0.norm.weight": bf16((HIDDEN,)),
-        "language_model.backbone.layers.0.mixer.in_proj.weight": bf16((2 * HIDDEN + 8, HIDDEN)),
-        "language_model.backbone.layers.0.mixer.out_proj.weight": bf16((HIDDEN, HIDDEN)),
-        "language_model.backbone.layers.0.mixer.conv1d.weight": bf16((HIDDEN + 8, 1, 4)),
-        "language_model.backbone.layers.0.mixer.conv1d.bias": bf16((HIDDEN + 8,)),
-        "language_model.backbone.layers.0.mixer.A_log": bf16((4,)),
-        "language_model.backbone.layers.0.mixer.D": bf16((4,)),
-        "language_model.backbone.layers.0.mixer.dt_bias": bf16((4,)),
-        "language_model.backbone.layers.0.mixer.norm.weight": bf16((HIDDEN,)),
+        "language_model.backbone.layers.0.mixer.in_proj.weight": bf16(
+            (IN_PROJECTION, HIDDEN)),
+        "language_model.backbone.layers.0.mixer.out_proj.weight": bf16(
+            (HIDDEN, MAMBA_INTERMEDIATE)),
+        "language_model.backbone.layers.0.mixer.conv1d.weight": bf16(
+            (CONV_DIMENSION, 1, 4)),
+        "language_model.backbone.layers.0.mixer.conv1d.bias": bf16((CONV_DIMENSION,)),
+        "language_model.backbone.layers.0.mixer.A_log": bf16((MAMBA_HEADS,)),
+        "language_model.backbone.layers.0.mixer.D": bf16((MAMBA_HEADS,)),
+        "language_model.backbone.layers.0.mixer.dt_bias": bf16((MAMBA_HEADS,)),
+        "language_model.backbone.layers.0.mixer.norm.weight": bf16((MAMBA_INTERMEDIATE,)),
         # layer 1: MoE
         "language_model.backbone.layers.1.norm.weight": bf16((HIDDEN,)),
         "language_model.backbone.layers.1.mixer.fc1_latent_proj.weight": bf16((LATENT, HIDDEN)),
@@ -89,10 +99,10 @@ def fake_text() -> dict:
         "num_key_value_heads": 1,
         "head_dim": 64,
         "vocab_size": VOCAB,
-        "mamba_num_heads": 4,
-        "mamba_head_dim": 32,
-        "ssm_state_size": 8,
-        "n_groups": 2,
+        "mamba_num_heads": MAMBA_HEADS,
+        "mamba_head_dim": MAMBA_HEAD_DIM,
+        "ssm_state_size": MAMBA_STATE,
+        "n_groups": MAMBA_GROUPS,
         "conv_kernel": 4,
         "moe_latent_size": LATENT,
         "moe_shared_expert_intermediate_size": 64,
@@ -157,30 +167,31 @@ def main() -> int:
     if not VERIFIER.exists():
         print(f"skip: {VERIFIER} is not built")
         return 0
-    root = Path(tempfile.mkdtemp(prefix="nemotron-writer-"))
-    try:
-        failures = 0
-        for bits in (4, 8):
-            directory = build(root / f"toy-{bits}bit", bits)
-            manifest = json.loads((directory / "manifest.json").read_text())
-            result = subprocess.run(
-                [str(VERIFIER), "--verify-install", "--input-ssdai", str(directory)],
-                capture_output=True, text=True)
-            status = "ok" if result.returncode == 0 else "FAILED"
-            print(
-                f"{bits}-bit: {status}: {manifest['numLayers']} layers, "
-                f"{manifest['expertsPerLayer']} experts declared, "
-                f"stride {manifest['expertStride']}")
-            if result.returncode != 0:
-                failures += 1
-                print(result.stdout[-4000:])
-                print(result.stderr[-4000:])
-            elif not (directory / "verified-install.json").exists():
-                failures += 1
-                print("verify-install accepted the install but wrote no receipt")
-        return 1 if failures else 0
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
+    root = ROOT / ".build"
+    root.mkdir(parents=True, exist_ok=True)
+    failures = 0
+    for bits in (4, 8):
+        directory = root / f"nemotron-toy-{bits}bit"
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory = build(directory, bits)
+        manifest = json.loads((directory / "manifest.json").read_text())
+        result = subprocess.run(
+            [str(VERIFIER), "--verify-install", "--input-ssdai", str(directory)],
+            capture_output=True, text=True)
+        status = "ok" if result.returncode == 0 else "FAILED"
+        print(
+            f"{bits}-bit: {status}: {manifest['numLayers']} layers, "
+            f"{manifest['expertsPerLayer']} experts declared, "
+            f"stride {manifest['expertStride']} -> {directory}")
+        if result.returncode != 0:
+            failures += 1
+            print(result.stdout[-4000:])
+            print(result.stderr[-4000:])
+        elif not (directory / "verified-install.json").exists():
+            failures += 1
+            print("verify-install accepted the install but wrote no receipt")
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

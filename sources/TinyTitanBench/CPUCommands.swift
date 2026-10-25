@@ -317,6 +317,25 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
+        case "nemotron":
+            // The Nemotron 3.5 Bolt text install: install, prompt, greedy limit.
+            let install =
+                CommandLine.arguments.count > 2
+                ? CommandLine.arguments[2]
+                : "models/nemotron-3.5-bolt_74B_A9B_4Bit"
+            let prompt =
+                CommandLine.arguments.count > 3
+                ? CommandLine.arguments[3] : "The capital of France is"
+            let limit =
+                CommandLine.arguments.count > 4
+                ? Int(CommandLine.arguments[4]) ?? 16 : 16
+            try runNemotron(install: install, prompt: prompt, limit: limit)
+        case "nemotroninfo":
+            let install =
+                CommandLine.arguments.count > 2
+                ? CommandLine.arguments[2]
+                : "models/nemotron-3.5-bolt_74B_A9B_4Bit"
+            try runNemotronInfo(install: install)
         case "k2gpu":
             // The K2 install through the probe graph on Metal: install,
             // prompt, greedy limit.
