@@ -44,6 +44,24 @@ extension Model {
     public func oProj(layer L: Int) throws -> TensorView {
         try resident(name: schema.oProj(L))
     }
+
+    // MARK: K2-Horizon roles
+
+    /// The separate softplus-gate projection (`hidden -> heads * headDim`).
+    /// K2 does not pack it into q_proj the way the Qwen families do.
+    public func k2AttentionGate(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.attnGate(L))
+    }
+    /// The dense layers 0-2 SwiGLU MLP.
+    public func k2DenseGate(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.denseGate(L))
+    }
+    public func k2DenseUp(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.denseUp(L))
+    }
+    public func k2DenseDown(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.denseDown(L))
+    }
     // MARK: Hyper-connection (Gated Residual) weights
     //
     // Present only on families whose `hyperConnections` is enabled; asking for

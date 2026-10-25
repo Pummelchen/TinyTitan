@@ -16,6 +16,7 @@ final class Elementwise {
     let hcInjectPSO: MTLComputePipelineState
     private let sigmoidPSO: MTLComputePipelineState
     private let siluPSO: MTLComputePipelineState
+    private let siluMulPSO: MTLComputePipelineState
     // PLE (n-gram) block.
     let pleScorePSO: MTLComputePipelineState
     let pleGatePSO: MTLComputePipelineState
@@ -36,6 +37,7 @@ final class Elementwise {
         self.hcInjectPSO = try context.pipeline("hc_stream_inject_fp16")
         self.sigmoidPSO = try context.pipeline("sigmoid_fp16")
         self.siluPSO = try context.pipeline("silu_fp16")
+        self.siluMulPSO = try context.pipeline("silu_mul_fp16")
         self.pleScorePSO = try context.pipeline("ple_stream_score_fp16")
         self.pleGatePSO = try context.pipeline("ple_signed_sqrt_gate_fp16")
         self.pleBroadcastPSO = try context.pipeline("ple_broadcast_scale_fp16")
@@ -101,6 +103,30 @@ final class Elementwise {
             siluPSO, commandBuffer: commandBuffer,
             x: x, xOffset: xOffset, out: out, outOffset: outOffset,
             count: count, inScale: inScale, outScale: nil)
+    }
+
+    /// out = silu(gate) * up, the SwiGLU activation K2's dense and shared
+    /// experts use. The Qwen families get the same arithmetic inside their
+    /// fused expert kernels; this entry point is for callers that run the two
+    /// projections as separate GEMVs.
+    func encodeSiluMul(
+        commandBuffer: MTLCommandBuffer,
+        gate: MTLBuffer, gateOffset: Int = 0,
+        up: MTLBuffer, upOffset: Int = 0,
+        out: MTLBuffer, outOffset: Int = 0,
+        count: Int
+    ) throws {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(siluMulPSO)
+        encoder.setBuffer(gate, offset: gateOffset, index: 0)
+        encoder.setBuffer(up, offset: upOffset, index: 1)
+        encoder.setBuffer(out, offset: outOffset, index: 2)
+        var elementCount = UInt32(count)
+        encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 3)
+        dispatch(encoder, pipeline: siluMulPSO, threads: count)
+        encoder.endEncoding()
     }
 
     /// packed [H, 2D] per-head [query ; gate] → q [H, D], gate [H, D].
