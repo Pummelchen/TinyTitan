@@ -34,7 +34,7 @@ therefore quantized here from the BF16 weights, not copied from the card.
 
 | | |
 | --- | --- |
-| Layers | **88**: 40 `mamba`, 40 `moe`, 8 `attention` (indices 7, 16, 25, 36, 47, 58, 69, 80) |
+| Layers | **88**: 40 `mamba`, 40 `moe`, 8 `attention` (indices 7, 16, 25, 36, 47, 58, 69, 78) |
 | Hidden | 4,096; pre-norm RMSNorm, eps 1e-5; residual added after the mixer |
 | MoE | 40 layers; **240 / 304 / 368 / 432 / 496** routed experts per layer (13,824 total), top-9, latent width **1,024**, per-expert width 1,536–2,560 (per layer), shared expert 5,376, activation **relu²** |
 | Router | sigmoid scores + `e_score_correction_bias`, 8 groups choose top-1 group by top-2 sum, top-9 globally, normalize top-k, ×5.0 |
@@ -75,15 +75,18 @@ the latent/shared projections are quantized; norms and the router stay bf16;
 the embedding and untied head are kept at 8 bits in both installs, as the
 other families do.
 
-Expected installed size, computed from the index (group-64 overhead included):
+Measured from the index and the planner (`--plan`), group-64 overhead included:
 
-| Build | Routed experts | Resident | Total (approx.) |
+| Build | Routed experts (padded) | Resident | Total |
 | --- | ---: | ---: | ---: |
-| 4-bit | 37.2 GB | 8.6 GB | **45.8 GB** |
-| 8-bit | 70.3 GB | 18.2 GB | **88.5 GB** |
+| 4-bit | 40.77 GB | 5.07 GB | **45.83 GB** |
+| 8-bit | 77.01 GB | 8.45 GB | **85.46 GB** |
 
-Both installs are ~134 GB, so the host needs its disposable build artifacts
-cleared first (`.build` is 47 GB here); the source is never staged whole.
+The routed experts are padded to the widest layer's blob (`expertStride`
+2,949,120 B at 4-bit, 5,570,560 B at 8-bit), because the verifier accepts one
+stride per install and requires `fileSize = expertsPerLayer * expertStride`.
+That costs 3.56 GB and 6.73 GB of page padding respectively. Both installs are
+131.3 GB; the source is never staged whole.
 
 ### Decode design
 
@@ -106,3 +109,82 @@ path is a **prefill** attention sidecar (v4.5) — the Neural Engine is not
 programmable for the Mamba-2 recurrence, and Core ML cannot express the
 streaming routed experts. A decode column is only published if a real path
 exists; it is not replaced with a guess.
+
+## 4. The runtime, as implemented
+
+`NemotronInstall` reads the install directly rather than through the Qwen-shaped
+`Model.load`: the manifest's `arch.nemotronH` block is the geometry, the
+resident index is parsed from `model_weights.bin`, and `packed_experts/layout.json`
+gives each layer's two-role (`up`, `down`) expert blobs. The weight files are
+mmap'd; a 74B model is never resident.
+
+`NemotronModel` is one straight transcription of the reference forward:
+
+- every block is pre-norm RMSNorm, mixer, residual;
+- Mamba-2: `in_proj` → depthwise conv (4 taps) → SiLU → split x/B/C → selective
+  scan with `softplus(dt + dt_bias)` clamped at 1e-4, `A = -exp(A_log)`, D skip →
+  gated RMSNorm (group 1,024) → `out_proj`;
+- LatentMoE: BF16 router → sigmoid → `e_score_correction_bias` → top-9 (one
+  group, so the grouped mask is a no-op) → normalize → ×5 → `fc1_latent_proj`,
+  nine `up`/`down` pairs on the 1,024-wide latent, weighted sum →
+  `fc2_latent_proj`, plus the shared 5,376-wide relu² expert on the unprojected
+  residual;
+- attention: 32/2×128, **no RoPE**, scale 128^-0.5, causal softmax over a
+  per-layer KV cache;
+- final RMSNorm then the untied 8-bit head.
+
+Two matvec backends, one graph:
+
+| Backend | GEMV | Status |
+| --- | --- | --- |
+| `NemotronCPU` | `tinytitan_int4/int8_affine_gemv` (NEON), rows split across cores | reference |
+| `NemotronMetal` | `dequant_int4_gemv_simd` / `dequant_int8_gemv_simd`, one no-copy `MTLBuffer` per mmap'd file, a layer's nine experts in one command buffer | measurement path |
+
+The elementwise kernels (RMSNorm, gated RMSNorm, conv, SSM update, SiLU, relu²,
+BF16 router GEMV, embedding row) are in `TinyTitanKernelsC/nemotron_ops.c`.
+
+**Checked against an independent implementation.** `tools/nemotron_reference.py`
+is a NumPy transcription of the same reference forward that reads the same
+install. On a three-layer toy install (mamba, MoE, attention; random weights)
+with an input of three tokens — so the Mamba conv/SSM state and the KV cache are
+both exercising their second and third steps:
+
+| Arm | max |logit difference| vs NumPy |
+| --- | ---: |
+| 4-bit CPU | **4.9e-7** |
+| 4-bit Metal | **3.4e-6** (FP16 GEMV) |
+| 8-bit CPU | **5.0e-7** |
+| 8-bit Metal | **3.4e-6** |
+
+The writer itself is checked before any 150 GB download: `tools/test_nemotron_writer.py`
+builds that toy install from scratch and the real `TinyTitanRepack --verify-install`
+accepts both widths.
+
+Commands:
+
+```bash
+TinyTitanBench nemotroninfo models/nemotron-3.5-bolt_74B_A9B_4Bit
+TinyTitanBench nemotron      <install> "The capital of France is" 4   # CPU
+TinyTitanBench nemotrongpu   <install> "The capital of France is" 4   # Metal
+TinyTitanBench nemotronlogits <install> 5,7,9 [--gpu]                 # no tokenizer
+benchmark/nemotron_decode.py --install4 ... --install8 ... --runs 1
+```
+
+## 5. The Neural Engine
+
+There is **no ANE decode path for this model, and this is a hardware limit, not
+an omission**. TinyTitan's ANE path is a Core ML sidecar that computes a
+full-attention block's prefill (`docs/v4.5-ane-prefill.md`); the ANE is
+programmed by exporting a fixed graph, not by launching arbitrary compute.
+Nemotron 3.5 Bolt needs three things Core ML cannot express here:
+
+1. a per-token **selective-scan recurrence** over a 128×64×128 FP32 state in
+   each of 40 layers — the ANE has no such op and the model is not a static
+   graph;
+2. **dynamic gather of 9 of 240–496 experts per layer** from an 80 GB blob —
+   there is no ANE op for an indexed expert read, and a dense surrogate would
+   be 74B parameters per token;
+3. the routed experts do not fit in 24 GB of unified memory even at 4 bits.
+
+A decode column is therefore reported as **NA with that reason**; it is not
+replaced by a prefill-assisted number that would measure the GPU anyway.
