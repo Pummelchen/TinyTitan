@@ -151,10 +151,13 @@ extension TinyTitanBench {
             forFamily: .k2Horizon, directoryURL: install)
         let context = try MetalContext()
         // Expert-cache slots per layer. Eight covers exactly one top-8 set, so
-        // a changing selection misses; a larger value trades RAM for hits.
+        // a changing selection misses; the measured default trades RAM for
+        // hits (4-bit experts are 3.3 MB, 8-bit 6.6 MB per layer-slot).
+        let identity = try ManifestReader.peekIdentity(directoryURL: install)
+        let defaultSlots = identity.weightBits == 4 ? 64 : 16
         let slots =
             Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? "")
-            ?? 8
+            ?? defaultSlots
         let model = try Model.load(
             directoryURL: install, device: context.device, expecting: config,
             streamingMode: .pread(slotCount: slots))

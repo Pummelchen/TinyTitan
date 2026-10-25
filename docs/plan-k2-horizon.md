@@ -126,6 +126,11 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   GEMVs. The runner path (one command buffer per token, GPU-side residency,
   prefetch, fused expert kernels, ANE/batched prefill) is what closes the gap
   to the Qwen 35B numbers; 2 tok/s is the correctness prototype's cost.
+  `k2gpu` now defaults to 64 slots on 4-bit and 16 on 8-bit (overridable with
+  `TINYTITAN_K2_SLOTS`). Reusing the Qwen fused-expert kernels was tried and
+  measured **slower** (1.4 vs 2.6 tok/s): they are tuned for 512-wide experts,
+  and K2's 768×2560 shape stages too little work per threadgroup. A fused
+  kernel has to be written for this shape, not borrowed.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
