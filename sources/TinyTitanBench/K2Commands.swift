@@ -77,6 +77,9 @@ extension TinyTitanBench {
     static func loadK2Tokenizer(_ directory: URL) throws -> Tokenizer? {
         guard let folder = GFTokenizer.resolvedTokenizerFolder(forModelDirectory: directory)
         else { return nil }
+        // unchecked-invariant: written only inside the Task below and read only
+        // after `semaphore.wait()` returns, which the signal orders after the
+        // last write. There is no concurrent access.
         final class Box: @unchecked Sendable {
             var value: Tokenizer?
             var error: Error?
