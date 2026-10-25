@@ -531,20 +531,27 @@ install_one() {
     # then, which is the same rule the runtime's own guard follows.
     if [[ "${TINYTITAN_SKIP_DISK_CHECK:-0}" != "1" ]]; then
       local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
-      local stream_gb=12
+      local stream_gb=12 stage_need=""
       [[ "$source" == convert_qwen35moe ]] && stream_gb=104
-      # The solo 122B path holds four 5 GB shards (TINYTITAN_FETCHERS=4, depth
-      # 2) plus the finished one being converted: ~24 GB, not the 35B's ~90.
-      [[ "$source" == convert_qwen35moe_solo ]] && stream_gb=24
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
         while IFS=: read -r _kind probe; do
           [[ -n "$probe" && -e "$probe" ]] && snap_exists=1
         done < <(row_staging_dirs "$name")
         [[ -d "$MODELS/$dir" ]] && install_exists=1
-        require_gb "the staging volume ($WORK)" "$WORK" \
-          "$(awk -v s="$size_gb" -v have="$snap_exists" -v stream="$stream_gb" \
-               'BEGIN { printf "%d", have ? 2 : s * 1.25 + stream }')" \
+        if [[ "$source" == convert_qwen35moe_solo ]]; then
+          # The solo path retires its source shards as the install is written
+          # (--retire-source-shards), so the peak is the snapshot plus the
+          # bytes written before the first unlink -- not the snapshot plus the
+          # whole install. 24 GB is the pre-unlink headroom (resident body,
+          # four layer files and the reserve) with two fetchers in flight.
+          stage_need="$(awk -v s="$size_gb" -v have="$snap_exists" \
+               'BEGIN { printf "%d", have ? 24 : s + 24 }')"
+        else
+          stage_need="$(awk -v s="$size_gb" -v have="$snap_exists" -v stream="$stream_gb" \
+               'BEGIN { printf "%d", have ? 2 : s * 1.25 + stream }')"
+        fi
+        require_gb "the staging volume ($WORK)" "$WORK" "$stage_need" \
           || work_ok=0
         require_gb "the models volume ($MODELS)" "$MODELS" \
           "$(awk -v s="$size_gb" -v have="$install_exists" 'BEGIN { printf "%d", have ? 2 : s + 3 }')" \

@@ -248,6 +248,24 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.assertNotIn("FAKE-REPACK", output)
         self.assertFalse((self.models / self.ORNITH_4).exists())
 
+    def test_solo_122b_staging_needs_the_retirement_headroom(self) -> None:
+        # The 4-bit row is 66 GB; the install (69 GB including the reserve)
+        # fits in 80 GB, but the staging volume needs the snapshot plus the
+        # pre-unlink headroom, so 80 must refuse while 100 proceeds. The
+        # converter is `/usr/bin/true` here, so no byte is fetched.
+        short = self.run_tool("ornith122", available_gb=80)
+        output = short.stdout + short.stderr
+        self.assertNotEqual(short.returncode, 0, output)
+        self.assertIn("Not starting ornith122", output)
+        self.assertNotIn("FAKE-REPACK", output)
+
+        enough = self.run_tool("ornith122", available_gb=100)
+        output = enough.stdout + enough.stderr
+        self.assertEqual(enough.returncode, 0, output)
+        self.assertIn("FAKE-REPACK", output)
+        # The import consumes its snapshot; the guard's estimate depends on it.
+        self.assertIn("--retire-source-shards", output)
+
     def test_enough_space_lets_the_install_proceed(self) -> None:
         result = self.run_tool("ornith15", available_gb=9999)
         output = result.stdout + result.stderr
