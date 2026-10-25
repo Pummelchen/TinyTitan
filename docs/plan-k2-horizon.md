@@ -109,7 +109,11 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   same two token ids. That is the real 36B weights through the K2 graph, not
   the toy; the CPU reference's answer for the same prompt is the same word.
   The 8-bit run found that the sparse layer passed a hardcoded 4-bit width to
-  the routed experts; it now reads the expert's own declared width.
+  the routed experts; it now reads the expert's own declared width. `k2gpu`
+  honours `TINYTITAN_K2_CHAT=1` (render the prompt through the checkpoint's
+  template) and `TINYTITAN_REASONING_EFFORT`; a chat prompt's first tokens are
+  the start of its reasoning block, which is what the high-effort template
+  opens.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden

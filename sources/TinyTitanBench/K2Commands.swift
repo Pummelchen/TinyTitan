@@ -153,10 +153,19 @@ extension TinyTitanBench {
         let model = try Model.load(
             directoryURL: install, device: context.device, expecting: config,
             streamingMode: .pread(slotCount: 8))
+        let effort = ModelReasoningEffort.resolved() ?? .high
         let tokenizer = try await GFTokenizer.load(
             forModelDirectory: install, thinkingMode: .on,
-            reasoningEffort: .high)
-        let ids = tokenizer.encode(prompt, addBOS: false)
+            reasoningEffort: effort)
+        let chat = ProcessInfo.processInfo.environment["TINYTITAN_K2_CHAT"] == "1"
+        let ids: [Int32]
+        if chat {
+            ids = try tokenizer.encodeToolChat(
+                messages: [GFTokenizer.Message(role: .user, content: prompt)],
+                tools: [])
+        } else {
+            ids = tokenizer.encode(prompt, addBOS: false)
+        }
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
             exit(2)
