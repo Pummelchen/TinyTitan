@@ -16,6 +16,8 @@ package final class K2GraphProbe {
     /// The chunked prefill view of each dense layer, sharing that layer's K/V
     /// cache so a chunk and a later decode step agree.
     private let denseBatch: [Int: K2DenseBatch]
+    /// The chunked view of each sparse layer, sharing that layer's K/V cache.
+    private let sparseBatch: [Int: K2SparseBatch]
     private let context: MetalContext
     private let queue: MTLCommandQueue
     private let maxSequence: Int
@@ -27,7 +29,7 @@ package final class K2GraphProbe {
 
     package init(
         model: Model, context: MetalContext, maxSequence: Int,
-        maxChunk: Int = 16
+        maxChunk: Int = 1
     ) throws {
         precondition(maxChunk > 0)
         let config = model.config
@@ -72,6 +74,14 @@ package final class K2GraphProbe {
                 kCache: denseLayer.kCache, vCache: denseLayer.vCache)
         }
         self.denseBatch = batches
+        var sparseBatches: [Int: K2SparseBatch] = [:]
+        for (layer, sparseLayer) in sparse {
+            sparseBatches[layer] = try K2SparseBatch(
+                model: model, context: context, layer: layer,
+                maxSequence: maxSequence, maxTokens: maxChunk,
+                kCache: sparseLayer.kCache, vCache: sparseLayer.vCache)
+        }
+        self.sparseBatch = sparseBatches
         let hidden = config.hiddenSize
         func buffer(_ label: String) throws -> MTLBuffer {
             guard
@@ -102,12 +112,13 @@ package final class K2GraphProbe {
     /// Prefill a chunk of tokens at consecutive positions and return the
     /// logits of the last one.
     ///
-    /// The dense prefix runs layer-major through `K2DenseBatch` (one command
-    /// buffer for the whole chunk), sharing the decode layers' K/V caches. The
-    /// sparse layers still run one token at a time -- their router ids and
-    /// expert fetches are per token -- so this is the scaffold for batching
-    /// them, not yet the whole win. Positions are absolute, so a caller may
-    /// start a chunk at any cached prefix boundary.
+    /// Every layer runs layer-major over the chunk: the dense prefix through
+    /// `K2DenseBatch`, the sparse layers through `K2SparseBatch`, both sharing
+    /// the decode layers' K/V caches. The sparse batch still resolves routing
+    /// per token and streams each token's experts, but its norm, q/k/gate/o,
+    /// attention and shared expert read their weights once per chunk. Positions
+    /// are absolute, so a caller may start a chunk at any cached prefix
+    /// boundary.
     package func forwardChunk(
         tokenIDs: [UInt32], basePosition: UInt32
     ) async throws -> [Float] {
@@ -152,32 +163,11 @@ package final class K2GraphProbe {
         await cb.completed()
         try checkFailure(cb)
 
-        for layer in 0..<config.numLayers where sparse[layer] != nil {
-            guard let probe = sparse[layer] else { continue }
-            for token in 0..<count {
-                // Rows stay on the GPU: the pre-fetch phase reads straight out
-                // of the chunk buffer, and a blit lands the layer's output in
-                // the alternate chunk. The earlier CPU `run` path paid two
-                // [Float16] copies per token per layer, which measured slower
-                // than the whole dense batching saved.
-                try await probe.prefetch(
-                    queue: queue, input: current,
-                    inputOffset: token * d * half,
-                    position: Int(basePosition) + token)
-                try await probe.submitExperts(queue: queue)
-                guard let blitCB = queue.makeCommandBuffer() else {
-                    throw MetalError.commandEncoderFailed
-                }
-                guard let blit = blitCB.makeBlitCommandEncoder() else {
-                    throw MetalError.commandEncoderFailed
-                }
-                blit.copy(
-                    from: probe.output, sourceOffset: 0,
-                    to: next, destinationOffset: token * d * half,
-                    size: d * half)
-                blit.endEncoding()
-                blitCB.commit()
-            }
+        for layer in 0..<config.numLayers where sparseBatch[layer] != nil {
+            guard let batch = sparseBatch[layer] else { continue }
+            try await batch.encode(
+                queue: queue, hidden: current, out: next,
+                basePosition: Int(basePosition), tokenCount: count)
             swap(&current, &next)
         }
 

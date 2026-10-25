@@ -41,8 +41,10 @@ final class K2SparseLayerProbe {
     private let normed2: MTLBuffer
     private let moeOut: MTLBuffer
     private let out: MTLBuffer
-    private let kCache: MTLBuffer
-    private let vCache: MTLBuffer
+    /// Internal so the chunked sparse path can share them: a chunk prefill
+    /// must write the rows a later decode step reads.
+    let kCache: MTLBuffer
+    let vCache: MTLBuffer
     private(set) var fetchSeconds: Double = 0
     private(set) var encodeSeconds: Double = 0
     /// GPU busy time, accumulated from the command buffers' own timestamps in

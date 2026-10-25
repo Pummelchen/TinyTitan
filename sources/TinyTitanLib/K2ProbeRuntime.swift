@@ -33,6 +33,26 @@ package actor K2ProbeRuntime {
     private var graphCapacity = 0
     private var cachedTokens: [Int32] = []
 
+    /// How many prompt tokens the chunked prefill batches; 0 or 1 is the
+    /// token path, and that is the default.
+    ///
+    /// Opt-in because the measurement says so. With each sparse layer's expert
+    /// fetch awaited before the next token's fetch (the safe order; the cache
+    /// reuses slots and running ahead corrupted the pending token's weights),
+    /// a 163-token prompt on 4-bit measured 34.9 s chunked against 33.3 s
+    /// token-by-token -- neutral to 5% slower -- so batching projections alone
+    /// does not pay. At 8-bit the same prompt is faster (85 s against
+    /// 107-134 s), but the affine GEMM's reduction order is not the GEMV's and
+    /// the greedy output flips three tokens on the golden prompt, which a
+    /// speed change may not buy. The win that was measured (12-15 s) came from
+    /// overlapping fetches over the cache's slots, and it was not correct.
+    private var chunkSize: Int {
+        let requested =
+            Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_CHUNK"] ?? "")
+            ?? 0
+        return max(1, min(requested, 16))
+    }
+
     /// The graph's initial sequence capacity. K/V costs ~0.2 MB per position
     /// across the 48 layers, so this reserves ~0.4 GB and covers a normal
     /// multi-turn conversation without a rebuild.
@@ -220,12 +240,10 @@ package actor K2ProbeRuntime {
                     ("k2 probe: reused \(reused)/\(promptIDs.count) prompt tokens "
                         + "(capacity \(graphCapacity))\n").utf8))
         }
-        // Chunked prefill is opt-in: the dense prefix batches, the sparse
-        // layers still run per token but now pass rows on the GPU (no CPU
-        // conversions), which the earlier CPU path could not pay for.
-        let chunk = min(
-            Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_CHUNK"] ?? "") ?? 0,
-            16)
+        // Chunked prefill batches every layer's projections; the routed
+        // experts still stream per token, but their command buffers are
+        // committed without waiting so the next fetch overlaps the GPU.
+        let chunk = chunkSize
         var logits: [Float] = []
         do {
             if chunk > 1 {
@@ -332,7 +350,8 @@ package actor K2ProbeRuntime {
         guard graph == nil || needed > graphCapacity else { return }
         let graphStart = Date()
         graph = try K2GraphProbe(
-            model: model, context: context, maxSequence: wanted)
+            model: model, context: context, maxSequence: wanted,
+            maxChunk: chunkSize)
         graphCapacity = wanted
         cachedTokens = []
         if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
