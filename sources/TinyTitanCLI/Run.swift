@@ -103,6 +103,15 @@ public func run(
             && options.presencePenalty == 0
             && options.repetitionPenalty == 1
         let prompt = try buildPrompt(args: args)
+        // K2-Horizon has no runner graph; the CLI drives the probe runtime
+        // instead. Branch before the runner-specific chunk resolution.
+        if (try? ManifestReader.peekFamily(directoryURL: modelURL)) == .k2Horizon {
+            return await runK2Probe(
+                args: args, modelURL: modelURL, prompt: prompt,
+                options: options, thinkingMode: thinkingMode,
+                reasoningEffort: reasoningEffort,
+                stdout: stdout, stderr: stderr)
+        }
         let prefillChunkTokens = try await resolvePrefillChunk(
             args: args, prompt: prompt, modelURL: modelURL,
             thinkingMode: thinkingMode, reasoningEffort: reasoningEffort)
@@ -296,7 +305,7 @@ private func readAheadAdvice(_ raw: String) -> ReadAheadAdvice? {
     ReadAheadAdvice(rawValue: raw)
 }
 
-private func errored(_ stderr: FileHandle, _ message: String, _ code: Int32) -> RunResult {
+func errored(_ stderr: FileHandle, _ message: String, _ code: Int32) -> RunResult {
     stderr.write(Data("error: \(message)\n".utf8))
     return RunResult(exitCode: code)
 }

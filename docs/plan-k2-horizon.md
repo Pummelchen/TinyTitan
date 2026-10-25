@@ -392,6 +392,19 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   and the next request started immediately. A cancellation during prefill also
   clears the K/V reuse record, because the positions it wrote no longer match
   the recorded token stream.
+- **CLI path** — `TinyTitanCLI --model models/k2-horizon-4bit.ssdai --prompt
+  "…"` now runs the family through `K2ProbeRuntime`, the same engine the
+  server serves from and the bench measures; `--messages-file` renders through
+  the installed template (use `--thinking on --reasoning-effort low` for the
+  effort tags). Raw prompts stay raw, the answer goes to stdout and the
+  reasoning does not, and the footer reports `stop`, prefill tokens/seconds,
+  decode seconds and tok/s. Verified: "What is the capital of France?" answers
+  "The capital of France is **Paris**." (stop=endOfTurn, 17 prompt + 12
+  completion); a raw "List three colours:" continues from the prompt. The
+  runtime extraction was not free: the first version decoded with the
+  load-time tokenizer instead of the request's, so a low-effort tool request
+  leaked `</ifm|think_faster>` into content — the serve smoke gate caught it
+  and passing the render tokenizer per call fixed it.
 - **Serve smoke gate** — `tools/k2-serve-smoke.sh [install]` starts the release
   server on the single-model path and checks what a client uses: the model
   list, a chat completion, SSE streaming, the Responses API, a tool call and a
@@ -399,8 +412,9 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   France is **Paris**."; the tool call comes back as
   `get_weather({"city":"Paris"})` with empty content; the stop string ends the
   turn and is stripped). Manual, needs a GPU, never modifies the install.
-- **Still missing** — the runner graph the CLI drives, batched prefill and ANE.
-  (The catalogue entry and the release golden landed.)
+- **Still missing** — the runner graph itself (batched prefill, ANE, the
+  runner's cache management). The CLI, the server and the bench all run the
+  probe runtime today; the catalogue entry and the release golden landed.
 
 Next: the runner graph (persistent GPU state, GPU-side router dispatch,
 prefetch overlap), batched prefill, and the ANE prefill sidecar.
