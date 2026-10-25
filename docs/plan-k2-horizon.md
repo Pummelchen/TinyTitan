@@ -326,18 +326,17 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   passes `tool_presentation_format: "json"` for the K2 dialect -- a mode the
   template supports and renders through `tojson` -- so a tool prompt can be
   built at all. The call format stays the template default (xml).
-- **Golden baseline** — `TINYTITAN_K2_GOLDEN=<path>` on `k2gpu` captures a
-  greedy token baseline when the file is missing (or with
+- **Golden baseline (release-gated)** — `TINYTITAN_K2_GOLDEN=<path>` on
+  `k2gpu` captures a greedy token baseline when the file is missing (or with
   `TINYTITAN_K2_GOLDEN_UPDATE=1`) and otherwise compares the run against it,
-  failing with the first differing token. `benchmark/golden/k2-horizon-4bit.txt`
-  and `-8bit.txt` hold 32 tokens from "Explain what a mutex is and when you
-  would use one."; a second run of each matched. Like every baseline in that
-  directory it is one (machine, build, install, prompt) tuple — Metal reduction
-  order is not portable across GPU families, so re-capture per machine and
-  after a deliberate numerics change. `tools/golden-baseline.sh` cannot drive
-  this path (it runs the CLI, and the runner refuses the family), so the release
-  gate lists the two installs in `NON_GOLDEN_INSTALLS` with that reason; the
-  bench check is the manual gate until the runner lands.
+  failing with the first differing token. `tools/golden-baseline.sh` has
+  `k2-4` / `k2-8` targets that drive that path (the family has no CLI leg), and
+  `tools/release.sh` lists both installs in `check_golden`, so the release gate
+  now checks K2. `benchmark/golden/k2-horizon-4bit.txt` and `-8bit.txt` hold the
+  96-token mutex baseline (captured through the script; `--check k2-4 k2-8`
+  passes). Like every baseline in that directory it is one (machine, build,
+  install, prompt) tuple — Metal reduction order is not portable across GPU
+  families, so re-capture per machine and after a deliberate numerics change.
 - **Server path** — `K2ProbeBackend` is the probe behind
   `ServerInferenceBackend`, the way `CPUModelBackend` is the CPU engine. Both
   server shapes serve it: `TinyTitanServer --model
@@ -400,8 +399,8 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   France is **Paris**."; the tool call comes back as
   `get_weather({"city":"Paris"})` with empty content; the stop string ends the
   turn and is stripped). Manual, needs a GPU, never modifies the install.
-- **Still missing** — the runner graph the CLI and release goldens drive,
-  prompt caching, batching and ANE. (The catalogue entry landed.)
+- **Still missing** — the runner graph the CLI drives, batched prefill and ANE.
+  (The catalogue entry and the release golden landed.)
 
 Next: the runner graph (persistent GPU state, GPU-side router dispatch,
 prefetch overlap), batched prefill, and the ANE prefill sidecar.

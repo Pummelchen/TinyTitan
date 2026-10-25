@@ -9,7 +9,7 @@
 #   tools/golden-baseline.sh --server [...]   # CLI and server must agree
 #
 # Targets: ornith-4, ornith-8, qwen36-4, qwen36-8, qwen38-4, qwen38-8,
-# agentworld-4, agentworld-8, katcoder-4, katcoder-8, and the dense
+# agentworld-4, agentworld-8, katcoder-4, katcoder-8, k2-4, k2-8, and the dense
 # qwen35-{2b,4b,9b}-{4,8}. The katcoder and qwen35 targets are declared whether
 # or not their install is present: a target is inert until the directory is
 # there, and release.sh demands the baseline as soon as it is.
@@ -48,6 +48,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI="$ROOT/.build/release/TinyTitanCLI"
+# K2-Horizon has no CLI path: its baseline drives the GPU probe instead, which
+# is the same graph the server serves. One bench binary, one baseline format.
+BENCH="$ROOT/.build/release/TinyTitanBench"
 # shellcheck source=model-guard.sh
 . "$SCRIPT_DIR/model-guard.sh"
 SERVER="$ROOT/.build/release/TinyTitanServer"
@@ -340,6 +343,7 @@ PY
 }
 
 for t in "${targets[@]+"${targets[@]}"}"; do
+  kind=cli
   case "$t" in
     4|ornith-4) dir="ornith-1.5_35B_A3B_4Bit"; file="ornith-1.5-35b-a3b-4bit.txt"; q=4 ;;
     8|ornith-8) dir="ornith-1.5_35B_A3B_8Bit"; file="ornith-1.5-35b-a3b-8bit.txt"; q=8 ;;
@@ -362,7 +366,10 @@ for t in "${targets[@]+"${targets[@]}"}"; do
     qwen35-4b-8) dir="qwen3.5_4B_8Bit"; file="qwen3.5-4b-8bit.txt"; q=8 ;;
     qwen35-9b-4) dir="qwen3.5_9B_4Bit"; file="qwen3.5-9b-4bit.txt"; q=4 ;;
     qwen35-9b-8) dir="qwen3.5_9B_8Bit"; file="qwen3.5-9b-8bit.txt"; q=8 ;;
-    *) echo "unknown target: $t (ornith-4, ornith-8, qwen36-4, qwen36-8, qwen38-4, qwen38-8, agentworld-4, agentworld-8, katcoder-4, katcoder-8, qwen35-2b-4, qwen35-2b-8, qwen35-4b-4, qwen35-4b-8, qwen35-9b-4, qwen35-9b-8)" >&2
+    # K2-Horizon installs, driven by the probe: `TinyTitanBench k2gpu`.
+    k2-4) dir="k2-horizon-4bit.ssdai"; file="k2-horizon-4bit.txt"; q=4; kind=k2 ;;
+    k2-8) dir="k2-horizon-8bit.ssdai"; file="k2-horizon-8bit.txt"; q=8; kind=k2 ;;
+    *) echo "unknown target: $t (ornith-4, ornith-8, qwen36-4, qwen36-8, qwen38-4, qwen38-8, agentworld-4, agentworld-8, katcoder-4, katcoder-8, qwen35-2b-4, qwen35-2b-8, qwen35-4b-4, qwen35-4b-8, qwen35-9b-4, qwen35-9b-8, k2-4, k2-8)" >&2
        status=1; continue ;;
   esac
   model="$ROOT/models/$dir"
@@ -375,6 +382,42 @@ for t in "${targets[@]+"${targets[@]}"}"; do
   work="$(mktemp "$ROOT/.build/golden-baseline.XXXXXX")"
 
   echo "== $t =="
+
+  if [ "$kind" = "k2" ]; then
+    # The bench owns capture and comparison for this family
+    # (`TINYTITAN_K2_GOLDEN`), so the body format is the token ids it prints
+    # rather than CLI text. --server has no K2 twin: there is no CLI leg.
+    if [ "$server_mode" = 1 ]; then
+      echo "  server: not applicable — K2 has no CLI leg to compare against"
+      status=1
+    elif [ ! -x "$BENCH" ]; then
+      echo "  FAILED: missing $BENCH — run: swift build -c release"
+      status=1
+    elif [ "$mode" = check ] && [ ! -f "$file" ]; then
+      echo "  no baseline at ${file#$ROOT/}; run without --check first"
+      status=1
+    else
+      if [ "$mode" = capture ]; then
+        TINYTITAN_K2_GOLDEN="$file" TINYTITAN_K2_GOLDEN_UPDATE=1 \
+          "$BENCH" k2gpu "$model" "$PROMPT" "$MAX_NEW" \
+          > "$work" 2>"$work.err"
+      else
+        TINYTITAN_K2_GOLDEN="$file" \
+          "$BENCH" k2gpu "$model" "$PROMPT" "$MAX_NEW" \
+          > "$work" 2>"$work.err"
+      fi
+      rc=$?
+      if [ $rc -ne 0 ]; then
+        echo "  FAILED (exit $rc)"
+        sed 's/^/  /' "$work.err" | head -10
+        status=1
+      else
+        grep -E '^(tokens|output|golden): ' "$work" | sed 's/^/  /'
+      fi
+    fi
+    rm -f "$work" "$work.err"
+    continue
+  fi
 
   if [ "$server_mode" = 1 ]; then
     server_check "$model" "$t" || status=1
