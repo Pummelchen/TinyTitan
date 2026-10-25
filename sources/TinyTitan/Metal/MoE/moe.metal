@@ -1388,3 +1388,25 @@ kernel void mova_combine_fp16(
     }
     out[tid] = half(total);
 }
+
+// K2's routed-expert sum: out += Σ_slot weight[slot] * expertOutput[slot][i].
+//
+// The expert GEMVs are separate dispatches (they read different resident
+// blobs), so each writes its own slot and this pass applies the router weight.
+// It adds into `out`, which the shared expert's down projection has already
+// written, matching the checkpoint's "shared + routed" sum.
+kernel void k2_moe_accumulate_fp16(
+    device const half* experts [[buffer(0)]],   // [slots][count]
+    device const half* weights [[buffer(1)]],   // [slots]
+    device half*       out     [[buffer(2)]],   // [count], shared already written
+    constant uint&     count   [[buffer(3)]],
+    constant uint&     slots   [[buffer(4)]],
+    uint tid [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    float total = 0.0f;
+    for (uint slot = 0; slot < slots; ++slot) {
+        total += float(weights[slot]) * float(experts[slot * count + tid]);
+    }
+    out[tid] = half(float(out[tid]) + total);
+}

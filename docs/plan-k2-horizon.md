@@ -92,6 +92,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   token that has to attend over the cached first. It is probe-sized caching,
   not the runner's paged/quantized manager; the same commit adds
   `Elementwise.encodeSiluMul` and the K2 gate/dense-MLP accessors.
+- **MoE stage** — `K2MoEStage` runs the sparse block's resident form: the bf16
+  router GEMV (float logits), the shared selection kernel, then each selected
+  expert's SwiGLU (separate gate/up GEMV, fused SiLU multiply, down GEMV) with
+  the router weights summed by `k2_moe_accumulate_fp16`, and the always-on
+  shared expert added first. The test builds four 4-bit experts at top-2 on
+  synthetic buffers and matches the CPU formula, including the selected ids.
 - **Input and output ends** — `K2Head` covers the embedding lookup
   (`AffineQuantEmbeddingLookup` at the install's width, no `sqrt(hidden)`
   scale), the grouped final norm and the untied `lm_head` GEMV, with a test
