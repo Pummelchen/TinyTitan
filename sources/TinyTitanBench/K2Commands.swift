@@ -209,35 +209,63 @@ extension TinyTitanBench {
         let graph = try K2GraphProbe(
             model: model, context: context, maxSequence: ids.count + limit + 1)
 
-        let start = Date()
-        var logits: [Float] = []
-        for (position, token) in ids.enumerated() {
-            logits = try await graph.forward(
-                tokenID: UInt32(bitPattern: token),
-                position: UInt32(position))
-        }
-        let prefill = Date().timeIntervalSince(start)
-
-        var produced: [Int32] = []
-        // `<|ifm|endoftext|>` and `<|ifm|im_end|>` both end a K2 turn; stopping
-        // only on the former let a chat reply keep generating past its end.
+        // Repeat the whole prompt+decode loop in-process so a measurement can
+        // report a median instead of a single sample. Run 1 pays the cold
+        // expert cache; later runs are the steady state a server sees, and the
+        // machine may be busy with unrelated work, which single runs cannot
+        // distinguish from a regression.
+        let repeatCount = max(
+            1,
+            Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_REPEAT"] ?? "") ?? 1)
         let stops: Set<Int32> = [tokenizer.eosID, tokenizer.endOfTurnID]
-        let decodeStart = Date()
-        var position = ids.count
-        for _ in 0..<limit {
-            var best = 0
-            for index in logits.indices where logits[index] > logits[best] {
-                best = index
+        var produced: [Int32] = []
+        var prefillTimes: [Double] = []
+        var decodeTimes: [Double] = []
+        for run in 0..<repeatCount {
+            let start = Date()
+            var logits: [Float] = []
+            for (position, token) in ids.enumerated() {
+                logits = try await graph.forward(
+                    tokenID: UInt32(bitPattern: token),
+                    position: UInt32(position))
             }
-            let token = Int32(best)
-            if stops.contains(token) { break }
-            produced.append(token)
-            logits = try await graph.forward(
-                tokenID: UInt32(bitPattern: token),
-                position: UInt32(position))
-            position += 1
+            prefillTimes.append(Date().timeIntervalSince(start))
+
+            var runTokens: [Int32] = []
+            let decodeStart = Date()
+            var position = ids.count
+            for _ in 0..<limit {
+                var best = 0
+                for index in logits.indices where logits[index] > logits[best] {
+                    best = index
+                }
+                let token = Int32(best)
+                if stops.contains(token) { break }
+                runTokens.append(token)
+                logits = try await graph.forward(
+                    tokenID: UInt32(bitPattern: token),
+                    position: UInt32(position))
+                position += 1
+            }
+            decodeTimes.append(Date().timeIntervalSince(decodeStart))
+            if repeatCount > 1 {
+                let elapsed = decodeTimes[run]
+                print(
+                    "run \(run): prompt \(String(format: "%.2f", prefillTimes[run]))s, "
+                        + "decode \(String(format: "%.2f", elapsed))s "
+                        + "(\(String(format: "%.2f", Double(runTokens.count) / max(elapsed, 0.001))) tok/s)"
+                )
+            }
+            if run == 0 {
+                produced = runTokens
+            } else if runTokens != produced {
+                print(
+                    "warning: run \(run) produced different tokens: "
+                        + runTokens.prefix(8).map(String.init).joined(separator: ","))
+            }
         }
-        let decode = Date().timeIntervalSince(decodeStart)
+        let prefill = prefillTimes[0]
+        let decode = decodeTimes[0]
         print(integrityNote)
         print(
             "prompt \(ids.count) tokens: \(String(format: "%.2f", prefill))s "
@@ -245,6 +273,28 @@ extension TinyTitanBench {
         print(
             "decode \(produced.count) tokens: \(String(format: "%.2f", decode))s "
                 + "(\(String(format: "%.2f", Double(produced.count) / max(decode, 0.001))) tok/s)")
+        if repeatCount > 1 {
+            // Run 0 pays the cold expert cache; the steady-state figure is the
+            // later runs. With only two runs there is no steady state to
+            // separate, so the median covers all of them.
+            let steady = repeatCount > 2 ? Array(decodeTimes.dropFirst()) : decodeTimes
+            let steadyPrefill =
+                repeatCount > 2 ? Array(prefillTimes.dropFirst()) : prefillTimes
+            func median(_ values: [Double]) -> Double {
+                let sorted = values.sorted()
+                guard !sorted.isEmpty else { return 0 }
+                if sorted.count % 2 == 1 { return sorted[sorted.count / 2] }
+                return (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2
+            }
+            let steadyMedian = median(steady)
+            let best = decodeTimes.min() ?? steadyMedian
+            let window = repeatCount > 2 ? "runs 1..\(repeatCount - 1)" : "all runs"
+            print(
+                "steady state (\(window)): prompt \(String(format: "%.2f", median(steadyPrefill)))s, "
+                    + "decode \(String(format: "%.2f", steadyMedian))s "
+                    + "(\(String(format: "%.2f", Double(produced.count) / max(steadyMedian, 0.001))) tok/s), "
+                    + "best \(String(format: "%.2f", best))s")
+        }
         print(
             "tokens: "
                 + produced.map { String(Int($0)) }.joined(separator: ","))

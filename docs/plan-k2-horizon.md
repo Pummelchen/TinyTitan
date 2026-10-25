@@ -157,6 +157,18 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
   levers are I/O overlap and fewer command-buffer round trips, not more kernel
   arithmetic. Both widths still produce the same tokens.
+- **Cold cache vs steady state** — `k2gpu` measured one prompt+decode, which
+  is dominated by filling the per-layer expert cache. `TINYTITAN_K2_REPEAT=n`
+  now repeats the loop in-process and prints each run plus the median, and the
+  split is large: 4-bit, 32 decode tokens, run 0 = 6.76 s (4.73 tok/s), runs
+  1-3 = 2.81/2.57/2.38 s (11.4/12.4/13.4 tok/s); prompt 2.19 s → 0.37-0.62 s.
+  So the probe already clears the 10 tok/s target once the 64-slot cache holds
+  the layer's active experts, and the single-run figure was the cost of
+  warming it. The warm number repeats one token stream, so it is the upper
+  bound; a cache that has seen different requests lands between the two. Cold
+  fill is disk traffic (~1.2 GB/token of misses for the first tokens), not
+  kernel time, which is why the runner's pinned/prefetched cache is the next
+  lever rather than more kernel work.
 - **Hidden state on the GPU** — the graph used to read every layer's output
   back as `[Float]`, convert it, copy it into the next layer's input buffer and
   wait for the expert command buffer before starting the next layer. Layers now
