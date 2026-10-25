@@ -429,12 +429,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   turn and is stripped; a 9,011-token prompt comes back as HTTP 400
   `context_length_exceeded` naming both counts). Manual, needs a GPU, never
   modifies the install.
-- **Still missing** — the runner graph itself (batched prefill, ANE, the
-  runner's cache management). The CLI, the server and the bench all run the
-  probe runtime today; the catalogue entry and the release golden landed.
+- **Still missing** — the runner phase itself: batched prefill, the ANE
+  sidecar and runner-style cache management. The CLI, the server and the bench
+  all run the probe runtime today; the catalogue entry and the release golden
+  landed. `docs/plan-k2-runner.md` scopes that phase: the kernels it needs
+  (affine GEMM first), the data flow, the expected win, the verification
+  contract and the first concrete steps.
 
-Next: the runner graph (persistent GPU state, GPU-side router dispatch,
-prefetch overlap), batched prefill, and the ANE prefill sidecar.
+Next: `docs/plan-k2-runner.md`. Everything the front ends need exists; what
+remains is new prefill kernels (the probe's are all one-token shapes) and,
+after their numbers, the ANE question.
 
 ## The conversion plan, measured
 
