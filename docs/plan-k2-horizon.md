@@ -101,6 +101,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   and a two-token run checks the second token against every layer's cache; both
   logit vectors match the chained CPU reference. Sparse layers are refused by
   name, so a real 36B install still stops before the graph runs.
+- **Sparse layer** — `K2SparseLayerProbe` runs one sparse layer end to end:
+  grouped norm, q/k and the separate gate, MoVA values from the four resident
+  experts, cached gated attention, the bf16 MoE router, the fetched routed
+  expert and the shared expert, with both residuals. Its test on the sparse toy
+  compares every output element against the CPU formulas, dequantizing the
+  routed expert from the same fetched bytes the layer used.
 - **MoE stage** — `K2MoEStage` runs the sparse block's resident form: the bf16
   router GEMV (float logits), the shared selection kernel, then each selected
   expert's SwiGLU (separate gate/up GEMV, fused SiLU multiply, down GEMV) with
