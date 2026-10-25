@@ -143,8 +143,9 @@ The repacker now produces a K2 `.ssdai` install. Two changes made it work:
   writer, the structural validator and `--verify-install` all read it, and an
   install without it is unchanged.
 
-The 4-bit install is `models/k2-horizon-4bit.ssdai` (21.8 GB, 53 files,
-`--verify-install` green) with the K2 extension fields in
+Both installs are written and verified: `models/k2-horizon-4bit.ssdai`
+(21.8 GB) and `models/k2-horizon-8bit.ssdai` (39.9 GB), 53 files each,
+`--verify-install` green. The 4-bit manifest carries the K2 extension fields in
 `manifest.arch`: `movaNumExperts 64`, `movaTopKExperts 4`, `normGroups 2`,
 `attentionGate softplus`, `routerScaling 2.5`, `routerHasBias true`,
 `denseLayerIndices [0,1,2]`.
