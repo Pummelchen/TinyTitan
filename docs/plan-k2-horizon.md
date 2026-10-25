@@ -101,13 +101,21 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   a request for the other family's level is refused instead of reaching a
   template that raises. Sampling follows the model card: temperature 1.0,
   top-p 0.95, top-k 20.
+- **Tool-call parsing** — `K2ToolCallParser` reads the checkpoint's
+  `<ifm|tool_calls>` wrapper in all three formats its template offers (`json`,
+  `xml`, default `xml`, and `xml_typed`), including several calls in one
+  wrapper. Values that the template writes as JSON literals become typed
+  arguments; the type tag is informational. Tests cover the three grammars,
+  multi-call blocks, unknown tools and malformed/oversized input.
 - **Surfaces not wired** — the 52 KB template renders through the generic
-  tokenizer (`TINYTITAN_K2_CHAT=1`), but the `k2_horizon` reason/tool parsers,
-  the catalogue entry and a golden baseline are not implemented.
+  tokenizer (`TINYTITAN_K2_CHAT=1`), but the K2 decoder is not selected yet:
+  `StructuredAssistantDecoder` still looks for ChatML's `<think>`/`<tool_call>`
+  markers instead of K2's `<ifm|think>` / `<ifm|tool_call>`, so the parser has no
+  caller. The catalogue entry and a golden baseline are also missing.
 
 Next: the GPU family graph that calls these stages (dense layers first), the
-in-graph wiring of the MoVA stage for decode and prefill, the ANE prefill
-sidecar and the template/parsers.
+in-graph wiring of the MoVA stage for decode and prefill, the K2 decoder
+(markers plus the tool parser), the ANE prefill sidecar.
 
 ## The conversion plan, measured
 
