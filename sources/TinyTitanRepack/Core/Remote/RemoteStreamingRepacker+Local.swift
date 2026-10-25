@@ -168,13 +168,51 @@ extension RemoteStreamingRepacker {
             .planning(
                 downloadBytes: rangePlan.remoteBytesToDownload,
                 outputBytes: outputBytes))
+        // With retirement the source is consumed as the install grows, so the
+        // free space at t=0 is not the peak requirement: only the bytes written
+        // before the first shard can be unlinked are. That is the resident
+        // section (written first) plus the layers whose source shard has not
+        // yet reached its last range. The floor below allows four layer files
+        // past the resident section, which covers a snapshot shard carrying the
+        // ~1.5 layers a 122B build packs per shard, with room for the copy that
+        // bridges them.
+        let diskBytes = Self.localDiskRequirement(
+            outputBytes: outputBytes,
+            residentBytes: plan.resident.totalSize,
+            largestLayerBytes: plan.layers.map(\.fileSize).max() ?? 0,
+            retireSourceShards: local.retireSourceShards)
         let diskRequirement = try DiskSpaceChecker.requireAvailable(
             path: paths.parentDirectory,
-            bytes: outputBytes,
+            bytes: diskBytes,
             reserveBytes: local.minFreeReserveBytes)
         progress(.checkingDisk(diskRequirement))
         try Task.checkCancellation()
         return (plan, rangePlan, outputBytes)
+    }
+
+    /// The free space a local import must have at t=0.
+    ///
+    /// Without retirement the install is a second full copy of the snapshot, so
+    /// the requirement is the whole output. With retirement the source shards
+    /// are unlinked as their last range commits; only the bytes written before
+    /// the first unlink need to fit, which is the resident section plus the
+    /// layers still waiting on their shard. Four layer files is the bound that
+    /// covers a snapshot shard carrying the ~1.5 layers a 122B build packs per
+    /// shard, with room for the copy that bridges them.
+    static func localDiskRequirement(
+        outputBytes: UInt64,
+        residentBytes: UInt64,
+        largestLayerBytes: UInt64,
+        retireSourceShards: Bool
+    ) -> UInt64 {
+        guard retireSourceShards else { return outputBytes }
+        let (scaled, overflow) = largestLayerBytes.multipliedReportingOverflow(by: 4)
+        guard !overflow else { return outputBytes }
+        let (headroom, sumOverflow) = residentBytes.addingReportingOverflow(scaled)
+        guard !sumOverflow else { return outputBytes }
+        let (withMargin, marginOverflow) = headroom.addingReportingOverflow(1 << 30)
+        guard !marginOverflow else { return outputBytes }
+        return min(outputBytes, withMargin)
     }
 
     func configureLocalAudit(source: LocalSnapshot, plan: RepackPlan) {

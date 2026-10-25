@@ -85,6 +85,29 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: shard))
     }
 
+    /// The disk floor has to follow the same trade: with retirement only the
+    /// bytes written before the first shard can go must fit, never the whole
+    /// output, and never more than the whole output when it is smaller.
+    @Test func retirementLowersTheDiskFloorToThePreUnlinkBytes() {
+        let gib: UInt64 = 1 << 30
+        #expect(
+            RemoteStreamingRepacker.localDiskRequirement(
+                outputBytes: 125 * gib, residentBytes: 11 * gib,
+                largestLayerBytes: 2 * gib, retireSourceShards: false)
+                == 125 * gib)
+        #expect(
+            RemoteStreamingRepacker.localDiskRequirement(
+                outputBytes: 125 * gib, residentBytes: 11 * gib,
+                largestLayerBytes: 2 * gib, retireSourceShards: true)
+                == 20 * gib)
+        // A tiny install is its own floor; the headroom cannot exceed it.
+        #expect(
+            RemoteStreamingRepacker.localDiskRequirement(
+                outputBytes: 4 * gib, residentBytes: 11 * gib,
+                largestLayerBytes: 2 * gib, retireSourceShards: true)
+                == 4 * gib)
+    }
+
     /// The path guard, independent of the count: only a safetensors shard may
     /// be unlinked, even if a malformed plan named something else.
     @Test func refusesToUnlinkANonShard() throws {
