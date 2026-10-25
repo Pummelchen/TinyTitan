@@ -235,13 +235,19 @@ public struct GFTokenizer: @unchecked Sendable {
         public let toolCalls: [HistoricalToolCall]
         public let toolCallID: String?
         public let name: String?
+        /// A historical assistant turn's reasoning, when the caller kept it.
+        /// The K2 template refuses an assistant message without a thinking
+        /// field, so this is what a replayed turn carries; nil renders an
+        /// empty block (the turn had closed it).
+        public let reasoning: String?
 
-        public init(role: Role, content: String) {
+        public init(role: Role, content: String, reasoning: String? = nil) {
             self.role = role
             self.content = content
             self.toolCalls = []
             self.toolCallID = nil
             self.name = nil
+            self.reasoning = reasoning
         }
 
         public init(
@@ -249,13 +255,15 @@ public struct GFTokenizer: @unchecked Sendable {
             content: String?,
             toolCalls: [HistoricalToolCall] = [],
             toolCallID: String? = nil,
-            name: String? = nil
+            name: String? = nil,
+            reasoning: String? = nil
         ) {
             self.role = role
             self.content = content
             self.toolCalls = toolCalls
             self.toolCallID = toolCallID
             self.name = name
+            self.reasoning = reasoning
         }
     }
 
@@ -371,6 +379,17 @@ public struct GFTokenizer: @unchecked Sendable {
         return (reasoning, String(afterLast.drop(while: { $0 == "\n" })))
     }
 
+    /// The field name the K2 template reads for a historical assistant turn's
+    /// thinking. It selects the tag by the effort the tokenizer was loaded
+    /// with, matching the generation prompt the same template writes.
+    private var k2ThinkKey: String {
+        switch reasoningEffort ?? .high {
+        case .medium: return "think_fast"
+        case .low: return "think_faster"
+        case .high, .xhigh: return "think"
+        }
+    }
+
     public func encodeToolChat(
         messages: [Message],
         tools: [FunctionDefinition]
@@ -383,6 +402,13 @@ public struct GFTokenizer: @unchecked Sendable {
                 "role": message.role.templateRole,
                 "content": message.content,
             ]
+            if dialect == .k2, message.role == .assistant {
+                // The K2 template raises unless an assistant turn names the
+                // block its thinking lived in, so a replayed turn has to carry
+                // one: the caller's reasoning when it kept it, an empty block
+                // when it did not (the turn closed it before answering).
+                value[k2ThinkKey] = message.reasoning ?? ""
+            }
             if !message.toolCalls.isEmpty {
                 value["tool_calls"] = try message.toolCalls.map { call -> [String: any Sendable] in
                     [

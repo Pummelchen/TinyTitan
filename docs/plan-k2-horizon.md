@@ -284,6 +284,15 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   stream yields `get_weather(city: "Paris")`. A real low-effort chat run
   (`TINYTITAN_K2_CHAT=1`) renders the prompt, closes `</ifm|think_faster>` and
   reports the answer as content.
+- **Multi-turn history** — the checkpoint's template raises on any assistant
+  message without a thinking field ("Assistant message is missing a thinking
+  field"), so a replayed conversation could not be rendered at all: the first
+  follow-up turn failed. `GFTokenizer.Message` now carries an optional
+  `reasoning`, mapped to the template's effort tag (`think` / `think_fast` /
+  `think_faster`) for K2 assistant turns; nil renders an empty closed block,
+  which is what a turn without stored reasoning had. The bench self-test renders
+  a three-message history and reports the prompt size plus whether the reasoning
+  and the closing tag survived (39 tokens, both true, on the real tokenizer).
 - **Tool prompts need JSON presentation** — rendering a tool prompt used to
   throw `Cannot compare values of different types ({type: string} and true)`:
   the checkpoint's markdown tool renderer tests schema nodes with
