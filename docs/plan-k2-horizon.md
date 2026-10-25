@@ -129,6 +129,26 @@ so experts stream from disk every token. The 8-bit snapshot (37 GB) is worse
 competes with the page cache and the swap), so it was removed. This is the
 measurement that says the CPU is the wrong engine, not a tuning target.
 
+### Phase 1 landed: the install format
+
+The repacker now produces a K2 `.ssdai` install. Two changes made it work:
+
+- the snapshot is rewritten with the 100 MoE experts fused into one rank-3
+  tensor per layer and role (`model.layers.N.mlp.switch_mlp.*`) by
+  `tools/fuse_k2_experts.py`; the MoVA value experts stay resident tensors
+  (top-4 of 64 is small enough not to stream), as do attention, the gate and
+  the router;
+- the layout format gained an optional per-layer `expertsPerLayer`, because
+  K2's first three layers are dense and the other 45 carry 100 experts. The
+  writer, the structural validator and `--verify-install` all read it, and an
+  install without it is unchanged.
+
+The 4-bit install is `models/k2-horizon-4bit.ssdai` (21.8 GB, 53 files,
+`--verify-install` green) with the K2 extension fields in
+`manifest.arch`: `movaNumExperts 64`, `movaTopKExperts 4`, `normGroups 2`,
+`attentionGate softplus`, `routerScaling 2.5`, `routerHasBias true`,
+`denseLayerIndices [0,1,2]`.
+
 ### The GPU/ANE port
 
 1. **Install format.** The repacker's planner stores one fused expert stack per

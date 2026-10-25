@@ -106,6 +106,21 @@ enum SSDAIJSON {
             archDict["routerNormTopK"] = arch.routerNormTopK
             archDict["quantGroupSize"] = arch.quantGroupSize
         }
+        if arch.family == .k2Horizon {
+            // K2's layer shape: the MoVA expert set, the grouped norm, the
+            // attention gate function, the router's selection bias and
+            // scaling, and which layers are dense.
+            archDict["movaNumExperts"] = arch.movaNumExperts
+            archDict["movaTopKExperts"] = arch.movaTopKExperts
+            archDict["normGroups"] = arch.normGroups
+            archDict["attentionGate"] = arch.attentionGate
+            archDict["routerScaling"] = arch.routerScaling
+            archDict["routerHasBias"] = arch.routerHasBias
+            archDict["movaRouterScaling"] = arch.movaRouterScaling
+            archDict["movaRouterHasBias"] = arch.movaRouterHasBias
+            archDict["movaActivation"] = arch.movaActivation
+            archDict["denseLayerIndices"] = arch.denseLayerIndices
+        }
         let quantDict = try quantObject(plan: plan, bitWidths: bitWidths)
 
         var filesDict: [String: Any] = [:]
@@ -307,6 +322,7 @@ enum SSDAIJSON {
             layersArr.append([
                 "layer": lp.layerIndex,
                 "file": layerFile,
+                "expertsPerLayer": lp.expertsPerLayer,
                 "experts": experts,
             ])
         }

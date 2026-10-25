@@ -41,6 +41,9 @@ struct Layer: Decodable {
     let layer: Int
     let file: String
     let experts: [Expert]
+    /// Present when this layer's expert count differs from the install-wide
+    /// one; nil means it uses the install-wide value.
+    let expertsPerLayer: Int?
 }
 
 struct Expert: Decodable {

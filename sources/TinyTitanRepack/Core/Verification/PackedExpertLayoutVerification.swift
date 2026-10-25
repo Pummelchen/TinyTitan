@@ -67,13 +67,14 @@ extension VerifiedInstallTool {
         // dense install never reaches it: its layers hold no experts, and the
         // resident index is what describes its weights.
         let declaredExpertBits = manifest.quant?.routedExpert.weightBits
-        let (expectedLayerSize, overflow) = UInt64(layout.expertsPerLayer)
-            .multipliedReportingOverflow(by: layout.expertStride)
-        guard !overflow else {
-            throw RepackError.configurationInvalid(
-                detail: "packed expert layer size overflows")
-        }
         for layer in layout.layers {
+            let count = layer.expertsPerLayer ?? layout.expertsPerLayer
+            let (expectedLayerSize, overflow) = UInt64(count)
+                .multipliedReportingOverflow(by: layout.expertStride)
+            guard !overflow else {
+                throw RepackError.configurationInvalid(
+                    detail: "packed expert layer size overflows")
+            }
             try validateLayer(
                 layer, access: access, manifest: manifest, layout: layout,
                 expectedLayerSize: expectedLayerSize,
@@ -97,7 +98,8 @@ extension VerifiedInstallTool {
             throw RepackError.configurationInvalid(
                 detail: "packed expert layer index out of range")
         }
-        guard layer.experts.count == layout.expertsPerLayer else {
+        let layerExperts = layer.expertsPerLayer ?? layout.expertsPerLayer
+        guard layer.experts.count == layerExperts else {
             throw RepackError.configurationInvalid(
                 detail: "packed_experts/\(layer.file) expert count mismatch")
         }

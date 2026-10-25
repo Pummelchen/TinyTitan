@@ -42,11 +42,23 @@ package struct SSDAILayerV1: Codable, Equatable, Sendable {
     package let layer: Int
     package let file: String
     package let experts: [SSDAIExpertV1]
+    /// Per-layer expert count when this layer differs from the install's
+    /// `expertsPerLayer`; nil means it uses the install-wide value.
+    ///
+    /// A mixed dense/sparse model needs it: K2-Horizon's first three layers
+    /// are dense and the other 45 carry 100 experts each, so one value cannot
+    /// describe both. Optional so every install written before mixed layers
+    /// existed decodes unchanged.
+    package let expertsPerLayer: Int?
 
-    package init(layer: Int, file: String, experts: [SSDAIExpertV1]) {
+    package init(
+        layer: Int, file: String, experts: [SSDAIExpertV1],
+        expertsPerLayer: Int? = nil
+    ) {
         self.layer = layer
         self.file = file
         self.experts = experts
+        self.expertsPerLayer = expertsPerLayer
     }
 }
 
@@ -167,7 +179,11 @@ package enum SSDAIV1StructuralValidator {
                     field: "layout.layers[\(layer.layer)].file",
                     reason: "duplicate layer filename")
             }
-            guard layer.experts.count == layout.expertsPerLayer else {
+            let layerExperts = layer.expertsPerLayer ?? layout.expertsPerLayer
+            guard layerExperts >= 0,
+                layerExperts <= layout.expertsPerLayer,
+                layer.experts.count == layerExperts
+            else {
                 throw TinyTitanFormatError.invalid(
                     field: "layout.layers[\(layer.layer)].experts",
                     reason: "wrong expert count")
@@ -188,8 +204,8 @@ package enum SSDAIV1StructuralValidator {
             for (position, expert) in layer.experts.enumerated() {
                 let logical = expert.expert ?? position
                 let physical = expert.physicalRank ?? logical
-                guard logical >= 0, logical < layout.expertsPerLayer,
-                    physical >= 0, physical < layout.expertsPerLayer,
+                guard logical >= 0, logical < layerExperts,
+                    physical >= 0, physical < layerExperts,
                     logicalIDs.insert(logical).inserted,
                     physicalRanks.insert(physical).inserted,
                     offsets.insert(expert.offset).inserted

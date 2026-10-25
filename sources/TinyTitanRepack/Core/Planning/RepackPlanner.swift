@@ -120,6 +120,24 @@ enum RepackPlanner {
             }
             return .unknown
         }
+        if family == .k2Horizon {
+            // K2's snapshot keeps the checkpoint's names: the MoE experts are
+            // fused into the repacker's `switch_mlp` spelling by the
+            // converter, and everything else -- attention, the attention gate,
+            // the value router, the 64 MoVA experts, the norms, the embedding
+            // and the head -- is resident.
+            if isMultimodalTensorName(name) { return .excludedMultimodal }
+            if let role = routedExpertRole(in: name),
+                let layer = layerIndex(in: name),
+                layer >= 0, layer < numLayers
+            {
+                return .routedExpert(role: role, layer: layer)
+            }
+            if name.hasPrefix("model.") || name.hasPrefix("lm_head.") {
+                return .lmResident
+            }
+            return .unknown
+        }
         if name.hasPrefix("language_model.") {
             // Routed expert?
             if let role = routedExpertRole(in: name),
