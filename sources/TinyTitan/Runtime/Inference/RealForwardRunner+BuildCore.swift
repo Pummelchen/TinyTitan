@@ -20,14 +20,16 @@ extension RealForwardRunner {
         let cfg = model.config
         bp.cfg = cfg
         bp.maxContext = maxContext
-        // K2's install loads and validates, but there is no layer graph for it
-        // yet. Refusing here, before any scratch is sized for a Qwen-shaped
-        // pipeline set, keeps a K2 payload from being run through kernels that
-        // would read its gate projection as a packed q/gate.
+        // K2 has a working graph, but it is the probe's (K2GraphProbe), not
+        // this runner's: the layers here size a Qwen-shaped pipeline set whose
+        // kernels would read K2's gate projection as a packed q/gate. Refusing
+        // before any scratch is sized keeps that from happening, and the
+        // message names the path that does work.
         guard cfg.family != .k2Horizon else {
             throw ModelError.unsupportedArchitecture(
-                detail: "K2-Horizon's GPU graph is not implemented yet; the "
-                    + "install loads and validates, serving it does not. "
+                detail: "K2-Horizon runs through the GPU probe, not this "
+                    + "runner: use `TinyTitanBench k2gpu <install> \"<prompt>\"`. "
+                    + "Server integration is not implemented yet. "
                     + "See docs/plan-k2-horizon.md.")
         }
         precondition(

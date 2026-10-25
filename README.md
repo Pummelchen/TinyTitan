@@ -79,9 +79,10 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
 does not serve the model: the MoE families stream their experts on the GPU + ANE
-path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
-install-only today — its GPU graph is not implemented, so both of its decode
-columns are `NA`. K2-Horizon's score is from its
+path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon has no
+served path yet — its graph runs through the `TinyTitanBench k2gpu` probe
+(measured ~10–13 tok/s steady state on this host with a warm expert cache), so
+both of its decode columns are `NA`. K2-Horizon's score is from its
 [model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
 Terminal-Bench 4.0 result is published for it. Per-version measurements and the
 method live on the wiki

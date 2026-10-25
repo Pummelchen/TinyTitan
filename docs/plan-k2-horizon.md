@@ -1,15 +1,21 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
-Status: **install format and runtime identity complete; the GPU graph is not
-implemented.** This is not an "adding a model" wiring job in the sense of
-`adding-a-model.md` — the architecture is new. The checkpoint is
-`IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at sha
-`e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
+Status: **the graph runs; serving does not.** Both installs load and validate,
+`K2GraphProbe` executes the real 36B on Metal (dense layers plus the sparse
+MoVA layers, streamed routed experts, GPU-resolved MoVA selection), and
+`TinyTitanBench k2gpu` decodes at ~4 tok/s cold and 10-13 tok/s steady state on
+this host. The tokenizer, decoder and tool surfaces are exercised against the
+real installs, including a full tool round trip. What is missing is the serving
+integration: a runner graph the server can drive, a catalogue entry, batched
+prefill and the ANE sidecar (and a release golden). This is not an "adding a
+model" wiring job in the sense of `adding-a-model.md` — the architecture is
+new. The checkpoint is `IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at
+sha `e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
 
 Everything below was read from the source at that sha: `config.json`,
 `configuration_k2_horizon.py`, `modeling_k2_horizon.py`, the safetensors
 index, `generation_config.json`, `tokenizer_config.json` and
-`chat_template.jinja`. None of it has been run.
+`chat_template.jinja`; most of it now runs.
 
 ## The checkpoint
 

@@ -96,8 +96,8 @@ enum DoctorModelScanner {
         case .qwen36MTP, .qwen38flashMTP:
             return "MTP draft head, served only beside its target"
         case .k2Horizon:
-            return "K2-Horizon's GPU graph is not implemented yet; the install "
-                + "validates but cannot be served (docs/plan-k2-horizon.md)"
+            return "K2-Horizon is probe-only: run it with `TinyTitanBench k2gpu`; "
+                + "the server path is not implemented (docs/plan-k2-horizon.md)"
         case .qwen36, .qwen38flash, .qwen35Dense:
             return nil
         }
