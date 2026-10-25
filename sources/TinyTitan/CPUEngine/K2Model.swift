@@ -58,8 +58,6 @@ public final class K2Model {
     /// One token, returning the logits over the vocabulary.
     @discardableResult
     public func step(token: Int, needsLogits: Bool = true) throws -> [Float] {
-        let timing = ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1"
-        let start = DispatchTime.now().uptimeNanoseconds
         var hidden = try snapshot.row("model.embed_tokens.weight", token)
         for layer in 0..<configuration.layers {
             var normalized = groupedNorm(
@@ -82,16 +80,8 @@ public final class K2Model {
         }
         position += 1
         guard needsLogits else { return [] }
-        let layersDone = DispatchTime.now().uptimeNanoseconds
         let final = groupedNorm(hidden, weight: try snapshot.floats("model.norm.weight"))
-        let logits = try project("lm_head.weight", final)
-        if timing {
-            let end = DispatchTime.now().uptimeNanoseconds
-            let layersMs = Double(layersDone - start) / 1e6
-            let headMs = Double(end - layersDone) / 1e6
-            print(String(format: "timing layers %.1f ms head %.1f ms", layersMs, headMs))
-        }
-        return logits
+        return try project("lm_head.weight", final)
     }
 
     /// Greedy continuation, for benchmarks and the correctness checks.
