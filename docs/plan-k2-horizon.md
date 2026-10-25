@@ -108,8 +108,10 @@ The model is also served through `TinyTitanServer`: `CPUModelFamily.k2Horizon`,
 a `K2ModelBackend` that renders the checkpoint's template, samples with the
 request's settings and streams content, a catalog entry for a snapshot under
 `models/`, and the card's sampling defaults (temperature 1.0, top-p 0.95).
-Verified on this host: a chat request of 22 prompt + 6 completion tokens
-returns HTTP 200 in 12.35 s and the model answers in its instruction format.
+Verified on this host: the same 22-prompt/6-completion chat request returns
+HTTP 200 in 12.35 s on the 4-bit install and 43.2 s on the 8-bit one (the
+larger snapshot streams harder), and the model answers in its instruction
+format.
 The installs live at `models/k2-horizon-affine-4bit` (20 GB) and
 `models/k2-horizon-affine-8bit` (37 GB).
 
