@@ -1,0 +1,3 @@
+# K2-Horizon greedy baseline; machine-specific
+model=k2-horizon-8bit.ssdai prompt="Explain what a mutex is and when you would use one." max_new=32
+tokens=41679,265,14498,4353,317,353,525,18123,1714,2190,1227,325,6123,458,28284,13,12184,4050,106207,15,589,3318,10249,265,14498,4353,317,353,525,18123,15,1111

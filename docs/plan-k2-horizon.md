@@ -292,7 +292,19 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   passes `tool_presentation_format: "json"` for the K2 dialect -- a mode the
   template supports and renders through `tojson` -- so a tool prompt can be
   built at all. The call format stays the template default (xml).
-- **Still missing** — the catalogue entry and a golden baseline.
+- **Golden baseline** — `TINYTITAN_K2_GOLDEN=<path>` on `k2gpu` captures a
+  greedy token baseline when the file is missing (or with
+  `TINYTITAN_K2_GOLDEN_UPDATE=1`) and otherwise compares the run against it,
+  failing with the first differing token. `benchmark/golden/k2-horizon-4bit.txt`
+  and `-8bit.txt` hold 32 tokens from "Explain what a mutex is and when you
+  would use one."; a second run of each matched. Like every baseline in that
+  directory it is one (machine, build, install, prompt) tuple — Metal reduction
+  order is not portable across GPU families, so re-capture per machine and
+  after a deliberate numerics change. `tools/golden-baseline.sh` cannot drive
+  this path (it runs the CLI, and the runner refuses the family), so the release
+  gate lists the two installs in `NON_GOLDEN_INSTALLS` with that reason; the
+  bench check is the manual gate until the runner lands.
+- **Still missing** — the catalogue entry.
 
 Next: the runner graph (persistent GPU state, GPU-side router dispatch,
 prefetch overlap), batched prefill, and the ANE prefill sidecar.

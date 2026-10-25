@@ -305,6 +305,13 @@ extension TinyTitanBench {
         print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
         print(
             "raw: \(tokenizer.decode(produced, skipSpecialTokens: false))")
+        if let golden = ProcessInfo.processInfo.environment["TINYTITAN_K2_GOLDEN"],
+            !golden.isEmpty
+        {
+            try k2GoldenCheck(
+                path: golden, install: install, prompt: prompt, limit: limit,
+                tokens: produced)
+        }
         if ProcessInfo.processInfo.environment["TINYTITAN_K2_DECODER_SELFTEST"] == "1" {
             try k2DecoderSelfTest(tokenizer: tokenizer)
         }
@@ -316,6 +323,62 @@ extension TinyTitanBench {
                         tokenizer: tokenizer, promptIDs: ids,
                         tokens: produced, allowedTools: allowed)))
         }
+    }
+
+    /// Compare this run's token ids against a stored baseline, or capture one
+    /// when the file does not exist (or `TINYTITAN_K2_GOLDEN_UPDATE=1`).
+    ///
+    /// A K2 baseline is one (machine, build, install, prompt) tuple: Metal
+    /// reduction order is not guaranteed across GPU families, and a deliberate
+    /// numerics change needs a re-capture. That is the same contract as
+    /// `tools/golden-baseline.sh`, which cannot drive this path because it runs
+    /// the CLI and `RealForwardRunner` refuses the family.
+    private static func k2GoldenCheck(
+        path: String, install: URL, prompt: String, limit: Int,
+        tokens: [Int32]
+    ) throws {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let update =
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_GOLDEN_UPDATE"] == "1"
+        let recorded = "tokens=" + tokens.map(String.init).joined(separator: ",")
+        let header =
+            "model=\(install.lastPathComponent) prompt=\(prompt.debugDescription) "
+            + "max_new=\(limit)"
+        if !FileManager.default.fileExists(atPath: url.path) || update {
+            let body =
+                "# K2-Horizon greedy baseline; machine-specific\n"
+                + header + "\n" + recorded + "\n"
+            try body.write(to: url, atomically: true, encoding: .utf8)
+            print("golden: captured \(tokens.count) tokens to \(url.path)")
+            return
+        }
+        let lines = try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: true)
+        guard let storedLine = lines.first(where: { $0.hasPrefix("tokens=") }) else {
+            throw ModelError.internalInconsistency(
+                detail: "golden \(url.path) has no tokens= line")
+        }
+        let stored = storedLine.dropFirst("tokens=".count)
+            .split(separator: ",")
+            .compactMap { Int32($0) }
+        guard stored == tokens else {
+            var firstDiff = 0
+            while firstDiff < min(stored.count, tokens.count),
+                stored[firstDiff] == tokens[firstDiff]
+            {
+                firstDiff += 1
+            }
+            FileHandle.standardError.write(
+                Data(
+                    ("golden: MISMATCH at token \(firstDiff) — stored \(stored.count) "
+                        + "tokens, produced \(tokens.count)\n"
+                        + "  stored:  \(stored.prefix(16).map(String.init).joined(separator: ","))\n"
+                        + "  produced: \(tokens.prefix(16).map(String.init).joined(separator: ","))\n")
+                        .utf8))
+            throw ModelError.internalInconsistency(
+                detail: "golden baseline mismatch (\(url.path))")
+        }
+        print("golden: ok, \(tokens.count) tokens match \(url.path)")
     }
 
     /// A sample tool set for the chat path, so a tool-templated prompt can be
