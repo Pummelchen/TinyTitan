@@ -267,5 +267,11 @@ struct ArchConfigManifestTests {
         #expect(config.numHeads == 32)
         #expect(config.linearAttention.numVHeads == 64)
         #expect(config.fullAttentionLayerMask.filter { $0 == 1 }.count == 12)
+        // The MoE/gated-DeltaNet threadgroup tile is the one compile-time
+        // constant this geometry had to widen. A 3072-wide config must pass the
+        // load guard; a 3073-wide one is the neighbouring failure the guard
+        // exists for and is refused rather than written past the tile.
+        #expect(Model.maximumThreadgroupTileWidth == 3072)
+        try Model.validateExecutableGeometry(config)
     }
 }
