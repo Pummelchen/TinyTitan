@@ -37,4 +37,22 @@ struct K2ToyInstallTests {
         }
         #expect(message.contains("GPU graph is not implemented"), "\(message)")
     }
+
+    @Test func sparseToyValidatesTheMoEAndMoVAProteins() throws {
+        let directory = try K2ToySynthetic.write(sparse: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = try ArchConfig.resolved(
+            forFamily: .k2Horizon, directoryURL: directory)
+        #expect(config.numLayers == 4)
+        #expect(config.denseLayerIndices == [0, 1, 2])
+        #expect(config.mova.numExperts == 4)
+        let ctx = try MetalContext()
+        let model = try Model.load(
+            directoryURL: directory, device: ctx.device, expecting: config,
+            integrityPolicy: .fullSha256)
+        #expect(model.config.numLayers == 4)
+        #expect(try model.inputNorm(layer: 3).shape.0 == UInt32(config.hiddenSize))
+        // The sparse layer's routed blob is laid out and readable.
+        _ = try model.routedExpertResidency(layer: 3)
+    }
 }

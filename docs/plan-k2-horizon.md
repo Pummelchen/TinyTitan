@@ -79,11 +79,14 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   allowance (both mixed-install gaps it closed were found by loading the real
   installs). Both builds load under full SHA-256 and stop at the runner's graph
   refusal, which is the current end state.
-- **Synthetic install** — `K2ToySynthetic` builds a three-dense-layer K2
-  `.ssdai` (toy geometry, real manifest/layout/index machinery) so the loader
-  path is covered in CI: `K2ToyInstallTests` resolves the architecture, runs
-  the resident schema, maps the weights, and checks that the runner refuses
-  the family. It is the fixture the future graph tests will reuse.
+- **Synthetic install** — `K2ToySynthetic` builds a K2 `.ssdai` (toy geometry,
+  real manifest/layout/index machinery) so the loader path is covered in CI:
+  the default is three dense layers for the dense-graph tests, and
+  `write(sparse: true)` adds a fourth sparse layer with bf16 routers, four
+  MoVA value experts and a packed two-expert MoE blob. `K2ToyInstallTests`
+  resolves the architecture, runs the resident schema (both variants), maps
+  the weights, and checks that the runner refuses the family. It is the
+  fixture the future graph tests will reuse.
 - **Dense layer on the GPU** — `K2DenseLayer` runs one dense layer on Metal
   with a plain FP16 K/V cache: grouped norm, q/k/v and the separate gate
   projection, RoPE, GQA over the cache, the softplus gate, o_proj, the SwiGLU

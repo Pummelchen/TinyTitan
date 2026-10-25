@@ -15,28 +15,37 @@ import TinyTitanFormat
 /// layout already has its own tests (`K2RoutedLayoutTests`), and a dense-only
 /// toy keeps the fixture small enough to read.
 enum K2ToySynthetic {
-    static let toy = ArchConfig(
-        hiddenSize: 64, intermediateSize: 128, moeIntermediateSize: 64,
-        numHeads: 4, numKVHeads: 1, numFullKVHeads: 1,
-        headDim: 16, fullHeadDim: 16, vocabSize: 128,
-        slidingWindow: 0, finalLogitSoftcap: 0,
-        ropeTheta: 10_000_000, fullRopeTheta: 10_000_000,
-        partialRotaryFactor: 1, numLayers: 3,
-        numExperts: 2, topKExperts: 1,
-        tieWordEmbeddings: false, attentionKEqV: false,
-        fullAttentionLayerMask: [1, 1, 1], hiddenActivation: "silu",
-        family: .k2Horizon, attnOutputGate: true, attentionScale: 0.25,
-        embeddingScaledBySqrtHidden: false, routerScaled: false,
-        ffnSandwichNorms: false, sharedExpertGated: true,
-        ropeNeoxSubdim: true, routerNormTopK: true,
-        normGroups: 2, attentionGate: .softplus,
-        routerHasBias: true, routerScaling: 2.5,
-        denseLayerIndices: [0, 1, 2],
-        mova: MoVAConfig(
+    /// The toy geometry. `sparse` adds a fourth layer carrying the MoE and
+    /// MoVA tensors; the default is dense-only so the dense graph tests have a
+    /// three-layer model to run end to end.
+    static func toyConfig(sparse: Bool) -> ArchConfig {
+        ArchConfig(
+            hiddenSize: 64, intermediateSize: 128, moeIntermediateSize: 64,
+            numHeads: 4, numKVHeads: 1, numFullKVHeads: 1,
+            headDim: 16, fullHeadDim: 16, vocabSize: 128,
+            slidingWindow: 0, finalLogitSoftcap: 0,
+            ropeTheta: 10_000_000, fullRopeTheta: 10_000_000,
+            partialRotaryFactor: 1, numLayers: sparse ? 4 : 3,
             numExperts: 2, topKExperts: 1,
-            routerScaling: 2.5, routerHasBias: true, activation: "silu"))
+            tieWordEmbeddings: false, attentionKEqV: false,
+            fullAttentionLayerMask: [UInt8](repeating: 1, count: sparse ? 4 : 3),
+            hiddenActivation: "silu",
+            family: .k2Horizon, attnOutputGate: true, attentionScale: 0.25,
+            embeddingScaledBySqrtHidden: false, routerScaled: false,
+            ffnSandwichNorms: false, sharedExpertGated: true,
+            ropeNeoxSubdim: true, routerNormTopK: true,
+            normGroups: 2, attentionGate: .softplus,
+            routerHasBias: true, routerScaling: 2.5,
+            denseLayerIndices: [0, 1, 2],
+            mova: MoVAConfig(
+                numExperts: 4, topKExperts: 4,
+                routerScaling: 2.5, routerHasBias: true, activation: "silu"))
+    }
 
-    static func write() throws -> URL {
+    static let toy = toyConfig(sparse: false)
+
+    static func write(sparse: Bool = false) throws -> URL {
+        let toy = toyConfig(sparse: sparse)
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ssdai-k2-toy-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
@@ -82,15 +91,37 @@ enum K2ToySynthetic {
             specs.append(bf16(K2HorizonTensors.postAttnNorm(layer), count: d))
             specs.append(affine(K2HorizonTensors.qProj(layer), rows: queryDim, cols: d))
             specs.append(affine(K2HorizonTensors.kProj(layer), rows: kvDim, cols: d))
-            specs.append(affine(K2HorizonTensors.vProj(layer), rows: kvDim, cols: d))
             specs.append(affine(K2HorizonTensors.oProj(layer), rows: d, cols: queryDim))
             specs.append(affine(K2HorizonTensors.attnGate(layer), rows: queryDim, cols: d))
-            specs.append(
-                affine(K2HorizonTensors.denseGate(layer), rows: toy.intermediateSize, cols: d))
-            specs.append(
-                affine(K2HorizonTensors.denseUp(layer), rows: toy.intermediateSize, cols: d))
-            specs.append(
-                affine(K2HorizonTensors.denseDown(layer), rows: d, cols: toy.intermediateSize))
+            if toy.denseLayerIndices.contains(layer) {
+                specs.append(affine(K2HorizonTensors.vProj(layer), rows: kvDim, cols: d))
+                specs.append(
+                    affine(K2HorizonTensors.denseGate(layer), rows: toy.intermediateSize, cols: d))
+                specs.append(
+                    affine(K2HorizonTensors.denseUp(layer), rows: toy.intermediateSize, cols: d))
+                specs.append(
+                    affine(K2HorizonTensors.denseDown(layer), rows: d, cols: toy.intermediateSize))
+            } else {
+                specs.append(bf16(K2HorizonTensors.vRouter(layer), count: toy.mova.numExperts * d))
+                specs.append(bf16(K2HorizonTensors.vRouterBias(layer), count: toy.mova.numExperts))
+                for expert in 0..<toy.mova.numExperts {
+                    specs.append(
+                        affine(
+                            K2HorizonTensors.vExpert(layer, expert),
+                            rows: kvDim, cols: d))
+                }
+                specs.append(bf16(K2HorizonTensors.moeRouter(layer), count: toy.numExperts * d))
+                specs.append(bf16(K2HorizonTensors.moeRouterBias(layer), count: toy.numExperts))
+                specs.append(
+                    affine(
+                        K2HorizonTensors.sharedGate(layer), rows: toy.moeIntermediateSize, cols: d))
+                specs.append(
+                    affine(K2HorizonTensors.sharedUp(layer), rows: toy.moeIntermediateSize, cols: d)
+                )
+                specs.append(
+                    affine(
+                        K2HorizonTensors.sharedDown(layer), rows: d, cols: toy.moeIntermediateSize))
+            }
         }
 
         let names = specs.map(\.name)
@@ -174,27 +205,144 @@ enum K2ToySynthetic {
         try Data(file).write(to: weightsURL)
         let weightsSha = try Sha256Verifier.hashFile(at: weightsURL)
 
-        // The install declares the routed width its architecture has, but
-        // every layer here is dense: the mixed-layout representation of that
-        // is a per-layer count of 0 and no layer file.
-        let layout: [String: Any] = [
-            "expertStride": Int(SSDAIFormatV1.alignmentBytes),
-            "numLayers": toy.numLayers,
-            "expertsPerLayer": toy.numExperts,
-            "layers": (0..<toy.numLayers).map { layer in
-                [
-                    "layer": layer,
-                    "file": String(format: "layer_%02d.bin", layer),
-                    "experts": [],
-                    "expertsPerLayer": 0,
-                ] as [String: Any]
-            },
-        ]
+        // The sparse layer's routed experts, packed exactly as the runtime
+        // reads them: one blob per expert, gate/up/down plus their BF16
+        // companions, page-strided. The dense-only fixture writes the same
+        // layout with every layer empty and no layer file.
+        var layoutData: Data
+        var layerFile: (name: String, size: Int, sha: String)?
+        if sparse {
+            func appendU16(_ values: [UInt16], to bytes: inout [UInt8]) {
+                for value in values {
+                    bytes.append(UInt8(truncatingIfNeeded: value))
+                    bytes.append(UInt8(truncatingIfNeeded: value >> 8))
+                }
+            }
+            func expertBlob(expert: Int) -> (bytes: [UInt8], tensors: [String: [String: Any]]) {
+                var bytes: [UInt8] = []
+                var tensors: [String: [String: Any]] = [:]
+                func projection(_ role: String, rows: Int, cols: Int, weightRow: Int) {
+                    let values = (0..<rows).map { row in
+                        (0..<cols).map { column in
+                            Float(expert + 1) * 0.001 + Float(weightRow + 1) * 0.003
+                                + Float((row % 7) - 3) * 0.0004
+                                + Float((column % 11) - 5) * 0.0002
+                        }
+                    }
+                    let quantized = values.map { Quantization.quantizeInt4Affine($0) }
+                    let weightOffset = bytes.count
+                    for row in quantized { bytes.append(contentsOf: row.packed) }
+                    tensors[role] = [
+                        "offset": weightOffset,
+                        "size": bytes.count - weightOffset,
+                        "dtype": "U32",
+                        "shape": [rows, cols],
+                        "bits": 4,
+                    ]
+                    let scalesOffset = bytes.count
+                    for row in quantized { appendU16(row.scales, to: &bytes) }
+                    tensors["\(role)_scales"] = [
+                        "offset": scalesOffset,
+                        "size": bytes.count - scalesOffset,
+                        "dtype": "BF16",
+                        "shape": [rows, cols / Quantization.groupSize],
+                    ]
+                    let biasesOffset = bytes.count
+                    for row in quantized { appendU16(row.biases, to: &bytes) }
+                    tensors["\(role)_biases"] = [
+                        "offset": biasesOffset,
+                        "size": bytes.count - biasesOffset,
+                        "dtype": "BF16",
+                        "shape": [rows, cols / Quantization.groupSize],
+                    ]
+                }
+                projection("gate", rows: toy.moeIntermediateSize, cols: d, weightRow: 0)
+                projection("up", rows: toy.moeIntermediateSize, cols: d, weightRow: 1)
+                projection("down", rows: d, cols: toy.moeIntermediateSize, weightRow: 2)
+                return (bytes, tensors)
+            }
+
+            let expertStride = Int(SSDAIFormatV1.alignmentBytes) * 2
+            let sparseLayer = toy.numLayers - 1
+            let layerBytes = expertStride * toy.numExperts
+            var payload = [UInt8](repeating: 0, count: layerBytes)
+            var expertJSON: [[String: Any]] = []
+            for expert in 0..<toy.numExperts {
+                let blob = expertBlob(expert: expert)
+                precondition(blob.bytes.count <= expertStride, "toy expert exceeds stride")
+                let base = expert * expertStride
+                for (offset, byte) in blob.bytes.enumerated() {
+                    payload[base + offset] = byte
+                }
+                expertJSON.append([
+                    "expert": expert,
+                    "offset": UInt64(base),
+                    "size": UInt64(expertStride),
+                    "tensors": blob.tensors,
+                ])
+            }
+            let layerName = String(format: "layer_%02d.bin", sparseLayer)
+            let layerURL = dir.appendingPathComponent("packed_experts/\(layerName)")
+            try Data(payload).write(to: layerURL)
+            layerFile = (
+                layerName, layerBytes,
+                try Sha256Verifier.hashFile(at: layerURL)
+            )
+            let layout: [String: Any] = [
+                "expertStride": expertStride,
+                "numLayers": toy.numLayers,
+                "expertsPerLayer": toy.numExperts,
+                "layers": (0..<toy.numLayers).map { layer in
+                    if layer == sparseLayer {
+                        return [
+                            "layer": layer,
+                            "file": layerName,
+                            "experts": expertJSON,
+                            "expertsPerLayer": toy.numExperts,
+                        ] as [String: Any]
+                    }
+                    return [
+                        "layer": layer,
+                        "file": String(format: "layer_%02d.bin", layer),
+                        "experts": [],
+                        "expertsPerLayer": 0,
+                    ] as [String: Any]
+                },
+            ]
+            layoutData = try JSONSerialization.data(
+                withJSONObject: layout, options: [.sortedKeys])
+        } else {
+            let layout: [String: Any] = [
+                "expertStride": Int(SSDAIFormatV1.alignmentBytes),
+                "numLayers": toy.numLayers,
+                "expertsPerLayer": toy.numExperts,
+                "layers": (0..<toy.numLayers).map { layer in
+                    [
+                        "layer": layer,
+                        "file": String(format: "layer_%02d.bin", layer),
+                        "experts": [],
+                        "expertsPerLayer": 0,
+                    ] as [String: Any]
+                },
+            ]
+            layoutData = try JSONSerialization.data(
+                withJSONObject: layout, options: [.sortedKeys])
+        }
         let layoutURL = dir.appendingPathComponent("packed_experts/layout.json")
-        let layoutData = try JSONSerialization.data(
-            withJSONObject: layout, options: [.sortedKeys])
         try layoutData.write(to: layoutURL)
         let layoutSha = try Sha256Verifier.hashFile(at: layoutURL)
+
+        var files: [String: [String: Any]] = [
+            "model_weights.bin": ["size": file.count, "sha256": weightsSha],
+            "packed_experts/layout.json": [
+                "size": layoutData.count, "sha256": layoutSha,
+            ],
+        ]
+        if let layerFile {
+            files["packed_experts/\(layerFile.name)"] = [
+                "size": layerFile.size, "sha256": layerFile.sha,
+            ]
+        }
 
         let manifest: [String: Any] = [
             "magic": "SSDAI",
@@ -205,20 +353,17 @@ enum K2ToySynthetic {
                 "aneSharedExpert": false,
             ],
             "modelID": "k2-horizon-toy",
-            "arch": archJSON(),
+            "arch": archJSON(toy),
             "quant": [
                 "embedding": slot(), "attention": slot(), "router": slot(),
                 "sharedExpert": slot(), "routedExpert": slot(),
             ],
-            "files": [
-                "model_weights.bin": ["size": file.count, "sha256": weightsSha],
-                "packed_experts/layout.json": [
-                    "size": layoutData.count, "sha256": layoutSha,
-                ],
-            ],
+            "files": files,
             "expertsPerLayer": toy.numExperts,
             "numLayers": toy.numLayers,
-            "expertStride": Int(SSDAIFormatV1.alignmentBytes),
+            "expertStride": sparse
+                ? Int(SSDAIFormatV1.alignmentBytes) * 2
+                : Int(SSDAIFormatV1.alignmentBytes),
         ]
         try JSONSerialization.data(
             withJSONObject: manifest, options: [.sortedKeys]
@@ -233,7 +378,7 @@ enum K2ToySynthetic {
         ]
     }
 
-    private static func archJSON() -> [String: Any] {
+    private static func archJSON(_ toy: ArchConfig) -> [String: Any] {
         [
             "hiddenSize": toy.hiddenSize,
             "ffnIntermediate": toy.intermediateSize,
