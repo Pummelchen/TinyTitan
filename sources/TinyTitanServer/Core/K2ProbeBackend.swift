@@ -151,9 +151,17 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         // probe has no cross-task state to share. `nonisolated(unsafe)` is the
         // narrow opt-out for sending it into its own `forward` calls, not a
         // claim that the graph is safe to use from two tasks at once.
+        let graphStart = Date()
         nonisolated(unsafe) let graph = try K2GraphProbe(
             model: model, context: context,
             maxSequence: promptIDs.count + budget)
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            FileHandle.standardError.write(
+                Data(
+                    ("k2 server: graph built in "
+                        + String(format: "%.2f", Date().timeIntervalSince(graphStart))
+                        + "s (maxSequence \(promptIDs.count + budget))\n").utf8))
+        }
         var logits: [Float] = []
         for (position, token) in promptIDs.enumerated() {
             logits = try await graph.forward(

@@ -356,10 +356,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   160-token reply 38.1 s (4.2 tok/s). One sampled reply (temperature 1.0) wrote
   its closing think tag as ordinary text and the decoder left it in reasoning;
   five later samples behaved, so text-spelled markers remain a known edge.
-  The catalogue path is slower per forward than the bench in the same process
-  shape (a 12-token reply took 17.7 s, per-forward 0.27-0.70 s against ~0.2 s in
-  `k2gpu`); the gap is server-side scheduling, not the kernels, and is the first
-  thing to profile before trusting serving throughput numbers.
+  A per-request graph costs 0.02 s to build (`maxSequence` = prompt + budget,
+  reported under `TINYTITAN_K2_TIMING`), so it is not worth caching one. Warm
+  served throughput matches the bench: a 32-token reply took 15.2 s on the
+  first request and 8.36 s on the second (0.30 -> 0.164 s/forward, ~6.1
+  tok/s), against the bench's warm 0.181 s/forward. The earlier 17.7 s reading
+  was a lazy model load plus a cold expert cache, not server overhead.
 - **Still missing** — the runner graph the CLI and release goldens drive,
   prompt caching, batching and ANE. (The catalogue entry landed.)
 
