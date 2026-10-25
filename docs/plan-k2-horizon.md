@@ -375,6 +375,17 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   12.6 s against 44.3 s cold. A different tokenizer render or a capacity
   rebuild drops the reuse, which is why a request that asks for more
   `max_tokens` does not reuse anything the first time.
+- **Warm start from the routing profile** — the backend persists the
+  routed-expert profile the runner already uses (`expert-profile.bin` beside
+  the install; `TINYTITAN_EXPERT_PROFILE=0` disables) after each request, and
+  at start preloads the historically hottest experts per layer
+  (`TINYTITAN_K2_WARM_EXPERTS`, default 16, 0 disables; capped by the slot
+  count). A restart's first request then misses less: the 173-token prompt
+  went 38.2 s cold → 34.8 s with 16/layer → 30.2 s with 64/layer (that one
+  warms ~9.5 GB and readiness was 10 s), and the short mutex chat 15.2 → 13.5 s.
+  The gain is modest because per-forward compute dominates a long prompt, and
+  the profile's LFU seeding also applies for the whole session whether or not
+  anything is preloaded.
 - **Disconnects stop generation** — the decode loop checks task cancellation
   per token, and a prefill checks it between tokens. A client that goes away
   therefore stops the GPU work instead of letting the full budget run out: a

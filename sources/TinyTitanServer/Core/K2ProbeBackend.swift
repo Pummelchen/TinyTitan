@@ -34,6 +34,8 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
     static let minimumGraphCapacity = 2_048
 
     private let model: Model
+    private let config: ArchConfig
+    private let directory: URL
     private let context: MetalContext
     private let tokenizer: GFTokenizer
     private let tokenizerFolder: URL
@@ -116,6 +118,8 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
                 "no tokenizer in \(modelDirectory.lastPathComponent)")
         }
         self.model = loaded
+        self.config = config
+        self.directory = modelDirectory
         self.context = metal
         self.slotCount = resolvedSlots
         self.tokenizerFolder = folder
@@ -125,6 +129,71 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             thinkingMode: thinking, effort: reasoningEffort)
         self.contextLimit = min(maximumContext, Self.contextCeiling)
         self.defaults = GenerationDefaults.forFamily(.k2Horizon)
+        await warmExpertCache()
+    }
+
+    /// Preload the experts a previous run routed to, into the slots they would
+    /// have won anyway. The profile is the streamer's LFU seeding; loading the
+    /// top few per layer turns the first request after a restart from a cold
+    /// miss on every layer into mostly hits.
+    ///
+    /// Best effort: a missing or unreadable profile, a read failure, or an
+    /// install without routed experts just skips warming. `TINYTITAN_K2_WARM_EXPERTS`
+    /// sets how many per layer (0 disables; default 16).
+    private func warmExpertCache() async {
+        let limit =
+            Int(
+                ProcessInfo.processInfo.environment["TINYTITAN_K2_WARM_EXPERTS"] ?? "")
+            ?? 16
+        guard limit > 0, let url = Self.expertProfileURL(for: directory),
+            let profile = ExpertUsageProfile.load(
+                url: url, layers: config.numLayers,
+                expertsPerLayer: config.numExperts),
+            !profile.isEmpty
+        else { return }
+        // The model is a non-Sendable class driven by this actor's task; the
+        // narrow opt-out is for sending it into the fetch's async call, not a
+        // claim it is safe to share.
+        nonisolated(unsafe) let model = self.model
+        let config = self.config
+        let perLayer = min(limit, slotCount, config.numExperts)
+        let sparseLayers = (0..<config.numLayers).filter {
+            !config.denseLayerIndices.contains($0)
+        }
+        var warmed = 0
+        for layer in sparseLayers {
+            let ranked = (0..<config.numExperts)
+                .sorted {
+                    profile.count(layer: layer, expert: $0)
+                        > profile.count(layer: layer, expert: $1)
+                }
+                .prefix(perLayer)
+                .filter { profile.count(layer: layer, expert: $0) > 0 }
+            guard !ranked.isEmpty,
+                let plan = try? model.planRoutedExperts(
+                    layer: layer, experts: Array(ranked)),
+                (try? await model.fetchRoutedExperts(plan: plan)) != nil
+            else { continue }
+            warmed += ranked.count
+        }
+        if warmed > 0 {
+            FileHandle.standardError.write(
+                Data(
+                    ("k2 probe: warmed \(warmed) expert(s) across \(sparseLayers.count) "
+                        + "layers from \(url.lastPathComponent)\n").utf8))
+        }
+    }
+
+    /// The profile beside the install, unless `TINYTITAN_EXPERT_PROFILE`
+    /// names another path or turns the mechanism off. Kept in step with
+    /// `Model.expertProfileURL`, which is not visible from this target.
+    static func expertProfileURL(for directory: URL) -> URL? {
+        guard
+            let raw = ProcessInfo.processInfo.environment["TINYTITAN_EXPERT_PROFILE"]
+        else { return directory.appendingPathComponent("expert-profile.bin") }
+        if raw == "0" { return nil }
+        let path = (raw as NSString).expandingTildeInPath
+        return path.isEmpty ? nil : URL(fileURLWithPath: path)
     }
 
     package func generate(
@@ -151,12 +220,42 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
         let generator = sampler.makeGenerator()
 
         try ensureGraph(needed: promptIDs.count + budget)
+        let firstLogits = try await prefill(promptIDs: promptIDs)
+
+        let allowedTools =
+            request.tools.isEmpty ? nil : Set(request.tools.map(\.name))
+        let decoder = StructuredAssistantDecoder.forGeneration(
+            tokenizer: renderTokenizer, promptIDs: promptIDs,
+            allowedTools: allowedTools)
+        var detokenizer = GFDetokenizer(tokenizer: renderTokenizer)
+        var output = AssistantOutput(
+            stops: configuration.stopStrings, onEvent: onEvent)
+        let result = try await decode(
+            promptIDs: promptIDs, budget: budget,
+            configuration: configuration, sampler: sampler,
+            generator: generator, decoder: decoder,
+            detokenizer: &detokenizer, output: &output,
+            logits: firstLogits)
+        output.publish(
+            try decoder.consumeTail(detokenizer.flush()), isToken: false)
+        try decoder.finish()
+        output.finish()
+        // Fold this request's routing into the profile the next start warms
+        // from. The write is async and best effort; a read-only install is not
+        // an error.
+        model.saveExpertUsageProfile()
+        return completion(
+            promptTokens: promptIDs.count, produced: result.produced,
+            reason: result.reason, output: output)
+    }
+
+    /// Forward the prompt tokens the resident K/V does not already hold.
+    /// At least one token is always forwarded, because its logits are what the
+    /// sampler reads.
+    private func prefill(promptIDs: [Int32]) async throws -> [Float] {
         guard let graph else {
             throw K2BackendError.unsupported("the probe graph is not resident")
         }
-        // At least one token is always forwarded: its logits are what the
-        // sampler reads. Everything before it is K/V the previous request
-        // already computed from the same ids.
         let reused = min(
             Self.commonPrefixLength(promptIDs, cachedTokens),
             max(0, promptIDs.count - 1))
@@ -185,26 +284,37 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             throw error
         }
         cachedTokens = promptIDs
+        return logits
+    }
 
-        let allowedTools =
-            request.tools.isEmpty ? nil : Set(request.tools.map(\.name))
-        let decoder = StructuredAssistantDecoder.forGeneration(
-            tokenizer: renderTokenizer, promptIDs: promptIDs,
-            allowedTools: allowedTools)
-        var detokenizer = GFDetokenizer(tokenizer: renderTokenizer)
-        var output = AssistantOutput(
-            stops: configuration.stopStrings, onEvent: onEvent)
+    private struct DecodeResult {
+        var produced: Int
+        var reason: String
+    }
+
+    /// The sampling loop. A disconnected client cancels the task; checking
+    /// cancellation here stops the GPU work nobody will read. The K/V record
+    /// stays valid across a cancellation because it is appended only after a
+    /// token's forward completes.
+    private func decode(
+        promptIDs: [Int32], budget: Int,
+        configuration: GenerationConfig, sampler: CPUSampler,
+        generator: CPUSampler.Generator, decoder: StructuredAssistantDecoder,
+        detokenizer: inout GFDetokenizer, output: inout AssistantOutput,
+        logits initialLogits: [Float]
+    ) async throws -> DecodeResult {
+        guard let graph else {
+            throw K2BackendError.unsupported("the probe graph is not resident")
+        }
+        var logits = initialLogits
         var history = promptIDs
         var produced = 0
         var position = promptIDs.count
         var reason = "length"
         let stops: Set<Int> = [
-            Int(renderTokenizer.eosID), Int(renderTokenizer.endOfTurnID),
+            Int(tokenizer.eosID), Int(tokenizer.endOfTurnID),
         ]
         while produced < budget {
-            // A disconnected client cancels the request task; stop spending
-            // GPU time on tokens nobody will read. The cache stays valid here:
-            // it is appended only after a token's forward completes.
             try Task.checkCancellation()
             if let constraint = configuration.constraint {
                 let mask = constraint.allowedMask()
@@ -239,13 +349,7 @@ public actor K2ProbeBackend: ServerInferenceBackend, PromptCacheDescribing {
             cachedTokens.append(Int32(next))
             position += 1
         }
-        output.publish(
-            try decoder.consumeTail(detokenizer.flush()), isToken: false)
-        try decoder.finish()
-        output.finish()
-        return completion(
-            promptTokens: promptIDs.count, produced: produced,
-            reason: reason, output: output)
+        return DecodeResult(produced: produced, reason: reason)
     }
 
     /// The request's generation config with the structured-output constraint,
