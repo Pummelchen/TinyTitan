@@ -159,7 +159,9 @@ final class K2MoEStage {
     }
 
     /// The shared expert then the selected routed experts, summed into `out`.
-    /// The command buffer that encoded `encodeRouter` must have completed.
+    /// `experts` is in selection order (slot order), which is the order a
+    /// streaming caller fetches them in. The command buffer that encoded
+    /// `encodeRouter` must have completed.
     func encodeExperts(
         commandBuffer: MTLCommandBuffer,
         hidden: MTLBuffer, hiddenOffset: Int = 0,
@@ -177,15 +179,14 @@ final class K2MoEStage {
                 rows: hiddenSize, width: expertWidth)
         }
 
-        let ids = selectedExpertIDs()
-        for (slot, id) in ids.enumerated() {
-            guard experts.indices.contains(id) else {
-                throw ModelError.internalInconsistency(
-                    detail: "K2 MoE selected expert \(id), but \(experts.count) are bound")
-            }
+        guard experts.count == topK else {
+            throw ModelError.internalInconsistency(
+                detail: "K2 MoE selected \(topK) experts, but \(experts.count) are bound")
+        }
+        for slot in 0..<topK {
             try encodeSwiGLU(
                 commandBuffer: commandBuffer,
-                weights: experts[id],
+                weights: experts[slot],
                 x: hidden, xOffset: hiddenOffset,
                 gate: gateScratch, up: upScratch, act: actScratch,
                 y: downScratch,

@@ -74,9 +74,9 @@ import TinyTitanValidationSupport
             integrityPolicy: .fullSha256)
         let layer = config.numLayers - 1
         let plan = try #require(
-            try model.planRoutedExperts(layer: layer, experts: [0, 1]))
+            try model.planRoutedExperts(layer: layer, experts: [0]))
         let blobs = try await model.fetchRoutedExperts(plan: plan)
-        #expect(blobs.count == 2)
+        #expect(blobs.count == 1)
 
         var experts: [K2MoEStage.ExpertWeights] = []
         for (index, id) in plan.experts.enumerated() {

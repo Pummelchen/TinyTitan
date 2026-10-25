@@ -163,7 +163,7 @@ import TinyTitanValidationSupport
         let valueCB = try #require(ctx.queue.makeCommandBuffer())
         try stage.encodeExperts(
             commandBuffer: valueCB, hidden: xBuf,
-            experts: expertViews, shared: shared, out: outBuf)
+            experts: ids.map { expertViews[$0] }, shared: shared, out: outBuf)
         valueCB.commit()
         valueCB.waitUntilCompleted()
         let actual = Fp16Buffer.read(outBuf, count: Self.hidden)

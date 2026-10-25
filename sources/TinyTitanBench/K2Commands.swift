@@ -90,6 +90,9 @@ extension TinyTitanBench {
         // unchecked-invariant: written only inside the Task below and read only
         // after `semaphore.wait()` returns, which the signal orders after the
         // last write. There is no concurrent access.
+        /// unchecked-invariant: written only inside the Task below and read
+        /// only after `semaphore.wait()` returns, which orders the read after
+        /// the write; no concurrent access.
         final class Box: @unchecked Sendable {
             var value: Tokenizer?
             var error: Error?
@@ -107,5 +110,92 @@ extension TinyTitanBench {
         semaphore.wait()
         if let error = box.error { throw error }
         return box.value
+    }
+}
+
+/// `TinyTitanBench k2gpu <install> "<prompt>" [n]`: the K2 install through the
+/// probe graph on Metal, greedy.
+///
+/// This is the real 36B path minus the runner: one token at a time, the
+/// per-layer probes with their plain K/V caches, and the fetched routed
+/// experts. It exists to put a number and a text on the graph before it is
+/// wired to the server.
+extension TinyTitanBench {
+    static func runK2GPU(install path: String, prompt: String, limit: Int) throws {
+        /// unchecked-invariant: written only inside the Task below and read
+        /// only after `semaphore.wait()` returns, which orders the read after
+        /// the write; no concurrent access.
+        final class Box: @unchecked Sendable {
+            var error: Error?
+        }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            do {
+                try await runK2GPUAsync(
+                    install: URL(fileURLWithPath: path), prompt: prompt,
+                    limit: limit)
+            } catch {
+                box.error = error
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if let error = box.error { throw error }
+    }
+
+    private static func runK2GPUAsync(
+        install: URL, prompt: String, limit: Int
+    ) async throws {
+        let config = try ArchConfig.resolved(
+            forFamily: .k2Horizon, directoryURL: install)
+        let context = try MetalContext()
+        let model = try Model.load(
+            directoryURL: install, device: context.device, expecting: config,
+            streamingMode: .pread(slotCount: 8))
+        let tokenizer = try await GFTokenizer.load(
+            forModelDirectory: install, thinkingMode: .on,
+            reasoningEffort: .high)
+        let ids = tokenizer.encode(prompt, addBOS: false)
+        guard !ids.isEmpty else {
+            FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
+            exit(2)
+        }
+        let graph = try K2GraphProbe(
+            model: model, context: context, maxSequence: ids.count + limit + 1)
+
+        let start = Date()
+        var logits: [Float] = []
+        for (position, token) in ids.enumerated() {
+            logits = try await graph.forward(
+                tokenID: UInt32(bitPattern: token),
+                position: UInt32(position))
+        }
+        let prefill = Date().timeIntervalSince(start)
+
+        var produced: [Int32] = []
+        let decodeStart = Date()
+        var position = ids.count
+        for _ in 0..<limit {
+            var best = 0
+            for index in logits.indices where logits[index] > logits[best] {
+                best = index
+            }
+            let token = Int32(best)
+            if token == tokenizer.eosID { break }
+            produced.append(token)
+            logits = try await graph.forward(
+                tokenID: UInt32(bitPattern: token),
+                position: UInt32(position))
+            position += 1
+        }
+        let decode = Date().timeIntervalSince(decodeStart)
+        print(
+            "prompt \(ids.count) tokens: \(String(format: "%.2f", prefill))s "
+                + "(\(String(format: "%.2f", Double(ids.count) / prefill)) tok/s)")
+        print(
+            "decode \(produced.count) tokens: \(String(format: "%.2f", decode))s "
+                + "(\(String(format: "%.2f", Double(produced.count) / max(decode, 0.001))) tok/s)")
+        print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
     }
 }

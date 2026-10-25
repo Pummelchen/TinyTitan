@@ -8,7 +8,7 @@ import Metal
 /// cross to the CPU between phases), so this graph sequences each layer one at
 /// a time and carries the hidden state as halfs between them. That is the probe
 /// form of the loop, not the batched serving graph.
-final class K2GraphProbe {
+package final class K2GraphProbe {
     private let config: ArchConfig
     private let head: K2Head
     private let dense: [Int: K2DenseLayer]
@@ -18,7 +18,7 @@ final class K2GraphProbe {
     private let hiddenA: MTLBuffer
     private let hiddenB: MTLBuffer
 
-    init(
+    package init(
         model: Model, context: MetalContext, maxSequence: Int
     ) throws {
         let config = model.config
@@ -56,7 +56,7 @@ final class K2GraphProbe {
         self.hiddenB = try buffer("k2.graph.hiddenB")
     }
 
-    func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {
+    package func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {
         var hidden = try await embed(tokenID: tokenID)
         for layer in 0..<config.numLayers {
             if let dense = dense[layer] {

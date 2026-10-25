@@ -101,6 +101,12 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   and a two-token run checks the second token against every layer's cache; both
   logit vectors match the chained CPU reference. Sparse layers are refused by
   name, so a real 36B install still stops before the graph runs.
+- **First real GPU token** — `TinyTitanBench k2gpu` loads the 4-bit install,
+  runs the probe graph token by token and greedy-decodes. On 2026-10-25
+  "The capital of France is" produced " Paris": prompt 5 tokens in 10.00 s
+  (0.50 tok/s), one decode token in 0.49 s (2.02 tok/s). That is the real 36B
+  weights through the K2 graph, not the toy; the CPU reference's expected
+  answer for the same prompt is the same word.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
