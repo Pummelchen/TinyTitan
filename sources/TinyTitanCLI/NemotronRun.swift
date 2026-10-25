@@ -54,15 +54,9 @@ enum NemotronRun {
                 description: "the Nemotron path does not read --messages-file yet")
         }
         let install = try NemotronInstall(directory: directory)
-        let tokenizer = try await GFTokenizer.load(
-            forModelDirectory: directory,
-            thinkingMode: args.thinkingMode == .on ? .on : .off)
-        let chat = args.concise
-        let ids: [Int32] = chat
-            ? try tokenizer.encodeToolChat(
-                messages: [GFTokenizer.Message(role: .user, content: prompt)],
-                tools: [])
-            : tokenizer.encode(prompt, addBOS: false)
+        let tokenizer = try await NemotronTokenizer(
+            directory: directory, thinking: args.thinkingMode == .on)
+        let ids = try tokenizer.encode(prompt: prompt, chat: args.concise)
         guard !ids.isEmpty else {
             throw NemotronRunError(description: "the prompt tokenized to nothing")
         }
@@ -87,7 +81,7 @@ enum NemotronRun {
                 generator: &generator)
             if install.geometry.eosTokens.contains(token) { break }
             produced.append(Int32(token))
-            let text = tokenizer.decode(produced, skipSpecialTokens: true)
+            let text = tokenizer.decode(produced)
             if text.hasPrefix(printed) {
                 let delta = String(text.dropFirst(printed.count))
                 if !delta.isEmpty { stdout.write(Data(delta.utf8)) }

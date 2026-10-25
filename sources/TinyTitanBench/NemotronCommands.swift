@@ -40,17 +40,9 @@ extension TinyTitanBench {
         install: URL, prompt: String, limit: Int, gpu: Bool, graph: Bool
     ) async throws {
         let loaded = try NemotronInstall(directory: install)
-        let tokenizer = try await GFTokenizer.load(
-            forModelDirectory: install, thinkingMode: .off)
+        let tokenizer = try await NemotronTokenizer(directory: install)
         let chat = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_CHAT"] == "1"
-        let ids: [Int32]
-        if chat {
-            ids = try tokenizer.encodeToolChat(
-                messages: [GFTokenizer.Message(role: .user, content: prompt)],
-                tools: [])
-        } else {
-            ids = tokenizer.encode(prompt, addBOS: false)
-        }
+        let ids = try tokenizer.encode(prompt: prompt, chat: chat)
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
             exit(2)
@@ -106,7 +98,7 @@ extension TinyTitanBench {
                     + "(\(String(format: "%.2f", Double(produced.count) / decode)) tok/s)")
         }
         print("tokens: " + produced.map { String(Int($0)) }.joined(separator: ","))
-        print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
+        print("output: \(tokenizer.decode(produced))")
     }
 
     /// `TinyTitanBench nemotronlogits <install> <token,token,...> [--gpu]`:

@@ -30,8 +30,8 @@ public final class NemotronModel {
     private let latent: UnsafeMutablePointer<Float>
     private let latentAccumulator: UnsafeMutablePointer<Float>
     private let expertHidden: UnsafeMutablePointer<Float>
-    private let expertOutput: UnsafeMutablePointer<Float>
     private let expertBatch: UnsafeMutablePointer<Float>
+    private let expertDownBatch: UnsafeMutablePointer<Float>
     private let sharedOutput: UnsafeMutablePointer<Float>
     private let routerScores: UnsafeMutablePointer<Float>
     private let routerChoice: UnsafeMutablePointer<Float>
@@ -91,8 +91,8 @@ public final class NemotronModel {
         latent = allocate(g.moeLatentSize)
         latentAccumulator = allocate(g.moeLatentSize)
         expertHidden = allocate(max(g.maxMoeIntermediate, g.moeSharedIntermediate))
-        expertOutput = allocate(g.moeLatentSize)
         expertBatch = allocate(max(1, g.topKExperts * g.maxMoeIntermediate))
+        expertDownBatch = allocate(max(1, g.topKExperts * g.moeLatentSize))
         sharedOutput = allocate(g.hiddenSize)
         routerScores = allocate(max(g.maxExperts, 1))
         routerChoice = allocate(max(g.maxExperts, 1))
@@ -103,7 +103,7 @@ public final class NemotronModel {
         keyValues = allocate(
             max(
                 1,
-                g.attentionLayers.count * maxSequence * g.attentionKVHeads
+                2 * g.attentionLayers.count * maxSequence * g.attentionKVHeads
                     * g.attentionHeadDim))
 
         for layer in 0..<g.numLayers {
@@ -121,7 +121,7 @@ public final class NemotronModel {
         for pointer in [
             hidden, normalized, projection, convInput, convOutput, ssmY,
             mambaNormed, matrixOut, sequenceBuffer, latent, latentAccumulator,
-            expertHidden, expertOutput, expertBatch, sharedOutput, routerScores,
+            expertHidden, expertBatch, expertDownBatch, sharedOutput, routerScores,
             routerChoice, logits, mambaStates, convStates, keyValues,
         ] {
             pointer.deallocate()
@@ -134,7 +134,7 @@ public final class NemotronModel {
         hidden.update(repeating: 0, count: g.hiddenSize)
         keyValues.update(
             repeating: 0,
-            count: g.attentionLayers.count * maxSequence * g.attentionKVHeads
+            count: 2 * g.attentionLayers.count * maxSequence * g.attentionKVHeads
                 * g.attentionHeadDim)
         mambaStates.update(
             repeating: 0,
@@ -303,10 +303,10 @@ public final class NemotronModel {
         }
         matvec.gemvExperts(
             layer: layer, experts: selected, role: "down",
-            x: expertBatch, xStride: expertWidth, y: expertOutput)
+            x: expertBatch, xStride: expertWidth, y: expertDownBatch)
         for index in 0..<selected.count {
             let weight = routerScores[selected[index]]
-            let row = expertOutput + index * latentWidth
+            let row = expertDownBatch + index * latentWidth
             for element in 0..<latentWidth {
                 latentAccumulator[element] += weight * row[element]
             }
@@ -343,7 +343,7 @@ public final class NemotronModel {
         let slot = g.attentionLayers.firstIndex(of: layer) ?? 0
         let headDim = g.attentionHeadDim
         let kvStride = maxSequence * g.attentionKVHeads * headDim
-        let cache = keyValues + slot * kvStride
+        let cache = keyValues + slot * 2 * kvStride
         for head in 0..<g.attentionKVHeads {
             for d in 0..<headDim {
                 cache[position * g.attentionKVHeads * headDim + head * headDim + d] =
