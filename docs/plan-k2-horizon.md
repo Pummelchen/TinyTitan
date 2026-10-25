@@ -92,6 +92,11 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   token that has to attend over the cached first. It is probe-sized caching,
   not the runner's paged/quantized manager; the same commit adds
   `Elementwise.encodeSiluMul` and the K2 gate/dense-MLP accessors.
+- **Dense graph** — `K2DenseGraph` chains the pieces into a whole dense-only
+  token: embedding, the layer stack (each layer with its own K/V cache), final
+  norm and head. The synthetic install runs token 7 through all three layers
+  and the logits match the chained CPU reference. Sparse layers are refused by
+  name, so a real 36B install still stops before the graph runs.
 - **MoE stage** — `K2MoEStage` runs the sparse block's resident form: the bf16
   router GEMV (float logits), the shared selection kernel, then each selected
   expert's SwiGLU (separate gate/up GEMV, fused SiLU multiply, down GEMV) with
