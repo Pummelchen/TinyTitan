@@ -16,3 +16,4 @@ test_concurrent_sessions	starts one TinyTitanServer per model at --max-concurren
 test_ane_gather_probe	its module imports coremltools, which the CI python does not carry — measured here as 5 tests, 5 skipped, so it asserts on a machine that has coremltools and nowhere else
 test_export_ane_prefill	its module imports coremltools via the exporter — measured here as 22 tests, 22 skipped, the same asymmetry as test_ane_gather_probe
 test_verify_ane_sidecar	its module imports coremltools to verify a sidecar — measured here as 6 tests, 6 skipped, the same asymmetry again
+test_nemotron_install	needs a built .build/release/TinyTitanRepack plus numpy, ml_dtypes and safetensors for the toy converter; measured locally as 3 tests passing, and it guards the format before a 149.77 GB conversion rather than a runner-sized check

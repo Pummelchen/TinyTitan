@@ -43,20 +43,22 @@ public final class NemotronMetal: NemotronMatvec {
         let page = Int(getpagesize())
         func rounded(_ value: Int) -> Int { ((value + page - 1) / page) * page }
         let mapping = install.weightsMapping
-        guard let buffer = device.makeBuffer(
-            bytesNoCopy: UnsafeMutableRawPointer(mutating: mapping.base),
-            length: rounded(mapping.size),
-            options: .storageModeShared, deallocator: nil)
+        guard
+            let buffer = device.makeBuffer(
+                bytesNoCopy: UnsafeMutableRawPointer(mutating: mapping.base),
+                length: rounded(mapping.size),
+                options: .storageModeShared, deallocator: nil)
         else {
             throw NemotronInstallError.unsupported("cannot wrap model_weights.bin in Metal")
         }
         weightsBuffer = buffer
         for (layer, _) in install.experts {
             guard let layerMapping = install.layerMapping(layer) else { continue }
-            guard let layerBuffer = device.makeBuffer(
-                bytesNoCopy: UnsafeMutableRawPointer(mutating: layerMapping.base),
-                length: rounded(layerMapping.size),
-                options: .storageModeShared, deallocator: nil)
+            guard
+                let layerBuffer = device.makeBuffer(
+                    bytesNoCopy: UnsafeMutableRawPointer(mutating: layerMapping.base),
+                    length: rounded(layerMapping.size),
+                    options: .storageModeShared, deallocator: nil)
             else {
                 throw NemotronInstallError.unsupported(
                     "cannot wrap packed_experts for layer \(layer) in Metal")
@@ -71,9 +73,10 @@ public final class NemotronMetal: NemotronMatvec {
         let maximumY = max(
             g.vocabSize, g.topKExperts * max(g.maxMoeIntermediate, g.moeLatentSize),
             g.mambaIntermediate + 2 * g.mambaGroups * g.ssmStateSize + g.mambaHeads)
-        guard let xBuffer = device.makeBuffer(
-            length: maximumX * MemoryLayout<Float16>.size,
-            options: .storageModeShared),
+        guard
+            let xBuffer = device.makeBuffer(
+                length: maximumX * MemoryLayout<Float16>.size,
+                options: .storageModeShared),
             let yBuffer = device.makeBuffer(
                 length: maximumY * MemoryLayout<Float16>.size,
                 options: .storageModeShared)
@@ -92,7 +95,9 @@ public final class NemotronMetal: NemotronMatvec {
         y: UnsafeMutablePointer<Float>
     ) {
         stage(x, count: tensor.columns, slot: 0)
-        let command = queue.makeCommandBuffer()!
+        guard let command = queue.makeCommandBuffer() else {
+            preconditionFailure("Metal refused a command buffer")
+        }
         encode(
             command, buffer: weightsBuffer,
             weightOffset: tensor.fileOffset,
@@ -125,12 +130,14 @@ public final class NemotronMetal: NemotronMatvec {
         }
         let columns = tensor.shape[1]
         let rows = tensor.shape[0]
-        for (index, _) in experts.enumerated() {
+        for index in experts.indices {
             stage(
                 xStride == 0 ? x : x + index * xStride,
                 count: columns, slot: xStride == 0 ? 0 : index)
         }
-        let command = queue.makeCommandBuffer()!
+        guard let command = queue.makeCommandBuffer() else {
+            preconditionFailure("Metal refused a command buffer")
+        }
         for (index, expert) in experts.enumerated() {
             let base = expert * entry.stride
             encode(

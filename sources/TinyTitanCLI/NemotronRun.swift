@@ -33,7 +33,9 @@ enum NemotronRun {
 
     private static func isNemotronInstall(_ directory: URL) -> Bool {
         let manifest = directory.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifest),
+        guard
+            let data = try? BoundedMetadataRead.read(
+                fileAt: manifest, maxBytes: 64 * 1024 * 1024),
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let arch = object["arch"] as? [String: Any]
         else { return false }

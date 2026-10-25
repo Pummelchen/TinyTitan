@@ -192,7 +192,7 @@ install. On a three-layer toy install (mamba, MoE, attention; random weights)
 with an input of three tokens — so the Mamba conv/SSM state and the KV cache are
 both exercising their second and third steps:
 
-| Arm | max |logit difference| vs NumPy |
+| Arm | max \|logit difference\| vs NumPy |
 | --- | ---: |
 | 4-bit CPU | **4.9e-7** |
 | 4-bit Metal matvec | **3.4e-6** (FP16 GEMV) |

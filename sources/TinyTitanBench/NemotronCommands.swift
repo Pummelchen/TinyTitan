@@ -11,6 +11,34 @@ import TinyTitan
 /// token-by-token, so the first number is the real TTFT and the second is
 /// steady-state decode.
 extension TinyTitanBench {
+    /// The `nemotron*` command shapes, parsed in one place so the bench's main
+    /// switch stays under the function-length gate.
+    static func runNemotronCommand(_ arguments: [String]) throws {
+        let command = arguments.count > 1 ? arguments[1] : "nemotron"
+        let install =
+            arguments.count > 2
+            ? arguments[2] : "models/nemotron-3.5-bolt_74B_A9B_4Bit"
+        switch command {
+        case "nemotroninfo":
+            try runNemotronInfo(install: install)
+        case "nemotronlogits":
+            let tokens = arguments.count > 3 ? arguments[3] : "5"
+            try runNemotronLogits(
+                install: install, tokens: tokens,
+                gpu: arguments.contains("--gpu"),
+                graph: arguments.contains("--graph"))
+        default:
+            let prompt =
+                arguments.count > 3
+                ? arguments[3] : "The capital of France is"
+            let limit = arguments.count > 4 ? Int(arguments[4]) ?? 16 : 16
+            try runNemotron(
+                install: install, prompt: prompt, limit: limit,
+                gpu: ["nemotrongpu", "nemotrongraph"].contains(command),
+                graph: command == "nemotrongraph")
+        }
+    }
+
     static func runNemotron(
         install path: String, prompt: String, limit: Int, gpu: Bool = false,
         graph: Bool = false
@@ -69,7 +97,10 @@ extension TinyTitanBench {
         }
         func advance(_ token: Int) throws -> [Float] {
             if let graphModel { return try graphModel.step(token: token) }
-            return try model!.step(token: token)
+            guard let model else {
+                throw NemotronInstallError.unsupported("no Nemotron engine was built")
+            }
+            return try model.step(token: token)
         }
 
         let prefillStart = Date()
@@ -131,8 +162,11 @@ extension TinyTitanBench {
             install: loaded, maxSequence: ids.count + 8, matvec: backend)
         var logits: [Float] = []
         for token in ids {
-            if let graphModel { logits = try graphModel.step(token: token) }
-            else { logits = try model.step(token: token) }
+            if let graphModel {
+                logits = try graphModel.step(token: token)
+            } else {
+                logits = try model.step(token: token)
+            }
         }
         print(logits.map { String(format: "%.6f", $0) }.joined(separator: ","))
         var best = 0

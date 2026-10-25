@@ -101,43 +101,6 @@ public enum NemotronInstallError: Error, CustomStringConvertible {
 }
 
 /// A read-only mapping of one payload file.
-final class NemotronMappedFile {
-    let url: URL
-    let size: Int
-    let base: UnsafeRawPointer
-
-    init(url: URL) throws {
-        self.url = url
-        let fd = open(url.path, O_RDONLY)
-        guard fd >= 0 else {
-            throw NemotronInstallError.resident("cannot open \(url.lastPathComponent)")
-        }
-        defer { close(fd) }
-        var status = stat()
-        guard fstat(fd, &status) == 0 else {
-            throw NemotronInstallError.resident("cannot stat \(url.lastPathComponent)")
-        }
-        let length = Int(status.st_size)
-        guard length > 0 else {
-            throw NemotronInstallError.resident("\(url.lastPathComponent) is empty")
-        }
-        guard let mapped = mmap(nil, length, PROT_READ, MAP_PRIVATE, fd, 0),
-            mapped != MAP_FAILED
-        else {
-            throw NemotronInstallError.resident("cannot map \(url.lastPathComponent)")
-        }
-        self.size = length
-        self.base = UnsafeRawPointer(mapped)
-    }
-
-    deinit {
-        munmap(UnsafeMutableRawPointer(mutating: base), size)
-    }
-
-    func pointer(offset: Int) -> UnsafeRawPointer {
-        base.advanced(by: offset)
-    }
-}
 
 /// A Nemotron 3.5 Bolt `.ssdai` install, read directly: the manifest's text
 /// geometry, the resident index, and the packed-expert layout.
@@ -153,8 +116,8 @@ public final class NemotronInstall {
     public let resident: [String: NemotronTensorRef]
     public let experts: [Int: NemotronLayerExperts]
 
-    private let weights: NemotronMappedFile
-    private let layerFiles: [Int: NemotronMappedFile]
+    let weights: NemotronMappedFile
+    let layerFiles: [Int: NemotronMappedFile]
 
     /// The mappings, for a matvec backend that wraps them in `MTLBuffer`s.
     var weightsMapping: (base: UnsafeRawPointer, size: Int) {
@@ -168,8 +131,9 @@ public final class NemotronInstall {
 
     public init(directory: URL) throws {
         self.directory = directory
-        let manifestData = try Data(
-            contentsOf: directory.appendingPathComponent("manifest.json"))
+        let manifestData = try BoundedMetadataRead.read(
+            fileAt: directory.appendingPathComponent("manifest.json"),
+            maxBytes: 64 * 1024 * 1024)
         guard
             let manifest = try JSONSerialization.jsonObject(with: manifestData)
                 as? [String: Any]
@@ -232,7 +196,8 @@ public final class NemotronInstall {
         let headDim = try integer(arch, "headDim")
         var eos: [Int] = [2, 11]
         let generationURL = directory.appendingPathComponent("tokenizer/generation_config.json")
-        if let data = try? Data(contentsOf: generationURL),
+        if let data = try? BoundedMetadataRead.read(
+            fileAt: generationURL, maxBytes: 1024 * 1024),
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         {
             if let many = object["eos_token_id"] as? [Int] {
@@ -279,7 +244,8 @@ public final class NemotronInstall {
         var layerFiles: [Int: NemotronMappedFile] = [:]
         var experts: [Int: NemotronLayerExperts] = [:]
         let layoutURL = directory.appendingPathComponent("packed_experts/layout.json")
-        let layoutData = try Data(contentsOf: layoutURL)
+        let layoutData = try BoundedMetadataRead.read(
+            fileAt: layoutURL, maxBytes: 64 * 1024 * 1024)
         guard let layoutRoot = try JSONSerialization.jsonObject(with: layoutData) as? [String: Any],
             let layers = layoutRoot["layers"] as? [[String: Any]]
         else {
@@ -346,10 +312,11 @@ public final class NemotronInstall {
 
     /// Structural cross-checks between the manifest and the payload. Cheap and
     /// specific: a mismatch here is a repack bug, not a bad request.
-    private func validateGeometry() throws {
+    func validateGeometry() throws {
         let g = geometry
-        guard try tensor("language_model.backbone.embeddings.weight").shape
-            == [g.vocabSize, g.hiddenSize]
+        guard
+            try tensor("language_model.backbone.embeddings.weight").shape
+                == [g.vocabSize, g.hiddenSize]
         else {
             throw NemotronInstallError.resident("embedding shape disagrees with the manifest")
         }
@@ -463,73 +430,6 @@ public final class NemotronInstall {
         return out
     }
 
-    private static func readResidentIndex(
-        _ file: NemotronMappedFile
-    ) throws -> [String: NemotronTensorRef] {
-        guard file.size >= 24 else {
-            throw NemotronInstallError.resident("model_weights.bin is shorter than its header")
-        }
-        let header = file.base.assumingMemoryBound(to: UInt64.self)
-        let indexSize = Int(UInt64(littleEndian: header[0]))
-        let residentSize = Int(UInt64(littleEndian: header[1]))
-        let count = Int(UInt64(littleEndian: header[2]))
-        guard indexSize >= 24, indexSize + residentSize <= file.size,
-            24 + count * 72 <= indexSize
-        else {
-            throw NemotronInstallError.resident("index header is inconsistent")
-        }
-        var tensors: [String: NemotronTensorRef] = [:]
-        tensors.reserveCapacity(count)
-        let base = file.base
-        for index in 0..<count {
-            let entry = base.advanced(by: 24 + index * 72)
-            let nameOffset = Int(entry.load(fromByteOffset: 0, as: UInt32.self))
-            let nameLength = Int(entry.load(fromByteOffset: 4, as: UInt16.self))
-            let dtype = entry.load(fromByteOffset: 6, as: UInt8.self)
-            let fileOffset = Int(entry.load(fromByteOffset: 8, as: UInt64.self))
-            let sizeBytes = Int(entry.load(fromByteOffset: 16, as: UInt64.self))
-            let shape = (0..<4).map { slot in
-                Int(entry.load(fromByteOffset: 24 + slot * 4, as: UInt32.self))
-            }
-            let scaleOffset = Int(entry.load(fromByteOffset: 40, as: UInt64.self))
-            let scaleSize = Int(entry.load(fromByteOffset: 48, as: UInt64.self))
-            let biasOffset = Int(entry.load(fromByteOffset: 56, as: UInt64.self))
-            let biasSize = Int(entry.load(fromByteOffset: 64, as: UInt64.self))
-            guard nameOffset >= 0, nameLength > 0, nameOffset + nameLength <= indexSize
-            else {
-                throw NemotronInstallError.resident("entry \(index) has an out-of-range name")
-            }
-            let name = String(
-                decoding: UnsafeRawBufferPointer(
-                    start: base.advanced(by: nameOffset), count: nameLength),
-                as: UTF8.self)
-            let logicalShape = shape.prefix { $0 != 0 }
-            var bits: Int?
-            if dtype == 0 {
-                let cells = logicalShape.reduce(1, *)
-                guard cells > 0, sizeBytes * 8 % (cells * 4) == 0 else {
-                    throw NemotronInstallError.resident("\(name) has an impossible packed size")
-                }
-                let width = sizeBytes * 8 / cells
-                guard width == 4 || width == 8 else {
-                    throw NemotronInstallError.resident("\(name) is \(width)-bit")
-                }
-                bits = width
-            }
-            tensors[name] = NemotronTensorRef(
-                name: name, dtype: dtype, shape: Array(logicalShape),
-                fileOffset: fileOffset, sizeBytes: sizeBytes,
-                scaleOffset: scaleOffset, scaleSize: scaleSize,
-                biasOffset: biasOffset, biasSize: biasSize, bits: bits)
-        }
-        return tensors
-    }
 }
 
 /// Small shared math helpers that are not worth a C call.
-public enum NemotronMath {
-    @inline(__always)
-    public static func bfloat16(_ bits: UInt16) -> Float {
-        Float(bitPattern: UInt32(bits) << 16)
-    }
-}

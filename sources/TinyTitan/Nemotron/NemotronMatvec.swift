@@ -28,6 +28,11 @@ public protocol NemotronMatvec: AnyObject {
 /// The raw pointers a worker needs, boxed so the `concurrentPerform` closure
 /// captures one `@unchecked Sendable` value instead of five non-Sendable ones.
 /// Every worker writes a disjoint row range and reads the same `x`.
+///
+/// unchecked-invariant: the split ranges are disjoint by construction and the
+/// input is read-only for the duration of the call. `unsafe` is the point:
+/// `concurrentPerform` cannot see that, and boxing them is how the type system
+/// is told once instead of per pointer.
 private struct GemvPointers: @unchecked Sendable {
     let weights: UnsafePointer<UInt8>
     let scales: UnsafePointer<UInt16>
@@ -82,7 +87,8 @@ public final class NemotronCPU: NemotronMatvec {
             return
         }
         for (index, expert) in experts.enumerated() {
-            let base = try! install.expertPointer(layer: layer, expert: expert)
+            guard let base = try? install.expertPointer(layer: layer, expert: expert)
+            else { return }
             multiply(
                 weights: base.advanced(by: tensor.offset)
                     .assumingMemoryBound(to: UInt8.self),

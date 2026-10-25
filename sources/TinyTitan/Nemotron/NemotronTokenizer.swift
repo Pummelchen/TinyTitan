@@ -15,16 +15,20 @@ public final class NemotronTokenizer {
     private let template: String
 
     public init(directory: URL, thinking: Bool = false) async throws {
-        guard let folder = GFTokenizer.resolvedTokenizerFolder(
-            forModelDirectory: directory)
+        guard
+            let folder = GFTokenizer.resolvedTokenizerFolder(
+                forModelDirectory: directory)
         else {
             throw NemotronInstallError.unsupported(
                 "the install has no tokenizer/tokenizer.json")
         }
         tokenizer = try await AutoTokenizer.from(modelFolder: folder)
-        let raw = try String(
-            contentsOf: folder.appendingPathComponent("chat_template.jinja"),
-            encoding: .utf8)
+        let templateData = try BoundedMetadataRead.read(
+            fileAt: folder.appendingPathComponent("chat_template.jinja"),
+            maxBytes: 1024 * 1024)
+        guard let raw = String(bytes: templateData, encoding: .utf8) else {
+            throw NemotronInstallError.unsupported("the chat template is not UTF-8")
+        }
         // The card's template defaults `enable_thinking` to true. A benchmark
         // and a CLI one-shot both want the answer, not the thoughts, so the
         // flag is set before the template's own `is defined` fallback.

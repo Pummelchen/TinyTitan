@@ -166,7 +166,8 @@ public final class NemotronModel {
 
         // A debugging switch, not a serving knob: run a prefix of the stack so
         // a shape or timing problem can be localized to one layer type.
-        let requested = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_LAYERS"]
+        let requested =
+            ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_LAYERS"]
             .flatMap { Int($0) } ?? g.numLayers
         for layer in 0..<min(g.numLayers, max(0, requested)) {
             switch g.layerKinds[layer] {
@@ -181,8 +182,9 @@ public final class NemotronModel {
 
         let finalNorm = try install.floatVector("language_model.backbone.norm_f.weight")
         finalNorm.withUnsafeBufferPointer { weight in
-            tinytitan_rmsnorm_f32(hidden, weight.baseAddress, g.hiddenSize,
-                                  g.normEpsilon, normalized)
+            tinytitan_rmsnorm_f32(
+                hidden, weight.baseAddress, g.hiddenSize,
+                g.normEpsilon, normalized)
         }
         let head = try install.tensor("language_model.lm_head.weight")
         matvec.gemv(head, x: normalized, y: logits)
@@ -197,8 +199,9 @@ public final class NemotronModel {
         let prefix = "language_model.backbone.layers.\(layer).mixer"
         if let weight = layerNormWeights[layer] {
             weight.withUnsafeBufferPointer {
-                tinytitan_rmsnorm_f32(hidden, $0.baseAddress, g.hiddenSize,
-                                      g.normEpsilon, normalized)
+                tinytitan_rmsnorm_f32(
+                    hidden, $0.baseAddress, g.hiddenSize,
+                    g.normEpsilon, normalized)
             }
         }
         let inProj = try install.tensor("\(prefix).in_proj.weight")
@@ -210,7 +213,8 @@ public final class NemotronModel {
         let stateIndex = mambaIndex[layer]
         let state = convStates + stateIndex * convDimension * g.convKernel
         let convWeight = try install.bf16Tensor("\(prefix).conv1d.weight")
-        let convBias = g.mambaConvBias
+        let convBias =
+            g.mambaConvBias
             ? try install.bf16Tensor("\(prefix).conv1d.bias") : nil
         tinytitan_mamba_conv_step(
             convSource, convWeight, convBias, convDimension, g.convKernel,
@@ -222,7 +226,8 @@ public final class NemotronModel {
         let aLog = try install.bf16Tensor("\(prefix).A_log")
         let skipD = try install.bf16Tensor("\(prefix).D")
         let dtBias = try install.bf16Tensor("\(prefix).dt_bias")
-        let ssmState = mambaStates + stateIndex * g.mambaHeads * g.mambaHeadDim
+        let ssmState =
+            mambaStates + stateIndex * g.mambaHeads * g.mambaHeadDim
             * g.ssmStateSize
         parallel(heads: g.mambaHeads) { first, count in
             tinytitan_mamba_ssm_range(
@@ -253,8 +258,9 @@ public final class NemotronModel {
         let prefix = "language_model.backbone.layers.\(layer).mixer"
         if let weight = layerNormWeights[layer] {
             weight.withUnsafeBufferPointer {
-                tinytitan_rmsnorm_f32(hidden, $0.baseAddress, g.hiddenSize,
-                                      g.normEpsilon, normalized)
+                tinytitan_rmsnorm_f32(
+                    hidden, $0.baseAddress, g.hiddenSize,
+                    g.normEpsilon, normalized)
             }
         }
         // Router: BF16 gate, sigmoid, correction bias, top-9 (n_group is 1).
@@ -326,8 +332,9 @@ public final class NemotronModel {
         let prefix = "language_model.backbone.layers.\(layer).mixer"
         if let weight = layerNormWeights[layer] {
             weight.withUnsafeBufferPointer {
-                tinytitan_rmsnorm_f32(hidden, $0.baseAddress, g.hiddenSize,
-                                      g.normEpsilon, normalized)
+                tinytitan_rmsnorm_f32(
+                    hidden, $0.baseAddress, g.hiddenSize,
+                    g.normEpsilon, normalized)
             }
         }
         let q = try install.tensor("\(prefix).q_proj.weight")
@@ -348,9 +355,10 @@ public final class NemotronModel {
             for d in 0..<headDim {
                 cache[position * g.attentionKVHeads * headDim + head * headDim + d] =
                     key[head * headDim + d]
-                cache[maxSequence * g.attentionKVHeads * headDim
-                    + position * g.attentionKVHeads * headDim
-                    + head * headDim + d] = value[head * headDim + d]
+                cache[
+                    maxSequence * g.attentionKVHeads * headDim
+                        + position * g.attentionKVHeads * headDim
+                        + head * headDim + d] = value[head * headDim + d]
             }
         }
         let keyBase = cache
@@ -362,7 +370,8 @@ public final class NemotronModel {
             var maximum: Float = -.infinity
             for token in 0...position {
                 var dot: Float = 0
-                let kb = keyBase + token * g.attentionKVHeads * headDim
+                let kb =
+                    keyBase + token * g.attentionKVHeads * headDim
                     + kvHead * headDim
                 for d in 0..<headDim { dot += qh[d] * kb[d] }
                 dot *= g.attentionScale
@@ -381,7 +390,8 @@ public final class NemotronModel {
             for d in 0..<headDim { outHead[d] = 0 }
             for token in 0...position {
                 let probability = sequenceBuffer[token]
-                let vb = valueBase + token * g.attentionKVHeads * headDim
+                let vb =
+                    valueBase + token * g.attentionKVHeads * headDim
                     + kvHead * headDim
                 for d in 0..<headDim { outHead[d] += probability * vb[d] }
             }
