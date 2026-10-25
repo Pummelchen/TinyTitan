@@ -16,6 +16,41 @@ final class K2MoEStage {
         let down: TensorView
     }
 
+    /// Build the three per-role views for one packed expert blob.
+    ///
+    /// `fetchRoutedExperts` returns one view at the blob's start; the layout's
+    /// sub-tensor table says where each projection and its BF16 companions
+    /// live inside it.
+    static func expertWeights(
+        blob: TensorView, entry: ExpertEntry
+    ) throws -> ExpertWeights {
+        func view(_ role: String) throws -> TensorView {
+            guard let sub = entry.subTensors[role],
+                let scales = entry.subTensors["\(role)_scales"],
+                let biases = entry.subTensors["\(role)_biases"]
+            else {
+                throw ModelError.indexCorrupt(
+                    detail: "expert \(entry.expert) is missing role \(role)")
+            }
+            let dtype: UInt8 = sub.dtype == "BF16" ? 1 : 0
+            return TensorView(
+                buffer: blob.buffer,
+                offset: blob.offset + sub.offset,
+                length: sub.size,
+                scaleOffset: blob.offset + scales.offset,
+                scaleLength: scales.size,
+                biasOffset: blob.offset + biases.offset,
+                biasLength: biases.size,
+                shape: (
+                    sub.shape.first ?? 0,
+                    sub.shape.count > 1 ? sub.shape[1] : 0, 0, 0
+                ),
+                dtype: dtype)
+        }
+        return ExpertWeights(
+            gate: try view("gate"), up: try view("up"), down: try view("down"))
+    }
+
     private let hiddenSize: Int
     private let expertWidth: Int
     private let numExperts: Int

@@ -107,6 +107,10 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   the router weights summed by `k2_moe_accumulate_fp16`, and the always-on
   shared expert added first. The test builds four 4-bit experts at top-2 on
   synthetic buffers and matches the CPU formula, including the selected ids.
+  `K2MoEStage.expertWeights(blob:entry:)` converts a fetched packed blob into
+  the three per-role views from the layout's sub-tensor table; a second test
+  fetches the sparse toy's real experts through the streaming cache and
+  matches a reference dequantized from the same bytes.
 - **Input and output ends** — `K2Head` covers the embedding lookup
   (`AffineQuantEmbeddingLookup` at the install's width, no `sqrt(hidden)`
   scale), the grouped final norm and the untied `lm_head` GEMV, with a test

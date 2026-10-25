@@ -62,6 +62,30 @@ extension Model {
     public func k2DenseDown(layer L: Int) throws -> TensorView {
         try resident(name: K2HorizonTensors.denseDown(L))
     }
+    public func k2MoeRouter(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.moeRouter(L))
+    }
+    public func k2MoeRouterBias(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.moeRouterBias(L))
+    }
+    public func k2SharedGate(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.sharedGate(L))
+    }
+    public func k2SharedUp(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.sharedUp(L))
+    }
+    public func k2SharedDown(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.sharedDown(L))
+    }
+    public func k2VRouter(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.vRouter(L))
+    }
+    public func k2VRouterBias(layer L: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.vRouterBias(L))
+    }
+    public func k2VExpert(layer L: Int, expert: Int) throws -> TensorView {
+        try resident(name: K2HorizonTensors.vExpert(L, expert))
+    }
     // MARK: Hyper-connection (Gated Residual) weights
     //
     // Present only on families whose `hyperConnections` is enabled; asking for
