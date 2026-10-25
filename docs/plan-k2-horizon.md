@@ -84,13 +84,14 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   path is covered in CI: `K2ToyInstallTests` resolves the architecture, runs
   the resident schema, maps the weights, and checks that the runner refuses
   the family. It is the fixture the future graph tests will reuse.
-- **Dense-layer probe** — `K2DenseLayerProbe` runs one dense layer on the
-  GPU: grouped norm, q/k/v and the separate gate projection, one-token GQA,
-  the softplus gate, o_proj, the SwiGLU MLP and both residuals. It has no KV
-  cache (attention sees the token alone), so it is the first end-to-end layer
-  arithmetic rather than the serving graph; its test compares every output
-  element against the CPU formulas on the synthetic install. The same commit
-  adds `Elementwise.encodeSiluMul` and the K2 gate/dense-MLP accessors.
+- **Dense layer on the GPU** — `K2DenseLayer` runs one dense layer on Metal
+  with a plain FP16 K/V cache: grouped norm, q/k/v and the separate gate
+  projection, RoPE, GQA over the cache, the softplus gate, o_proj, the SwiGLU
+  MLP and both residuals. Its two tests compare every output element against
+  the CPU formulas on the synthetic install, at one token and at a second
+  token that has to attend over the cached first. It is probe-sized caching,
+  not the runner's paged/quantized manager; the same commit adds
+  `Elementwise.encodeSiluMul` and the K2 gate/dense-MLP accessors.
 - **GPU primitives** — the grouped two-way RMS norm is the existing
   `rmsnorm_bf16w_grouped` kernel with `headDim 1280, groupsPerRow 2`; no new
   norm work was needed. Two kernels are new and tested in isolation:

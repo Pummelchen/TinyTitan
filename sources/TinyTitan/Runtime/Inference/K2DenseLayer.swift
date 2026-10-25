@@ -1,14 +1,14 @@
 import Foundation
 import Metal
 
-/// One K2-Horizon dense layer on a single token: grouped norm, GQA with the
+/// One K2-Horizon dense layer on a decode step: grouped norm, GQA with the
 /// separate softplus gate, RoPE, then the SwiGLU MLP and both residuals.
 ///
-/// It is a probe, not the serving path: attention sees this token alone (no KV
-/// cache), so it validates the projections, norm, gate and MLP wiring against a
-/// reference before a graph with a cache exists. `position` still drives RoPE,
-/// so the same code checks a non-zero rotation.
-final class K2DenseLayerProbe {
+/// It owns a plain FP16 K/V cache for one sequence (`maxSequence` positions).
+/// That is the probe-sized form of what the serving graph will use: enough to
+/// check a multi-token decode against a reference, without the runner's
+/// paged/quantized cache manager.
+final class K2DenseLayer {
     private let config: ArchConfig
     private let model: Model
     private let rms: RMSNorm
@@ -24,6 +24,9 @@ final class K2DenseLayerProbe {
     private let k: MTLBuffer
     private let v: MTLBuffer
     private let gate: MTLBuffer
+    private let kCache: MTLBuffer
+    private let vCache: MTLBuffer
+    private let maxSequence: Int
     private let attn: MTLBuffer
     private let oOut: MTLBuffer
     private let h1: MTLBuffer
@@ -35,10 +38,15 @@ final class K2DenseLayerProbe {
 
     let layer: Int
 
-    init(model: Model, context: MetalContext, layer: Int) throws {
+    init(
+        model: Model, context: MetalContext, layer: Int,
+        maxSequence: Int = 1
+    ) throws {
+        precondition(maxSequence > 0, "a layer needs at least one KV position")
         self.model = model
         self.config = model.config
         self.layer = layer
+        self.maxSequence = maxSequence
         guard config.denseLayerIndices.contains(layer) else {
             throw ModelError.internalInconsistency(
                 detail: "layer \(layer) is not a dense K2 layer")
@@ -69,6 +77,8 @@ final class K2DenseLayerProbe {
         self.q = try buffer(queryDim, "k2.q")
         self.k = try buffer(kvDim, "k2.k")
         self.v = try buffer(kvDim, "k2.v")
+        self.kCache = try buffer(maxSequence * kvDim, "k2.kCache")
+        self.vCache = try buffer(maxSequence * kvDim, "k2.vCache")
         self.gate = try buffer(queryDim, "k2.gate")
         self.attn = try buffer(queryDim, "k2.attn")
         self.oOut = try buffer(hidden, "k2.o")
@@ -87,6 +97,10 @@ final class K2DenseLayerProbe {
         out: MTLBuffer, outOffset: Int = 0,
         position: UInt32
     ) throws {
+        guard Int(position) < maxSequence else {
+            throw ModelError.internalInconsistency(
+                detail: "K2 layer position \(position) exceeds its \(maxSequence)-token cache")
+        }
         let d = config.hiddenSize
         let queryDim = config.numHeads * config.fullHeadDim
         let kvDim = config.numFullKVHeads * config.fullHeadDim
@@ -131,13 +145,21 @@ final class K2DenseLayerProbe {
             numHeads: UInt32(config.numFullKVHeads), rotaryDim: rotaryDim,
             theta: Float(config.fullRopeTheta))
 
+        let cacheBytes = Int(position) * kvDim * MemoryLayout<UInt16>.stride
+        try copy(
+            commandBuffer: commandBuffer, from: k, to: kCache,
+            toOffset: cacheBytes, count: kvDim)
+        try copy(
+            commandBuffer: commandBuffer, from: v, to: vCache,
+            toOffset: cacheBytes, count: kvDim)
+
         try attention.encodeFull(
             commandBuffer: commandBuffer,
-            q: q, k: k, v: v, out: attn,
+            q: q, k: kCache, v: vCache, out: attn,
             headDim: UInt32(config.fullHeadDim),
             numQHeads: UInt32(config.numHeads),
             numKVHeads: UInt32(config.numFullKVHeads),
-            seqLen: 1, scale: Float(config.attentionScale))
+            seqLen: position + 1, scale: Float(config.attentionScale))
         try elementwise.encodeSoftplusGateMul(
             commandBuffer: commandBuffer, out: attn, gate: gate,
             count: queryDim)
