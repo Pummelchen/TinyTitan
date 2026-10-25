@@ -682,7 +682,14 @@ def resident_order(name: str) -> tuple:
 class Install:
     """One width's `.ssdai` payload, written in place while the source streams."""
 
-    def __init__(self, directory: Path, bits: int, model_id: str, plan_data) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        bits: int,
+        model_id: str,
+        plan_data,
+        resume: bool = False,
+    ) -> None:
         self.directory = directory
         self.bits = bits
         self.model_id = model_id
@@ -703,21 +710,19 @@ class Install:
             default=self.index_size,
         )
         self.resident_size = last - self.index_size
-        self.weights_fd = os.open(
-            directory / "model_weights.bin",
-            os.O_RDWR | os.O_CREAT | os.O_TRUNC,
-            0o644,
-        )
-        os.ftruncate(self.weights_fd, self.index_size + self.resident_size)
+        flags = os.O_RDWR | os.O_CREAT | (0 if resume else os.O_TRUNC)
+        weights_path = directory / "model_weights.bin"
+        self.weights_fd = os.open(weights_path, flags, 0o644)
+        expected_weights = self.index_size + self.resident_size
+        if os.fstat(self.weights_fd).st_size != expected_weights:
+            os.ftruncate(self.weights_fd, expected_weights)
         self.layer_fds: dict[int, int] = {}
         for layer, layer_plan in self.layer_plans.items():
             if layer_plan.experts:
-                fd = os.open(
-                    directory / "packed_experts" / layer_plan.file_name,
-                    os.O_RDWR | os.O_CREAT | os.O_TRUNC,
-                    0o644,
-                )
-                os.ftruncate(fd, layer_plan.file_size)
+                layer_path = directory / "packed_experts" / layer_plan.file_name
+                fd = os.open(layer_path, flags, 0o644)
+                if os.fstat(fd).st_size != layer_plan.file_size:
+                    os.ftruncate(fd, layer_plan.file_size)
                 self.layer_fds[layer] = fd
 
     def close(self) -> None:
@@ -1096,8 +1101,8 @@ def install(args) -> int:
         raise SystemExit(f"not enough disk: need {needed / 1e9:.2f} GB, have {free / 1e9:.2f} GB")
 
     installs = {
-        4: Install(out4, 4, "nemotron-3.5-bolt-74b-a9b", plans[4]),
-        8: Install(out8, 8, "nemotron-3.5-bolt-74b-a9b", plans[8]),
+        4: Install(out4, 4, "nemotron-3.5-bolt-74b-a9b", plans[4], resume=args.resume),
+        8: Install(out8, 8, "nemotron-3.5-bolt-74b-a9b", plans[8], resume=args.resume),
     }
     progress_path = work / "progress.json"
     done: set[str] = set()
