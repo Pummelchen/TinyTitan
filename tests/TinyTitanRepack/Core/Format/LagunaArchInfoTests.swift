@@ -92,9 +92,8 @@ struct LagunaArchInfoTests {
 
     @Test("A config outside the supported contract is refused by field")
     func refusesWrongContract() throws {
-        var text: [String: Any] =
-            try JSONSerialization.jsonObject(
-                with: Self.configJSON()) as! [String: Any]
+        let parsed = try JSONSerialization.jsonObject(with: Self.configJSON())
+        var text = try #require(parsed as? [String: Any])
         text["moe_routed_scaling_factor"] = 1.0
         let data = try JSONSerialization.data(withJSONObject: text)
         var message = ""

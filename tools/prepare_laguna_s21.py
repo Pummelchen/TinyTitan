@@ -41,6 +41,7 @@ import os
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -112,18 +113,10 @@ def fetch_header(shard: str, timeout: int = 300) -> tuple[dict, int]:
     return json.loads(raw), 8 + size
 
 
-def download_range(remote: str, start: int, end: int, destination: Path) -> None:
-    """Fetch [start, end] into `destination`, continuing after short reads.
-
-    A single range request for several hundred MB is not reliable on this
-    link, so the range is cut into CHUNK-sized pieces and each piece is
-    retried from its own offset. A piece that returns fewer bytes than asked
-    for advances by what actually arrived instead of failing the layer.
-    """
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    url = f"{BASE}/{remote}"
-    position = start
+def download_piece(url: str, start: int, end: int, destination: Path) -> None:
+    """Fetch [start, end] into `destination`, continuing after short reads."""
     with open(destination, "wb") as out:
+        position = start
         while position <= end:
             stop = min(position + CHUNK - 1, end)
             expected = stop - position + 1
@@ -151,9 +144,9 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
                 if result.returncode == 0 and got == expected:
                     break
                 attempt += 1
-                if attempt >= 6:
+                if attempt >= 8:
                     raise SystemExit(
-                        f"download failed for {remote} [{position}-{stop}] "
+                        f"download failed for {url} [{position}-{stop}] "
                         f"(curl {result.returncode}, {got}/{expected} bytes)"
                     )
                 if got:
@@ -165,11 +158,67 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
                     stop = min(position + CHUNK - 1, end)
                     expected = stop - position + 1
                     log(f"    short read, continuing at {position}")
-                time.sleep(min(2**attempt, 20))
+                time.sleep(min(2**attempt, 30))
             if part.exists():
                 out.write(part.read_bytes())
                 part.unlink()
             position += expected
+
+
+def download_range(remote: str, start: int, end: int, destination: Path) -> None:
+    """Fetch a long range over several connections, in order.
+
+    One connection gets a small share of a link several sessions are using:
+    measured on this host, four parallel range reads of the same shard finish
+    in a fraction of the wall time of one, and the sub-ranges concatenate in
+    order, so nothing about the result changes. Short ranges stay on one
+    connection to keep the request count down.
+    """
+    url = f"{BASE}/{remote}"
+    length = end - start + 1
+    workers = min(8, max(1, length // (512 * 1024 * 1024)))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if workers == 1:
+        download_piece(url, start, end, destination)
+        return
+    span = length // workers
+    pieces: list[tuple[Path, int, int]] = []
+    threads: list[threading.Thread] = []
+    errors: list[BaseException] = []
+
+    def fetch(index: int, low: int, high: int) -> None:
+        path = destination.with_name(f"{destination.name}.w{index}")
+        try:
+            download_piece(url, low, high, path)
+        except BaseException as error:  # surfaced on the main thread
+            errors.append(error)
+
+    for index in range(workers):
+        low = start + index * span
+        high = end if index == workers - 1 else low + span - 1
+        path = destination.with_name(f"{destination.name}.w{index}")
+        pieces.append((path, low, high))
+        thread = threading.Thread(target=fetch, args=(index, low, high), daemon=True)
+        thread.start()
+        threads.append(thread)
+    for thread in threads:
+        thread.join()
+    if errors:
+        raise errors[0]
+    with open(destination, "wb") as out:
+        for path, _, _ in pieces:
+            with open(path, "rb") as source:
+                while True:
+                    block = source.read(16 * 1024 * 1024)
+                    if not block:
+                        break
+                    out.write(block)
+            path.unlink()
+    expected = sum(high - low + 1 for _, low, high in pieces)
+    if destination.stat().st_size != expected:
+        raise SystemExit(
+            f"{destination} assembled to {destination.stat().st_size} bytes, expected {expected}"
+        )
 
 
 # --- classification ---------------------------------------------------------

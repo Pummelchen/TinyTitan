@@ -46,17 +46,15 @@ final class Attention {
     /// (q_smem[512] + reduce[8] + bcast) sizes are correct.
     static let threadsPerGroup: Int = 256
 
-    // 32: Qwen3.8-Flash-Next has 24 query heads against Qwen 3.6's 16. This
-    // only sizes the split-KV reduction scratch (maxQHeads x maxChunks, and
-    // the same again x maxHeadDim), so the cost is ~2 MB of host-side buffer,
-    // and the kernels read the real head count from their arguments.
     /// Project ceilings for the split-KV partial scratch. `kAttnMaxHeadDim` in
-    /// attention.metal is 512; the model has 16 Q heads; `maxChunks` bounds the
-    /// split factor (and therefore the scratch size: 16·64·512 FP32 ≈ 2 MB).
-    // 96: Laguna-S-2.1's sliding-window layers run 72 query heads against 8
-    // KV heads, above the 32 the Qwen families needed. The scratch is
-    // maxQHeads x maxChunks floats plus maxQHeads x maxChunks x maxHeadDim
-    // for the output partials (~12 MB), allocated once per Attention.
+    /// attention.metal is 512; `maxChunks` bounds the split factor, so the
+    /// scratch is `maxQHeads * maxChunks` floats plus the same count of
+    /// `maxHeadDim` output partials.
+    ///
+    /// The head ceiling has grown with the families: Qwen 3.6 has 16, Qwen3.8
+    /// has 24, and Laguna-S-2.1's sliding-window layers run 72 against 8 KV
+    /// heads. At 96 the scratch is about 12 MB, allocated once per `Attention`;
+    /// the kernels read the real head count from their arguments.
     static let maxQHeads = 96
     static let maxHeadDim = 512
     static let maxChunks = 64
