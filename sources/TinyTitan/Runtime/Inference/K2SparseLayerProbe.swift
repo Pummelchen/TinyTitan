@@ -219,12 +219,14 @@ final class K2SparseLayerProbe {
     func prefetch(
         queue: MTLCommandQueue,
         input source: MTLBuffer,
+        inputOffset: Int = 0,
         position: Int
     ) async throws {
         precondition(position < maxSequence)
         try checkPendingError()
         try await encodePrefetchPhase(
-            queue: queue, input: source, position: position)
+            queue: queue, input: source, inputOffset: inputOffset,
+            position: position)
     }
 
     /// Phase 2: read the router ids, fetch the selected experts, and submit the
@@ -289,6 +291,7 @@ final class K2SparseLayerProbe {
     private func encodePrefetchPhase(
         queue: MTLCommandQueue,
         input source: MTLBuffer,
+        inputOffset: Int,
         position: Int
     ) async throws {
         let d = config.hiddenSize
@@ -302,7 +305,7 @@ final class K2SparseLayerProbe {
         let inputNorm = try model.inputNorm(layer: layer)
         try rms.encodeBF16WGrouped(
             commandBuffer: first,
-            x: source, weight: inputNorm.buffer,
+            x: source, xOffset: inputOffset, weight: inputNorm.buffer,
             weightOffset: Int(inputNorm.offset),
             out: normed,
             groupDim: UInt32(d / groups), numGroups: groups,
@@ -351,7 +354,7 @@ final class K2SparseLayerProbe {
             commandBuffer: first, out: attn, gate: gate, count: queryDim)
         try gemv(
             first, try model.oProj(layer: layer), x: attn, y: oOut, rows: d, columns: queryDim)
-        try copy(first, from: source, to: h1, count: d)
+        try copy(first, from: source, fromOffset: inputOffset, to: h1, count: d)
         try elementwise.encodeResidualAdd(
             commandBuffer: first, hidden: h1, delta: oOut, count: d)
         let postNorm = try model.postAttnNorm(layer: layer)
@@ -411,13 +414,14 @@ final class K2SparseLayerProbe {
 
     private func copy(
         _ commandBuffer: MTLCommandBuffer,
-        from: MTLBuffer, to: MTLBuffer, toOffset: Int = 0, count: Int
+        from: MTLBuffer, fromOffset: Int = 0,
+        to: MTLBuffer, toOffset: Int = 0, count: Int
     ) throws {
         guard let blit = commandBuffer.makeBlitCommandEncoder() else {
             throw MetalError.commandEncoderFailed
         }
         blit.copy(
-            from: from, sourceOffset: 0,
+            from: from, sourceOffset: fromOffset,
             to: to, destinationOffset: toOffset,
             size: count * MemoryLayout<UInt16>.stride)
         blit.endEncoding()

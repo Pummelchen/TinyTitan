@@ -36,12 +36,15 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   (sharing the decode layers' caches) and the sparse layers per token, then
   returns the last token's logits. `chunkPrefillMatchesTokenByToken` checks a
   four-token chunk and two two-token chunks against four `forward` calls.
-  Measured on the real 4-bit install (163-token prompt, CLI, `--max-new 4`):
-  token path 31.84 s prefill, chunked 36.46 s — **slower**, because the sparse
-  layers still go through their CPU `run` path (a `[Float16]` in and out per
-  token per layer) while the token path chains GPU buffers. Three batched
-  dense layers cannot pay for 45 layers of those copies, so the runtime keeps
-  the token path and the entry stays unused until the sparse layers batch.
+  The sparse layers now read their input row straight out of the chunk buffer
+  (`prefetch(inputOffset:)`) and write it to the alternate chunk with a blit,
+  so a chunk costs no CPU `[Float16]` conversions; the earlier CPU path
+  measured 36.46 s on a 163-token prompt against the token path's 31.84 s. With
+  rows on the GPU the same prompt measured 30.79 s chunked vs 30.04 s token —
+  neutral within run-to-run noise, which says the three batched dense layers
+  are worth little on their own. The runtime keeps `TINYTITAN_K2_CHUNK=0` as
+  the default and the chunk entry stays a scaffold until the sparse layers
+  batch.
 - **Next**: a `K2SparseBatch` that batches the sparse layer's norm, q/k/gate,
   attention, gate/o and shared expert over a chunk, keeps MoVA values and MoE
   per token at first, and passes hidden rows between stages on the GPU (no CPU

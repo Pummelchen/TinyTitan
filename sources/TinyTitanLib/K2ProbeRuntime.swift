@@ -220,13 +220,33 @@ package actor K2ProbeRuntime {
                     ("k2 probe: reused \(reused)/\(promptIDs.count) prompt tokens "
                         + "(capacity \(graphCapacity))\n").utf8))
         }
+        // Chunked prefill is opt-in: the dense prefix batches, the sparse
+        // layers still run per token but now pass rows on the GPU (no CPU
+        // conversions), which the earlier CPU path could not pay for.
+        let chunk = min(
+            Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_CHUNK"] ?? "") ?? 0,
+            16)
         var logits: [Float] = []
         do {
-            for position in reused..<promptIDs.count {
-                try Task.checkCancellation()
-                logits = try await graph.forward(
-                    tokenID: UInt32(bitPattern: promptIDs[position]),
-                    position: UInt32(position))
+            if chunk > 1 {
+                var start = reused
+                while start < promptIDs.count {
+                    try Task.checkCancellation()
+                    let end = min(start + chunk, promptIDs.count)
+                    logits = try await graph.forwardChunk(
+                        tokenIDs: promptIDs[start..<end].map {
+                            UInt32(bitPattern: $0)
+                        },
+                        basePosition: UInt32(start))
+                    start = end
+                }
+            } else {
+                for position in reused..<promptIDs.count {
+                    try Task.checkCancellation()
+                    logits = try await graph.forward(
+                        tokenID: UInt32(bitPattern: promptIDs[position]),
+                        position: UInt32(position))
+                }
             }
         } catch {
             // The K/V for the positions this request just wrote does not match

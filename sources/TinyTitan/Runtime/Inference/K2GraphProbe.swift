@@ -155,12 +155,28 @@ package final class K2GraphProbe {
         for layer in 0..<config.numLayers where sparse[layer] != nil {
             guard let probe = sparse[layer] else { continue }
             for token in 0..<count {
-                let row = halves(
-                    from: current, offset: token * d * half, count: d)
-                let out = try await probe.run(
-                    queue: queue, hidden: row,
+                // Rows stay on the GPU: the pre-fetch phase reads straight out
+                // of the chunk buffer, and a blit lands the layer's output in
+                // the alternate chunk. The earlier CPU `run` path paid two
+                // [Float16] copies per token per layer, which measured slower
+                // than the whole dense batching saved.
+                try await probe.prefetch(
+                    queue: queue, input: current,
+                    inputOffset: token * d * half,
                     position: Int(basePosition) + token)
-                write(out, into: next, offset: token * d * half)
+                try await probe.submitExperts(queue: queue)
+                guard let blitCB = queue.makeCommandBuffer() else {
+                    throw MetalError.commandEncoderFailed
+                }
+                guard let blit = blitCB.makeBlitCommandEncoder() else {
+                    throw MetalError.commandEncoderFailed
+                }
+                blit.copy(
+                    from: probe.output, sourceOffset: 0,
+                    to: next, destinationOffset: token * d * half,
+                    size: d * half)
+                blit.endEncoding()
+                blitCB.commit()
             }
             swap(&current, &next)
         }
@@ -204,26 +220,6 @@ package final class K2GraphProbe {
         if let error = commandBuffer.error {
             throw ModelError.internalInconsistency(
                 detail: "K2 chunk command buffer failed: \(error)")
-        }
-    }
-
-    private func halves(
-        from buffer: MTLBuffer, offset: Int, count: Int
-    ) -> [Float16] {
-        let base = buffer.contents()
-        return (0..<count).map {
-            base.load(
-                fromByteOffset: offset + $0 * MemoryLayout<Float16>.stride,
-                as: Float16.self)
-        }
-    }
-
-    private func write(_ values: [Float], into buffer: MTLBuffer, offset: Int) {
-        let halfs = values.map { Float16($0) }
-        halfs.withUnsafeBufferPointer { source in
-            if let base = source.baseAddress {
-                memcpy(buffer.contents() + offset, base, values.count * 2)
-            }
         }
     }
 
