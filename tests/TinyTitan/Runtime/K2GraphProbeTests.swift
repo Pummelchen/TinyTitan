@@ -101,4 +101,51 @@ import TinyTitanValidationSupport
         let manual1 = try await manual(tokenID: 8, position: 1)
         #expect(RelError.compute(actual: graph1, reference: manual1) < Tolerance.fp16Reduction)
     }
+
+    /// The server's cross-request reuse rests on one assumption: forwarding
+    /// tokens 2..n on a graph whose cache already holds 0..1 gives the same
+    /// logits as forwarding 0..n in one pass. Nothing checked it before the
+    /// reuse existed; this pins it on the sparse toy, where the sparse layer's
+    /// MoVA cache and expert routing are both in play.
+    @Test func continuingAfterAPrefixMatchesOneFullPass() async throws {
+        let directory = try K2ToySynthetic.write(sparse: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = try ArchConfig.resolved(
+            forFamily: .k2Horizon, directoryURL: directory)
+        let ctx = try MetalContext()
+        let model = try Model.load(
+            directoryURL: directory, device: ctx.device, expecting: config,
+            integrityPolicy: .fullSha256)
+        let tokens: [UInt32] = [7, 8, 9, 10]
+
+        let full = try K2GraphProbe(model: model, context: ctx, maxSequence: 4)
+        var fullLogits: [Float] = []
+        for (position, token) in tokens.enumerated() {
+            fullLogits = try await full.forward(
+                tokenID: token, position: UInt32(position))
+        }
+
+        // Split after position 1: the cache carries 0..1 and 2..3 continue.
+        let split = try K2GraphProbe(model: model, context: ctx, maxSequence: 4)
+        for position in 0..<2 {
+            _ = try await split.forward(
+                tokenID: tokens[position], position: UInt32(position))
+        }
+        var splitLogits: [Float] = []
+        for position in 2..<4 {
+            splitLogits = try await split.forward(
+                tokenID: tokens[position], position: UInt32(position))
+        }
+        #expect(
+            RelError.compute(actual: splitLogits, reference: fullLogits) < 1e-6,
+            "continuing after a prefix diverged from the full pass")
+
+        // A fully cached prompt re-forwards its last token (the runtime always
+        // forwards at least one, for the logits). Rewriting that position with
+        // the same token must be idempotent.
+        let repeated = try await full.forward(tokenID: tokens[3], position: 3)
+        #expect(
+            RelError.compute(actual: repeated, reference: fullLogits) < 1e-6,
+            "re-forwarding the last token changed the logits")
+    }
 }
