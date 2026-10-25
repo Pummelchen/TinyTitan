@@ -176,7 +176,7 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
     """
     url = f"{BASE}/{remote}"
     length = end - start + 1
-    workers = min(8, max(1, length // (512 * 1024 * 1024)))
+    workers = min(16, max(1, length // (256 * 1024 * 1024)))
     destination.parent.mkdir(parents=True, exist_ok=True)
     if workers == 1:
         download_piece(url, start, end, destination)
