@@ -39,6 +39,9 @@ final class K2SparseLayerProbe {
     private let out: MTLBuffer
     private let kCache: MTLBuffer
     private let vCache: MTLBuffer
+    private(set) var fetchSeconds: Double = 0
+    private(set) var encodeSeconds: Double = 0
+    private(set) var gpuSeconds: Double = 0
 
     init(
         model: Model, context: MetalContext, layer: Int,
@@ -132,6 +135,7 @@ final class K2SparseLayerProbe {
         try await encodeEntry(queue: queue)
         try await encodeAttention(queue: queue, position: position)
         // Phase 3: fetch the selected experts, run them with the shared expert.
+        let fetchStart = Date()
         let ids = moe.selectedExpertIDs()
         guard
             let plan = try model.planRoutedExperts(layer: layer, experts: ids)
@@ -151,7 +155,9 @@ final class K2SparseLayerProbe {
             gate: try model.k2SharedGate(layer: layer),
             up: try model.k2SharedUp(layer: layer),
             down: try model.k2SharedDown(layer: layer))
+        fetchSeconds += Date().timeIntervalSince(fetchStart)
 
+        let phaseStart2 = Date()
         guard let third = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
@@ -161,8 +167,11 @@ final class K2SparseLayerProbe {
         try copy(third, from: h1, to: out, count: d)
         try elementwise.encodeResidualAdd(
             commandBuffer: third, hidden: out, delta: moeOut, count: d)
+        encodeSeconds += Date().timeIntervalSince(phaseStart2)
         third.commit()
+        let gpuStart2 = Date()
         await third.completed()
+        gpuSeconds += Date().timeIntervalSince(gpuStart2)
 
         let base = out.contents()
         return (0..<d).map {
@@ -179,6 +188,7 @@ final class K2SparseLayerProbe {
         let queryDim = config.numHeads * config.fullHeadDim
         let kvDim = config.numFullKVHeads * config.fullHeadDim
         let groups = max(1, config.normGroups)
+        let phaseStart = Date()
         guard let first = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
@@ -205,8 +215,11 @@ final class K2SparseLayerProbe {
             routerBiasOffset: Int(vRouterBias.offset),
             numExperts: config.mova.numExperts,
             scaling: Float(config.mova.routerScaling))
+        encodeSeconds += Date().timeIntervalSince(phaseStart)
         first.commit()
+        let gpuStart = Date()
         await first.completed()
+        gpuSeconds += Date().timeIntervalSince(gpuStart)
     }
 
     private func encodeAttention(queue: MTLCommandQueue, position: Int) async throws {
@@ -216,6 +229,7 @@ final class K2SparseLayerProbe {
         let queryDim = config.numHeads * config.fullHeadDim
         let kvDim = config.numFullKVHeads * config.fullHeadDim
         let groups = max(1, config.normGroups)
+        let phaseStart = Date()
         guard let second = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed
         }
@@ -268,8 +282,11 @@ final class K2SparseLayerProbe {
             routerBias: moeBias.buffer,
             routerBiasOffset: Int(moeBias.offset),
             scaling: Float(config.routerScaling))
+        encodeSeconds += Date().timeIntervalSince(phaseStart)
         second.commit()
+        let gpuStart = Date()
         await second.completed()
+        gpuSeconds += Date().timeIntervalSince(gpuStart)
     }
 
     private func gemv(

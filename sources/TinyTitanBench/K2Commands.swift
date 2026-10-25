@@ -150,9 +150,14 @@ extension TinyTitanBench {
         let config = try ArchConfig.resolved(
             forFamily: .k2Horizon, directoryURL: install)
         let context = try MetalContext()
+        // Expert-cache slots per layer. Eight covers exactly one top-8 set, so
+        // a changing selection misses; a larger value trades RAM for hits.
+        let slots =
+            Int(ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? "")
+            ?? 8
         let model = try Model.load(
             directoryURL: install, device: context.device, expecting: config,
-            streamingMode: .pread(slotCount: 8))
+            streamingMode: .pread(slotCount: slots))
         let effort = ModelReasoningEffort.resolved() ?? .high
         let tokenizer = try await GFTokenizer.load(
             forModelDirectory: install, thinkingMode: .on,
@@ -183,6 +188,9 @@ extension TinyTitanBench {
         let prefill = Date().timeIntervalSince(start)
 
         var produced: [Int32] = []
+        // `<|ifm|endoftext|>` and `<|ifm|im_end|>` both end a K2 turn; stopping
+        // only on the former let a chat reply keep generating past its end.
+        let stops: Set<Int32> = [tokenizer.eosID, tokenizer.endOfTurnID]
         let decodeStart = Date()
         var position = ids.count
         for _ in 0..<limit {
@@ -191,7 +199,7 @@ extension TinyTitanBench {
                 best = index
             }
             let token = Int32(best)
-            if token == tokenizer.eosID { break }
+            if stops.contains(token) { break }
             produced.append(token)
             logits = try await graph.forward(
                 tokenID: UInt32(bitPattern: token),

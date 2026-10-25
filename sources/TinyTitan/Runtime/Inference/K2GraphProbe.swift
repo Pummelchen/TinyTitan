@@ -57,6 +57,7 @@ package final class K2GraphProbe {
     }
 
     package func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {
+        let started = Date()
         var hidden = try await embed(tokenID: tokenID)
         for layer in 0..<config.numLayers {
             if let dense = dense[layer] {
@@ -71,7 +72,22 @@ package final class K2GraphProbe {
                     detail: "layer \(layer) is neither dense nor sparse")
             }
         }
-        return try await logits(hidden: hidden)
+        let result = try await logits(hidden: hidden)
+        if ProcessInfo.processInfo.environment["TINYTITAN_K2_TIMING"] == "1" {
+            let fetch = sparse.values.reduce(0.0) { $0 + $1.fetchSeconds }
+            let encode = sparse.values.reduce(0.0) { $0 + $1.encodeSeconds }
+            let gpu = sparse.values.reduce(0.0) { $0 + $1.gpuSeconds }
+            let total = Date().timeIntervalSince(started)
+            let rest = total - fetch - encode - gpu
+            FileHandle.standardError.write(
+                Data(
+                    String(
+                        format:
+                            "k2 timing: total %.3fs fetch %.3fs gpu %.3fs encode %.3fs other %.3fs\n",
+                        total, fetch, gpu, encode, rest
+                    ).utf8))
+        }
+        return result
     }
 
     private func embed(tokenID: UInt32) async throws -> [Float16] {

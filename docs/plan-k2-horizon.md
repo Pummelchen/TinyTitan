@@ -114,6 +114,16 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   template) and `TINYTITAN_REASONING_EFFORT`; a chat prompt's first tokens are
   the start of its reasoning block, which is what the high-effort template
   opens.
+- **Why the probe is slow** — a 4-bit decode token at 8 expert slots measures
+  ~0.22 s in expert fetch, ~0.22 s in GPU work and ~0.05 s in encode/sync
+  (`TINYTITAN_K2_TIMING=1`). Raising the cache to 64 slots cuts those to
+  ~0.14 s and ~0.15 s (2.0 → 2.7 tok/s), so it is not one bottleneck: the probe
+  commits and waits three command buffers per sparse layer (about 138 GPU
+  round-trips per token), reads the router ids back per layer, fetches experts
+  synchronously with no overlap, and runs every routed expert as three small
+  GEMVs. The runner path (one command buffer per token, GPU-side residency,
+  prefetch, fused expert kernels, ANE/batched prefill) is what closes the gap
+  to the Qwen 35B numbers; 2 tok/s is the correctness prototype's cost.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
