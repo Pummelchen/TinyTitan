@@ -1,11 +1,14 @@
 # Plan: K2-Horizon runner phase (batched prefill, ANE)
 
-Status: **phase 1 started.** The install, the graph, the runtime and every
-front end exist and are gated. Phase 1's first kernel — the affine GEMM that
-holds a weight row in registers across a chunk of tokens — is implemented and
-tested (`AffineQuantGEMM`, `AffineQuantGEMMTests`); nothing calls it yet. The
-data flow below is unchanged; prefill is still one token at a time until the
-dense-layer wiring exists, and the family has no ANE sidecar.
+Status: **phase 1 built and measured; it does not pay yet.** Every layer has a
+chunked form — `K2DenseBatch` for the dense prefix, `K2SparseBatch` for the
+sparse MoVA layers — and `K2GraphProbe.forwardChunk` drives the whole graph
+layer-major over a chunk. The runtime keeps the token path as the default
+(`TINYTITAN_K2_CHUNK` opts in, 2-16 tokens), because with the expert fetches
+awaited in the safe order a 163-token prompt measured 34.9 s chunked against
+33.3 s token-by-token on 4-bit, and at 8-bit the greedy output changes. The
+family still has no ANE sidecar. The earlier 12-15 s reading was a fetch-overlap
+race, not a win — see the sparse-batch entry below.
 
 ## Progress
 
@@ -18,8 +21,8 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   product. The shape guard is strict: a row must have a whole number of
   lane-group iterations (for 4-bit, `columns/64` divisible by 4) and at most
   32 of them — a half-covered row would otherwise dispatch and write nothing.
-- **Batched dense layer** (done, not yet called) — `K2DenseBatch` runs one
-  dense layer over a chunk: the grouped norm (the kernel already takes a token
+- **Batched dense layer** (done, called by the chunk entry) — `K2DenseBatch`
+  runs one dense layer over a chunk: the grouped norm (the kernel already takes a token
   count), the four attention and three MLP projections through the GEMM with a
   per-token GEMV fallback for shapes that do not tile, RoPE per token (its
   scalar position cannot advance across a chunk), causal attention per token
@@ -31,25 +34,54 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   them, so a chunk prefill and a later token decode read the same rows;
   `chunkThenTokenSharesTheCache` writes 0–3 through the batch, decodes 4
   through the layer, and matches a token-only run over all five positions.
-- **Chunked graph entry** (done, dormant) — `K2GraphProbe.forwardChunk`
-  embeds a chunk, runs the dense prefix layer-major through the batch layers
-  (sharing the decode layers' caches) and the sparse layers per token, then
-  returns the last token's logits. `chunkPrefillMatchesTokenByToken` checks a
-  four-token chunk and two two-token chunks against four `forward` calls.
-  The sparse layers now read their input row straight out of the chunk buffer
-  (`prefetch(inputOffset:)`) and write it to the alternate chunk with a blit,
-  so a chunk costs no CPU `[Float16]` conversions; the earlier CPU path
-  measured 36.46 s on a 163-token prompt against the token path's 31.84 s. With
-  rows on the GPU the same prompt measured 30.79 s chunked vs 30.04 s token —
-  neutral within run-to-run noise, which says the three batched dense layers
-  are worth little on their own. The runtime keeps `TINYTITAN_K2_CHUNK=0` as
-  the default and the chunk entry stays a scaffold until the sparse layers
-  batch.
-- **Next**: a `K2SparseBatch` that batches the sparse layer's norm, q/k/gate,
-  attention, gate/o and shared expert over a chunk, keeps MoVA values and MoE
-  per token at first, and passes hidden rows between stages on the GPU (no CPU
-  round trips). That is where the prefill win is; only then wire
-  `forwardChunk` into `K2ProbeRuntime.prefill`.
+- **Chunked graph entry** (done) — `K2GraphProbe.forwardChunk` embeds a chunk,
+  runs every layer layer-major (dense through `K2DenseBatch`, sparse through
+  `K2SparseBatch`, both sharing the decode layers' caches) and returns the last
+  token's logits. `chunkPrefillMatchesTokenByToken` checks a four-token chunk
+  and two two-token chunks against four `forward` calls on the toy. Rows stay
+  on the GPU between layers: the sparse path reads its input straight out of
+  the chunk buffer and blits its output into the alternate one, so a chunk
+  costs no CPU `[Float16]` conversions (the CPU-row version measured 36.46 s on
+  a 163-token prompt against 31.84 s token-by-token).
+- **Batched sparse layer** (done, opt-in) — `K2SparseBatch` runs one sparse
+  layer over a chunk: grouped norm, q/k/gate and o projections, the softplus
+  gate, both residuals and the post-attention norm are batched (through the
+  affine GEMM when the shape tiles, per-token GEMV otherwise), while RoPE,
+  causal attention, the MoVA router/values and MoE routing stay per token, in
+  the same command buffer for the whole chunk. `K2SparseBatchTests.
+  chunkMatchesTheTokenPath` compares it element-wise with `K2SparseLayerProbe`
+  on the sparse toy. The routed experts are still streamed per token — the
+  layer's cache is a ring of 64 (4-bit) or 16 (8-bit) slots, and the fetch
+  **must be awaited before the next token's fetch**: running ahead overwrote
+  slots a pending dispatch had not read yet, which made the same chunk size
+  produce different tokens from run to run at 8-bit (measured: two different
+  outputs for chunk 16, two more for chunk 8). With the safe order the chunk is
+  deterministic and reproducible; on 4-bit the greedy stream is byte-identical
+  to the token path at chunk 8 and 16 over 24 tokens, and the 96-token stream
+  at chunk 16 matched it.
+  Measurements, 163-token prompt, greedy, after the fix:
+
+  | install | token path | chunk 16 |
+  | --- | ---: | ---: |
+  | 4-bit | 33.3 s (24.2-35.1, 3 rounds) | 34.9 s (32.0-45.6) |
+  | 8-bit | 107-134 s | 85-86 s |
+
+  4-bit is neutral to 5% slower, so batching projections alone does not pay
+  there. 8-bit is 20-35% faster, but its greedy output on the golden prompt
+  flips three tokens against the token path: the affine GEMM partitions a
+  64-element group across lanes differently from the GEMV (4 elements per lane
+  at 8-bit against 2), so the reduction order — and the logits at close calls —
+  differ. A speed change may not buy a different answer, so 8-bit stays on the
+  token path too.
+- **Next**: the two things that could make the chunk pay. (1) A safe overlap of
+  fetch and GPU work, e.g. fetching the union of a sub-chunk's selected experts
+  once (four tokens' top-8 is at most 32 ids, inside the 64-slot 4-bit cache)
+  and dispatching those tokens against it, which reuses each expert's weights
+  and cuts the per-layer fetches from 16 to ~4. The 12-15 s prefill measured
+  with overlapping fetches is the size of the prize; it was corrupt, not
+  available for free. (2) A GEMM whose per-token accumulation mirrors the
+  GEMV's lane-for-lane, which would make the chunk bit-identical at 8-bit and
+  retire the width caveat.
 
 ## What exists today
 
