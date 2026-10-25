@@ -1,14 +1,17 @@
 # Plan: K2-Horizon runner phase (batched prefill, ANE)
 
-Status: **phase 1 built and measured; it does not pay yet.** Every layer has a
-chunked form — `K2DenseBatch` for the dense prefix, `K2SparseBatch` for the
-sparse MoVA layers — and `K2GraphProbe.forwardChunk` drives the whole graph
-layer-major over a chunk. The runtime keeps the token path as the default
-(`TINYTITAN_K2_CHUNK` opts in, 2-16 tokens), because with the expert fetches
-awaited in the safe order a 163-token prompt measured 34.9 s chunked against
-33.3 s token-by-token on 4-bit, and at 8-bit the greedy output changes. The
-family still has no ANE sidecar. The earlier 12-15 s reading was a fetch-overlap
-race, not a win — see the sparse-batch entry below.
+Status: **phase 1 pays on 4-bit.** Every layer has a chunked form —
+`K2DenseBatch` for the dense prefix, `K2SparseBatch` for the sparse MoVA
+layers — and `K2GraphProbe.forwardChunk` drives the whole graph layer-major
+over a chunk. The sparse batch fetches the union of a chunk's selected experts
+once per layer (495 fetches for a 163-token prompt against the token path's
+7,335), and with that a 163-token prompt measured a median **17.5 s against
+23.8 s** token-by-token over eight paired rounds (best 13.4 against 22.5), the
+greedy stream byte-identical to the token path. The runtime therefore defaults
+chunk 16 on 4-bit installs; 8-bit is faster too (77.9 s against 107-134 s) but
+its greedy output changes, because the affine GEMM's reduction order is not the
+GEMV's, so it stays on the token path until that is fixed. The family still has
+no ANE sidecar.
 
 ## Progress
 
@@ -43,45 +46,49 @@ race, not a win — see the sparse-batch entry below.
   the chunk buffer and blits its output into the alternate one, so a chunk
   costs no CPU `[Float16]` conversions (the CPU-row version measured 36.46 s on
   a 163-token prompt against 31.84 s token-by-token).
-- **Batched sparse layer** (done, opt-in) — `K2SparseBatch` runs one sparse
-  layer over a chunk: grouped norm, q/k/gate and o projections, the softplus
-  gate, both residuals and the post-attention norm are batched (through the
-  affine GEMM when the shape tiles, per-token GEMV otherwise), while RoPE,
-  causal attention, the MoVA router/values and MoE routing stay per token, in
-  the same command buffer for the whole chunk. `K2SparseBatchTests.
-  chunkMatchesTheTokenPath` compares it element-wise with `K2SparseLayerProbe`
-  on the sparse toy. The routed experts are still streamed per token — the
-  layer's cache is a ring of 64 (4-bit) or 16 (8-bit) slots, and the fetch
-  **must be awaited before the next token's fetch**: running ahead overwrote
-  slots a pending dispatch had not read yet, which made the same chunk size
-  produce different tokens from run to run at 8-bit (measured: two different
-  outputs for chunk 16, two more for chunk 8). With the safe order the chunk is
-  deterministic and reproducible; on 4-bit the greedy stream is byte-identical
-  to the token path at chunk 8 and 16 over 24 tokens, and the 96-token stream
-  at chunk 16 matched it.
-  Measurements, 163-token prompt, greedy, after the fix:
+- **Batched sparse layer** (done, default on 4-bit) — `K2SparseBatch` runs one
+  sparse layer over a chunk: grouped norm, q/k/gate and o projections, the
+  softplus gate, both residuals and the post-attention norm are batched
+  (through the affine GEMM when the shape tiles, per-token GEMV otherwise),
+  while RoPE, causal attention, the MoVA router/values and MoE routing stay per
+  token. `K2SparseBatchTests.chunkMatchesTheTokenPath` compares it element-wise
+  with `K2SparseLayerProbe` on the sparse toy.
+- **Expert fetch: union per chunk, awaited per group** — the layer's expert
+  cache is a ring of 64 (4-bit) or 16 (8-bit) slots that a fetch reuses, so a
+  fetch must never run ahead of a dispatch still reading a slot. An earlier
+  version committed all sixteen expert buffers and awaited them at the end; the
+  same chunk size then produced different tokens from run to run at 8-bit
+  (measured: two different outputs for chunk 16, two more for chunk 8). The
+  phase now groups consecutive tokens while the union of their selected ids
+  fits the ring, fetches the union once, and dispatches the group's tokens
+  against it in one command buffer before the next fetch. On the 163-token
+  prompt that is 495 fetches against 7,335 for the token path — one per layer
+  per chunk, because sixteen tokens' top-8 union fits the 64-slot 4-bit cache
+  (a four-token group needs at most 32 slots at either width).
+  Measurements, 163-token prompt, greedy, paired:
 
   | install | token path | chunk 16 |
   | --- | ---: | ---: |
-  | 4-bit | 33.3 s (24.2-35.1, 3 rounds) | 34.9 s (32.0-45.6) |
-  | 8-bit | 107-134 s | 85-86 s |
+  | 4-bit | 23.8 s median (22.5-35.1, 8 rounds) | 17.5 s median (13.4-30.0) |
+  | 8-bit | 107-134 s | 77.9 s |
 
-  4-bit is neutral to 5% slower, so batching projections alone does not pay
-  there. 8-bit is 20-35% faster, but its greedy output on the golden prompt
-  flips three tokens against the token path: the affine GEMM partitions a
-  64-element group across lanes differently from the GEMV (4 elements per lane
-  at 8-bit against 2), so the reduction order — and the logits at close calls —
-  differ. A speed change may not buy a different answer, so 8-bit stays on the
-  token path too.
-- **Next**: the two things that could make the chunk pay. (1) A safe overlap of
-  fetch and GPU work, e.g. fetching the union of a sub-chunk's selected experts
-  once (four tokens' top-8 is at most 32 ids, inside the 64-slot 4-bit cache)
-  and dispatching those tokens against it, which reuses each expert's weights
-  and cuts the per-layer fetches from 16 to ~4. The 12-15 s prefill measured
-  with overlapping fetches is the size of the prize; it was corrupt, not
-  available for free. (2) A GEMM whose per-token accumulation mirrors the
-  GEMV's lane-for-lane, which would make the chunk bit-identical at 8-bit and
-  retire the width caveat.
+  4-bit is **1.36x** by median (1.68x best against best) and its 24-token
+  greedy stream is byte-identical to the token path at chunk 8 and 16 (the
+  96-token stream at 16 matched too), so chunk 16 is its default. 8-bit is
+  1.4-1.7x, but its greedy output on the golden prompt flips three tokens: the
+  affine GEMM partitions a 64-element group across lanes differently from the
+  GEMV (4 elements per lane at 8-bit against 2), so the reduction order — and
+  the logits at close calls — differ. A speed change may not buy a different
+  answer, so 8-bit stays on the token path.
+- **Next**: make the 8-bit chunk legal. A GEMM whose per-token accumulation
+  mirrors the GEMV's lane-for-lane (one 64-element group across all 32 lanes,
+  two elements each, the row's words held in registers and scales/biases read
+  per token) would give it the same reduction order, hence bit-identical
+  logits, and retire the width caveat. The chunk still spends most of its time
+  streaming each token's routed experts; the next fetch-amortisation step is
+  batching the routed experts' GEMM across the tokens that selected the same
+  expert, so an expert's weights are read once per group instead of once per
+  token.
 
 ## What exists today
 
