@@ -24,8 +24,12 @@ final class K2DenseLayer {
     private let k: MTLBuffer
     private let v: MTLBuffer
     private let gate: MTLBuffer
-    private let kCache: MTLBuffer
-    private let vCache: MTLBuffer
+    /// The plain FP16 K/V cache, shared with the chunked path (`K2DenseBatch`)
+    /// so a prefill chunk and a decode step read and write the same rows. A
+    /// batch that allocates its own cache would silently diverge from the
+    /// layer's decode state.
+    let kCache: MTLBuffer
+    let vCache: MTLBuffer
     private let maxSequence: Int
     private let attn: MTLBuffer
     private let oOut: MTLBuffer

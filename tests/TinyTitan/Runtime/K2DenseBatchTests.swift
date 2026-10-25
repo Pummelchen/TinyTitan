@@ -37,6 +37,90 @@ import TinyTitanValidationSupport
         }
     }
 
+    /// A prefill chunk and a decode step have to agree about the cache, not
+    /// just about their own outputs: the batch writes rows 0-3 and the token
+    /// layer then decodes position 4 from them. Compared against a token-only
+    /// run over the same five positions.
+    @Test func chunkThenTokenSharesTheCache() async throws {
+        let directory = try K2ToySynthetic.write(sparse: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = try ArchConfig.resolved(
+            forFamily: .k2Horizon, directoryURL: directory)
+        let ctx = try MetalContext()
+        let model = try Model.load(
+            directoryURL: directory, device: ctx.device, expecting: config,
+            integrityPolicy: .fullSha256)
+        let d = config.hiddenSize
+        let chunk = 4
+        let decoderLayer = try K2DenseLayer(
+            model: model, context: ctx, layer: 0, maxSequence: 8)
+        let referenceLayer = try K2DenseLayer(
+            model: model, context: ctx, layer: 0, maxSequence: 8)
+        let shared = try K2DenseBatch(
+            model: model, context: ctx, layer: 0,
+            maxSequence: 8, maxTokens: chunk,
+            kCache: decoderLayer.kCache, vCache: decoderLayer.vCache)
+
+        guard
+            let batchIn = ctx.device.makeBuffer(
+                length: chunk * d * 2, options: .storageModeShared),
+            let batchOut = ctx.device.makeBuffer(
+                length: chunk * d * 2, options: .storageModeShared),
+            let singleIn = ctx.device.makeBuffer(
+                length: d * 2, options: .storageModeShared),
+            let singleOut = ctx.device.makeBuffer(
+                length: d * 2, options: .storageModeShared)
+        else {
+            Issue.record("could not allocate the layer buffers")
+            return
+        }
+
+        let input = Self.values(chunk * d, salt: 0)
+        let last = Self.values(d, salt: 9)
+
+        // Reference: five positions through one token layer.
+        var expectedLast: [Float16] = []
+        for index in 0..<5 {
+            let row = index < chunk ? Array(input[index * d..<(index + 1) * d]) : last
+            Self.copy(row, into: singleIn)
+            let cb = try #require(ctx.queue.makeCommandBuffer())
+            try referenceLayer.encode(
+                commandBuffer: cb, hidden: singleIn, out: singleOut,
+                position: UInt32(index))
+            cb.commit()
+            await cb.completed()
+            if index == 4 { expectedLast = Self.halves(singleOut, offset: 0, count: d) }
+        }
+
+        // The chunk writes 0-3, then the token layer decodes 4 from the cache.
+        Self.copy(input, into: batchIn)
+        let batchCB = try #require(ctx.queue.makeCommandBuffer())
+        try shared.encode(
+            commandBuffer: batchCB, hidden: batchIn, out: batchOut,
+            basePosition: 0, tokenCount: chunk)
+        batchCB.commit()
+        await batchCB.completed()
+        #expect(batchCB.status == .completed)
+
+        Self.copy(last, into: singleIn)
+        let decodeCB = try #require(ctx.queue.makeCommandBuffer())
+        try decoderLayer.encode(
+            commandBuffer: decodeCB, hidden: singleIn, out: singleOut,
+            position: 4)
+        decodeCB.commit()
+        await decodeCB.completed()
+        #expect(decodeCB.status == .completed)
+
+        let actual = Self.halves(singleOut, offset: 0, count: d).map { Float($0) }
+        let reference = expectedLast.map { Float($0) }
+        let rel = RelError.compute(actual: actual, reference: reference)
+        #expect(rel < Tolerance.fp16Reduction, "relErr=\(rel)")
+        // The batch must not have allocated a second cache and ignored the
+        // shared one: the decode result would then be wrong above, but assert
+        // the buffers are the ones handed over.
+        #expect(shared.kCache === decoderLayer.kCache)
+    }
+
     @Test func chunkMatchesTheTokenPathAcrossTwoChunks() async throws {
         let directory = try K2ToySynthetic.write(sparse: true)
         defer { try? FileManager.default.removeItem(at: directory) }

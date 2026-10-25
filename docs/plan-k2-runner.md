@@ -27,6 +27,10 @@ dense-layer wiring exists, and the family has no ANE sidecar.
   writes the chunk's K/V rows into consecutive cache positions.
   `K2DenseBatchTests.chunkMatchesTheTokenPathAcrossTwoChunks` compares it with
   `K2DenseLayer` for positions 0–3 and 4–7 on the sparse toy and they agree.
+  The batch takes the decoder layer's `kCache`/`vCache` when a caller passes
+  them, so a chunk prefill and a later token decode read the same rows;
+  `chunkThenTokenSharesTheCache` writes 0–3 through the batch, decodes 4
+  through the layer, and matches a token-only run over all five positions.
 - **Next**: give the graph a chunked prefill entry that uses `K2DenseBatch` for
   layers 0-2 while the sparse layers still run per token (their caches are the
   same per-layer buffers, so the chunk path must write those, not a copy), then

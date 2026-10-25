@@ -43,12 +43,19 @@ final class K2DenseBatch {
     private let mlpUp: MTLBuffer
     private let act: MTLBuffer
     private let mlpOut: MTLBuffer
-    private let kCache: MTLBuffer
-    private let vCache: MTLBuffer
+    /// Internal so a caller can confirm the batch is using the decoder
+    /// layer's cache (and the parity test can assert it).
+    let kCache: MTLBuffer
+    let vCache: MTLBuffer
 
+    /// `kCache`/`vCache` let a caller share the decoder layer's cache: a chunk
+    /// prefill must write the rows a later decode step reads. Omitted, the
+    /// batch allocates its own (what the parity test uses).
     init(
         model: Model, context: MetalContext, layer: Int,
-        maxSequence: Int, maxTokens: Int
+        maxSequence: Int, maxTokens: Int,
+        kCache sharedKCache: MTLBuffer? = nil,
+        vCache sharedVCache: MTLBuffer? = nil
     ) throws {
         precondition(maxSequence > 0 && maxTokens > 0)
         self.model = model
@@ -96,8 +103,16 @@ final class K2DenseBatch {
         self.mlpUp = try buffer(maxTokens * intermediate, "k2.batch.mlpUp")
         self.act = try buffer(maxTokens * intermediate, "k2.batch.act")
         self.mlpOut = try buffer(maxTokens * d, "k2.batch.mlpOut")
-        self.kCache = try buffer(maxSequence * kvDim, "k2.batch.kCache")
-        self.vCache = try buffer(maxSequence * kvDim, "k2.batch.vCache")
+        if let sharedKCache {
+            self.kCache = sharedKCache
+        } else {
+            self.kCache = try buffer(maxSequence * kvDim, "k2.batch.kCache")
+        }
+        if let sharedVCache {
+            self.vCache = sharedVCache
+        } else {
+            self.vCache = try buffer(maxSequence * kvDim, "k2.batch.vCache")
+        }
     }
 
     /// Run `tokenCount` consecutive positions starting at `basePosition`.
