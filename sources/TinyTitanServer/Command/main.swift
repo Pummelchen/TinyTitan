@@ -166,6 +166,43 @@ do {
             family: .qwen36,
             thinkingMode: reasoning.thinking,
             reasoningEffort: nil)
+    } else if (try? ManifestReader.peekFamily(directoryURL: modelURL)) == .k2Horizon {
+        // K2 has a graph, but not this runner's: the probe is the engine. It
+        // is a backend of its own, like the CPU path, because
+        // `RealForwardRunner` sizes a Qwen-shaped pipeline set and refuses the
+        // family. No prompt cache, no batching, plain FP16 KV caches.
+        let started = ContinuousClock.now
+        let slots = Int(
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? ""
+        )
+        .flatMap { $0 > 0 ? $0 : nil }
+        let k2 = try await K2ProbeBackend(
+            modelDirectory: modelURL,
+            maximumContext: arguments.maxContext,
+            thinking: reasoning.thinking,
+            reasoningEffort: reasoning.effort,
+            slots: slots)
+        backend = k2
+        let elapsed = started.duration(to: .now)
+        let seconds =
+            Double(elapsed.components.seconds)
+            + Double(elapsed.components.attoseconds) / 1e18
+        let identifier =
+            arguments.modelIDOverride
+            ?? modelURL.lastPathComponent
+        facts = ModelSessionFacts(
+            modelID: identifier,
+            prefillChunkTokens: 0,
+            promptCacheMode: .off,
+            expertCacheSlots: k2.expertCacheSlots)
+        print(
+            String(
+                format: "K2 probe engine: %@ in %.1fs, context %d, %d expert slots",
+                identifier, seconds, k2.maximumContext, k2.expertCacheSlots))
+        reasoningProfile = ServerReasoningProfile(
+            family: .k2Horizon,
+            thinkingMode: reasoning.thinking,
+            reasoningEffort: reasoning.effort)
     } else if arguments.managesResidency {
         let plan = makePlan()
         // Reads manifest.json only; a bad --model still fails here at launch

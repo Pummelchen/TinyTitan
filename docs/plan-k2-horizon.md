@@ -1,13 +1,16 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
-Status: **the graph runs; serving does not.** Both installs load and validate,
-`K2GraphProbe` executes the real 36B on Metal (dense layers plus the sparse
-MoVA layers, streamed routed experts, GPU-resolved MoVA selection), and
-`TinyTitanBench k2gpu` decodes at ~4 tok/s cold and 10-13 tok/s steady state on
-this host. The tokenizer, decoder and tool surfaces are exercised against the
-real installs, including a full tool round trip. What is missing is the serving
-integration: a runner graph the server can drive, a catalogue entry, batched
-prefill and the ANE sidecar (and a release golden). This is not an "adding a
+Status: **the graph runs and the server serves it; the runner and the CLI do
+not.** Both installs load and validate, `K2GraphProbe` executes the real 36B on
+Metal (dense layers plus the sparse MoVA layers, streamed routed experts,
+GPU-resolved MoVA selection), `TinyTitanBench k2gpu` decodes at ~4 tok/s cold
+and 10-13 tok/s steady state on this host, and `TinyTitanServer --model
+models/k2-horizon-4bit.ssdai` answers OpenAI chat completions through
+`K2ProbeBackend` (measured 2.6 tok/s on the first 48-token reply, 4.2 tok/s on
+the next). The tokenizer, decoder and tool surfaces are exercised against the
+real installs, including a full tool round trip. What is missing is the runner
+graph (so the CLI and the catalogue serve it, with prompt caching), batching,
+ANE prefill, and a release golden. This is not an "adding a
 model" wiring job in the sense of `adding-a-model.md` — the architecture is
 new. The checkpoint is `IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at
 sha `e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
@@ -335,7 +338,23 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   this path (it runs the CLI, and the runner refuses the family), so the release
   gate lists the two installs in `NON_GOLDEN_INSTALLS` with that reason; the
   bench check is the manual gate until the runner lands.
-- **Still missing** — the catalogue entry.
+- **Server path** — `K2ProbeBackend` is the probe behind
+  `ServerInferenceBackend`, the way `CPUModelBackend` is the CPU engine:
+  `TinyTitanServer --model models/k2-horizon-4bit.ssdai --reasoning high`
+  serves the OpenAI and Responses surfaces with no prompt cache, no batching and
+  plain FP16 KV caches. Each request builds its own graph, sampling uses the
+  card row (1.0 / top-p 0.95 / top-k 20 via `GenerationDefaults`), tools render
+  through the installed template and the decoder parses calls, `json_schema`
+  constraints apply, and context is capped at 8,192 tokens because the KV
+  caches are ~0.2 MB per position across 48 layers (the checkpoint's 524,288 is
+  a weight property, not an affordable allocation here). Measured on the 4-bit
+  install: first 48-token reply 18.3 s (2.6 tok/s, cold cache), a later
+  160-token reply 38.1 s (4.2 tok/s). One sampled reply (temperature 1.0) wrote
+  its closing think tag as ordinary text and the decoder left it in reasoning;
+  five later samples behaved, so text-spelled markers remain a known edge.
+- **Still missing** — a catalogue entry (the single-model `--model` path works,
+  but `--models-directory` still skips the family), the runner graph the CLI
+  drives, prompt caching, batching and ANE.
 
 Next: the runner graph (persistent GPU state, GPU-side router dispatch,
 prefetch overlap), batched prefill, and the ANE prefill sidecar.

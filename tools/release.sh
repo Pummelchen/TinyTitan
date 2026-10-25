@@ -253,11 +253,13 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 #
 #   * the MTP draft head -- a sidecar to a target whose own baseline already
 #     exercises it, not a served model.
-#   * the K2-Horizon installs -- they have no served path yet: the only entry
-#     point is `TinyTitanBench k2gpu`, which this gate does not drive, and
-#     `RealForwardRunner` refuses the family. Declared here so the coverage
-#     guard does not read "installed but unserved" as "silently unchecked";
-#     when the runner graph lands, replace these with `check_golden` targets.
+#   * the K2-Horizon installs -- the server serves them through its probe
+#     backend, but this gate drives `TinyTitanCLI`, and the CLI has no K2 path
+#     (`RealForwardRunner` refuses the family). Declared here so the coverage
+#     guard does not read "installed but not CLI-servable" as "silently
+#     unchecked"; when the runner graph lands, replace these with `check_golden`
+#     targets. The probe's own golden is checked with
+#     `TINYTITAN_K2_GOLDEN=<path> TinyTitanBench k2gpu ...`.
 #
 # The dense Qwen 3.5 2B/4B/9B were listed here too, because they had no stored
 # baseline at all: a release verified them through neither path, and capturing

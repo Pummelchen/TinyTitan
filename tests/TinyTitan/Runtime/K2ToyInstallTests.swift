@@ -36,7 +36,7 @@ struct K2ToyInstallTests {
             message = String(describing: error)
         }
         #expect(message.contains("TinyTitanBench k2gpu"), "\(message)")
-        #expect(message.contains("Server integration is not implemented"), "\(message)")
+        #expect(message.contains("does not run on this runner"), "\(message)")
     }
 
     @Test func sparseToyValidatesTheMoEAndMoVAProteins() throws {

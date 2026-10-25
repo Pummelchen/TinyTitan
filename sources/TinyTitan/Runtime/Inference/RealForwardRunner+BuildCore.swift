@@ -27,9 +27,9 @@ extension RealForwardRunner {
         // message names the path that does work.
         guard cfg.family != .k2Horizon else {
             throw ModelError.unsupportedArchitecture(
-                detail: "K2-Horizon runs through the GPU probe, not this "
-                    + "runner: use `TinyTitanBench k2gpu <install> \"<prompt>\"`. "
-                    + "Server integration is not implemented yet. "
+                detail: "K2-Horizon does not run on this runner: the server's "
+                    + "probe backend serves it, and `TinyTitanBench k2gpu "
+                    + "<install> \"<prompt>\"` runs it directly. "
                     + "See docs/plan-k2-horizon.md.")
         }
         precondition(
