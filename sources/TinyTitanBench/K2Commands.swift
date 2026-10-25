@@ -196,6 +196,11 @@ extension TinyTitanBench {
         print(
             "decode \(produced.count) tokens: \(String(format: "%.2f", decode))s "
                 + "(\(String(format: "%.2f", Double(produced.count) / max(decode, 0.001))) tok/s)")
+        print(
+            "tokens: "
+                + produced.map { String(Int($0)) }.joined(separator: ","))
         print("output: \(tokenizer.decode(produced, skipSpecialTokens: true))")
+        print(
+            "raw: \(tokenizer.decode(produced, skipSpecialTokens: false))")
     }
 }

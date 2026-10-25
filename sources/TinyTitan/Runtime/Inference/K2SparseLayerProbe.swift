@@ -69,8 +69,14 @@ final class K2SparseLayerProbe {
             context: context, weightBits: vBits,
             hiddenSize: hidden, valueDim: kvDim,
             maxExperts: config.mova.numExperts)
+        // The routed experts' own width, not the attention slot's: the 8-bit
+        // install stores them at 8 bits and a fixed 4 would unpack half the
+        // bytes as nibbles.
+        let routedEntry = try model.packedExpertsLayout.expert(
+            layer: layer, expert: 0)
+        let routedBits = routedEntry.subTensors["gate"]?.bits ?? 4
         self.moe = try K2MoEStage(
-            context: context, weightBits: 4,
+            context: context, weightBits: routedBits,
             hiddenSize: hidden, expertWidth: config.moeIntermediateSize,
             numExperts: config.numExperts, topK: config.topKExperts)
         self.vExperts = try (0..<config.mova.numExperts).map { expert in
