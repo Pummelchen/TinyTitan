@@ -52,7 +52,7 @@ GROUP_SIZE = 64
 # 128 MiB range requests: small enough that a dropped connection costs a
 # retry rather than the layer, large enough that the per-request redirect and
 # TLS setup do not dominate a ~7.8 MB/s link.
-CHUNK = 128 * 1024 * 1024
+CHUNK = 4 * 1024 * 1024
 TOKENIZER_FILES = (
     "tokenizer.json",
     "tokenizer_config.json",
@@ -184,7 +184,7 @@ def download_range(remote: str, start: int, end: int, destination: Path) -> None
     length = end - start
     if length <= 0:
         raise SystemExit(f"empty download range [{start}, {end})")
-    workers = min(16, max(1, length // (256 * 1024 * 1024)))
+    workers = min(64, max(1, length // (64 * 1024 * 1024)))
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and destination.stat().st_size == length:
         log(f"    {destination.name} is complete, skipping")
@@ -380,14 +380,24 @@ class HeaderIndex:
         return list(self.entries)
 
 
-DTYPES = {
-    "F32": "float32",
-    "BF16": "bfloat16",
-    "F16": "float16",
-    "U32": "uint32",
-    "U16": "uint16",
-    "I32": "int32",
-}
+def numpy_dtype(name: str):
+    """The numpy/ml_dtypes dtype for a safetensors dtype string.
+
+    `np.dtype("bfloat16")` is not a numpy dtype: bf16 comes from ml_dtypes,
+    and passing the string to `frombuffer` raises "data type 'bfloat16' not
+    understood" on the first real checkpoint tensor (the fixture is F32).
+    """
+    import ml_dtypes
+    import numpy as np
+
+    return {
+        "F32": np.float32,
+        "BF16": ml_dtypes.bfloat16,
+        "F16": np.float16,
+        "U32": np.uint32,
+        "U16": np.uint16,
+        "I32": np.int32,
+    }[name]
 
 
 class Segment:
@@ -422,7 +432,7 @@ class TensorSource:
     def tensor(self, entry: dict):
         import numpy as np
 
-        dtype = DTYPES[entry["dtype"]]
+        dtype = numpy_dtype(entry["dtype"])
         for segment in self.segments:
             if segment.contains(entry["shard"], entry["start"], entry["end"]):
                 mapping = self._map(segment.path)
