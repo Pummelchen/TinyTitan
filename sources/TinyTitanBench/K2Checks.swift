@@ -80,6 +80,8 @@ extension TinyTitanBench {
             print("golden: captured \(tokens.count) tokens to \(url.path)")
             return
         }
+        // lint:allow-unbounded-read the baseline is a one-line file this
+        // command itself wrote under .build; it is not model metadata.
         let lines = try String(contentsOf: url, encoding: .utf8)
             .split(separator: "\n", omittingEmptySubsequences: true)
         guard let storedLine = lines.first(where: { $0.hasPrefix("tokens=") }) else {

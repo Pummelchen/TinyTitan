@@ -766,11 +766,13 @@ Python equivalent:
 ```python
 import json, re
 
+
 def _collate(s):
     # Foundation's sortedKeys = localizedStandardCompare: case-insensitive,
     # numeric-aware, punctuation-insensitive.
     s = "".join(ch for ch in s.casefold() if ch.isalnum() or ch.isspace())
     return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", s)]
+
 
 def dumps_foundation(obj, indent=0):
     pad = "  " * indent
@@ -778,9 +780,9 @@ def dumps_foundation(obj, indent=0):
         if not obj:
             return "{\n\n" + pad + "}"
         items = ",\n".join(
-            f'{pad}  {json.dumps(k, ensure_ascii=False)} : '
-            f"{dumps_foundation(obj[k], indent + 1)}"
-            for k in sorted(obj, key=_collate))
+            f"{pad}  {json.dumps(k, ensure_ascii=False)} : {dumps_foundation(obj[k], indent + 1)}"
+            for k in sorted(obj, key=_collate)
+        )
         return "{\n" + items + "\n" + pad + "}"
     if isinstance(obj, list):
         if not obj:
@@ -792,7 +794,7 @@ def dumps_foundation(obj, indent=0):
     if isinstance(obj, int):
         return str(obj)
     if isinstance(obj, float):
-        return str(int(obj)) if obj == int(obj) else repr(obj)   # see caveat
+        return str(int(obj)) if obj == int(obj) else repr(obj)  # see caveat
     if isinstance(obj, str):
         return json.dumps(obj, ensure_ascii=False)
     raise TypeError(type(obj))
@@ -916,26 +918,41 @@ kernels, which no manifest can supply.
 import struct
 
 PAGE = 16384
-def page_up(n): return (n + PAGE - 1) // PAGE * PAGE
+
+
+def page_up(n):
+    return (n + PAGE - 1) // PAGE * PAGE
+
 
 # ---- model_weights.bin ----
-names = [...]                       # entry order, UTF-8
+names = [...]  # entry order, UTF-8
 table = b"".join(n.encode() for n in names)
 offs, cur = [], 0
 for n in names:
-    offs.append(cur); cur += len(n.encode())
-index_size = page_up(24 + 72*len(names) + len(table))
-buf = bytearray(index_size)         # zero padding to the page
+    offs.append(cur)
+    cur += len(n.encode())
+index_size = page_up(24 + 72 * len(names) + len(table))
+buf = bytearray(index_size)  # zero padding to the page
 struct.pack_into("<QQQ", buf, 0, index_size, resident_size, len(names))
-tbl_base = 24 + 72*len(names)
+tbl_base = 24 + 72 * len(names)
 for i, e in enumerate(entries):
     struct.pack_into(
-        "<IHBBQQIIIIQQQQ", buf, 24 + 72*i,
-        tbl_base + offs[i], len(names[i].encode()), e.dtype, 0,
-        e.file_offset, e.size_bytes,
-        *e.shape4,                              # [a,b,0,0]
-        e.scale_offset, e.scale_size, e.bias_offset, e.bias_size)
-buf[tbl_base:tbl_base+len(table)] = table
+        "<IHBBQQIIIIQQQQ",
+        buf,
+        24 + 72 * i,
+        tbl_base + offs[i],
+        len(names[i].encode()),
+        e.dtype,
+        0,
+        e.file_offset,
+        e.size_bytes,
+        *e.shape4,  # [a,b,0,0]
+        e.scale_offset,
+        e.scale_size,
+        e.bias_offset,
+        e.bias_size,
+    )
+buf[tbl_base : tbl_base + len(table)] = table
 
 # ---- layout.json per expert ----
 blob = b""

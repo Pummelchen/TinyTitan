@@ -111,6 +111,7 @@ public final class MetalContext: @unchecked Sendable {
         "gdn",
         "qsa",
         "bf16_gemv",
+        "nemotron",
     ]
 
     /// Bundle locations for runtime shader modules.
@@ -131,6 +132,7 @@ public final class MetalContext: @unchecked Sendable {
         "rope": "Metal/Primitives",
         "tensorops": "Metal/TensorCore",
         "utility": "Metal/Primitives",
+        "nemotron": "Metal/Nemotron",
     ]
 
     private static func shaderURL(module: String) -> URL? {

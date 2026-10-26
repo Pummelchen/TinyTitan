@@ -1,0 +1,54 @@
+{
+ "prompt": "Once upon a time, there was a",
+ "limit": 4,
+ "table": [
+  {
+   "quant": "4-bit",
+   "backend": "gpu",
+   "decode_tps": 6.66,
+   "runs": [
+    1.25,
+    6.69,
+    6.66
+   ],
+   "prefill_seconds": 11.41,
+   "output": "output:  lot of people who"
+  },
+  {
+   "quant": "4-bit",
+   "backend": "cpu",
+   "decode_tps": 3.6,
+   "runs": [
+    3.77,
+    3.6,
+    3.26
+   ],
+   "prefill_seconds": 3.6,
+   "output": "output:  lot of people who"
+  },
+  {
+   "quant": "8-bit",
+   "backend": "gpu",
+   "decode_tps": 0.57,
+   "runs": [
+    0.59,
+    0.57,
+    0.55
+   ],
+   "prefill_seconds": 21.1,
+   "output": "output:  great deal of money"
+  },
+  {
+   "quant": "8-bit",
+   "backend": "cpu",
+   "decode_tps": 0.86,
+   "runs": [
+    0.85,
+    0.86,
+    0.87
+   ],
+   "prefill_seconds": 19.97,
+   "output": "output:  lot of fun."
+  }
+ ]
+}

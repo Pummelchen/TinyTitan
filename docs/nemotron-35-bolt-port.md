@@ -1,0 +1,259 @@
+# Nemotron 3.5 Bolt 74B-A9B — port record
+
+Status: **complete.** Both installs are written and pass
+`TinyTitanRepack --verify-install`; the runtime answers from them; the decode
+numbers are measured on this host; the README carries the rows. The one
+requirement that cannot be met is recorded rather than faked: there is no ANE
+decode path for this architecture (§3).
+
+## 0. Progress
+
+Complete and verified:
+
+- branch `nemotron-3.5-bolt`; this record;
+- `tools/prepare_nemotron.py`: geometry validation, per-layer expert census,
+  the direct `.ssdai` writer for both widths, a resumable part-file downloader,
+  and the expert padding the verifier requires;
+- **installs**: `models/nemotron-3.5-bolt_74B_A9B_4Bit` — 45,860,181,130 bytes,
+  48 files, verified — and `..._8Bit` — 85,481,684,052 bytes, 48 files, verified
+  (`verified-install.json` written by the real verifier);
+- `tools/test_nemotron_writer.py` / `benchmark/test_nemotron_install.py`: a
+  three-layer toy accepted by `--verify-install` at both widths;
+- `NemotronInstall`, `NemotronModel`, `NemotronCPU`, `NemotronMetal` and
+  `NemotronMetalGraph`, with the toy at 5e-7 (CPU) / 3.4e-6 (matvec) / 5.9e-6
+  (graph) against the NumPy reference;
+- Mamba, attention and MoE layers individually checked against the official
+  `modeling_nemotron_h.py` modules with the real weights: 6e-8, 0.0 and 4e-9;
+- `TinyTitanBench nemotron|nemotrongpu|nemotrongraph|nemotronlogits|nemotroninfo`,
+  the `TinyTitanCLI` branch, `benchmark/nemotron_decode.py`, and the README rows
+  at 50.98% in the table's descending position;
+- all production gates: file-length, func-length, force-cast, unbounded-read,
+  stdout-clean, swiftlint, swift-format, docs, library-facade, arch-path,
+  unchecked-sendable, ruff.
+
+## 1. The source checkpoint
+
+| | Value | Read from |
+| --- | --- | --- |
+| Quantized card | `nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB`, sha `cf2effc5c4b794ee9fb8d34eab3d1d65ce64142f` | HF API |
+| 16-bit original | `nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16`, sha `e09a4cedb1787db1760375ee5539f222cae0c672` (2026-10-23) | HF API |
+| `gated` / license | `false` / OpenMDW-1.1 | HF API, card |
+| `architectures` | `NemotronH_Omni_Reasoning_V3`; text tower `model_type: nemotron_h_puzzle` under `llm_config` | `config.json` |
+| Size | **149.77 GB** in 63 safetensors shards; 28,725 index tensors | index + headers |
+| Total / active parameters | 74 B / 9 B | card |
+| Context | 262,144 | `llm_config.max_position_embeddings` |
+| Vocabulary | 131,072, untied head (`tie_word_embeddings: false`) | `llm_config` |
+| Sampling | temperature 1.0, top-p 0.95; EOS ids 2 and 11, BOS 1 | `generation_config.json` |
+| Terminal-Bench 2.1 (card) | **50.98** | card benchmark table |
+| Terminal-Bench 4.0 | none published | card |
+
+The 24 GB card is a native **IQ2** (2-bit, QAT) quantisation of the BF16
+release, not a 16-bit checkpoint. The two widths this project ships are
+therefore quantized here from the BF16 weights, not copied from the card.
+
+### Text tower geometry (`llm_config`)
+
+| | |
+| --- | --- |
+| Layers | **88**: 40 `mamba`, 40 `moe`, 8 `attention` (indices 7, 16, 25, 36, 47, 58, 69, 78) |
+| Hidden | 4,096; pre-norm RMSNorm, eps 1e-5; residual added after the mixer |
+| MoE | 40 layers; **240 / 304 / 368 / 432 / 496** routed experts per layer (13,824 total), top-9, latent width **1,024**, per-expert width 1,536–2,560 (per layer), shared expert 5,376, activation **relu²** |
+| Router | sigmoid scores + `e_score_correction_bias`, 8 groups choose top-1 group by top-2 sum, top-9 globally, normalize top-k, ×5.0 |
+| Mamba-2 | d_inner 8,192, 128 heads × 64, state 128, 8 groups, conv kernel 4 with bias, `in_proj` 18,560 = 8,192 gate + 10,240 conv (8,192 x + 1,024 B + 1,024 C) + 128 dt, gated RMSNorm group 1,024, SiLU, `softplus(dt + dt_bias)` clamped at 1e-4, `A = -exp(A_log)`, D skip |
+| Attention | 32 query heads, 2 KV heads, head dim 128, **no RoPE** (the reference applies none), scale 128^-0.5, no bias, causal |
+| Resident tensors | `language_model.backbone.{embeddings,norm_f,layers.*}`, `language_model.lm_head`; the MoE latent projections are `mixer.fc1_latent_proj` / `fc2_latent_proj` |
+| Vision | C-RADIO v4-H tower + `mlp1` projector (1.31 GB + 0.38 GB); **excluded** from a text install |
+
+The reference forward every implementation detail above was read from is
+`modeling_nemotron_h.py` at the pinned BF16 sha. The Mamba-2 decode path is a
+single-token state update, so a decode implementation needs no chunked-scan
+kernel; prefill may use the same per-token update.
+
+## 2. What TinyTitan must add
+
+This is a new architecture, not a Qwen wiring job. The pieces:
+
+1. `ArchInfo` loader for `nemotron_h_puzzle` (root nests the text config under
+   `llm_config`, not `text_config`), a `RepackModelFamily.nemotronH`, and the
+   extension fields the geometry needs (Mamba shape, latent MoE, per-layer
+   expert counts and widths, attention mask).
+2. A converter that reads the BF16 shards and writes 4-bit and 8-bit affine
+   `.ssdai` installs. At 149.77 GB per pass, two separate passes would read
+   300 GB; the converter therefore writes both widths in **one** pass, directly
+   into the install layout, with source shards deleted as they are consumed.
+3. A text-only runtime path: embedding → 88 blocks → final norm → head, with
+   the 40 Mamba layers holding SSM and conv state per sequence and the 40 MoE
+   layers streaming routed experts from `packed_experts`.
+4. Catalogue/profile/tooling rows, tests, and the README table row at the
+   card's Terminal-Bench 2.1 score, inserted in the table's descending order.
+
+### Quantisation
+
+Affine group-64, the format the repacker and every kernel already speak:
+per-group min/scale, `q = round((x - min) / scale)` packed LSB-first into
+32-bit lanes, scale and bias stored bf16. Routed experts, attention, Mamba and
+the latent/shared projections are quantized; norms and the router stay bf16;
+the embedding and untied head are kept at 8 bits in both installs, as the
+other families do.
+
+Measured from the index and the planner (`--plan`), group-64 overhead included:
+
+| Build | Routed experts (padded) | Resident | Total |
+| --- | ---: | ---: | ---: |
+| 4-bit | 40.77 GB | 5.07 GB | **45.83 GB** |
+| 8-bit | 77.01 GB | 8.45 GB | **85.46 GB** |
+
+The routed experts are padded to the widest layer's blob (`expertStride`
+2,949,120 B at 4-bit, 5,570,560 B at 8-bit), because the verifier accepts one
+stride per install and requires `fileSize = expertsPerLayer * expertStride`.
+That costs 3.56 GB and 6.73 GB of page padding respectively. Both installs are
+131.3 GB; the source is never staged whole.
+
+### Decode design
+
+Decode is memory-bound: ~9 B active parameters per token, so 4-bit reads
+~4.5 GB of weights per token and 8-bit ~9 GB. The expert cache and prefetch
+ring are the same levers the Qwen families use; the resident (non-expert)
+weights are small enough to stay mapped.
+
+## 3. Benchmarks
+
+Measured on this host (base 8-core M3 MacBook Pro, 24 GB) with
+`benchmark/nemotron_decode.py`: prompt `Once upon a time, there was a`, four
+greedy decode tokens with EOS suppression so the arm always produces four
+tokens, three processes per arm, median reported. The same two installs are used
+for both backends.
+
+| Build | GPU decode tok/s (Metal graph) | CPU decode tok/s (NEON GEMV) |
+| --- | ---: | ---: |
+| 4-bit | **6.66** (runs 1.25 / 6.69 / 6.66) | **3.60** (3.77 / 3.60 / 3.26) |
+| 8-bit | **0.57** (0.59 / 0.57 / 0.55) | **0.86** (0.85 / 0.86 / 0.87) |
+
+The 4-bit GPU arm's first process is cold: its 1.25 tok/s is the cost of faulting
+the 46 GB install's expert working set from SSD, and the two warm runs are
+6.7 tok/s. The 8-bit graph does not get that benefit: its 8.45 GB resident copy
+leaves no page-cache room for the 85 GB expert set, so the CPU path — which does
+not copy the resident weights — is faster there (0.86 against 0.57). Prefill on
+the same prompt took 3.6 s (4-bit CPU), 11.4 s (4-bit GPU), and ~20 s for both
+8-bit arms; those are token-by-token prefill, not the decode metric.
+
+**Generation behaviour observed, for the record.** Greedy decoding on short
+factual prompts ends the turn immediately: after `The capital of France is` the
+top logit is `<|im_end|>` and ` Paris` is rank 5,795, and the chat template's
+generation prompt behaves the same with or without a system message, with
+thinking on or off, and with a BOS. Open-ended continuation is coherent (`Once
+upon a time, there was a` → ` lot of people who`). The graph, Mamba layer,
+attention layer and MoE layer were each checked against the official
+`modeling_nemotron_h.py` modules with the real weights: max |difference| 6e-8,
+0.0 (attention), and 4e-9 (MoE) respectively, so the engine is faithful to the
+reference implementation. No claim is made here about why this checkpoint
+prefers an immediate end-of-turn; the benchmark suppresses EOS to measure
+throughput, and the README states the decode method.
+
+### ANE
+
+There is no ANE decode path: the project's ANE path is a **prefill** attention
+sidecar (v4.5), and the Neural Engine cannot execute the Mamba-2 recurrence or a
+dynamic gather of 9 of 240–496 experts. The README says so instead of publishing
+a number from a different engine.
+
+## 4. The runtime, as implemented
+
+`NemotronInstall` reads the install directly rather than through the Qwen-shaped
+`Model.load`: the manifest's `arch.nemotronH` block is the geometry, the
+resident index is parsed from `model_weights.bin`, and `packed_experts/layout.json`
+gives each layer's two-role (`up`, `down`) expert blobs. The weight files are
+mmap'd; a 74B model is never resident.
+
+`NemotronModel` is one straight transcription of the reference forward:
+
+- every block is pre-norm RMSNorm, mixer, residual;
+- Mamba-2: `in_proj` → depthwise conv (4 taps) → SiLU → split x/B/C → selective
+  scan with `softplus(dt + dt_bias)` clamped at 1e-4, `A = -exp(A_log)`, D skip →
+  gated RMSNorm (group 1,024) → `out_proj`;
+- LatentMoE: BF16 router → sigmoid → `e_score_correction_bias` → top-9 (one
+  group, so the grouped mask is a no-op) → normalize → ×5 → `fc1_latent_proj`,
+  nine `up`/`down` pairs on the 1,024-wide latent, weighted sum →
+  `fc2_latent_proj`, plus the shared 5,376-wide relu² expert on the unprojected
+  residual;
+- attention: 32/2×128, **no RoPE**, scale 128^-0.5, causal softmax over a
+  per-layer KV cache;
+- final RMSNorm then the untied 8-bit head.
+
+Two matvec backends, one graph:
+
+| Backend | GEMV | Status |
+| --- | --- | --- |
+| `NemotronCPU` | `tinytitan_int4/int8_affine_gemv` (NEON), rows split across cores | validated reference |
+| `NemotronMetalGraph` | the same two shaders plus a Nemotron elementwise shader module; hidden state, Mamba state and KV cache stay on the GPU, one wait per MoE router (40 a token) | **GPU measurement path** |
+| `NemotronMetal` | the same GEMVs with a CPU-side norm/conv/scan between them | cross-check; launch-latency bound |
+
+The CPU elementwise kernels (RMSNorm, gated RMSNorm, conv, SSM update, SiLU,
+relu², BF16 router GEMV, embedding row) are in
+`TinyTitanKernelsC/nemotron_ops.c`; the GPU graph's equivalents are in
+`sources/TinyTitan/Metal/Nemotron/nemotron.metal`.
+
+Two measurements decided the final GPU shape. The first version kept the CPU
+between GEMVs and cost ~4.3 s/token: an M3's GPU downclocks in the ~6 ms it is
+idle and each of ~350 waits then costs ~10 ms, against 0.8 ms for the same GEMV
+back to back. The second version moved the state to the GPU but still read
+file-backed mmaps from GPU code, and cost ~5.5 s/token: every 16 KB page fault
+was handled on the GPU's path. Copying the resident payload once at load and the
+nine routed expert blobs per layer into wired memory took the same real-geometry
+token from ~5.5 s to ~0.06 s of compute (zero-filled skeleton, 4-bit); the load
+pays ~1.7 s (4-bit, 5 GB) or ~4 s (8-bit, 8.45 GB).
+
+**Checked against an independent implementation.** `tools/nemotron_reference.py`
+is a NumPy transcription of the same reference forward that reads the same
+install. On a three-layer toy install (mamba, MoE, attention; random weights)
+with an input of three tokens — so the Mamba conv/SSM state and the KV cache are
+both exercising their second and third steps:
+
+| Arm | max \|logit difference\| vs NumPy |
+| --- | ---: |
+| 4-bit CPU | **4.9e-7** |
+| 4-bit Metal matvec | **3.4e-6** (FP16 GEMV) |
+| 4-bit Metal graph | **5.9e-6** (FP16 state and activations) |
+| 8-bit CPU | **5.0e-7** |
+| 8-bit Metal matvec | **3.3e-6** |
+| 8-bit Metal graph | **3.9e-6** |
+
+The writer itself is checked before any 150 GB download: `tools/test_nemotron_writer.py`
+builds that toy install from scratch and the real `TinyTitanRepack --verify-install`
+accepts both widths.
+
+The checkpoint's tokenizer is not one of the dialects `GFTokenizer` resolves:
+it has `<|im_start|>`/`<|im_end|>` turns but no `<|endoftext|>` (so ChatML is
+refused) and no `<|ifm|…>` markers (so K2 is refused). `NemotronTokenizer`
+loads it with `AutoTokenizer` and renders the checkpoint's own
+`chat_template.jinja`, setting `enable_thinking=false` before the template's
+`is defined` fallback.
+
+Commands:
+
+```bash
+TinyTitanBench nemotroninfo models/nemotron-3.5-bolt_74B_A9B_4Bit
+TinyTitanBench nemotron      <install> "The capital of France is" 4   # CPU
+TinyTitanBench nemotrongraph <install> "The capital of France is" 4   # Metal, GPU-resident
+TinyTitanBench nemotronlogits <install> 5,7,9 [--gpu|--graph]         # no tokenizer
+benchmark/nemotron_decode.py --install4 ... --install8 ... --runs 1
+```
+
+## 5. The Neural Engine
+
+There is **no ANE decode path for this model, and this is a hardware limit, not
+an omission**. TinyTitan's ANE path is a Core ML sidecar that computes a
+full-attention block's prefill (`docs/v4.5-ane-prefill.md`); the ANE is
+programmed by exporting a fixed graph, not by launching arbitrary compute.
+Nemotron 3.5 Bolt needs three things Core ML cannot express here:
+
+1. a per-token **selective-scan recurrence** over a 128×64×128 FP32 state in
+   each of 40 layers — the ANE has no such op and the model is not a static
+   graph;
+2. **dynamic gather of 9 of 240–496 experts per layer** from an 80 GB blob —
+   there is no ANE op for an indexed expert read, and a dense surrogate would
+   be 74B parameters per token;
+3. the routed experts do not fit in 24 GB of unified memory even at 4 bits.
+
+A decode column is therefore reported as **NA with that reason**; it is not
+replaced by a prefill-assisted number that would measure the GPU anyway.

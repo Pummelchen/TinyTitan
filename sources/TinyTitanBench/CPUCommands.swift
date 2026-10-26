@@ -317,31 +317,11 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
-        case "k2gpu":
-            // The K2 install through the probe graph on Metal: install,
-            // prompt, greedy limit.
-            let install =
-                CommandLine.arguments.count > 2
-                ? CommandLine.arguments[2] : "models/k2-horizon-4bit.ssdai"
-            let prompt =
-                CommandLine.arguments.count > 3
-                ? CommandLine.arguments[3] : "The capital of France is"
-            let limit =
-                CommandLine.arguments.count > 4
-                ? Int(CommandLine.arguments[4]) ?? 1 : 1
-            try runK2GPU(install: install, prompt: prompt, limit: limit)
-        case "k2":
-            // The K2-Horizon CPU model: snapshot in, prompt, greedy limit.
-            let snapshot =
-                CommandLine.arguments.count > 2
-                ? CommandLine.arguments[2] : ".build/k2-horizon-affine-4bit"
-            let prompt =
-                CommandLine.arguments.count > 3
-                ? CommandLine.arguments[3] : "The capital of France is"
-            let limit =
-                CommandLine.arguments.count > 4
-                ? Int(CommandLine.arguments[4]) ?? 32 : 32
-            try runK2(snapshot: snapshot, prompt: prompt, limit: limit)
+        case "nemotron", "nemotrongpu", "nemotrongraph",
+            "nemotronlogits", "nemotroninfo":
+            // The Nemotron family has its own reader and graph; see
+            // NemotronCommands for the argument shapes.
+            try runNemotronCommand(CommandLine.arguments)
         case "cpu35ppl":
             // Held-out text through the CPU forward pass: mean NLL and
             // perplexity, the sharper instrument the twenty-prompt A/B was

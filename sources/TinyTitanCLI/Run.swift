@@ -74,6 +74,11 @@ public func run(
             stderr.write(Data((line + "\n").utf8))
         }
         let modelURL = URL(fileURLWithPath: args.model)
+        if let nemotron = await NemotronRun.runIfNemotron(
+            args: args, stdout: stdout, stderr: stderr)
+        {
+            return nemotron
+        }
         let thinkingMode: ThinkingMode = args.thinkingMode == .on ? .on : .off
         let reasoningEffort = args.reasoningEffort.flatMap {
             ReasoningEffort(rawValue: $0.rawValue)
