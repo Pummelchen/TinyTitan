@@ -77,6 +77,51 @@ void softplus_gate_mul_fp16(
     out[tid] = half(float(out[tid]) * (sp / beta));
 }
 
+// out[i] *= softplus(gate[i / head_dim]) — Laguna-S-2.1's per-head gate.
+//
+// One gate value per query head, broadcast across that head's head_dim
+// channels. Plain softplus log(1 + exp(x)), not K2's beta = ln 2 form: the
+// checkpoints differ and the gate is applied before o_proj in both.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void softplus_gate_per_head_mul_fp16(
+    device half*       out      [[buffer(0)]],
+    device const half* gate     [[buffer(1)]],
+    constant uint&     count    [[buffer(2)]],
+    constant uint&     head_dim [[buffer(3)]],
+    uint               tid      [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    const float s = float(gate[tid / head_dim]);
+    const float sp = s > 0.0f ? s + log(1.0f + exp(-s)) : log(1.0f + exp(s));
+    out[tid] = half(float(out[tid]) * sp);
+}
+
+// out[i] = x[i] * factor — the residual-stream scale.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void scale_fp16(
+    device half*       out    [[buffer(0)]],
+    device const half* x      [[buffer(1)]],
+    constant uint&     count  [[buffer(2)]],
+    constant float&    factor [[buffer(3)]],
+    uint               tid    [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    out[tid] = half(float(x[tid]) * factor);
+}
+
+// hidden[i] += factor * delta[i] — the scaled residual add.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void residual_add_scaled_fp16(
+    device half*       hidden [[buffer(0)]],
+    device const half* delta  [[buffer(1)]],
+    constant uint&     count  [[buffer(2)]],
+    constant float&    factor [[buffer(3)]],
+    uint               tid    [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    hidden[tid] = half(float(hidden[tid]) + factor * float(delta[tid]));
+}
+
 // y[i] *= sigmoid(gate[0]) — Qwen 3.6 shared-expert scalar gate.
 [[kernel, max_total_threads_per_threadgroup(256)]]
 void sigmoid_scalar_mul_fp16(

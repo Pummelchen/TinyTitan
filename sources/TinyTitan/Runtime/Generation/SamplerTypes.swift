@@ -73,6 +73,9 @@ public enum GenerationDefaults {
             // The K2 model card asks for 1.0 / 0.95 at high reasoning effort;
             // top-k is the runtime's usual 20 (the card names no top-k).
             return Sampling(temperature: 1.0, topK: topK, topP: 0.95)
+        case .laguna:
+            // generation_config.json: temperature 1.0, top_p 1.0, top_k 20.
+            return Sampling(temperature: 1.0, topK: 20, topP: 1.0)
         default:
             return house
         }

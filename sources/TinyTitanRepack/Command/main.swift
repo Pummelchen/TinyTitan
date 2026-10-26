@@ -48,7 +48,12 @@ private struct Arguments {
     var localModelID: String?
     var draftHead = false
     var shareNgramTable = false
+    var consumeSnapshot = false
 
+    /// lint:allow-long a flag table: one `case` per option plus its
+    /// validation. Splitting it would scatter the accepted grammar across
+    /// helpers and make an option's parse and its refusal impossible to read
+    /// together.
     static func parse(_ values: [String]) throws -> Arguments {
         var parsed = Arguments()
         var index = 1
@@ -100,6 +105,9 @@ private struct Arguments {
             case "--share-ngram-table":
                 parsed.shareNgramTable = true
                 index += 1
+            case "--consume-snapshot":
+                parsed.consumeSnapshot = true
+                index += 1
             case "--output", "--input-ssdai", "--input-gturbo", "--input-snapshot", "--model-id":
                 guard index + 1 < values.count else {
                     throw ParseError.missingValue(flag)
@@ -124,9 +132,14 @@ private struct Arguments {
         }
         // Both are fields of `LocalSnapshotRepackOptions`, which the download,
         // discard and receipt routes have no parameter for.
+        guard !parsed.consumeSnapshot || parsed.inputSnapshot != nil else {
+            throw ParseError.invalidMode(
+                "--consume-snapshot applies only to --input-snapshot imports")
+        }
         guard (!parsed.draftHead && !parsed.shareNgramTable) || parsed.inputSnapshot != nil else {
             throw ParseError.invalidMode(
-                "--draft-head and --share-ngram-table apply only to --input-snapshot imports")
+                "--draft-head, --share-ngram-table and --consume-snapshot apply "
+                    + "only to --input-snapshot imports")
         }
         if parsed.discardPartial {
             guard parsed.output != nil else {
@@ -309,6 +322,7 @@ private func run(_ values: [String]) async -> Int32 {
                     modelID: modelID,
                     draftHead: arguments.draftHead,
                     shareNgramTable: arguments.shareNgramTable,
+                    consumeSnapshot: arguments.consumeSnapshot,
                     overwrite: arguments.overwrite),
                 progress: { progress in progressDisplay.handle(progress) })
             print("Imported local snapshot")

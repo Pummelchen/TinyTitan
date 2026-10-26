@@ -7,6 +7,9 @@ import Metal
 final class Elementwise {
     private let sigmoidGateMulPSO: MTLComputePipelineState
     private let softplusGateMulPSO: MTLComputePipelineState
+    private let softplusGatePerHeadPSO: MTLComputePipelineState
+    private let scalePSO: MTLComputePipelineState
+    private let residualAddScaledPSO: MTLComputePipelineState
     private let sigmoidScalarMulPSO: MTLComputePipelineState
     private let residualAddPSO: MTLComputePipelineState
     private let splitQGatePSO: MTLComputePipelineState
@@ -29,6 +32,10 @@ final class Elementwise {
     init(context: MetalContext) throws {
         self.sigmoidGateMulPSO = try context.pipeline("sigmoid_gate_mul_fp16")
         self.softplusGateMulPSO = try context.pipeline("softplus_gate_mul_fp16")
+        self.softplusGatePerHeadPSO = try context.pipeline(
+            "softplus_gate_per_head_mul_fp16")
+        self.scalePSO = try context.pipeline("scale_fp16")
+        self.residualAddScaledPSO = try context.pipeline("residual_add_scaled_fp16")
         self.sigmoidScalarMulPSO = try context.pipeline("sigmoid_scalar_mul_fp16")
         self.residualAddPSO = try context.pipeline("residual_add_fp16")
         self.splitQGatePSO = try context.pipeline("split_q_gate_fp16")
@@ -198,6 +205,29 @@ final class Elementwise {
         encoder.endEncoding()
     }
 
+    /// out[i] *= softplus(gate[head(i)]) — Laguna's per-head attention gate.
+    func encodeSoftplusGatePerHeadMul(
+        commandBuffer: MTLCommandBuffer,
+        out: MTLBuffer, outOffset: Int = 0,
+        gate: MTLBuffer, gateOffset: Int = 0,
+        count: Int,
+        headDim: Int
+    ) throws {
+        precondition(count % headDim == 0, "count must cover whole heads")
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(softplusGatePerHeadPSO)
+        encoder.setBuffer(out, offset: outOffset, index: 0)
+        encoder.setBuffer(gate, offset: gateOffset, index: 1)
+        var elementCount = UInt32(count)
+        var width = UInt32(headDim)
+        encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
+        encoder.setBytes(&width, length: MemoryLayout<UInt32>.size, index: 3)
+        dispatch(encoder, pipeline: softplusGatePerHeadPSO, threads: count)
+        encoder.endEncoding()
+    }
+
     /// y[i] *= sigmoid(gate[0])
     func encodeSigmoidScalarMul(
         commandBuffer: MTLCommandBuffer,
@@ -214,6 +244,48 @@ final class Elementwise {
         var elementCount = UInt32(count)
         encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
         dispatch(encoder, pipeline: sigmoidScalarMulPSO, threads: count)
+        encoder.endEncoding()
+    }
+
+    /// out[i] = x[i] * factor
+    func encodeScale(
+        commandBuffer: MTLCommandBuffer,
+        x: MTLBuffer, xOffset: Int = 0,
+        out: MTLBuffer, outOffset: Int = 0,
+        count: Int, factor: Float
+    ) throws {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(scalePSO)
+        encoder.setBuffer(out, offset: outOffset, index: 0)
+        encoder.setBuffer(x, offset: xOffset, index: 1)
+        var elementCount = UInt32(count)
+        var scale = factor
+        encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
+        encoder.setBytes(&scale, length: MemoryLayout<Float>.size, index: 3)
+        dispatch(encoder, pipeline: scalePSO, threads: count)
+        encoder.endEncoding()
+    }
+
+    /// hidden[i] += factor * delta[i] — a scaled residual add.
+    func encodeResidualAddScaled(
+        commandBuffer: MTLCommandBuffer,
+        hidden: MTLBuffer, hiddenOffset: Int = 0,
+        delta: MTLBuffer, deltaOffset: Int = 0,
+        count: Int, factor: Float
+    ) throws {
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            throw MetalError.commandEncoderFailed
+        }
+        encoder.setComputePipelineState(residualAddScaledPSO)
+        encoder.setBuffer(hidden, offset: hiddenOffset, index: 0)
+        encoder.setBuffer(delta, offset: deltaOffset, index: 1)
+        var elementCount = UInt32(count)
+        var scale = factor
+        encoder.setBytes(&elementCount, length: MemoryLayout<UInt32>.size, index: 2)
+        encoder.setBytes(&scale, length: MemoryLayout<Float>.size, index: 3)
+        dispatch(encoder, pipeline: residualAddScaledPSO, threads: count)
         encoder.endEncoding()
     }
 

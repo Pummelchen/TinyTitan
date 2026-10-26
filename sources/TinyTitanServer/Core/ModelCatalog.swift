@@ -251,6 +251,14 @@ public struct ModelCatalog: Sendable {
             // the entry is honest, and `ModelRouter` picks the backend by
             // family.
             break
+        case .laguna:
+            return .failure(
+                ProbeFailure(
+                    reason:
+                        "Laguna-S-2.1 (\(identity.family.rawValue)) is not served yet: "
+                        + "its decode probe exists, the server graph does not "
+                        + "(docs/plan-laguna-s-2.1.md)"
+                ))
         }
         guard GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil else {
             return .failure(

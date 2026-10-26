@@ -25,7 +25,7 @@ extension RepackPlanner {
             // The draft needs no sidecar files of its own: it has no n-gram
             // block, and its embedding and head are the target's.
             return []
-        case .qwen35Dense, .k2Horizon:
+        case .qwen35Dense, .k2Horizon, .laguna:
             // A dense Qwen 3.5 has no hashed n-gram block and no PLE
             // constants; its tokenizer travels with the payload like every
             // other family's. K2-Horizon likewise carries only its tokenizer
@@ -116,6 +116,21 @@ enum RepackPlanner {
                 {
                     return .routedExpert(role: role, layer: layer)
                 }
+                return .lmResident
+            }
+            return .unknown
+        }
+        if family == .laguna {
+            // Laguna's snapshot keeps the checkpoint's names, with the 256
+            // experts already fused into `mlp.switch_mlp.*` by the converter.
+            if isMultimodalTensorName(name) { return .excludedMultimodal }
+            if let role = routedExpertRole(in: name),
+                let layer = layerIndex(in: name),
+                layer >= 0, layer < numLayers
+            {
+                return .routedExpert(role: role, layer: layer)
+            }
+            if name.hasPrefix("model.") || name.hasPrefix("lm_head.") {
                 return .lmResident
             }
             return .unknown

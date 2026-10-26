@@ -99,6 +99,10 @@ enum DoctorModelScanner {
             return "K2-Horizon is not served by this CLI: the server's probe "
                 + "backend serves it, and `TinyTitanBench k2gpu` runs it "
                 + "directly (docs/plan-k2-horizon.md)"
+        case .laguna:
+            return "Laguna-S-2.1's decode probe is implemented; the serving "
+                + "graph is not, so the install validates but is not served "
+                + "(docs/plan-laguna-s-2.1.md)"
         case .qwen36, .qwen38flash, .qwen35Dense:
             return nil
         }

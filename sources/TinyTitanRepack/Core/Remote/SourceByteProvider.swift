@@ -9,7 +9,8 @@ public protocol SourceByteProvider {
         temporaryPath: String,
         audit: RepackAudit,
         progress: @escaping @Sendable (UInt64) -> Void,
-        commit: (RemoteCompletedRange) throws -> Void
+        commit: (RemoteCompletedRange) throws -> Void,
+        consumeSource: Bool
     ) async throws
 }
 
@@ -63,7 +64,8 @@ public final class HTTPRangeSourceByteProvider: SourceByteProvider {
         temporaryPath: String,
         audit: RepackAudit,
         progress: @escaping @Sendable (UInt64) -> Void,
-        commit: (RemoteCompletedRange) throws -> Void
+        commit: (RemoteCompletedRange) throws -> Void,
+        consumeSource: Bool
     ) async throws {
         let scratch = UnsafeMutableRawBufferPointer.allocate(
             byteCount: writeTileBytes,

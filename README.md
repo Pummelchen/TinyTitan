@@ -8,9 +8,9 @@
 [![Views (14d)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Pummelchen/TinyTitan/main/.github/traffic.json)](https://github.com/Pummelchen/TinyTitan)
 [![Last Commit](https://img.shields.io/github/last-commit/Pummelchen/TinyTitan?style=flat-square&logo=git&label=Last%20Commit&color=2ea44f)](https://github.com/Pummelchen/TinyTitan/commits/main)
 
-**TinyTitan runs Qwen-family MoE and dense text models locally on Apple Silicon,
-streaming the routed experts from SSD so a model larger than your RAM still
-runs.** Decode is native Swift over hand-written Metal kernels; the prompt runs
+**TinyTitan runs Qwen-family MoE and dense text models, and Poolside's
+Laguna-S-2.1, locally on Apple Silicon, streaming the routed experts from SSD
+so a model larger than your RAM still runs.** Decode is native Swift over hand-written Metal kernels; the prompt runs
 on the GPU or, optionally, the Apple Neural Engine. It ships a CLI, an
 installer/repacker, and a loopback OpenAI-compatible server with no MLX and no
 GGUF dependency.
@@ -89,6 +89,16 @@ blobs, so those figures would be NA rather than a different path. The 8-bit
 graph is slower than its CPU path because wiring 8.45 GB of resident weights
 leaves no room for the expert working set that the 4-bit install fits.
 
+Laguna-S-2.1's decode column is its Metal probe (`TinyTitanBench lagunagpu`),
+not the server: the probe runs the real 4- and 8-bit installs token by token.
+Those two rows are logged chat-template runs: the 4-bit install prefilled the
+48-token chat prompt in 66.1 s and decoded 8 tokens at 1.47 tok/s; the 8-bit
+install prefilled in 148.4 s and decoded at 0.65 tok/s. Page-cache state moves
+them (4-bit 1.12-1.47, 8-bit 0.50-0.87 tok/s) and the full spread is in
+`docs/plan-laguna-s-2.1.md`. K2-Horizon's score is from its
+[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
+Terminal-Bench 4.0 result is published for it.
+
 Per-version measurements and the method live on the wiki
 ([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
 [Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
@@ -97,6 +107,8 @@ Per-version measurements and the method live on the wiki
 | --- | --- | ---: | ---: | ---: | ---: |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
+| Laguna-S-2.1 118B-A8B | 4-bit | **1.47 tok/s** | NA | 70.2% (2.1) | NA |
+| Laguna-S-2.1 118B-A8B | 8-bit | **0.65 tok/s** | NA | 70.2% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
 | K2-Horizon-MoVA-36B-A4B | 4-bit | **12.4 tok/s** | NA | 58.6% (2.1) | NA |

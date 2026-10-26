@@ -32,6 +32,14 @@ extension RealForwardRunner {
                     + "<install> \"<prompt>\"` runs it directly. "
                     + "See docs/plan-k2-horizon.md.")
         }
+        // Laguna is the same shape of exception: its decode probe exists, the
+        // serving graph does not.
+        guard cfg.family != .laguna else {
+            throw ModelError.unsupportedArchitecture(
+                detail: "Laguna-S-2.1 does not run on this runner: "
+                    + "`TinyTitanBench lagunagpu <install> \"<prompt>\"` runs "
+                    + "its decode probe. See docs/plan-laguna-s-2.1.md.")
+        }
         precondition(
             slots > 0 && slots <= KVCacheManager.maximumSlots,
             "slots must be between 1 and \(KVCacheManager.maximumSlots)")

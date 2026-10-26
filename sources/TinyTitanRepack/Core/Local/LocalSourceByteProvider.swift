@@ -24,7 +24,8 @@ final class LocalSourceByteProvider: SourceByteProvider {
         temporaryPath: String,
         audit: RepackAudit,
         progress: @escaping @Sendable (UInt64) -> Void,
-        commit: (RemoteCompletedRange) throws -> Void
+        commit: (RemoteCompletedRange) throws -> Void,
+        consumeSource: Bool
     ) async throws {
         let scratch = UnsafeMutableRawBufferPointer.allocate(
             byteCount: writeTileBytes,
@@ -37,6 +38,15 @@ final class LocalSourceByteProvider: SourceByteProvider {
             for descriptor in outputDescriptors.values { close(descriptor) }
         }
         var copiedBytes: UInt64 = 0
+        // Every coalesced copy reads one shard. Counting the reads per shard
+        // up front is what makes deletion safe: the file goes only after the
+        // last copy that will ever read it has committed its digest.
+        var remainingByShard: [String: Int] = [:]
+        if consumeSource {
+            for copy in copies where !completedRangeIDs.contains(copy.id) {
+                remainingByShard[copy.shardID, default: 0] += 1
+            }
+        }
 
         for copy in copies where !completedRangeIDs.contains(copy.id) {
             try Task.checkCancellation()
@@ -90,6 +100,13 @@ final class LocalSourceByteProvider: SourceByteProvider {
                     destinationDigest: digest,
                     sourceBytes: copy.size,
                     destinationBytes: copy.destinations.reduce(0) { $0 + $1.size }))
+            if consumeSource {
+                let left = (remainingByShard[copy.shardID] ?? 1) - 1
+                remainingByShard[copy.shardID] = left
+                if left == 0 {
+                    try? FileManager.default.removeItem(atPath: sourcePath)
+                }
+            }
             copiedBytes += copy.size
             progress(copiedBytes)
         }

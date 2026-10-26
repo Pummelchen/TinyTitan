@@ -13,6 +13,9 @@ enum RepackModelFamily: String, Sendable, Equatable {
     /// K2-Horizon's sparse family: 100 routed experts, a shared expert, a
     /// grouped RMS norm, a softplus attention gate and MoVA value experts.
     case k2Horizon = "k2_horizon"
+    /// Laguna-S-2.1: per-head softplus gating, QK norms, two RoPE dialects
+    /// and a 1:3 global-to-sliding layer mask.
+    case laguna = "laguna"
     /// A draft sidecar is loaded beside a target and prompted through the
     /// target's tokenizer, so a local import of one carries no tokenizer of
     /// its own.
@@ -255,6 +258,9 @@ struct ArchInfo: Sendable, Equatable {
         }
         if (root["model_type"] as? String) == "k2_horizon" {
             return try loadK2Horizon(configPath: configPath, tc: tc)
+        }
+        if (root["model_type"] as? String) == "laguna" {
+            return try loadLaguna(configPath: configPath, tc: tc)
         }
         throw RepackError.configJsonInvalid(
             path: configPath,

@@ -322,6 +322,19 @@ extension TinyTitanBench {
             // The Nemotron family has its own reader and graph; see
             // NemotronCommands for the argument shapes.
             try runNemotronCommand(CommandLine.arguments)
+        case "lagunagpu":
+            // The Laguna-S-2.1 install through the probe graph on Metal:
+            // install, prompt, greedy limit.
+            let install =
+                CommandLine.arguments.count > 2
+                ? CommandLine.arguments[2] : "models/laguna-s-2.1-4bit.ssdai"
+            let prompt =
+                CommandLine.arguments.count > 3
+                ? CommandLine.arguments[3] : "The capital of France is"
+            let limit =
+                CommandLine.arguments.count > 4
+                ? Int(CommandLine.arguments[4]) ?? 1 : 1
+            try runLagunaGPU(install: install, prompt: prompt, limit: limit)
         case "cpu35ppl":
             // Held-out text through the CPU forward pass: mean NLL and
             // perplexity, the sharper instrument the twenty-prompt A/B was

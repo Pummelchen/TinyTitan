@@ -168,9 +168,26 @@ extension RemoteStreamingRepacker {
             .planning(
                 downloadBytes: rangePlan.remoteBytesToDownload,
                 outputBytes: outputBytes))
+        // With `--consume-snapshot` the install grows as its source shards
+        // are deleted, so the extra space the copy needs is the install less
+        // the bytes those shards will release. The check is still bounded
+        // below by the reserve, never skipped.
+        var additionalBytes = outputBytes
+        if local.consumeSnapshot {
+            let releasable = source.metadata.shardFilenames.reduce(UInt64(0)) {
+                partial, shard in
+                let path = (local.inputSnapshotDir as NSString)
+                    .appendingPathComponent(shard)
+                let attributes = try? FileManager.default.attributesOfItem(
+                    atPath: path)
+                let size = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+                return partial + size
+            }
+            additionalBytes = outputBytes > releasable ? outputBytes - releasable : 0
+        }
         let diskRequirement = try DiskSpaceChecker.requireAvailable(
             path: paths.parentDirectory,
-            bytes: outputBytes,
+            bytes: additionalBytes,
             reserveBytes: local.minFreeReserveBytes)
         progress(.checkingDisk(diskRequirement))
         try Task.checkCancellation()
@@ -325,7 +342,8 @@ extension RemoteStreamingRepacker {
                             downloadedThisRunBytes: bytes,
                             totalBytes: rangePlan.remoteBytesToDownload))
                 },
-                commit: { _ in })
+                commit: { _ in },
+                consumeSource: local.consumeSnapshot)
 
             try recordOutputFile(
                 relativePath: "model_weights.bin",
