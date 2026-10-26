@@ -128,6 +128,31 @@ Per-version measurements and the method live on the wiki
 | Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** | 3.0% (2.1) | NA |
 | Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** | 3.0% (2.1) | NA |
 
+### Nemotron 3.5 Bolt 74B-A9B — the 4-bit and 8-bit conversions
+
+Both installs are written from the pinned BF16 release (`…-BF16` at
+`e09a4ced…`) by `tools/prepare_nemotron.py` and pass
+`TinyTitanRepack --verify-install`. Decode is measured by
+`benchmark/nemotron_decode.py` with prompt `Once upon a time, there was a`, four
+tokens, EOS suppressed, one warm-up plus three processes, median:
+
+| Build | Install | GPU decode | CPU decode | Prompt prefill |
+| --- | ---: | ---: | ---: | ---: |
+| 4-bit | 45.86 GB | **6.66 tok/s** | **3.60 tok/s** | 11.4 s GPU / 3.6 s CPU |
+| 8-bit | 85.48 GB | **0.57 tok/s** | **0.86 tok/s** | ~21 s both |
+
+The 4-bit GPU figure is the warm median; its first process is cold and streams
+the 46 GB install's expert set from SSD at **1.25 tok/s**. The 8-bit graph is
+slower than its CPU path because wiring 8.45 GB of resident weights leaves no
+page-cache room for the 85 GB expert set. For scale, the same arms measured
+**0.94 / 0.77 / 0.42 / 0.58 tok/s** while this host was under load (load average
+8, a Swift test runner and a GPU-heavy game each near a core); those runs are
+kept in
+[`benchmark/nemotron_decode-loaded-2026-10-26.json`](benchmark/nemotron_decode-loaded-2026-10-26.json).
+No ANE figure is published: the Neural Engine cannot execute this model's
+selective scan or dynamic expert gather.
+
+
 ## Documentation
 
 - [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)
