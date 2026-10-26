@@ -138,9 +138,9 @@ Two changes:
 
 ## Measurements
 
-Filled in as the runs finish. The benchmark prompt is the project's canonical
-`The capital of France is`, greedy, with a plain tokenizer encode (no chat
-template), so the number is comparable with the K2 and Qwen runs.
+Measured on this host (M3, 24 GB), greedy, with the checkpoint's own 48-token
+chat template and `What is the capital of France?`. That is the model's
+intended format; a plain continuation is not, and the probe records both.
 
 | Install | Prompt | Prefill | Decode | Output |
 | --- | ---: | ---: | ---: | --- |
@@ -158,10 +158,11 @@ on this host is:
 Every run produced the **same eight token ids** at both widths, which is the
 width-quality check this probe offers. Decode is short (8 tokens) and the
 8-bit install is 125 GB on a 24 GB machine, so the spread is dominated by what
-the page cache holds, not by a steady-state ceiling. A 16-token no-think run of the 4-bit
-install answered "The capital of France is Paris." — the model is the chat
-model it says it is, and the plain continuation used by the earlier K2 run is
-not its format.
+the page cache holds, not by a steady-state ceiling. A 32-token chat run of
+the 4-bit install reasons "Okay, the user is asking for the capital of France.
+Let me start by recalling what I know. France is a country in Western Europe.
+The capital is" — the model is the chat model it says it is, and the plain
+continuation used by the earlier K2 run is not its format.
 
 Both numbers are the **GPU (Metal)** decode; `NA` for CPU is deliberate (the
 CPU engine only serves the dense Qwen 3.5 models) and there is no ANE decode
