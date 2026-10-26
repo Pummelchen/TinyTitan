@@ -894,6 +894,19 @@ class Install:
                             "dtype": "BF16",
                             "shape": [tensor.shape[0], tensor.shape[-1] // GROUP_SIZE],
                         }
+                    # The verifier requires an expert's declared tensors to
+                    # pad to the install-wide stride, because the file's
+                    # capacity is expertsPerLayer * stride. Layers narrower
+                    # than the widest one therefore describe their zero tail
+                    # as a BF16 padding tensor.
+                    used = max(t["offset"] + t["size"] for t in tensors.values())
+                    if used < layer_plan.stride:
+                        tensors["padding"] = {
+                            "offset": used,
+                            "size": layer_plan.stride - used,
+                            "dtype": "BF16",
+                            "shape": [(layer_plan.stride - used) // 2, 1],
+                        }
                     experts.append(
                         {
                             "expert": expert,
