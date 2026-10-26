@@ -52,6 +52,11 @@ public struct GFTokenizer: @unchecked Sendable {
     let thinkEndMark: String
     let toolCallStartMark: String
     let toolCallEndMark: String
+    /// The outer `<ifm|tool_calls>` wrapper: present for K2, nil elsewhere.
+    public let toolCallsStartID: Int32?
+    public let toolCallsEndID: Int32?
+    let toolCallsStartMark: String
+    let toolCallsEndMark: String
 
     /// Tokens that stand for a control marker rather than for text: the ChatML
     /// turn and tool barriers, the channel markers, and every stop token.
@@ -70,6 +75,8 @@ public struct GFTokenizer: @unchecked Sendable {
         ]
         if let thinkStartID { ids.insert(thinkStartID) }
         if let thinkEndID { ids.insert(thinkEndID) }
+        if let toolCallsStartID { ids.insert(toolCallsStartID) }
+        if let toolCallsEndID { ids.insert(toolCallsEndID) }
         ids.formUnion(stopTokenIDs)
         return ids
     }
@@ -142,6 +149,10 @@ public struct GFTokenizer: @unchecked Sendable {
         self.thinkEndMark = resolved.thinkEndMark
         self.toolCallStartMark = resolved.toolCallStartMark
         self.toolCallEndMark = resolved.toolCallEndMark
+        self.toolCallsStartID = resolved.toolCallsStartID
+        self.toolCallsEndID = resolved.toolCallsEndID
+        self.toolCallsStartMark = resolved.toolCallsStartMark
+        self.toolCallsEndMark = resolved.toolCallsEndMark
         self.thinkingMode = thinkingMode
         // Every supported template ignores effort while thinking is off, so
         // an off-mode tokenizer stores none rather than an inert value.
@@ -159,9 +170,19 @@ public struct GFTokenizer: @unchecked Sendable {
     }
 
     private var templateContext: [String: any Sendable] {
-        Self.templateContext(
+        var context = Self.templateContext(
             thinkingEnabled: thinkingMode.isEnabled,
             reasoningEffort: reasoningEffort)
+        if dialect == .k2 {
+            // The checkpoint's markdown tool renderer compares schema nodes
+            // with `is sameas true`, and swift-jinja's `sameas` goes through
+            // `compare(to:)`, which throws for a mapping ("Cannot compare
+            // values of different types ({type: string} and true)"). JSON
+            // presentation is a mode the template itself supports and renders
+            // through `tojson`, so a tool prompt can be built at all.
+            context["tool_presentation_format"] = "json"
+        }
+        return context
     }
 
     /// Encode UTF-8 text to token IDs.
@@ -225,13 +246,19 @@ public struct GFTokenizer: @unchecked Sendable {
         public let toolCalls: [HistoricalToolCall]
         public let toolCallID: String?
         public let name: String?
+        /// A historical assistant turn's reasoning, when the caller kept it.
+        /// The K2 template refuses an assistant message without a thinking
+        /// field, so this is what a replayed turn carries; nil renders an
+        /// empty block (the turn had closed it).
+        public let reasoning: String?
 
-        public init(role: Role, content: String) {
+        public init(role: Role, content: String, reasoning: String? = nil) {
             self.role = role
             self.content = content
             self.toolCalls = []
             self.toolCallID = nil
             self.name = nil
+            self.reasoning = reasoning
         }
 
         public init(
@@ -239,13 +266,15 @@ public struct GFTokenizer: @unchecked Sendable {
             content: String?,
             toolCalls: [HistoricalToolCall] = [],
             toolCallID: String? = nil,
-            name: String? = nil
+            name: String? = nil,
+            reasoning: String? = nil
         ) {
             self.role = role
             self.content = content
             self.toolCalls = toolCalls
             self.toolCallID = toolCallID
             self.name = name
+            self.reasoning = reasoning
         }
     }
 
@@ -361,6 +390,17 @@ public struct GFTokenizer: @unchecked Sendable {
         return (reasoning, String(afterLast.drop(while: { $0 == "\n" })))
     }
 
+    /// The field name the K2 template reads for a historical assistant turn's
+    /// thinking. It selects the tag by the effort the tokenizer was loaded
+    /// with, matching the generation prompt the same template writes.
+    private var k2ThinkKey: String {
+        switch reasoningEffort ?? .high {
+        case .medium: return "think_fast"
+        case .low: return "think_faster"
+        case .high, .xhigh: return "think"
+        }
+    }
+
     public func encodeToolChat(
         messages: [Message],
         tools: [FunctionDefinition]
@@ -373,6 +413,13 @@ public struct GFTokenizer: @unchecked Sendable {
                 "role": message.role.templateRole,
                 "content": message.content,
             ]
+            if dialect == .k2, message.role == .assistant {
+                // The K2 template raises unless an assistant turn names the
+                // block its thinking lived in, so a replayed turn has to carry
+                // one: the caller's reasoning when it kept it, an empty block
+                // when it did not (the turn closed it before answering).
+                value[k2ThinkKey] = message.reasoning ?? ""
+            }
             if !message.toolCalls.isEmpty {
                 value["tool_calls"] = try message.toolCalls.map { call -> [String: any Sendable] in
                     [

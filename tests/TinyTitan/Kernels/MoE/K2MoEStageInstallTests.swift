@@ -123,6 +123,20 @@ import TinyTitanValidationSupport
         await valueCB.completed()
         let actual = Fp16Buffer.read(outBuf, count: hiddenSize)
 
+        // The fused form binds the same fetched blobs through argument
+        // buffers, so this also checks the layout's sub-tensor offsets are
+        // addressable that way.
+        let fusedBuf = try #require(Fp16Buffer.make(ctx.device, count: hiddenSize))
+        let fusedCB = try #require(ctx.queue.makeCommandBuffer())
+        try stage.encodeFusedExperts(
+            commandBuffer: fusedCB, hidden: xBuf,
+            experts: experts, shared: shared, out: fusedBuf)
+        fusedCB.commit()
+        await fusedCB.completed()
+        let fused = Fp16Buffer.read(fusedBuf, count: hiddenSize)
+        let fusedVsStaged = RelError.compute(actual: fused, reference: actual)
+        #expect(fusedVsStaged < Tolerance.fp16Reduction, "relErr=\(fusedVsStaged)")
+
         let xFloat = x.map(Float.init)
         let router = Self.bf16(routerView, count: config.numExperts * hiddenSize)
         let bias = Self.bf16(biasView, count: config.numExperts)

@@ -145,6 +145,9 @@ step "preconditions"
 # first, where the message can say what to actually run.
 [ -x "$ROOT/.build/release/TinyTitanCLI" ] \
   || die "no release build at .build/release/TinyTitanCLI; run: swift build -c release (the golden gate drives that binary)"
+# The K2 targets drive the probe instead of the CLI.
+[ -x "$ROOT/.build/release/TinyTitanBench" ] \
+  || die "no release build at .build/release/TinyTitanBench; run: swift build -c release (the k2-4/k2-8 golden targets drive that binary)"
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "tag $TAG does not exist locally"
 [ "$(git rev-parse "$TAG^{commit}")" = "$(git rev-parse HEAD)" ] \
   || die "HEAD is not $TAG; check out the tagged commit before releasing"
@@ -253,6 +256,10 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 #
 #   * the MTP draft head -- a sidecar to a target whose own baseline already
 #     exercises it, not a served model.
+#   * the K2-Horizon installs are golden targets of their own (k2-4/k2-8), but
+#     they are driven by `TinyTitanBench k2gpu` rather than the CLI: the family
+#     has no CLI path. tools/golden-baseline.sh owns that branch and the bench's
+#     `TINYTITAN_K2_GOLDEN` capture/compare.
 #
 # The dense Qwen 3.5 2B/4B/9B were listed here too, because they had no stored
 # baseline at all: a release verified them through neither path, and capturing
@@ -320,6 +327,8 @@ check_golden qwen3.6_35B_A3B_4Bit qwen36-4
 check_golden qwen3.6_35B_A3B_8Bit qwen36-8
 check_golden qwen3.8-flash-next_125B_A6B_4Bit qwen38-4
 check_golden qwen3.8-flash-next_125B_A6B_8Bit qwen38-8
+check_golden k2-horizon-4bit.ssdai k2-4
+check_golden k2-horizon-8bit.ssdai k2-8
 check_golden qwen-agentworld_35B_A3B_4Bit agentworld-4
 check_golden qwen-agentworld_35B_A3B_8Bit agentworld-8
 # KAT-Coder-V2.5-Dev. Declared before its install existed so the first release

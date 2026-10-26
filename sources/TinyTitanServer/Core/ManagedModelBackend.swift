@@ -38,13 +38,19 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
         case stop
     }
 
-    private let plan: ModelSessionPlan
-    private let loader: Loader
+    /// Builds the object that serves. The Metal context is shared across
+    /// reloads; the closure captures whatever else the backend needs (a plan
+    /// for the runner graph, an install path for the K2 probe).
+    private let loader: @Sendable (MetalContext) async throws -> any ServerInferenceBackend
     private let idleTimeout: Duration?
 
     /// Answered from configuration and the manifest, so they are valid before
     /// the first load and identical to what the eager path would report.
     public nonisolated let maximumContext: Int
+    /// The row a request that omits sampling gets. The runner plans fill it
+    /// from their own catalog entry elsewhere; the wrapper answers the house
+    /// row unless the caller names one (the K2 probe passes its card row).
+    public nonisolated let samplingDefaults: GenerationDefaults.Sampling
     package nonisolated let facts: ModelSessionFacts
 
     private var session: (any ServerInferenceBackend)?
@@ -67,10 +73,27 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
             try await plan.makeSession(reusingContext: context)
         }
     ) {
-        self.plan = plan
         self.facts = facts
         self.idleTimeout = idleTimeout
         self.maximumContext = plan.maxContext
+        self.samplingDefaults = GenerationDefaults.house
+        self.loader = { context in try await loader(plan, context) }
+    }
+
+    /// The same residency logic for a backend that is not built from a plan.
+    package init(
+        facts: ModelSessionFacts,
+        maximumContext: Int,
+        samplingDefaults: GenerationDefaults.Sampling,
+        idleTimeout: Duration?,
+        loader:
+            @escaping @Sendable (MetalContext) async throws
+            -> any ServerInferenceBackend
+    ) {
+        self.facts = facts
+        self.idleTimeout = idleTimeout
+        self.maximumContext = maximumContext
+        self.samplingDefaults = samplingDefaults
         self.loader = loader
     }
 
@@ -196,9 +219,8 @@ public actor ManagedModelBackend: ServerInferenceBackend, ResidencyManaging, Pro
             metalContext = context
         }
 
-        let plan = self.plan
         let loader = self.loader
-        let task = Task { try await loader(plan, context) }
+        let task = Task { try await loader(context) }
         loadTask = task
         defer { loadTask = nil }
 

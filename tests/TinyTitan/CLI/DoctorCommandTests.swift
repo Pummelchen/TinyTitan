@@ -283,7 +283,7 @@ import TinyTitanLib
         // its graph does not exist, and doctor must say that rather than list
         // it as a model this machine can run.
         let k2 = DoctorModelScanner.unsupportedInstallReason(.k2Horizon)
-        #expect(k2?.contains("GPU graph is not implemented") == true)
+        #expect(k2?.contains("server's probe backend") == true)
         #expect(
             DoctorModelScanner.unsupportedInstallReason(.qwen36MTP)?
                 .contains("MTP draft head") == true)

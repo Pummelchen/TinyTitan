@@ -125,10 +125,15 @@ do {
             // residency line and a test all read the same
             // answer, and the CPU arm is testable without
             // a catalog on disk.
-            promptCacheMode: ServerModelSession.initialPromptCacheMode(
-                backend: initial.backend,
-                requested: arguments.promptCacheMode,
-                maxConcurrentSequences: concurrency))
+            // The probe backend keeps no prompt cache, so an entry the
+            // catalogue lists for it reports `.off` rather than the mode the
+            // server was asked for.
+            promptCacheMode: initial.kind == .gpu(.k2Horizon)
+                ? .off
+                : ServerModelSession.initialPromptCacheMode(
+                    backend: initial.backend,
+                    requested: arguments.promptCacheMode,
+                    maxConcurrentSequences: concurrency))
         reasoningProfile = routing.servedModel(named: initial.id)?.reasoningProfile
     } else if arguments.cpu {
         // A different engine entirely: no Metal context, no expert
@@ -166,6 +171,77 @@ do {
             family: .qwen36,
             thinkingMode: reasoning.thinking,
             reasoningEffort: nil)
+    } else if (try? ManifestReader.peekFamily(directoryURL: modelURL)) == .k2Horizon {
+        // K2 has a graph, but not this runner's: the probe is the engine. It
+        // is a backend of its own, like the CPU path, because
+        // `RealForwardRunner` sizes a Qwen-shaped pipeline set and refuses the
+        // family. No prompt cache, no batching, plain FP16 KV caches.
+        let slots = Int(
+            ProcessInfo.processInfo.environment["TINYTITAN_K2_SLOTS"] ?? ""
+        )
+        .flatMap { $0 > 0 ? $0 : nil }
+        let identity = try? ManifestReader.peekIdentity(directoryURL: modelURL)
+        let resolvedSlots = slots ?? ((identity?.weightBits ?? 4) == 4 ? 64 : 16)
+        let contextLimit = min(
+            arguments.maxContext, K2ProbeBackend.contextCeiling)
+        let identifier =
+            arguments.modelIDOverride
+            ?? modelURL.lastPathComponent
+        let k2Facts = ModelSessionFacts(
+            modelID: identifier,
+            prefillChunkTokens: 0,
+            promptCacheMode: .off,
+            expertCacheSlots: resolvedSlots)
+        facts = k2Facts
+        if arguments.managesResidency {
+            // --lazy-load and --idle-unload-seconds work here too: the wrapper
+            // builds a probe on demand and drops it when idle, which is what
+            // returns the install's ~22 GB. The Metal context is reused across
+            // reloads.
+            let residency = ManagedModelBackend(
+                facts: k2Facts,
+                maximumContext: contextLimit,
+                samplingDefaults: GenerationDefaults.forFamily(.k2Horizon),
+                idleTimeout: arguments.idleUnloadSeconds > 0
+                    ? .seconds(arguments.idleUnloadSeconds) : nil,
+                loader: { context in
+                    try await K2ProbeBackend(
+                        modelDirectory: modelURL,
+                        maximumContext: contextLimit,
+                        thinking: reasoning.thinking,
+                        reasoningEffort: reasoning.effort,
+                        slots: slots,
+                        reusingContext: context)
+                })
+            managed = residency
+            backend = residency
+            print(
+                "K2 probe engine: \(identifier) loads on the first request"
+                    + (arguments.idleUnloadSeconds > 0
+                        ? ", unloads after \(arguments.idleUnloadSeconds)s idle"
+                        : ""))
+        } else {
+            let started = ContinuousClock.now
+            let k2 = try await K2ProbeBackend(
+                modelDirectory: modelURL,
+                maximumContext: contextLimit,
+                thinking: reasoning.thinking,
+                reasoningEffort: reasoning.effort,
+                slots: slots)
+            backend = k2
+            let elapsed = started.duration(to: .now)
+            let seconds =
+                Double(elapsed.components.seconds)
+                + Double(elapsed.components.attoseconds) / 1e18
+            print(
+                String(
+                    format: "K2 probe engine: %@ in %.1fs, context %d, %d expert slots",
+                    identifier, seconds, k2.maximumContext, k2.expertCacheSlots))
+        }
+        reasoningProfile = ServerReasoningProfile(
+            family: .k2Horizon,
+            thinkingMode: reasoning.thinking,
+            reasoningEffort: reasoning.effort)
     } else if arguments.managesResidency {
         let plan = makePlan()
         // Reads manifest.json only; a bad --model still fails here at launch

@@ -78,12 +78,6 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 ## Benchmarks
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
-`NA` means that engine does not serve the model: the MoE families stream their
-experts on the GPU + ANE path, only the dense Qwen 3.5 models run on either
-engine, and K2-Horizon is install-only today — its GPU graph is not implemented,
-so both of its decode columns are `NA`. K2-Horizon's score is from its
-[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
-Terminal-Bench 4.0 result is published for it.
 
 Nemotron 3.5 Bolt is the 74B-A9B BF16 release converted by this repository to
 4-bit and 8-bit `.ssdai` installs. Its GPU number is the GPU-resident Metal graph
@@ -105,8 +99,8 @@ Per-version measurements and the method live on the wiki
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B | 4-bit | NA | NA | 58.6% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B | 8-bit | NA | NA | 58.6% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 4-bit | **12.4 tok/s** | NA | 58.6% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 8-bit | **2.0 tok/s** | NA | 58.6% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 52.5% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 52.5% (2.1) | NA |
 | NVIDIA Nemotron 3.5 Bolt 74B-A9B | 4-bit | **6.66 tok/s** | **3.60 tok/s** | 50.98% (2.1) | NA |

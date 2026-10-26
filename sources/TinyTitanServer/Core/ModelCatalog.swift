@@ -245,19 +245,12 @@ public struct ModelCatalog: Sendable {
                     reason:
                         "an MTP draft head (\(identity.family.rawValue)), served only beside its target"
                 ))
-        case .qwen36, .qwen38flash, .qwen35Dense:
+        case .qwen36, .qwen38flash, .qwen35Dense, .k2Horizon:
+            // K2-Horizon is served by `K2ProbeBackend`, not by the runner, and
+            // that is a property of the loader rather than of the catalogue:
+            // the entry is honest, and `ModelRouter` picks the backend by
+            // family.
             break
-        case .k2Horizon:
-            // The install is real and its identity is honest, but the GPU graph
-            // for this family does not exist yet. Listing it would offer a model
-            // that fails at load; the reason is reported instead, per directory.
-            return .failure(
-                ProbeFailure(
-                    reason:
-                        "K2-Horizon (\(identity.family.rawValue)) is not served yet: "
-                        + "the GPU graph and kernels are not implemented "
-                        + "(docs/plan-k2-horizon.md)"
-                ))
         }
         guard GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil else {
             return .failure(
@@ -282,6 +275,10 @@ public struct ModelCatalog: Sendable {
                 quant: identity.weightBits,
                 path: directory,
                 sampling: ModelProfile.resolve(identity: identity).sampling,
+                // The probe's KV caches are what cap it, not the checkpoint.
+                contextLimit:
+                    identity.family == .k2Horizon
+                    ? K2ProbeBackend.contextCeiling : nil,
                 sizeBytes: sizeOnDisk(directory),
                 engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : nil))
     }

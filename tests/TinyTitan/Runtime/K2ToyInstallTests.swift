@@ -35,7 +35,8 @@ struct K2ToyInstallTests {
         } catch {
             message = String(describing: error)
         }
-        #expect(message.contains("GPU graph is not implemented"), "\(message)")
+        #expect(message.contains("TinyTitanBench k2gpu"), "\(message)")
+        #expect(message.contains("does not run on this runner"), "\(message)")
     }
 
     @Test func sparseToyValidatesTheMoEAndMoVAProteins() throws {

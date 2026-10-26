@@ -37,6 +37,16 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// so the answer reported here starts where the template's would.
     private var trimsLeadingNewlines = false
     private var toolTokens: [Int32]?
+    /// Held text that might be the beginning of K2's closing think tag. The
+    /// model can spell `</ifm|think>` as ordinary tokens instead of the special
+    /// token under sampling; the ID check then misses it and the tag ends up in
+    /// the reasoning. Holding back only the longest suffix that is a prefix of
+    /// the marker lets the text-level split see a marker split across tokens.
+    private var thoughtSuffix = ""
+    /// True between K2's `<ifm|tool_calls>` and `</ifm|tool_calls>`: text in
+    /// there is framing the template wrote, not the model's answer, so it is
+    /// dropped while the inner calls are parsed.
+    private var inToolWrapper = false
     private var emittedCalls = 0
     private var failed = false
 
@@ -142,6 +152,9 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// `<tool_call>`…`</tool_call>` buffer tokens for the Qwen parser.
     /// Everything else streams in whichever channel is open.
     private func consumeChatML(tokenID: Int32, delta: String) throws -> [StructuredAssistantEvent] {
+        if let events = try consumeToolCallsWrapper(tokenID: tokenID, delta: delta) {
+            return events
+        }
         if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
             return events
         }
@@ -150,16 +163,97 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
             let events = channelEvents(prefix)
             channel = .thought
             trimsLeadingNewlines = false
+            thoughtSuffix = ""
             return events
         }
         if tokenID == tokenizer.thinkEndID {
             let prefix = try boundaryPrefix(delta, marker: tokenizer.thinkEndMark)
-            let events = channelEvents(prefix)
+            // A text-level prefix held back before the special token belongs to
+            // the reasoning that token closes.
+            let text = thoughtSuffix + prefix
+            thoughtSuffix = ""
+            let events = channelEvents(text)
             trimsLeadingNewlines = channel == .thought
             channel = .visible
             return events
         }
+        if channel == .thought, tokenizer.dialect == .k2, !tokenizer.thinkEndMark.isEmpty {
+            return consumeTextThinkEnd(delta)
+        }
         return channelEvents(delta)
+    }
+
+    /// The closing think tag spelled as ordinary text rather than the special
+    /// token. Splits on the marker when the accumulated text holds it, and
+    /// otherwise emits everything except a suffix that could still become one.
+    private func consumeTextThinkEnd(_ delta: String) -> [StructuredAssistantEvent] {
+        let marker = tokenizer.thinkEndMark
+        let accumulated = thoughtSuffix + delta
+        if let range = accumulated.range(of: marker) {
+            let before = String(accumulated[..<range.lowerBound])
+            let after = String(accumulated[range.upperBound...])
+            thoughtSuffix = ""
+            var events: [StructuredAssistantEvent] = []
+            if !before.isEmpty { events.append(.reasoning(before)) }
+            channel = .visible
+            trimsLeadingNewlines = true
+            events += channelEvents(after)
+            return events
+        }
+        let hold = Self.longestSuffixPrefix(accumulated, of: marker)
+        let head = String(accumulated.dropLast(hold))
+        thoughtSuffix = hold == 0 ? "" : String(accumulated.suffix(hold))
+        return head.isEmpty ? [] : [.reasoning(head)]
+    }
+
+    /// The longest suffix of `text` that is a proper prefix of `marker`.
+    private static func longestSuffixPrefix(_ text: String, of marker: String) -> Int {
+        let limit = min(marker.count - 1, text.count)
+        guard limit > 0 else { return 0 }
+        for length in stride(from: limit, through: 1, by: -1)
+        where text.hasSuffix(marker.prefix(length)) {
+            return length
+        }
+        return 0
+    }
+
+    /// K2's outer `<ifm|tool_calls>` wrapper. The model writes it around one or
+    /// more inner calls, and it is template framing: without suppressing it a
+    /// successful tool call still leaked `<ifm|tool_calls>` / `</ifm|tool_calls>`
+    /// into `content` (measured on the real install). Everything inside the
+    /// wrapper that is not an inner call is dropped, including the newlines the
+    /// template puts between them.
+    private func consumeToolCallsWrapper(
+        tokenID: Int32, delta: String
+    ) throws -> [StructuredAssistantEvent]? {
+        guard let startID = tokenizer.toolCallsStartID,
+            let endID = tokenizer.toolCallsEndID
+        else { return nil }
+        if tokenID == startID {
+            guard !inToolWrapper else {
+                failed = true
+                throw ToolCallParserError.malformed
+            }
+            let prefix = try boundaryPrefix(delta, marker: tokenizer.toolCallsStartMark)
+            let events = channelEvents(prefix)
+            inToolWrapper = true
+            return events
+        }
+        if tokenID == endID {
+            guard inToolWrapper else {
+                failed = true
+                throw ToolCallParserError.malformed
+            }
+            _ = try boundaryPrefix(delta, marker: tokenizer.toolCallsEndMark)
+            inToolWrapper = false
+            return []
+        }
+        guard inToolWrapper else { return nil }
+        if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
+            return events
+        }
+        // Whitespace and other framing inside the wrapper never reaches content.
+        return []
     }
 
     /// A tool marker, or a token inside an open call; nil for anything else.
@@ -228,8 +322,14 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// tail never becomes visible.
     public func consumeTail(_ text: String) throws -> [StructuredAssistantEvent] {
         guard !failed else { throw ToolCallParserError.malformed }
-        guard toolTokens == nil else { return [] }
-        return channelEvents(text)
+        guard toolTokens == nil, !inToolWrapper else { return [] }
+        var events: [StructuredAssistantEvent] = []
+        if !thoughtSuffix.isEmpty {
+            events.append(.reasoning(thoughtSuffix))
+            thoughtSuffix = ""
+        }
+        events += channelEvents(text)
+        return events
     }
 
     private func boundaryPrefix(_ delta: String, marker: String) throws -> String {
@@ -256,7 +356,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     }
 
     public func finish() throws {
-        guard !failed, toolTokens == nil else {
+        guard !failed, toolTokens == nil, !inToolWrapper else {
             throw ToolCallParserError.malformed
         }
     }

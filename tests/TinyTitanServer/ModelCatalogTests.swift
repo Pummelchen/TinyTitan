@@ -161,19 +161,23 @@ struct ModelCatalogTests {
         #expect(skipped["half-written"]?.contains("incomplete") == true)
     }
 
-    /// K2's install is real and validates, but the catalogue must not offer
-    /// it: listing it would send a launch at a family whose runner refuses.
-    @Test func k2InstallIsSkippedWithTheGraphReason() throws {
+    /// K2's install is listed like any other: the router picks the probe
+    /// backend by family, and the context is the probe's cap rather than the
+    /// checkpoint's 524,288.
+    @Test func k2InstallIsListedWithTheProbeCeiling() throws {
         let root = try CatalogFixture.root()
         defer { try? FileManager.default.removeItem(at: root) }
         try CatalogFixture.install(
             root, "k2-horizon-4bit", modelID: "k2-horizon-4bit",
             family: "k2_horizon", bits: 4)
         let catalog = ModelCatalog.scan(directory: root)
-        #expect(catalog.entries.isEmpty)
-        let reason = try #require(catalog.skipped.first?.reason)
-        #expect(reason.contains("not served yet"))
-        #expect(reason.contains("GPU graph"))
+        #expect(catalog.skipped.isEmpty)
+        let entry = try #require(catalog.entries.first)
+        #expect(entry.kind == .gpu(.k2Horizon))
+        #expect(entry.backend == .gpu)
+        #expect(entry.contextLimit == K2ProbeBackend.contextCeiling)
+        #expect(entry.sampling.temperature == 1.0)
+        #expect(entry.sampling.topP == 0.95)
     }
 
     @Test func skippedDirectoriesAreReportedOnceInOneNotice() throws {

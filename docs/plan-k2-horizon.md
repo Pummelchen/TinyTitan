@@ -1,15 +1,24 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
-Status: **install format and runtime identity complete; the GPU graph is not
-implemented.** This is not an "adding a model" wiring job in the sense of
-`adding-a-model.md` — the architecture is new. The checkpoint is
-`IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at sha
-`e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
+Status: **the graph runs and the server serves it, from a catalogue entry
+too; the runner and the CLI do not.** Both installs load and validate, `K2GraphProbe` executes the real 36B on
+Metal (dense layers plus the sparse MoVA layers, streamed routed experts,
+GPU-resolved MoVA selection), `TinyTitanBench k2gpu` decodes at ~4 tok/s cold
+and 10-13 tok/s steady state on this host, and `TinyTitanServer --model
+models/k2-horizon-4bit.ssdai` answers OpenAI chat completions through
+`K2ProbeBackend` (measured 2.6 tok/s on the first 48-token reply, 4.2 tok/s on
+the next). The tokenizer, decoder and tool surfaces are exercised against the
+real installs, including a full tool round trip. What is missing is the runner
+graph (so the CLI and the catalogue serve it, with prompt caching), batching,
+ANE prefill, and a release golden. This is not an "adding a
+model" wiring job in the sense of `adding-a-model.md` — the architecture is
+new. The checkpoint is `IFM/K2-Horizon-MoVA-36B-A4B`, Apache-2.0, ungated, at
+sha `e9ce717642b2074082875be233c02c729ba47960` (2026-10-14).
 
 Everything below was read from the source at that sha: `config.json`,
 `configuration_k2_horizon.py`, `modeling_k2_horizon.py`, the safetensors
 index, `generation_config.json`, `tokenizer_config.json` and
-`chat_template.jinja`. None of it has been run.
+`chat_template.jinja`; most of it now runs.
 
 ## The checkpoint
 
@@ -114,6 +123,97 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   template) and `TINYTITAN_REASONING_EFFORT`; a chat prompt's first tokens are
   the start of its reasoning block, which is what the high-effort template
   opens.
+- **Why the probe is slow** — a 4-bit decode token at 8 expert slots measures
+  ~0.22 s in expert fetch, ~0.22 s in GPU work and ~0.05 s in encode/sync
+  (`TINYTITAN_K2_TIMING=1`). Raising the cache to 64 slots cuts those to
+  ~0.14 s and ~0.15 s (2.0 → 2.7 tok/s); the GPU's own busy time in that
+  decode step is ~0.11 s, so ~0.05 s is scheduling gap. It is not one
+  bottleneck: the probe
+  commits and waits three command buffers per sparse layer (about 138 GPU
+  round-trips per token), reads the router ids back per layer, fetches experts
+  synchronously with no overlap, and runs every routed expert as three small
+  GEMVs. The runner path (one command buffer per token, GPU-side residency,
+  prefetch, fused expert kernels, ANE/batched prefill) is what closes the gap
+  to the Qwen 35B numbers; 2 tok/s is the correctness prototype's cost.
+  `k2gpu` now defaults to 64 slots on 4-bit and 16 on 8-bit (overridable with
+  `TINYTITAN_K2_SLOTS`). Reusing the Qwen fused-expert kernels was tried and
+  measured **slower** (1.4 vs 2.6 tok/s): they are tuned for 512-wide experts,
+  and K2's 768×2560 shape stages too little work per threadgroup. A fused
+  kernel has to be written for this shape, not borrowed.
+- **K2-shaped fused routed experts** — `k2_moe_gate_up_act` and `k2_moe_down`
+  keep one simdgroup per output row and read the selected experts through
+  three argument buffers, so a whole top-8 set costs two dispatches per layer
+  instead of four per expert (32). The pass is now the sparse layer's default;
+  `TINYTITAN_K2_FUSED_MOE=0` restores the per-expert form for A/B runs. On the
+  real installs (greedy, 8 decode tokens on 4-bit and 4 on 8-bit, same prompt
+  and tokens): 4-bit 2.82 s → 2.53 s (2.83 → 3.16 tok/s), 8-bit 2.36 s →
+  2.21 s (1.70 → 1.81 tok/s); a later warm run measured 3.38 tok/s on 4-bit.
+  The timing line is now per forward (the counters were cumulative next to a
+  per-token total), which shows where the remaining time is: fetch 0.05-0.17 s,
+  GPU 0.14-0.23 s (busy 0.10-0.19 s), encode 0.005 s, other 0.02 s. Decode is
+  GPU-bound at 64 slots now, not fetch-bound, so the next levers are one
+  command buffer per token instead of three per sparse layer, and overlap of
+  the next layer's expert fetch with the current layer's GPU work.
+- **Coalesced expert loads** — the fused kernels first read two elements per
+  lane per group, which issued twice the word transactions for the same bytes.
+  Each lane now consumes one 32-bit word (eight 4-bit or four 8-bit weights)
+  covering a whole 64-element group across eight (four-bit) or sixteen
+  (eight-bit) lanes, so a simdgroup's reads are one coalesced line and a lane's
+  scale and bias are single scalars. GPU busy time is now split by phase in the
+  timing line: on 4-bit over 21 forwards the experts phase fell from 0.92-0.96 s
+  to 0.63 s (0.044 → 0.030 s/token) and total busy from 2.15-2.24 s to 1.94 s.
+  End-to-end decode did not move under the current machine load: fetch
+  (0.03-0.30 s/token) and a 0.04-0.06 s GPU idle gap now gate it, so the next
+  levers are I/O overlap and fewer command-buffer round trips, not more kernel
+  arithmetic. Both widths still produce the same tokens.
+- **Cold cache vs steady state** — `k2gpu` measured one prompt+decode, which
+  is dominated by filling the per-layer expert cache. `TINYTITAN_K2_REPEAT=n`
+  now repeats the loop in-process and prints each run plus the median, and the
+  split is large: 4-bit, 32 decode tokens, run 0 = 6.76 s (4.73 tok/s), runs
+  1-3 = 2.81/2.57/2.38 s (11.4/12.4/13.4 tok/s); prompt 2.19 s → 0.37-0.62 s.
+  So the probe already clears the 10 tok/s target once the 64-slot cache holds
+  the layer's active experts, and the single-run figure was the cost of
+  warming it. The warm number repeats one token stream, so it is the upper
+  bound; a cache that has seen different requests lands between the two. Cold
+  fill is disk traffic (~1.2 GB/token of misses for the first tokens), not
+  kernel time, which is why the runner's pinned/prefetched cache is the next
+  lever rather than more kernel work.
+- **Hidden state on the GPU** — the graph used to read every layer's output
+  back as `[Float]`, convert it, copy it into the next layer's input buffer and
+  wait for the expert command buffer before starting the next layer. Layers now
+  hand their output buffer straight on, the expert phase is submitted without a
+  wait (the queue order is the dependency), and only the router ids and the
+  final logits cross to the CPU. Interleaved A/B on 4-bit, 16 decode tokens,
+  three runs each: 4.85 s → 4.04 s (3.38 → 3.95 tok/s). GPU busy is accumulated
+  from the command buffers' completion handlers now, and a deferred expert
+  buffer's error is carried forward and rethrown rather than dropped.
+- **Startup re-hash** — the first token used to pay a full SHA-256 over every
+  expert layer as each layer opened: 15 GB of hashing, 8.2 s of the 8.3 s
+  prefill. `k2gpu` now validates the installer's receipt first (it is bound to
+  the manifest hash, the file list and the directory path) and falls back to
+  the full hash, reported in the output, when the receipt is missing, moved or
+  stale; `TINYTITAN_K2_FULL_VERIFY=1` forces the old path. The two receipts
+  under `models/` were re-issued in place with `TinyTitanRepack
+  --verify-install` because they had been written at the `/tmp` conversion
+  path. 4-bit 5-token prompt 8.14 s → 2.28 s (process wall 14.7 s → 9.7 s);
+  8-bit 17.2 s → 4.7 s, same tokens.
+- **Two command buffers per sparse layer** — the MoVA value pass used to read
+  its selected ids back to the CPU, which forced the router and the values into
+  separate buffers. `k2_mova_values_routed` resolves the ids from the GPU's
+  selection buffer and indexes three per-expert offset tables into the shared
+  resident buffer, so norm, q/k/gate, MoVA router and values, attention, the
+  MoE router and the shared expert are one command buffer and only the fetched
+  routed experts are a second (135 → 90 buffers per token). On the 4-bit
+  install, 16 decode tokens across three runs: 3.45-3.50 → 3.64-4.23 tok/s,
+  GPU busy 0.092 → 0.082 s/token (pre-fetch 0.055, experts 0.027); 8-bit
+  4 tokens 1.81 → 1.92 tok/s. Same token ids at both widths.
+- **Shared expert before the fetch** — the shared expert depends only on the
+  post-attention hidden state, so it now runs in the attention command buffer
+  and the post-fetch buffer carries only the two routed dispatches. On 4-bit
+  with 16 decode tokens and the same prompt (two runs each): 5.76 s before,
+  5.01 s after (2.78 → 3.19 tok/s), same output. The entry and attention
+  buffers cannot merge as well: `MoVAValueStage.encodeValues` reads the value
+  router's ids on the CPU, so the router buffer has to complete first.
 - **Mixed graph** — `K2GraphProbe` runs a whole token over the mixed model:
   embedding, dense and sparse layers in order, final norm and head. Each sparse
   layer fetches its experts between phases, so the graph carries the hidden
@@ -182,15 +282,163 @@ The quantized installs this would produce are roughly 18-19 GB at 4-bit and
   wrapper. Values that the template writes as JSON literals become typed
   arguments; the type tag is informational. Tests cover the three grammars,
   multi-call blocks, unknown tools and malformed/oversized input.
-- **Surfaces not wired** — the 52 KB template renders through the generic
-  tokenizer (`TINYTITAN_K2_CHAT=1`), but the K2 decoder is not selected yet:
-  `StructuredAssistantDecoder` still looks for ChatML's `<think>`/`<tool_call>`
-  markers instead of K2's `<ifm|think>` / `<ifm|tool_call>`, so the parser has no
-  caller. The catalogue entry and a golden baseline are also missing.
+- **Decoder and tool surfaces wired** — `StructuredAssistantDecoder` resolves
+  the K2 think markers by effort and buffers `<ifm|tool_call>` bodies for
+  `K2ToolCallParser`. `k2gpu` now has two install-dependent checks:
+  `TINYTITAN_K2_DECODER=1` runs the generated tokens through the same decoder a
+  server uses and reports the reasoning/content/tool channels, and
+  `TINYTITAN_K2_DECODER_SELFTEST=1` feeds a canned answer stream and a canned
+  xml tool call through the real tokenizer. Both pass: the answer stream splits
+  into reasoning "Simple.\n" and content "The capital is Paris.", and the tool
+  stream yields `get_weather(city: "Paris")`. A real low-effort chat run
+  (`TINYTITAN_K2_CHAT=1`) renders the prompt, closes `</ifm|think_faster>` and
+  reports the answer as content.
+- **Tool call end to end** — with the JSON tool presentation the model was
+  asked "What is the weather in Paris? Use the get_weather tool." and emitted a
+  complete `<ifm|tool_calls>` block; the decoder parsed
+  `get_weather(city: "Paris")` from it. That run found one more leak: the outer
+  wrapper's markers streamed into `content` because the decoder only tracked
+  the inner `<ifm|tool_call>` pair. `StructuredAssistantDecoder` now suppresses
+  `<ifm|tool_calls>` / `</ifm|tool_calls>`, drops all framing text between them
+  (including the newlines the template writes), and fails closed on an
+  unterminated wrapper. The bench self-test gained a wrapped stream; content is
+  now empty and the call parses.
+  The round trip also works end to end (`TINYTITAN_K2_TOOL_LOOP=1`): the call is
+  put back into history with a canned tool response
+  (`{"city":"Paris","temp_c":21,"condition":"sunny"}`), the template renders the
+  assistant `tool_calls` message and the `.tool` turn (64 prompt tokens, call and
+  result both kept), and the model answers "The weather in Paris is currently
+  sunny with a temperature of 21 degrees Celsius."
+- **Multi-turn history** — the checkpoint's template raises on any assistant
+  message without a thinking field ("Assistant message is missing a thinking
+  field"), so a replayed conversation could not be rendered at all: the first
+  follow-up turn failed. `GFTokenizer.Message` now carries an optional
+  `reasoning`, mapped to the template's effort tag (`think` / `think_fast` /
+  `think_faster`) for K2 assistant turns; nil renders an empty closed block,
+  which is what a turn without stored reasoning had. The bench self-test renders
+  a three-message history and reports the prompt size plus whether the reasoning
+  and the closing tag survived (39 tokens, both true, on the real tokenizer).
+- **Tool prompts need JSON presentation** — rendering a tool prompt used to
+  throw `Cannot compare values of different types ({type: string} and true)`:
+  the checkpoint's markdown tool renderer tests schema nodes with
+  `is sameas true`, and swift-jinja implements `sameas` through
+  `compare(to:)`, which only orders numbers and strings. The tokenizer now
+  passes `tool_presentation_format: "json"` for the K2 dialect -- a mode the
+  template supports and renders through `tojson` -- so a tool prompt can be
+  built at all. The call format stays the template default (xml).
+- **Golden baseline (release-gated)** — `TINYTITAN_K2_GOLDEN=<path>` on
+  `k2gpu` captures a greedy token baseline when the file is missing (or with
+  `TINYTITAN_K2_GOLDEN_UPDATE=1`) and otherwise compares the run against it,
+  failing with the first differing token. `tools/golden-baseline.sh` has
+  `k2-4` / `k2-8` targets that drive that path (the family has no CLI leg), and
+  `tools/release.sh` lists both installs in `check_golden`, so the release gate
+  now checks K2. `benchmark/golden/k2-horizon-4bit.txt` and `-8bit.txt` hold the
+  96-token mutex baseline (captured through the script; `--check k2-4 k2-8`
+  passes). Like every baseline in that directory it is one (machine, build,
+  install, prompt) tuple — Metal reduction order is not portable across GPU
+  families, so re-capture per machine and after a deliberate numerics change.
+- **Server path** — `K2ProbeBackend` is the probe behind
+  `ServerInferenceBackend`, the way `CPUModelBackend` is the CPU engine. Both
+  server shapes serve it: `TinyTitanServer --model
+  models/k2-horizon-4bit.ssdai --reasoning high`, and the catalogue path
+  `--models-dir models --model k2-horizon_4-Bit`, where the scan lists
+  `k2-horizon_{4,8}-Bit` (family `k2_horizon`, thinking low/medium/high, the
+  card's sampling row, context capped at the probe's 8,192) and `ModelRouter`
+  picks the probe backend by family. No prompt cache, no batching, plain FP16
+  KV caches. Each request builds its own graph, sampling uses the
+  card row (1.0 / top-p 0.95 / top-k 20 via `GenerationDefaults`), tools render
+  through the installed template and the decoder parses calls, `json_schema`
+  constraints apply, and context is capped at 8,192 tokens because the KV
+  caches are ~0.2 MB per position across 48 layers (the checkpoint's 524,288 is
+  a weight property, not an affordable allocation here). Measured on the 4-bit
+  install: first 48-token reply 18.3 s (2.6 tok/s, cold cache), a later
+  160-token reply 38.1 s (4.2 tok/s). One sampled reply (temperature 1.0) wrote
+  its closing think tag as ordinary text and the decoder left it in reasoning.
+  The decoder now holds back a suffix that could become the closing tag and
+  splits on it at the text level, so a tag spelled as tokens (even split across
+  two) closes the thought: the bench selftest feeds `</ifm|` + `think_faster>`
+  as separate tokens and gets reasoning "Need the city.\n" plus content
+  "Paris". A quoted tag inside a thought would close it early, which is the
+  accepted trade for the sampled case.
+  Warm served throughput matches the bench: a 32-token reply took 15.2 s on
+  the first request and 8.36 s on the second (0.30 -> 0.164 s/forward, ~6.1
+  tok/s), against the bench's warm 0.181 s/forward. The earlier 17.7 s reading
+  was a lazy model load plus a cold expert cache, not server overhead.
+- **Cross-request K/V reuse** — the backend keeps its graph (initial capacity
+  2,048 positions, ~0.4 GB; rebuilt only when a request needs more) and
+  continues from the longest token prefix it already holds. The layers read
+  their caches by position, so identical tokens at identical positions have
+  identical K/V. Measured: an identical 173-token prompt took 42.2 s cold and
+  4.97 s on the next request (reused 172/173, completion byte-identical); a
+  multi-turn follow-up reuses the shared user turn (174/211 tokens) and took
+  12.6 s against 44.3 s cold. A different tokenizer render or a capacity
+  rebuild drops the reuse, which is why a request that asks for more
+  `max_tokens` does not reuse anything the first time. The assumption it rests
+  on is pinned in CI now:
+  `K2GraphProbeTests.continuingAfterAPrefixMatchesOneFullPass` forwards 7,8 and
+  then 9,10 on one sparse-toy graph and compares the logits with a single 0..3
+  pass (1e-6), and re-forwarding the last token at its own position is
+  idempotent.
+- **Lazy load and idle unload** — the single-model path now honours
+  `--lazy-load` and `--idle-unload-seconds` for K2 too: `ManagedModelBackend`
+  gained a plan-free initializer so it can wrap the probe backend, building it
+  on the first request and dropping it when idle (which returns the install's
+  ~22 GB and the expert cache; the Metal context is shared across reloads).
+  Measured on the 4-bit install: ready in 1 s with `--lazy-load`, first request
+  loads (`model loaded prompt_cache=off`) and answers, `--idle-unload-seconds 5`
+  logs `model unloaded` after the idle window, and the next request reloads and
+  answers the same. (`--models-dir` cannot be combined with
+  `--idle-unload-seconds`; that rule predates K2.)
+- **Warm start from the routing profile** — the backend persists the
+  routed-expert profile the runner already uses (`expert-profile.bin` beside
+  the install; `TINYTITAN_EXPERT_PROFILE=0` disables) after each request, and
+  at start preloads the historically hottest experts per layer
+  (`TINYTITAN_K2_WARM_EXPERTS`, default 16, 0 disables; capped by the slot
+  count). A restart's first request then misses less: the 173-token prompt
+  went 38.2 s cold → 34.8 s with 16/layer → 30.2 s with 64/layer (that one
+  warms ~9.5 GB and readiness was 10 s), and the short mutex chat 15.2 → 13.5 s.
+  The gain is modest because per-forward compute dominates a long prompt, and
+  the profile's LFU seeding also applies for the whole session whether or not
+  anything is preloaded.
+- **Disconnects stop generation** — the decode loop checks task cancellation
+  per token, and a prefill checks it between tokens. A client that goes away
+  therefore stops the GPU work instead of letting the full budget run out: a
+  512-token streaming request aborted after 3 s left no completion in the log
+  and the next request started immediately. A cancellation during prefill also
+  clears the K/V reuse record, because the positions it wrote no longer match
+  the recorded token stream.
+- **CLI path** — `TinyTitanCLI --model models/k2-horizon-4bit.ssdai --prompt
+  "…"` now runs the family through `K2ProbeRuntime`, the same engine the
+  server serves from and the bench measures; `--messages-file` renders through
+  the installed template (use `--thinking on --reasoning-effort low` for the
+  effort tags). Raw prompts stay raw, the answer goes to stdout and the
+  reasoning does not, and the footer reports `stop`, prefill tokens/seconds,
+  decode seconds and tok/s. Verified: "What is the capital of France?" answers
+  "The capital of France is **Paris**." (stop=endOfTurn, 17 prompt + 12
+  completion); a raw "List three colours:" continues from the prompt. The
+  runtime extraction was not free: the first version decoded with the
+  load-time tokenizer instead of the request's, so a low-effort tool request
+  leaked `</ifm|think_faster>` into content — the serve smoke gate caught it
+  and passing the render tokenizer per call fixed it.
+- **Serve smoke gate** — `tools/k2-serve-smoke.sh [install]` starts the release
+  server on the single-model path and checks what a client uses: the model
+  list, a chat completion, SSE streaming, the Responses API, a tool call, a
+  stop string and the context bound. All six pass on the 4-bit install (chat answers "The capital of
+  France is **Paris**."; the tool call comes back as
+  `get_weather({"city":"Paris"})` with empty content; the stop string ends the
+  turn and is stripped; a 9,011-token prompt comes back as HTTP 400
+  `context_length_exceeded` naming both counts). Manual, needs a GPU, never
+  modifies the install.
+- **Still missing** — the runner phase itself: batched prefill, the ANE
+  sidecar and runner-style cache management. The CLI, the server and the bench
+  all run the probe runtime today; the catalogue entry and the release golden
+  landed. `docs/plan-k2-runner.md` scopes that phase: the kernels it needs
+  (affine GEMM first), the data flow, the expected win, the verification
+  contract and the first concrete steps.
 
-Next: the GPU family graph that calls these stages (dense layers first), the
-in-graph wiring of the MoVA stage for decode and prefill, the K2 decoder
-(markers plus the tool parser), the ANE prefill sidecar.
+Next: `docs/plan-k2-runner.md`. Everything the front ends need exists; what
+remains is new prefill kernels (the probe's are all one-token shapes) and,
+after their numbers, the ANE question.
 
 ## The conversion plan, measured
 

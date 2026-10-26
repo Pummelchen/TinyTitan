@@ -1410,3 +1410,212 @@ kernel void k2_moe_accumulate_fp16(
     }
     out[tid] = half(float(out[tid]) + total);
 }
+
+// K2's fused routed-expert pass, written for its 768x2560 experts.
+//
+// The Qwen fused kernels stage 16 rows of a 512-wide expert per threadgroup,
+// a shape K2 does not share: its experts are wider (2560) and taller (768), and
+// that staging loses more than it gains there. These two kernels keep one
+// simdgroup per row and read the selected experts through argument buffers, so a
+// whole top-8 set costs two dispatches per layer instead of four per expert.
+constant uint K2_FUSED_BITS [[function_constant(120)]];
+
+static inline uint k2_fused_bits() {
+    return is_function_constant_defined(K2_FUSED_BITS) ? K2_FUSED_BITS : 4u;
+}
+
+struct K2ExpertBuffers {
+    device const uint*   w[kMaxStreamedExperts];
+    device const bfloat* s[kMaxStreamedExperts];
+    device const bfloat* b[kMaxStreamedExperts];
+};
+
+// acts[slot * F + row] = silu(gate_row . x) * (up_row . x)
+kernel void k2_moe_gate_up_act(
+    device const K2ExpertBuffers& gate [[buffer(0)]],
+    device const K2ExpertBuffers& up   [[buffer(1)]],
+    device const half* x               [[buffer(2)]],
+    device half* acts                  [[buffer(3)]],
+    constant uint& D                   [[buffer(4)]],
+    constant uint& F                   [[buffer(5)]],
+    constant uint& topK                [[buffer(6)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]
+) {
+    const uint row = tg * 8u + sg;
+    const uint slot = row / F;
+    if (slot >= topK) return;
+    const uint local = row - slot * F;
+    const uint bits = k2_fused_bits();
+    const uint groups = D / kMoEGroupSize;
+    const uint words = (D * bits) / 32u;
+    device const uint* gw = gate.w[slot] + local * words;
+    device const bfloat* gs = gate.s[slot] + local * groups;
+    device const bfloat* gb = gate.b[slot] + local * groups;
+    device const uint* uw = up.w[slot] + local * words;
+    device const bfloat* us = up.s[slot] + local * groups;
+    device const bfloat* ub = up.b[slot] + local * groups;
+    // One word per lane, one group per lane stride: 8 (4-bit) or 4 (8-bit)
+    // consecutive weights share a word and a group, so a lane's scale and bias
+    // are single scalars and the simdgroup's word reads are one coalesced
+    // line. The first form read two elements per lane per group, which issued
+    // twice the transactions for the same bytes.
+    const uint elemsPerWord = 32u / bits;
+    const uint lanesPerGroup = kMoEGroupSize / elemsPerWord;
+    const uint groupsPerIteration = 32u / lanesPerGroup;
+    const uint wordsPerGroup = kMoEGroupSize / elemsPerWord;
+    const uint mask = (1u << bits) - 1u;
+    float gateAcc = 0.0f;
+    float upAcc = 0.0f;
+    for (uint base = 0; base < groups; base += groupsPerIteration) {
+        const uint group = base + lane / lanesPerGroup;
+        if (group >= groups) continue;
+        const uint localWord = lane % lanesPerGroup;
+        const uint word = group * wordsPerGroup + localWord;
+        const uint elementBase = group * kMoEGroupSize + localWord * elemsPerWord;
+        const uint gWord = gw[word];
+        const uint uWord = uw[word];
+        float gateDot = 0.0f;
+        float upDot = 0.0f;
+        float sumX = 0.0f;
+        for (uint i = 0; i < elemsPerWord; ++i) {
+            const uint shift = i * bits;
+            const float xv = float(x[elementBase + i]);
+            gateDot = fma(float((gWord >> shift) & mask), xv, gateDot);
+            upDot = fma(float((uWord >> shift) & mask), xv, upDot);
+            sumX += xv;
+        }
+        const float gScale = float(gs[group]);
+        const float gBias = float(gb[group]);
+        gateAcc = fma(gScale, gateDot, gateAcc);
+        gateAcc = fma(gBias, sumX, gateAcc);
+        upAcc = fma(float(us[group]), upDot, upAcc);
+        upAcc = fma(float(ub[group]), sumX, upAcc);
+    }
+    gateAcc = simd_sum(gateAcc);
+    upAcc = simd_sum(upAcc);
+    if (lane == 0u) {
+        acts[row] = half((gateAcc / (1.0f + exp(-gateAcc))) * upAcc);
+    }
+}
+
+// out[d] = residual[d] + Σ_slot weight[slot] * down_slot[d] . acts_slot
+kernel void k2_moe_down(
+    device const K2ExpertBuffers& down [[buffer(0)]],
+    device const half* acts            [[buffer(1)]],
+    device const half* weights         [[buffer(2)]],
+    device const half* residual        [[buffer(3)]],
+    device half* out                   [[buffer(4)]],
+    constant uint& D                   [[buffer(5)]],
+    constant uint& F                   [[buffer(6)]],
+    constant uint& topK                [[buffer(7)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]
+) {
+    const uint row = tg * 8u + sg;
+    if (row >= D) return;
+    const uint bits = k2_fused_bits();
+    const uint groups = F / kMoEGroupSize;
+    const uint words = (F * bits) / 32u;
+    float total = 0.0f;
+    for (uint slot = 0; slot < topK; ++slot) {
+        device const uint* dw = down.w[slot] + row * words;
+        device const bfloat* ds = down.s[slot] + row * groups;
+        device const bfloat* db = down.b[slot] + row * groups;
+        device const half* a = acts + slot * F;
+        const uint elemsPerWord = 32u / bits;
+        const uint lanesPerGroup = kMoEGroupSize / elemsPerWord;
+        const uint groupsPerIteration = 32u / lanesPerGroup;
+        const uint wordsPerGroup = kMoEGroupSize / elemsPerWord;
+        const uint mask = (1u << bits) - 1u;
+        float acc = 0.0f;
+        for (uint base = 0; base < groups; base += groupsPerIteration) {
+            const uint group = base + lane / lanesPerGroup;
+            if (group >= groups) continue;
+            const uint localWord = lane % lanesPerGroup;
+            const uint word = group * wordsPerGroup + localWord;
+            const uint elementBase = group * kMoEGroupSize + localWord * elemsPerWord;
+            const uint dWord = dw[word];
+            float dot = 0.0f;
+            float sumA = 0.0f;
+            for (uint i = 0; i < elemsPerWord; ++i) {
+                const uint shift = i * bits;
+                const float av = float(a[elementBase + i]);
+                dot = fma(float((dWord >> shift) & mask), av, dot);
+                sumA += av;
+            }
+            acc = fma(float(ds[group]), dot, acc);
+            acc = fma(float(db[group]), sumA, acc);
+        }
+        total += float(weights[slot]) * simd_sum(acc);
+    }
+    if (lane == 0u) {
+        out[row] = half(float(residual[row]) + total);
+    }
+}
+
+// K2's MoVA values with the router's choice resolved on the GPU. The four
+// value experts are resident, so instead of reading the selected ids back to
+// the CPU (which forces the value pass into its own command buffer) the kernel
+// indexes three per-expert offset tables into the shared resident buffer. The
+// GPU dependency is the selection kernel earlier in the same command buffer.
+kernel void k2_mova_values_routed(
+    device const uchar* resident          [[buffer(0)]],
+    device const ulong* weightOffsets     [[buffer(1)]],
+    device const ulong* scaleOffsets      [[buffer(2)]],
+    device const ulong* biasOffsets       [[buffer(3)]],
+    device const uint* selected           [[buffer(4)]],
+    device const half* x                  [[buffer(5)]],
+    device half* out                      [[buffer(6)]],
+    constant uint& D                      [[buffer(7)]],
+    constant uint& R                      [[buffer(8)]],
+    constant uint& topK                   [[buffer(9)]],
+    uint tg [[threadgroup_position_in_grid]],
+    uint sg [[simdgroup_index_in_threadgroup]],
+    uint lane [[thread_index_in_simdgroup]]
+) {
+    const uint row = tg * 8u + sg;
+    const uint slot = row / R;
+    if (slot >= topK) return;
+    const uint local = row - slot * R;
+    const uint id = selected[slot];
+    const uint bits = k2_fused_bits();
+    const uint groups = D / kMoEGroupSize;
+    const uint words = (D * bits) / 32u;
+    device const uint* vw =
+        (device const uint*)(resident + (size_t)weightOffsets[id]) + local * words;
+    device const bfloat* vs =
+        (device const bfloat*)(resident + (size_t)scaleOffsets[id]) + local * groups;
+    device const bfloat* vb =
+        (device const bfloat*)(resident + (size_t)biasOffsets[id]) + local * groups;
+    const uint elemsPerWord = 32u / bits;
+    const uint lanesPerGroup = kMoEGroupSize / elemsPerWord;
+    const uint groupsPerIteration = 32u / lanesPerGroup;
+    const uint wordsPerGroup = kMoEGroupSize / elemsPerWord;
+    const uint mask = (1u << bits) - 1u;
+    float acc = 0.0f;
+    for (uint base = 0; base < groups; base += groupsPerIteration) {
+        const uint group = base + lane / lanesPerGroup;
+        if (group >= groups) continue;
+        const uint localWord = lane % lanesPerGroup;
+        const uint word = group * wordsPerGroup + localWord;
+        const uint elementBase = group * kMoEGroupSize + localWord * elemsPerWord;
+        const uint vWord = vw[word];
+        float dot = 0.0f;
+        float sumX = 0.0f;
+        for (uint i = 0; i < elemsPerWord; ++i) {
+            const uint shift = i * bits;
+            const float xv = float(x[elementBase + i]);
+            dot = fma(float((vWord >> shift) & mask), xv, dot);
+            sumX += xv;
+        }
+        acc = fma(float(vs[group]), dot, acc);
+        acc = fma(float(vb[group]), sumX, acc);
+    }
+    acc = simd_sum(acc);
+    if (lane == 0u) {
+        out[row] = half(acc);
+    }
+}
