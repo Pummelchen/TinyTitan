@@ -145,7 +145,7 @@ intended format; a plain continuation is not, and the probe records both.
 | Install | Prompt | Prefill | Decode | Output |
 | --- | ---: | ---: | ---: | --- |
 | 4-bit (66.5 GB) | 48-token chat template, "What is the capital of France?" | 66.07 s (0.73 tok/s) | **1.47 tok/s** (8 tokens, 5.45 s) | "Okay, the user is asking for the" |
-| 8-bit (125.0 GB) | the same | 114.32 s (0.42 tok/s) | **0.87 tok/s** (8 tokens, 9.22 s) | the same eight token ids |
+| 8-bit (125.0 GB) | the same | 148.38 s (0.32 tok/s) | **0.65 tok/s** (8 tokens, 12.24 s) | the same eight token ids |
 
 The README carries the best chat run of each width; the full spread measured
 on this host is:
@@ -153,7 +153,7 @@ on this host is:
 | Width | Prefill (48 tokens) | Decode | Note |
 | --- | ---: | ---: | --- |
 | 4-bit | 63.43 s / 66.07 s / 66.31 s | 1.27 / 1.47 / 1.12 tok/s | three runs |
-| 8-bit | 114.32 s / 116.54 s / 164.89 s | 0.87 / 0.83 / 0.60 tok/s | three runs; the last followed a full 125 GB re-hash |
+| 8-bit | 114.32 s / 116.54 s / 164.89 s / 174.57 s / 148.38 s | 0.87 / 0.83 / 0.60 / 0.65 / 0.50 tok/s | five runs; after the full 125 GB re-hash the cache state settles at 0.50-0.65 |
 
 Every run produced the **same eight token ids** at both widths, which is the
 width-quality check this probe offers. Decode is short (8 tokens) and the
