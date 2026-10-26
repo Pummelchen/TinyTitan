@@ -152,6 +152,27 @@ kept in
 No ANE figure is published: the Neural Engine cannot execute this model's
 selective scan or dynamic expert gather.
 
+### Laguna-S-2.1 118B-A8B — the 4-bit and 8-bit conversions
+
+Both installs are written from the pinned BF16 release
+(`poolside/Laguna-S-2.1` at `0f573140…`) by `tools/prepare_laguna_s21.py`,
+pass `TinyTitanRepack --verify-install`, and run through the Metal decode probe
+`TinyTitanBench lagunagpu`. Decode is greedy, with the checkpoint's own chat
+template and the prompt "What is the capital of France?", eight tokens:
+
+| Build | Install | GPU decode | CPU decode | Prompt prefill |
+| --- | ---: | ---: | ---: | ---: |
+| 4-bit | 66.52 GB | **1.47 tok/s** | NA | 66.1 s (48 tokens) |
+| 8-bit | 124.98 GB | **0.65 tok/s** | NA | 148.4 s (48 tokens) |
+
+Both widths emit the same eight token ids. A 32-token run of the 4-bit install
+reasons "Okay, the user is asking for the capital of France. … The capital is"
+— it thinks before answering, so eight tokens stop inside the thinking block.
+The numbers move with page-cache state (4-bit 1.12-1.47, 8-bit 0.50-0.87
+tok/s); the runs and the intermediate checks are in
+[`docs/plan-laguna-s-2.1.md`](docs/plan-laguna-s-2.1.md). No ANE figure is
+published for Laguna either: this engine has no ANE decode path for any model.
+
 
 ## Documentation
 
