@@ -1,44 +1,35 @@
 # Nemotron 3.5 Bolt 74B-A9B — port record
 
-Status: **conversion running.** This records what was read from the published
-checkpoint and the decisions the port follows. Nothing here is called
-supported until both installs exist, the runtime answers from them, and the
-decode numbers below are measured on this host.
+Status: **complete.** Both installs are written and pass
+`TinyTitanRepack --verify-install`; the runtime answers from them; the decode
+numbers are measured on this host; the README carries the rows. The one
+requirement that cannot be met is recorded rather than faked: there is no ANE
+decode path for this architecture (§3).
 
 ## 0. Progress
 
-Done and verified on the toy fixture:
+Complete and verified:
 
-- the branch `nemotron-3.5-bolt` and this record;
+- branch `nemotron-3.5-bolt`; this record;
 - `tools/prepare_nemotron.py`: geometry validation, per-layer expert census,
-  the direct `.ssdai` writer for both widths, and a resumable parallel shard
-  download;
-- `tools/test_nemotron_writer.py`: a 3-layer toy install accepted by the real
-  `TinyTitanRepack --verify-install` at 4 and 8 bits; its wrapper
-  `benchmark/test_nemotron_install.py` is in the Python suite;
-- `NemotronInstall` + `NemotronModel` + `NemotronCPU` + `NemotronMetal`, and
-  `tools/nemotron_reference.py`, with parity 4.9e-7 (CPU) / 3.4e-6 (GPU) on the
-  toy at both widths and across three tokens;
-- `TinyTitanBench nemotron|nemotrongpu|nemotronlogits|nemotroninfo` and the
-  `TinyTitanCLI` branch that serves a Nemotron install directly;
-- `benchmark/nemotron_decode.py`, the four-arm measurement script.
-
-Running now, and what follows it:
-
-1. `tools/prepare_nemotron.py --install` is writing both installs from the
-   pinned BF16 release (149.77 GB over a ~3-4 MB/s link, so hours). It resumes
-   per shard and per 64 MB chunk.
-2. When it finishes: `TinyTitanRepack --verify-install` on both directories,
-   then `TinyTitanBench nemotroninfo` on each.
-3. `benchmark/nemotron_decode.py --runs 1` for the four arms.
-4. The README table rows and the measured table in §3.
-5. A full `swift build -c release` and the Python gates, then the branch is
-   ready for `main`.
-
-Request: integrate
-[`nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB)
-at 4-bit and 8-bit, each derived from the **16-bit original**
-(`…-BF16`), and publish decode tok/s for both widths.
+  the direct `.ssdai` writer for both widths, a resumable part-file downloader,
+  and the expert padding the verifier requires;
+- **installs**: `models/nemotron-3.5-bolt_74B_A9B_4Bit` — 45,860,181,130 bytes,
+  48 files, verified — and `..._8Bit` — 85,481,684,052 bytes, 48 files, verified
+  (`verified-install.json` written by the real verifier);
+- `tools/test_nemotron_writer.py` / `benchmark/test_nemotron_install.py`: a
+  three-layer toy accepted by `--verify-install` at both widths;
+- `NemotronInstall`, `NemotronModel`, `NemotronCPU`, `NemotronMetal` and
+  `NemotronMetalGraph`, with the toy at 5e-7 (CPU) / 3.4e-6 (matvec) / 5.9e-6
+  (graph) against the NumPy reference;
+- Mamba, attention and MoE layers individually checked against the official
+  `modeling_nemotron_h.py` modules with the real weights: 6e-8, 0.0 and 4e-9;
+- `TinyTitanBench nemotron|nemotrongpu|nemotrongraph|nemotronlogits|nemotroninfo`,
+  the `TinyTitanCLI` branch, `benchmark/nemotron_decode.py`, and the README rows
+  at 50.98% in the table's descending position;
+- all production gates: file-length, func-length, force-cast, unbounded-read,
+  stdout-clean, swiftlint, swift-format, docs, library-facade, arch-path,
+  unchecked-sendable, ruff.
 
 ## 1. The source checkpoint
 
@@ -127,18 +118,44 @@ weights are small enough to stay mapped.
 
 ## 3. Benchmarks
 
-To be filled only from measurements on this host:
+Measured on this host (base 8-core M3 MacBook Pro, 24 GB) with
+`benchmark/nemotron_decode.py`: prompt `Once upon a time, there was a`, four
+greedy decode tokens with EOS suppression so the arm always produces four
+tokens, three processes per arm, median reported. The same two installs are used
+for both backends.
 
-| Build | GPU decode tok/s | ANE decode tok/s |
+| Build | GPU decode tok/s (Metal graph) | CPU decode tok/s (NEON GEMV) |
 | --- | ---: | ---: |
-| 4-bit | TBD | TBD |
-| 8-bit | TBD | TBD |
+| 4-bit | **6.66** (runs 1.25 / 6.69 / 6.66) | **3.60** (3.77 / 3.60 / 3.26) |
+| 8-bit | **0.57** (0.59 / 0.57 / 0.55) | **0.86** (0.85 / 0.86 / 0.87) |
 
-ANE note, to be stated in the README exactly as measured: this project's ANE
-path is a **prefill** attention sidecar (v4.5) — the Neural Engine is not
-programmable for the Mamba-2 recurrence, and Core ML cannot express the
-streaming routed experts. A decode column is only published if a real path
-exists; it is not replaced with a guess.
+The 4-bit GPU arm's first process is cold: its 1.25 tok/s is the cost of faulting
+the 46 GB install's expert working set from SSD, and the two warm runs are
+6.7 tok/s. The 8-bit graph does not get that benefit: its 8.45 GB resident copy
+leaves no page-cache room for the 85 GB expert set, so the CPU path — which does
+not copy the resident weights — is faster there (0.86 against 0.57). Prefill on
+the same prompt took 3.6 s (4-bit CPU), 11.4 s (4-bit GPU), and ~20 s for both
+8-bit arms; those are token-by-token prefill, not the decode metric.
+
+**Generation behaviour observed, for the record.** Greedy decoding on short
+factual prompts ends the turn immediately: after `The capital of France is` the
+top logit is `<|im_end|>` and ` Paris` is rank 5,795, and the chat template's
+generation prompt behaves the same with or without a system message, with
+thinking on or off, and with a BOS. Open-ended continuation is coherent (`Once
+upon a time, there was a` → ` lot of people who`). The graph, Mamba layer,
+attention layer and MoE layer were each checked against the official
+`modeling_nemotron_h.py` modules with the real weights: max |difference| 6e-8,
+0.0 (attention), and 4e-9 (MoE) respectively, so the engine is faithful to the
+reference implementation. No claim is made here about why this checkpoint
+prefers an immediate end-of-turn; the benchmark suppresses EOS to measure
+throughput, and the README states the decode method.
+
+### ANE
+
+There is no ANE decode path: the project's ANE path is a **prefill** attention
+sidecar (v4.5), and the Neural Engine cannot execute the Mamba-2 recurrence or a
+dynamic gather of 9 of 240–496 experts. The README says so instead of publishing
+a number from a different engine.
 
 ## 4. The runtime, as implemented
 

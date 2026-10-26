@@ -38,11 +38,15 @@ public final class NemotronTokenizer {
     public func encode(prompt: String, chat: Bool) throws -> [Int32] {
         let ids: [Int]
         if chat {
-            let message: [String: any Sendable] = [
-                "role": "user", "content": prompt,
-            ]
+            var messages: [[String: any Sendable]] = []
+            if let system = ProcessInfo.processInfo.environment[
+                "TINYTITAN_NEMOTRON_SYSTEM"]
+            {
+                messages.append(["role": "system", "content": system])
+            }
+            messages.append(["role": "user", "content": prompt])
             ids = try tokenizer.applyChatTemplate(
-                messages: [message],
+                messages: messages,
                 chatTemplate: .literal(template),
                 addGenerationPrompt: true,
                 truncation: false,

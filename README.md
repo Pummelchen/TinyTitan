@@ -77,14 +77,25 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 ## Benchmarks
 
-Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
-does not serve the model: the MoE families stream their experts on the GPU + ANE
-path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
-install-only today — its GPU graph is not implemented, so both of its decode
-columns are `NA`. K2-Horizon's score is from its
+Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
+`NA` means that engine does not serve the model: the MoE families stream their
+experts on the GPU + ANE path, only the dense Qwen 3.5 models run on either
+engine, and K2-Horizon is install-only today — its GPU graph is not implemented,
+so both of its decode columns are `NA`. K2-Horizon's score is from its
 [model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
-Terminal-Bench 4.0 result is published for it. Per-version measurements and the
-method live on the wiki
+Terminal-Bench 4.0 result is published for it.
+
+Nemotron 3.5 Bolt is the 74B-A9B BF16 release converted by this repository to
+4-bit and 8-bit `.ssdai` installs. Its GPU number is the GPU-resident Metal graph
+(`nemotrongraph`), its CPU number the NEON affine-GEMV path (`nemotron`); the
+checkpoint is agentic and its published 50.98% is Terminal-Bench 2.1. **There is
+no ANE decode column for it**: the Neural Engine cannot execute the model's
+per-token Mamba-2 selective scan or gather 9 of 240–496 experts from the expert
+blobs, so those figures would be NA rather than a different path. The 8-bit
+graph is slower than its CPU path because wiring 8.45 GB of resident weights
+leaves no room for the expert working set that the 4-bit install fits.
+
+Per-version measurements and the method live on the wiki
 ([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
 [Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
 
@@ -98,6 +109,8 @@ method live on the wiki
 | K2-Horizon-MoVA-36B-A4B | 8-bit | NA | NA | 58.6% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 52.5% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 52.5% (2.1) | NA |
+| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 4-bit | **6.66 tok/s** | **3.60 tok/s** | 50.98% (2.1) | NA |
+| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 8-bit | **0.57 tok/s** | **0.86 tok/s** | 50.98% (2.1) | NA |
 | Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA | 39.55% (2.0) | NA |
 | Qwen-AgentWorld 35B-A3B | 8-bit | **12.28 tok/s** | NA | 39.55% (2.0) | NA |
 | KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.86 tok/s** | NA | 32.6% (2.1) | NA |

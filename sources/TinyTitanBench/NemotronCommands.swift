@@ -68,12 +68,18 @@ extension TinyTitanBench {
         install: URL, prompt: String, limit: Int, gpu: Bool, graph: Bool
     ) async throws {
         let loaded = try NemotronInstall(directory: install)
-        let tokenizer = try await NemotronTokenizer(directory: install)
+        let thinking =
+            ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_THINKING"] == "1"
+        let tokenizer = try await NemotronTokenizer(
+            directory: install, thinking: thinking)
         let chat = ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_CHAT"] == "1"
         let ids = try tokenizer.encode(prompt: prompt, chat: chat)
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
             exit(2)
+        }
+        if ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_PRINT_IDS"] == "1" {
+            print("ids: " + ids.map(String.init).joined(separator: ","))
         }
         let sequence = ids.count + limit + 8
         let model: NemotronModel?
@@ -108,11 +114,13 @@ extension TinyTitanBench {
         for token in ids { logits = try advance(Int(token)) }
         let prefill = Date().timeIntervalSince(prefillStart)
 
+        let ignoreEOS =
+            ProcessInfo.processInfo.environment["TINYTITAN_NEMOTRON_IGNORE_EOS"] == "1"
         var produced: [Int32] = []
         let decodeStart = Date()
         for _ in 0..<limit {
             guard let best = greedy(logits) else { break }
-            if loaded.geometry.eosTokens.contains(best) { break }
+            if !ignoreEOS, loaded.geometry.eosTokens.contains(best) { break }
             produced.append(Int32(best))
             logits = try advance(best)
         }
@@ -172,6 +180,11 @@ extension TinyTitanBench {
         var best = 0
         for index in logits.indices where logits[index] > logits[best] { best = index }
         print("argmax \(best)")
+        let top = logits.indices.sorted { logits[$0] > logits[$1] }.prefix(5)
+        print(
+            "top: "
+                + top.map { "\($0)=\(String(format: "%.3f", logits[$0]))" }
+                .joined(separator: " "))
     }
 
     /// `TinyTitanBench nemotroninfo <install>`: what the install declares and

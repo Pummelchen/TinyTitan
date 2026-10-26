@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import statistics
 import subprocess
@@ -30,9 +31,14 @@ DECODE = re.compile(r"decode (\d+) tokens: ([\d.]+)s \(([\d.]+) tok/s\)")
 PREFILL = re.compile(r"prompt (\d+) tokens: ([\d.]+)s \(([\d.]+) tok/s\)")
 
 
-def run_arm(binary: str, install: str, prompt: str, limit: int, gpu: bool) -> dict:
+def run_arm(
+    binary: str, install: str, prompt: str, limit: int, gpu: bool, ignore_eos: bool
+) -> dict:
     command = [binary, "nemotrongraph" if gpu else "nemotron", install, prompt, str(limit)]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    environment = dict(os.environ)
+    if ignore_eos:
+        environment["TINYTITAN_NEMOTRON_IGNORE_EOS"] = "1"
+    result = subprocess.run(command, capture_output=True, text=True, check=False, env=environment)
     if result.returncode != 0:
         raise SystemExit(f"{command[1]} failed ({result.returncode}):\n{result.stderr[-4000:]}")
     decode = DECODE.search(result.stdout)
@@ -59,6 +65,7 @@ def main() -> int:
     parser.add_argument("--prompt", default="The capital of France is")
     parser.add_argument("--limit", type=int, default=4)
     parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--ignore-eos", action="store_true")
     parser.add_argument("--out", type=Path, default=Path("benchmark/nemotron_decode.json"))
     args = parser.parse_args()
 
@@ -66,7 +73,7 @@ def main() -> int:
     for label, install in (("4-bit", args.install4), ("8-bit", args.install8)):
         for gpu in (True, False):
             runs = [
-                run_arm(args.binary, install, args.prompt, args.limit, gpu)
+                run_arm(args.binary, install, args.prompt, args.limit, gpu, args.ignore_eos)
                 for _ in range(args.runs)
             ]
             arms.append({"quant": label, "runs": runs})
