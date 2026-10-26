@@ -16,7 +16,8 @@ Swift and Metal inference for Qwen-family MoE and dense text models on Apple
 Silicon, streaming routed experts from SSD so a model larger than RAM still runs.
 Supports 4-bit and 8-bit builds of Qwen3.8-Flash-Next 125B-A6B,
 KAT-Coder-V2.5-Dev 35B-A3B, Qwen-AgentWorld 35B-A3B, Ornith 1.5 35B-A3B and
-Qwen 3.6 35B-A3B, plus the dense Qwen 3.5 2B/4B/9B on either engine. **The README
+Qwen 3.6 35B-A3B, plus the dense Qwen 3.5 2B/4B/9B on either engine, and
+Poolside Laguna-S-2.1 118B-A8B at 4 and 8 bits through its decode probe. **The README
 is the authority on which checkpoints and widths are supported** — it changes more
 often than this file, so do not treat any list here as the current matrix.
 `Qwen 3.5 <size> <bits>` (keys `qwen35-2b/4b/9b`) are dense: no routed experts,

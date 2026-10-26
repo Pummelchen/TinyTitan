@@ -41,15 +41,38 @@ extension TinyTitanBench {
         let context = try MetalContext()
         let model = try Model.load(
             directoryURL: install, device: context.device, expecting: config,
-            streamingMode: .pread(slotCount: 8))
+            streamingMode: .pread(slotCount: 16))
         guard let tokenizer = try loadK2Tokenizer(install) else {
             FileHandle.standardError.write(Data("no tokenizer in \(install.path)\n".utf8))
             exit(2)
         }
-        let ids = tokenizer.encode(text: prompt, addSpecialTokens: false)
+        let chat = ProcessInfo.processInfo.environment["TINYTITAN_LAGUNA_CHAT"] == "1"
+        let ids: [Int]
+        if chat {
+            // lint:allow-unbounded-read the checkpoint's own template: 4 KB,
+            // written by the converter, and read once per process.
+            let template = try String(
+                contentsOf: install.appendingPathComponent(
+                    "tokenizer/chat_template.jinja"),
+                encoding: .utf8)
+            let messages: [Message] = [["role": "user", "content": prompt]]
+            ids = try tokenizer.applyChatTemplate(
+                messages: messages, chatTemplate: .literal(template),
+                addGenerationPrompt: true, truncation: false,
+                maxLength: nil, tools: nil)
+        } else {
+            ids = tokenizer.encode(text: prompt, addSpecialTokens: false)
+        }
         guard !ids.isEmpty else {
             FileHandle.standardError.write(Data("the prompt tokenized to nothing\n".utf8))
             exit(2)
+        }
+        let debugPrompt = ProcessInfo.processInfo.environment["TINYTITAN_LAGUNA_PROMPT"] == "1"
+        if debugPrompt {
+            print("prompt ids: " + ids.map(String.init).joined(separator: ","))
+            print(
+                "prompt text: "
+                    + tokenizer.decode(tokens: ids, skipSpecialTokens: false))
         }
         let graph = try LagunaGraphProbe(
             model: model, context: context,
@@ -98,6 +121,15 @@ extension TinyTitanBench {
                 "logits: "
                     + logits.prefix(8).map { String(format: "%.5f", $0) }
                     .joined(separator: ","))
+            let ranked = logits.indices.sorted { logits[$0] > logits[$1] }.prefix(5)
+            print(
+                "top5: "
+                    + ranked.map { "\($0):\(String(format: "%.3f", logits[$0]))" }
+                    .joined(separator: ","))
+            print(
+                "top5 text: "
+                    + tokenizer.decode(
+                        tokens: Array(ranked), skipSpecialTokens: false))
         }
     }
 }

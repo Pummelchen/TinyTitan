@@ -96,6 +96,32 @@ void softplus_gate_per_head_mul_fp16(
     out[tid] = half(float(out[tid]) * sp);
 }
 
+// out[i] = x[i] * factor — the residual-stream scale.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void scale_fp16(
+    device half*       out    [[buffer(0)]],
+    device const half* x      [[buffer(1)]],
+    constant uint&     count  [[buffer(2)]],
+    constant float&    factor [[buffer(3)]],
+    uint               tid    [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    out[tid] = half(float(x[tid]) * factor);
+}
+
+// hidden[i] += factor * delta[i] — the scaled residual add.
+[[kernel, max_total_threads_per_threadgroup(256)]]
+void residual_add_scaled_fp16(
+    device half*       hidden [[buffer(0)]],
+    device const half* delta  [[buffer(1)]],
+    constant uint&     count  [[buffer(2)]],
+    constant float&    factor [[buffer(3)]],
+    uint               tid    [[thread_position_in_grid]]
+) {
+    if (tid >= count) return;
+    hidden[tid] = half(float(hidden[tid]) + factor * float(delta[tid]));
+}
+
 // y[i] *= sigmoid(gate[0]) — Qwen 3.6 shared-expert scalar gate.
 [[kernel, max_total_threads_per_threadgroup(256)]]
 void sigmoid_scalar_mul_fp16(

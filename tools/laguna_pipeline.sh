@@ -21,7 +21,7 @@ BENCH="$ROOT/.build/out/Products/Release/TinyTitanBench"
 INSTALL4="$ROOT/models/laguna-s-2.1-4bit.ssdai"
 INSTALL8="$ROOT/models/laguna-s-2.1-8bit.ssdai"
 PYTHON="${TINYTITAN_PYTHON:-python3}"
-PROMPT="The capital of France is"
+PROMPT="What is the capital of France?"
 DEADLINE_SECONDS=$((96 * 3600))
 
 say() {
@@ -36,27 +36,49 @@ die() {
 [ -x "$REPACK" ] || die "no repacker at $REPACK"
 [ -x "$BENCH" ] || die "no bench at $BENCH"
 
-say "waiting for the conversion (deadline ${DEADLINE_SECONDS}s)"
-started=$SECONDS
-while :; do
-  if [ -f "$SNAP4/model.safetensors.index.json" ] &&
-    [ -f "$SNAP8/model.safetensors.index.json" ]; then
-    break
-  fi
-  if [ $((SECONDS - started)) -ge "$DEADLINE_SECONDS" ]; then
-    die "conversion did not finish within ${DEADLINE_SECONDS}s"
-  fi
-  sleep 60
-done
+install_ok() {
+  local install="$1"
+  [ -d "$install" ] &&
+    "$REPACK" --verify-install --input-ssdai "$install" >/dev/null 2>&1
+}
 
-for pair in "$SNAP4:4" "$SNAP8:8"; do
-  snap="${pair%:*}"
-  bits="${pair#*:}"
-  count=$(ls "$snap"/layer-*.safetensors 2>/dev/null | wc -l | tr -d ' ')
-  [ "$count" -eq 47 ] || die "$snap has $count layer files, expected 47"
-  "$PYTHON" "$ROOT/tools/verify_laguna_snapshot.py" \
-    --snapshot "$snap" --bits "$bits" || die "snapshot verification failed for $snap"
-done
+need4=1
+need8=1
+if install_ok "$INSTALL4"; then need4=0; fi
+if install_ok "$INSTALL8"; then need8=0; fi
+
+if [ "$need4" -eq 1 ] || [ "$need8" -eq 1 ]; then
+  say "waiting for the conversion (deadline ${DEADLINE_SECONDS}s)"
+  started=$SECONDS
+  while :; do
+    if { [ "$need4" -eq 0 ] || [ -f "$SNAP4/model.safetensors.index.json" ]; } &&
+      { [ "$need8" -eq 0 ] || [ -f "$SNAP8/model.safetensors.index.json" ]; }; then
+      break
+    fi
+    if [ $((SECONDS - started)) -ge "$DEADLINE_SECONDS" ]; then
+      die "conversion did not finish within ${DEADLINE_SECONDS}s"
+    fi
+    sleep 60
+  done
+
+  if [ "$need4" -eq 1 ]; then
+    count=$(ls "$SNAP4"/layer-*.safetensors 2>/dev/null | wc -l | tr -d ' ')
+    [ "$count" -eq 47 ] || die "$SNAP4 has $count layer files, expected 47"
+    "$PYTHON" "$ROOT/tools/verify_laguna_snapshot.py" \
+      --snapshot "$SNAP4" --bits 4 ||
+      die "snapshot verification failed for $SNAP4"
+  fi
+  if [ "$need8" -eq 1 ]; then
+    count=$(ls "$SNAP8"/layer-*.safetensors 2>/dev/null | wc -l | tr -d ' ')
+    [ "$count" -eq 47 ] || die "$SNAP8 has $count layer files, expected 47"
+    "$PYTHON" "$ROOT/tools/verify_laguna_snapshot.py" \
+      --snapshot "$SNAP8" --bits 8 ||
+      die "snapshot verification failed for $SNAP8"
+  fi
+  say "the snapshots still needed verify"
+else
+  say "both installs already verify; benchmarking them"
+fi
 say "both snapshots verify"
 
 install_one() {
@@ -83,7 +105,7 @@ benchmark_one() {
   local log="$ROOT/.build/laguna-bench-$bits-bit.log"
   say "benchmarking $bits-bit"
   df -h "$ROOT" | tail -1
-  "$BENCH" lagunagpu "$install" "$PROMPT" 4 >"$log" 2>&1 ||
+  TINYTITAN_LAGUNA_CHAT=1 "$BENCH" lagunagpu "$install" "$PROMPT" 4 >"$log" 2>&1 ||
     die "$bits-bit benchmark failed (see $log)"
   cat "$log"
   say "$bits-bit: $(grep '^decode' "$log" | tail -1)"

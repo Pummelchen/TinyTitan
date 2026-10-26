@@ -16,6 +16,10 @@ package final class LagunaGraphProbe {
     private let queue: MTLCommandQueue
     private let hiddenA: MTLBuffer
     private let hiddenB: MTLBuffer
+    /// Debug hook: write each layer's hidden state as raw FP16 when
+    /// `TINYTITAN_LAGUNA_DUMP` names a directory. Used to compare a real
+    /// install against an independent CPU reference; off by default.
+    private let dumpDirectory: URL?
 
     package init(model: Model, context: MetalContext, maxSequence: Int) throws {
         self.config = model.config
@@ -40,6 +44,25 @@ package final class LagunaGraphProbe {
         }
         self.hiddenA = try buffer("laguna.graph.hiddenA")
         self.hiddenB = try buffer("laguna.graph.hiddenB")
+        if let path = ProcessInfo.processInfo.environment["TINYTITAN_LAGUNA_DUMP"] {
+            let directory = URL(fileURLWithPath: path)
+            try? FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            self.dumpDirectory = directory
+        } else {
+            self.dumpDirectory = nil
+        }
+    }
+
+    private func dump(
+        _ buffer: MTLBuffer, layer: Int, position: UInt32
+    ) {
+        guard let directory = dumpDirectory else { return }
+        let data = Data(
+            bytes: buffer.contents(),
+            count: config.hiddenSize * MemoryLayout<UInt16>.stride)
+        let name = String(format: "layer-%02d-pos-%u.bin", layer, position)
+        try? data.write(to: directory.appendingPathComponent(name))
     }
 
     package func forward(tokenID: UInt32, position: UInt32) async throws -> [Float] {
@@ -47,16 +70,19 @@ package final class LagunaGraphProbe {
             throw MetalError.commandEncoderFailed
         }
         try head.encodeEmbedding(
-            commandBuffer: embed, tokenID: tokenID, out: hiddenA)
+            commandBuffer: embed, tokenID: tokenID, out: hiddenA,
+            scale: LagunaLayer.residualScale)
         embed.commit()
         await embed.completed()
+        dump(hiddenA, layer: -1, position: position)
 
         var input = hiddenA
         var output = hiddenB
-        for layer in layers {
+        for (index, layer) in layers.enumerated() {
             try await layer.run(
                 queue: queue, hidden: input, out: output, position: Int(position))
             swap(&input, &output)
+            dump(input, layer: index, position: position)
         }
         guard let final = queue.makeCommandBuffer() else {
             throw MetalError.commandEncoderFailed

@@ -167,7 +167,8 @@ final class K2MoEStage {
         hidden: MTLBuffer, hiddenOffset: Int = 0,
         experts: [ExpertWeights],
         shared: ExpertWeights?,
-        out: MTLBuffer, outOffset: Int = 0
+        out: MTLBuffer, outOffset: Int = 0,
+        downInputScale: Float = 1
     ) throws {
         if let shared {
             try encodeSwiGLU(
@@ -176,7 +177,8 @@ final class K2MoEStage {
                 x: hidden, xOffset: hiddenOffset,
                 gate: sharedGate, up: sharedUp, act: sharedAct,
                 y: out, yOffset: outOffset,
-                rows: hiddenSize, width: expertWidth)
+                rows: hiddenSize, width: expertWidth,
+                downInputScale: downInputScale)
         }
 
         guard experts.count == topK else {
@@ -191,7 +193,8 @@ final class K2MoEStage {
                 gate: gateScratch, up: upScratch, act: actScratch,
                 y: downScratch,
                 yOffset: slot * hiddenSize * MemoryLayout<UInt16>.stride,
-                rows: hiddenSize, width: expertWidth)
+                rows: hiddenSize, width: expertWidth,
+                downInputScale: downInputScale)
         }
 
         guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
@@ -218,7 +221,8 @@ final class K2MoEStage {
         x: MTLBuffer, xOffset: Int,
         gate: MTLBuffer, up: MTLBuffer, act: MTLBuffer,
         y: MTLBuffer, yOffset: Int,
-        rows: Int, width: Int
+        rows: Int, width: Int,
+        downInputScale: Float
     ) throws {
         try gemv(
             weights.gate, commandBuffer: commandBuffer, x: x, xOffset: xOffset, y: gate,
@@ -229,6 +233,11 @@ final class K2MoEStage {
         try elementwise.encodeSiluMul(
             commandBuffer: commandBuffer,
             gate: gate, up: up, out: act, count: width)
+        if downInputScale != 1 {
+            try elementwise.encodeScale(
+                commandBuffer: commandBuffer, x: act, out: act,
+                count: width, factor: downInputScale)
+        }
         try gemv(
             weights.down, commandBuffer: commandBuffer, x: act, y: y, yOffset: yOffset, rows: rows,
             columns: width)

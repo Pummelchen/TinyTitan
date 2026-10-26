@@ -1,9 +1,11 @@
 # Plan: Poolside Laguna-S-2.1
 
-Status: **runtime port and conversion in progress.** The install format, the
-architecture reader, the resident schema, the decode probe and the converter
-exist; the real 4-bit and 8-bit installs are being built, and the serving
-runner does not have a Laguna graph yet.
+Status: **runtime port and both conversions complete; the decode probe is
+measured.** The 4-bit install is 66,524,584,443 bytes and the 8-bit
+124,978,666,238 bytes; both were imported from snapshots of the 16-bit
+original, verify under `--verify-install`, and run the real weights through
+`TinyTitanBench lagunagpu`. The serving runner and the ANE prefill sidecar are
+not implemented.
 
 The checkpoint is `poolside/Laguna-S-2.1`, OpenMDW-1.1, ungated, at sha
 `0f573140834b11cfac0c2af97a101a7a69a13e22` (2026-08-19). Everything below was
@@ -142,8 +144,54 @@ template), so the number is comparable with the K2 and Qwen runs.
 
 | Install | Prompt | Prefill | Decode | Output |
 | --- | ---: | ---: | ---: | --- |
-| 4-bit | | | | |
-| 8-bit | | | | |
+| 4-bit (66.5 GB) | 48-token chat template, "What is the capital of France?" | 66.07 s (0.73 tok/s) | **1.47 tok/s** (8 tokens, 5.45 s) | "Okay, the user is asking for the" |
+| 8-bit (125.0 GB) | the same | 114.32 s (0.42 tok/s) | **0.87 tok/s** (8 tokens, 9.22 s) | the same eight token ids |
+
+The README carries the best chat run of each width; the full spread measured
+on this host is:
+
+| Width | Prefill (48 tokens) | Decode | Note |
+| --- | ---: | ---: | --- |
+| 4-bit | 63.43 s / 66.07 s / 66.31 s | 1.27 / 1.47 / 1.12 tok/s | three runs |
+| 8-bit | 114.32 s / 116.54 s / 164.89 s | 0.87 / 0.83 / 0.60 tok/s | three runs; the last followed a full 125 GB re-hash |
+
+Every run produced the **same eight token ids** at both widths, which is the
+width-quality check this probe offers. Decode is short (8 tokens) and the
+8-bit install is 125 GB on a 24 GB machine, so the spread is dominated by what
+the page cache holds, not by a steady-state ceiling. A 16-token no-think run of the 4-bit
+install answered "The capital of France is Paris." — the model is the chat
+model it says it is, and the plain continuation used by the earlier K2 run is
+not its format.
+
+Both numbers are the **GPU (Metal)** decode; `NA` for CPU is deliberate (the
+CPU engine only serves the dense Qwen 3.5 models) and there is no ANE decode
+number to report, because this engine has no ANE decode path at all.
+
+### Findings from the real weights
+
+- **Massive activations do not fit FP16.** The residual stream reaches ~1,200
+  by layer 46 (a checkpoint property, reproduced by the independent numpy
+  reference), and one layer-46 MoE down-projection output exceeds the FP16
+  maximum: the buffer becomes `inf`, then the next norm turns it into `NaN`.
+  The probe now keeps the residual stream divided by 32 and scales the MoE
+  down projection's input by the same factor; RMSNorm is scale-invariant apart
+  from its epsilon, so the normalised inputs are unchanged. The fix was
+  verified by comparing layer 0 against the numpy reference (7.7e-4) and by
+  the chat answer above.
+- **The dense residual add was unscaled** in the first version of that fix,
+  which left layer 0's output at the wrong scale; the layer-0 comparison
+  caught it before the benchmark.
+- **The manifest did not write `denseLayerIndices`** for Laguna, so the loader
+  demanded `packed_experts/layer_0.bin` from the one layer that never has one.
+  The writer now emits the field for this family; the already-built 4-bit
+  install was amended and re-attested with `--verify-install`.
+- **The expert cache needs at least top-k slots.** `lagunagpu` loaded with
+  eight slots against top-10 and refused; it now uses sixteen.
+
+The probe scale and the layer-0/1 comparisons are pinned by dumping each
+layer's hidden state (`TINYTITAN_LAGUNA_DUMP`) and, for one layer, its
+intermediates (`TINYTITAN_LAGUNA_LAYER_DUMP`), then comparing against
+`numpy` from the install's own bytes.
 
 The host is a base 8-core M3 MacBook Pro with 24 GB and a 1 GbE-class link
 shared with other work; the conversion is 235 GB over that link, one layer at
@@ -152,11 +200,14 @@ a time, and a layer's 4.8 GB is fetched over several parallel range reads.
 ## Open
 
 - Serving graph: the server does not run Laguna; `lagunagpu` is the probe.
+  The catalogue reports the family as not served, with the reason.
 - ANE prefill sidecar: not exported. The engine's ANE path is prefill-only;
   the project has no ANE *decode* path at all (the measurements in
   `docs/qwen38-decode-12gb-measurements.md` call it unreachable), so the decode
   numbers above are the GPU probe's. There is no ANE decode number to report
-  for any model, Laguna included.
+  for any model, Laguna included. The sidecar exporter would also need a
+  Laguna graph (72 query heads, per-head gate, two RoPE dialects) that does
+  not exist yet.
 - Batched prefill: none; the probe decodes one token at a time.
 - Golden baseline: not captured. A baseline is valid per (machine, build,
   model); capture it once the installs are stable and a serving path exists.

@@ -164,6 +164,15 @@ enum SSDAIJSON {
             // `norm_topk_prob: true`; write it so the manifest says it too.
             archDict["routerNormTopK"] = arch.routerNormTopK
         }
+        if arch.family == .laguna {
+            // Layer 0 is dense and carries no expert file. The manifest is
+            // where the runtime learns which layers may legitimately have no
+            // `packed_experts/layer_NN.bin`; omitting this made the loader
+            // demand layer_0.bin from an install that was never going to have
+            // one.
+            archDict["denseLayerIndices"] = arch.denseLayerIndices
+            archDict["routerNormTopK"] = arch.routerNormTopK
+        }
         return archDict
     }
 

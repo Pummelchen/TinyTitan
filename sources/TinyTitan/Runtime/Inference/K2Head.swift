@@ -47,7 +47,8 @@ final class K2Head {
     func encodeEmbedding(
         commandBuffer: MTLCommandBuffer,
         tokenID: UInt32,
-        out: MTLBuffer, outOffset: Int = 0
+        out: MTLBuffer, outOffset: Int = 0,
+        scale: Float = 1
     ) throws {
         let view = try model.embedding()
         let bits = weightBits(view, rows: config.vocabSize, columns: config.hiddenSize)
@@ -59,8 +60,9 @@ final class K2Head {
             biases: view.buffer, biasesOffset: Int(view.biasOffset),
             out: out, outOffset: outOffset,
             tokenId: tokenID, d: UInt32(config.hiddenSize),
-            outScale: config.embeddingScaledBySqrtHidden
-                ? Float(config.hiddenSize).squareRoot() : 1,
+            outScale: scale
+                * (config.embeddingScaledBySqrtHidden
+                    ? Float(config.hiddenSize).squareRoot() : 1),
             vocab: UInt32(config.vocabSize))
     }
 

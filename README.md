@@ -8,9 +8,9 @@
 [![Views (14d)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Pummelchen/TinyTitan/main/.github/traffic.json)](https://github.com/Pummelchen/TinyTitan)
 [![Last Commit](https://img.shields.io/github/last-commit/Pummelchen/TinyTitan?style=flat-square&logo=git&label=Last%20Commit&color=2ea44f)](https://github.com/Pummelchen/TinyTitan/commits/main)
 
-**TinyTitan runs Qwen-family MoE and dense text models locally on Apple Silicon,
-streaming the routed experts from SSD so a model larger than your RAM still
-runs.** Decode is native Swift over hand-written Metal kernels; the prompt runs
+**TinyTitan runs Qwen-family MoE and dense text models, and Poolside's
+Laguna-S-2.1, locally on Apple Silicon, streaming the routed experts from SSD
+so a model larger than your RAM still runs.** Decode is native Swift over hand-written Metal kernels; the prompt runs
 on the GPU or, optionally, the Apple Neural Engine. It ships a CLI, an
 installer/repacker, and a loopback OpenAI-compatible server with no MLX and no
 GGUF dependency.
@@ -81,7 +81,10 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB. `NA` means that engine
 does not serve the model: the MoE families stream their experts on the GPU + ANE
 path, only the dense Qwen 3.5 models run on either engine, and K2-Horizon is
 install-only today — its GPU graph is not implemented, so both of its decode
-columns are `NA`. K2-Horizon's score is from its
+columns are `NA`. Laguna-S-2.1's decode column is its Metal probe
+(`TinyTitanBench lagunagpu`), not the server: the probe runs the real 4- and
+8-bit installs token by token and is what produced the numbers and the text in
+`docs/plan-laguna-s-2.1.md`. K2-Horizon's score is from its
 [model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
 Terminal-Bench 4.0 result is published for it. Per-version measurements and the
 method live on the wiki
@@ -92,6 +95,8 @@ method live on the wiki
 | --- | --- | ---: | ---: | ---: | ---: |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
+| Laguna-S-2.1 118B-A8B | 4-bit | **1.47 tok/s** | NA | 70.2% (2.1) | NA |
+| Laguna-S-2.1 118B-A8B | 8-bit | **0.87 tok/s** | NA | 70.2% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
 | K2-Horizon-MoVA-36B-A4B | 4-bit | NA | NA | 58.6% (2.1) | NA |

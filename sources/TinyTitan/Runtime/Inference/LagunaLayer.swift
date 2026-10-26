@@ -14,6 +14,12 @@ import Metal
 /// of the serving graph), and the routed experts are fetched between command
 /// buffers because the router's ids have to come back to the CPU.
 final class LagunaLayer {
+    /// The residual stream is kept divided by this factor so the checkpoint's
+    /// massive activations (layer 46 reaches ~1,200) fit in FP16. RMSNorm is
+    /// scale-invariant apart from its epsilon, so every sublayer reads the
+    /// same normalised input; only the residual additions carry 1/scale.
+    static let residualScale: Float = 1.0 / 32.0
+
     private let config: ArchConfig
     private let model: Model
     private let layer: Int
@@ -149,11 +155,13 @@ final class LagunaLayer {
         if isDense {
             try encodeDenseMLP(first)
             try copy(first, from: h1, to: out, toOffset: outOffset, count: config.hiddenSize)
-            try elementwise.encodeResidualAdd(
+            try elementwise.encodeResidualAddScaled(
                 commandBuffer: first, hidden: out, hiddenOffset: outOffset,
-                delta: mlpOut, count: config.hiddenSize)
+                delta: mlpOut, count: config.hiddenSize,
+                factor: Self.residualScale)
             first.commit()
             await first.completed()
+            dumpLayerBuffers(position: position)
             return
         }
         guard let stage = moe else {
@@ -170,6 +178,7 @@ final class LagunaLayer {
             scaling: Float(config.routerScaling))
         first.commit()
         await first.completed()
+        dumpLayerBuffers(position: position)
 
         let ids = stage.selectedExpertIDs()
         guard let plan = try model.planRoutedExperts(layer: layer, experts: ids) else {
@@ -192,13 +201,17 @@ final class LagunaLayer {
         }
         try stage.encodeExperts(
             commandBuffer: second, hidden: normed2,
-            experts: experts, shared: shared, out: mlpOut)
+            experts: experts, shared: shared, out: mlpOut,
+            downInputScale: Self.residualScale)
         try copy(second, from: h1, to: out, toOffset: outOffset, count: config.hiddenSize)
-        try elementwise.encodeResidualAdd(
+        // The MoE output was computed through a 1/residualScale input to the
+        // down projection, so it is already in the scaled residual's units.
+        try elementwise.encodeResidualAddScaled(
             commandBuffer: second, hidden: out, hiddenOffset: outOffset,
-            delta: mlpOut, count: config.hiddenSize)
+            delta: mlpOut, count: config.hiddenSize, factor: 1)
         second.commit()
         await second.completed()
+        dumpLayerBuffers(position: position)
     }
 
     /// Norm, q/k/v/g, QK norms, RoPE, cached windowed/full attention, the
@@ -296,8 +309,9 @@ final class LagunaLayer {
         try copy(
             commandBuffer, from: hidden, fromOffset: hiddenOffset,
             to: h1, count: d)
-        try elementwise.encodeResidualAdd(
-            commandBuffer: commandBuffer, hidden: h1, delta: oOut, count: d)
+        try elementwise.encodeResidualAddScaled(
+            commandBuffer: commandBuffer, hidden: h1, delta: oOut, count: d,
+            factor: Self.residualScale)
 
         let postNorm = try model.postAttnNorm(layer: layer)
         try rms.encodeBF16WGrouped(
@@ -307,6 +321,34 @@ final class LagunaLayer {
             groupDim: UInt32(d / max(1, config.normGroups)),
             numGroups: max(1, config.normGroups),
             eps: 1e-6)
+    }
+
+    /// Debug hook: dump layer 0's intermediates at one position so an
+    /// independent reference can be compared stage by stage.
+    private func dumpLayerBuffers(position: Int) {
+        guard
+            let value = ProcessInfo.processInfo.environment["TINYTITAN_LAGUNA_LAYER_DUMP"],
+            let dumpLayer = Int(value), dumpLayer == layer
+        else { return }
+        let directory = URL(
+            fileURLWithPath: "/tmp/laguna-layer\(layer)-pos\(position)")
+        try? FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        func write(_ name: String, _ buffer: MTLBuffer, _ count: Int) {
+            let data = Data(
+                bytes: buffer.contents(),
+                count: count * MemoryLayout<UInt16>.stride)
+            try? data.write(to: directory.appendingPathComponent(name + ".bin"))
+        }
+        write("q", q, queryDim)
+        write("k", k, kvDim)
+        write("v", v, kvDim)
+        write("gate", gate, heads)
+        write("attn", attn, queryDim)
+        write("o", oOut, config.hiddenSize)
+        write("h1", h1, config.hiddenSize)
+        write("normed2", normed2, config.hiddenSize)
+        write("mlpOut", mlpOut, config.hiddenSize)
     }
 
     private func encodeDenseMLP(_ commandBuffer: MTLCommandBuffer) throws {
