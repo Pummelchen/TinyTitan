@@ -60,11 +60,11 @@ state is the two installs (178 GB) with the snapshots gone.
         --model-id laguna-s-2.1-8bit --output models/laguna-s-2.1-8bit.ssdai \
         --consume-snapshot
 
-    # The decode numbers, one width at a time.
-    TinyTitanBench lagunagpu models/laguna-s-2.1-4bit.ssdai \
-        "The capital of France is" 4
-    TinyTitanBench lagunagpu models/laguna-s-2.1-8bit.ssdai \
-        "The capital of France is" 4
+    # The decode numbers, one width at a time, in the model's own format.
+    TINYTITAN_LAGUNA_CHAT=1 TinyTitanBench lagunagpu \
+        models/laguna-s-2.1-4bit.ssdai "What is the capital of France?" 8
+    TINYTITAN_LAGUNA_CHAT=1 TinyTitanBench lagunagpu \
+        models/laguna-s-2.1-8bit.ssdai "What is the capital of France?" 8
 
 ## What a layer does
 
