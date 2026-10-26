@@ -700,41 +700,44 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
                     part.unlink(missing_ok=True)
                     transfers.append((start, want, chunk, part, have_chunk))
                 if transfers:
-                    command = [
-                        "curl",
-                        "--parallel",
-                        "--parallel-max",
-                        str(PARALLEL_CHUNKS),
-                        "-fL",
-                        "--http1.1",
-                        "--max-time",
-                        str(PARALLEL_CHUNK_TIMEOUT),
-                        "--speed-limit",
-                        str(CHUNK_MIN_BYTES_PER_SEC),
-                        "--speed-time",
-                        str(CHUNK_STALL_SECONDS),
-                    ]
+                    # One curl per range. `-r` is a global option in curl, so a
+                    # single --parallel invocation applied the last range to
+                    # every transfer -- four copies of one range appended at
+                    # four offsets, which corrupts the shard's header. Separate
+                    # processes give each range its own URL and output.
+                    procs: list[subprocess.Popen] = []
                     for start, want, _chunk, part, have_chunk in transfers:
-                        # A fresh signature per range. One signed URL shared by
-                        # sixteen transfers is throttled by the CDN as one
-                        # object; sixteen independently resolved URLs are not.
-                        command += [
-                            "-r",
-                            f"{start + have_chunk}-{start + want - 1}",
-                            "--silent",
-                            "--show-error",
-                            "-o",
-                            str(part),
-                            resolve_url(shard),
-                        ]
-                    proc = subprocess.Popen(command)
+                        procs.append(
+                            subprocess.Popen(
+                                [
+                                    "curl",
+                                    "-fL",
+                                    "--http1.1",
+                                    "--max-time",
+                                    str(PARALLEL_CHUNK_TIMEOUT),
+                                    "--speed-limit",
+                                    str(CHUNK_MIN_BYTES_PER_SEC),
+                                    "--speed-time",
+                                    str(CHUNK_STALL_SECONDS),
+                                    "-r",
+                                    f"{start + have_chunk}-{start + want - 1}",
+                                    "--silent",
+                                    "--show-error",
+                                    "-o",
+                                    str(part),
+                                    resolve_url(shard),
+                                ]
+                            )
+                        )
                     with _in_flight_lock:
-                        _in_flight.add(proc)
+                        _in_flight.update(procs)
                     try:
-                        code = proc.wait()
+                        for proc in procs:
+                            proc.wait()
+                        code = next((p.returncode for p in procs if p.returncode != 0), 0)
                     finally:
                         with _in_flight_lock:
-                            _in_flight.discard(proc)
+                            _in_flight.difference_update(procs)
                     # A transfer that closed early still wrote bytes. Keep them;
                     # the next attempt ranges from the new end instead of
                     # refetching the chunk.
