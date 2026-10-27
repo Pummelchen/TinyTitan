@@ -242,6 +242,35 @@ The project's bar, in this order:
 Never mark a model "supported" before §4 passes. "Install path landed,
 verification pending" is the honest state, and it is worth writing down.
 
+## 5b. A wider member of an existing family
+
+Ornith-1.5-122B is the worked example of a *geometry* addition rather than an
+architecture one. It is the same Qwen3.5-MoE text graph as the 35B-A3B
+(`family: qwen36`), at hidden 3072, 48 layers, 256 experts top-8, F=1024,
+32 Q / 2 KV heads and 16 GDN K / 64 V heads. Three things differ from the 35B
+checklist above:
+
+1. **The runtime must serve two shapes under one family.** `ArchConfig.resolved`
+   returns the 35B preset when the manifest declares the 35B shape and otherwise
+   builds the config from the manifest's own `arch` block (all conventions are
+   `required`, never defaulted). The repacker's `crossCheckOrnith122` pins the
+   3072/48 geometry the same way `crossCheckProductionQwen35MoE` pins 2048/40.
+2. **The MoE threadgroup tile.** `kMoEXMaxD` in `moe.metal` and
+   `Model.maximumThreadgroupTileWidth` are 3072, not 2816. A hidden size above
+   the tile is a silent out-of-bounds write in the kernel, so the load guard is
+   the thing that makes this a refusal rather than wrong numbers. The GDN tile is
+   already 4096.
+3. **Disk, not compute, decides the conversion shape.** The source is 250 GB,
+   the 4-bit snapshot 69.5 GB and the 8-bit 129.8 GB; one `--bits 4 8` pass
+   stages 199 GB and then wants a 125 GB install beside it. The `ornith122` rows
+   are therefore `convert_qwen35moe_solo`: one width per run, converter fetchers
+   capped at four, and `TinyTitanRepack --input-snapshot --consume-snapshot`
+   unlinks each snapshot shard after its last planned range is committed. That is
+   a ~142 GB peak for the 8-bit width instead of ~255 GB. It consumes the
+   snapshot: a failed repack after a retirement needs the snapshot rebuilt, which
+   is the trade the checklist's "converted widths are reproducible from the
+   source" already assumes.
+
 ## 6. After the checkout moves
 
 An install receipt is bound to its absolute path. Moving or renaming the
@@ -267,6 +296,7 @@ moved or swapped directory.
 - [ ] `--plan` classifies every tensor and the output size fits the disk table
 - [ ] All eight wiring points above
 - [ ] Conversion and install, one width at a time, snapshots deleted after
+      (a 122B install additionally uses `--consume-snapshot`)
 - [ ] Continuations, golden target, receipt, catalog, launcher keys
 - [ ] README, wiki pages, tracker, roadmap — with deviations and status
 - [ ] Committed, pushed, and the receipts re-issued if the checkout moved

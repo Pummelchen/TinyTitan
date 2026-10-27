@@ -198,6 +198,52 @@ public struct ModelProfile: Sendable, Equatable {
                 GenerationDefaults.qwen38Thinking,
                 true, true, false, false, true
             ),
+            // Ornith-1.5-122B: the same qwen36 graph at hidden 3072 and 48
+            // layers, 256 experts top-8, so a routed-expert slot is 5.3 MB at
+            // 4-bit and 10.0 MB at 8-bit (against 2.5/4.9 MB for the 35B). Its
+            // resident body is 4.30 GB at 4-bit and 6.58 GB at 8-bit, so at the
+            // 12 GB process target the 4-bit install keeps 24 of 256 experts a
+            // layer (9.4%) and the 8-bit 8 (3.1%); the counts above the target
+            // are recorded on each row. The inferred prefetch depth 1 follows
+            // qwen38: at this width the routed-expert read dominates the token.
+            // Sampling is the checkpoint's own `generation_config.json`
+            // (temperature 0.6, top-k 20, top-p 0.95), which is the house pair
+            // -- stated rather than borrowed so a later house change cannot move
+            // this model.
+            Key("ornith-1.5-122b", 4): (
+                // 24 slots x 5,308,416 B x 48 layers = 6,115,295,232 B
+                // (~5.70 GiB): the remainder of the 12 GB process target after
+                // the 4.0 GB resident body. Measured 2026-10-27 at
+                // `--ram-budget 12G`: 10.2 GiB estimate, 10.63 GB peak RSS,
+                // 2.720 tok/s at 128 generated tokens and 2.43-2.86 at 256
+                // across the records and arms logged in .build/speeds-4bit-*.
+                // This row is a cache *budget*, not a process cap: on a 24 GiB
+                // host `affordableExpertCacheBudget` grows it to a third of RAM
+                // (8.59 GB, 32 slots, 12.10 GiB estimate, 12.85 GB peak RSS), so
+                // holding the 12 GB target needs `--ram-budget 12G` -- which is
+                // what the launcher passes on a 24 GB Mac. 40 slots (3.411) and
+                // 48 (3.574) also exceed the target; 64 fell to 0.682 (swap).
+                6_115_295_232, 1, 2_048,
+                GenerationDefaults.Sampling(
+                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
+                true, true, false, false, true
+            ),
+            Key("ornith-1.5-122b", 8): (
+                // 8 slots x 10,027,008 B x 48 layers = 3,850,371,072 B
+                // (~3.59 GiB): the largest cache that fits the 12 GB target
+                // beside the 6.1 GB 8-bit resident body. Measured 2026-10-27 at
+                // `--ram-budget 12G`: 10.22 GiB estimate, 10.78 GB peak RSS,
+                // 1.048 tok/s at 128 tokens and 1.00-1.24 at 256. Like the
+                // 4-bit row it is a budget, so the third-of-RAM floor grows it
+                // to 7.17 GB (16 slots, 13.80 GiB estimate, 14.48 GB peak RSS)
+                // on this 24 GiB host -- pass the target to stay at 12 GB.
+                // 16 slots measured 1.056 tok/s at ~15 GB -- no faster for
+                // twice the footprint; 24 slots was killed by the OS.
+                3_850_371_072, 1, 2_048,
+                GenerationDefaults.Sampling(
+                    temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
+                true, true, false, false, true
+            ),
         ]
 
     /// Environment switches applied last. Read once per process.

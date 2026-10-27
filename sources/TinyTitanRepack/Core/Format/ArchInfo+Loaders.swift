@@ -91,6 +91,7 @@ extension ArchInfo {
             linearValueHeadDim: try i("linear_value_head_dim"),
             linearConvKernelSize: try i("linear_conv_kernel_dim"))
         try crossCheckProductionQwen35MoE(arch, configPath: configPath)
+        try crossCheckOrnith122(arch, configPath: configPath)
         return arch
     }
 

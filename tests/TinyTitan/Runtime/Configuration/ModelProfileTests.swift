@@ -7,6 +7,7 @@ import Testing
 @Suite struct ModelProfileTests {
     static let shipped: [(String, ModelFamily)] = [
         ("qwen3.6-35b-a3b", .qwen36), ("ornith-1.5-35b-a3b", .qwen36),
+        ("ornith-1.5-122b", .qwen36),
         ("qwen-agentworld", .qwen36), ("kat-coder-v2.5", .qwen36),
         ("qwen3.8-flash-next", .qwen38flash),
     ]
@@ -20,7 +21,7 @@ import Testing
                 #expect(p.key == ModelProfile.Key(id, bits))
             }
         }
-        #expect(ModelProfile.table.count == 10)
+        #expect(ModelProfile.table.count == 12)
     }
 
     @Test func modelsSharingAFamilyResolveIndependently() {
@@ -76,6 +77,10 @@ import Testing
         let expected: [(String, ModelFamily, GenerationDefaults.Sampling)] = [
             ("qwen3.6-35b-a3b", .qwen36, qwen36Series),
             ("qwen-agentworld", .qwen36, qwen36Series),
+            // Ornith-1.5-122B's `generation_config.json` asks for 0.6 / top-k
+            // 20 / top-p 0.95, which happens to equal the house pair. Stated so
+            // that a later house change cannot move it.
+            ("ornith-1.5-122b", .qwen36, qwen36Series),
             // A fine-tune does not inherit its base's sampling: KAT-Coder's own
             // generation_config.json asks for 1.0, so its rows must not be
             // swept along by the 0.6 the rest of the qwen36 series uses.

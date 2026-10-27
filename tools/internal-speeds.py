@@ -271,7 +271,12 @@ def parse_footer(stderr: str) -> dict | None:
 
 
 def measure_generation(
-    model: str, prompt: str, max_new: int, ane: bool = False, prefill_chunk: int | None = None
+    model: str,
+    prompt: str,
+    max_new: int,
+    ane: bool = False,
+    prefill_chunk: int | None = None,
+    ram_budget: str | None = None,
 ) -> dict:
     import os
 
@@ -291,6 +296,8 @@ def measure_generation(
     ]
     if prefill_chunk is not None:
         command += ["--prefill-chunk", str(prefill_chunk)]
+    if ram_budget is not None:
+        command += ["--ram-budget", ram_budget]
     code, out, err = run(command, env=env, timeout=3600)
     if code != 0:
         return {"error": f"cli exit {code}", "stderr": err[-800:]}
@@ -376,7 +383,9 @@ def environment() -> dict:
     }
 
 
-def measure(model: str, prompt: str, max_new: int, iterations: int) -> dict:
+def measure(
+    model: str, prompt: str, max_new: int, iterations: int, ram_budget: str | None = None
+) -> dict:
     print(f"measuring kernels ({iterations} iterations each)...", flush=True)
     gpu = {
         "qkv_gemv": measure_kernel("baseline", iterations),
@@ -391,7 +400,7 @@ def measure(model: str, prompt: str, max_new: int, iterations: int) -> dict:
     cpu = measure_cpu_gemv(iterations)
 
     print(f"measuring generation on {model} ...", flush=True)
-    generation = measure_generation(model, prompt, max_new)
+    generation = measure_generation(model, prompt, max_new, ram_budget=ram_budget)
 
     model_dir = ROOT / model
     sidecar = model_dir / "ane_prefill/ane_prefill.json"
@@ -410,8 +419,17 @@ def measure(model: str, prompt: str, max_new: int, iterations: int) -> dict:
                 file=sys.stderr,
                 flush=True,
             )
-            measure_generation(model, ane_prompt(), 1, ane=True, prefill_chunk=ANE_PREFILL_CHUNK)
-        ane = measure_generation(model, ane_prompt(), 1, ane=True, prefill_chunk=ANE_PREFILL_CHUNK)
+            measure_generation(
+                model,
+                ane_prompt(),
+                1,
+                ane=True,
+                prefill_chunk=ANE_PREFILL_CHUNK,
+                ram_budget=ram_budget,
+            )
+        ane = measure_generation(
+            model, ane_prompt(), 1, ane=True, prefill_chunk=ANE_PREFILL_CHUNK, ram_budget=ram_budget
+        )
         ane["cache_was_warm"] = warm
         ane["applicable"] = "error" not in ane and ane.get("used_ane", False)
         if "error" not in ane and not ane.get("used_ane", False):
@@ -438,7 +456,13 @@ def measure(model: str, prompt: str, max_new: int, iterations: int) -> dict:
     return {
         "schema": 1,
         "environment": env,
-        "model": {"path": model, "family": family, "prompt": prompt, "max_new_tokens": max_new},
+        "model": {
+            "path": model,
+            "family": family,
+            "prompt": prompt,
+            "max_new_tokens": max_new,
+            "ram_budget": ram_budget,
+        },
         "gpu": gpu,
         "cpu": cpu,
         "generation": generation,
@@ -556,6 +580,11 @@ def main() -> int:
     parser.add_argument("--max-new", type=int, default=DEFAULT_MAX_NEW)
     parser.add_argument("--iterations", type=int, default=300)
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    parser.add_argument(
+        "--ram-budget",
+        help="resident-memory target passed to the CLI (e.g. 12G). It is "
+        "recorded in the model block, so a row says which ceiling produced it",
+    )
     args = parser.parse_args()
 
     if args.compare:
@@ -567,7 +596,7 @@ def main() -> int:
     if not args.record:
         parser.error("pass --record or --compare")
 
-    record = measure(args.model, args.prompt, args.max_new, args.iterations)
+    record = measure(args.model, args.prompt, args.max_new, args.iterations, args.ram_budget)
     RESULTS.mkdir(parents=True, exist_ok=True)
     label = (
         args.label

@@ -11,9 +11,10 @@ constant constexpr uint kMoEGroupSize = 64;
 constant constexpr uint kMaxStreamedExperts = 16;
 constant constexpr float kGeluSqrt2OverPi = 0.7978845608028654f;
 constant constexpr float kGeluCubicCoeff = 0.044715f;
-// Max hidden size for the phase-1 threadgroup-staged activation (covers
-// qwen36_35B_A3B's 2048; the cooperative load is guarded for smaller D).
-constant constexpr uint kMoEXMaxD = 2816;
+// Max hidden size for the phase-1 threadgroup-staged activation. Covers
+// qwen36_35B_A3B's 2048, qwen38flash's 2560 and Ornith-1.5-122B's 3072; the
+// cooperative load is guarded for smaller D.
+constant constexpr uint kMoEXMaxD = 3072;
 
 constant uint FC_ROUTER_NUM_EXPERTS [[function_constant(40)]];
 constant uint FC_ROUTER_D [[function_constant(41)]];

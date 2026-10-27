@@ -118,7 +118,7 @@ class MenuRowPaddingTests(unittest.TestCase):
         return (match.group(1) if match else "", result.stdout + result.stderr)
 
     def test_a_zero_padded_row_installs_the_row_its_digits_name(self) -> None:
-        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("016", "16")):
+        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("018", "18")):
             with self.subTest(reply=padded):
                 want, _ = self.installed(plain + "\n")
                 self.assertTrue(want, f"the plain reply {plain} names no row")
@@ -127,9 +127,9 @@ class MenuRowPaddingTests(unittest.TestCase):
                 self.assertNotIn("value too great for base", output)
 
     def test_a_padded_row_outside_the_list_still_refuses(self) -> None:
-        # Forcing the base is not a pass: 17 and 20 are still not rows, and 0 is
-        # still not a row, padded or not.
-        for reply in ("00", "017", "020"):
+        # Forcing the base is not a pass: 19 and 20 are still not rows (the
+        # catalogue has 18), and 0 is still not a row, padded or not.
+        for reply in ("00", "019", "020"):
             with self.subTest(reply=reply):
                 got, output = self.installed(reply + "\n")
                 self.assertEqual(got, "", output)
@@ -247,6 +247,24 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.assertIn("TINYTITAN_WORK_DIR", output)
         self.assertNotIn("FAKE-REPACK", output)
         self.assertFalse((self.models / self.ORNITH_4).exists())
+
+    def test_solo_122b_staging_needs_the_retirement_headroom(self) -> None:
+        # The 4-bit row is 66 GB; the install (69 GB including the reserve)
+        # fits in 80 GB, but the staging volume needs the snapshot plus the
+        # pre-unlink headroom, so 80 must refuse while 100 proceeds. The
+        # converter is `/usr/bin/true` here, so no byte is fetched.
+        short = self.run_tool("ornith122", available_gb=80)
+        output = short.stdout + short.stderr
+        self.assertNotEqual(short.returncode, 0, output)
+        self.assertIn("Not starting ornith122", output)
+        self.assertNotIn("FAKE-REPACK", output)
+
+        enough = self.run_tool("ornith122", available_gb=100)
+        output = enough.stdout + enough.stderr
+        self.assertEqual(enough.returncode, 0, output)
+        self.assertIn("FAKE-REPACK", output)
+        # The import consumes its snapshot; the guard's estimate depends on it.
+        self.assertIn("--consume-snapshot", output)
 
     def test_enough_space_lets_the_install_proceed(self) -> None:
         result = self.run_tool("ornith15", available_gb=9999)

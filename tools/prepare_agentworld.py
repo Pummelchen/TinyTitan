@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import signal
 import struct
@@ -84,6 +85,15 @@ MODELS = {
     # the checkpoint was checked for vision tensors rather than trusted to lack
     # them.
     "katcoder": ("Kwaipilot/KAT-Coder-V2.5-Dev", "7be56fe773e72b6f5ca93c1ae45d828ddb893922"),
+    # Ornith-1.5-122B: the largest member of the family, the same text
+    # architecture at a wider geometry (hidden 3072, 48 layers, 256 experts at
+    # top-8, F=1024, 32 Q / 2 KV heads, 16 GDN K / 64 V heads). Verified
+    # against the pinned index rather than assumed: 1,949 tensors, of which 333
+    # are `model.visual.*` and 785 are `mtp.*` (both skipped, as on every other
+    # member), leaving 830 text tensors plus the untied `lm_head`. The routed
+    # experts are fused per layer, so this is the same conversion path as
+    # Ornith-1.5-35B-A3B -- no per-expert stacking.
+    "ornith122": ("ornith-ai/Ornith-1.5-122B", "7681ef608624e7532d8164128bcffdbdbaf1b1af"),
 }
 REPO = MODELS["agentworld"][0]
 COMMIT = MODELS["agentworld"][1]
@@ -511,7 +521,16 @@ _in_flight_lock = threading.Lock()
 # could not complete at all. The speed limit still aborts a dead connection.
 CHUNK_BYTES = 32 * 1024 * 1024
 CHUNK_TIMEOUT = 900
-CHUNK_ATTEMPTS = 8
+CHUNK_ATTEMPTS = 100
+# Chunks fetched concurrently within one shard. The CDN throttles a single
+# connection to well under 1 MB/s here, while sixteen concurrent ranged
+# requests measured ~5 MB/s aggregate; batching keeps the staging footprint to
+# a few hundred MB per shard instead of another whole shard.
+PARALLEL_CHUNKS = int(os.environ.get("TINYTITAN_PARALLEL_CHUNKS", "8"))
+# One parallel transfer's ceiling. Curl's own --retry restarts a 32 MB range and
+# can multiply this by five, so retries belong to this file, which resumes from
+# the bytes already on disk instead of refetching the range.
+PARALLEL_CHUNK_TIMEOUT = int(os.environ.get("TINYTITAN_PARALLEL_CHUNK_TIMEOUT", "180"))
 # Abort a transfer that has effectively stopped. A dead connection does not
 # always error: one was observed sitting in `S` with its chunk file static for
 # minutes and no curl retry firing, because nothing had timed out. curl only
@@ -548,9 +567,20 @@ def expected_size(shard: str) -> int:
         raise RuntimeError(f"{shard}: header carries no tensors")
     payload = max(t["data_offsets"][1] for t in tensors.values())
     derived = 8 + header_len + payload
-    reported = subprocess.run(
-        ["curl", "-sIL", "--http1.1", *RETRY, url], capture_output=True, text=True, check=True
-    ).stdout
+    # The confirmation is useful, not load-bearing: `derived` comes from the
+    # shard's own tensor offsets and is length-checked on every chunk. A HEAD
+    # that fails or times out (rate limiting) must not abort a conversion whose
+    # range requests are working, so a missing answer skips the confirmation.
+    try:
+        reported = subprocess.run(
+            ["curl", "-sIL", "--http1.1", "--max-time", "30", *RETRY, url],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        reported = ""
     lengths = [
         int(line.split(":", 1)[1])
         for line in reported.splitlines()
@@ -574,9 +604,23 @@ def resolve_url(shard: str) -> str:
     end the whole run. That cost a 19 GB staging tree on 2026-10-17, after the
     chunked range fetches — which do retry — had survived two network drops.
     """
-    out = subprocess.run(
-        ["curl", "-sIL", *RETRY, f"{BASE}/{shard}"], capture_output=True, text=True, check=True
-    ).stdout
+    # A bounded HEAD, and a fallback that is still correct: `curl -L` follows
+    # the hub's redirect itself, so the unresolved URL works with `-r`. A HEAD
+    # that hangs (HF rate-limits them during a concurrent conversion) must not
+    # hold the whole run open — there is no `--max-time` in RETRY.
+    try:
+        proc = subprocess.run(
+            ["curl", "-sIL", "--max-time", "30", *RETRY, f"{BASE}/{shard}"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return f"{BASE}/{shard}"
+    if proc.returncode != 0:
+        return f"{BASE}/{shard}"
+    out = proc.stdout
     locations = [
         line.split(":", 1)[1].strip()
         for line in out.splitlines()
@@ -634,65 +678,114 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
     with open(dest, mode) as out:
         done = have
         while done < expected:
-            want = min(CHUNK_BYTES, expected - done)
-            chunk = work / f".{shard}.chunk"
+            tasks: list[tuple[int, int, Path]] = []
+            cursor = done
+            while cursor < expected and len(tasks) < PARALLEL_CHUNKS:
+                want = min(CHUNK_BYTES, expected - cursor)
+                tasks.append((cursor, want, work / f".{shard}.chunk.{cursor}"))
+                cursor += want
+            pending = list(tasks)
             for attempt in range(1, CHUNK_ATTEMPTS + 1):
                 if _stopping.is_set():
                     raise InterruptedError(f"{shard}: stopped before an attempt")
-                url = resolve_url(shard)
-                proc = subprocess.Popen(
-                    [
-                        "curl",
-                        "-fL",
-                        "--http1.1",
-                        "--retry",
-                        "5",
-                        "--retry-delay",
-                        "5",
-                        "--retry-all-errors",
-                        "--remove-on-error",
-                        "--max-time",
-                        str(CHUNK_TIMEOUT),
-                        "--speed-limit",
-                        str(CHUNK_MIN_BYTES_PER_SEC),
-                        "--speed-time",
-                        str(CHUNK_STALL_SECONDS),
-                        "-r",
-                        f"{done}-{done + want - 1}",
-                        "--silent",
-                        "--show-error",
-                        "-o",
-                        str(chunk),
-                        url,
-                    ]
-                )
-                with _in_flight_lock:
-                    _in_flight.add(proc)
-                try:
-                    code = proc.wait()
-                finally:
+                transfers: list[tuple[int, int, Path, Path, int]] = []
+                for start, want, chunk in pending:
+                    have_chunk = chunk.stat().st_size if chunk.exists() else 0
+                    if have_chunk > want:
+                        chunk.unlink()
+                        have_chunk = 0
+                    if have_chunk == want:
+                        continue
+                    part = work / f".{shard}.part.{start}"
+                    part.unlink(missing_ok=True)
+                    transfers.append((start, want, chunk, part, have_chunk))
+                if transfers:
+                    # One curl per range. `-r` is a global option in curl, so a
+                    # single --parallel invocation applied the last range to
+                    # every transfer -- four copies of one range appended at
+                    # four offsets, which corrupts the shard's header. Separate
+                    # processes give each range its own URL and output.
+                    procs: list[subprocess.Popen] = []
+                    for start, want, _chunk, part, have_chunk in transfers:
+                        procs.append(
+                            subprocess.Popen(
+                                [
+                                    "curl",
+                                    "-fL",
+                                    "--http1.1",
+                                    "--max-time",
+                                    str(PARALLEL_CHUNK_TIMEOUT),
+                                    "--speed-limit",
+                                    str(CHUNK_MIN_BYTES_PER_SEC),
+                                    "--speed-time",
+                                    str(CHUNK_STALL_SECONDS),
+                                    "-r",
+                                    f"{start + have_chunk}-{start + want - 1}",
+                                    "--silent",
+                                    "--show-error",
+                                    "-o",
+                                    str(part),
+                                    resolve_url(shard),
+                                ]
+                            )
+                        )
                     with _in_flight_lock:
-                        _in_flight.discard(proc)
-                got = chunk.stat().st_size if chunk.exists() else 0
-                if code == 0 and got == want:
+                        _in_flight.update(procs)
+                    try:
+                        for proc in procs:
+                            proc.wait()
+                        code = next((p.returncode for p in procs if p.returncode != 0), 0)
+                    finally:
+                        with _in_flight_lock:
+                            _in_flight.difference_update(procs)
+                    # A transfer that closed early still wrote bytes. Keep them;
+                    # the next attempt ranges from the new end instead of
+                    # refetching the chunk.
+                    for _start, _want, chunk, part, _have in transfers:
+                        if part.exists():
+                            data = part.read_bytes()
+                            if data:
+                                with open(chunk, "ab") as sink:
+                                    sink.write(data)
+                            part.unlink()
+                # Append the contiguous completed prefix and stop at the first
+                # chunk that is still short. Progress is never held hostage by
+                # a single slow range.
+                while tasks:
+                    start, want, chunk = tasks[0]
+                    have_chunk = chunk.stat().st_size if chunk.exists() else 0
+                    if have_chunk != want:
+                        break
+                    out.write(chunk.read_bytes())
+                    out.flush()
+                    chunk.unlink()
+                    if progress is not None:
+                        progress.add(want)
+                    tasks.pop(0)
+                    done = start + want
+                if not tasks:
                     break
+                got = sum(
+                    min(
+                        task[2].stat().st_size if task[2].exists() else 0,
+                        task[1],
+                    )
+                    for task in tasks
+                )
+                want_total = sum(task[1] for task in tasks)
                 wait = min(15 * attempt, 120)
                 tell(
-                    f"    {shard} @{done}: chunk {got}/{want} bytes (curl {code}, "
+                    f"    {shard}: {len(tasks)} chunks short "
+                    f"({got}/{want_total} bytes, curl {code if transfers else '-'}, "
                     f"attempt {attempt}/{CHUNK_ATTEMPTS}), waiting {wait} s"
                 )
+                pending = list(tasks)
                 if _sleep_unless_stopped(wait):
                     raise InterruptedError(f"{shard}: stopped while retrying")
             else:
                 raise RuntimeError(
-                    f"{shard}: chunk at {done} failed after {CHUNK_ATTEMPTS} attempts"
+                    f"{shard}: {len(tasks)} chunks failed after {CHUNK_ATTEMPTS} attempts"
                 )
-            out.write(chunk.read_bytes())
-            out.flush()
-            chunk.unlink()
-            done += want
-            if progress is not None:
-                progress.add(want)
     if dest.stat().st_size != expected:
         raise RuntimeError(f"{shard}: finished at {dest.stat().st_size}, expected {expected}")
     return dest
@@ -744,8 +837,14 @@ def _sleep_unless_stopped(seconds: float) -> bool:
 # measured +47% and hold up to twenty source shards (~90 GB at 4.5 GB each).
 # Depth only caps the completed shards waiting for the converter, whose pass
 # over one is far shorter than its download.
-PREFETCH_DEPTH = 3
-FETCHERS = 20
+#
+# Both are overridable because the 122B width does not fit the 35B staging
+# budget: twenty in-flight 5 GB shards plus a 130 GB 8-bit output needs about
+# 230 GB, more than this class of Mac has. The defaults stay tuned for the
+# 35B models; a 122B run lowers them (see the `ornith122` rows in
+# tools/install_models.sh and docs/adding-a-model.md).
+PREFETCH_DEPTH = int(os.environ.get("TINYTITAN_PREFETCH_DEPTH", "3"))
+FETCHERS = int(os.environ.get("TINYTITAN_FETCHERS", "20"))
 
 
 def prefetch_shards(

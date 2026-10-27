@@ -38,6 +38,11 @@ public struct Args: Equatable, Sendable {
     /// right for both families: 8 GiB is 128 slots at the 35B stride and 96
     /// at Qwen3.8-Flash-Next's.
     public var expertCacheSlots: Int?
+    /// A target for the whole process, or nil to leave the install's profile in
+    /// charge. The loader turns it into a slot count by subtracting the
+    /// resident weights and the runtime reserve, and prints the `ram target`
+    /// line; an explicit `expertCacheSlots` wins over it.
+    public var ramBudgetBytes: Int?
     public var rdadvise: String
     public var prefillChunk: PrefillChunkChoice?
     public var kvCachePrecision: KVCachePrecision
@@ -69,6 +74,7 @@ public struct Args: Equatable, Sendable {
         thinkingMode: ModelThinkingMode = .off,
         reasoningEffort: ModelReasoningEffort? = nil,
         expertCacheSlots: Int? = nil,
+        ramBudgetBytes: Int? = nil,
         rdadvise: String = "default",
         prefillChunk: PrefillChunkChoice? = nil,
         kvCachePrecision: KVCachePrecision = .int8,
@@ -91,6 +97,7 @@ public struct Args: Equatable, Sendable {
         self.presencePenalty = presencePenalty
         self.presencePenaltyWasSet = presencePenaltyWasSet
         self.expertCacheSlots = expertCacheSlots
+        self.ramBudgetBytes = ramBudgetBytes
         self.rdadvise = rdadvise
         self.prefillChunk = prefillChunk
         self.kvCachePrecision = kvCachePrecision
@@ -129,94 +136,6 @@ public enum ArgsError: Error, Equatable, CustomStringConvertible {
 }
 
 extension Args {
-    /// The accepted slot counts, spelled from the validator that enforces them.
-    ///
-    /// The help text used to list them by hand and had already drifted: it
-    /// stopped at 128 while `RuntimeConfiguration.allowedExpertCacheSlots`
-    /// accepts 40, 48, 112, 160, 192 and 256 as well, so a caller reading
-    /// `--help` would not know 160 was legal. Spelled from the source of truth
-    /// so it cannot drift again.
-    static var expertCacheSlotsHelp: String {
-        RuntimeConfiguration.allowedExpertCacheSlots
-            .map(String.init).joined(separator: ", ")
-    }
-
-    /// The accepted YaRN context rungs, spelled from the validator that enforces
-    /// them — the help said "524288 or 1048576" until the 2M rung landed.
-    static var yarnContextRungsHelp: String {
-        RuntimeConfiguration.supportedYaRNContextTokens
-            .map(String.init).joined(separator: ", ")
-    }
-
-    public static let usage = """
-        TinyTitanCLI — Qwen3.5-MoE 35B-A3B text generation
-
-        usage: TinyTitanCLI --model <dir> (--prompt <string> | --messages-file <path>) [options]
-               TinyTitanCLI calibrate (--model <dir> [--max-context <tokens>] [--out <path>]
-                                       | --check <path>)
-               TinyTitanCLI doctor [--json] [--models-dir <dir>]
-
-        command:
-          calibrate                  Write or validate a per-machine tuning
-                                    profile (the calibrate command's --help
-                                    lists its own flags).
-
-        required:
-          --model <dir>             Path to a .ssdai model directory.
-          --prompt <string>         Raw-completion prompt.
-          --messages-file <path>    JSON chat messages with role and content fields.
-
-        options:
-          --max-new <int>           Generated-token limit (default 1024).
-          --max-context <int>       Native context limit, 1...262144 (default 262144).
-                                    With YaRN: \(Args.yarnContextRungsHelp) (default 1048576).
-          --rope-scaling <mode>     Context scaling: none or yarn (default none).
-          --temperature <float>     Sampling temperature (0 = greedy). Default is
-                                    the family's: 1.0 for Qwen3.8-Flash-Next,
-                                    0.6 elsewhere.
-          --top-k <int>             Top-k truncation, 1...256 (default 20; 0 = off).
-          --top-p <float>           Nucleus truncation (default 0.95).
-          --repetition-penalty <f>  Repetition penalty (default 1.0).
-          --presence-penalty <f>    Presence penalty, -2...2 (default: the model's
-                                    own row; 1.5 for Qwen3.8 outside thinking mode).
-          --seed <uint64>           Deterministic sampling seed (default off).
-          --stop <string>           Stop substring (repeatable).
-          --rdadvise <mode>         Expert read-ahead advice: off, default,
-                                    bounded, or adaptive. The default is
-                                    `default`, which leaves advice ON; pass
-                                    off to disable it.
-          --expert-cache-slots <n>  Routed-expert cache slots per layer:
-                                    \(Self.expertCacheSlotsHelp). The default
-                                    is derived from the model profile's tuned
-                                    budget, not fixed; 64 is only the
-                                    fallback when the manifest cannot be read.
-                                    More slots raise the hit rate but use more
-                                    memory.
-          --calibration-profile <path>
-                                    Apply a measured profile where no explicit
-                                    flag wins (explicit flags always win).
-                                    Unsupported profile knobs are logged, not
-                                    applied.
-          --prefill-chunk <n|auto>  Prefill chunk tokens. Larger chunks reduce
-                                    routed-expert file sweeps but use more GPU
-                                    scratch. Allowed: 32, 64, 128, 256, 512,
-                                    1024, 2048, 4096; auto covers the prompt with
-                                    the smallest allowed chunk.
-          --kv-bits <4|8|16>        KV-cache storage precision (default 8).
-          --concise                 Inject the per-quantization concise-mode
-                                    system prompt (answers without preamble,
-                                    filler, or closing codas).
-          --thinking <off|on>       Ornith/Qwen reasoning mode (default off).
-                                    These models do not define effort levels.
-          --reasoning-effort <lvl>  Reasoning-effort level: low, medium, high,
-                                    or xhigh. Requires --thinking on and a model
-                                    family whose chat template defines effort
-                                    levels (Qwen3.8-Flash-Next, K2-Horizon);
-                                    Ornith 1.5 and Qwen 3.6 reject it.
-          --quiet                   Suppress the timing footer.
-          --help                    Show this message.
-        """
-
     /// lint:allow-long same shape as ServerArguments.parse: a flag table
     /// where the exhaustive switch is the point.
     public static func parse(_ argv: [String]) throws -> Args {
@@ -246,6 +165,7 @@ extension Args {
         var thinkingMode: ModelThinkingMode = .off
         var reasoningEffort: ModelReasoningEffort?
         var expertCacheSlots: Int?
+        var ramBudgetBytes: Int?
         var rdadvise = "default"
         var prefillChunk: PrefillChunkChoice?
         var kvCachePrecision: KVCachePrecision = .int8
@@ -364,6 +284,14 @@ extension Args {
                     throw ArgsError.invalidValue(flag: flag, value: value)
                 }
                 expertCacheSlots = parsed
+            case "--ram-budget":
+                let value = try takeValue(argv, &index, flag: flag)
+                guard let parsed = RuntimeConfiguration.parseBudgetBytes(value),
+                    parsed >= RuntimeConfiguration.minimumProcessTargetBytes
+                else {
+                    throw ArgsError.invalidValue(flag: flag, value: value)
+                }
+                ramBudgetBytes = parsed
             case "--rdadvise":
                 let value = try takeValue(argv, &index, flag: flag)
                 guard ["off", "default", "bounded", "adaptive"].contains(value) else {
@@ -455,6 +383,11 @@ extension Args {
                     flag: "--calibration-profile", value: "\(error)")
             }
         }
+        // The target stays a target here: the loader owns the residency
+        // arithmetic (resident weights, runtime reserve, the slot ladder) and
+        // the `ram target` line that records what it chose. Resolving it in the
+        // parser would duplicate that derivation and make the loader print a
+        // cache budget for a flag that named a process ceiling.
         return Args(
             model: model,
             prompt: prompt,
@@ -477,6 +410,7 @@ extension Args {
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort,
             expertCacheSlots: expertCacheSlots,
+            ramBudgetBytes: ramBudgetBytes,
             rdadvise: rdadvise,
             prefillChunk: prefillChunk,
             kvCachePrecision: kvCachePrecision,

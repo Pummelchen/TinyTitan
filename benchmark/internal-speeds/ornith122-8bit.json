@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "environment": {
+    "recorded_at": "2026-10-27T17:40:57+00:00",
+    "git_commit": "33af2bea",
+    "git_describe": "v6.1-64-g33af2bea-dirty",
+    "macos": "27.2",
+    "swift": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.2.0",
+    "python": "3.15.2",
+    "physical_memory_bytes": 25769803776
+  },
+  "model": {
+    "path": "models/ornith-1.5_122B_8Bit",
+    "family": "qwen36",
+    "prompt": "difference swift vs c++ in detail",
+    "max_new_tokens": 256,
+    "ram_budget": "12G"
+  },
+  "gpu": {
+    "qkv_gemv": {
+      "gbps": 64.1,
+      "bytes_per_launch": 17301504
+    },
+    "routed_moe": {
+      "gbps": 42.3,
+      "bytes_per_launch": 12582912
+    },
+    "gdn_inproj": {
+      "gbps": 76.5,
+      "bytes_per_launch": 12648448
+    },
+    "qkv_gemv_gbps": 64.1,
+    "routed_moe_gbps": 42.3,
+    "gdn_inproj_gbps": 76.5
+  },
+  "cpu": {
+    "best_gbps": 55.7,
+    "best_threads": 8,
+    "rows": [
+      {
+        "threads": 1,
+        "ms_per_pass": 4.98,
+        "gbps": 14.3,
+        "tok_per_second_2b_8bit": 7.5
+      },
+      {
+        "threads": 2,
+        "ms_per_pass": 2.68,
+        "gbps": 26.6,
+        "tok_per_second_2b_8bit": 14.0
+      },
+      {
+        "threads": 4,
+        "ms_per_pass": 1.49,
+        "gbps": 47.9,
+        "tok_per_second_2b_8bit": 25.2
+      },
+      {
+        "threads": 6,
+        "ms_per_pass": 1.54,
+        "gbps": 46.4,
+        "tok_per_second_2b_8bit": 24.4
+      },
+      {
+        "threads": 8,
+        "ms_per_pass": 1.28,
+        "gbps": 55.7,
+        "tok_per_second_2b_8bit": 29.3
+      }
+    ]
+  },
+  "generation": {
+    "finish": "maxTokens",
+    "prefill_tokens": 7,
+    "prefill_seconds": 6.54,
+    "decode_tokens": 256,
+    "decode_seconds": 255.34,
+    "decode_tokens_per_second": 1.003,
+    "prefill_tokens_per_second": 1.070336391437309,
+    "ttft_seconds": 6.54,
+    "total_seconds": 261.88,
+    "weight_bytes": 6582472704,
+    "effective_decode_gbps": 6.599487006438474,
+    "response": "<think>\nThe user is asking about the differences between Swift and C++ in detail. This is a technical programming question. Let me give a comprehensive, well-organized answer.\n\nLet me think about the key areas of difference:\n\n1. **Origin and purpose**\n2. **Memory management**\n3. **Type system**\n4. **Performance**\n5. **Safety**\n6. **Syntax**\n7. **Concurrency**\n8. **Ecosystem/platform**\n9. **Compilation**\n10. **Use cases**\n\nLet me write this out in detail with code examples where helpful.\n\n**Swift:**\n- Created by Apple, first released 2014, open source since 2015\n- Successor to Objective-C for Apple platforms\n- Modern language with safety features\n- Uses ARC (Automatic Reference Counting)\n- Type inference, optionals\n- Protocol-oriented programming\n- Value types (structs, enums) emphasized\n- Runs on Apple platforms primarily, also Linux\n\n**C++:**\n- Created by Bjarne Stroustrup, first released 1985\n- Extension of C with classes\n- Manual memory management + RAII, smart pointers",
+    "response_sha256": "c60f2093bf800e37d3702f60e7cc658f11e3e3c5b71db74e7ac508bfec460a12",
+    "response_characters": 987,
+    "response_tokens": 256
+  },
+  "ane": {
+    "finish": "maxTokens",
+    "prefill_tokens": 6027,
+    "prefill_seconds": 467.7,
+    "decode_tokens": 1,
+    "decode_seconds": 0.01,
+    "decode_tokens_per_second": 192.086,
+    "prefill_tokens_per_second": 12.886465683130211,
+    "ttft_seconds": 467.7,
+    "total_seconds": 467.71,
+    "weight_bytes": 6582472704,
+    "effective_decode_gbps": 658.2472704,
+    "response": "for",
+    "response_sha256": "10c22bcf4c768b515be4e94bcafc71bf3e8fb5f70b2584bcc8c7533217f2e7f9",
+    "response_characters": 3,
+    "response_tokens": 1,
+    "chunks": 2,
+    "model_total_bytes": 129834383192,
+    "effective_prefill_gbps": 0.5552036912208681,
+    "used_ane": true,
+    "cache_was_warm": true,
+    "applicable": true
+  },
+  "quality": {
+    "keyword_coverage": 0.6666666666666666,
+    "keywords_present": [
+      "swift",
+      "c++",
+      "performance",
+      "memory",
+      "type",
+      "arc",
+      "manual",
+      "safety"
+    ],
+    "trigram_repetition": 0.0,
+    "response_sha256": "c60f2093bf800e37d3702f60e7cc658f11e3e3c5b71db74e7ac508bfec460a12",
+    "characters": 987
+  }
+}

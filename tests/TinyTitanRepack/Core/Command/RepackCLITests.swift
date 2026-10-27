@@ -156,6 +156,60 @@ struct RepackCLITests {
             "stdout: \(result.stdout)")
     }
 
+    @Test func consumeSnapshotWithoutASnapshotIsRefused() throws {
+        let output = temporaryOutput("consume-without-snapshot")
+        defer { clean(output) }
+        let result = try run([
+            "--discard-partial",
+            "--output", output,
+            "--consume-snapshot",
+        ])
+
+        #expect(result.status == 2, "stderr: \(result.stderr)")
+        #expect(
+            result.stderr.contains("apply only to --input-snapshot"),
+            "stderr: \(result.stderr)")
+    }
+
+    /// `--consume-snapshot` reaches the copy phase, not just the parser: the
+    /// synthetic snapshot's shards are gone once the install exists, and the
+    /// small files that are not shards survive. This is the 122B import's disk
+    /// contract stated on a fixture where it costs nothing to check.
+    @Test func consumeSnapshotConsumesTheSnapshot() throws {
+        let root = (NSTemporaryDirectory() as NSString)
+            .appendingPathComponent("tinytitanrepack-consume-\(UUID().uuidString)")
+        let snapshot = (root as NSString).appendingPathComponent("snapshot")
+        let output = (root as NSString).appendingPathComponent("model.ssdai")
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        _ = try SyntheticSnapshot.buildQwenMTP(at: snapshot)
+        let shards = try FileManager.default
+            .contentsOfDirectory(atPath: snapshot)
+            .filter {
+                $0.hasSuffix(".safetensors")
+                    && ($0.hasPrefix("model-") || $0 == "model.safetensors")
+            }
+        #expect(!shards.isEmpty)
+
+        let result = try run([
+            "--input-snapshot", snapshot,
+            "--model-id", "cli-consume-fixture",
+            "--output", output,
+            "--consume-snapshot",
+        ])
+
+        #expect(result.status == 0, "stderr: \(result.stderr)")
+        for shard in shards {
+            #expect(
+                !FileManager.default.fileExists(
+                    atPath: (snapshot as NSString).appendingPathComponent(shard)),
+                "\(shard) survived consumption")
+        }
+        // Not a shard, and still needed to describe what was imported.
+        #expect(
+            FileManager.default.fileExists(
+                atPath: (snapshot as NSString).appendingPathComponent("config.json")))
+    }
+
     /// `--draft-head` needs a Qwen3.8-Flash-Next *target* config to derive the
     /// draft arch from (`ArchInfo.qwen38FlashNextMTP`, via
     /// `LocalSnapshotLoader.load(directory:draftHead:)`), and every fixture here
