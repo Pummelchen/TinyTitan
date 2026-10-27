@@ -123,12 +123,14 @@ extension RealForwardRunner {
         }
         try rotate(&cb, role: "gdn.gatednorm")
         if !ablated("outproj") {
+            // The projection overload, not the raw one: a promoted out_proj
+            // carries no scales or biases, and the raw call reads those
+            // companions from offset zero -- the file header -- and produces
+            // NaN. The overload dispatches on the tensor's dtype.
             try encodePrimaryGEMV(
-                commandBuffer: cb,
-                weights: outW.buffer, weightsOffset: Int(outW.offset),
-                scales: outW.buffer, scalesOffset: Int(outW.scaleOffset),
-                biases: outW.buffer, biasesOffset: Int(outW.biasOffset),
-                x: gdnOut, y: yOut, yOffset: outputOffset, m: D, n: UInt32(la.valueDim))
+                commandBuffer: cb, projection: outW,
+                x: gdnOut, y: yOut, yOffset: outputOffset,
+                m: D, n: UInt32(la.valueDim))
         }
         try rotate(&cb, role: "gdn.outproj")
     }
@@ -265,10 +267,7 @@ extension RealForwardRunner {
             count: Int(qDim))
         try rotate(&cb, role: "qsa.gatemul")
         try encodePrimaryGEMV(
-            commandBuffer: cb,
-            weights: o.buffer, weightsOffset: Int(o.offset),
-            scales: o.buffer, scalesOffset: Int(o.scaleOffset),
-            biases: o.buffer, biasesOffset: Int(o.biasOffset),
+            commandBuffer: cb, projection: o,
             x: attnOut, y: oOut, m: D, n: qDim)
         try rotate(&cb, role: "qsa.oproj")
     }

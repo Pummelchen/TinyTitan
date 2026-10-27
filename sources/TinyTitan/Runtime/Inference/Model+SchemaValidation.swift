@@ -244,7 +244,7 @@ extension Model {
                     schema.gdnB(layer),
                     rows: la.numVHeads, columns: config.hiddenSize,
                     slot: quant.attention)
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.gdnOut(layer),
                     rows: config.hiddenSize, columns: la.valueDim,
                     slot: roleSlot(schema.gdnOut(layer), quant.attention))
