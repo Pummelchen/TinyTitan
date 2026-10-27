@@ -1,6 +1,7 @@
 # TinyTitan 7.0 — one engine path per (model, quantization)
 
 Status: **proposal**, not implemented. Written 2026-10-27 on `ornith-1.5-122b`.
+Tracking issue: [#32](https://github.com/Pummelchen/TinyTitan/issues/32).
 This document is the design contract for the 7.0 rewrite. It deliberately
 reverses several 6.x decisions; where it does, the old decision is named so the
 migration does not quietly keep both.
