@@ -8,6 +8,7 @@ private let usage = """
       TinyTitanRepack [--model <\(supportedModelNames)>] --output <model.ssdai> [--overwrite] [--resume]
       TinyTitanRepack --input-snapshot <affine-safetensors-dir> --model-id <id>
                       --output <model.ssdai> [--overwrite] [--draft-head] [--share-ngram-table]
+                      [--consume-snapshot]
       TinyTitanRepack --discard-partial --output <model.ssdai>
       TinyTitanRepack --verify-install --input-ssdai <model.ssdai>  (--input-gturbo still accepted)
       TinyTitanRepack --compress-experts --input-ssdai <raw model.ssdai>
@@ -30,7 +31,11 @@ private let usage = """
     hardlinks the snapshot's n-gram table rather than rebuilding it, which works
     only when the staging directory and the install share a filesystem. Neither
     flag means anything without --input-snapshot, and the repack refuses that
-    combination rather than ignoring it.
+    combination rather than ignoring it. --consume-snapshot deletes each snapshot
+    shard once the last range that reads it has been committed, which is what
+    lets a 125 GB install grow into the space its own snapshot is releasing on a
+    host that cannot hold both. It is one-way: an interrupted run leaves a
+    partly consumed snapshot.
     """
 
 private struct Arguments {

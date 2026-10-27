@@ -167,7 +167,7 @@ struct RepackCLITests {
 
         #expect(result.status == 2, "stderr: \(result.stderr)")
         #expect(
-            result.stderr.contains("apply only to --input-snapshot"),
+            result.stderr.contains("applies only to --input-snapshot"),
             "stderr: \(result.stderr)")
     }
 
