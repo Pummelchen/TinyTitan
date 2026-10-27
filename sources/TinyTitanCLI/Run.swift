@@ -119,6 +119,7 @@ public func run(
         }
         let configuration = EngineConfiguration(
             contextWindow: args.maxContext,
+            expertCacheBudgetBytes: args.ramBudgetBytes,
             cachePrecision: cachePrecision(args.kvCachePrecision),
             prefillChunkTokens: prefillChunkTokens,
             expertCacheSlots: args.expertCacheSlots,

@@ -193,7 +193,8 @@ import TinyTitan
             "--temperature", "--top-k", "--top-p", "--repetition-penalty",
             "--presence-penalty",
             "--seed", "--stop", "--quiet", "--help",
-            "--rdadvise", "--expert-cache-slots", "--prefill-chunk", "--concise",
+            "--rdadvise", "--expert-cache-slots", "--ram-budget", "--prefill-chunk",
+            "--concise",
             "--kv-bits", "--rope-scaling", "--thinking", "--reasoning-effort",
             "--calibration-profile", "--check", "--out",
             "--json", "--models-dir",
@@ -239,5 +240,46 @@ import TinyTitan
                 "--messages-file", "chat.json",
             ])
         }
+    }
+
+    /// `--ram-budget` names the whole process, so the parser keeps the number
+    /// and the loader derives the cache from it. Resolving it here would
+    /// duplicate the loader's arithmetic and turn the `ram target` line into a
+    /// cache-budget line, which is the one thing the flag exists to avoid.
+    @Test func ramBudgetParsesAsATarget() throws {
+        let arguments = try Args.parse([
+            "--model", "m.ssdai", "--prompt", "hi", "--ram-budget", "12G",
+        ])
+        #expect(arguments.ramBudgetBytes == 12 << 30)
+        #expect(arguments.expertCacheSlots == nil)
+    }
+
+    /// The same floor the server refuses below: a streaming install holds its
+    /// weights plus the 8-slot minimum cache, so 1-3G is a target the process
+    /// cannot honour.
+    @Test func ramBudgetRefusesTargetsBelowTheFloor() {
+        for tiny in ["1G", "2G", "3G", "3221225472"] {
+            #expect(throws: ArgsError.invalidValue(flag: "--ram-budget", value: tiny)) {
+                _ = try Args.parse([
+                    "--model", "m.ssdai", "--prompt", "hi", "--ram-budget", tiny,
+                ])
+            }
+        }
+        #expect(throws: ArgsError.invalidValue(flag: "--ram-budget", value: "nope")) {
+            _ = try Args.parse([
+                "--model", "m.ssdai", "--prompt", "hi", "--ram-budget", "nope",
+            ])
+        }
+    }
+
+    /// Both flags reach the engine so the loader can apply its precedence and
+    /// report the gap as the override's, not the install's.
+    @Test func ramBudgetAndExplicitSlotsBothSurviveTheParse() throws {
+        let arguments = try Args.parse([
+            "--model", "m.ssdai", "--prompt", "hi",
+            "--ram-budget", "12G", "--expert-cache-slots", "16",
+        ])
+        #expect(arguments.ramBudgetBytes == 12 << 30)
+        #expect(arguments.expertCacheSlots == 16)
     }
 }
