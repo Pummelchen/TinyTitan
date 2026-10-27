@@ -65,7 +65,7 @@ about 2.3 GB), then run a prompt:
 
 ```bash
 .build/release/TinyTitanCLI --model models/qwen3.5_2B_4Bit \
-  --prompt "Explain a mutex in one paragraph." --max-new 96
+  --prompt "What is the capital of Paris ?" --max-new 96
 ```
 
 Start the server with `tools/server_launcher.sh`; it prints the base URL and
