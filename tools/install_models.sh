@@ -553,8 +553,19 @@ install_one() {
         fi
         require_gb "the staging volume ($WORK)" "$WORK" "$stage_need" \
           || work_ok=0
-        require_gb "the models volume ($MODELS)" "$MODELS" \
-          "$(awk -v s="$size_gb" -v have="$install_exists" 'BEGIN { printf "%d", have ? 2 : s + 3 }')" \
+        local model_need
+        if [[ "$source" == convert_qwen35moe_solo ]]; then
+          # The solo import consumes its snapshot as the install is written, so
+          # the install is not a second full copy. The repacker's own
+          # retirement floor (resident body + four layer files + 1 GiB) is the
+          # real requirement; requiring s + 3 here refused a build that had
+          # 123 GB free for a 123 GB install and a 130 GB snapshot.
+          if (( install_exists )); then model_need=2; else model_need=24; fi
+        else
+          model_need="$(awk -v s="$size_gb" -v have="$install_exists" \
+               'BEGIN { printf "%d", have ? 2 : s + 3 }')"
+        fi
+        require_gb "the models volume ($MODELS)" "$MODELS" "$model_need" \
           || models_ok=0
         if (( ! work_ok || ! models_ok )); then
           echo "  Not starting $name: there is not enough room to finish it." >&2
