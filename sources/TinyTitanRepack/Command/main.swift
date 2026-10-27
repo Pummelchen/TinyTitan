@@ -160,22 +160,29 @@ private struct Arguments {
         if parsed.compressExperts {
             return try parsed.validatingCompressExperts()
         }
-        if parsed.verifyInstall {
-            guard parsed.inputSSDAI != nil else {
+        return try parsed.validatingMode()
+    }
+
+    /// The two install modes and the flags each one refuses. Split out of
+    /// `parse` as pure code motion (2026-10-27) when the retiring-snapshot flags
+    /// took the parser past the 120-line limit; the guards are unchanged.
+    private func validatingMode() throws -> Arguments {
+        if verifyInstall {
+            guard inputSSDAI != nil else {
                 throw ParseError.missingRequired("--input-ssdai")
             }
-            guard parsed.output == nil, !parsed.overwrite, !parsed.resume else {
+            guard output == nil, !overwrite, !resume else {
                 throw ParseError.invalidMode("verification accepts only --input-ssdai")
             }
-        } else {
-            guard parsed.output != nil else {
-                throw ParseError.missingRequired("--output")
-            }
-            guard parsed.inputSSDAI == nil else {
-                throw ParseError.invalidMode("--input-ssdai requires --verify-install")
-            }
+            return self
         }
-        return parsed
+        guard output != nil else {
+            throw ParseError.missingRequired("--output")
+        }
+        guard inputSSDAI == nil else {
+            throw ParseError.invalidMode("--input-ssdai requires --verify-install")
+        }
+        return self
     }
 
     /// A local snapshot import names its own source and model id, and takes no
