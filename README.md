@@ -79,26 +79,6 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 
-Nemotron 3.5 Bolt is the 74B-A9B BF16 release converted by this repository to
-4-bit and 8-bit `.ssdai` installs. Its GPU number is the GPU-resident Metal graph
-(`nemotrongraph`), its CPU number the NEON affine-GEMV path (`nemotron`); the
-checkpoint is agentic and its published 50.98% is Terminal-Bench 2.1. **There is
-no ANE decode column for it**: the Neural Engine cannot execute the model's
-per-token Mamba-2 selective scan or gather 9 of 240–496 experts from the expert
-blobs, so those figures would be NA rather than a different path. The 8-bit
-graph is slower than its CPU path because wiring 8.45 GB of resident weights
-leaves no room for the expert working set that the 4-bit install fits.
-
-Laguna-S-2.1's decode column is its Metal probe (`TinyTitanBench lagunagpu`),
-not the server: the probe runs the real 4- and 8-bit installs token by token.
-Those two rows are logged chat-template runs: the 4-bit install prefilled the
-48-token chat prompt in 66.1 s and decoded 8 tokens at 1.47 tok/s; the 8-bit
-install prefilled in 148.4 s and decoded at 0.65 tok/s. Page-cache state moves
-them (4-bit 1.12-1.47, 8-bit 0.50-0.87 tok/s) and the full spread is in
-`docs/plan-laguna-s-2.1.md`. K2-Horizon's score is from its
-[model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B); no
-Terminal-Bench 4.0 result is published for it.
-
 Per-version measurements and the method live on the wiki
 ([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
 [Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
