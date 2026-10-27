@@ -15,11 +15,19 @@ public struct SharedExpertProjection {
     public let biasesOffset: Int
     public let rows: UInt32
     public let cols: UInt32
+    /// 0 for packed affine weights, 1 for the checkpoint's own bf16.
+    ///
+    /// Promotion is per tensor, so a shared expert can be bf16 inside a 4-bit
+    /// `sharedExpert` slot. The scales/biases of such a tensor are absent and
+    /// the buffers here point at whatever precedes it, so reading them would
+    /// produce NaN rather than an error -- the dtype is what says which kernel
+    /// may read this projection.
+    public let dtype: Int
 
     public init(
         weights: MTLBuffer, scales: MTLBuffer, biases: MTLBuffer,
         weightsOffset: Int = 0, scalesOffset: Int = 0, biasesOffset: Int = 0,
-        rows: UInt32, cols: UInt32
+        rows: UInt32, cols: UInt32, dtype: Int = 0
     ) {
         self.weights = weights
         self.scales = scales
@@ -29,6 +37,7 @@ public struct SharedExpertProjection {
         self.biasesOffset = biasesOffset
         self.rows = rows
         self.cols = cols
+        self.dtype = dtype
     }
 }
 

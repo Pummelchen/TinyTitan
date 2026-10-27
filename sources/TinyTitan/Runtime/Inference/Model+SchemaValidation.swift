@@ -169,15 +169,15 @@ extension Model {
                     forTensorNamed: name, overrides: overrides,
                     fallback: quant.sharedExpert)
             }
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertGate(layer),
                 rows: config.intermediateSize, columns: config.hiddenSize,
                 slot: ffnSlot(schema.sharedExpertGate(layer)))
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertUp(layer),
                 rows: config.intermediateSize, columns: config.hiddenSize,
                 slot: ffnSlot(schema.sharedExpertUp(layer)))
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertDown(layer),
                 rows: config.hiddenSize, columns: config.intermediateSize,
                 slot: ffnSlot(schema.sharedExpertDown(layer)))
