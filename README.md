@@ -76,8 +76,6 @@ writes the client configuration. The full walkthrough is
 ## Benchmarks
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
-Ornith 1.5 122B's Terminal-Bench figure is the checkpoint card's five-run Claude
-Code 2.1.126 average; the card publishes no 4.0 result, so that cell is `NA`.
 
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
