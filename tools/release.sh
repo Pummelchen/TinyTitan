@@ -345,6 +345,11 @@ check_golden qwen3.5_4B_4Bit qwen35-4b-4
 check_golden qwen3.5_4B_8Bit qwen35-4b-8
 check_golden qwen3.5_9B_4Bit qwen35-9b-4
 check_golden qwen3.5_9B_8Bit qwen35-9b-8
+# Ornith 1.5 122B, the wider member of the Ornith family: hidden 3072 over 48
+# layers in the same qwen36 graph. Declared before this machine had the
+# installs, so the first release that ships them cannot skip the check.
+check_golden ornith-1.5_122B_4Bit ornith122-4
+check_golden ornith-1.5_122B_8Bit ornith122-8
 
 # An installed model that no check_golden line covers would be silently
 # unchecked. The old guard caught that only when *no* baseline had been checked
