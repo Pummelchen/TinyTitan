@@ -211,13 +211,22 @@ public struct ModelProfile: Sendable, Equatable {
             // which is the house pair -- stated rather than borrowed so a later
             // house change cannot move this model.
             Key("ornith-1.5-122b", 4): (
-                10 << 30, 1, 2_048,
+                // 48 slots x 5,308,416 B x 48 layers = 12,230,590,464 B
+                // (~11.4 GiB). Measured at 128 generated tokens: 40 slots
+                // 3.411 tok/s, 48 slots 3.574 (+4.8%); 64 slots fell to 0.682
+                // (swap). The machine has ~5.6 GB resident at 4-bit, so 48
+                // slots is the last rung that fits 24 GB without paging.
+                12_230_590_464, 1, 2_048,
                 GenerationDefaults.Sampling(
                     temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
                 true, true, false, false, true
             ),
             Key("ornith-1.5-122b", 8): (
-                8 << 30, 1, 2_048,
+                // 24 slots x 10,027,008 B x 48 layers = 11,551,113,216 B
+                // (~10.8 GiB). Measured at 128 generated tokens: 16 slots
+                // 1.056 tok/s, 24 slots 1.276 (+20.8%). The resident body is
+                // ~11 GB, so this is the largest rung that stays under 24 GB.
+                11_551_113_216, 1, 2_048,
                 GenerationDefaults.Sampling(
                     temperature: 0.6, topK: GenerationDefaults.topK, topP: 0.95),
                 true, true, false, false, true
