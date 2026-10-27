@@ -225,11 +225,14 @@ extension Model {
                     slot: roleSlot(schema.oProj(layer), quant.attention))
             } else if config.layerIsLinear(layer) {
                 let la = config.linearAttention
-                try checks.requireAffine(
+                // Same rule as the full-attention projections: the decode
+                // path picks the fused kernel only when every input projection
+                // is affine, so a promoted one is served by `BF16GEMV`.
+                try checks.requireAffineOrBF16(
                     schema.gdnQKV(layer),
                     rows: la.qkvDim, columns: config.hiddenSize,
                     slot: roleSlot(schema.gdnQKV(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.gdnZ(layer),
                     rows: la.valueDim, columns: config.hiddenSize,
                     slot: roleSlot(schema.gdnZ(layer), quant.attention))

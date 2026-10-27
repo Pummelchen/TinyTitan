@@ -150,7 +150,15 @@ extension RealForwardRunner {
         let k = try model.kProj(layer: layer)
         let v = try model.vProj(layer: layer)
         let hiddenDimension = UInt32(cfg.hiddenSize)
-        if model.qoProjectionWeightBits == 4 && model.kvProjectionWeightBits == 4 {
+        // The fused kernel reads packed nibbles for all three, so a promoted
+        // (bf16) tensor must not reach it even though its *slot* says 4: the
+        // slot is a default, and the tensor's dtype is the truth. Same test the
+        // GDN input projections already use.
+        let fusedIsUsable =
+            model.qoProjectionWeightBits == 4
+            && model.kvProjectionWeightBits == 4
+            && q.dtype == 0 && k.dtype == 0 && v.dtype == 0
+        if fusedIsUsable {
             try fusedQKVGEMV.encode(
                 commandBuffer: cb,
                 qWeights: q.buffer, qWeightsOffset: Int(q.offset),
