@@ -108,51 +108,6 @@ Per-version measurements and the method live on the wiki
 | Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** | 3.0% (2.1) | NA |
 | Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** | 3.0% (2.1) | NA |
 
-### Nemotron 3.5 Bolt 74B-A9B — the 4-bit and 8-bit conversions
-
-Both installs are written from the pinned BF16 release (`…-BF16` at
-`e09a4ced…`) by `tools/prepare_nemotron.py` and pass
-`TinyTitanRepack --verify-install`. Decode is measured by
-`benchmark/nemotron_decode.py` with prompt `Once upon a time, there was a`, four
-tokens, EOS suppressed, one warm-up plus three processes, median:
-
-| Build | Install | GPU decode | CPU decode | Prompt prefill |
-| --- | ---: | ---: | ---: | ---: |
-| 4-bit | 45.86 GB | **6.66 tok/s** | **3.60 tok/s** | 11.4 s GPU / 3.6 s CPU |
-| 8-bit | 85.48 GB | **0.57 tok/s** | **0.86 tok/s** | ~21 s both |
-
-The 4-bit GPU figure is the warm median; its first process is cold and streams
-the 46 GB install's expert set from SSD at **1.25 tok/s**. The 8-bit graph is
-slower than its CPU path because wiring 8.45 GB of resident weights leaves no
-page-cache room for the 85 GB expert set. For scale, the same arms measured
-**0.94 / 0.77 / 0.42 / 0.58 tok/s** while this host was under load (load average
-8, a Swift test runner and a GPU-heavy game each near a core); those runs are
-kept in
-[`benchmark/nemotron_decode-loaded-2026-10-26.json`](benchmark/nemotron_decode-loaded-2026-10-26.json).
-No ANE figure is published: the Neural Engine cannot execute this model's
-selective scan or dynamic expert gather.
-
-### Laguna-S-2.1 118B-A8B — the 4-bit and 8-bit conversions
-
-Both installs are written from the pinned BF16 release
-(`poolside/Laguna-S-2.1` at `0f573140…`) by `tools/prepare_laguna_s21.py`,
-pass `TinyTitanRepack --verify-install`, and run through the Metal decode probe
-`TinyTitanBench lagunagpu`. Decode is greedy, with the checkpoint's own chat
-template and the prompt "What is the capital of France?", eight tokens:
-
-| Build | Install | GPU decode | CPU decode | Prompt prefill |
-| --- | ---: | ---: | ---: | ---: |
-| 4-bit | 66.52 GB | **1.47 tok/s** | NA | 66.1 s (48 tokens) |
-| 8-bit | 124.98 GB | **0.65 tok/s** | NA | 148.4 s (48 tokens) |
-
-Both widths emit the same eight token ids. A 32-token run of the 4-bit install
-reasons "Okay, the user is asking for the capital of France. … The capital is"
-— it thinks before answering, so eight tokens stop inside the thinking block.
-The numbers move with page-cache state (4-bit 1.12-1.47, 8-bit 0.50-0.87
-tok/s); the runs and the intermediate checks are in
-[`docs/plan-laguna-s-2.1.md`](docs/plan-laguna-s-2.1.md). No ANE figure is
-published for Laguna either: this engine has no ANE decode path for any model.
-
 
 ## Documentation
 
