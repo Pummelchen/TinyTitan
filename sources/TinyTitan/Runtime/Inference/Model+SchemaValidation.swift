@@ -203,19 +203,22 @@ extension Model {
                 try checks.requireBF16(
                     schema.kNorm(layer),
                     count: config.fullHeadDim)
-                try checks.requireAffine(
+                // A promoted attention projection is legal: the decode path
+                // dispatches on the tensor's own dtype (`encodeRoleGEMV`), so a
+                // bf16 q/k/v/o runs through `BF16GEMV` with no scales or biases.
+                try checks.requireAffineOrBF16(
                     schema.qProj(layer),
                     rows: queryDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.qProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.kProj(layer),
                     rows: kvDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.kProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.vProj(layer),
                     rows: kvDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.vProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.oProj(layer),
                     rows: config.hiddenSize,
                     columns: config.numHeads * config.fullHeadDim,
