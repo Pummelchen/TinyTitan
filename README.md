@@ -81,51 +81,39 @@ Code 2.1.126 average; the card publishes no 4.0 result, so that cell is `NA`.
 
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
-| Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
-| Ornith 1.5 122B | 4-bit | **2.86 tok/s** | NA | 81.2% (2.1) | NA |
-| Ornith 1.5 122B | 8-bit | **1.24 tok/s** | NA | 81.2% (2.1) | NA |
-| Laguna-S-2.1 118B-A8B | 4-bit | **1.47 tok/s** | NA | 70.2% (2.1) | NA |
-| Laguna-S-2.1 118B-A8B | 8-bit | **0.65 tok/s** | NA | 70.2% (2.1) | NA |
-| Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
-| Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B | 4-bit | **12.4 tok/s** | NA | 58.6% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B | 8-bit | **2.0 tok/s** | NA | 58.6% (2.1) | NA |
-| Qwen 3.6 35B-A3B | 4-bit | **21.41 tok/s** | NA | 52.5% (2.1) | NA |
-| Qwen 3.6 35B-A3B | 8-bit | **12.37 tok/s** | NA | 52.5% (2.1) | NA |
-| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 4-bit | **6.66 tok/s** | **3.60 tok/s** | 50.98% (2.1) | NA |
-| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 8-bit | **0.57 tok/s** | **0.86 tok/s** | 50.98% (2.1) | NA |
-| Qwen-AgentWorld 35B-A3B | 4-bit | **21.74 tok/s** | NA | 39.55% (2.0) | NA |
-| Qwen-AgentWorld 35B-A3B | 8-bit | **12.28 tok/s** | NA | 39.55% (2.0) | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.86 tok/s** | NA | 32.6% (2.1) | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.91 tok/s** | NA | 32.6% (2.1) | NA |
-| Qwen 3.5 4B (dense) | 4-bit | **22.81 tok/s** | **7.54 tok/s** | 25.8% (2.1) | NA |
-| Qwen 3.5 4B (dense) | 8-bit | **14.10 tok/s** | **7.85 tok/s** | 25.8% (2.1) | NA |
-| Qwen 3.5 9B (dense) | 4-bit | **12.88 tok/s** | **4.43 tok/s** | 9.2% (2.0) | NA |
-| Qwen 3.5 9B (dense) | 8-bit | **7.80 tok/s** | **4.42 tok/s** | 9.2% (2.0) | NA |
-| Qwen 3.5 2B (dense) | 4-bit | **44.41 tok/s** | **17.42 tok/s** | 3.0% (2.1) | NA |
-| Qwen 3.5 2B (dense) | 8-bit | **29.64 tok/s** | **18.10 tok/s** | 3.0% (2.1) | NA |
+| Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.5 tok/s** | NA | 86% (2.1) | 25% |
+| Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.1 tok/s** | NA | 86% (2.1) | 25% |
+| Ornith 1.5 122B | 4-bit | **2.9 tok/s** | NA | 81% (2.1) | NA |
+| Ornith 1.5 122B | 8-bit | **1.2 tok/s** | NA | 81% (2.1) | NA |
+| Laguna-S-2.1 118B-A8B | 4-bit | **1.5 tok/s** | NA | 70% (2.1) | NA |
+| Laguna-S-2.1 118B-A8B | 8-bit | **0.7 tok/s** | NA | 70% (2.1) | NA |
+| Ornith 1.5 35B-A3B | 4-bit | **21.7 tok/s** | NA | 68% (2.1) | NA |
+| Ornith 1.5 35B-A3B | 8-bit | **11.9 tok/s** | NA | 68% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 4-bit | **12.4 tok/s** | NA | 59% (2.1) | NA |
+| K2-Horizon-MoVA-36B-A4B | 8-bit | **2.0 tok/s** | NA | 59% (2.1) | NA |
+| Qwen 3.6 35B-A3B | 4-bit | **21.4 tok/s** | NA | 53% (2.1) | NA |
+| Qwen 3.6 35B-A3B | 8-bit | **12.4 tok/s** | NA | 53% (2.1) | NA |
+| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 4-bit | **6.7 tok/s** | **3.6 tok/s** | 51% (2.1) | NA |
+| NVIDIA Nemotron 3.5 Bolt 74B-A9B | 8-bit | **0.6 tok/s** | **0.9 tok/s** | 51% (2.1) | NA |
+| Qwen-AgentWorld 35B-A3B | 4-bit | **21.7 tok/s** | NA | 40% (2.0) | NA |
+| Qwen-AgentWorld 35B-A3B | 8-bit | **12.3 tok/s** | NA | 40% (2.0) | NA |
+| KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.9 tok/s** | NA | 33% (2.1) | NA |
+| KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.9 tok/s** | NA | 33% (2.1) | NA |
+| Qwen 3.5 4B (dense) | 4-bit | **22.8 tok/s** | **7.5 tok/s** | 26% (2.1) | NA |
+| Qwen 3.5 4B (dense) | 8-bit | **14.1 tok/s** | **7.9 tok/s** | 26% (2.1) | NA |
+| Qwen 3.5 9B (dense) | 4-bit | **12.9 tok/s** | **4.4 tok/s** | 9% (2.0) | NA |
+| Qwen 3.5 9B (dense) | 8-bit | **7.8 tok/s** | **4.4 tok/s** | 9% (2.0) | NA |
+| Qwen 3.5 2B (dense) | 4-bit | **44.4 tok/s** | **17.4 tok/s** | 3% (2.1) | NA |
+| Qwen 3.5 2B (dense) | 8-bit | **29.6 tok/s** | **18.1 tok/s** | 3% (2.1) | NA |
 
 
 ## Documentation
 
-- [Getting started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started)
-- [Installation and configuration](https://github.com/Pummelchen/TinyTitan/wiki/Installation-and-Configuration)
-  — the model catalogue, environment variables, the launcher and the tools
-- [Cookbook — one recipe per task](https://github.com/Pummelchen/TinyTitan/wiki/Cookbook)
-- [Local server and API](https://github.com/Pummelchen/TinyTitan/wiki/OpenAI-Compatible-Server)
-- [Runtime controls](https://github.com/Pummelchen/TinyTitan/wiki/Runtime-Controls) — every flag and default
-- [Features](https://github.com/Pummelchen/TinyTitan/wiki/Features)
-- [Library and engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine)
-  — the library and the engine, and how the two products are split
-- [System design](https://github.com/Pummelchen/TinyTitan/wiki/System-Design)
-- [FAQ](https://github.com/Pummelchen/TinyTitan/wiki/FAQ)
-- [Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
-  [Benchmarking guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)
-- [Changelog](https://github.com/Pummelchen/TinyTitan/wiki/Changelog)
-- [Project tracker](https://github.com/Pummelchen/TinyTitan/wiki/Project-Tracker) — open work only
-- [Repository layout](docs/repository-layout.md) — where everything lives, and
-  the naming and file-size conventions
+Everything is in the [wiki](https://github.com/Pummelchen/TinyTitan/wiki):
+getting started, installation and configuration, the cookbook, the local server
+and API, runtime controls, features, the library and engine, system design, the
+FAQ, benchmarks and the benchmarking guide, the changelog and the project
+tracker.
 
 ## Credits
 
