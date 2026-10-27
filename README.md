@@ -79,10 +79,6 @@ clone; the 2B install and a greedy 96-token CLI run on this host.
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 
-Per-version measurements and the method live on the wiki
-([Benchmarks](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarks) ·
-[Benchmarking Guide](https://github.com/Pummelchen/TinyTitan/wiki/Benchmarking-Guide)).
-
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
