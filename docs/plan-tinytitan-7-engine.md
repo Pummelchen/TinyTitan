@@ -416,12 +416,16 @@ another branch is present on this machine; "Concept" means design only.
 | Ornith 1.5 35B-A3B | `qwen36` | Shipped | Shipped | MTP draft 4-bit sidecar |
 | Qwen-AgentWorld 35B-A3B | `qwen36` | Shipped | Shipped | |
 | KAT-Coder-V2.5-Dev 35B-A3B | `qwen36` | Shipped | Shipped | |
-| Qwen3.8-Flash-Next 125B-A6B | `qwen38flash` | Shipped | Shipped | MTP draft 4-bit sidecar |
+| Qwen 4.0 Flash Next (Qwen3.8-Flash-Next) 125B-A6B | `qwen4_exp` / `qwen38flash` | Shipped | Shipped | The checkpoint is `Qwen/Qwen3.8-Flash-Next`; `qwen4_exp` is its architecture. MTP draft 4-bit sidecar |
 | K2-Horizon-MoVA-36B-A4B | `k2_horizon` | Install-only | Install-only | No GPU graph; cannot serve |
 | Ornith 1.5 122B | `qwen36` (3072×48) | In progress | In progress | This branch; 87 GB of snapshots converted at the time of writing |
 | Laguna-S-2.1 (poolside) | `laguna` (3072×48, top-10) | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
 | Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88, top-9) | Installed | Not installed | 43 GB 4-bit install; the 8-bit install was built and then removed under disk pressure; code on `nemotron-3.5-bolt` / `nemotron-readme-bench` |
 | DeepSeek-V4.1-Flash-1017 | `deepseek_v41` | No (policy) | No (policy) | Concept only; the owner decision is a precision-preserving mixed install, no re-quantization |
+
+**Naming:** "Qwen 4.0 Flash Next" is the name used for the `qwen4_exp`
+architecture; the shipped checkpoint is `Qwen/Qwen3.8-Flash-Next` 125B-A6B,
+at both 4-bit and 8-bit. No separate Qwen 4.0 checkpoint exists in this tree.
 
 Draft heads (MTP) are not independent LLMs and are not rows above: Qwen 3.6,
 Ornith 1.5 35B and Qwen3.8-Flash-Next each ship a 4-bit draft sidecar, and the
