@@ -396,3 +396,36 @@ supersedes that. The union graph is a 6.x reference, not a 7.0 target.)
 - [ ] Every variant has a golden hash, benchmark record, memory ceiling and
       Terminal-Bench row, dated and hardware-tagged.
 - [ ] The 6.x family switches and `ModelProfile` table are deleted.
+
+## Appendix A — inventory, 2026-10-27
+
+Every LLM this repository supports, has an install for, or has started a port
+for, with the two widths listed separately. "Shipped" means an install, a
+qualified golden and a README benchmark row on `main`; "Install-only" means the
+format and loader exist but no graph can serve it; "In progress" means work on
+a branch that is not yet a 7.0 variant; "Installed" means an install made from
+another branch is present on this machine; "Concept" means design only.
+
+| Model | Architecture family | 4-bit | 8-bit | Notes |
+| --- | --- | --- | --- | --- |
+| Qwen 3.5 2B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
+| Qwen 3.5 4B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
+| Qwen 3.5 9B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
+| Qwen 3.6 35B-A3B | `qwen36` | Shipped | Shipped | MTP draft 4-bit sidecar |
+| Ornith 1.5 35B-A3B | `qwen36` | Shipped | Shipped | MTP draft 4-bit sidecar |
+| Qwen-AgentWorld 35B-A3B | `qwen36` | Shipped | Shipped | |
+| KAT-Coder-V2.5-Dev 35B-A3B | `qwen36` | Shipped | Shipped | |
+| Qwen3.8-Flash-Next 125B-A6B | `qwen38flash` | Shipped | Shipped | MTP draft 4-bit sidecar |
+| K2-Horizon-MoVA-36B-A4B | `k2_horizon` | Install-only | Install-only | No GPU graph; cannot serve |
+| Ornith 1.5 122B | `qwen36` (3072×48) | In progress | In progress | This branch; 87 GB of snapshots converted at the time of writing |
+| Laguna-S-2.1 (poolside) | `laguna` (3072×48, top-10) | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
+| Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88, top-9) | Installed | Not installed | 43 GB 4-bit install; the 8-bit install was built and then removed under disk pressure; code on `nemotron-3.5-bolt` / `nemotron-readme-bench` |
+| DeepSeek-V4.1-Flash-1017 | `deepseek_v41` | No (policy) | No (policy) | Concept only; the owner decision is a precision-preserving mixed install, no re-quantization |
+
+Draft heads (MTP) are not independent LLMs and are not rows above: Qwen 3.6,
+Ornith 1.5 35B and Qwen3.8-Flash-Next each ship a 4-bit draft sidecar, and the
+122B checkpoint carries a draft that is not yet ported.
+
+The 7.0 target is one variant per row and width: two for every "Shipped" or
+"Installed" row, two for the 122B, two for K2 when a K2 runner exists, and no
+variant for the DeepSeek concept until its precision policy changes.
