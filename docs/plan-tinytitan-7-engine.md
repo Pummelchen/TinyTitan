@@ -407,21 +407,27 @@ format and loader exist but no graph can serve it; "In progress" means work on
 a branch that is not yet a 7.0 variant; "Installed" means an install made from
 another branch is present on this machine; "Concept" means design only.
 
-| Model | Architecture family | 4-bit | 8-bit | Notes |
-| --- | --- | --- | --- | --- |
-| Qwen 3.5 2B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
-| Qwen 3.5 4B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
-| Qwen 3.5 9B (dense) | `qwen3_5_dense` | Shipped | Shipped | CPU or GPU |
-| Qwen 3.6 35B-A3B | `qwen36` | Shipped | Shipped | MTP draft 4-bit sidecar |
-| Ornith 1.5 35B-A3B | `qwen36` | Shipped | Shipped | MTP draft 4-bit sidecar |
-| Qwen-AgentWorld 35B-A3B | `qwen36` | Shipped | Shipped | |
-| KAT-Coder-V2.5-Dev 35B-A3B | `qwen36` | Shipped | Shipped | |
-| Qwen 4.0 Flash Next (Qwen3.8-Flash-Next) 125B-A6B | `qwen4_exp` / `qwen38flash` | Shipped | Shipped | The checkpoint is `Qwen/Qwen3.8-Flash-Next`; `qwen4_exp` is its architecture. MTP draft 4-bit sidecar |
-| K2-Horizon-MoVA-36B-A4B | `k2_horizon` | Install-only | Install-only | No GPU graph; cannot serve |
-| Ornith 1.5 122B | `qwen36` (3072×48) | In progress | In progress | This branch; 87 GB of snapshots converted at the time of writing |
-| Laguna-S-2.1 (poolside) | `laguna` (3072×48, top-10) | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
-| Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88, top-9) | Installed | Not installed | 43 GB 4-bit install; the 8-bit install was built and then removed under disk pressure; code on `nemotron-3.5-bolt` / `nemotron-readme-bench` |
-| DeepSeek-V4.1-Flash-1017 | `deepseek_v41` | No (policy) | No (policy) | Concept only; the owner decision is a precision-preserving mixed install, no re-quantization |
+| Model | Architecture family | Dense/MoE | Total params | Active params | 4-bit | 8-bit | Notes |
+| --- | --- | --- | ---: | ---: | --- | --- | --- |
+| Qwen 3.5 2B (dense) | `qwen3_5_dense` | Dense | 2B | 2B | Shipped | Shipped | CPU or GPU |
+| Qwen 3.5 4B (dense) | `qwen3_5_dense` | Dense | 4B | 4B | Shipped | Shipped | CPU or GPU |
+| Qwen 3.5 9B (dense) | `qwen3_5_dense` | Dense | 9B | 9B | Shipped | Shipped | CPU or GPU |
+| Qwen 3.6 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | MTP draft 4-bit sidecar |
+| Ornith 1.5 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | MTP draft 4-bit sidecar |
+| Qwen-AgentWorld 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | |
+| KAT-Coder-V2.5-Dev 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | |
+| Qwen 4.0 Flash Next (Qwen3.8-Flash-Next) 125B-A6B | `qwen4_exp` / `qwen38flash` | MoE top-10 | 125B | 6B | Shipped | Shipped | Checkpoint is `Qwen/Qwen3.8-Flash-Next`; MTP draft 4-bit sidecar |
+| K2-Horizon-MoVA-36B-A4B | `k2_horizon` | MoE top-8 + MoVA top-4 | 36B | 4B | Install-only | Install-only | No GPU graph; cannot serve |
+| Ornith 1.5 122B | `qwen36` (3072×48) | MoE top-8 | 122B | ≈12B* | In progress | In progress | This branch; 87 GB of snapshots converted at the time of writing |
+| Laguna-S-2.1 (poolside) | `laguna` (3072×48) | MoE top-10 | 118B | 8B | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
+| Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88) | MoE top-9 | 74B | 9B | Installed | Not installed | 43 GB 4-bit install; 8-bit built then removed under disk pressure; code on `nemotron-3.5-bolt` |
+| DeepSeek-V4.1-Flash-1017 | `deepseek_v41` | MoE top-6 + Engram/CSA | 763B | n/a | No (policy) | No (policy) | Concept only; precision-preserving mixed install, no re-quantization |
+
+\* **Ornith 122B active parameters are computed, not published:** 8 routed
+experts at F=1024 over 48 layers plus the non-expert body is ≈12.1B active,
+≈13.7B if the embedding and lm_head are counted. The model card names no
+A-number. DeepSeek's card declares 763B total but no active count; the port is
+a concept and not a supported width.
 
 **Naming:** "Qwen 4.0 Flash Next" is the name used for the `qwen4_exp`
 architecture; the shipped checkpoint is `Qwen/Qwen3.8-Flash-Next` 125B-A6B,
