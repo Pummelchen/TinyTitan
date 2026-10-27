@@ -94,6 +94,8 @@ method live on the wiki
 | --- | --- | ---: | ---: | ---: | ---: |
 | Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.46 tok/s** | NA | 86.14% (2.1) | 25.25% |
 | Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.10 tok/s** | NA | 86.14% (2.1) | 25.25% |
+| Ornith 1.5 122B | 4-bit | **2.86 tok/s** | NA | 81.2% (2.1) | NA |
+| Ornith 1.5 122B | 8-bit | **1.24 tok/s** | NA | 81.2% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 4-bit | **21.65 tok/s** | NA | 67.8% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.93 tok/s** | NA | 67.8% (2.1) | NA |
 | K2-Horizon-MoVA-36B-A4B | 4-bit | NA | NA | 58.6% (2.1) | NA |
