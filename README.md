@@ -107,11 +107,7 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 
 ## Documentation
 
-Everything is in the [wiki](https://github.com/Pummelchen/TinyTitan/wiki):
-getting started, installation and configuration, the cookbook, the local server
-and API, runtime controls, features, the library and engine, system design, the
-FAQ, benchmarks and the benchmarking guide, the changelog and the project
-tracker.
+Everything is in the [Wiki](https://github.com/Pummelchen/TinyTitan/wiki).
 
 ## Credits
 
