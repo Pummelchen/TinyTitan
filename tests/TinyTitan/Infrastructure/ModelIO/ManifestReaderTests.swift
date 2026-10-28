@@ -232,6 +232,51 @@ import Testing
         }
     }
 
+    /// A promoted tensor is a *name*, not a width.
+    ///
+    /// `weightBits: 16` cannot be the spelling: every reader that takes a
+    /// width as arithmetic (`32 / bits` lanes, packed-row extents) would unpack
+    /// the same bytes wrongly, and `anOverrideAtAWidthNoKernelImplementsIsRefusedAtDecode`
+    /// pins that refusal. The list says which tensors the slot describes but
+    /// does not pack; the slots keep describing the packing.
+    @Test func aPromotedTensorIsAListNotAWidth() throws {
+        let stem = "language_model.model.layers.0.mlp.shared_expert.gate_proj"
+        var quant = Self.quant()
+        quant["promoted"] = [stem]
+        let (dir, toy) = try Self.writeToyManifest(["quant": quant])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let m = try ManifestReader.load(directoryURL: dir, expecting: toy)
+        #expect(m.quantPromoted == [stem])
+        // The five slots are unchanged, and nothing became an override.
+        #expect(m.quantOverrides.isEmpty)
+        #expect(m.quant?.sharedExpert.weightBits == 4)
+        #expect(m.quant?.attention.weightBits == 4)
+    }
+
+    /// A promoted role resolves to 16 for kernel selection, and only then.
+    ///
+    /// 16 is the runtime's name for "unquantized"; an affine dispatcher is
+    /// never built for it, and the fused kernels refuse it, which is what keeps
+    /// a bf16 tensor out of the nibble readers.
+    @Test func aPromotedRoleResolvesToSixteen() {
+        let stem = "language_model.model.layers.0.mlp.shared_expert.gate_proj"
+        #expect(
+            ManifestQuant.roleWeightBits(
+                roleSuffix: ".mlp.shared_expert.gate_proj",
+                overrides: [:], fallback: 8, promoted: [stem]) == 16)
+        // Same role, no marker: the slot's width, as before.
+        #expect(
+            ManifestQuant.roleWeightBits(
+                roleSuffix: ".mlp.shared_expert.gate_proj",
+                overrides: [:], fallback: 8, promoted: []) == 8)
+        // A different role is untouched by someone else's promotion.
+        #expect(
+            ManifestQuant.roleWeightBits(
+                roleSuffix: ".self_attn.q_proj",
+                overrides: [:], fallback: 4, promoted: [stem]) == 4)
+    }
+
     @Test func aTensorResolvesThroughItsOverrideThenItsSlot() throws {
         let quant = try Self.decodedQuant()
         let stem = "language_model.model.layers.0.self_attn.indexer.index_q_proj"

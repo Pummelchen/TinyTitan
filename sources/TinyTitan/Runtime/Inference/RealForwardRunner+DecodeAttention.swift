@@ -46,9 +46,9 @@ extension RealForwardRunner {
         // four *are* affine: the dense Qwen 3.5 installs keep `a` and `b` at
         // bf16, and the per-projection GEMV below routes bf16, 4- and 8-bit.
         // Reading bf16 bytes as nibbles is silent nonsense, not an error.
-        let fusedIsUsable =
-            model.attentionWeightBits == 4
-            && qkvW.dtype == 0 && zW.dtype == 0 && aW.dtype == 0 && bW.dtype == 0
+        let fusedIsUsable = FusedKernelPolicy.mayUseFusedGDNInputProjections(
+            attentionWeightBits: model.attentionWeightBits,
+            dTypes: [qkvW.dtype, zW.dtype, aW.dtype, bW.dtype].map(Int.init))
         if fusedIsUsable {
             if !ablated("inproj") {
                 try gdn.encodeInputProjections(
@@ -123,12 +123,14 @@ extension RealForwardRunner {
         }
         try rotate(&cb, role: "gdn.gatednorm")
         if !ablated("outproj") {
+            // The projection overload, not the raw one: a promoted out_proj
+            // carries no scales or biases, and the raw call reads those
+            // companions from offset zero -- the file header -- and produces
+            // NaN. The overload dispatches on the tensor's dtype.
             try encodePrimaryGEMV(
-                commandBuffer: cb,
-                weights: outW.buffer, weightsOffset: Int(outW.offset),
-                scales: outW.buffer, scalesOffset: Int(outW.scaleOffset),
-                biases: outW.buffer, biasesOffset: Int(outW.biasOffset),
-                x: gdnOut, y: yOut, yOffset: outputOffset, m: D, n: UInt32(la.valueDim))
+                commandBuffer: cb, projection: outW,
+                x: gdnOut, y: yOut, yOffset: outputOffset,
+                m: D, n: UInt32(la.valueDim))
         }
         try rotate(&cb, role: "gdn.outproj")
     }
@@ -150,7 +152,15 @@ extension RealForwardRunner {
         let k = try model.kProj(layer: layer)
         let v = try model.vProj(layer: layer)
         let hiddenDimension = UInt32(cfg.hiddenSize)
-        if model.qoProjectionWeightBits == 4 && model.kvProjectionWeightBits == 4 {
+        // The fused kernel reads packed nibbles for all three, so a promoted
+        // (bf16) tensor must not reach it even though its *slot* says 4: the
+        // slot is a default, and the tensor's dtype is the truth. Same test the
+        // GDN input projections already use.
+        let fusedIsUsable = FusedKernelPolicy.mayUseFusedQKV(
+            qoProjectionWeightBits: model.qoProjectionWeightBits,
+            kvProjectionWeightBits: model.kvProjectionWeightBits,
+            qDType: Int(q.dtype), kDType: Int(k.dtype), vDType: Int(v.dtype))
+        if fusedIsUsable {
             try fusedQKVGEMV.encode(
                 commandBuffer: cb,
                 qWeights: q.buffer, qWeightsOffset: Int(q.offset),
@@ -257,10 +267,7 @@ extension RealForwardRunner {
             count: Int(qDim))
         try rotate(&cb, role: "qsa.gatemul")
         try encodePrimaryGEMV(
-            commandBuffer: cb,
-            weights: o.buffer, weightsOffset: Int(o.offset),
-            scales: o.buffer, scalesOffset: Int(o.scaleOffset),
-            biases: o.buffer, biasesOffset: Int(o.biasOffset),
+            commandBuffer: cb, projection: o,
             x: attnOut, y: oOut, m: D, n: qDim)
         try rotate(&cb, role: "qsa.oproj")
     }

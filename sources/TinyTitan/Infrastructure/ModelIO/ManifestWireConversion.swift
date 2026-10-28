@@ -113,6 +113,7 @@ extension Manifest {
             arch: ManifestArch(wire: wire.arch),
             quant: wire.quant.map(ManifestQuant.init(wire:)),
             quantOverrides: wire.quant?.overrides?.mapValues(\.weightBits) ?? [:],
+            quantPromoted: Set(wire.quant?.promoted ?? []),
             files: wire.files.mapValues(ManifestFileEntry.init(wire:)),
             expertsPerLayer: wire.expertsPerLayer,
             numLayers: wire.numLayers,

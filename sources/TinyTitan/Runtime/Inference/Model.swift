@@ -97,6 +97,7 @@ public struct Model {
     /// without `.weight`). The dense Qwen 3.5 installs are built that way.
     func weightBits(forTensorNamed name: String) -> Int? {
         let stem = name.hasSuffix(".weight") ? String(name.dropLast(".weight".count)) : name
+        if manifest.quantPromoted.contains(stem) { return 16 }
         return manifest.quantOverrides[stem]
     }
 
@@ -118,7 +119,8 @@ public struct Model {
         ManifestQuant.roleWeightBits(
             roleSuffix: roleSuffix,
             overrides: manifest.quantOverrides,
-            fallback: fallback)
+            fallback: fallback,
+            promoted: manifest.quantPromoted)
     }
 
     /// The width the `q_proj`/`o_proj` pair is stored at.

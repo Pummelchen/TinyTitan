@@ -71,6 +71,31 @@ extension RealForwardRunner {
         // The batching lost here is cheap: every promoted family is among the
         // smallest tensors in the model, which is why they were chosen.
         if weights.dtype == 1 {
+            // One dispatch for the whole chunk when there is more than a row:
+            // the per-row loop costs a dispatch per token per projection, and a
+            // 1500-token prompt on this family issues ~180k of them. The bytes
+            // are unchanged, so this is launch amortisation, not a bandwidth
+            // win -- see the shader's note.
+            //
+            // `TINYTITAN_BF16_PREFILL_SINGLE_ROW=1` forces the per-row path so
+            // the two can be compared on one prompt: the arithmetic order is
+            // identical, so the text has to be identical too.
+            let singleRow =
+                ProcessInfo.processInfo.environment["TINYTITAN_BF16_PREFILL_SINGLE_ROW"] == "1"
+            if BF16PrefillDispatch.usesMultiRow(
+                tokenCount: tokenCount, singleRowForced: singleRow)
+            {
+                try bf16Projection.encodeMultiRow(
+                    commandBuffer: commandBuffer,
+                    weights: weights.buffer,
+                    weightsOffset: Int(weights.offset),
+                    x: x, y: y,
+                    m: UInt32(rows), n: UInt32(columns),
+                    tokens: tokenCount,
+                    xStrideElements: xStrideElements,
+                    yStrideElements: yStrideElements)
+                return
+            }
             for row in 0..<tokenCount {
                 try encodeRoleGEMV(
                     commandBuffer: commandBuffer,

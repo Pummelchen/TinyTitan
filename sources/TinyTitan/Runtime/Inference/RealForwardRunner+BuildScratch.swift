@@ -214,7 +214,8 @@ extension RealForwardRunner {
                 scalesOffset: Int(view.scaleOffset),
                 biasesOffset: Int(view.biasOffset),
                 rows: rows,
-                cols: cols)
+                cols: cols,
+                dtype: Int(view.dtype))
         }
         var sharedViews: [LayerSharedExpertProjections] = []
         sharedViews.reserveCapacity(cfg.numLayers)

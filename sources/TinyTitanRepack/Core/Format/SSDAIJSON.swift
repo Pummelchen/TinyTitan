@@ -229,6 +229,19 @@ enum SSDAIJSON {
         {
             dict[override.stem] = entry(override.bits)
         }
+        // Promoted tensors: bf16 weights living in a slot whose default width
+        // describes packed data. They get a name in `promoted`, not a
+        // `weightBits` value, because a width is a packing and this is the
+        // absence of one -- the reader that needs a kernel width resolves these
+        // to 16, and the arithmetic that unpacks never sees them.
+        let promoted = plan.resident.entries.compactMap { resident -> String? in
+            guard resident.quantSpec == nil, resident.dtype == 1,
+                Self.isSlotDescribedRole(resident.name)
+            else { return nil }
+            return resident.name.hasSuffix(weightSuffix)
+                ? String(resident.name.dropLast(weightSuffix.count)) : resident.name
+        }
+        if !promoted.isEmpty { dict["promoted"] = promoted.sorted() }
         return dict
     }
 
@@ -279,6 +292,27 @@ enum SSDAIJSON {
             result.append((stem: stem, bits: tensor.bits))
         }
         return result
+    }
+
+    /// Whether a resident tensor is one the five slots describe.
+    ///
+    /// Only those belong in `promoted` when stored at bf16: a norm is bf16 in
+    /// every install and never described by a slot, so listing it would claim
+    /// a slot applies to it when none does.
+    private static func isSlotDescribedRole(_ name: String) -> Bool {
+        guard name.hasSuffix(weightSuffix) else { return false }
+        let suffixes = [
+            ".embed_tokens.weight", ".lm_head.weight",
+            ".self_attn.q_proj.weight", ".self_attn.k_proj.weight",
+            ".self_attn.v_proj.weight", ".self_attn.o_proj.weight",
+            ".linear_attn.in_proj_qkv.weight", ".linear_attn.in_proj_z.weight",
+            ".linear_attn.in_proj_a.weight", ".linear_attn.in_proj_b.weight",
+            ".linear_attn.out_proj.weight", ".mlp.gate.weight",
+            ".mlp.shared_expert.gate_proj.weight",
+            ".mlp.shared_expert.up_proj.weight",
+            ".mlp.shared_expert.down_proj.weight",
+        ]
+        return suffixes.contains { name.hasSuffix($0) }
     }
 
     /// The suffix a resident tensor's name carries and its manifest key drops.

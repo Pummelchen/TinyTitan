@@ -76,3 +76,44 @@ kernel void bf16_gemv_float_simd(
     accumulator = simd_sum(accumulator);
     if (lane == 0u) y[row] = accumulator;
 }
+
+// The same arithmetic for a prompt: one threadgroup per (row block, token), so
+// a whole prefill chunk costs one dispatch instead of one per token per
+// projection.
+//
+// This amortises launches, not bytes. A promoted projection is four times the
+// traffic of the same projection at 4 bits (bf16 against packed nibbles), and
+// prefill is bandwidth-bound, so the win here is the CPU-side encode and the
+// round trip -- measured on a 1500-token prompt at about 1% of the run. It
+// exists because the per-row path issued ~180k dispatches for that prompt, and
+// dispatch cost is the part a caller can remove without changing the weights.
+kernel void bf16_gemv_multirow_simd(
+    device const bfloat* weights [[buffer(0)]],
+    device const half*   x       [[buffer(1)]],
+    device half*         y       [[buffer(2)]],
+    constant uint&       rows    [[buffer(3)]],
+    constant uint&       columns [[buffer(4)]],
+    constant uint&       x_stride [[buffer(5)]],
+    constant uint&       y_stride [[buffer(6)]],
+    uint2 tg [[threadgroup_position_in_grid]],
+    uint sg_idx [[simdgroup_index_in_threadgroup]],
+    uint lane   [[thread_index_in_simdgroup]]
+) {
+    constexpr uint rows_per_threadgroup = 8;
+    constexpr uint lanes = 32;
+    const uint row = tg.x * rows_per_threadgroup + sg_idx;
+    if (row >= rows) return;
+
+    device const bfloat* row_weights = weights + row * columns;
+    device const half* token_x = x + tg.y * x_stride;
+    float accumulator = 0.0f;
+    for (uint base = 0; base < columns; base += lanes * 2u) {
+        const uint first = base + lane * 2u;
+        accumulator = fma(float(row_weights[first]), float(token_x[first]),
+                          accumulator);
+        accumulator = fma(float(row_weights[first + 1u]), float(token_x[first + 1u]),
+                          accumulator);
+    }
+    accumulator = simd_sum(accumulator);
+    if (lane == 0u) y[tg.y * y_stride + row] = half(accumulator);
+}

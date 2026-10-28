@@ -84,8 +84,13 @@ final class PrefillSharedExpert {
 
         // The batched kernel indexes X and Y by their logical strides, so it is
         // only correct when those strides are exactly K and N.
+        // A promoted (bf16) shared expert carries no scales or biases, and the
+        // batched kernel reads packed affine weights; fall to the per-row path,
+        // which dispatches on the projection's dtype.
         let batched =
-            ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_SHARED_GEMM"] != "0"
+            FusedKernelPolicy.mayUseBatchedSharedExpert(
+                dTypes: [gate.dtype, up.dtype, down.dtype])
+            && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_SHARED_GEMM"] != "0"
             && queryCount >= 8
             && gate.cols % 64 == 0 && down.cols % 64 == 0
             && xStrideElements == Int(gate.cols)

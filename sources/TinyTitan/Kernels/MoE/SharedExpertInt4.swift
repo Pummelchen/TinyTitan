@@ -107,6 +107,75 @@ public final class SharedExpertInt4 {
     }
 }
 
+/// The shared expert at the checkpoint's own bf16.
+///
+/// A promoted projection carries no scales or biases, so the affine kernels
+/// cannot read it; the three matvecs go through `BF16GEMV` and the activation
+/// runs on the same fp16 scratch and pipeline the affine path uses, which is
+/// what keeps one activation kernel for both.
+public final class BF16SharedExpert {
+    private let gemv: BF16GEMV
+    private let geluMulPSO: MTLComputePipelineState
+
+    init(context: MetalContext, siluActivation: Bool = false) throws {
+        self.gemv = try BF16GEMV(context: context)
+        self.geluMulPSO = try context.pipeline(
+            siluActivation ? "silu_mul_fp16" : "gelu_mul_fp16")
+    }
+
+    func encode(
+        commandBuffer cb: MTLCommandBuffer,
+        x: MTLBuffer, xOffset: Int = 0,
+        gate: SharedExpertProjection,
+        up: SharedExpertProjection,
+        down: SharedExpertProjection,
+        y: MTLBuffer, yOffset: Int = 0,
+        scratchGate: MTLBuffer, scratchGateOffset: Int = 0,
+        scratchUp: MTLBuffer, scratchUpOffset: Int = 0,
+        scratchAct: MTLBuffer, scratchActOffset: Int = 0
+    ) throws {
+        guard gate.rows == up.rows, gate.cols == up.cols,
+            down.rows == gate.cols, down.cols == gate.rows
+        else {
+            throw SharedExpertError.dimensionMismatch(
+                "gate=(\(gate.rows),\(gate.cols)) up=(\(up.rows),\(up.cols)) down=(\(down.rows),\(down.cols))"
+            )
+        }
+        try gemv.encode(
+            commandBuffer: cb,
+            weights: gate.weights, weightsOffset: gate.weightsOffset,
+            x: x, xOffset: xOffset,
+            y: scratchGate, yOffset: scratchGateOffset,
+            m: gate.rows, n: gate.cols)
+        try gemv.encode(
+            commandBuffer: cb,
+            weights: up.weights, weightsOffset: up.weightsOffset,
+            x: x, xOffset: xOffset,
+            y: scratchUp, yOffset: scratchUpOffset,
+            m: up.rows, n: up.cols)
+        guard let encoder = cb.makeComputeCommandEncoder() else {
+            throw SharedExpertError.dimensionMismatch("encoder alloc failed")
+        }
+        encoder.setComputePipelineState(geluMulPSO)
+        encoder.setBuffer(scratchGate, offset: scratchGateOffset, index: 0)
+        encoder.setBuffer(scratchUp, offset: scratchUpOffset, index: 1)
+        encoder.setBuffer(scratchAct, offset: scratchActOffset, index: 2)
+        var count = gate.rows
+        encoder.setBytes(&count, length: MemoryLayout<UInt32>.size, index: 3)
+        let width = min(geluMulPSO.maxTotalThreadsPerThreadgroup, 256)
+        encoder.dispatchThreads(
+            MTLSize(width: Int(gate.rows), height: 1, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: width, height: 1, depth: 1))
+        encoder.endEncoding()
+        try gemv.encode(
+            commandBuffer: cb,
+            weights: down.weights, weightsOffset: down.weightsOffset,
+            x: scratchAct, xOffset: scratchActOffset,
+            y: y, yOffset: yOffset,
+            m: down.rows, n: down.cols)
+    }
+}
+
 public final class SharedExpertRuntime {
     private enum Implementation {
         case int4(SharedExpertInt4)
@@ -114,6 +183,9 @@ public final class SharedExpertRuntime {
     }
 
     private let implementation: Implementation
+    /// Built beside the affine path, because a promoted shared expert sits
+    /// inside a slot that may still say 4 or 8 bits: the tensor decides.
+    private let bf16: BF16SharedExpert
     public let weightBits: Int
 
     public init(
@@ -121,6 +193,8 @@ public final class SharedExpertRuntime {
         siluActivation: Bool = false
     ) throws {
         self.weightBits = weightBits
+        self.bf16 = try BF16SharedExpert(
+            context: context, siluActivation: siluActivation)
         // Only 4 and 8. A 6-bit arm used to route here and compose affine GEMVs,
         // but `AffineQuantGEMV` asserts `[4, 8]`, so it aborted the process
         // instead of failing the load. 6-bit is a withdrawn format and no width
@@ -151,6 +225,15 @@ public final class SharedExpertRuntime {
         scratchUp: MTLBuffer, scratchUpOffset: Int = 0,
         scratchAct: MTLBuffer, scratchActOffset: Int = 0
     ) throws {
+        if gate.dtype == 1 {
+            try bf16.encode(
+                commandBuffer: commandBuffer, x: x, xOffset: xOffset,
+                gate: gate, up: up, down: down, y: y, yOffset: yOffset,
+                scratchGate: scratchGate, scratchGateOffset: scratchGateOffset,
+                scratchUp: scratchUp, scratchUpOffset: scratchUpOffset,
+                scratchAct: scratchAct, scratchActOffset: scratchActOffset)
+            return
+        }
         switch implementation {
         case .int4(let runtime):
             try runtime.encode(

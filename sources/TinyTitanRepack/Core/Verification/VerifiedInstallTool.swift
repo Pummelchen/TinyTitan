@@ -199,6 +199,33 @@ public enum VerifiedInstallTool {
         var impliedCounts: [Int: Int] = [:]
         var unreadable: [String] = []
 
+        // A bf16 tensor inside a quantized slot must be named in `promoted`.
+        // Without that the manifest says the slot's width applies to it, and a
+        // reader that trusts the slot would dequantize bf16 bytes as integers;
+        // this is the check that makes the claim true rather than assumed.
+        let promotedStems = Set(quant.promoted ?? [])
+        let slotRoleSuffixes = [
+            ".embed_tokens", ".lm_head",
+            ".self_attn.q_proj", ".self_attn.k_proj",
+            ".self_attn.v_proj", ".self_attn.o_proj",
+            ".linear_attn.in_proj_qkv", ".linear_attn.in_proj_z",
+            ".linear_attn.in_proj_a", ".linear_attn.in_proj_b",
+            ".linear_attn.out_proj", ".mlp.gate",
+            ".mlp.shared_expert.gate_proj",
+            ".mlp.shared_expert.up_proj",
+            ".mlp.shared_expert.down_proj",
+        ]
+        for entry in entries where entry.dtype != SSDAIFormatV1.DType.u32.rawValue {
+            guard entry.name.hasSuffix(".weight") else { continue }
+            let stem = String(entry.name.dropLast(".weight".count))
+            let isSlotRole = slotRoleSuffixes.contains { stem.hasSuffix($0) }
+            if isSlotRole, !promotedStems.contains(stem) {
+                throw RepackError.configurationInvalid(
+                    detail: "\(entry.name) is stored at the checkpoint's bf16 but the "
+                        + "manifest does not list it in `promoted`, so its slot's width "
+                        + "would be read as applying to it")
+            }
+        }
         for entry in entries where entry.dtype == SSDAIFormatV1.DType.u32.rawValue {
             let implied = try impliedWidth(of: entry)
             impliedCounts[implied, default: 0] += 1

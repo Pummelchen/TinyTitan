@@ -169,15 +169,15 @@ extension Model {
                     forTensorNamed: name, overrides: overrides,
                     fallback: quant.sharedExpert)
             }
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertGate(layer),
                 rows: config.intermediateSize, columns: config.hiddenSize,
                 slot: ffnSlot(schema.sharedExpertGate(layer)))
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertUp(layer),
                 rows: config.intermediateSize, columns: config.hiddenSize,
                 slot: ffnSlot(schema.sharedExpertUp(layer)))
-            try checks.requireAffine(
+            try checks.requireAffineOrBF16(
                 schema.sharedExpertDown(layer),
                 rows: config.hiddenSize, columns: config.intermediateSize,
                 slot: ffnSlot(schema.sharedExpertDown(layer)))
@@ -203,30 +203,36 @@ extension Model {
                 try checks.requireBF16(
                     schema.kNorm(layer),
                     count: config.fullHeadDim)
-                try checks.requireAffine(
+                // A promoted attention projection is legal: the decode path
+                // dispatches on the tensor's own dtype (`encodeRoleGEMV`), so a
+                // bf16 q/k/v/o runs through `BF16GEMV` with no scales or biases.
+                try checks.requireAffineOrBF16(
                     schema.qProj(layer),
                     rows: queryDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.qProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.kProj(layer),
                     rows: kvDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.kProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.vProj(layer),
                     rows: kvDimension, columns: config.hiddenSize,
                     slot: roleSlot(schema.vProj(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.oProj(layer),
                     rows: config.hiddenSize,
                     columns: config.numHeads * config.fullHeadDim,
                     slot: roleSlot(schema.oProj(layer), quant.attention))
             } else if config.layerIsLinear(layer) {
                 let la = config.linearAttention
-                try checks.requireAffine(
+                // Same rule as the full-attention projections: the decode
+                // path picks the fused kernel only when every input projection
+                // is affine, so a promoted one is served by `BF16GEMV`.
+                try checks.requireAffineOrBF16(
                     schema.gdnQKV(layer),
                     rows: la.qkvDim, columns: config.hiddenSize,
                     slot: roleSlot(schema.gdnQKV(layer), quant.attention))
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.gdnZ(layer),
                     rows: la.valueDim, columns: config.hiddenSize,
                     slot: roleSlot(schema.gdnZ(layer), quant.attention))
@@ -238,7 +244,7 @@ extension Model {
                     schema.gdnB(layer),
                     rows: la.numVHeads, columns: config.hiddenSize,
                     slot: quant.attention)
-                try checks.requireAffine(
+                try checks.requireAffineOrBF16(
                     schema.gdnOut(layer),
                     rows: config.hiddenSize, columns: la.valueDim,
                     slot: roleSlot(schema.gdnOut(layer), quant.attention))
