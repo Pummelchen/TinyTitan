@@ -121,7 +121,7 @@ class AdvisoryCoverageTests(unittest.TestCase):
         # waiting to happen. Actions are the exception — a bump there is a
         # supply-chain event that should arrive as a PR rather than as drift.
         watched = [b for b in self.blocks if b["ecosystem"] in {"swift", "npm", "pip"}]
-        self.assertEqual(len(watched), 4, "expected the swift, two npm and pip entries")
+        self.assertEqual(len(watched), 3, "expected the swift, npm and pip entries")
         for block in watched:
             with self.subTest(ecosystem=block["ecosystem"], directory=block.get("directory")):
                 self.assertEqual(
