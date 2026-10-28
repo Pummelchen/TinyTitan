@@ -1,6 +1,6 @@
 {
   "name": "dsh-tinytitan",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-alpha.2",
   "description": "DeepSeek Harness route and quiet compaction for a local TinyTitan server",
   "type": "module",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=24.9"
   },
   "repository": {
     "type": "git",
@@ -36,12 +36,12 @@
     "format:check": "prettier --check ."
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/cordis-plugin-include": "~1.0.9",
-    "@deepseek-ai/dsh-agent-preset": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-compaction-basic": "0.2.1-rc.3",
-    "@deepseek-ai/dsh-web-app": "0.2.1-rc.3",
-    "js-yaml": "^4.2.0"
+    "@deepseek-ai/cordis": "~4.0.6-alpha.1",
+    "@deepseek-ai/cordis-plugin-include": "~1.0.11-alpha.1",
+    "@deepseek-ai/dsh-agent-preset": "0.2.2-alpha.2",
+    "@deepseek-ai/dsh-compaction-basic": "0.2.2-alpha.2",
+    "@deepseek-ai/dsh-web-app": "0.2.2-alpha.2",
+    "js-yaml": "^4.3.2"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis-plugin-include": {
@@ -67,11 +67,11 @@
     "local"
   ],
   "devDependencies": {
-    "@deepseek-ai/cordis-plugin-include": "~1.0.9",
+    "@deepseek-ai/cordis-plugin-include": "~1.0.11-alpha.1",
     "@eslint/js": "10.0.1",
     "eslint": "10.11.0",
     "globals": "17.12.0",
-    "js-yaml": "^4.2.0",
+    "js-yaml": "^4.3.2",
     "prettier": "3.9.9"
   }
 }
