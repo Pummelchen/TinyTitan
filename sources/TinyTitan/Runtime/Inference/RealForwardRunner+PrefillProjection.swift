@@ -82,7 +82,9 @@ extension RealForwardRunner {
             // identical, so the text has to be identical too.
             let singleRow =
                 ProcessInfo.processInfo.environment["TINYTITAN_BF16_PREFILL_SINGLE_ROW"] == "1"
-            if tokenCount > 1 && !singleRow {
+            if BF16PrefillDispatch.usesMultiRow(
+                tokenCount: tokenCount, singleRowForced: singleRow)
+            {
                 try bf16Projection.encodeMultiRow(
                     commandBuffer: commandBuffer,
                     weights: weights.buffer,

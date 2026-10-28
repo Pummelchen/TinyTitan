@@ -80,9 +80,11 @@ final class BF16GEMV {
         yStrideElements: Int
     ) throws {
         precondition(
-            n.isMultiple(of: 64),
-            "bf16 GEMV expects a column count that is a multiple of 64")
-        guard tokens > 0, let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            BF16PrefillDispatch.isEncodable(columns: Int(n)),
+            "bf16 multirow GEMV expects a positive column count that is a multiple of 64")
+        guard let grid = BF16PrefillDispatch.grid(rows: Int(m), tokens: tokens),
+            let encoder = commandBuffer.makeComputeCommandEncoder()
+        else {
             return
         }
         encoder.setComputePipelineState(multiRowPipeline)
@@ -97,12 +99,10 @@ final class BF16GEMV {
         encoder.setBytes(&columns, length: MemoryLayout<UInt32>.size, index: 4)
         encoder.setBytes(&xStride, length: MemoryLayout<UInt32>.size, index: 5)
         encoder.setBytes(&yStride, length: MemoryLayout<UInt32>.size, index: 6)
-        let rowsPerThreadgroup = 8
-        let blocks = (Int(m) + rowsPerThreadgroup - 1) / rowsPerThreadgroup
         encoder.dispatchThreadgroups(
-            MTLSize(width: blocks, height: tokens, depth: 1),
+            MTLSize(width: grid.rowBlocks, height: grid.tokens, depth: 1),
             threadsPerThreadgroup: MTLSize(
-                width: 32 * rowsPerThreadgroup, height: 1, depth: 1))
+                width: grid.threadsPerThreadgroup, height: 1, depth: 1))
         encoder.endEncoding()
     }
 
