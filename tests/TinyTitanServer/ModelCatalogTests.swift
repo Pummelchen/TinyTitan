@@ -331,7 +331,8 @@ struct ModelCatalogTests {
     /// before the model had an install.
     @Test func everyShippedModelHasADisplayName() {
         let shipped = [
-            "qwen3.6-35b-a3b", "ornith-1.5-35b-a3b", "qwen-agentworld",
+            "qwen3.6-35b-a3b", "ornith-1.5-35b-a3b", "ornith-1.5-35b-a3b-bf16dense",
+            "qwen-agentworld",
             "kat-coder-v2.5", "qwen3.8-flash-next",
             "qwen3.5-2b", "qwen3.5-4b", "qwen3.5-9b",
         ]

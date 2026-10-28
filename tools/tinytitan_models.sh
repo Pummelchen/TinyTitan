@@ -59,6 +59,7 @@ TINYTITAN_CLIENTS=(
 TINYTITAN_MODEL_CHOICES=(
   "ornith15-8bit|Ornith 1.5 35B-A3B|8|36.9|Recommended. Best measured coding and tooling results."
   "ornith15|Ornith 1.5 35B-A3B|4|19.5|The same model at 4-bit: half the disk, faster decode."
+  "ornith15-bf16dense|Ornith 1.5 35B-A3B (bf16 dense)|4|22.0|Attention, GDN and the shared expert at the checkpoint's own bf16 with the routed experts still 4-bit: about 7% slower to decode than the 4-bit row, the same prefill, and no quantization error in the always-on blocks."
   "qwen36-8bit|Qwen 3.6 35B-A3B|8|37.8|The other 35B family, at 8-bit."
   "qwen36|Qwen 3.6 35B-A3B|4|19.5|The other 35B family, at 4-bit."
   "agentworld-8bit|Qwen-AgentWorld 35B-A3B|8|41.0|Tuned for agentic tool use."
@@ -142,6 +143,13 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_FAMILY=qwen36
       TINYTITAN_MODEL_ENGINES=gpu
       TINYTITAN_MODEL_THINKING="off,on" ;;
+    ornith15-bf16dense|ornith1.5-bf16dense)
+      TINYTITAN_MODEL_KEY=ornith15-bf16dense
+      TINYTITAN_MODEL_STEM="ornith-1.5_35B_A3B-bf16dense"
+      TINYTITAN_MODEL_LABEL="Ornith 1.5 35B-A3B (bf16 dense)"
+      TINYTITAN_MODEL_FAMILY=qwen36
+      TINYTITAN_MODEL_ENGINES=gpu
+      TINYTITAN_MODEL_THINKING="off,on" ;;
     ornith122|ornith-1.5-122b|ornith1.5-122b)
       TINYTITAN_MODEL_KEY=ornith122
       TINYTITAN_MODEL_STEM="ornith-1.5_122B"
@@ -201,7 +209,7 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_ENGINES="gpu,cpu"
       TINYTITAN_MODEL_THINKING="off,on" ;;
     *)
-      echo "unknown AI model: ${1:-} (ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
+      echo "unknown AI model: ${1:-} (ornith|ornith15-bf16dense|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
       return 2 ;;
   esac
 }
@@ -228,6 +236,12 @@ tinytitan_install_key() {
   local key
   case "${1:-}" in
     ornith-1.5_35B_A3B)            key=ornith15 ;;
+    # The mixed build has one width only: the routed experts are the 4-bit
+    # payload and the dense blocks are bf16, so there is no 8-bit sibling to
+    # fetch and the launcher must not ask for one.
+    ornith-1.5_35B_A3B-bf16dense)
+      [[ "${2:-4}" == 8 ]] && return 1
+      key=ornith15-bf16dense ;;
     ornith-1.5_122B)               key=ornith122 ;;
     qwen3.6_35B_A3B)               key=qwen36 ;;
     qwen-agentworld_35B_A3B)       key=agentworld ;;
@@ -303,7 +317,7 @@ tinytitan_model_port() {
 # Every model this checkout knows about, for help text and for the fallback
 # list when the server cannot report its catalog. One list: the catalog is
 # still the source of what is installed.
-TINYTITAN_ALL_MODELS=(ornith ornith122 qwen36 agentworld katcoder qwen38 qwen35-2b qwen35-4b qwen35-9b)
+TINYTITAN_ALL_MODELS=(ornith ornith15-bf16dense ornith122 qwen36 agentworld katcoder qwen38 qwen35-2b qwen35-4b qwen35-9b)
 
 # --- Installed models, from the server's catalog -----------------------
 #

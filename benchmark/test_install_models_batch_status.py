@@ -41,7 +41,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "install_models.sh"
 
-WIDTHS = {"4": 12, "8": 9}
+WIDTHS = {"4": 13, "8": 9}
 ROWS = re.compile(r'^\s*"([a-z0-9-]+)\|[^|]*\|([48])\|', re.M).findall(SCRIPT.read_text())
 CATALOGUE_WIDTHS = {name: width for name, width in ROWS}
 

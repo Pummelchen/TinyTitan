@@ -168,6 +168,12 @@ row_staging_dirs() {
       # run, so every one of these is what the *other* width would consume.
       convert_qwen35moe)   printf 'reuse:%s\n' "$WORK/${preset}-affine-4bit" "$WORK/${preset}-affine-8bit" \
                                               "$WORK/${preset}-affine" "$WORK/${preset}-shards" ;;
+      # The bf16-dense build is a third conversion of the same checkpoint, not
+      # a width of either snapshot above: its dense blocks are copied through
+      # at bf16, so neither `<preset>-affine-*` can stand in for it. Nothing
+      # else can reuse it either, hence `drop` for the snapshot and the shards.
+      convert_qwen35moe_dense16)
+        printf 'drop:%s\n' "$WORK/${preset}-bf16dense-affine" "$WORK/${preset}-bf16dense-shards" ;;
       # A 122B snapshot is 69.5 GB (4-bit) or 129.8 GB (8-bit). Nobody can reuse
       # it -- the sibling width is a separate fetch by design -- so it goes as
       # soon as its own install exists. The shard directory holds only partial
@@ -278,15 +284,20 @@ cmd_clean() {
 
 # name|install directory|width|source[|preset[|both-widths-directory]]
 #
-# The last two fields only appear on rows whose source is `convert_qwen35moe`.
-# Those are all Qwen3.5-MoE checkpoints, and their converter can write *both*
-# widths from one 70 GB download -- so a row names the sibling width it pairs
-# with. That is what makes `tools/install_models.sh katcoder both` cost one
-# download instead of two, and it also lets a second width reuse a snapshot a
-# previous run already converted.
+# The preset field names the converter preset; it appears on every row a
+# converter branch reads (`convert_qwen35moe`, `convert_qwen35moe_dense16`,
+# `convert_qwen35moe_solo`). The sibling field appears only on the paired
+# `convert_qwen35moe` rows: their converter can write *both* widths from one
+# 70 GB download, so a row names the sibling width it pairs with. That is what
+# makes `tools/install_models.sh katcoder both` cost one download instead of
+# two, and it also lets a second width reuse a snapshot a previous run already
+# converted. The bf16-dense row is not paired: it is a third conversion, so it
+# has a preset and no sibling.
 CATALOGUE=(
   "ornith15|ornith-1.5_35B_A3B_4Bit|4|convert_qwen35moe|ornith15|ornith15-8bit"
   "ornith15-8bit|ornith-1.5_35B_A3B_8Bit|8|convert_qwen35moe|ornith15|ornith15"
+  # One width only, and a different dense policy: see convert_qwen35moe_dense16.
+  "ornith15-bf16dense|ornith-1.5_35B_A3B-bf16dense_4Bit|4|convert_qwen35moe_dense16|ornith15"
   "ornith15-mtp|ornith-1.5_35B_A3B_MTP_4Bit|4|prepare_ornith_mtp"
   # Ornith-1.5-122B. Deliberately *not* a paired `convert_qwen35moe` row: one
   # `--bits 4 8` pass would stage 69.5 GB and 129.8 GB of snapshots at once,
@@ -353,13 +364,15 @@ What a run costs
   The sizes in the menu are the space an install occupies. Installing also
   downloads the model's own bf16 release and stages it under
   $TINYTITAN_WORK_DIR: about 70 GB for a 35B-A3B, which serves both widths,
-  and 360 GB per width for Qwen3.8-Flash-Next. A draft head fetches only its
+  and 360 GB per width for Qwen3.8-Flash-Next. The bf16-dense variant is a
+  third conversion of the same 70 GB, not a width of either snapshot, so it
+  fetches again when installed on its own. A draft head fetches only its
   own shards. The disk guard above names both volumes and both numbers before
   anything starts.
 
 Coverage
 
-  Ornith 1.5 35B-A3B        4-bit, 8-bit, MTP draft
+  Ornith 1.5 35B-A3B        4-bit, 8-bit, bf16 dense (4-bit experts), MTP draft
   Ornith 1.5 122B           4-bit, 8-bit (one width per run)
   Qwen 3.6 35B-A3B          4-bit, 8-bit, MTP draft
   Qwen3.8-Flash-Next        4-bit, 8-bit, MTP draft
@@ -381,6 +394,12 @@ Sources
                       `<name> both` installs 4-bit and 8-bit for the cost of
                       one fetch; one width alone already converts both and
                       keeps the other snapshot for a later run.
+  convert_qwen35moe_dense16
+                      the same converter for Ornith-1.5-35B, with the dense
+                      projections kept at the checkpoint's bf16 and only the
+                      routed experts at the build width (--bits 4
+                      --dense-bits 16). One width only: the install is a
+                      different model, not a second width of the 4-bit one.
   convert_qwen35moe_solo
                       the same converter for Ornith-1.5-122B, one width per
                       run. A 250 GB source cannot stage both snapshots (69.5
@@ -412,7 +431,7 @@ USAGE
 # fetched" — which is exactly how people read it. Every row downloads first.
 source_label() {
   case "$1" in
-    convert|convert_qwen35|convert_qwen35moe|convert_qwen35moe_solo)
+    convert|convert_qwen35|convert_qwen35moe|convert_qwen35moe_solo|convert_qwen35moe_dense16)
       printf 'download + convert' ;;
     convert_qwen36_mtp|convert_qwen38_mtp|prepare_ornith_mtp)
       printf 'download + convert (draft head)' ;;
@@ -491,15 +510,17 @@ tinytitan_no_python_fallback() {
 }
 
 install_one() {
-  local want="$1" found=0
+  local want="$1" found=0 preset_field=""
   # Every conversion path runs a Python converter, so resolve the interpreter
   # once, here, rather than emitting a raw "command not found" per call.
   local python
   python="$(tinytitan_resolve_python)" || { tinytitan_no_python_fallback "$want"; return 1; }
   for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
-    # Six fields on the MoE rows, four elsewhere; the trailing two are only
-    # read by the convert_qwen35moe branch, not here.
-    IFS='|' read -r name dir width source _ _ <<<"$row"
+    # Up to six fields on the MoE rows, four elsewhere. The preset is read here
+    # because the MoE branches address staging by it (`$WORK/<preset>-affine-*`);
+    # it used to be left unset, which worked only while every key equalled its
+    # preset by coincidence.
+    IFS='|' read -r name dir width source preset_field _ <<<"$row"
     [[ "$name" == "$want" ]] || continue
     found=1
     if [[ -d "$MODELS/$dir" ]]; then
@@ -532,7 +553,8 @@ install_one() {
     if [[ "${TINYTITAN_SKIP_DISK_CHECK:-0}" != "1" ]]; then
       local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
       local stream_gb=12 stage_need=""
-      [[ "$source" == convert_qwen35moe ]] && stream_gb=104
+      [[ "$source" == convert_qwen35moe || "$source" == convert_qwen35moe_dense16 ]] \
+        && stream_gb=104
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
         while IFS=: read -r _kind probe; do
@@ -685,6 +707,34 @@ install_one() {
         echo "installing $name -> models/$dir"
         "$BIN" --input-snapshot "$snap" \
             --model-id "$model_id" --output "$MODELS/$dir"
+        ;;
+      convert_qwen35moe_dense16)
+        # Ornith 1.5 35B with the dense blocks at the checkpoint's bf16.
+        # `--dense-bits 16` copies attention, GDN and shared-expert weights
+        # through unquantized, so the runtime reads them by dtype through
+        # BF16GEMV, while the routed experts keep the 4-bit width the catalogue
+        # names. The repacker records the promoted tensors in the manifest's
+        # `promoted` list, which is what stops a reader from dequantizing them.
+        # The model id carries the variant: the catalog id is `<id>_4-Bit`, and
+        # without the suffix this install would advertise the same one as the
+        # plain 4-bit row.
+        [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
+        local preset="${preset_field:-${name}}" model_id
+        case "$preset" in
+          ornith15) model_id="ornith-1.5-35b-a3b-bf16dense" ;;
+          *) echo "unknown bf16-dense preset: $preset" >&2; return 2 ;;
+        esac
+        local snap="$WORK/${preset}-bf16dense-affine"
+        if [[ ! -f "$snap/model.safetensors.index.json" ]]; then
+          echo "downloading and converting $preset (~70 GB fetch, bf16 dense) -> $snap"
+          "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" \
+              --bits "$width" --dense-bits 16 \
+              --output "$snap" --work "$WORK/${preset}-bf16dense-shards" || return 1
+        fi
+        echo "installing $name -> models/$dir"
+        "$BIN" --input-snapshot "$snap" --model-id "$model_id" --output "$MODELS/$dir" \
+          || return 1
+        "$BIN" --verify-install --input-ssdai "$MODELS/$dir" || return 1
         ;;
       convert_qwen35moe_solo)
         # The 122B path. One width per run, because the two snapshots plus an

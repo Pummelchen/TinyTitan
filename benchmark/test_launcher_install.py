@@ -53,6 +53,9 @@ STEM_KEYS = {
 # these, because `--model qwen38flash` is not a name the launcher knows.
 LAUNCHER_NAMES = {
     "ornith": "ornith15",
+    # A one-width model: the bf16-dense build's routed experts are the 4-bit
+    # payload, so there is no 8-bit sibling to fetch.
+    "ornith15-bf16dense": "ornith15-bf16dense",
     "ornith122": "ornith122",
     "qwen36": "qwen36",
     "agentworld": "agentworld",
@@ -165,6 +168,16 @@ class InstallKeyTests(unittest.TestCase):
         result = shell_model_function("tinytitan_install_key", "not-a-stem", "4")
         self.assertNotEqual(result.returncode, 0)
 
+    def test_the_bf16_dense_build_has_only_a_4_bit_key(self) -> None:
+        # It is a different model, not a second width: the catalogue carries no
+        # 8-bit row, so the launcher must not offer to fetch one.
+        four = shell_model_function("tinytitan_install_key", "ornith-1.5_35B_A3B-bf16dense", "4")
+        self.assertEqual(four.returncode, 0, four.stderr)
+        self.assertEqual(four.stdout.strip(), "ornith15-bf16dense")
+        self.assertIn(four.stdout.strip(), catalogue())
+        eight = shell_model_function("tinytitan_install_key", "ornith-1.5_35B_A3B-bf16dense", "8")
+        self.assertNotEqual(eight.returncode, 0)
+
     def test_the_install_size_comes_from_the_menu_entry(self) -> None:
         result = subprocess.run(
             [
@@ -252,7 +265,13 @@ class MissingOffersTests(unittest.TestCase):
         self.assertIn("ornith", names)
         self.assertIn("katcoder", names)
         self.assertIn("qwen38", names)
-        self.assertEqual(len(rows), 18, "nine models, two widths each")
+        # Nine models in two widths, plus the bf16-dense build, which has one
+        # width. The count is asserted so a new row is a deliberate edit here:
+        # a width that cannot be fetched must not appear as a row.
+        self.assertEqual(len(rows), 19, "ten models, one of them 4-bit only")
+        dense = [row for row in rows if row[0] == "ornith15-bf16dense"]
+        self.assertEqual([row[1] for row in dense], ["4"], dense)
+        self.assertEqual([row[2] for row in dense], ["ornith15-bf16dense"], dense)
         for row in rows:
             self.assertIn(row[1], ("4", "8"))
             self.assertTrue(row[3], f"offer row has no label: {row}")
@@ -287,6 +306,7 @@ class MissingOffersTests(unittest.TestCase):
             root = pathlib.Path(directory)
             for stem in (
                 "ornith-1.5_35B_A3B",
+                "ornith-1.5_35B_A3B-bf16dense",
                 "ornith-1.5_122B",
                 "qwen3.6_35B_A3B",
                 "qwen-agentworld_35B_A3B",
@@ -548,13 +568,54 @@ class MenuRowPaddingTests(unittest.TestCase):
     def test_a_padded_reply_past_the_end_still_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             models = pathlib.Path(empty)
-            for padded in ("019", "020"):
+            # The catalogue has 19 rows; 20 and 21 are past its end.
+            for padded in ("020", "021"):
                 with self.subTest(reply=padded):
                     pad = self.pick(padded, models)
                     combined = pad.stdout + pad.stderr
                     self.assertIsNone(self.named_key(pad), f"{padded} reached a row")
                     self.assertIn("invalid choice", combined)
                     self.assertEqual(pad.returncode, 2)
+
+
+class OneWidthModelTests(unittest.TestCase):
+    """A model the catalogue ships in one width is not a missing 8-bit fetch.
+
+    The launcher's historical default is 8-bit. The bf16-dense Ornith row has
+    no 8-bit sibling, so asking for it by name must resolve to the width it
+    has, and asking for `--bits 8` must name the absence rather than offering
+    a download that cannot exist.
+    """
+
+    def test_the_bare_model_name_defaults_to_its_only_width(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="one-width-") as empty:
+            run = run_launcher(
+                "--client",
+                "server",
+                "--model",
+                "ornith15-bf16dense",
+                models_dir=pathlib.Path(empty),
+            )
+        combined = run.stdout + run.stderr
+        self.assertEqual(run.returncode, 1, combined)
+        self.assertIn("4-bit is not installed", combined)
+        self.assertIn("tools/install_models.sh ornith15-bf16dense", combined)
+
+    def test_an_explicit_eight_bit_is_refused_by_name(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="one-width-") as empty:
+            run = run_launcher(
+                "--client",
+                "server",
+                "--model",
+                "ornith15-bf16dense",
+                "--bits",
+                "8",
+                models_dir=pathlib.Path(empty),
+            )
+        combined = run.stdout + run.stderr
+        self.assertEqual(run.returncode, 2, combined)
+        self.assertIn("has no 8-bit build", combined)
+        self.assertNotIn("Install it with", combined)
 
 
 if __name__ == "__main__":

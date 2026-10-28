@@ -30,7 +30,9 @@ skips where those are absent.
 
 from __future__ import annotations
 
+import json
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -253,6 +255,107 @@ class DownloadStopTests(unittest.TestCase):
             ):
                 with self.assertRaises(InterruptedError):
                     prepare.download("model-00000-of-00013.safetensors", pathlib.Path(tmp))
+
+
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class DenseBitsTests(unittest.TestCase):
+    """`--dense-bits` splits the always-on blocks from the routed experts.
+
+    The mixed build is what the 35B catalogue row ships: attention, GDN and the
+    shared expert at the checkpoint's own bf16, routed experts at the build
+    width. The split has to be exactly the dense roles -- a routed expert
+    promoted to bf16 would triple the install, and a dense projection left at
+    4-bit would make the row a lie about what it runs.
+    """
+
+    ATTN = "language_model.model.layers.6.self_attn.q_proj.weight"
+    GDN = "language_model.model.layers.6.linear_attn.in_proj_qkv.weight"
+    GDN_OUT = "language_model.model.layers.6.linear_attn.out_proj.weight"
+    SHARED = "language_model.model.layers.6.mlp.shared_expert.down_proj.weight"
+    ROUTED = "language_model.model.layers.6.mlp.switch_mlp.gate_proj.weight"
+    ROUTER = "language_model.model.layers.6.mlp.gate.weight"
+    HEAD = "language_model.lm_head.weight"
+    NORM = "language_model.model.layers.6.input_layernorm.weight"
+
+    def setUp(self):
+        self.saved = prepare.DENSE_BITS
+
+    def tearDown(self):
+        prepare.DENSE_BITS = self.saved
+
+    def test_16_copies_the_dense_blocks_through_at_bf16(self):
+        prepare.DENSE_BITS = 16
+        for name in (self.ATTN, self.GDN, self.GDN_OUT, self.SHARED):
+            self.assertIsNone(prepare.quant_bits(name, 4), name)
+
+    def test_16_leaves_the_experts_and_the_head_at_their_own_widths(self):
+        prepare.DENSE_BITS = 16
+        self.assertEqual(prepare.quant_bits(self.ROUTED, 4), 4)
+        self.assertEqual(prepare.quant_bits(self.HEAD, 4), prepare.HEAD_BITS)
+        # The router and every norm were already bf16, which is why `None` here
+        # is the same answer as before rather than a new promotion.
+        self.assertIsNone(prepare.quant_bits(self.ROUTER, 4))
+        self.assertIsNone(prepare.quant_bits(self.NORM, 4))
+
+    def test_8_quantizes_the_dense_blocks_but_not_the_experts(self):
+        prepare.DENSE_BITS = 8
+        for name in (self.ATTN, self.GDN, self.GDN_OUT, self.SHARED):
+            self.assertEqual(prepare.quant_bits(name, 4), 8, name)
+        self.assertEqual(prepare.quant_bits(self.ROUTED, 4), 4)
+
+    def test_the_config_names_the_head_but_no_width_for_a_bf16_tensor(self):
+        # The repacker classifies each tensor by its own dtype; the config's
+        # `bits` is the slot width and every override is a tensor that really
+        # is packed at that width. Writing an override for a bf16 tensor would
+        # claim a packing that is not on disk, so 16 is expressed by absence.
+        prepare.DENSE_BITS = 16
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            prepare.write_config(
+                {"model_type": "qwen3_5_moe", "architectures": ["Qwen3_5MoeForCausalLM"]},
+                out,
+                [self.ATTN, self.SHARED, self.HEAD],
+                4,
+            )
+            written = json.loads((out / "config.json").read_text())
+        quant = written["quantization"]
+        self.assertEqual(quant["bits"], 4)
+        self.assertEqual(quant["language_model.lm_head"]["bits"], prepare.HEAD_BITS)
+        self.assertNotIn(self.ATTN[: -len(".weight")], quant)
+        self.assertNotIn(self.SHARED[: -len(".weight")], quant)
+
+    def test_unset_keeps_the_single_width_rule(self):
+        prepare.DENSE_BITS = None
+        for name in (self.ATTN, self.GDN, self.SHARED, self.ROUTED):
+            self.assertEqual(prepare.quant_bits(name, 4), 4, name)
+
+    def test_two_widths_are_refused_before_anything_is_fetched(self):
+        # One dense policy cannot describe two snapshots, and refusing after a
+        # 70 GB fetch would waste the run. The parse is where it has to fail.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp) / "out"
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "tools/prepare_agentworld.py"),
+                    "--model",
+                    "ornith15",
+                    "--bits",
+                    "4",
+                    "8",
+                    "--dense-bits",
+                    "16",
+                    "--output",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("--dense-bits names one configuration", result.stderr)
+            self.assertFalse(out.exists(), "the refused run wrote an output directory")
 
 
 if __name__ == "__main__":

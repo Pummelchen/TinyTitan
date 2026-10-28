@@ -13,7 +13,8 @@
 #   <client>   server (default), or one of the coding clients:
 #              codex, claude, qwen, opencode, zed
 #   <model>    an install key (ornith|ornith122|qwen36|agentworld|katcoder|qwen38, or
-#              qwen35-2b|qwen35-4b|qwen35-9b) optionally followed by 4|8, or a
+#              qwen35-2b|qwen35-4b|qwen35-9b, or the one-width bf16-dense build
+#              ornith15-bf16dense) optionally followed by 4|8, or a
 #              catalog id such as ornith-1.5-35b-a3b_8-Bit, which names its own
 #              width. A model that is not on disk is offered for download and
 #              conversion at that point (see --install). The three qwen35-* keys
@@ -699,12 +700,29 @@ else
     fi
   else
     if ! tinytitan_resolve_model "$MODEL_ARG" 2>/dev/null; then
-      echo "unknown model: $MODEL_ARG (a model id, or ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
+      echo "unknown model: $MODEL_ARG (a model id, or ornith|ornith15-bf16dense|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b)" >&2
       if (( dynamic )); then echo "installed: ${TINYTITAN_CAT_ID[*]+"${TINYTITAN_CAT_ID[*]}"}" >&2; fi
       exit 2
     fi
-    # No width given means 8-bit, the historical default.
+    # No width given means 8-bit, the historical default -- except for a model
+    # the catalogue ships in one width only (the bf16-dense Ornith build has no
+    # 8-bit row). Defaulting it to a width that does not exist would answer the
+    # bare model name with "8-bit is not installed", which reads like a fetch
+    # that can be made. `--bits 8` still refuses; the default is which build
+    # exists, not a promise that every model has both.
+    if [[ -z "$BITS" ]] && tinytitan_install_key "$TINYTITAN_MODEL_STEM" 4 >/dev/null 2>&1 \
+       && ! tinytitan_install_key "$TINYTITAN_MODEL_STEM" 8 >/dev/null 2>&1; then
+      BITS=4
+    fi
     tinytitan_resolve_quant "${BITS:-8}" || exit 2
+    # A width the catalogue does not carry is not a missing install, and must
+    # not be offered as one: the fetch below addresses a catalogue key, and a
+    # key that does not exist can only fail after asking the person to wait.
+    if ! tinytitan_install_key "$TINYTITAN_MODEL_STEM" "${TINYTITAN_QUANT%bit}" >/dev/null 2>&1; then
+      echo "ERROR: $TINYTITAN_MODEL_LABEL has no ${TINYTITAN_QUANT%bit}-bit build; the catalogue has no such row." >&2
+      echo "       \`tools/install_models.sh --help\` lists the widths each model ships." >&2
+      exit 2
+    fi
     if ! idx="$(tinytitan_catalog_find_dir "${TINYTITAN_MODEL_STEM}_${TINYTITAN_QUANT_DIR}")"; then
       echo "ERROR: $TINYTITAN_MODEL_LABEL ${TINYTITAN_QUANT%bit}-bit is not installed (no ${TINYTITAN_MODEL_STEM}_${TINYTITAN_QUANT_DIR} under $MODELS_DIR)" >&2
       # Name the widths that are here: "not installed" alone reads like the

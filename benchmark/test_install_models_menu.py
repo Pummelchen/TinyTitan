@@ -61,7 +61,10 @@ class InstallMenuAnswerTests(unittest.TestCase):
         self.assertIn("INSTALLED ornith15-8bit", result.stdout + result.stderr)
 
     def test_a_number_installs_that_row(self) -> None:
-        result = run_menu("13\n")
+        # Row 14 is Qwen 3.5 2B 4-bit in the current catalogue; the bf16-dense
+        # row sits at 3, so this also pins that a row's number moved with its
+        # position rather than being read from a stale list.
+        result = run_menu("14\n")
         self.assertIn("INSTALLED qwen35-2b", result.stdout + result.stderr)
 
     def test_end_of_input_installs_nothing(self) -> None:
@@ -127,9 +130,9 @@ class MenuRowPaddingTests(unittest.TestCase):
                 self.assertNotIn("value too great for base", output)
 
     def test_a_padded_row_outside_the_list_still_refuses(self) -> None:
-        # Forcing the base is not a pass: 19 and 20 are still not rows (the
-        # catalogue has 18), and 0 is still not a row, padded or not.
-        for reply in ("00", "019", "020"):
+        # Forcing the base is not a pass: 20 and 21 are still not rows (the
+        # catalogue has 19), and 0 is still not a row, padded or not.
+        for reply in ("00", "020", "021"):
             with self.subTest(reply=reply):
                 got, output = self.installed(reply + "\n")
                 self.assertEqual(got, "", output)
@@ -453,6 +456,87 @@ class ConverterPathTests(unittest.TestCase):
         path = pathlib.Path(converters[0])
         self.assertTrue(path.is_absolute(), f"resolved against the caller's cwd: {path}")
         self.assertTrue(path.is_file(), path)
+
+
+class DenseBf16InstallTests(unittest.TestCase):
+    """The bf16-dense row is installed, not merely listed.
+
+    This is the branch that was once pasted into `row_staging_dirs` instead of
+    `install_one`, so the catalogue row, the menu entry and the README all said
+    the build existed while selecting it returned success and installed nothing.
+    The stub repack records its arguments, so the test pins the converter path,
+    the variant's own model id (the catalog id must not collide with the plain
+    4-bit row) and that the per-build staging is dropped afterwards.
+    """
+
+    def test_the_row_repacks_the_dense_snapshot_and_verifies_it(self) -> None:
+        root = pathlib.Path(tempfile.mkdtemp(prefix="tt-dense-install-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for name in ("work", "models", "bin"):
+            (root / name).mkdir()
+        # The resolver only has to answer its `-c` probe; the snapshot exists,
+        # so the converter itself is never called.
+        fake_python = root / "python"
+        fake_python.write_text("#!/bin/sh\nexit 0\n")
+        fake_python.chmod(0o755)
+        calls = root / "calls"
+        repack = root / "bin" / "TinyTitanRepack"
+        repack.write_text(
+            "#!/bin/sh\n"
+            "{ printf 'CALL\\n'; printf '%s\\n' \"$@\"; } >> \"$STUB_LOG\"\n"
+            "while [ $# -gt 0 ]; do\n"
+            '  case "$1" in --output) mkdir -p "$2"; shift 2 ;; *) shift ;; esac\n'
+            "done\n"
+            "exit 0\n"
+        )
+        repack.chmod(0o755)
+        snap = root / "work" / "ornith15-bf16dense-affine"
+        snap.mkdir(parents=True)
+        (snap / "model.safetensors.index.json").write_text("{}")
+        shards = root / "work" / "ornith15-bf16dense-shards"
+        shards.mkdir()
+        (shards / "model-00001-of-00016.safetensors").write_text("partial")
+        env = dict(
+            os.environ,
+            TINYTITAN_WORK_DIR=str(root / "work"),
+            TINYTITAN_MODELS_DIR=str(root / "models"),
+            TINYTITAN_BIN_DIR=str(root / "bin"),
+            TINYTITAN_PYTHON=str(fake_python),
+            TINYTITAN_SKIP_DISK_CHECK="1",
+            STUB_LOG=str(calls),
+        )
+        result = subprocess.run(
+            ["bash", str(SCRIPT), "ornith15-bf16dense"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        groups = [
+            group.splitlines() for group in calls.read_text().split("CALL\n") if group.strip()
+        ]
+        self.assertEqual(len(groups), 2, output)
+        install = groups[0]
+        self.assertIn("--input-snapshot", install)
+        self.assertEqual(install[install.index("--input-snapshot") + 1], str(snap))
+        self.assertEqual(
+            install[install.index("--model-id") + 1],
+            "ornith-1.5-35b-a3b-bf16dense",
+            "the variant must not advertise the plain 4-bit row's catalog id",
+        )
+        self.assertEqual(
+            install[install.index("--output") + 1],
+            str(root / "models" / "ornith-1.5_35B_A3B-bf16dense_4Bit"),
+        )
+        self.assertIn("--verify-install", groups[1], output)
+        self.assertFalse(snap.exists(), "the dense snapshot was not cleaned up")
+        self.assertFalse(
+            (root / "work" / "ornith15-bf16dense-shards").exists(),
+            "the shard directory was not cleaned up",
+        )
 
 
 if __name__ == "__main__":
