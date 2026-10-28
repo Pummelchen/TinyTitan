@@ -231,7 +231,12 @@ extension RealForwardRunner {
             // until a per-tensor override promotes them.
             model.hyperConnectionWeightBits, model.pleKeyWeightBits,
             model.qsaIndexerWeightBits,
-        ]).sorted() where width != 4 {
+        ]).sorted()
+        // 4 is the int4 kernel and 16 means "stored at bf16": neither needs an
+        // affine dispatcher, and constructing one at 16 traps on the packing
+        // precondition. The promoted roles never reach these dicts -- their
+        // tensors dispatch on dtype -- so filtering is the whole fix.
+        where width != 4 && width != 16 {
             affineByWidth[width] = try AffineQuantGEMV(context: context, weightBits: width)
         }
         bp.affineByWidth = affineByWidth
@@ -255,9 +260,16 @@ extension RealForwardRunner {
         bp.kvQuantizer =
             runtimeConfiguration.kvCachePrecision.isQuantized
             ? try KVCacheQuantizer(context: context) : nil
+        // 16 means the role is stored at the checkpoint's bf16. No affine
+        // kernel is ever built for it -- the shared-expert dispatch reads each
+        // projection's dtype -- so the constructor takes the slot's width and
+        // keeps it unused. Passing 16 to a constructor that packs by width is
+        // a precondition trap, not a fallback.
+        let ffnKernelBits =
+            model.ffnWeightBits == 16 ? model.sharedExpertWeightBits : model.ffnWeightBits
         bp.shared = try SharedExpertRuntime(
             context: context,
-            weightBits: model.ffnWeightBits,
+            weightBits: ffnKernelBits,
             siluActivation: silu)
         if ProcessInfo.processInfo.environment["TINYTITAN_DEBUG_PROMOTION"] != nil {
             FileHandle.standardError.write(
@@ -309,13 +321,13 @@ extension RealForwardRunner {
             weightBits: model.effectiveRouterWeightBits)
         bp.prefillSharedExpert = try PrefillSharedExpert(
             context: context,
-            weightBits: model.ffnWeightBits,
+            weightBits: ffnKernelBits,
             siluActivation: silu,
-            tensorOps: model.ffnWeightBits == model.attentionWeightBits
+            tensorOps: ffnKernelBits == model.attentionWeightBits
                 ? attentionTensorOps
                 : MPPPrefillInt4QMM(
                     context: context,
-                    weightBits: model.ffnWeightBits,
+                    weightBits: ffnKernelBits,
                     capabilities: capabilities))
         bp.prefillGroupedMoE = try PrefillGroupedRoutedMoE(
             context: context,

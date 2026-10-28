@@ -147,10 +147,19 @@ public struct ManifestQuant: Decodable, Equatable, Sendable {
     public static func roleWeightBits(
         roleSuffix: String,
         overrides: [String: Int],
-        fallback: Int
+        fallback: Int,
+        promoted: Set<String> = []
     ) -> Int {
-        overrides.sorted { $0.key < $1.key }
-            .first { $0.key.hasSuffix(roleSuffix) }?.value ?? fallback
+        if let override = overrides.sorted(by: { $0.key < $1.key })
+            .first(where: { $0.key.hasSuffix(roleSuffix) })?.value
+        {
+            return override
+        }
+        // A promoted role is unquantized: 16 tells the caller no affine kernel
+        // may read it. Only reached when the slot would otherwise have claimed
+        // it, so norms and other always-bf16 tensors never come through here.
+        if promoted.contains(where: { $0.hasSuffix(roleSuffix) }) { return 16 }
+        return fallback
     }
 }
 
@@ -167,6 +176,11 @@ public struct Manifest: Decodable, Equatable, Sendable {
     /// .model.layers.3.self_attn.k_proj" -> 8). Absent when the build has no
     /// overrides, and in manifests written before this existed.
     public let quantOverrides: [String: Int]
+    /// Tensor stems stored at the checkpoint's own bf16 inside a quantized
+    /// slot. Their width is 16 when a kernel has to be chosen and absent from
+    /// the packing arithmetic, which is why this is a set of names rather than
+    /// a `weightBits` value.
+    public let quantPromoted: Set<String>
     public let files: [String: ManifestFileEntry]
     public let expertsPerLayer: Int
     public let numLayers: Int

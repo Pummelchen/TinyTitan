@@ -49,8 +49,19 @@ package struct SSDAIManifestQuantV1: Codable, Equatable, Sendable {
     /// overrides at all.
     package let overrides: [String: SSDAIManifestQuantSlotV1]?
 
+    /// Tensor stems stored at the checkpoint's own bf16 inside a quantized
+    /// slot, sorted.
+    ///
+    /// A separate list rather than `weightBits: 16`, because every reader that
+    /// takes a width as arithmetic (`32 / bits` lanes, packed-row extents)
+    /// would unpack such a tensor wrongly instead of failing; a width means a
+    /// packing, and bf16 is the absence of one. The list says which tensors the
+    /// slot describes but does not pack, and a reader that needs a kernel width
+    /// resolves those to 16 by name.
+    package let promoted: [String]?
+
     private enum CodingKeys: String, CodingKey {
-        case embedding, attention, router, sharedExpert, routedExpert
+        case embedding, attention, router, sharedExpert, routedExpert, promoted
     }
 
     /// Hand-written because the object mixes five fixed slots with an open set
@@ -68,6 +79,7 @@ package struct SSDAIManifestQuantV1: Codable, Equatable, Sendable {
         routedExpert = try container.decode(
             SSDAIManifestQuantSlotV1.self,
             forKey: .routedExpert)
+        self.promoted = try container.decodeIfPresent([String].self, forKey: .promoted)
         let dynamic = try decoder.container(keyedBy: AnyKey.self)
         var overrides: [String: SSDAIManifestQuantSlotV1] = [:]
         for key in dynamic.allKeys {
@@ -102,6 +114,9 @@ package struct SSDAIManifestQuantV1: Codable, Equatable, Sendable {
         try container.encode(router, forKey: .router)
         try container.encode(sharedExpert, forKey: .sharedExpert)
         try container.encode(routedExpert, forKey: .routedExpert)
+        if let promoted {
+            try container.encode(promoted, forKey: .promoted)
+        }
         if let overrides {
             var dynamic = encoder.container(keyedBy: AnyKey.self)
             for (stem, slot) in overrides {
@@ -128,9 +143,11 @@ package struct SSDAIManifestQuantV1: Codable, Equatable, Sendable {
         router: SSDAIManifestQuantSlotV1,
         sharedExpert: SSDAIManifestQuantSlotV1,
         routedExpert: SSDAIManifestQuantSlotV1,
-        overrides: [String: SSDAIManifestQuantSlotV1]? = nil
+        overrides: [String: SSDAIManifestQuantSlotV1]? = nil,
+        promoted: [String]? = nil
     ) {
         self.overrides = overrides
+        self.promoted = promoted
         self.embedding = embedding
         self.attention = attention
         self.router = router
