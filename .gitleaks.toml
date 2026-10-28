@@ -16,7 +16,11 @@
 #     the same value pinned by `ENGINE_READ_MISSES_PER_TOKEN` in
 #     `benchmark/test_continuous_feeder_sim.py`, which divides it by the token
 #     count of the run that produced it.
-# All four are matched by `generic-api-key` only because they look like long
+# The next two were found by the scan on 2026-10-28 (2,254 commits), when the
+# bf16-dense Ornith row added its catalogue key and its tests:
+#   * `ornith-1.5_35B_A3B-bf16dense` — the runtime stem in the launcher tests
+#   * `ornith15-bf16dense`           — the installer key in the catalogue
+# All six are matched by `generic-api-key` only because they look like long
 # opaque tokens. The values are literal, not shape-based, so no future secret
 # that happens to be shaped like a path, a model id or a counter is hidden.
 
@@ -31,4 +35,6 @@ regexes = [
   '''^characters/halvorsen/eyes$''',
   '''^ornith-1\.5-35b-a3b$''',
   '''^expert_misses=37724$''',
+  '''^ornith-1\.5_35B_A3B-bf16dense$''',
+  '''^ornith15-bf16dense$''',
 ]
