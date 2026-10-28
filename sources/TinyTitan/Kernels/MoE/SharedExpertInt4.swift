@@ -138,7 +138,8 @@ public final class BF16SharedExpert {
             down.rows == gate.cols, down.cols == gate.rows
         else {
             throw SharedExpertError.dimensionMismatch(
-                "gate=(\(gate.rows),\(gate.cols)) up=(\(up.rows),\(up.cols)) down=(\(down.rows),\(down.cols))")
+                "gate=(\(gate.rows),\(gate.cols)) up=(\(up.rows),\(up.cols)) down=(\(down.rows),\(down.cols))"
+            )
         }
         try gemv.encode(
             commandBuffer: cb,
