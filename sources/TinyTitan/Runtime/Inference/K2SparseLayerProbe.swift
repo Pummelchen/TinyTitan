@@ -12,7 +12,7 @@ import Metal
 /// resolves itself -- is one command buffer; the fetched experts are the
 /// second. That two-phase shape is what the full graph will keep.
 ///
-/// `unchecked-invariant`: the two Metal command-buffer completion handlers run
+/// unchecked-invariant: the two Metal command-buffer completion handlers run
 /// on the queue's own threads and touch only the counters and `pendingError`
 /// guarded by `timingLock`; every other stored property is immutable after
 /// `init`. `fetchSeconds` and `encodeSeconds` are written by the submitting
