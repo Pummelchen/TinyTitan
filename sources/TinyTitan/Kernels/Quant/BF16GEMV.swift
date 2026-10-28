@@ -13,6 +13,7 @@ import Metal
 final class BF16GEMV {
     private let pipeline: MTLComputePipelineState
     private let floatPipeline: MTLComputePipelineState
+    private let multiRowPipeline: MTLComputePipelineState
 
     init(context: MetalContext) throws {
         self.pipeline = try context.pipeline(
@@ -21,6 +22,10 @@ final class BF16GEMV {
             maxTotalThreadsPerThreadgroup: 256)
         self.floatPipeline = try context.pipeline(
             "bf16_gemv_float_simd",
+            constants: [],
+            maxTotalThreadsPerThreadgroup: 256)
+        self.multiRowPipeline = try context.pipeline(
+            "bf16_gemv_multirow_simd",
             constants: [],
             maxTotalThreadsPerThreadgroup: 256)
     }
@@ -53,6 +58,51 @@ final class BF16GEMV {
             threadsPerThreadgroup: MTLSize(
                 width: 32 * rowsPerThreadgroup,
                 height: 1, depth: 1))
+        encoder.endEncoding()
+    }
+
+    /// A prompt's worth of rows in one dispatch: one threadgroup per (row
+    /// block, token).
+    ///
+    /// Amortises launches only -- the bytes are the same as calling `encode`
+    /// once per token -- and exists because a prefill chunk issues one dispatch
+    /// per token per projection: ~180k for a 1500-token prompt on this family.
+    /// Strides are in elements, so the caller can serve a chunk stored
+    /// token-major.
+    func encodeMultiRow(
+        commandBuffer: MTLCommandBuffer,
+        weights: MTLBuffer, weightsOffset: Int = 0,
+        x: MTLBuffer, xOffset: Int = 0,
+        y: MTLBuffer, yOffset: Int = 0,
+        m: UInt32, n: UInt32,
+        tokens: Int,
+        xStrideElements: Int,
+        yStrideElements: Int
+    ) throws {
+        precondition(
+            n.isMultiple(of: 64),
+            "bf16 GEMV expects a column count that is a multiple of 64")
+        guard tokens > 0, let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            return
+        }
+        encoder.setComputePipelineState(multiRowPipeline)
+        encoder.setBuffer(weights, offset: weightsOffset, index: 0)
+        encoder.setBuffer(x, offset: xOffset, index: 1)
+        encoder.setBuffer(y, offset: yOffset, index: 2)
+        var rows = m
+        var columns = n
+        var xStride = UInt32(xStrideElements)
+        var yStride = UInt32(yStrideElements)
+        encoder.setBytes(&rows, length: MemoryLayout<UInt32>.size, index: 3)
+        encoder.setBytes(&columns, length: MemoryLayout<UInt32>.size, index: 4)
+        encoder.setBytes(&xStride, length: MemoryLayout<UInt32>.size, index: 5)
+        encoder.setBytes(&yStride, length: MemoryLayout<UInt32>.size, index: 6)
+        let rowsPerThreadgroup = 8
+        let blocks = (Int(m) + rowsPerThreadgroup - 1) / rowsPerThreadgroup
+        encoder.dispatchThreadgroups(
+            MTLSize(width: blocks, height: tokens, depth: 1),
+            threadsPerThreadgroup: MTLSize(
+                width: 32 * rowsPerThreadgroup, height: 1, depth: 1))
         encoder.endEncoding()
     }
 
