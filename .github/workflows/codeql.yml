@@ -107,13 +107,12 @@ jobs:
           swift build --target TinyTitanServerCore --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
           # The first green scan covered 220 of 464 Swift files: the six targets
           # above are the ones that build the server's dependency graph, so the
-          # validation references, the memory service (persistent state) and the
-          # Fleet LAN API (network-facing) were never compiled and therefore
-          # never extracted. These four are libraries; the remaining uncovered
-          # files are the thin executable `main.swift` entry points and tests.
+          # validation references and the memory service (persistent state) were
+          # never compiled and therefore never extracted. These three are
+          # libraries; the remaining uncovered files are the thin executable
+          # `main.swift` entry points and tests.
           swift build --target TinyTitanValidationSupport --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
           swift build --target TinyTitanMemory --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
-          swift build --target TinyTitanFleetCore --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
           swift build --target TinyTitanCLICore --arch arm64 --disable-sandbox --scratch-path "$SCRATCH"
 
       - name: Perform CodeQL Analysis

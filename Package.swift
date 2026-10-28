@@ -50,13 +50,6 @@ let package = Package(
         .executable(name: "TinyTitanBench", targets: ["TinyTitanBench"]),
         .executable(name: "ContinuityDemo", targets: ["ContinuityDemo"]),
         .executable(name: "tinytitan-memory", targets: ["TinyTitanMemoryTool"]),
-        // TinyTitan DSH LAN Manager: the fleet manager for
-        // `plugins/dsh-lan-manager`. The command is `ttlanmanager` while the
-        // targets keep the long name, as `tinytitan-memory` sits on
-        // TinyTitanMemoryTool. Deliberately *not* in `release.sh`'s PRODUCTS: it
-        // drives a group of DeepSeek Harness instances, so it is an operator tool
-        // and not part of the engine users install.
-        .executable(name: "ttlanmanager", targets: ["TinyTitanFleet"]),
     ],
     dependencies: [
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
@@ -237,26 +230,6 @@ let package = Package(
             name: "TinyTitanValidationSupport",
             dependencies: ["TinyTitan"],
             path: "sources/TinyTitanValidation/Support",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        // The fleet manager: Core is a library so its selection, aggregation and
-        // request-building logic is testable without a network or a live fleet;
-        // Command is the thin CLI over it.
-        .target(
-            name: "TinyTitanFleetCore",
-            path: "sources/TinyTitanFleet/Core",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .executableTarget(
-            name: "TinyTitanFleet",
-            dependencies: ["TinyTitanFleetCore"],
-            path: "sources/TinyTitanFleet/Command",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .testTarget(
-            name: "TinyTitanFleetTests",
-            dependencies: ["TinyTitanFleetCore"],
-            path: "tests/TinyTitanFleet",
             swiftSettings: tinytitanLanguageStandard
         ),
         .testTarget(

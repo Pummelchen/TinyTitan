@@ -34,11 +34,9 @@ your network — the server is `127.0.0.1`-only and has no authentication.
    35B, 122B or 125B model from the terminal and serve it on a loopback
    OpenAI-/Anthropic-compatible endpoint for Codex, Claude Code, Qwen Code,
    OpenCode, Zed or the official SDKs. Native Swift and Metal: no MLX, no GGUF.
-3. **DeepSeek Harness plugins — [`plugins/dsh-tinytitan`](plugins/dsh-tinytitan),
-   [`plugins/dsh-lan-manager`](plugins/dsh-lan-manager).** The harness finds the
-   models you have installed and keeps its route current, with a quiet
-   compaction backend; the LAN manager drives a fleet of harnesses from one
-   console.
+3. **The DeepSeek Harness plugin — [`plugins/dsh-tinytitan`](plugins/dsh-tinytitan).**
+   The harness finds the models you have installed and keeps its route current,
+   with a quiet compaction backend.
 4. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
    [`tools/`](tools).** Stream a checkpoint into a hash-verified install that
    keeps the routed experts on SSD, so a model larger than your RAM still runs —

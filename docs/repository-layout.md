@@ -38,7 +38,7 @@ deliberate (`docs/plan-embedded-library.md`):
 | Product | Kind | What it is |
 | --- | --- | --- |
 | `TinyTitanLib` | library | The supported surface an embedder depends on: `Engine`, `Session` and their value types. |
-| `TinyTitanCLI`, `TinyTitanServer`, `TinyTitanRepack`, `TinyTitanBench`, `ContinuityDemo`, `tinytitan-memory`, `ttlanmanager` | executables | The engine: the terminal product, which embeds `TinyTitanLib`. |
+| `TinyTitanCLI`, `TinyTitanServer`, `TinyTitanRepack`, `TinyTitanBench`, `ContinuityDemo`, `tinytitan-memory` | executables | The engine: the terminal product, which embeds `TinyTitanLib`. |
 
 `TinyTitan`, `TinyTitanFormat`, `ContinuityCore` and the rest are **targets, not
 products**: they are the building blocks of those two, and nothing outside this

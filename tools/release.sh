@@ -30,8 +30,8 @@ die() { echo "error: $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }
 
 # What counts as a passing suite. `swift test --no-parallel` prints one summary
-# line per test target -- seven on this tree -- so a verdict that asks whether
-# *some* line says passed is a verdict on one target out of seven, and the run's
+# line per test target -- six on this tree -- so a verdict that asks whether
+# *some* line says passed is a verdict on one target out of six, and the run's
 # own status knows more than any grep does.
 test_gate_verdict() {
   local log="$1" status="$2" summaries failures

@@ -49,8 +49,8 @@ surface to build, keep in step with every engine feature, and support, and it wa
 removed for exactly that reason. Do not add one back, and do not take on work that
 only a GUI needs.
 
-The DeepSeek Harness integration is **plugins we publish, not a harness we
-install**: `plugins/dsh-tinytitan` and `plugins/dsh-lan-manager` are installed into
+The DeepSeek Harness integration is **a plugin we publish, not a harness we
+install**: `plugins/dsh-tinytitan` is installed into
 the user's own DSH profile (`dsh plugin --profile <name> add …`), and this project
 no longer bundles, downloads or pins a private DeepSeek Harness of its own. Keep it
 that way: no forking the harness, no GUI code in this tree, no private `~/.tinytitan`
@@ -78,7 +78,6 @@ those three is a thin executable over a `*Core` library target
 `sources/TinyTitanMemory/` and `sources/ContinuityCore/` are persistent
 agent memory, `sources/TinyTitanMemoryTool/` inspects it (executable
 `tinytitan-memory`), `sources/ContinuityDemo/` is the memory demo executable,
-`sources/TinyTitanFleet/` is the LAN manager (executable `ttlanmanager`), and
 `sources/TinyTitanBench/` plus `sources/TinyTitanValidation/` are the benchmark
 driver and the validation/reference target. An executable target keeps its
 top-level or `@main` entry in `Command/`; `plugins/dsh-tinytitan/` is the DeepSeek
@@ -156,9 +155,8 @@ change. See `docs/plan-embedded-library.md` §2.
 
 ## Two products, one repository
 
-The tree ships two products on one branch, `main`, exactly as the two DeepSeek
-Harness bundles do under `plugins/` — one tree, one release tag, one CI, and
-separate surfaces:
+The tree ships two products on one branch, `main` — one tree, one release tag,
+one CI, and separate surfaces:
 
 - **The library — `TinyTitanLib` (`sources/TinyTitanLib/`).** The supported
   surface an embedder depends on: `Engine`, `Session`, `EngineConfiguration`,
@@ -166,7 +164,7 @@ separate surfaces:
   and `TinyTitanError`. Every other declaration in that target is `package` on
   purpose: `public` there is a promise, so nothing becomes `public` by accident.
 - **The engine — the executables** (`TinyTitanCLI`, `TinyTitanServer`,
-  `TinyTitanRepack`, `TinyTitanBench`, the memory tool and the fleet manager).
+  `TinyTitanRepack`, `TinyTitanBench` and the memory tool).
   It embeds the library rather than sitting beside it: the server's generation
   path *is* the library's session.
 
@@ -326,11 +324,7 @@ linters:
 - `docs` — a documented count, name, sha or table must match the repository, via
   `tools/docs-facts.py`. This is what catches the class the audit kept finding:
   a gate name in `AGENTS.md` that `tools/lint.sh` does not accept, and a restated
-  audit count in `docs/handover-tinytitan.md` that `ledger.json` contradicts. It
-  also reads one value defined twice in two languages — the shipped fleet group
-  key, `FleetGroupKey.shippedDefault` in Swift and `DEFAULT_GROUP_KEY` in the
-  plugin's `config.js` — and fails when the two differ, because a drifted default
-  empties a peer table instead of raising an error.
+  audit count in `docs/handover-tinytitan.md` that `ledger.json` contradicts.
 - `shell-portability` — every shell script parses and runs under `/bin/bash`,
   which is 3.2.57 on a factory Mac, not the Homebrew 5.x a development machine
   puts first on `PATH`. That one is not academic: a single-quoted heredoc holding
@@ -352,9 +346,9 @@ linters:
 `shell`, `shellcheck`, `swiftlint`, `swift-format`, `javascript`, `python`;
 `format` and `js` are aliases).
 
-In a fresh checkout the `javascript` check needs the plugin packages'
-dependencies first — `npm ci` in `plugins/dsh-lan-manager/` and
-`plugins/dsh-tinytitan/` (all CI installs before the gate); without it the check
+In a fresh checkout the `javascript` check needs the plugin package's
+dependencies first — `npm ci` in `plugins/dsh-tinytitan/` (CI installs it before
+the gate); without it the check
 fails with that command in its message and every other check still runs. The
 `converter` check is the same kind of dependency: it needs `numpy` and the
 converter module, so `python3 -m pip install -r benchmark/requirements.txt`

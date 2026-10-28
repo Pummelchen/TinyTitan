@@ -26,12 +26,6 @@ updates:
       interval: weekly
     open-pull-requests-limit: 0
 
-  - package-ecosystem: npm
-    directory: /plugins/dsh-lan-manager
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 0
-
   - package-ecosystem: pip
     directory: /benchmark
     schedule:
