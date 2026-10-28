@@ -46,9 +46,9 @@ extension RealForwardRunner {
         // four *are* affine: the dense Qwen 3.5 installs keep `a` and `b` at
         // bf16, and the per-projection GEMV below routes bf16, 4- and 8-bit.
         // Reading bf16 bytes as nibbles is silent nonsense, not an error.
-        let fusedIsUsable =
-            model.attentionWeightBits == 4
-            && qkvW.dtype == 0 && zW.dtype == 0 && aW.dtype == 0 && bW.dtype == 0
+        let fusedIsUsable = FusedKernelPolicy.mayUseFusedGDNInputProjections(
+            attentionWeightBits: model.attentionWeightBits,
+            dTypes: [qkvW.dtype, zW.dtype, aW.dtype, bW.dtype].map(Int.init))
         if fusedIsUsable {
             if !ablated("inproj") {
                 try gdn.encodeInputProjections(
@@ -156,10 +156,10 @@ extension RealForwardRunner {
         // (bf16) tensor must not reach it even though its *slot* says 4: the
         // slot is a default, and the tensor's dtype is the truth. Same test the
         // GDN input projections already use.
-        let fusedIsUsable =
-            model.qoProjectionWeightBits == 4
-            && model.kvProjectionWeightBits == 4
-            && q.dtype == 0 && k.dtype == 0 && v.dtype == 0
+        let fusedIsUsable = FusedKernelPolicy.mayUseFusedQKV(
+            qoProjectionWeightBits: model.qoProjectionWeightBits,
+            kvProjectionWeightBits: model.kvProjectionWeightBits,
+            qDType: Int(q.dtype), kDType: Int(k.dtype), vDType: Int(v.dtype))
         if fusedIsUsable {
             try fusedQKVGEMV.encode(
                 commandBuffer: cb,

@@ -88,7 +88,8 @@ final class PrefillSharedExpert {
         // batched kernel reads packed affine weights; fall to the per-row path,
         // which dispatches on the projection's dtype.
         let batched =
-            gate.dtype == 0 && up.dtype == 0 && down.dtype == 0
+            FusedKernelPolicy.mayUseBatchedSharedExpert(
+                dTypes: [gate.dtype, up.dtype, down.dtype])
             && ProcessInfo.processInfo.environment["TINYTITAN_PREFILL_SHARED_GEMM"] != "0"
             && queryCount >= 8
             && gate.cols % 64 == 0 && down.cols % 64 == 0
