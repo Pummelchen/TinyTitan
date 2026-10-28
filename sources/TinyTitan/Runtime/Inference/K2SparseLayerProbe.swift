@@ -11,7 +11,13 @@ import Metal
 /// that read-back -- including the MoVA values, whose selection the shader
 /// resolves itself -- is one command buffer; the fetched experts are the
 /// second. That two-phase shape is what the full graph will keep.
-final class K2SparseLayerProbe {
+///
+/// `unchecked-invariant`: the two Metal command-buffer completion handlers run
+/// on the queue's own threads and touch only the counters and `pendingError`
+/// guarded by `timingLock`; every other stored property is immutable after
+/// `init`. `fetchSeconds` and `encodeSeconds` are written by the submitting
+/// thread and read after the wait, never from a handler.
+final class K2SparseLayerProbe: @unchecked Sendable {
     private let config: ArchConfig
     private let model: Model
     private let layer: Int
