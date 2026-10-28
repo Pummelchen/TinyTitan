@@ -163,6 +163,18 @@ def quantize_affine(value: np.ndarray, bits: int) -> tuple[np.ndarray, ...]:
 
 DRAFT_HEAD = False  # --draft-head: convert only the `mtp.*` namespace
 HEAD_BITS = BITS_8  # --head-bits: the embedding and lm_head slot
+# --dense-bits: attention, GDN and shared-expert width, independent of the
+# routed experts. None keeps the old rule (both follow `--bits`). 16 means the
+# checkpoint's own bf16 -- the tensors are copied through unquantized, which the
+# runtime reads by dtype.
+DENSE_BITS: int | None = None
+
+# The projections `--dense-bits` governs. Routed experts are excluded on
+# purpose: they are the payload whose width `--bits` names, and mixing the two
+# in one option is how a "4-bit" build comes to mean two different things. The
+# shared-expert scalar gate is not a projection and is already bf16 through
+# `kept_bf16`, which `quant_bits` checks first.
+DENSE_ROLES = (".self_attn.", ".linear_attn.", ".mlp.shared_expert.")
 
 
 def is_draft_norm(name: str) -> bool:
@@ -259,6 +271,8 @@ def quant_bits(name: str, width: int) -> int | None:
         return None
     if name.endswith("embed_tokens.weight") or name.endswith("lm_head.weight"):
         return HEAD_BITS
+    if DENSE_BITS is not None and any(role in name for role in DENSE_ROLES):
+        return None if DENSE_BITS == 16 else DENSE_BITS
     return width
 
 
@@ -1094,6 +1108,16 @@ def main() -> int:
         "at 8-bit and ~3.5 ms of every 35B token)",
     )
     ap.add_argument(
+        "--dense-bits",
+        type=int,
+        choices=(4, 8, 16),
+        default=None,
+        help="width for attention, GDN and shared-expert projections, "
+        "independent of --bits: 16 keeps the checkpoint's bf16 (copied "
+        "through unquantized), 4 or 8 quantizes them there. Default: the "
+        "build width, routed experts included",
+    )
+    ap.add_argument(
         "--draft-head",
         action="store_true",
         help="convert the mtp.* draft head only, as a qwen3_5_mtp sidecar snapshot",
@@ -1115,9 +1139,15 @@ def main() -> int:
     ap.add_argument("--work", type=Path, help="scratch for in-flight shards")
     args = ap.parse_args()
     select_model(args.model)
-    global DRAFT_HEAD, HEAD_BITS
+    global DRAFT_HEAD, HEAD_BITS, DENSE_BITS
     DRAFT_HEAD = args.draft_head
     HEAD_BITS = args.head_bits
+    DENSE_BITS = args.dense_bits
+    if DENSE_BITS is not None and len(args.bits) > 1:
+        ap.error(
+            "--dense-bits names one configuration, so --bits takes one width; "
+            "a two-width pass writes both snapshots with the same dense policy"
+        )
 
     config = fetch_json("config.json")
     if config.get("model_type") != "qwen3_5_moe":
