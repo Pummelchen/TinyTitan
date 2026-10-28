@@ -113,6 +113,16 @@ public struct ModelProfile: Sendable, Equatable {
             Key("ornith-1.5-35b-a3b", 4): (
                 10 << 30, 1, 4_096, GenerationDefaults.house, true, true, false, false, true
             ),
+            // The bf16-dense variant of the row above: the same 4-bit routed
+            // experts and the same cache geometry, with attention, GDN and the
+            // shared expert held at the checkpoint's bf16. Everything this row
+            // tunes is on the expert path, so the values are inherited from
+            // that measured install by inference -- the dense blocks are bigger
+            // and read every token, which is why the variant decodes slower,
+            // not why it would want a different cache.
+            Key("ornith-1.5-35b-a3b-bf16dense", 4): (
+                10 << 30, 1, 4_096, GenerationDefaults.house, true, true, false, false, true
+            ),
             Key("ornith-1.5-35b-a3b", 8): (
                 12 << 30, 1, 4_096, GenerationDefaults.house, true, true, false, false, true
             ),

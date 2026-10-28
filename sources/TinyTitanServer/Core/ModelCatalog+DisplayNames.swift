@@ -8,6 +8,7 @@ extension ModelCatalog {
     static let displayNames: [String: String] = [
         "qwen3.6-35b-a3b": "Qwen 3.6 35B-A3B",
         "ornith-1.5-35b-a3b": "Ornith 1.5 35B-A3B",
+        "ornith-1.5-35b-a3b-bf16dense": "Ornith 1.5 35B-A3B (bf16 dense)",
         "qwen-agentworld": "Qwen AgentWorld 35B-A3B",
         "kat-coder-v2.5": "KAT-Coder-V2.5-Dev 35B-A3B",
         "qwen3.8-flash-next": "Qwen 3.8 Flash Next 125B-A6B",

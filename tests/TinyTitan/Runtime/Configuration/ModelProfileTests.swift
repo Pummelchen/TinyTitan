@@ -21,7 +21,29 @@ import Testing
                 #expect(p.key == ModelProfile.Key(id, bits))
             }
         }
-        #expect(ModelProfile.table.count == 12)
+        #expect(ModelProfile.table.count == 13)
+    }
+
+    @Test func theBf16DenseOrnithInheritsTheFourBitRowsTuning() {
+        // It is a different install, not a second width: the 4-bit experts and
+        // their cache are the same, so every value this table tunes is the
+        // plain 4-bit row's. The row is still its own key, because sharing one
+        // would make the two installs indistinguishable to the log and to a
+        // later re-tune of either.
+        let dense = ModelProfile.resolve(
+            modelID: "ornith-1.5-35b-a3b-bf16dense", family: .qwen36, weightBits: 4,
+            environment: [:])
+        let plain = ModelProfile.resolve(
+            modelID: "ornith-1.5-35b-a3b", family: .qwen36, weightBits: 4, environment: [:])
+        #expect(dense.isTabled)
+        #expect(dense.key != plain.key)
+        #expect(dense.expertCacheBudgetBytes == plain.expertCacheBudgetBytes)
+        #expect(dense.prefetchDepth == plain.prefetchDepth)
+        #expect(dense.prefillChunkTokens == plain.prefillChunkTokens)
+        #expect(dense.sampling == plain.sampling)
+        #expect(dense.routerTopKSimd == plain.routerTopKSimd)
+        #expect(dense.attentionSimdPartial == plain.attentionSimdPartial)
+        #expect(dense.keepExpertCacheWired == plain.keepExpertCacheWired)
     }
 
     @Test func modelsSharingAFamilyResolveIndependently() {
