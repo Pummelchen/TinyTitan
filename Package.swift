@@ -291,6 +291,12 @@ let package = Package(
             swiftSettings: tinytitanLanguageStandard
         ),
         .testTarget(
+            name: "Qwen35Dense2B4BitTests",
+            dependencies: ["Qwen35Dense2B4Bit", "TinyTitanCore"],
+            path: "tests/Engines/Qwen35Dense2B4Bit",
+            swiftSettings: tinytitanLanguageStandard
+        ),
+        .testTarget(
             name: "TinyTitanMemoryTests",
             dependencies: ["TinyTitanMemory", "ContinuityCore"],
             path: "tests/TinyTitanMemory",
