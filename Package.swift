@@ -118,6 +118,14 @@ let package = Package(
             path: "sources/TinyTitanCore",
             swiftSettings: tinytitanLanguageStandard
         ),
+        // The first 7.0 engine variant (plan task 5). A variant target imports
+        // only the generic library — the variant-isolation gate enforces it.
+        .target(
+            name: "Qwen35Dense2B4Bit",
+            dependencies: ["TinyTitanCore"],
+            path: "sources/Engines/Qwen35Dense2B4Bit",
+            swiftSettings: tinytitanLanguageStandard
+        ),
         .target(
             name: "TinyTitan",
             dependencies: [

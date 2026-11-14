@@ -13,7 +13,7 @@
       "variants": [
         {
           "id": "qwen35-2b-4bit",
-          "target": null,
+          "target": "Qwen35Dense2B4Bit",
           "bits": 4,
           "engine": "cpu",
           "shipped": false,
