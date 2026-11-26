@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:12 in_progress:2 open:20 start:9 blocked:1**
+**done:13 in_progress:2 open:19 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -39,7 +39,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0027 | S1 | DONE | TinyTitanFormat | Verify bounded GGUF metadata parser resource use and duplicate handling |
 | 0028 | S1 | DONE | TinyTitanFormat | Verify overflow-safe compressed expert block-count arithmetic |
 | 0029 | S1 | START | ContinuityCore | Guard against zero-progress write loops |
-| 0030 | S2 | OPEN | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
+| 0030 | S2 | DONE | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
 | 0031 | S2 | DONE | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
 | 0032 | S1 | OPEN | DSH plugin / shell writer | Shell settings writer still truncates in place |
 | 0033 | S2 | OPEN | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
@@ -284,10 +284,11 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0030 — Test targets accept concurrency warnings despite warnings-as-errors
 
-- S2 / Tier C / OPEN / language-standard / diagnostics
+- S2 / Tier C / DONE / language-standard / diagnostics
 - Project: Root SwiftPM / tests; host: Apple Silicon Mac A
 - Location: tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift:35-62
 - Evidence before: `swift build --build-tests` exits 0 while emitting 12 `warning:` diagnostics from tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift (SendableClosureCaptures: capture of non-Sendable `read`, mutation/reference of captured `index`/`ranges`, concurrently-executed local function `read` not @Sendable). Every target carries `swiftSettings: tinytitanLanguageStandard` with `-warnings-as-errors`, so either the flag is not reaching this test compile or the diagnostics bypass it. The baseline is therefore red on warnings, not clean.
+- Evidence after: The 12 SendableClosureCaptures diagnostics are gone (build --build-tests exit 0, 0 matches). The test now uses let ranges, a @Sendable read taking the buffer as a parameter, Synchronization.Mutex for the claim counter, and one 1 MiB buffer per worker (removing a real shared-buffer data race). #warning still fails the build, so -warnings-as-errors works for ordinary warnings. See AUDIT/evidence/0030.md.
 
 ## 0031 — No-binary catalog scan rejects Inkling 2 installs the server serves
 
