@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { scanModelsFolder } from "../src/catalog-scan.js";
-import { catalogRows, generateBlock } from "../src/generate.js";
+import { generateBlock } from "../src/generate.js";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const MODELS_DIR = join(REPO_ROOT, "models");
@@ -71,6 +71,37 @@ function writeSnapshot(
   return directory;
 }
 
+/**
+ * An Inkling 2 install: a TPP/1 plugin-backed variant.
+ *
+ * The Q4 plugin exports its tokenizer from the GGUF header it carries, so that
+ * install has no `tokenizer/` folder at all; the NVFP4 plugin supplies no
+ * tokenizer hook and needs one. `activation` is `situ`, which is what both
+ * shipped manifests declare and what the family's kernels implement.
+ */
+function writeInkling(
+  root,
+  name,
+  { modelID, activation = "situ", bits = 4, tokenizerFolder = true } = {},
+) {
+  const directory = join(root, name);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "manifest.json"),
+    JSON.stringify({
+      magic: "SSDAI",
+      modelID,
+      quant: { routedExpert: { weightBits: bits } },
+      arch: { family: "inkling2", hiddenActivation: activation },
+    }),
+  );
+  if (tokenizerFolder) {
+    mkdirSync(join(directory, "tokenizer"), { recursive: true });
+    writeFileSync(join(directory, "tokenizer", "tokenizer.json"), "{}");
+  }
+  return directory;
+}
+
 test("the scan and the server catalog produce the same picker block", (t) => {
   if (!existsSync(BINARY) || !existsSync(MODELS_DIR)) {
     t.skip("no built TinyTitanServer or models/ here; skipping the parity check");
@@ -82,8 +113,18 @@ test("the scan and the server catalog produce the same picker block", (t) => {
   });
   const fromServer = JSON.parse(String(printed)).models;
   const fromFolder = scanModelsFolder(MODELS_DIR, { env: {} }).models;
-  assert.equal(generateBlock(catalogRows(fromFolder)), generateBlock(catalogRows(fromServer)));
   assert.ok(fromFolder.length > 0, "the parity check needs at least one installed model");
+  // The raw rows on both sides: `generateBlock` normalizes its own input, and a
+  // row that has already been through `catalogRows` is not a catalog row any
+  // more (it carries `levels`, not `quant`/`thinking`), so feeding it back in
+  // compares two empty blocks and asserts nothing.
+  const block = generateBlock(fromFolder);
+  assert.equal(block, generateBlock(fromServer));
+  assert.equal(
+    [...block.matchAll(/^ {8}- id: /gm)].length,
+    fromFolder.length,
+    "every scanned model must reach the picker",
+  );
 });
 
 test("a folder is read the way the server reads it", () => {
@@ -179,6 +220,144 @@ test("a folder is read the way the server reads it", () => {
     skipped.find((entry) => entry.path.endsWith("incomplete_4Bit")).reason.includes("tokenizer"),
   );
   assert.ok(skipped.find((entry) => entry.path.endsWith("llama_4Bit")).reason.includes("llama"));
+});
+
+test("a plugin-backed Inkling 2 install scans as the server describes it", () => {
+  // The server serves these through a TPP/1 plugin, not through a `ModelFamily`
+  // the generic loader knows: the plugin answers with its own identity, display
+  // name, width, reasoning levels and tokenizer hook. The folder scan has to
+  // describe them identically or a profile with no built server sees a different
+  // picker from one with it. These two rows are the shape `TinyTitanServer
+  // --catalog` prints for this repository's installs, measured on this Mac (the
+  // `sampling` and `size_gb` fields are the server's own and do not reach the
+  // block).
+  const root = mkdtempSync(join(tmpdir(), "dsh-tinytitan-inkling-"));
+  const gguf = writeInkling(root, "inkling-2-mini_GGUF-Q4", {
+    modelID: "inkling-2-mini-gguf-q4",
+    tokenizerFolder: false,
+  });
+  const nvfp4 = writeInkling(root, "inkling-2-mini_NVFP4", { modelID: "inkling-2-mini-nvfp4" });
+  const qwen = writeInstall(root, "qwen3.5_4B_4Bit", {
+    modelID: "qwen3.5-4b",
+    family: "qwen3_5_dense",
+    bits: 4,
+  });
+
+  const { models, skipped } = scanModelsFolder(root, { env: {} });
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(
+    models.map((model) => [
+      model.id,
+      model.name,
+      model.family,
+      model.quant,
+      model.backend,
+      model.engines,
+      model.thinking.join(","),
+    ]),
+    [
+      // The plugin reports the manifest's own id, so no `_4-Bit` suffix; the
+      // name is the plugin's display name, not the id; the ladder is the
+      // template's (thinking off plus four effort levels, `high` included).
+      [
+        "inkling-2-mini-gguf-q4",
+        "Inkling 2 Mini UD-Q4_K_XL (Unsloth)",
+        "inkling2",
+        4,
+        "gpu",
+        "gpu",
+        "off,low,medium,high,xhigh",
+      ],
+      [
+        "inkling-2-mini-nvfp4",
+        "Inkling 2 Mini",
+        "inkling2",
+        4,
+        "gpu",
+        "gpu",
+        "off,low,medium,high,xhigh",
+      ],
+      ["qwen3.5-4b_4-Bit", "Qwen 3.5 4B", "qwen3_5_dense", 4, "gpu", "gpu,cpu", "off,on"],
+    ],
+  );
+
+  const server = [
+    {
+      id: "inkling-2-mini-gguf-q4",
+      name: "Inkling 2 Mini UD-Q4_K_XL (Unsloth)",
+      family: "inkling2",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu",
+      path: gguf,
+      thinking: ["off", "low", "medium", "high", "xhigh"],
+      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
+      size_gb: 17.7,
+    },
+    {
+      id: "inkling-2-mini-nvfp4",
+      name: "Inkling 2 Mini",
+      family: "inkling2",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu",
+      path: nvfp4,
+      thinking: ["off", "low", "medium", "high", "xhigh"],
+      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
+      size_gb: 19.6,
+    },
+    {
+      id: "qwen3.5-4b_4-Bit",
+      name: "Qwen 3.5 4B",
+      family: "qwen3_5_dense",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu,cpu",
+      path: qwen,
+      thinking: ["off", "on"],
+      sampling: { temperature: 0.7, top_p: 0.8, top_k: 20 },
+      size_gb: 3.7,
+    },
+  ];
+  const block = generateBlock(models);
+  assert.equal(
+    block,
+    generateBlock(server),
+    "the picker block must be the server's, not a differently spelled one",
+  );
+  // Raw rows on both sides: `generateBlock` normalizes its own input, so feeding
+  // it rows that already went through `catalogRows` would compare two empty
+  // blocks. This pins that the two Inkling rows and the qwen row are really in
+  // the block, under the ids the server prints.
+  assert.deepEqual([...block.matchAll(/^ {8}- id: (.+)$/gm)].map((match) => match[1]).sort(), [
+    "inkling-2-mini-gguf-q4",
+    "inkling-2-mini-nvfp4",
+    "qwen3.5-4b_4-Bit",
+  ]);
+  assert.ok(block.includes("          name: Inkling 2 Mini UD-Q4_K_XL (Unsloth)\n"), block);
+  assert.ok(
+    block.includes(
+      "          reasoningEfforts:\n" +
+        "            off:\n" +
+        "            low: low\n" +
+        "            medium: medium\n" +
+        "            high: high\n" +
+        "            xhigh: xhigh\n",
+    ),
+  );
+});
+
+test("an Inkling 2 install the shipped plugins do not recognise is refused", () => {
+  // The plugin probe matches the install's model id prefix, not its directory
+  // name and not the family alone: an `inkling2` manifest outside both variants
+  // resolves to no plugin and the server leaves it off the list. Guessing an
+  // identity for it would offer a model that cannot be served.
+  const root = mkdtempSync(join(tmpdir(), "dsh-tinytitan-inkling-"));
+  writeInkling(root, "inkling-2-other", { modelID: "inkling-2-other" });
+  const { models, skipped } = scanModelsFolder(root, { env: {} });
+  assert.deepEqual(models, []);
+  assert.equal(skipped.length, 1);
+  assert.match(skipped[0].reason, /Inkling 2/);
 });
 
 test("two directories claiming one id list the first and skip the second", () => {

@@ -75,6 +75,45 @@ const FAMILY_BASE = Object.freeze({
   qwen3_5_dense: "qwen3.5-dense",
 });
 
+/**
+ * The TPP/1 plugin-backed installs this repository ships.
+ *
+ * For an install whose declared family is not a `ModelFamily` case, the server
+ * asks `PluginRegistry` before the generic loader, and the plugin answers with its
+ * own identity, display name, width, reasoning control and tokenizer hook
+ * (`ModelCatalog.probePluginInstall`, and the two Inkling 2 plugin files under
+ * `sources/Engines/`). This table is that answer for the variants that exist. A
+ * variant is matched the way the plugin's own probe matches — by the install's
+ * model id prefix, never by directory name — and its `tokenizer` says where the
+ * tokenizer comes from: `plugin` is the Q4 plugin exporting it from the GGUF
+ * header it carries (so that install has no `tokenizer/` directory at all),
+ * `folder` is the NVFP4 plugin, which supplies no hook and needs
+ * `tokenizer/tokenizer.json`.
+ *
+ * The width is the plugin's own constant (`weightBits: 4`) rather than a manifest
+ * field, the display name is the plugin's `displayName` rather than a table keyed
+ * by id, and the id is the manifest's own — no `_N-Bit` suffix is added, because a
+ * plugin reports its identity verbatim.
+ */
+const PLUGIN_VARIANTS = Object.freeze([
+  {
+    prefix: "inkling-2-mini-gguf",
+    family: "inkling2",
+    displayName: "Inkling 2 Mini UD-Q4_K_XL (Unsloth)",
+    quant: 4,
+    thinking: ["off", "low", "medium", "high", "xhigh"],
+    tokenizer: "plugin",
+  },
+  {
+    prefix: "inkling-2-mini-nvfp4",
+    family: "inkling2",
+    displayName: "Inkling 2 Mini",
+    quant: 4,
+    thinking: ["off", "low", "medium", "high", "xhigh"],
+    tokenizer: "folder",
+  },
+]);
+
 /** A manifest may already spell the width; the suffix is added exactly once. */
 const QUANT_SUFFIXES = ["-4bit", "-8bit", "-6bit"];
 
@@ -113,6 +152,35 @@ function probeInstall(directory, env) {
     return { reason: "manifest modelID is empty" };
   }
   const declared = manifest?.arch?.family;
+  const variant = PLUGIN_VARIANTS.find(
+    (candidate) => candidate.family === declared && manifest.modelID.startsWith(candidate.prefix),
+  );
+  if (variant !== undefined) {
+    if (variant.tokenizer === "folder" && !hasTokenizer(directory, env)) {
+      return { reason: "no tokenizer/tokenizer.json; the install is incomplete" };
+    }
+    // The scan describes the picker, so it carries exactly the fields the block
+    // is built from; `sampling` and `size_gb` are the server's own row fields and
+    // never reach the block (the parity test compares the two blocks).
+    return {
+      model: {
+        id: manifest.modelID,
+        name: variant.displayName,
+        family: variant.family,
+        quant: variant.quant,
+        backend: "gpu",
+        engines: "gpu",
+        path: directory,
+        thinking: [...variant.thinking],
+      },
+    };
+  }
+  // A plugin family whose id names no variant this project ships resolves to no
+  // plugin, so the server leaves it off the list; inventing an identity here would
+  // offer a model that cannot be served.
+  if (declared === "inkling2") {
+    return { reason: "an Inkling 2 install outside the variants this project ships" };
+  }
   // A manifest that declares no known family was inferred from layer shape by
   // the server; the shape test needs the full arch, so an undeclared family is
   // read as the qwen3.6 default exactly as `peekIdentity` does.
