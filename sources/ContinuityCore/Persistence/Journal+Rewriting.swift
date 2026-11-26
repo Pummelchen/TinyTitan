@@ -191,11 +191,31 @@ extension FileJournal {
         guard emptied >= 0 else {
             throw JournalError.cannotOpen(url, underlying: String(cString: strerror(-emptied)))
         }
+        // The length change is the operation. Without a barrier the file can
+        // come back at its old length after a power cut, while the appends
+        // that follow it are durable — a journal that is newer than its own
+        // beginning. Same strong barrier and checked fallback as an append
+        // and a checkpoint, on the descriptor that made the change.
+        var barrier = fileSystem.fullSync(emptied)
+        if barrier != 0 { barrier = fileSystem.fsync(emptied) }
         fileSystem.close(emptied)
+        // The truncation is visible either way, so the actor follows the file
+        // it has rather than keeping the old offset accounting.
         appendedRecords = 0
         durableRecords = 0
         tornTail = false
-        descriptor = try Self.openForAppend(url, using: fileSystem)
+        var failure: JournalError? =
+            barrier == 0 ? nil : .writeFailed(url, errno: -barrier)
+        do {
+            descriptor = try Self.openForAppend(url, using: fileSystem)
+        } catch {
+            // A reopen failure does not replace the barrier failure: that is
+            // the one the operation is about, and both leave the file empty
+            // and the descriptor closed. Reported after the attempt so the
+            // journal is not left with a descriptor number that was closed.
+            if failure == nil { failure = error }
+        }
+        if let failure { throw failure }
     }
 }
 

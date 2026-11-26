@@ -41,6 +41,8 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         var fsyncFailure: Int32?
         var fsyncFailurePaths: [String: Int32] = [:]
         var openFailure: [String: Int32] = [:]
+        var openCallFailure: [String: [Int: Int32]] = [:]
+        var opensByPath: [String: Int] = [:]
         /// Fail this path once a rename has happened; the checkpoint's reopen.
         var reopenFailurePath: String?
         var reopenFailureCode: Int32 = 0
@@ -109,6 +111,12 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         state.withLock { $0.openFailure[path] = -code }
     }
 
+    /// Fail only the `call`-th open of `path` (1-based), so a test can break
+    /// the reopen after a truncation without breaking the truncation itself.
+    func failOpen(at path: String, call: Int, _ code: Int32) {
+        state.withLock { $0.openCallFailure[path, default: [:]][call] = -code }
+    }
+
     func failReopen(at path: String, _ code: Int32) {
         state.withLock {
             $0.reopenFailurePath = path
@@ -170,6 +178,9 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     func open(path: String, flags: Int32, mode: mode_t) -> Int32 {
         let failure = state.withLock { state -> Int32? in
             state.opens += 1
+            let call = (state.opensByPath[path] ?? 0) + 1
+            state.opensByPath[path] = call
+            if let code = state.openCallFailure[path]?[call] { return code }
             if let code = state.openFailure[path] { return code }
             if state.renames > 0, state.reopenFailurePath == path {
                 return -state.reopenFailureCode
