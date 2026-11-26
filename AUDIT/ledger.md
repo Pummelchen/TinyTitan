@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:10 in_progress:2 open:16 start:9 blocked:1**
+**done:12 in_progress:2 open:20 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -36,8 +36,8 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0024 | S1 | DONE | DSH plugin | Make settings rewrite atomic and detect concurrent updates |
 | 0025 | S2 | DONE | DSH plugin | Report malformed catalog rows rather than silently dropping them |
 | 0026 | S2 | DONE | DSH plugin | Require safe integer compaction headroom |
-| 0027 | S1 | OPEN | TinyTitanFormat | Verify bounded GGUF metadata parser resource use and duplicate handling |
-| 0028 | S1 | OPEN | TinyTitanFormat | Verify overflow-safe compressed expert block-count arithmetic |
+| 0027 | S1 | DONE | TinyTitanFormat | Verify bounded GGUF metadata parser resource use and duplicate handling |
+| 0028 | S1 | DONE | TinyTitanFormat | Verify overflow-safe compressed expert block-count arithmetic |
 | 0029 | S1 | START | ContinuityCore | Guard against zero-progress write loops |
 | 0030 | S2 | OPEN | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
 | 0031 | S2 | DONE | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
@@ -48,6 +48,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0036 | S2 | OPEN | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 | 0038 | S3 | OPEN | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
+| 0039 | S1 | OPEN | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
+| 0040 | S3 | OPEN | TinyTitanRepack | Unchecked width narrowing of the GGUF string-table count |
+| 0041 | S2 | OPEN | TinyTitanFormat | Expert index maximumEnd adds offset and length unchecked |
+| 0042 | S2 | OPEN | TinyTitanRepack | Writer's raw layer size product is unchecked and unbounded |
+| 0043 | S3 | OPEN | TinyTitanRepack | Compression tool plan total multiplies unchecked |
+| 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -253,17 +259,21 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0027 — Verify bounded GGUF metadata parser resource use and duplicate handling
 
-- S1 / Tier A / OPEN / L4 untrusted model parsing
+- S1 / Tier A / DONE / L4 untrusted model parsing
 - Project: TinyTitanFormat; host: Apple Silicon Mac A
 - Location: sources/TinyTitanFormat/GGUFHeaderV3.swift:69-81,187-204
 - Evidence before: Key/tensor counts are capped at <2^20; metadata duplicates overwrite earlier entries; arrays iterate each element even if not retained. Need caller header-size limits and duplicate/tensor contract before asserting vulnerability.
+- Evidence after: Pre-fix parser reproduced duplicate-key last-wins, duplicate tensor names, an empty array of invalid type, and an alignment 2^63 trap. Added 128 MiB header, 64 MiB aggregate string, 8 Mi element and 65535-byte key budgets; checked cursor/alignment/growth; element-type validation including empty arrays; duplicate/zero-dimension typed errors; one capped nextHeaderReadSize for local and remote callers. 16 parser + 4 local-caller tests, 2,000-iteration capped fuzz; full suite 2,574 tests/449 suites passed. See AUDIT/evidence/0027.md.
+- Commit: `0525279f`
 
 ## 0028 — Verify overflow-safe compressed expert block-count arithmetic
 
-- S1 / Tier A / OPEN / L3 model parser
+- S1 / Tier A / DONE / L3 model parser
 - Project: TinyTitanFormat; host: Apple Silicon Mac A
 - Location: sources/TinyTitanFormat/ExpertBlobIndex.swift:62-63
 - Evidence before: Ceiling formula phaseBytes + blockBytes - 1 uses unchecked addition. Need prove bounds/types at all decode and encode call sites.
+- Evidence after: Pre-fix blockCount trapped (SIGTRAP) at UInt64.max via a corrupt layout stride. Now quotient+remainder UInt64 ceiling, decodeLayout rejects >128 blocks with badBlockCount before Int conversion, blockOutputBytes/blockDestination checked, codec bytes unchanged. 7 new tests (Int.max/UInt64.max, 128/129 blocks, roundtrip, wrapping tail); full suite 2,574 tests passed. See AUDIT/evidence/0028.md.
+- Commit: `299d7f44`
 
 ## 0029 — Guard against zero-progress write loops
 
@@ -337,4 +347,46 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: Root SwiftPM / manifests; host: Apple Silicon Mac A
 - Location: Package.swift: TinyTitanServer, Qwen35Dense*, TinyTitanLib targets
 - Evidence before: The source-derived graph in AUDIT/contracts.md shows TinyTitanServer imports TinyTitanCore, TinyTitanLegacyEngine, TinyTitanLib and TinyTitanMemory without declaring them directly (they arrive through TinyTitanServerCore), while the six Qwen35Dense* targets and TinyTitanLib declare TinyTitanFormat with no direct import. The build succeeds today; the declarations are fragile/unused rather than failing.
+
+## 0039 — GGUF planner multiplies untrusted dimensions unchecked
+
+- S1 / Tier A / OPEN / L3 model parser
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:63,67
+- Evidence before: The planner reduces an untrusted GGUF header's dimensions with `reduce(*)` and computes `rows * columns * kept.elementBytes` without checked arithmetic; a corrupt header can trap there, the same class as 0028.
+
+## 0040 — Unchecked width narrowing of the GGUF string-table count
+
+- S3 / Tier A / OPEN / L3 model parser
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:151
+- Evidence before: `UInt32(stringTable.count)` narrows without a range check. The new 128 MiB header budget makes the overflow practically unreachable, but the conversion is still unchecked.
+
+## 0041 — Expert index maximumEnd adds offset and length unchecked
+
+- S2 / Tier A / OPEN / L3 format arithmetic
+- Project: TinyTitanFormat; host: Apple Silicon Mac A
+- Location: sources/TinyTitanFormat/ExpertBlobIndex.swift:404-411
+- Evidence before: `maximumEnd` still computes `offset + length` unchecked, relying on a documented 'came from decode' precondition. A future caller or a decode regression could wrap it.
+
+## 0042 — Writer's raw layer size product is unchecked and unbounded
+
+- S2 / Tier A / OPEN / L3 format arithmetic
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Writing/CompressedExpertLayerWriter.swift:39
+- Evidence before: `rawBytes = expertStride * expertsPerLayer` is unchecked and `validate()` does not bound it. The tool path checks its own product, so this is writer-only today.
+
+## 0043 — Compression tool plan total multiplies unchecked
+
+- S3 / Tier A / OPEN / L3 format arithmetic
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Workflow/CompressExpertsTool.swift:117
+- Evidence before: The plan total `rawLayerBytes * layers.count` is unchecked. It is a plan/summary value, not a buffer size, so the practical impact is a wrong total rather than a trap.
+
+## 0044 — GGUF parser does not enforce several spec rules
+
+- S3 / Tier A / OPEN / L3 format conformance
+- Project: TinyTitanFormat; host: Apple Silicon Mac A
+- Location: sources/TinyTitanFormat/GGUFHeaderV3.swift:170-205
+- Evidence before: BOOL values other than 0/1 are accepted; key ASCII/hierarchical character rules are not enforced; nested arrays are rejected although the current GGUF specification permits them (pre-existing).
 

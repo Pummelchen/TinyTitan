@@ -1144,13 +1144,13 @@
       "file:line": "sources/TinyTitanFormat/GGUFHeaderV3.swift:69-81,187-204",
       "title": "Verify bounded GGUF metadata parser resource use and duplicate handling",
       "category": "L4 untrusted model parsing",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Key/tensor counts are capped at <2^20; metadata duplicates overwrite earlier entries; arrays iterate each element even if not retained. Need caller header-size limits and duplicate/tensor contract before asserting vulnerability.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Pre-fix parser reproduced duplicate-key last-wins, duplicate tensor names, an empty array of invalid type, and an alignment 2^63 trap. Added 128 MiB header, 64 MiB aggregate string, 8 Mi element and 65535-byte key budgets; checked cursor/alignment/growth; element-type validation including empty arrays; duplicate/zero-dimension typed errors; one capped nextHeaderReadSize for local and remote callers. 16 parser + 4 local-caller tests, 2,000-iteration capped fuzz; full suite 2,574 tests/449 suites passed. See AUDIT/evidence/0027.md.",
+      "commit": "0525279f",
       "blocked-reason": null,
       "acceptance-criteria": "Trace local and remote callers; test duplicate keys/tensors, large arrays, invalid empty array element types, malformed offsets, memory/time bounds.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -1188,13 +1188,13 @@
       "file:line": "sources/TinyTitanFormat/ExpertBlobIndex.swift:62-63",
       "title": "Verify overflow-safe compressed expert block-count arithmetic",
       "category": "L3 model parser",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Ceiling formula phaseBytes + blockBytes - 1 uses unchecked addition. Need prove bounds/types at all decode and encode call sites.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Pre-fix blockCount trapped (SIGTRAP) at UInt64.max via a corrupt layout stride. Now quotient+remainder UInt64 ceiling, decodeLayout rejects >128 blocks with badBlockCount before Int conversion, blockOutputBytes/blockDestination checked, codec bytes unchanged. 7 new tests (Int.max/UInt64.max, 128/129 blocks, roundtrip, wrapping tail); full suite 2,574 tests passed. See AUDIT/evidence/0028.md.",
+      "commit": "299d7f44",
       "blocked-reason": null,
       "acceptance-criteria": "Trace phase size validation; test maximum phase lengths; use checked arithmetic or division/remainder where needed.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -1615,6 +1615,227 @@
           "Confirm the graph tooling was not changed to make the comparison pass."
         ]
       }
+    },
+    {
+      "id": "0039",
+      "severity": "S1",
+      "tier": "A",
+      "project": "TinyTitanRepack",
+      "file:line": "sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:63,67",
+      "title": "GGUF planner multiplies untrusted dimensions unchecked",
+      "category": "L3 model parser",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0027 sibling audit by the format remediation agent",
+      "evidence-before": "The planner reduces an untrusted GGUF header's dimensions with `reduce(*)` and computes `rows * columns * kept.elementBytes` without checked arithmetic; a corrupt header can trap there, the same class as 0028.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Every dimension product is checked before allocation/arithmetic and a malformed header produces a typed error, not a trap; a synthetic oversized-dimension fixture proves it.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0027",
+          "0028"
+        ],
+        "problem_description": "`Inkling2GGUFPlanner` trusts GGUF header dimensions in its product calculations. The format parser now bounds counts/bytes, but a dimension value can still overflow the planner's arithmetic before any allocation.",
+        "proposed_solution": [
+          "Use the checked size helpers introduced for 0027/0028 or equivalent `multipliedReportingOverflow` chains.",
+          "Reject a dimension product that cannot fit the addressable buffer with a typed planner error.",
+          "Add a synthetic header with dimensions near the limits; verify no trap and a clean refusal."
+        ],
+        "verification_steps": [
+          "Pre-fix fixture traps; post-fix returns the typed error.",
+          "Valid synthetic/real GGUF plans unchanged.",
+          "Focused GGUF/repack tests and the full suite pass."
+        ],
+        "self_audit_steps": [
+          "Check every product in the planner, not only the reported lines.",
+          "Confirm no allocation occurs before validation."
+        ]
+      }
+    },
+    {
+      "id": "0040",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanRepack",
+      "file:line": "sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:151",
+      "title": "Unchecked width narrowing of the GGUF string-table count",
+      "category": "L3 model parser",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0027 sibling audit by the format remediation agent",
+      "evidence-before": "`UInt32(stringTable.count)` narrows without a range check. The new 128 MiB header budget makes the overflow practically unreachable, but the conversion is still unchecked.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "The conversion is checked and refuses an out-of-range count with a typed error; a boundary test pins it.",
+      "classification": "defence-in-depth",
+      "manual": {
+        "depends_on": [
+          "0027"
+        ],
+        "problem_description": "A `UInt32` narrowing of a `String` count is unchecked; under the current header cap it cannot overflow, but a future cap change or a different caller could.",
+        "proposed_solution": [
+          "Use a checked conversion (e.g. `UInt32(exactly:)`) and throw a typed error.",
+          "Add a boundary test at `UInt32.max`/`UInt32.max + 1` if the value can be constructed synthetically."
+        ],
+        "verification_steps": [
+          "Boundary test passes; valid headers unchanged.",
+          "Focused tests and lint green."
+        ],
+        "self_audit_steps": [
+          "Confirm the check is not dead code hidden by an earlier cap without documenting that."
+        ]
+      }
+    },
+    {
+      "id": "0041",
+      "severity": "S2",
+      "tier": "A",
+      "project": "TinyTitanFormat",
+      "file:line": "sources/TinyTitanFormat/ExpertBlobIndex.swift:404-411",
+      "title": "Expert index maximumEnd adds offset and length unchecked",
+      "category": "L3 format arithmetic",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0028 sibling audit by the format remediation agent",
+      "evidence-before": "`maximumEnd` still computes `offset + length` unchecked, relying on a documented 'came from decode' precondition. A future caller or a decode regression could wrap it.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "hardening",
+      "manual": {
+        "depends_on": [
+          "0028"
+        ],
+        "problem_description": "The decoded layout's `maximumEnd` adds a `UInt64` offset and a `UInt32` length without an overflow check, trusting that both came from a validated decode.",
+        "proposed_solution": [
+          "Use `addingReportingOverflow` and surface a typed failure or a documented saturating result that cannot be mistaken for a valid end.",
+          "Add a test with an offset near `UInt64.max`."
+        ],
+        "verification_steps": [
+          "Wrapping pair refused; valid layouts unchanged.",
+          "Focused tests and full suite green."
+        ],
+        "self_audit_steps": [
+          "Confirm the chosen failure cannot be read as a valid stream end."
+        ]
+      },
+      "acceptance-criteria": "The sum is checked (or the precondition is enforced by a type/assertion with a test); a wrapping pair is refused."
+    },
+    {
+      "id": "0042",
+      "severity": "S2",
+      "tier": "A",
+      "project": "TinyTitanRepack",
+      "file:line": "sources/TinyTitanRepack/Core/Writing/CompressedExpertLayerWriter.swift:39",
+      "title": "Writer's raw layer size product is unchecked and unbounded",
+      "category": "L3 format arithmetic",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0028 sibling audit by the format remediation agent",
+      "evidence-before": "`rawBytes = expertStride * expertsPerLayer` is unchecked and `validate()` does not bound it. The tool path checks its own product, so this is writer-only today.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "hardening",
+      "manual": {
+        "depends_on": [
+          "0028"
+        ],
+        "problem_description": "A caller constructing a writer directly can pass geometry whose product overflows the layer size; the writer does not validate it.",
+        "proposed_solution": [
+          "Check the product in `validate()` and refuse with a typed error.",
+          "Add a synthetic boundary test; keep the tool path's own check."
+        ],
+        "verification_steps": [
+          "Boundary test passes; normal writes byte-identical.",
+          "Focused writer tests and full suite green."
+        ],
+        "self_audit_steps": [
+          "Confirm the check happens before any allocation or file creation."
+        ]
+      },
+      "acceptance-criteria": "The writer rejects an overflowing/unbounded product before writing; a synthetic test pins it."
+    },
+    {
+      "id": "0043",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanRepack",
+      "file:line": "sources/TinyTitanRepack/Core/Workflow/CompressExpertsTool.swift:117",
+      "title": "Compression tool plan total multiplies unchecked",
+      "category": "L3 format arithmetic",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0028 sibling audit by the format remediation agent",
+      "evidence-before": "The plan total `rawLayerBytes * layers.count` is unchecked. It is a plan/summary value, not a buffer size, so the practical impact is a wrong total rather than a trap.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "defence-in-depth",
+      "manual": {
+        "depends_on": [
+          "0028"
+        ],
+        "problem_description": "A plan total multiplies a layer size by a layer count without a checked operation.",
+        "proposed_solution": [
+          "Use a checked multiply/sum for the plan total and surface an error rather than a wrapped number.",
+          "Add a boundary test."
+        ],
+        "verification_steps": [
+          "Boundary test passes; normal plans unchanged.",
+          "Focused tests and lint green."
+        ],
+        "self_audit_steps": [
+          "Confirm the summary cannot be mistaken for a validated size."
+        ]
+      },
+      "acceptance-criteria": "The total is checked and reports a typed error or an explicit overflow state; a boundary test pins it."
+    },
+    {
+      "id": "0044",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanFormat",
+      "file:line": "sources/TinyTitanFormat/GGUFHeaderV3.swift:170-205",
+      "title": "GGUF parser does not enforce several spec rules",
+      "category": "L3 format conformance",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0027 parser review by the format remediation agent",
+      "evidence-before": "BOOL values other than 0/1 are accepted; key ASCII/hierarchical character rules are not enforced; nested arrays are rejected although the current GGUF specification permits them (pre-existing).",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "spec-conformance gap",
+      "manual": {
+        "depends_on": [
+          "0027"
+        ],
+        "problem_description": "The parser accepts some out-of-spec values and rejects a construct the spec permits. None is a memory-safety issue after 0027, but the format conformance is incomplete.",
+        "proposed_solution": [
+          "Enforce BOOL 0/1 and the key character rules with typed errors.",
+          "Decide nested-array support explicitly; if unsupported, document it as a subset and keep the typed refusal.",
+          "Add fixture tests for each decision."
+        ],
+        "verification_steps": [
+          "Valid model headers unchanged; new negative/positive fixtures assert the chosen policy.",
+          "Focused format tests and full suite green."
+        ],
+        "self_audit_steps": [
+          "Confirm no strictness change silently drops a metadata key a model needs."
+        ]
+      },
+      "acceptance-criteria": "Each rule is either enforced with a typed error/test or documented as an intentional subset with the reason; no valid current model is refused by accident."
     }
   ],
   "manual_revision": 1,

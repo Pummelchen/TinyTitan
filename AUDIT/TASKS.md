@@ -1773,3 +1773,259 @@ The demo is a release artifact (`tools/build_library.sh` output) but no gate com
 **Acceptance:** CI builds a scratch library distribution and both demo scripts (no model, no publish); a `#warning` in the demo fails the job.
 
 ---
+
+### Findings 0039–0044 (native/format arithmetic and conformance)
+
+<a id="task-0039"></a>
+#### Task 0039 — GGUF planner multiplies untrusted dimensions unchecked
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:63,67`  
+**Severity / tier:** S1 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 model parser  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0027, 0028.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+`Inkling2GGUFPlanner` trusts GGUF header dimensions in its product calculations. The format parser now bounds counts/bytes, but a dimension value can still overflow the planner's arithmetic before any allocation.
+
+**Recorded evidence:** The planner reduces an untrusted GGUF header's dimensions with `reduce(*)` and computes `rows * columns * kept.elementBytes` without checked arithmetic; a corrupt header can trap there, the same class as 0028.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use the checked size helpers introduced for 0027/0028 or equivalent `multipliedReportingOverflow` chains.
+
+2. Reject a dimension product that cannot fit the addressable buffer with a typed planner error.
+
+3. Add a synthetic header with dimensions near the limits; verify no trap and a clean refusal.
+
+
+##### 3. Verification — regression and integration
+
+1. Pre-fix fixture traps; post-fix returns the typed error.
+
+2. Valid synthetic/real GGUF plans unchanged.
+
+3. Focused GGUF/repack tests and the full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check every product in the planner, not only the reported lines.
+
+2. Confirm no allocation occurs before validation.
+
+
+**Acceptance:** Every dimension product is checked before allocation/arithmetic and a malformed header produces a typed error, not a trap; a synthetic oversized-dimension fixture proves it.
+
+---
+
+<a id="task-0040"></a>
+#### Task 0040 — Unchecked width narrowing of the GGUF string-table count
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:151`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 model parser  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0027.  
+**Evidence classification:** defence-in-depth
+
+##### 1. Detailed problem description
+
+A `UInt32` narrowing of a `String` count is unchecked; under the current header cap it cannot overflow, but a future cap change or a different caller could.
+
+**Recorded evidence:** `UInt32(stringTable.count)` narrows without a range check. The new 128 MiB header budget makes the overflow practically unreachable, but the conversion is still unchecked.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use a checked conversion (e.g. `UInt32(exactly:)`) and throw a typed error.
+
+2. Add a boundary test at `UInt32.max`/`UInt32.max + 1` if the value can be constructed synthetically.
+
+
+##### 3. Verification — regression and integration
+
+1. Boundary test passes; valid headers unchanged.
+
+2. Focused tests and lint green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the check is not dead code hidden by an earlier cap without documenting that.
+
+
+**Acceptance:** The conversion is checked and refuses an out-of-range count with a typed error; a boundary test pins it.
+
+---
+
+<a id="task-0041"></a>
+#### Task 0041 — Expert index maximumEnd adds offset and length unchecked
+
+**Project / component:** TinyTitanFormat  
+**Location:** `sources/TinyTitanFormat/ExpertBlobIndex.swift:404-411`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 format arithmetic  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0028.  
+**Evidence classification:** hardening
+
+##### 1. Detailed problem description
+
+The decoded layout's `maximumEnd` adds a `UInt64` offset and a `UInt32` length without an overflow check, trusting that both came from a validated decode.
+
+**Recorded evidence:** `maximumEnd` still computes `offset + length` unchecked, relying on a documented 'came from decode' precondition. A future caller or a decode regression could wrap it.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use `addingReportingOverflow` and surface a typed failure or a documented saturating result that cannot be mistaken for a valid end.
+
+2. Add a test with an offset near `UInt64.max`.
+
+
+##### 3. Verification — regression and integration
+
+1. Wrapping pair refused; valid layouts unchanged.
+
+2. Focused tests and full suite green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the chosen failure cannot be read as a valid stream end.
+
+
+**Acceptance:** The sum is checked (or the precondition is enforced by a type/assertion with a test); a wrapping pair is refused.
+
+---
+
+<a id="task-0042"></a>
+#### Task 0042 — Writer's raw layer size product is unchecked and unbounded
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Writing/CompressedExpertLayerWriter.swift:39`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 format arithmetic  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0028.  
+**Evidence classification:** hardening
+
+##### 1. Detailed problem description
+
+A caller constructing a writer directly can pass geometry whose product overflows the layer size; the writer does not validate it.
+
+**Recorded evidence:** `rawBytes = expertStride * expertsPerLayer` is unchecked and `validate()` does not bound it. The tool path checks its own product, so this is writer-only today.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Check the product in `validate()` and refuse with a typed error.
+
+2. Add a synthetic boundary test; keep the tool path's own check.
+
+
+##### 3. Verification — regression and integration
+
+1. Boundary test passes; normal writes byte-identical.
+
+2. Focused writer tests and full suite green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the check happens before any allocation or file creation.
+
+
+**Acceptance:** The writer rejects an overflowing/unbounded product before writing; a synthetic test pins it.
+
+---
+
+<a id="task-0043"></a>
+#### Task 0043 — Compression tool plan total multiplies unchecked
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Workflow/CompressExpertsTool.swift:117`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 format arithmetic  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0028.  
+**Evidence classification:** defence-in-depth
+
+##### 1. Detailed problem description
+
+A plan total multiplies a layer size by a layer count without a checked operation.
+
+**Recorded evidence:** The plan total `rawLayerBytes * layers.count` is unchecked. It is a plan/summary value, not a buffer size, so the practical impact is a wrong total rather than a trap.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use a checked multiply/sum for the plan total and surface an error rather than a wrapped number.
+
+2. Add a boundary test.
+
+
+##### 3. Verification — regression and integration
+
+1. Boundary test passes; normal plans unchanged.
+
+2. Focused tests and lint green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the summary cannot be mistaken for a validated size.
+
+
+**Acceptance:** The total is checked and reports a typed error or an explicit overflow state; a boundary test pins it.
+
+---
+
+<a id="task-0044"></a>
+#### Task 0044 — GGUF parser does not enforce several spec rules
+
+**Project / component:** TinyTitanFormat  
+**Location:** `sources/TinyTitanFormat/GGUFHeaderV3.swift:170-205`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 format conformance  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0027.  
+**Evidence classification:** spec-conformance gap
+
+##### 1. Detailed problem description
+
+The parser accepts some out-of-spec values and rejects a construct the spec permits. None is a memory-safety issue after 0027, but the format conformance is incomplete.
+
+**Recorded evidence:** BOOL values other than 0/1 are accepted; key ASCII/hierarchical character rules are not enforced; nested arrays are rejected although the current GGUF specification permits them (pre-existing).
+
+##### 2. Proposed solution / implementation sequence
+
+1. Enforce BOOL 0/1 and the key character rules with typed errors.
+
+2. Decide nested-array support explicitly; if unsupported, document it as a subset and keep the typed refusal.
+
+3. Add fixture tests for each decision.
+
+
+##### 3. Verification — regression and integration
+
+1. Valid model headers unchanged; new negative/positive fixtures assert the chosen policy.
+
+2. Focused format tests and full suite green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no strictness change silently drops a metadata key a model needs.
+
+
+**Acceptance:** Each rule is either enforced with a typed error/test or documented as an intentional subset with the reason; no valid current model is refused by accident.
+
+---
