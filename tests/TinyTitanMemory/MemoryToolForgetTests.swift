@@ -30,6 +30,11 @@ struct MemoryToolForgetTests {
         try FileManager.default.createDirectory(
             at: journal.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("{}\n".utf8).write(to: journal)
+        // The mode a journal is created with. `Data.write` would leave this at
+        // 0644, which the journal now refuses to open for writing — the
+        // subject here is the lock, not the permissions policy.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: journal.path)
         return (directory, journal)
     }
 
