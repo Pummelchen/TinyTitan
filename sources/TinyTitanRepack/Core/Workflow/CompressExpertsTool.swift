@@ -99,9 +99,18 @@ public enum CompressExpertsTool {
         try prepareOutput(options)
         do {
             let input = try loadInput(options.inputSSDAI, codec: options.codec)
+            let rawBytes = try totalRawBytes(
+                rawLayerBytes: input.rawLayerBytes, layerCount: input.layers.count)
             try copyPayload(from: input.root, to: options.output)
             let layerResults = try compressLayers(
                 input: input, output: options.output, progress: progress)
+            // The result's byte totals are reported to the operator. Summing
+            // them before the receipt makes an (unreachable for real files)
+            // overflow a failed conversion rather than a trap after success.
+            let compressedBytes = try totalBytes(
+                layerResults.map(\.result.compressedBytes), field: "compressed bytes")
+            let indexBytes = try totalBytes(
+                layerResults.map(\.result.indexBytes), field: "index bytes")
             let layoutBytes = try SSDAIJSON.markCompressed(
                 layoutData: input.layoutData,
                 compression: input.codec == .rans ? .rans : .lzfse)
@@ -114,9 +123,9 @@ public enum CompressExpertsTool {
             return CompressExpertsResult(
                 outputDirectory: options.output,
                 layerCount: input.layers.count,
-                rawBytes: input.rawLayerBytes * UInt64(input.layers.count),
-                compressedBytes: layerResults.reduce(0) { $0 + $1.result.compressedBytes },
-                indexBytes: layerResults.reduce(0) { $0 + $1.result.indexBytes },
+                rawBytes: rawBytes,
+                compressedBytes: compressedBytes,
+                indexBytes: indexBytes,
                 receiptPath: receipt.receiptPath)
         } catch {
             // A failed conversion must not leave a directory that looks like an
@@ -125,6 +134,40 @@ public enum CompressExpertsTool {
             try? FileManager.default.removeItem(atPath: options.output)
             throw error
         }
+    }
+
+    /// The total raw bytes of a plan: every layer file has the same size.
+    ///
+    /// `rawLayerBytes` is `expertsPerLayer * expertStride`, already checked by
+    /// `loadInput`; this product is the remaining unchecked one. It is refused
+    /// before any copy or compression starts.
+    static func totalRawBytes(rawLayerBytes: UInt64, layerCount: Int) throws -> UInt64 {
+        guard layerCount >= 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "a compression plan cannot have \(layerCount) layers")
+        }
+        let (total, overflow) = rawLayerBytes.multipliedReportingOverflow(
+            by: UInt64(layerCount))
+        guard !overflow else {
+            throw RepackError.configurationInvalid(
+                detail:
+                    "\(layerCount) layers of \(rawLayerBytes) raw bytes overflow the total")
+        }
+        return total
+    }
+
+    /// A checked sum of per-layer byte counts for the result summary.
+    static func totalBytes(_ values: [UInt64], field: String) throws -> UInt64 {
+        var total: UInt64 = 0
+        for value in values {
+            let (next, overflow) = total.addingReportingOverflow(value)
+            guard !overflow else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(field) total overflows at \(value)")
+            }
+            total = next
+        }
+        return total
     }
 
     /// Validate the input/output pairing and create a clean output directory.
