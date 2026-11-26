@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import NIOCore
 import Testing
@@ -11,7 +12,14 @@ import Testing
 // scripted backend. This is the check the unit suites cannot make: that
 // Codex's Responses client and Claude Code's Messages client accept what
 // this server sends, end to end, including every request field they add
-// that the unit tests never wrote. Skipped when a CLI is not installed.
+// that the unit tests never wrote.
+//
+// A CLI is present at a fixed install path or it is not. Presence alone is not
+// runnability: a half-installed Homebrew `codex` could not load its node
+// dependency, and the old print/return reported the test *passed* with zero
+// assertions when absent and failed the whole suite when broken. The tests are
+// gated with `.enabled(if:)` on a bounded `--version` probe, so the framework
+// records a real skip; a working CLI still runs the full exercise.
 
 private actor GreetingBackend: ServerInferenceBackend, PromptTokenCounting {
     private let lock = NSLock()
@@ -42,6 +50,38 @@ private func binary(_ name: String) -> String? {
     return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
 }
 
+/// Whether `path` runs at all: a bounded `--version` probe, with no output kept
+/// and no inherited stdin. A half-installed CLI fails here instead of taking the
+/// suite down at its first real turn.
+func cliIsUsable(at path: String, timeout: TimeInterval = 5) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: path)
+    process.arguments = ["--version"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    process.standardInput = FileHandle.nullDevice
+    do {
+        try process.run()
+    } catch {
+        return false
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while process.isRunning, Date() < deadline {
+        usleep(50_000)
+    }
+    if process.isRunning {
+        process.terminate()
+        return false
+    }
+    return process.terminationStatus == 0
+}
+
+/// The predicate the `.enabled(if:)` traits use: installed *and* runnable.
+func usableCLI(_ name: String) -> Bool {
+    guard let path = binary(name) else { return false }
+    return cliIsUsable(at: path)
+}
+
 /// Run a CLI with a timeout; returns stdout+stderr and the exit status.
 private func run(
     _ executable: String, _ arguments: [String],
@@ -70,11 +110,8 @@ private func run(
 
 @Suite("Coding CLIs against the server", .serialized)
 struct ClientCLITests {
-    @Test func codexSpeaksTheResponsesAPI() async throws {
-        guard let codex = binary("codex") else {
-            print("codex not installed; skipping")
-            return
-        }
+    @Test(.enabled(if: usableCLI("codex"))) func codexSpeaksTheResponsesAPI() async throws {
+        let codex = try #require(binary("codex"), "codex disappeared after the probe")
         let backend = GreetingBackend()
         let server = TinyTitanHTTPServer(modelID: "test-model", queueLimit: 2, backend: backend)
         let channel = try await server.start(port: 0)
@@ -113,11 +150,8 @@ struct ClientCLITests {
         }
     }
 
-    @Test func claudeCodeSpeaksTheMessagesAPI() async throws {
-        guard let claude = binary("claude") else {
-            print("claude not installed; skipping")
-            return
-        }
+    @Test(.enabled(if: usableCLI("claude"))) func claudeCodeSpeaksTheMessagesAPI() async throws {
+        let claude = try #require(binary("claude"), "claude disappeared after the probe")
         let backend = GreetingBackend()
         let server = TinyTitanHTTPServer(modelID: "test-model", queueLimit: 2, backend: backend)
         let channel = try await server.start(port: 0)
@@ -157,6 +191,35 @@ struct ClientCLITests {
             #expect(first.messages.first?.role == .system)
             #expect(first.messages.contains { $0.role == .user })
         }
+    }
+
+    /// The gate itself, without depending on which CLIs this machine has: a
+    /// working probe is usable, a failing one is not, a missing path is not, and
+    /// a CLI that never answers `--version` is terminated at the deadline rather
+    /// than hanging test discovery.
+    @Test func theCLIProbeDistinguishesBrokenFromWorking() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tinytitan-cli-probe-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        func script(_ name: String, _ body: String) throws -> String {
+            let path = directory.appendingPathComponent(name).path
+            try body.write(toFile: path, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: path)
+            return path
+        }
+
+        let working = try script("working", "#!/bin/sh\nexit 0\n")
+        let failing = try script("failing", "#!/bin/sh\nexit 1\n")
+        let stalled = try script("stalled", "#!/bin/sh\nexec sleep 30\n")
+
+        #expect(FileManager.default.isExecutableFile(atPath: working))
+        #expect(cliIsUsable(at: working, timeout: 2))
+        #expect(!cliIsUsable(at: failing, timeout: 2))
+        #expect(!cliIsUsable(at: directory.appendingPathComponent("missing").path))
+        #expect(!cliIsUsable(at: stalled, timeout: 0.2))
     }
 }
 
