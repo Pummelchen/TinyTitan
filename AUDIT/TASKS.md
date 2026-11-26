@@ -2561,3 +2561,134 @@ The checkpoint planner can overflow its resident index/cursor arithmetic on malf
 **Acceptance:** The index and cursor use checked arithmetic and refuse a malformed geometry with a typed error; boundary tests.
 
 ---
+
+### Findings 0057–0059 (server duplicate-header policy and store cost)
+
+<a id="task-0057"></a>
+#### Task 0057 — Duplicate workspace header silently picks the first
+
+**Project / component:** TinyTitanServer  
+**Location:** `sources/TinyTitanServer/Core/HTTPServer.swift:225`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L4 input validation / cross-project contract  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0019.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+A duplicated workspace header can make the selected workspace depend on header order.
+
+**Recorded evidence:** `WorkspaceHeader.value(in:)` uses `headers.first(name:)`, so duplicate `X-TinyTitan-Workspace` headers silently choose the first; the cross-project workspace input should follow the duplicate-header policy the media/Host paths now use.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Apply the duplicate-header refusal used by Content-Type/Host, or document a deterministic policy.
+
+2. Add a raw-socket test for the duplicate.
+
+3. Keep the documented single-header clients working.
+
+
+##### 3. Verification — regression and integration
+
+1. Duplicate refused; single header routes as before.
+
+2. Server tests and full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check every `first(name:)` on a security-relevant header.
+
+
+**Acceptance:** A duplicate workspace header is refused (or a documented deterministic policy is enforced) with a test; a single valid header is unchanged.
+
+---
+
+<a id="task-0058"></a>
+#### Task 0058 — Duplicate anthropic-version silently picks the first
+
+**Project / component:** TinyTitanServer  
+**Location:** `sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:30`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 input validation  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0020.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+A duplicated routing header can select the surface by header order.
+
+**Recorded evidence:** `anthropic-version` presence uses `first(name:)`; duplicate headers silently choose one, affecting only the route/error shape.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Apply the duplicate policy; test both shapes.
+
+2. Keep the Anthropic surface for a single header.
+
+
+##### 3. Verification — regression and integration
+
+1. Duplicate refused; single header unchanged.
+
+2. Server/full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no legitimate client sends duplicates.
+
+
+**Acceptance:** Duplicate anthropic-version is refused or deterministically handled with a test; single-header clients unchanged.
+
+---
+
+<a id="task-0059"></a>
+#### Task 0059 — ResponseStore.conversation re-concatenates history per continuation
+
+**Project / component:** TinyTitanServer  
+**Location:** `sources/TinyTitanServer/Core/ResponsesAPIStore.swift:48`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L5 resource use  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0018.  
+**Evidence classification:** static performance finding
+
+##### 1. Detailed problem description
+
+Every continuation allocates a flattened copy of the prior conversation.
+
+**Recorded evidence:** `conversation` still returns `inputItems + outputItems` per continuation, an O(history) allocation on every stored follow-up; the new byte budget bounds it but does not remove the cost.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Store or return a bounded view (lazy concatenation) or measure and accept the cost with the budget.
+
+2. Keep lookup/eviction semantics.
+
+3. Test the representation/measure the allocation.
+
+
+##### 3. Verification — regression and integration
+
+1. API behaviour unchanged; a measurement or a representation test.
+
+2. Full suite and TSan pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the API/eviction semantics are unchanged.
+
+2. Confirm the measurement is honest and no request shape is unbounded.
+
+
+**Acceptance:** The retained representation does not allocate a full copy per read, or the cost is measured and documented; the API semantics are unchanged.
+
+---
