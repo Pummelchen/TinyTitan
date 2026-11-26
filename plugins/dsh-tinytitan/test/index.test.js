@@ -81,6 +81,37 @@ test("a harness without the settings service still gets the file path", () => {
   assert.equal(legacy.length, 1);
 });
 
+test("boot and every watcher refresh share one diagnostic budget", () => {
+  // A broken install stays broken between refreshes, and the watcher can wake
+  // several times for one install (thousands of files land). The same skip line
+  // must not be printed on every pass, which means the budget is created once per
+  // refresher and handed to whichever writer runs — the settings service and the
+  // file path both reach `collectRoute`, and that is where it is spent.
+  const seen = [];
+  const refresh = routeRefresher({
+    resolved: { port: 8080 },
+    ctx: context({}),
+    legacy: (options) => seen.push(options),
+  });
+  refresh();
+  refresh();
+  assert.equal(seen.length, 2);
+  assert.ok(seen[0].diagnostics instanceof Set, "the file writer gets a diagnostic set");
+  assert.equal(seen[0].diagnostics, seen[1].diagnostics, "and it is the same one every pass");
+
+  const applied = [];
+  const service = routeRefresher({
+    resolved: { port: 8080 },
+    ctx: context({ settings: { update: async () => {} } }),
+    apply: (options) => applied.push(options),
+  });
+  service();
+  service();
+  assert.equal(applied.length, 2);
+  assert.ok(applied[0].diagnostics instanceof Set);
+  assert.equal(applied[0].diagnostics, applied[1].diagnostics);
+});
+
 test("a refresh that throws or rejects is logged, never raised", async () => {
   const lines = [];
   const throwing = routeRefresher({

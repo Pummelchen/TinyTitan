@@ -200,6 +200,15 @@ to ask, so `src/catalog-scan.js` walks `models/` itself — the same rules, mirr
 the binary's own output on the same folder so the two cannot drift. A binary that
 exists but fails is treated the same way, and the reason goes to the log.
 
+A row the writer cannot describe does not disappear silently: it is reported as
+`skipping catalog row <n> (id <id>): <reason>`, naming the row, the id when it is a
+plain token, and the field that is wrong — never the row's other text, so a catalog
+cannot put a credential or a newline into the log. The remaining rows still serve.
+Boot and the `models/` watcher share one budget, so a still-broken install is named
+once rather than on every quiet period; a different row or a different reason is
+new information and prints. An exception that is not this writer's own refusal is
+a defect and surfaces instead of being counted as a malformed install.
+
 **The route follows the folder while the harness runs.** An install is a long
 download someone starts and then wants to use, so `models/` is watched and the
 route is rebuilt once the folder goes quiet (`watchDebounceMs`). Deletions count

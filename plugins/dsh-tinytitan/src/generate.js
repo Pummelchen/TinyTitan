@@ -44,6 +44,16 @@ export const SERVER_BINARY_NAME = "TinyTitanServer";
 const LEVEL_ORDER = ["off", "on", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 /**
+ * A catalog row this writer cannot describe, with a reason safe to print.
+ *
+ * Only this type is a skip. A row that trips something else — a getter that
+ * throws, a value that cannot be stringified — is a defect in the catalog or in
+ * this module, and it must surface rather than look like one more malformed
+ * install that quietly disappears from the picker.
+ */
+class CatalogRowError extends Error {}
+
+/**
  * The shell's `field()`: a value that can print on one YAML line.
  *
  * The parser that feeds the route skips a model whose id, name or path is
@@ -56,7 +66,7 @@ const LEVEL_ORDER = ["off", "on", "minimal", "low", "medium", "high", "xhigh", "
 function textField(value, field = "field") {
   const text = value === undefined || value === null ? "" : String(value);
   if (text === "" || /[\t\r\n]/.test(text)) {
-    throw new Error(`${field} is empty or multi-line`);
+    throw new CatalogRowError(`the ${field} is empty or multi-line`);
   }
   return text;
 }
@@ -172,12 +182,26 @@ function catalogLevels(thinking) {
   } else if (thinking === undefined || thinking === null || thinking === 0 || thinking === false) {
     listed.push("off");
   } else {
-    throw new Error("thinking is not iterable");
+    throw new CatalogRowError("thinking is not iterable");
   }
   return [
     ...LEVEL_ORDER.filter((level) => listed.includes(level)),
     ...listed.filter((level) => !LEVEL_ORDER.includes(level)),
   ];
+}
+
+/**
+ * A row's id, when it is one this writer would accept, for a diagnostic.
+ *
+ * A validated id is the one piece of a rejected row that is safe to print: it is
+ * a plain token, it is what the picker and the shell parser would call the model,
+ * and it lets an operator find the install. The reason never carries any other
+ * field, so a name with a credential in it cannot reach the log.
+ */
+function rowIdentity(model) {
+  if (model === null || typeof model !== "object") return "";
+  const id = model.id === undefined || model.id === null ? "" : String(model.id);
+  return MODEL_ID.test(id) ? ` (id ${id})` : "";
 }
 
 /**
@@ -189,18 +213,23 @@ function catalogLevels(thinking) {
  * needs is skipped rather than failing the whole route.
  *
  * @param models - the catalog's `models` array.
+ * @param options - `log`, the channel a refused row's diagnostic goes to.
  * @returns one `{id, name, path, backend, family, engines, levels}` per servable model.
  */
-export function catalogRows(models) {
+export function catalogRows(models, { log = () => {} } = {}) {
   if (!Array.isArray(models)) throw new Error('catalog: "models" is not a list');
   const gpu = [];
   const cpu = [];
-  for (const model of models) {
+  for (const [position, model] of models.entries()) {
     let row;
     try {
-      if (model === null || typeof model !== "object") throw new Error("not an object");
+      if (model === null || typeof model !== "object") {
+        throw new CatalogRowError("the entry is not an object");
+      }
       const backend = textField(model.backend, "backend");
-      if (backend !== "gpu" && backend !== "cpu") throw new Error("backend is not gpu or cpu");
+      if (backend !== "gpu" && backend !== "cpu") {
+        throw new CatalogRowError("the backend is not gpu or cpu");
+      }
       const quant = model.quant;
       if (
         quant === undefined ||
@@ -208,20 +237,20 @@ export function catalogRows(models) {
         quant === "" ||
         !Number.isFinite(Number(quant))
       ) {
-        throw new Error("quant is not a number");
+        throw new CatalogRowError("quant is not a number");
       }
       // Not used by the block, but the shell parser formats it and skips the
       // model when it cannot; dropping the same rows keeps the two in step.
       const size = model.size_gb;
       if (size !== undefined && size !== null && Number.isNaN(Number(size))) {
-        throw new Error("size_gb is not a number");
+        throw new CatalogRowError("size_gb is not a number");
       }
       // The block's `- id:` line is one `\S+` token to the picker, to the
       // default-model repair in this file and to the shell tool's parser, so an
       // id that is not one cannot be represented; a name is free-form and is
       // quoted by `yamlScalar` instead.
       const id = textField(model.id, "id");
-      if (!MODEL_ID.test(id)) throw new Error("id is not a plain model id");
+      if (!MODEL_ID.test(id)) throw new CatalogRowError("the id is not a plain model id");
       row = {
         id,
         name: textField(model.name, "name"),
@@ -231,9 +260,14 @@ export function catalogRows(models) {
         engines: textField(model.engines || backend, "engines"),
         levels: catalogLevels(model.thinking),
       };
-    } catch {
+    } catch (error) {
       // The shell's parser prints "catalog: skipping …" on stderr and carries
-      // on; the route is still useful for the installs that did parse.
+      // on; the route is still useful for the installs that did parse. Only a
+      // refusal this module raised is a skip — anything else is a defect.
+      if (!(error instanceof CatalogRowError)) throw error;
+      log(
+        `dsh-tinytitan: skipping catalog row ${position + 1}${rowIdentity(model)}: ${error.message}`,
+      );
       continue;
     }
     (row.backend === "gpu" ? gpu : cpu).push(row);
@@ -345,7 +379,7 @@ function buildBlock(rows, options) {
  * @returns the block, ending in a newline.
  */
 export function generateBlock(models, options = {}) {
-  return buildBlock(catalogRows(models), options);
+  return buildBlock(catalogRows(models, { log: options.log }), options);
 }
 
 /**
@@ -811,9 +845,22 @@ export function collectRoute({
   env = process.env,
   run = execFileSync,
   log = () => {},
+  diagnostics = null,
   isExecutable = defaultIsExecutable,
   isDirectory = defaultIsDirectory,
 } = {}) {
+  // Boot and every watcher refresh share one budget, so a still-broken install
+  // is named once rather than once per quiet period. The first failure always
+  // prints, and a diagnostic that changes (another row, another reason) is new
+  // information and prints too — only an exact repeat is dropped.
+  const seen = diagnostics instanceof Set ? diagnostics : null;
+  const report = (message) => {
+    if (seen !== null) {
+      if (seen.has(message)) return;
+      seen.add(message);
+    }
+    log(message);
+  };
   const directory = findModelsDir({ explicit: modelsDir, env, repoRoot, isDirectory });
   if (directory === null) {
     const detail = "no models directory (set modelsDir or TINYTITAN_MODELS_DIR)";
@@ -859,11 +906,11 @@ export function collectRoute({
   if (catalog === null) {
     const scanned = scanModelsFolder(directory, { env });
     for (const skip of scanned.skipped) {
-      log(`dsh-tinytitan: skipping ${skip.path}: ${skip.reason}`);
+      report(`dsh-tinytitan: skipping ${skip.path}: ${skip.reason}`);
     }
     catalog = { models: scanned.models };
   }
-  const rows = catalogRows(catalog.models);
+  const rows = catalogRows(catalog.models, { log: report });
   if (rows.length === 0) {
     const detail = `the catalog describes no servable install under ${directory}`;
     log(`dsh-tinytitan: ${detail}; leaving the llm-pi-ai route as it is`);

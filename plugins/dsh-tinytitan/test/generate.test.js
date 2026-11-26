@@ -22,6 +22,7 @@ import {
   applyDefaultModelToSettings,
   applyRouteThroughSettings,
   applyRouteToSettings,
+  collectRoute,
   DEFAULT_MODEL_SETTINGS_NS,
   ensureDefaultModel,
   findModelsDir,
@@ -537,6 +538,162 @@ test("the shell tool and the generator agree on adversarial scalars", async (t) 
     ADVERSARIAL_NAMES,
   );
   assert.ok(!printed.includes("bad id"), "an id that is not a token is refused by both");
+});
+
+/** A row the writer must refuse, with the diagnostic it must print for it. */
+const MALFORMED = [
+  [
+    { id: "bad-backend_4-Bit", name: "B", backend: "tpu", quant: 4, path: "/m" },
+    "the backend is not gpu or cpu",
+  ],
+  [{ id: "no-quant_4-Bit", name: "B", backend: "gpu", path: "/m" }, "quant is not a number"],
+  [
+    { id: "no-size_4-Bit", name: "B", backend: "gpu", quant: 4, size_gb: "many", path: "/m" },
+    "size_gb is not a number",
+  ],
+  [
+    { id: "bad id", name: "B", backend: "gpu", quant: 4, path: "/m" },
+    "the id is not a plain model id",
+  ],
+  [
+    { id: "no-name_4-Bit", backend: "gpu", quant: 4, path: "/m" },
+    "the name is empty or multi-line",
+  ],
+  [{ id: "no-path_4-Bit", name: "B", backend: "gpu", quant: 4 }, "the path is empty or multi-line"],
+  [
+    { id: "bad-thinking_4-Bit", name: "B", backend: "gpu", quant: 4, path: "/m", thinking: 7 },
+    "thinking is not iterable",
+  ],
+  [null, "the entry is not an object"],
+];
+
+test("a malformed catalog row is reported and the valid rows still serve", () => {
+  // A broken install used to vanish from the picker with nothing said anywhere,
+  // while the shell parser it mirrors prints `catalog: skipping …` on stderr. The
+  // operator needs the same evidence from the built-in writer: which row, which
+  // install when it has a usable id, and what was wrong.
+  const messages = [];
+  const models = [FAKE[0], ...MALFORMED.map(([model]) => model), FAKE[1]];
+  const block = generateBlock(models, { log: (message) => messages.push(message) });
+  assert.deepEqual(
+    messages,
+    MALFORMED.map(
+      ([model, reason], index) =>
+        `dsh-tinytitan: skipping catalog row ${index + 2}` +
+        `${typeof model?.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model.id) ? ` (id ${model.id})` : ""}` +
+        `: ${reason}`,
+    ),
+  );
+  // The two good rows are still there, in their own order, and nothing else is.
+  assert.deepEqual(
+    [...block.matchAll(/^ {8}- id: (.+)$/gm)].map((match) => match[1]),
+    ["alpha_4-Bit", "beta_4-Bit"],
+  );
+});
+
+test("a row diagnostic never quotes the catalog text it refused", () => {
+  // The catalog is data, not a trusted message: an id or name can carry a
+  // credential, a newline or the rest of the file. Only the reason vocabulary
+  // this module owns, the row number and a *validated* id are printed.
+  const messages = [];
+  generateBlock(
+    [
+      {
+        id: "leaky_4-Bit",
+        name: "Evil: name # comment\napiKey: sk-live-SECRET",
+        backend: "tpu",
+        quant: 4,
+        path: "/m",
+      },
+      { id: "not a token: sk-live-SECRET", name: "x", backend: "tpu", quant: 4, path: "/m" },
+    ],
+    { log: (message) => messages.push(message) },
+  );
+  assert.equal(messages.length, 2);
+  for (const message of messages) {
+    assert.ok(!message.includes("SECRET"), message);
+    assert.ok(!message.includes("Evil"), message);
+    assert.ok(!message.includes("\n"), message);
+  }
+  assert.match(
+    messages[0],
+    /^dsh-tinytitan: skipping catalog row 1 \(id leaky_4-Bit\): the backend is not gpu or cpu$/,
+  );
+  assert.match(
+    messages[1],
+    /^dsh-tinytitan: skipping catalog row 2: the backend is not gpu or cpu$/,
+  );
+});
+
+test("an unexpected failure while reading a row is not swallowed", () => {
+  // The old catch was bare: a programming error inside validation read exactly
+  // like a malformed install and disappeared. Only this module's own typed
+  // refusal is a skip; anything else is a defect and has to be visible.
+  const exploding = {
+    get backend() {
+      throw new Error("catalog getter exploded");
+    },
+  };
+  assert.throws(
+    () => generateBlock([FAKE[0], exploding], { log: () => {} }),
+    /catalog getter exploded/,
+  );
+});
+
+test("an all-invalid catalog says so row by row and as a whole", () => {
+  const home = mkdtempSync(join(tmpdir(), "dsh-tinytitan-home-"));
+  const settingsPath = join(home, "settings.yaml");
+  writeFileSync(settingsPath, "ui-theme:\n  preference: dark\n");
+  const messages = [];
+  const result = generateRoute({
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: "/models",
+    settingsPath,
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    run: () => JSON.stringify({ models: MALFORMED.map(([model]) => model) }),
+    log: (message) => messages.push(message),
+  });
+  assert.equal(result.status, "failed");
+  assert.match(result.detail, /describes no servable install/);
+  assert.equal(messages.filter((message) => /skipping catalog row/.test(message)).length, 8);
+  assert.ok(
+    messages.some((message) => /describes no servable install/.test(message)),
+    messages,
+  );
+  // A route that describes nothing must not replace the person's file.
+  assert.equal(readFileSync(settingsPath, "utf8"), "ui-theme:\n  preference: dark\n");
+});
+
+test("a repeated refresh does not repeat the same catalog diagnostic", () => {
+  // The watcher refreshes once per quiet period, so a still-broken install would
+  // otherwise print the same lines on every pass. One budget per refresher: the
+  // first failure is always printed, a new one is printed, a repeat is not.
+  const messages = [];
+  const diagnostics = new Set();
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-models-"));
+  const options = {
+    serverBinary: "/x/TinyTitanServer",
+    modelsDir: directory,
+    env: { PATH: "" },
+    isExecutable: () => true,
+    isDirectory: () => true,
+    diagnostics,
+    log: (message) => messages.push(message),
+  };
+  const run = () => JSON.stringify({ models: [MALFORMED[0][0]] });
+  collectRoute({ ...options, run });
+  collectRoute({ ...options, run });
+  const skips = () => messages.filter((message) => /skipping catalog row/.test(message));
+  assert.equal(skips().length, 1, JSON.stringify(messages));
+
+  // Installing another broken model is new information, so it is printed.
+  collectRoute({
+    ...options,
+    run: () => JSON.stringify({ models: [MALFORMED[0][0], MALFORMED[1][0]] }),
+  });
+  assert.equal(skips().length, 2);
 });
 
 test("the block carries the header, the three switches and the effort ladder", () => {

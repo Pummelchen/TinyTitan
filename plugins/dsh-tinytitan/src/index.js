@@ -121,17 +121,21 @@ export function routeRefresher({
   apply = applyRouteThroughSettings,
   legacy = registerRoute,
 } = {}) {
+  // One budget for boot and every watcher refresh: a broken install is named the
+  // first time it is seen and not again on each quiet period. `collectRoute` is
+  // where it is spent, whichever writer is running.
+  const diagnostics = new Set();
   return (scoped = ctx) => {
     const settings = scoped?.get?.("settings");
     try {
       if (settings && typeof settings.update === "function") {
-        void Promise.resolve(apply({ ...resolved, settings, log })).catch((error) => {
+        void Promise.resolve(apply({ ...resolved, settings, log, diagnostics })).catch((error) => {
           log(
             `dsh-tinytitan: route refresh threw: ${error instanceof Error ? error.message : error}`,
           );
         });
       } else {
-        legacy({ ...resolved, log });
+        legacy({ ...resolved, log, diagnostics });
       }
     } catch (error) {
       log(

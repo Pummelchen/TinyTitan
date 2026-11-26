@@ -89,6 +89,7 @@ export function registerRoute({
   env = process.env,
   run = execFileSync,
   log = () => {},
+  diagnostics = null,
 }) {
   const script = routeScript(repoRoot);
   if (!selfContained && existsSync(script)) {
@@ -164,6 +165,7 @@ export function registerRoute({
       env,
       run,
       log,
+      diagnostics,
     });
     if (written.status === "written-self-contained") {
       written.defaultModel = repairDefaultAfterWrite({
