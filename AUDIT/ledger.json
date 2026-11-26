@@ -1507,13 +1507,13 @@
       "file:line": "examples/embedded/Package.swift:43; examples/plugin/Package.swift:39,47",
       "title": "Example fixtures bind to the checkout directory name",
       "category": "portability / build configuration",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "0004 verification by the examples remediation agent",
       "evidence-before": "The fixtures declare `.package(path: \"../..\")` and reference it as `package: \"TinyTitan\"`. SwiftPM names a path dependency after the directory basename, so any clone or git worktree whose directory is not literally `TinyTitan` fails with `unknown package 'TinyTitan' ... valid packages are: 'examples'`. The prescribed `swift build --package-path examples/...` cannot run in such a checkout before any change.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Both fixtures use `.package(name: \"TinyTitan\", path: \"../..\")`. The exact failing case (worktree basename `examples`) now builds both packages and passes both dependency checks, and a copy named `fixture-copy` does too; the strict 0004 settings and a #warning negative control still hold. See AUDIT/evidence/0036.md.",
+      "commit": "823b8e6b",
       "blocked-reason": null,
       "acceptance-criteria": "`.package(name: \"TinyTitan\", path: \"../..\")` (or an equivalent explicit name) makes both fixtures build from a directory with any name; a test/CI fixture proves it from a differently named worktree.",
       "classification": "confirmed during 0004 verification",
@@ -1845,13 +1845,13 @@
       "file:line": "plugins/dsh-tinytitan/src/config.js:216,345",
       "title": "Route token count and port still coerce non-number input",
       "category": "L3 numeric validation",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "0033 sibling audit by the DSH remediation agent",
       "evidence-before": "`resolveRouteTokenCount` and the `port` resolver still use `Number(...)`/`Number.isFinite`: measured `port: true` -> 1, `port: [8096]` -> 8096, `context: true` -> 1, `context: [65536]` -> 65536. Same class as 0026/0033.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "resolveRouteTokenCount and the port resolver now accept only safe whole numbers or canonical decimal text (empty string stays the documented not-set sentinel for context; the port refusal names the raw value). 2 RED tests (37 refused shapes + accepted boundaries); npm test 185/185 with 0 skips, lint/format clean, test_dsh_route 24 OK. See AUDIT/evidence/0045.md.",
+      "commit": "1867e908",
       "blocked-reason": null,
       "acceptance-criteria": "The token count and port accept only supported numeric types/decimal strings, reject booleans/arrays/empty/whitespace/unsafe integers, keep documented defaults, and have boundary tests.",
       "classification": "static sibling finding",
@@ -1872,6 +1872,44 @@
         "self_audit_steps": [
           "Confirm no documented numeric-string form is rejected accidentally.",
           "Confirm the port range and context floor/ceiling are unchanged."
+        ]
+      }
+    },
+    {
+      "id": "0046",
+      "severity": "S2",
+      "tier": "A",
+      "project": "DSH plugin",
+      "file:line": "plugins/dsh-tinytitan/src/config.js:262,279,295,315,358",
+      "title": "Five more numeric config fields still coerce",
+      "category": "L3 numeric validation",
+      "status": "OPEN",
+      "host": "Linux primary B",
+      "discovered-by": "0045 sibling audit by the DSH remediation agent",
+      "evidence-before": "Measured: `autoGoalRounds: true` -> 1, `[5]` -> 5; `autonomyRounds: true` -> 1; `handoffHops: [3]` -> 3; `handoffAtTokens: [50000]` -> 50000; `handoffMaxChildren: true` -> 1. Same class as 0026/0033/0045.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "All five resolvers use the shared explicit type/range rules, keep documented defaults/ranges/sentinels, and have boundary tests proving the coercions refused.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0045"
+        ],
+        "problem_description": "Five option resolvers still pass values through `Number(value)`, so a boolean or single-element array silently becomes a round count or handoff threshold.",
+        "proposed_solution": [
+          "Switch each resolver to the shared `wholeNumber`/decimal-text validation from 0045.",
+          "Keep each field's documented range and default; preserve any documented empty-string sentinel.",
+          "Add accepted/refused boundary tests for every field."
+        ],
+        "verification_steps": [
+          "Before/after tests show the coerced inputs refused and the documented values unchanged.",
+          "npm test/lint/format and the shell/python parity tests green."
+        ],
+        "self_audit_steps": [
+          "Confirm no documented numeric-string form is rejected accidentally.",
+          "Confirm the defaults and ranges are unchanged."
         ]
       }
     }

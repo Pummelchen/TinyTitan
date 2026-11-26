@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:16 in_progress:2 open:17 start:9 blocked:1**
+**done:18 in_progress:2 open:16 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -45,7 +45,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0033 | S2 | DONE | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
 | 0034 | S2 | DONE | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
-| 0036 | S2 | OPEN | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
+| 0036 | S2 | DONE | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 | 0038 | S3 | OPEN | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
 | 0039 | S1 | OPEN | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
@@ -54,7 +54,8 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0042 | S2 | OPEN | TinyTitanRepack | Writer's raw layer size product is unchecked and unbounded |
 | 0043 | S3 | OPEN | TinyTitanRepack | Compression tool plan total multiplies unchecked |
 | 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
-| 0045 | S2 | OPEN | DSH plugin | Route token count and port still coerce non-number input |
+| 0045 | S2 | DONE | DSH plugin | Route token count and port still coerce non-number input |
+| 0046 | S2 | OPEN | DSH plugin | Five more numeric config fields still coerce |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -337,10 +338,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0036 — Example fixtures bind to the checkout directory name
 
-- S2 / Tier C / OPEN / portability / build configuration
+- S2 / Tier C / DONE / portability / build configuration
 - Project: Embedded and plugin examples; host: Apple Silicon Mac A
 - Location: examples/embedded/Package.swift:43; examples/plugin/Package.swift:39,47
 - Evidence before: The fixtures declare `.package(path: "../..")` and reference it as `package: "TinyTitan"`. SwiftPM names a path dependency after the directory basename, so any clone or git worktree whose directory is not literally `TinyTitan` fails with `unknown package 'TinyTitan' ... valid packages are: 'examples'`. The prescribed `swift build --package-path examples/...` cannot run in such a checkout before any change.
+- Evidence after: Both fixtures use `.package(name: "TinyTitan", path: "../..")`. The exact failing case (worktree basename `examples`) now builds both packages and passes both dependency checks, and a copy named `fixture-copy` does too; the strict 0004 settings and a #warning negative control still hold. See AUDIT/evidence/0036.md.
+- Commit: `823b8e6b`
 
 ## 0037 — CI never compiles the library demo, so its compiler standard can regress
 
@@ -400,8 +403,17 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0045 — Route token count and port still coerce non-number input
 
-- S2 / Tier A / OPEN / L3 numeric validation
+- S2 / Tier A / DONE / L3 numeric validation
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/config.js:216,345
 - Evidence before: `resolveRouteTokenCount` and the `port` resolver still use `Number(...)`/`Number.isFinite`: measured `port: true` -> 1, `port: [8096]` -> 8096, `context: true` -> 1, `context: [65536]` -> 65536. Same class as 0026/0033.
+- Evidence after: resolveRouteTokenCount and the port resolver now accept only safe whole numbers or canonical decimal text (empty string stays the documented not-set sentinel for context; the port refusal names the raw value). 2 RED tests (37 refused shapes + accepted boundaries); npm test 185/185 with 0 skips, lint/format clean, test_dsh_route 24 OK. See AUDIT/evidence/0045.md.
+- Commit: `1867e908`
+
+## 0046 — Five more numeric config fields still coerce
+
+- S2 / Tier A / OPEN / L3 numeric validation
+- Project: DSH plugin; host: Linux primary B
+- Location: plugins/dsh-tinytitan/src/config.js:262,279,295,315,358
+- Evidence before: Measured: `autoGoalRounds: true` -> 1, `[5]` -> 5; `autonomyRounds: true` -> 1; `handoffHops: [3]` -> 3; `handoffAtTokens: [50000]` -> 50000; `handoffMaxChildren: true` -> 1. Same class as 0026/0033/0045.
 

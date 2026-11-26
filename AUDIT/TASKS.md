@@ -2076,3 +2076,50 @@ Two route config fields still go through a coercion that turns booleans and sing
 **Acceptance:** The token count and port accept only supported numeric types/decimal strings, reject booleans/arrays/empty/whitespace/unsafe integers, keep documented defaults, and have boundary tests.
 
 ---
+
+### Finding 0046 (remaining DSH numeric coercions)
+
+<a id="task-0046"></a>
+#### Task 0046 — Five more numeric config fields still coerce
+
+**Project / component:** DSH plugin  
+**Location:** `plugins/dsh-tinytitan/src/config.js:262,279,295,315,358`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 numeric validation  
+**Primary host:** Linux primary B  
+**Prerequisites:** 0045.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+Five option resolvers still pass values through `Number(value)`, so a boolean or single-element array silently becomes a round count or handoff threshold.
+
+**Recorded evidence:** Measured: `autoGoalRounds: true` -> 1, `[5]` -> 5; `autonomyRounds: true` -> 1; `handoffHops: [3]` -> 3; `handoffAtTokens: [50000]` -> 50000; `handoffMaxChildren: true` -> 1. Same class as 0026/0033/0045.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Switch each resolver to the shared `wholeNumber`/decimal-text validation from 0045.
+
+2. Keep each field's documented range and default; preserve any documented empty-string sentinel.
+
+3. Add accepted/refused boundary tests for every field.
+
+
+##### 3. Verification — regression and integration
+
+1. Before/after tests show the coerced inputs refused and the documented values unchanged.
+
+2. npm test/lint/format and the shell/python parity tests green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no documented numeric-string form is rejected accidentally.
+
+2. Confirm the defaults and ranges are unchanged.
+
+
+**Acceptance:** All five resolvers use the shared explicit type/range rules, keep documented defaults/ranges/sentinels, and have boundary tests proving the coercions refused.
+
+---
