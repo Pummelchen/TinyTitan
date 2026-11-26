@@ -8,9 +8,12 @@ numerics -- quantizing once from the original weights beats inheriting somebody
 else's quantization error.
 
 The checkpoint is 360 GB across 131 shards. Nothing here holds the whole thing:
-one shard is fetched, converted and deleted before the next is needed, with a
-background thread fetching shard N+1 while shard N converts. Peak disk is the
-output plus one shard.
+one shard is fetched and converted with a background thread fetching shard N+1
+while shard N converts, and it is deleted once every tensor converted from it is
+in a *finished* output shard (see `release_durable_sources` in `main`). Peak disk
+is the output plus the sources converted since the last 4 GiB flush, and at most
+one fetch-ahead shard -- so a kill before that flush resumes from the sources on
+disk instead of fetching them again.
 
 Three things the official checkpoint does differently from the MLX repack the
 runtime was built against. Each is a silent mis-load if assumed rather than
@@ -631,7 +634,13 @@ def watch_size(dest: Path, progress: Progress, base: float, stop: threading.Even
             continue
 
 
-def download(shard: str, work: Path, progress: Progress | None = None, base: float = 0.0) -> Path:
+def download(
+    shard: str,
+    work: Path,
+    progress: Progress | None = None,
+    base: float = 0.0,
+    expected_size: int | None = None,
+) -> Path:
     """Fetch one shard, resuming a partial file rather than restarting it.
 
     A resume that the endpoint will not serve is not retried as a resume: curl
@@ -646,6 +655,14 @@ def download(shard: str, work: Path, progress: Progress | None = None, base: flo
     the shards before this one already landed: together they turn a 2 GB shard
     from one silent hour into a percentage and an ETA. With no line the watcher
     is not started and the call is exactly what it always was.
+
+    `expected_size` is the shard's size from the server's own `Content-Length`,
+    which `main` has already probed for every shard to size the progress line. A
+    file already that long is what a killed run leaves behind before its output
+    flushes, and it is returned without a *body* request at all: the resume that
+    matters on a 360 GB fetch must not ask the network for bytes it already has.
+    A file of any other length still resumes from its last byte, and the length
+    check on the finished download stays the thing that catches a bad append.
     """
 
     def tell(text: str) -> None:
@@ -656,6 +673,10 @@ def download(shard: str, work: Path, progress: Progress | None = None, base: flo
 
     dest = work / shard
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if expected_size is not None and dest.is_file() and dest.stat().st_size == expected_size:
+        if progress is not None:
+            progress.set(base + expected_size)
+        return dest
     delay = 5
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         url = f"{BASE}/{shard}"
@@ -832,6 +853,19 @@ class OutputWriter:
         self.total += value.nbytes
         if self.bytes >= OUTPUT_SHARD_BYTES:
             self.flush()
+
+    def offset(self) -> int:
+        """The output position after the last tensor added, right now.
+
+        `total` is every byte converted so far, adopted shards included, so this
+        is where a source's last tensor ended in the output stream. Recorded per
+        source, it is what the release rule compares a flush against.
+        """
+        return self.total
+
+    def written(self) -> int:
+        """The bytes in *finished* output shards; the open block is not counted."""
+        return self.total - self.bytes
 
     def flush(self) -> None:
         if not self.block:
@@ -1397,11 +1431,31 @@ def main() -> int:
         }
         if converted:
             shards = [s for s in shards if s not in converted]
+            # A source kept until its output flushed (see the release below) can
+            # still be here after the flush that made it adoptable. Its tensors
+            # are in the adopted output, so it has no reader left.
+            for stale in converted:
+                (work / stale).unlink(missing_ok=True)
             print(
                 f"  {len(converted)} checkpoint shards already converted; "
                 f"{len(shards)} left to fetch and convert",
                 flush=True,
             )
+
+    # Say what the resume can reuse *before* the first shard request: a run that
+    # was killed leaves its in-flight sources in `--work`, and those are the
+    # difference between continuing and starting over on a 360 GB fetch. A
+    # complete one is re-read from disk; a partial one continues from its last
+    # byte (`curl -C -` in `download`).
+    resumable = [s for s in shards if (work / s).is_file()]
+    if resumable:
+        resumable_bytes = sum((work / s).stat().st_size for s in resumable)
+        print(
+            f"  resuming: {len(resumable)} checkpoint shard(s) already in {work} "
+            f"({resumable_bytes / 1e9:.2f} GB); a complete one is not downloaded "
+            "again, a partial one continues from its last byte",
+            flush=True,
+        )
 
     # Fetch shard N+1 while shard N converts.
     #
@@ -1418,16 +1472,17 @@ def main() -> int:
     # Bounds the shards on disk that are fetched but not yet converted, so a
     # link faster than the converter cannot fill --work.
     on_disk = threading.Semaphore(2 * workers)
+    size_of = dict(zip(shards, sizes, strict=True))
 
     def fetch_bounded(shard: str) -> Path:
         on_disk.acquire()
-        return download(shard, work, None, 0.0)
+        return download(shard, work, None, 0.0, size_of.get(shard))
 
     def fetcher() -> None:
         base = 0.0
         for shard, size in zip(shards, sizes, strict=True):
             try:
-                queue.put(download(shard, work, progress, base))
+                queue.put(download(shard, work, progress, base, size))
             except Exception as exc:  # noqa: BLE001
                 queue.put(exc)
                 return
@@ -1451,6 +1506,25 @@ def main() -> int:
 
     threading.Thread(target=fetcher if workers == 1 else parallel_fetcher, daemon=True).start()
     done = 0
+    # A checkpoint shard may leave `--work` only once every tensor converted
+    # from it is in a *finished* output shard. `convert_shard` returns after
+    # `writer.add`, and `add` flushes only when the open block reaches
+    # `OUTPUT_SHARD_BYTES` (4 GiB), so "converted" is not "persisted": the block
+    # it filled may still be in memory. The offset recorded below is the output
+    # position after the source's last tensor; `writer.written()` counts only
+    # finished shards, so `written >= offset` is exactly "this source's bytes
+    # are on disk". An empty-block test (`bytes == 0`) is not the same thing and
+    # never fires: the block at a source boundary is almost never empty, so it
+    # keeps the whole checkpoint until `finish`.
+    pending: dict[Path, int] = {}
+
+    def release_durable_sources() -> None:
+        written = writer.written()
+        for source, offset in list(pending.items()):
+            if written >= offset:
+                source.unlink(missing_ok=True)
+                del pending[source]
+
     while True:
         item = queue.get()
         if item is None:
@@ -1461,13 +1535,18 @@ def main() -> int:
         done += 1
         progress.show(f"{done}/{len(shards)} shards  {progress.amount}")
         convert_shard(item, writer, ngram, args.bits)
-        item.unlink()
+        pending[item] = writer.offset()
+        release_durable_sources()
         if workers > 1:
             on_disk.release()
     progress.finish(f"  fetched and converted {done} of {len(shards)} shards")
 
     writer.finish()
     ngram.finish()
+    # The completion point, after the table is written too: no source has a
+    # reader left. Not earlier, so a kill during the table write still leaves
+    # the sources a retry rebuilds it from.
+    release_durable_sources()
     # Written last: the quantization block lists every tensor whose width
     # differs from the base, which is only known once they have all been seen.
     write_config(config, args.output, writer.index.keys(), args.bits)

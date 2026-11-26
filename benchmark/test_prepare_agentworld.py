@@ -166,9 +166,9 @@ class DurableSourceTests(unittest.TestCase):
         self.dir = pathlib.Path(self.tmp.name)
 
     @staticmethod
-    def writer(buffered: int):
-        """The writer surface the release rule reads."""
-        return SimpleNamespace(bytes=buffered)
+    def writer(written: int):
+        """The writer surface the release rule reads: finished shards only."""
+        return SimpleNamespace(written=lambda: written)
 
     def source(self, name: str) -> pathlib.Path:
         path = self.dir / name
@@ -176,42 +176,53 @@ class DurableSourceTests(unittest.TestCase):
         return path
 
     def test_a_source_waiting_on_one_writer_stays(self):
-        # `--bits 4 8`: the 8-bit writer filled its block and flushed, the
-        # 4-bit one has not. Only one width is durable, so nothing may go.
+        # `--bits 4 8`: the 8-bit writer has written past the source, the 4-bit
+        # one has not. Only one width is durable, so nothing may go.
         source = self.source("model-00001-of-00013.safetensors")
-        pending = [source]
+        pending = {source: {4: 2000, 8: 4000}}
         prepare.release_durable_sources(
             pending,
-            {4: self.writer(1024), 8: self.writer(0)},
+            {4: self.writer(1000), 8: self.writer(9000)},
             prepare.FusedExperts(),
         )
         self.assertTrue(source.exists())
-        self.assertEqual(pending, [source])
+        self.assertEqual(pending, {source: {4: 2000, 8: 4000}})
 
-    def test_a_source_is_dropped_once_every_writer_flushed(self):
+    def test_a_source_is_dropped_once_every_writer_wrote_past_it(self):
         source = self.source("model-00001-of-00013.safetensors")
-        pending = [source]
+        pending = {source: {4: 2000, 8: 4000}}
         prepare.release_durable_sources(
-            pending, {4: self.writer(0), 8: self.writer(0)}, prepare.FusedExperts()
+            pending, {4: self.writer(2000), 8: self.writer(9000)}, prepare.FusedExperts()
         )
         self.assertFalse(source.exists())
-        self.assertEqual(pending, [])
+        self.assertEqual(pending, {})
+
+    def test_an_empty_block_is_not_a_flush(self):
+        # The rule this replaced: `bytes == 0` looks durable, but the writer has
+        # written only 1000 bytes of finished shards while the source ended at
+        # 5000. A block that happens to be empty at a shard boundary is not a
+        # flush past this source -- keeping the whole checkpoint until `finish`.
+        source = self.source("model-00001-of-00013.safetensors")
+        pending = {source: {4: 5000}}
+        prepare.release_durable_sources(pending, {4: self.writer(1000)}, prepare.FusedExperts())
+        self.assertTrue(source.exists())
+        self.assertEqual(pending, {source: {4: 5000}})
 
     def test_a_source_with_experts_still_buffered_stays_after_a_flush(self):
-        # The writers flushed (a layer completed), but this shard supplied an
-        # expert for a layer that has not arrived yet: its bytes exist only in
-        # `FusedExperts`. A writer-only rule deletes the only remaining copy.
+        # The writers are past the source, but it supplied an expert for a layer
+        # that has not arrived yet: its bytes exist only in `FusedExperts`. A
+        # writer-only rule deletes the only remaining copy.
         import numpy as np
 
         held = self.source("model-00001-of-00013.safetensors")
         released = self.source("model-00002-of-00013.safetensors")
         fused = prepare.FusedExperts()
         fused.add(EXPERT.format(0), np.full((64, 64), 1, dtype=np.float32), 4, None, held)
-        pending = [held, released]
-        prepare.release_durable_sources(pending, {4: self.writer(0)}, fused)
+        pending = {held: {4: 100}, released: {4: 100}}
+        prepare.release_durable_sources(pending, {4: self.writer(1000)}, fused)
         self.assertTrue(held.exists())
         self.assertFalse(released.exists())
-        self.assertEqual(pending, [held])
+        self.assertEqual(pending, {held: {4: 100}})
 
     def test_a_completed_layer_releases_its_sources_from_the_fused_buffer(self):
         import numpy as np

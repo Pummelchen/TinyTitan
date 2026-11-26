@@ -1029,6 +1029,19 @@ class OutputWriter:
         if self.bytes >= OUTPUT_SHARD_BYTES:
             self.flush()
 
+    def offset(self) -> int:
+        """The output position after the last tensor added, right now.
+
+        `total` is every byte converted so far, adopted shards included, so this
+        is where a source's last tensor ended in the output stream. Recorded per
+        source, it is what `release_durable_sources` compares a flush against.
+        """
+        return self.total
+
+    def written(self) -> int:
+        """The bytes in *finished* output shards; the open block is not counted."""
+        return self.total - self.bytes
+
     def flush(self) -> None:
         if not self.block:
             return
@@ -1095,40 +1108,38 @@ def convert_shard(
 
 
 def release_durable_sources(
-    pending: list[Path], writers: dict[int, "OutputWriter"], fused: "FusedExperts"
+    pending: dict[Path, dict[int, int]],
+    writers: dict[int, "OutputWriter"],
+    fused: "FusedExperts",
 ) -> None:
     """Unlink every converted source whose output has reached disk.
 
-    A checkpoint shard may leave `--work` only once every tensor converted from
-    it is durable, and "converted" is not "durable":
+    `pending` pairs a source shard with the output offset its last tensor ended
+    at, per width (`writer.offset()` when it was converted). `written()` counts
+    only finished shards, so `written >= offset` is exactly "every tensor
+    converted from this source has been written". A source is dropped only when
+    *every* width has written past it -- on a `--bits 4 8` pass the two writers
+    hold different byte counts.
 
-    - `OutputWriter.add` buffers tensors in `block` until `OUTPUT_SHARD_BYTES`
-      (4 GiB) and only `flush` writes them, so `writer.bytes == 0` -- an empty
-      block -- is the durable point for a start-of-shard tensor.
-    - A per-expert checkpoint's routed experts sit in `FusedExperts` until their
-      whole layer has arrived, which can be many shards later, so
-      `fused.hold()` names the sources that must stay even after a flush.
+    A per-expert checkpoint's routed experts are held in `FusedExperts` until
+    their whole layer has arrived, which can be many shards later; `fused.hold()`
+    names those sources, and they stay even after the writers are past them.
 
-    The main loop used to `unlink` each source as `convert_shard` returned, with
-    both buffers still holding its bytes. A kill before the next flush then lost
-    the converted work while the source was already gone, so the resume fetched
-    every shard since the last flush again -- most of a fetch on a 250 GB
-    checkpoint, and nothing adoptable at all if the kill came before the first
-    output shard.
-
-    Both widths of a `--bits 4 8` pass are separate writers, so *every* writer
-    must have flushed, not just the one that filled its block last.
+    An empty-block test (`bytes == 0`) is the wrong instrument here and was the
+    first shape tried: `add` flushes in the middle of a shard, so at a shard
+    boundary the open block is almost never empty, and a rule that waits for it
+    keeps the whole checkpoint on disk until `finish` -- measured on the test
+    fixture, every source at every threshold but 1. The offset makes the release
+    point the flush that passes the source, not a coincidence of where a shard
+    happened to end.
     """
-    if any(writer.bytes for writer in writers.values()):
-        return
     held = fused.hold()
-    still_pending = []
-    for source in pending:
+    for source, offsets in list(pending.items()):
         if source in held:
-            still_pending.append(source)
-        else:
+            continue
+        if all(writers[width].written() >= offset for width, offset in offsets.items()):
             source.unlink(missing_ok=True)
-    pending[:] = still_pending
+            del pending[source]
 
 
 def plan(index: dict, width: int) -> None:
@@ -1301,19 +1312,19 @@ def main() -> int:
         except Exception:  # noqa: BLE001  # an unreadable header is not fatal here
             continue
     progress = Progress("converting", sum(sizes.values()) or None)
-    # A source may leave `--work` only once its output has reached disk. Both
-    # buffers are named in `release_durable_sources`: the writer block (up to
-    # 4 GiB) and, for a per-expert checkpoint, `FusedExperts` until the layer
-    # is whole. Until then a kill resumes from these files instead of fetching
-    # them again.
-    pending: list[Path] = []
+    # A source may leave `--work` only once the output it produced is in a
+    # finished shard, recorded as the offset its last tensor ended at. The
+    # writers buffer up to `OUTPUT_SHARD_BYTES` (4 GiB) and, for a per-expert
+    # checkpoint, `FusedExperts` holds experts until their layer is whole, so a
+    # kill before that flush resumes from these files instead of fetching them.
+    pending: dict[Path, dict[int, int]] = {}
     done = 0
     try:
         for path in prefetch_shards(shards, lambda s: download(s, work, progress, sizes.get(s))):
             done += 1
             progress.show(f"{done}/{len(shards)} shards  {progress.amount}")
             convert_shard(path, writers, fused, experts_per_layer)
-            pending.append(path)
+            pending[path] = {width: writer.offset() for width, writer in writers.items()}
             release_durable_sources(pending, writers, fused)
     except BaseException:
         stop_download()

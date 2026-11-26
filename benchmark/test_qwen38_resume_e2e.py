@@ -40,6 +40,7 @@ import hashlib
 import http.server
 import io
 import json
+import os
 import pathlib
 import shutil
 import signal
@@ -300,6 +301,25 @@ class _MirrorHandler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *_args) -> None:  # keep the test output readable
         pass
+
+    def do_HEAD(self) -> None:  # noqa: N802 - http.server's spelling
+        # `remote_size` probes each shard with a HEAD before the fetch, so a
+        # size-aware resume (a complete source is not requested again) can be
+        # exercised here. HEAD does not touch `faults`: a fault belongs to the
+        # body fetch, not to the size probe.
+        path = urllib.parse.urlparse(self.path).path
+        if "/main/" not in path:
+            self.send_error(404)
+            return
+        name = path.split("/main/", 1)[1]
+        data = self.server.files.get(name)
+        if data is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
 
     def do_GET(self) -> None:  # noqa: N802 - http.server's spelling
         path = urllib.parse.urlparse(self.path).path
@@ -1163,6 +1183,261 @@ class KilledProcessTests(unittest.TestCase):
         self.assertIn("resuming from", log)
         self.assertFalse(list(self.out.glob("*.partial")), log)
         self.assertEqual(fingerprint(self.out), baseline_fingerprint())
+
+    def test_a_kill_before_the_first_flush_keeps_its_sources(self) -> None:
+        # The kill that matters on a 360 GB fetch: the output block has not
+        # reached its flush size yet, so nothing is adoptable and the only
+        # resume material is the source shards in `--work`. They used to be
+        # unlinked as each one converted, so this resume re-downloaded all of
+        # them. `OUTPUT_SHARD_BYTES` is set past the whole fixture so no flush
+        # can make a source safely droppable before the kill.
+        driver = self.root / "driver.py"
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
+            "import prepare_qwen38 as prepare\n"
+            "prepare.OUTPUT_SHARD_BYTES = 10 << 30\n"
+            "raise SystemExit(prepare.main())\n"
+        )
+        first, second = (
+            "model-00001-of-00005.safetensors",
+            "model-00002-of-00005.safetensors",
+        )
+        log_path = self.root / "killed.log"
+        with log_path.open("w") as log_handle:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(driver),
+                    "--output",
+                    str(self.out),
+                    "--work",
+                    str(self.work),
+                    "--endpoint",
+                    self.server.base,
+                ],
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+            )
+            # A GET for the third shard proves the first was converted (the
+            # fetcher only moves on once the converter took it) and the second
+            # is on disk. No flush has happened, so nothing is adoptable.
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                if self.server.requests_for("model-00003-of-00005.safetensors"):
+                    break
+                if process.poll() is not None:
+                    break
+                time.sleep(0.005)
+            still_running = process.poll() is None
+            if still_running:
+                process.send_signal(signal.SIGKILL)
+            process.wait(timeout=15)
+        killed_log = log_path.read_text()
+        self.assertTrue(
+            still_running, f"the conversion finished before it could be killed:\n{killed_log}"
+        )
+        self.assertFalse(
+            list(self.out.glob("model-[0-9][0-9][0-9][0-9][0-9].safetensors")),
+            f"a flush happened before the kill, so this is not the case under test:\n{killed_log}",
+        )
+        for shard in (first, second):
+            self.assertTrue(
+                (self.work / shard).is_file(),
+                f"{shard} was dropped before its output reached disk:\n{killed_log}",
+            )
+
+        mark = len(self.server.requests)
+        code, log = run_converter(
+            self.out, self.work, self.server.base, patches={"OUTPUT_SHARD_BYTES": 10 << 30}
+        )
+        self.assertEqual(code, 0, log)
+        self.assertIn("resuming:", log)
+        refetched = {
+            request["file"]
+            for request in self.server.requests[mark:]
+            if request["file"] in (first, second)
+        }
+        self.assertFalse(refetched, f"the resume fetched {sorted(refetched)} again:\n{log}")
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint())
+
+
+@requires_deps
+class DurableReleaseTests(unittest.TestCase):
+    """When a source may leave `--work`, and what a kill there can reuse.
+
+    The fixture's per-shard output is uneven; a threshold just past the second
+    shard's cumulative output makes the third conversion's flush land inside the
+    third shard. Everything converted before it is then durable, and only the
+    shard the flush stopped in may stay -- the block-empty rule this replaces
+    would keep all five, because the open block is almost never empty at a
+    shard boundary.
+    """
+
+    def setUp(self) -> None:
+        self.files, _plan = checkpoint()
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-e2e-durable-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.mirror_ctx = mirror(self.files)
+        self.server = self.mirror_ctx.__enter__()
+        self.addCleanup(self.mirror_ctx.__exit__, None, None, None)
+        self.out = self.root / "out"
+        self.work = self.root / "work"
+        self.shards = sorted(name for name in self.files if name.endswith(".safetensors"))
+        self.offsets = self.shard_offsets()
+        self.threshold = self.offsets[1] + 1
+
+    def shard_offsets(self) -> list[int]:
+        """Cumulative output bytes after each source, in shard order.
+
+        Converted through the real `convert_shard` with no flush, so these are
+        the numbers the converter's own threshold sees. The n-gram rows go to
+        the table, not the writer, so a stub stands in for it.
+        """
+        root = self.root / "measure"
+        writer = prepare.OutputWriter(root)
+        saved = prepare.OUTPUT_SHARD_BYTES
+        prepare.OUTPUT_SHARD_BYTES = 10 << 30
+        try:
+            cumulative = []
+            for shard in self.shards:
+                source = root / shard
+                source.write_bytes(self.files[shard])
+                prepare.convert_shard(source, writer, mock.Mock(), prepare.BITS_4)
+                cumulative.append(writer.total)
+            return cumulative
+        finally:
+            prepare.OUTPUT_SHARD_BYTES = saved
+
+    def run_converter(self, patches: dict | None = None) -> tuple[int, str]:
+        return run_converter(
+            self.out,
+            self.work,
+            self.server.base,
+            extra=("--fetch-workers", "1"),
+            patches=patches,
+        )
+
+    def kill_after_conversions(self, count: int) -> tuple[str, list[str]]:
+        """SIGKILL the converter once `count` shards have been converted."""
+        driver = self.root / "kill-driver.py"
+        marker = self.root / "converted.txt"
+        driver.write_text(
+            "import os, signal, sys\n"
+            "from pathlib import Path\n"
+            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
+            "import prepare_qwen38 as prepare\n"
+            f"prepare.OUTPUT_SHARD_BYTES = {self.threshold}\n"
+            f"MARKER = Path({str(marker)!r})\n"
+            f"STOP_AFTER = {count}\n"
+            "real = prepare.convert_shard\n"
+            "converted = []\n"
+            "def stopping(path, writer, ngram, width):\n"
+            "    if len(converted) == STOP_AFTER:\n"
+            "        MARKER.write_text('\\n'.join(str(p) for p in converted))\n"
+            "        os.kill(os.getpid(), signal.SIGSTOP)\n"
+            "    real(path, writer, ngram, width)\n"
+            "    converted.append(path)\n"
+            "prepare.convert_shard = stopping\n"
+            "raise SystemExit(prepare.main())\n"
+        )
+        log_path = self.root / "killed.log"
+        with log_path.open("w") as log_handle:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(driver),
+                    "--output",
+                    str(self.out),
+                    "--work",
+                    str(self.work),
+                    "--endpoint",
+                    self.server.base,
+                    "--fetch-workers",
+                    "1",
+                ],
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+            )
+            stopped: dict = {}
+
+            def reap() -> None:
+                stopped["status"] = os.waitpid(process.pid, os.WUNTRACED)
+
+            watcher = threading.Thread(target=reap, daemon=True)
+            watcher.start()
+            watcher.join(120)
+            if watcher.is_alive():
+                process.kill()
+                os.waitpid(process.pid, 0)
+                raise AssertionError("never reached the stop:\n" + log_path.read_text())
+            if "status" not in stopped:
+                raise AssertionError("the stop watcher failed:\n" + log_path.read_text())
+            _pid, status = stopped["status"]
+            if not os.WIFSTOPPED(status):
+                process.returncode = os.waitstatus_to_exitcode(status)
+                raise AssertionError(
+                    f"finished before the kill (exit {process.returncode}):\n"
+                    + log_path.read_text()
+                )
+            converted = marker.read_text().splitlines() if marker.exists() else []
+            os.kill(process.pid, signal.SIGKILL)
+            os.waitpid(process.pid, 0)
+            process.returncode = -signal.SIGKILL
+        return log_path.read_text(), converted
+
+    def test_a_mid_run_flush_releases_the_earlier_sources(self) -> None:
+        at_first_finish: dict[str, list[str]] = {}
+        real_finish = prepare.OutputWriter.finish
+
+        def recording_finish(writer):
+            at_first_finish.setdefault(
+                "present", sorted(path.name for path in self.work.glob("*.safetensors"))
+            )
+            return real_finish(writer)
+
+        with mock.patch.object(prepare.OutputWriter, "finish", recording_finish):
+            code, log = self.run_converter({"OUTPUT_SHARD_BYTES": self.threshold})
+        self.assertEqual(code, 0, log)
+        retained = at_first_finish["present"]
+        self.assertNotIn(
+            self.shards[0],
+            retained,
+            f"the first source's output was flushed but it was kept until finish:\n{log}",
+        )
+        self.assertTrue(
+            retained,
+            f"every source was released before finish, so none came from the flush interval:\n{log}",
+        )
+        self.assertLess(
+            len(retained),
+            len(self.shards),
+            f"nothing was released mid-run, so this is the retain-everything case:\n{log}",
+        )
+
+    def test_a_kill_after_a_flush_reuses_the_adopted_output_and_the_sources_left(self) -> None:
+        log, converted = self.kill_after_conversions(3)
+        self.assertEqual(len(converted), 3, converted)
+        converted = [pathlib.Path(entry).name for entry in converted]
+        released = [name for name in converted if not (self.work / name).is_file()]
+        retained = [name for name in converted if (self.work / name).is_file()]
+        self.assertIn(converted[0], released, f"the flushed source was kept:\n{log}")
+        self.assertTrue(retained, f"the source past the flush was dropped:\n{log}")
+        self.assertFalse((self.out / "model.safetensors.index.json").exists())
+
+        mark = len(self.server.requests)
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        self.assertIn("already converted", log)
+        self.assertIn("resuming:", log)
+        # Everything the killed run had is reusable: the flushed sources through
+        # the adopted output, the rest from `--work`. A source that is not
+        # fetched issues no GET at all (the size comes from a HEAD), so an empty
+        # window is exactly "not requested again".
+        for name in released + retained:
+            got = [request for request in self.server.requests[mark:] if request["file"] == name]
+            self.assertEqual(got, [], f"the resume fetched {name} again:\n{log}")
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
 
 
 @requires_deps

@@ -315,20 +315,24 @@ def mirror(files: dict[str, bytes]):
 
 
 def body_requests(server: Mirror, name: str, files: dict[str, bytes], since: int = 0) -> list[dict]:
-    """The requests that moved payload bytes for `name`.
+    """The requests that moved payload bytes for `name`, after position `since`.
 
     The size probe reads the 8-byte length and then the header, so a ranged
     request no longer than the header region is not a body fetch. Anything
-    larger -- or un-ranged -- is. `since` skips the requests the killed run
-    itself made.
+    larger -- or un-ranged -- is. `since` is an index into the *mirror's* whole
+    request log, taken before the run under test: filtering the per-file list at
+    a global index, as this first did, returns an empty slice and makes every
+    "not fetched again" assertion pass while asserting nothing.
     """
     limit = 8 + header_bytes(files[name])
-    out = []
-    for request in server.requests_for(name)[since:]:
-        span = request["range"]
-        if span is None or span[1] - span[0] + 1 > limit:
-            out.append(request)
-    return out
+    with server.lock:
+        window = list(server.requests[since:])
+    return [
+        request
+        for request in window
+        if request["file"] == name
+        and (request["range"] is None or request["range"][1] - request["range"][0] + 1 > limit)
+    ]
 
 
 # --- running the converter --------------------------------------------------
@@ -805,6 +809,156 @@ class KilledBeforeFlushTests(RestoresModuleState):
         self.assertEqual(code, 0, log)
         self.assertIn(f"resuming: {len(present)} checkpoint shard(s) already in", log)
         self.assertEqual(fingerprint(prefix), baseline("fused", (4,))[4], log)
+
+
+@requires_deps
+class DurableReleaseTests(RestoresModuleState):
+    """A mid-run flush releases the sources it wrote, and only those.
+
+    The fixture's per-shard output is uneven (the expert shard is much larger),
+    so a threshold placed just past the second shard's cumulative output makes
+    the third conversion's flush land inside that shard. Everything converted
+    before reachable output is then durable and may go; the shard the flush
+    stopped in may not. The threshold is derived from the fixture, not guessed.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.files, _plan = checkpoint_files(fused_plan(), 8)
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-agentworld-durable-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.mirror_ctx = mirror(self.files)
+        self.server = self.mirror_ctx.__enter__()
+        self.addCleanup(self.mirror_ctx.__exit__, None, None, None)
+        self.work = self.root / "work"
+        self.prefix = self.root / "out"
+        self.argv = ["--bits", "4", "8", "--output", str(self.prefix), "--work", str(self.work)]
+        self.shards = sorted(name for name in self.files if name.endswith(".safetensors"))
+        self.threshold = self.offsets()[4][1] + 1
+
+    def out_paths(self, prefix: pathlib.Path, bits: tuple) -> dict[int, pathlib.Path]:
+        if len(bits) == 1:
+            return {bits[0]: prefix}
+        return {width: pathlib.Path(f"{prefix}-{width}bit") for width in bits}
+
+    def offsets(self) -> dict[int, list[int]]:
+        """Cumulative output bytes after each source, per width, in shard order.
+
+        Converted through the real `convert_shard` into real `OutputWriter`s with
+        no flush, so these are the numbers the converter's own threshold sees.
+        """
+        source = self.root / "measure-source"
+        source.mkdir()
+        for name in self.shards:
+            (source / name).write_bytes(self.files[name])
+        saved = prepare.OUTPUT_SHARD_BYTES
+        prepare.OUTPUT_SHARD_BYTES = 10 << 30
+        try:
+            offsets = {}
+            for width in (4, 8):
+                writer = prepare.OutputWriter(self.root / f"measure-{width}bit")
+                fused = prepare.FusedExperts()
+                cumulative = []
+                for name in self.shards:
+                    prepare.convert_shard(source / name, {width: writer}, fused, 8)
+                    cumulative.append(writer.total)
+                offsets[width] = cumulative
+            return offsets
+        finally:
+            prepare.OUTPUT_SHARD_BYTES = saved
+
+    def run_with_one_fetcher(self, patches: dict, finish=None) -> tuple[int, str]:
+        """`main()` in this process with one fetcher, so the conversion order is
+        the shard order the offsets were measured in."""
+        real_prefetch = prepare.prefetch_shards
+
+        def one_fetcher(shards, fetch):
+            return real_prefetch(shards, fetch, fetchers=1, depth=2)
+
+        stack = contextlib.ExitStack()
+        with stack:
+            if finish is not None:
+                stack.enter_context(mock.patch.object(prepare.OutputWriter, "finish", finish))
+            return run_in_process(
+                self.prefix,
+                self.work,
+                self.server.base,
+                extra=("--bits", "4", "8"),
+                patches={"prefetch_shards": one_fetcher, **patches},
+            )
+
+    def test_a_mid_run_flush_releases_the_earlier_sources(self) -> None:
+        at_first_finish: dict[str, list[str]] = {}
+        real_finish = prepare.OutputWriter.finish
+
+        def recording_finish(writer):
+            at_first_finish.setdefault(
+                "present", sorted(path.name for path in self.work.glob("*.safetensors"))
+            )
+            return real_finish(writer)
+
+        code, log = self.run_with_one_fetcher(
+            {"OUTPUT_SHARD_BYTES": self.threshold}, finish=recording_finish
+        )
+        self.assertEqual(code, 0, log)
+        retained = at_first_finish["present"]
+        self.assertNotIn(
+            self.shards[0],
+            retained,
+            f"the first source's output was flushed but it was kept until finish:\n{log}",
+        )
+        self.assertTrue(
+            retained,
+            f"every source was released before finish, so none came from the flush interval:\n{log}",
+        )
+        self.assertLess(
+            len(retained),
+            len(self.shards),
+            f"nothing was released mid-run, so this is the retain-everything case:\n{log}",
+        )
+
+    def test_a_kill_after_a_flush_keeps_only_the_unflushed_sources(self) -> None:
+        run = kill_at_conversion_boundary(
+            self.root,
+            self.server.base,
+            self.argv,
+            stop_after=3,
+            output_shard_bytes=self.threshold,
+        )
+        converted = [source.name for source in run.converted]
+        self.assertEqual(len(converted), 3, converted)
+        self.assertFalse(
+            (self.work / converted[0]).exists(),
+            "the first source's output was flushed but the source was kept",
+        )
+        self.assertTrue(
+            (self.work / converted[-1]).is_file(),
+            "the source the last flush stopped in was dropped before it was durable",
+        )
+        retained = [name for name in converted if (self.work / name).is_file()]
+        released = [name for name in converted if name not in retained]
+        self.assertTrue(retained and released, (released, retained))
+
+        mark = len(self.server.requests)
+        code, log = run_resume(self.root, self.server.base, self.argv)
+        self.assertEqual(code, 0, log)
+        self.assertIn("resuming:", log)
+        # This converter adopts no output, so the sources released at the flush
+        # are fetched again and the unflushed ones are converted from disk.
+        for name in retained:
+            self.assertEqual(
+                body_requests(self.server, name, self.files, mark),
+                [],
+                f"the resume fetched the retained source {name} again:\n{log}",
+            )
+        for name in released:
+            self.assertTrue(
+                body_requests(self.server, name, self.files, mark),
+                f"{name}'s output was released, so the resume must fetch it again:\n{log}",
+            )
+        for width, out in self.out_paths(self.prefix, (4, 8)).items():
+            with self.subTest(width=width):
+                self.assertEqual(fingerprint(out), baseline("fused", (4, 8))[width], log)
 
 
 @requires_deps
