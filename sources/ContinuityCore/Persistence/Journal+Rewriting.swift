@@ -126,7 +126,7 @@ extension FileJournal {
         do {
             try validateRegularFile(
                 descriptor: handle, url: temporary, using: fileSystem,
-                ownerAndMode: false)
+                checkOwner: false, checkMode: false)
         } catch {
             fileSystem.close(handle)
             _ = fileSystem.unlink(temporary.path)

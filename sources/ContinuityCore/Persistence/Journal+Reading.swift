@@ -86,7 +86,7 @@ extension FileJournal {
         // refused.
         try validateRegularFile(
             descriptor: descriptor, url: url,
-            using: SystemJournalFileSystem(), ownerAndMode: false)
+            using: SystemJournalFileSystem(), checkOwner: false, checkMode: false)
         var contents = Data()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
         while true {

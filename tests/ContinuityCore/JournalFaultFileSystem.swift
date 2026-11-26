@@ -54,6 +54,9 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         var readPlan: [ReadOutcome] = []
         var fstatModeOverride: mode_t?
         var fstatUIDOverride: uid_t?
+        /// Apply an override only to this path's descriptor, so a test can
+        /// make the journal look foreign without making its lock look foreign.
+        var fstatOverridePath: String?
         var opens = 0
         var writes = 0
         var reads = 0
@@ -135,8 +138,11 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         state.withLock { $0.fstatModeOverride = mode }
     }
 
-    func overrideOwner(_ uid: uid_t?) {
-        state.withLock { $0.fstatUIDOverride = uid }
+    func overrideOwner(_ uid: uid_t?, onlyFor path: String? = nil) {
+        state.withLock {
+            $0.fstatUIDOverride = uid
+            $0.fstatOverridePath = path
+        }
     }
 
     func holdRename(entered: DispatchSemaphore, release: DispatchSemaphore) {
@@ -306,9 +312,16 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     func fstat(_ descriptor: Int32) -> (status: stat, error: Int32) {
         var (status, error) = real.fstat(descriptor)
         guard error == 0 else { return (status, error) }
-        let override = state.withLock { ($0.fstatModeOverride, $0.fstatUIDOverride) }
-        if let mode = override.0 { status.st_mode = mode }
-        if let uid = override.1 { status.st_uid = uid }
+        let override = state.withLock {
+            (mode: $0.fstatModeOverride, uid: $0.fstatUIDOverride, path: $0.fstatOverridePath)
+        }
+        if let path = override.path,
+            state.withLock({ $0.descriptorPaths[descriptor] }) != path
+        {
+            return (status, 0)
+        }
+        if let mode = override.mode { status.st_mode = mode }
+        if let uid = override.uid { status.st_uid = uid }
         return (status, 0)
     }
 }

@@ -64,7 +64,7 @@ extension FileJournal {
         do {
             try validateRegularFile(
                 descriptor: descriptor, url: lockURL, using: fileSystem,
-                ownerAndMode: false)
+                checkOwner: true, checkMode: false)
         } catch {
             fileSystem.close(descriptor)
             throw error
@@ -107,7 +107,7 @@ extension FileJournal {
         do {
             try validateRegularFile(
                 descriptor: descriptor, url: url, using: fileSystem,
-                ownerAndMode: true)
+                checkOwner: true, checkMode: true)
         } catch {
             fileSystem.close(descriptor)
             throw error
@@ -124,17 +124,19 @@ extension FileJournal {
     /// is no second lookup between it and the first write.
     static func validateRegularFile(
         descriptor: Int32, url: URL, using fileSystem: any JournalFileSystem,
-        ownerAndMode: Bool
+        checkOwner: Bool, checkMode: Bool
     ) throws(JournalError) {
         let (status, error) = fileSystem.fstat(descriptor)
         guard error == 0 else { throw .readFailed(url, errno: -error) }
         guard status.st_mode & S_IFMT == S_IFREG else {
             throw .notAFile(url)
         }
-        guard status.st_uid == geteuid() else {
-            throw .wrongOwner(url, uid: status.st_uid)
+        if checkOwner {
+            guard status.st_uid == geteuid() else {
+                throw .wrongOwner(url, uid: status.st_uid)
+            }
         }
-        if ownerAndMode, status.st_mode & 0o077 != 0 {
+        if checkMode, status.st_mode & 0o077 != 0 {
             throw .insecurePermissions(url, mode: status.st_mode)
         }
     }
