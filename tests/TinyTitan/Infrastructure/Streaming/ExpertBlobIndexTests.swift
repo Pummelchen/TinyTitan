@@ -139,6 +139,165 @@ struct ExpertBlobIndexTests {
                 expectedCount: 1, expectedFrames: 1)
         }
     }
+
+    /// `(phaseBytes + blockBytes - 1) / blockBytes` traps at `UInt64.max`,
+    /// which a corrupt `layout.json` can reach through its stride. The ceiling
+    /// has to be exact and total instead.
+    @Test("Block counts are exact ceilings, including at the integer limits")
+    func blockCountsAreExactCeilings() {
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 0, blockBytes: 4096) == 0)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4096, blockBytes: 0) == 0)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 1, blockBytes: 4096) == 1)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4095, blockBytes: 4096) == 1)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4096, blockBytes: 4096) == 1)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4097, blockBytes: 4096) == 2)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4_194_304, blockBytes: 4096) == 1024)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: 4_194_305, blockBytes: 4096) == 1025)
+        // The maximum phase the format's 128-block limit allows at 1 MiB blocks.
+        #expect(
+            ExpertBlobIndex.blockCount(phaseBytes: 128 << 20, blockBytes: 1 << 20) == 128)
+        #expect(
+            ExpertBlobIndex.blockCount(phaseBytes: (128 << 20) + 1, blockBytes: 1 << 20)
+                == 129)
+        // Both of these overflowed the old `phaseBytes + blockBytes - 1`.
+        #expect(
+            ExpertBlobIndex.blockCount(phaseBytes: .max, blockBytes: 4096)
+                == 4_503_599_627_370_496)
+        #expect(ExpertBlobIndex.blockCount(phaseBytes: .max, blockBytes: 1) == .max)
+        #expect(
+            ExpertBlobIndex.blockCount(phaseBytes: UInt64(Int.max), blockBytes: 4096)
+                == UInt64(Int.max) / 4096 + 1)
+    }
+
+    /// The reader's limit is `maximumBlocksPerExpert`, and it must be reported
+    /// as the format's typed failure, not trap while computing it or converting
+    /// it to `Int`.
+    @Test("A phase that needs more blocks than the format allows is refused")
+    func refusesTooManyBlocks() throws {
+        let data = ExpertBlobIndex.encode(
+            [ExpertBlobIndex.Entry(frames: [.init(offset: 0, length: 1)])],
+            blockBytes: 1 << 20)
+        do {
+            _ = try ExpertBlobIndex.decodeLayout(
+                data, expectedCount: 1, phase0Bytes: 129 << 20, phase1Bytes: nil)
+            Issue.record("a 129-block phase must be refused")
+        } catch let failure as ExpertBlobIndex.Failure {
+            guard case .badBlockCount(let blocks) = failure else {
+                Issue.record("unexpected failure \(failure)")
+                return
+            }
+            #expect(blocks == 129)
+        }
+    }
+
+    @Test("A phase size at the integer limit is refused, not trapped")
+    func refusesPhaseAtTheIntegerLimit() throws {
+        let data = ExpertBlobIndex.encode(
+            [ExpertBlobIndex.Entry(frames: [.init(offset: 0, length: 1)])],
+            blockBytes: 4096)
+        do {
+            _ = try ExpertBlobIndex.decodeLayout(
+                data, expectedCount: 1, phase0Bytes: .max, phase1Bytes: nil)
+            Issue.record("a phase of UInt64.max bytes must be refused")
+        } catch let failure as ExpertBlobIndex.Failure {
+            guard case .badBlockCount(let blocks) = failure else {
+                Issue.record("unexpected failure \(failure)")
+                return
+            }
+            #expect(blocks == 4_503_599_627_370_496)
+        }
+    }
+
+    /// The writer->reader contract: the serialized v3 bytes are the documented
+    /// layout, and decoding them with the geometry that produced them returns
+    /// the same entries. Any change here would rewrite every `.idx` on disk.
+    @Test("A v3 index round-trips and keeps its serialized bytes")
+    func v3RoundTripsUnchanged() throws {
+        let blockBytes: UInt64 = 4096
+        let phase0Bytes: UInt64 = 3 * blockBytes
+        let phase1Bytes: UInt64 = 2 * blockBytes
+        let entries = Self.sample(4, frames: 5)
+        let data = ExpertBlobIndex.encode(entries, blockBytes: blockBytes)
+
+        var expected: [UInt8] = Array("TTXI".utf8)
+        expected += withUnsafeBytes(
+            of: ExpertBlobIndex.currentVersion.littleEndian, Array.init)
+        expected.append(UInt8(blockBytes.trailingZeroBitCount))
+        expected.append(0)
+        expected += withUnsafeBytes(of: UInt32(entries.count).littleEndian, Array.init)
+        for entry in entries {
+            for blob in entry.frames {
+                expected += withUnsafeBytes(of: blob.offset.littleEndian, Array.init)
+                expected += withUnsafeBytes(of: blob.length.littleEndian, Array.init)
+            }
+        }
+        #expect(Array(data) == expected)
+
+        let layout = try ExpertBlobIndex.decodeLayout(
+            data, expectedCount: entries.count,
+            phase0Bytes: phase0Bytes, phase1Bytes: phase1Bytes)
+        #expect(layout.blockBytes == blockBytes)
+        #expect(layout.entries == entries)
+    }
+
+    /// A block's destination is its start and its exact decoded size, and an
+    /// index outside the phase is nil rather than a wrapped offset.
+    @Test("Block destinations cover each phase exactly")
+    func blockDestinationsAreExact() throws {
+        let blockBytes: UInt64 = 4096
+        let phase0: UInt64 = 10_000
+        let phase1: UInt64 = 5_000
+        let first = try #require(
+            ExpertBlobIndex.blockDestination(
+                index: 0, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes))
+        #expect(first.offset == 0)
+        #expect(first.expected == 4_096)
+        #expect(first.phase == 0)
+        let phase0Last = try #require(
+            ExpertBlobIndex.blockDestination(
+                index: 2, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes))
+        #expect(phase0Last.offset == 8_192)
+        #expect(phase0Last.expected == 1_808)
+        #expect(phase0Last.phase == 0)
+        let phase1First = try #require(
+            ExpertBlobIndex.blockDestination(
+                index: 3, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes))
+        #expect(phase1First.offset == phase0)
+        #expect(phase1First.expected == 4_096)
+        #expect(phase1First.phase == 1)
+        let phase1Last = try #require(
+            ExpertBlobIndex.blockDestination(
+                index: 4, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes))
+        #expect(phase1Last.offset == phase0 + 4_096)
+        #expect(phase1Last.expected == 904)
+        #expect(phase1Last.phase == 1)
+        #expect(
+            ExpertBlobIndex.blockDestination(
+                index: 5, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes) == nil)
+        #expect(
+            ExpertBlobIndex.blockDestination(
+                index: -1, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes) == nil)
+    }
+
+    @Test("A tail offset that would wrap the address space has no destination")
+    func refusesWrappingBlockDestination() {
+        let blockBytes: UInt64 = 4096
+        let phase0 = UInt64.max - 1
+        let phase1: UInt64 = 10
+        let tailStart = Int(
+            ExpertBlobIndex.blockCount(phaseBytes: phase0, blockBytes: blockBytes))
+        // One block past the first tail block: `phase0 + blockBytes` wraps.
+        #expect(
+            ExpertBlobIndex.blockDestination(
+                index: tailStart + 1, phase0Bytes: phase0, phase1Bytes: phase1,
+                blockBytes: blockBytes) == nil)
+    }
 }
 
 /// The whole scheme on a synthetic layer: experts split into gate|up and tail,

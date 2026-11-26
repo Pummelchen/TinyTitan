@@ -57,17 +57,35 @@ package enum ExpertBlobIndex {
         package let blockBytes: UInt64
     }
 
-    /// The number of blocks one phase is cut into.
-    package static func blockCount(phaseBytes: UInt64, blockBytes: UInt64) -> Int {
+    /// The number of blocks one phase is cut into: `ceil(phaseBytes / blockBytes)`.
+    ///
+    /// Quotient plus a nonzero remainder, not `(phaseBytes + blockBytes - 1) /
+    /// blockBytes`: the latter overflows at `UInt64.max`, and a corrupt
+    /// `layout.json` can name any stride, so that intermediate is reachable and
+    /// traps. The result is `UInt64` because the ceiling is exact over the whole
+    /// input range; the readable limit is `maximumBlocksPerExpert`, checked in
+    /// `decodeLayout` before any `Int` conversion, so a corrupt phase size is
+    /// refused with `badBlockCount` instead of trapping.
+    package static func blockCount(phaseBytes: UInt64, blockBytes: UInt64) -> UInt64 {
         guard blockBytes > 0, phaseBytes > 0 else { return 0 }
-        return Int((phaseBytes + blockBytes - 1) / blockBytes)
+        let quotient = phaseBytes / blockBytes
+        let remainder = phaseBytes % blockBytes
+        // A nonzero remainder implies `blockBytes > 1`, hence
+        // `quotient <= UInt64.max / 2`, so this increment cannot overflow.
+        return remainder == 0 ? quotient : quotient + 1
     }
 
-    /// The decoded size of block `index` in a phase of `phaseBytes`.
-    package static func blockOutputBytes(
-        phaseBytes: UInt64, blockBytes: UInt64, index: Int
-    ) -> UInt64 {
-        let start = UInt64(index) * blockBytes
+    /// The decoded size of block `index` in a phase of `phaseBytes`, or nil when
+    /// `index` is not a block of that phase.
+    ///
+    /// Checked rather than assuming the caller: a corrupt geometry (or a block
+    /// index past the phase) returns nil instead of wrapping the multiply or
+    /// underflowing `phaseBytes - start`.
+    private static func blockOutputBytes(
+        phaseBytes: UInt64, blockBytes: UInt64, index: UInt64
+    ) -> UInt64? {
+        let (start, overflow) = index.multipliedReportingOverflow(by: blockBytes)
+        guard !overflow, start < phaseBytes else { return nil }
         return min(blockBytes, phaseBytes - start)
     }
 
@@ -103,7 +121,7 @@ package enum ExpertBlobIndex {
         case notMonotonic(expert: Int, frame: Int)
         case frameOverflow(expert: Int, frame: Int)
         case badBlockExponent(UInt8)
-        case badBlockCount(Int)
+        case badBlockCount(UInt64)
 
         package var description: String {
             switch self {
@@ -263,21 +281,25 @@ package enum ExpertBlobIndex {
         let blockBytes = UInt64(1) << exponent
         var frames = blockCount(phaseBytes: phase0Bytes, blockBytes: blockBytes)
         if let phase1Bytes {
-            frames += blockCount(phaseBytes: phase1Bytes, blockBytes: blockBytes)
+            let tail = blockCount(phaseBytes: phase1Bytes, blockBytes: blockBytes)
+            let (sum, overflow) = frames.addingReportingOverflow(tail)
+            guard !overflow else { throw Failure.badBlockCount(UInt64.max) }
+            frames = sum
         }
-        guard frames > 0, frames <= maximumBlocksPerExpert else {
+        guard frames > 0, frames <= UInt64(maximumBlocksPerExpert) else {
             throw Failure.badBlockCount(frames)
         }
+        let framesPerExpert = Int(frames)
         let count = Int(read(UInt32.self, bytes, at: 8))
         guard count == expectedCount else {
             throw Failure.countMismatch(expected: expectedCount, got: count)
         }
-        let needed = headerBytes + count * frames * frameBytes
+        let needed = headerBytes + count * framesPerExpert * frameBytes
         guard data.count >= needed else {
             throw Failure.truncated(expected: needed, got: data.count)
         }
         let entries = try parseEntries(
-            bytes, count: count, framesPerExpert: frames, expectedTotal: needed)
+            bytes, count: count, framesPerExpert: framesPerExpert, expectedTotal: needed)
         return Layout(entries: entries, blockBytes: blockBytes)
     }
 
@@ -333,6 +355,8 @@ package enum ExpertBlobIndex {
         phase1Bytes: UInt64?,
         blockBytes: UInt64
     ) -> (offset: UInt64, expected: UInt64, phase: Int)? {
+        guard index >= 0 else { return nil }
+        let index = UInt64(index)
         if blockBytes == 0 {
             switch index {
             case 0:
@@ -345,24 +369,25 @@ package enum ExpertBlobIndex {
         }
         let phase0Blocks = blockCount(phaseBytes: phase0Bytes, blockBytes: blockBytes)
         if index < phase0Blocks {
-            return (
-                UInt64(index) * blockBytes,
-                blockOutputBytes(
-                    phaseBytes: phase0Bytes, blockBytes: blockBytes, index: index),
-                0
-            )
+            let (offset, overflow) = index.multipliedReportingOverflow(by: blockBytes)
+            guard !overflow,
+                let expected = blockOutputBytes(
+                    phaseBytes: phase0Bytes, blockBytes: blockBytes, index: index)
+            else { return nil }
+            return (offset, expected, 0)
         }
         guard let phase1Bytes else { return nil }
         let tailIndex = index - phase0Blocks
-        guard tailIndex < blockCount(phaseBytes: phase1Bytes, blockBytes: blockBytes) else {
-            return nil
-        }
-        return (
-            phase0Bytes + UInt64(tailIndex) * blockBytes,
-            blockOutputBytes(
-                phaseBytes: phase1Bytes, blockBytes: blockBytes, index: tailIndex),
-            1
-        )
+        guard tailIndex < blockCount(phaseBytes: phase1Bytes, blockBytes: blockBytes),
+            let expected = blockOutputBytes(
+                phaseBytes: phase1Bytes, blockBytes: blockBytes, index: tailIndex)
+        else { return nil }
+        let (tailOffset, multiplyOverflow) = tailIndex.multipliedReportingOverflow(
+            by: blockBytes)
+        guard !multiplyOverflow else { return nil }
+        let (offset, addOverflow) = phase0Bytes.addingReportingOverflow(tailOffset)
+        guard !addOverflow else { return nil }
+        return (offset, expected, 1)
     }
 
     /// The byte after the last frame's end: the compressed layer's stream size.

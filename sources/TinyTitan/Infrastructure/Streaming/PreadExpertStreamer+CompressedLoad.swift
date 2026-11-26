@@ -218,8 +218,8 @@ extension PreadExpertStreamer {
     ) -> [(offset: UInt64, count: Int)] {
         let phase0 = layout.phase1Bytes ?? layout.expertStride
         let phase1 = layout.phase1Bytes.map { layout.expertStride - $0 }
-        let phase0Blocks: Int
-        let phase1Blocks: Int
+        let phase0Blocks: UInt64
+        let phase1Blocks: UInt64
         if compressedBlockBytes == 0 {
             phase0Blocks = pack.isEmpty ? 0 : 1
             phase1Blocks = pack.count > 1 ? 1 : 0
@@ -235,12 +235,12 @@ extension PreadExpertStreamer {
         var ranges: [(UInt64, Int)] = []
         var index = 0
         for blocks in [phase0Blocks, phase1Blocks] where blocks > 0 {
-            guard index + blocks <= pack.count else { return ranges }
+            guard blocks <= UInt64(pack.count - index) else { return ranges }
             let offset = pack[index].offset
-            let count = pack[index..<(index + blocks)]
+            let count = pack[index..<(index + Int(blocks))]
                 .reduce(0) { $0 + Int($1.length) }
             ranges.append((offset, count))
-            index += blocks
+            index += Int(blocks)
         }
         return ranges
     }
