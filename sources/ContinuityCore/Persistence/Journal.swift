@@ -55,6 +55,12 @@ public actor FileJournal: ContinuityJournal {
     private let maximumLatency: Duration
     private var barrier: Task<Void, Never>?
     var lastBarrier = ContinuousClock.now
+    /// A write that failed partway left the file ending mid-record. The next
+    /// append repairs it under the same descriptor before writing, because a
+    /// record appended onto a torn tail fuses with it and both lines stop
+    /// decoding: the failed record was already reported, and the successful one
+    /// would be lost without a failure of its own.
+    var tornTail = false
     /// A compaction or truncation owns the descriptor while it replaces the
     /// file, and a shutdown owns it while it closes it. Appends wait for that
     /// to finish rather than writing into an inode nobody will read again.
@@ -153,7 +159,15 @@ public actor FileJournal: ContinuityJournal {
         var data = try encoder.encode(record)
         data.append(0x0A)
         await awaitRewrite()
-        if let error = writeFully(data) { throw error }
+        try repairTornTail()
+        if let error = writeFully(data) {
+            // The file may end inside this record now. Said here rather than
+            // repaired here: the writer is about to be told this append
+            // failed, and the repair belongs to the next append, which is the
+            // first moment the file is known not to be mid-write.
+            tornTail = true
+            throw error
+        }
         appendedRecords &+= 1
         try await afterAppend()
     }
@@ -168,7 +182,11 @@ public actor FileJournal: ContinuityJournal {
             data.append(0x0A)
         }
         await awaitRewrite()
-        if let error = writeFully(data) { throw error }
+        try repairTornTail()
+        if let error = writeFully(data) {
+            tornTail = true
+            throw error
+        }
         appendedRecords &+= UInt64(records.count)
         try await afterAppend()
     }
@@ -209,6 +227,15 @@ public actor FileJournal: ContinuityJournal {
         } catch {
             return false
         }
+    }
+
+    /// Cut a partial record left by a failed write back to the last newline,
+    /// through the append descriptor, before the next record is written.
+    private func repairTornTail() throws {
+        guard tornTail else { return }
+        guard descriptor >= 0 else { throw JournalError.writeFailed(url, errno: EBADF) }
+        try Self.dropDanglingTail(descriptor: descriptor, url: url, using: fileSystem)
+        tornTail = false
     }
 
     /// Records written but not yet behind a barrier. For diagnostics.

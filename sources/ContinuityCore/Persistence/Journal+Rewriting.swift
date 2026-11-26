@@ -69,6 +69,7 @@ extension FileJournal {
             descriptorGeneration &+= 1
             appendedRecords = 0
             durableRecords = 0
+            tornTail = false
             lastBarrier = ContinuousClock.now
             descriptor = try Self.openForAppend(url, using: fileSystem)
             if case .committedWithUncertainDurability(let error) = outcome {
@@ -193,6 +194,7 @@ extension FileJournal {
         fileSystem.close(emptied)
         appendedRecords = 0
         durableRecords = 0
+        tornTail = false
         descriptor = try Self.openForAppend(url, using: fileSystem)
     }
 }
