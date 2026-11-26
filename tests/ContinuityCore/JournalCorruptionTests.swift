@@ -159,6 +159,23 @@ import Testing
         #expect(try FileJournal.read(contentsOf: url).count == 1)
     }
 
+    /// The older read is lossy by contract and its replacement reports the
+    /// same records plus where the damage is. A caller that decides anything
+    /// from the file uses the second one.
+    @Test func theCompatibilityReadIsLossyByContract() async throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("journal.ndjson")
+        let first = try await encoded(task("before"), in: directory)
+        let second = try await encoded(task("after"), in: directory)
+        try writeJournal(first + unreadable + second, to: url)
+
+        let detailed = try FileJournal.readDetailed(contentsOf: url)
+        let lossy = try FileJournal.read(contentsOf: url)
+        #expect(lossy == detailed.records)
+        #expect(detailed.damage?.lineNumbers == [2])
+    }
+
     @Test func aReadOnlyInspectionDoesNotChangeADamagedFile() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

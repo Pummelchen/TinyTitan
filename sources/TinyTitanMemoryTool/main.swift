@@ -28,6 +28,25 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+/// A diagnostic that does not change the command's answer or its exit status.
+///
+/// Used for a file the journal format could partly read: the facts shown are
+/// the ones that decoded, and hiding that would present an incomplete project
+/// as a whole one.
+func warn(_ message: String) {
+    FileHandle.standardError.write(Data("tinytitan-memory: \(message)\n".utf8))
+}
+
+/// Says, once, that a project file is missing complete records.
+func warnIfDamaged(_ file: MemoryProjectFile) {
+    guard !file.damagedRecordLines.isEmpty else { return }
+    let lines = file.damagedRecordLines.map(String.init).joined(separator: ", ")
+    warn(
+        "\(file.workspace) is incomplete: \(file.damagedRecordLines.count) complete "
+            + "record(s) did not decode (lines \(lines)); the facts shown are only "
+            + "what could be read")
+}
+
 var arguments = Array(CommandLine.arguments.dropFirst())
 var directory = MemoryProjectFile.defaultDirectory()
 if let index = arguments.firstIndex(of: "--dir") {
@@ -49,7 +68,9 @@ func projectName(_ raw: String) -> String {
 func resolve(_ raw: String, in directory: URL) -> MemoryProjectFile {
     let files = MemoryProjectFile.discover(in: directory)
     switch MemoryProjectFile.resolve(projectName(raw), among: files) {
-    case .success(let file): return file
+    case .success(let file):
+        warnIfDamaged(file)
+        return file
     case .failure(let error): fail(error.description)
     }
 }
@@ -91,6 +112,9 @@ case "projects":
             column("\(file.bytesOnDisk / 1024)K", 9, right: true),
             " \(formatter.string(from: file.modifiedAt))")
     }
+    // On stderr so the table stays machine-readable, and after it so a reader
+    // sees the rows first.
+    for file in files { warnIfDamaged(file) }
 
 case "list":
     guard arguments.count >= 2 else { fail("list needs a project") }

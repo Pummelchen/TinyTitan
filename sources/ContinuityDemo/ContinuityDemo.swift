@@ -303,7 +303,14 @@ struct ContinuityDemo {
             print("no journal at \(url.path)")
             exit(1)
         }
-        let records = try FileJournal.read(contentsOf: url)
+        let replay = try FileJournal.readDetailed(contentsOf: url)
+        let records = replay.records
+        if let damage = replay.damage {
+            let lines = damage.lineNumbers.map(String.init).joined(separator: ", ")
+            print(
+                "  note: \(damage.lines.count) complete record(s) did not decode "
+                    + "(lines \(lines)); this listing is missing them")
+        }
 
         heading("Journal at \(url.lastPathComponent)")
         var tasks: [UUID: ContinuityTask] = [:]

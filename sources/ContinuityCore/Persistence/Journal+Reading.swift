@@ -38,6 +38,16 @@ extension FileJournal {
     ///
     /// Takes no lock, so it is safe to point at the file of a running server.
     /// A store only its own process can look at is a store nobody can debug.
+    ///
+    /// **This is the lossy compatibility read, by contract.** It returns the
+    /// records that decoded and cannot tell the caller that a complete line
+    /// did not; that distinction is `readDetailed`. It stays because callers
+    /// that only need decodable records (and tests that assert bytes) should
+    /// not have to handle a damage value they do not act on. A caller that
+    /// decides anything *from* the file — lists a history, reports a project,
+    /// rewrites the store — must use `readDetailed` and handle `damage`, or it
+    /// will present an incomplete file as a whole one. The package's own
+    /// callers do: `MemoryProjectFile.load` and `ContinuityDemo.inspect`.
     public static func read(contentsOf url: URL) throws -> [JournalRecord] {
         try readDetailed(contentsOf: url).records
     }

@@ -8,6 +8,12 @@ import Foundation
 /// file of a server that is running, and it folds the journal the same way
 /// the engine does on start -- a checkpoint resets, a memory record upserts,
 /// a version extends the history.
+///
+/// A file can be damaged: a complete line that does not decode is skipped by
+/// the journal format and the rest is still readable. That is not the same as
+/// a clean file, so `damagedRecordLines` names the lines that were rejected.
+/// The facts here are what *did* decode; a person reading them is owed the
+/// knowledge that the view is incomplete.
 public struct MemoryProjectFile: Sendable {
     public struct Fact: Sendable, Equatable {
         public let key: String
@@ -32,6 +38,9 @@ public struct MemoryProjectFile: Sendable {
     public let eventCount: Int
     public let bytesOnDisk: Int
     public let modifiedAt: Date
+    /// 1-based lines that were complete but did not decode. Empty for a clean
+    /// file. The facts above come only from the lines that did decode.
+    public let damagedRecordLines: [Int]
 
     /// Every project file under a memory directory, newest first.
     public static func discover(in directory: URL) -> [MemoryProjectFile] {
@@ -76,7 +85,8 @@ public struct MemoryProjectFile: Sendable {
     }
 
     public static func load(_ url: URL) throws -> MemoryProjectFile {
-        let records = try FileJournal.read(contentsOf: url)
+        let replay = try FileJournal.readDetailed(contentsOf: url)
+        let records = replay.records
         var items: [String: MemoryItem] = [:]
         var versions: [String: [(Int, String)]] = [:]
         var tasks: [UUID: ContinuityTask] = [:]
@@ -125,7 +135,8 @@ public struct MemoryProjectFile: Sendable {
             sessionCount: sessions.count,
             eventCount: events,
             bytesOnDisk: (attributes?[.size] as? Int) ?? 0,
-            modifiedAt: (attributes?[.modificationDate] as? Date) ?? .distantPast)
+            modifiedAt: (attributes?[.modificationDate] as? Date) ?? .distantPast,
+            damagedRecordLines: replay.damage?.lineNumbers ?? [])
     }
 
     /// Where the project files are, by the same rule the server uses:
