@@ -57,12 +57,103 @@ const LEVEL_ORDER = ["off", "on", "minimal", "low", "medium", "high", "xhigh", "
  * The parser that feeds the route skips a model whose id, name or path is
  * missing or multi-line, so a malformed install cannot split the block across
  * lines. `null` is rejected here where Python would print `None`; a catalog is
- * JSON and a null there is a bug, not a name.
+ * JSON and a null there is a bug, not a name. Anything else is kept — quoting it
+ * is {@link yamlScalar}'s job, because stripping punctuation would rename the
+ * model in the picker.
  */
-function textField(value) {
+function textField(value, field = "field") {
   const text = value === undefined || value === null ? "" : String(value);
-  if (text === "" || /[\t\r\n]/.test(text)) throw new Error("empty or multi-line field");
+  if (text === "" || /[\t\r\n]/.test(text)) {
+    throw new Error(`${field} is empty or multi-line`);
+  }
   return text;
+}
+
+/**
+ * A plain scalar that YAML reads back as exactly this string, or null.
+ *
+ * Conservative on purpose: YAML's plain style also hosts indicators, comments
+ * and the core schema's non-string tokens, so the writer only leaves a value
+ * bare when it cannot be read as anything else. A letter or `_` first (so no
+ * `-`, `[`, `{`, `&`, `*`, `!`, `|`, `>`, `%`, `@`, quote or digit — and no
+ * number, timestamp or sexagesimal), no `:`, `#`, `\`, quote or control
+ * character inside, and no trailing space, which YAML strips.
+ *
+ * `on`, `off`, `yes` and `no` stay bare: YAML 1.2's core schema — the one
+ * js-yaml and the harness's own parser implement — reads them as strings, and
+ * the effort ladder already emits `off:` as a key on every route.
+ */
+const PLAIN_SCALAR = /^[A-Za-z_][A-Za-z0-9 _.,()+/@-]*$/;
+
+/** The plain scalars YAML's core schema resolves to a boolean or null. */
+const NON_STRING_SCALARS = new Set([
+  "true",
+  "True",
+  "TRUE",
+  "false",
+  "False",
+  "FALSE",
+  "null",
+  "Null",
+  "NULL",
+]);
+
+/**
+ * The one spelling a served model id may have.
+ *
+ * The block writes it on one `- id:` line, the default-model repair reads it
+ * back with `\S+`, and `tools/dsh_route.sh --from-server` already refuses
+ * anything outside this set, so the catalog path refuses the same rows rather
+ * than writing an id the picker and the repair cannot agree on.
+ */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * A string as one YAML scalar: bare when that is unambiguous, else quoted.
+ *
+ * The quoted form is a YAML double-quoted scalar with `\`, `"` and the control
+ * characters escaped and everything else — including non-ASCII — left as it is.
+ * `tools/dsh_route.sh`'s `yaml_scalar` produces the same bytes for the same
+ * input, which is what keeps the two writers byte-identical; the escaping is
+ * per byte on the shell side and per code point here, and those agree because
+ * only ASCII controls are escaped.
+ *
+ * @param value - the string (or anything `String()` describes) to serialize.
+ * @returns the scalar, without a trailing newline.
+ */
+export function yamlScalar(value) {
+  const text = String(value);
+  if (PLAIN_SCALAR.test(text) && !text.endsWith(" ") && !NON_STRING_SCALARS.has(text)) {
+    return text;
+  }
+  let quoted = '"';
+  for (const character of text) {
+    const code = character.codePointAt(0);
+    if (character === "\\") quoted += "\\\\";
+    else if (character === '"') quoted += '\\"';
+    else if (code < 0x20 || code === 0x7f) quoted += `\\x${code.toString(16).padStart(2, "0")}`;
+    else quoted += character;
+  }
+  return `${quoted}"`;
+}
+
+/**
+ * A whole number the route declares, as the block prints it.
+ *
+ * `port`, `context` and `maxTokens` land on their own YAML line, so a string
+ * carrying `#`, `:` or a newline would rewrite the rest of the block. Resolved
+ * config already hands these over as numbers; this is the chokepoint that keeps
+ * `generateBlock` safe for any other caller. A canonical decimal string is
+ * accepted because that is the shape the shell tool's arguments take.
+ */
+function integerField(field, value, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const text = String(value);
+  const number =
+    typeof value === "number" ? value : /^(?:0|[1-9][0-9]*)$/.test(text) ? Number(text) : NaN;
+  if (!Number.isSafeInteger(number) || number < min || number > max) {
+    throw new Error(`${field} must be a whole number, got ${text}`);
+  }
+  return String(number);
 }
 
 /**
@@ -116,8 +207,8 @@ export function catalogRows(models) {
     let row;
     try {
       if (model === null || typeof model !== "object") throw new Error("not an object");
-      const backend = textField(model.backend);
-      if (backend !== "gpu" && backend !== "cpu") throw new Error(`backend ${backend}`);
+      const backend = textField(model.backend, "backend");
+      if (backend !== "gpu" && backend !== "cpu") throw new Error("backend is not gpu or cpu");
       const quant = model.quant;
       if (
         quant === undefined ||
@@ -125,21 +216,27 @@ export function catalogRows(models) {
         quant === "" ||
         !Number.isFinite(Number(quant))
       ) {
-        throw new Error("quant");
+        throw new Error("quant is not a number");
       }
       // Not used by the block, but the shell parser formats it and skips the
       // model when it cannot; dropping the same rows keeps the two in step.
       const size = model.size_gb;
       if (size !== undefined && size !== null && Number.isNaN(Number(size))) {
-        throw new Error("size_gb");
+        throw new Error("size_gb is not a number");
       }
+      // The block's `- id:` line is one `\S+` token to the picker, to the
+      // default-model repair in this file and to the shell tool's parser, so an
+      // id that is not one cannot be represented; a name is free-form and is
+      // quoted by `yamlScalar` instead.
+      const id = textField(model.id, "id");
+      if (!MODEL_ID.test(id)) throw new Error("id is not a plain model id");
       row = {
-        id: textField(model.id),
-        name: textField(model.name),
-        path: textField(model.path),
+        id,
+        name: textField(model.name, "name"),
+        path: textField(model.path, "path"),
         backend,
-        family: textField(model.family || "-"),
-        engines: textField(model.engines || backend),
+        family: textField(model.family || "-", "family"),
+        engines: textField(model.engines || backend, "engines"),
         levels: catalogLevels(model.thinking),
       };
     } catch {
@@ -163,11 +260,20 @@ export function catalogRows(models) {
 function effortsLines(levels) {
   const lines = ["          reasoningEfforts:"];
   for (const raw of levels) {
-    const level = raw.replace(/ /g, "");
-    if (level === "") continue;
-    if (level === "off") lines.push("            off:");
-    else if (level === "on") lines.push("            medium: on");
-    else lines.push(`            ${level}: ${level}`);
+    // A comma is the shell tool's own separator: it joins a row's levels with
+    // one and splits them again, so a comma inside a level names two levels
+    // there. Splitting here keeps the two writers byte-identical even on that
+    // input, which is what "the shell tool is authoritative" means.
+    for (const part of String(raw).split(",")) {
+      const level = part.replace(/ /g, "");
+      if (level === "") continue;
+      // The names the ladder is documented in stay bare; anything a template
+      // adds is serialized like every other free-form string, as both a key and
+      // its wire value.
+      if (level === "off") lines.push("            off:");
+      else if (level === "on") lines.push("            medium: on");
+      else lines.push(`            ${yamlScalar(level)}: ${yamlScalar(level)}`);
+    }
   }
   return lines;
 }
@@ -188,11 +294,11 @@ function routeLabel(name, id) {
 
 /** Build the block from already-normalized rows. */
 function buildBlock(rows, options) {
-  const port = String(options.port ?? ROUTE_DEFAULTS.port);
-  const provider = String(options.provider ?? ROUTE_DEFAULTS.provider);
-  const context = String(options.context ?? ROUTE_DEFAULTS.context);
-  const maxTokens = String(options.maxTokens ?? ROUTE_DEFAULTS.maxTokens);
-  const reasoning = String(options.reasoning ?? ROUTE_DEFAULTS.reasoning);
+  const port = integerField("port", options.port ?? ROUTE_DEFAULTS.port, { max: 65535 });
+  const provider = yamlScalar(options.provider ?? ROUTE_DEFAULTS.provider);
+  const context = integerField("context", options.context ?? ROUTE_DEFAULTS.context);
+  const maxTokens = integerField("maxTokens", options.maxTokens ?? ROUTE_DEFAULTS.maxTokens);
+  const reasoning = yamlScalar(options.reasoning ?? ROUTE_DEFAULTS.reasoning);
 
   const lines = [
     `# DeepSeek Harness route to the TinyTitan server on port ${port}.`,
@@ -221,8 +327,8 @@ function buildBlock(rows, options) {
   ];
   for (const row of rows) {
     lines.push(
-      `        - id: ${row.id}`,
-      `          name: ${routeLabel(row.name, row.id)}`,
+      `        - id: ${yamlScalar(row.id)}`,
+      `          name: ${yamlScalar(routeLabel(row.name, row.id))}`,
       `          contextWindow: ${context}`,
       `          maxTokens: ${maxTokens}`,
       ...effortsLines(row.levels),

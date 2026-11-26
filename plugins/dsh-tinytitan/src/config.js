@@ -43,6 +43,24 @@ export const DEFAULT_PROVIDER = "tinytitan";
  */
 export const DEFAULT_REASONING = "medium";
 
+/**
+ * The reasoning levels the route may declare.
+ *
+ * pi-ai's ladder, which is also the set `tools/dsh_route.sh` refuses to go
+ * outside (`--reasoning` exits 2 otherwise). Validating the same list here keeps
+ * a boot-time refresh from forwarding a level the shell tool rejects, and keeps
+ * the value a known scalar rather than whatever text a profile carried.
+ */
+export const REASONING_LEVELS = Object.freeze([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
 /** The preset it generates, so it never has to touch a person's own. */
 export const DEFAULT_PRESET_ID = "tinytitan";
 
@@ -305,6 +323,11 @@ export function resolveConfig(config = {}) {
     config.reasoning ?? process.env.TINYTITAN_REASONING ?? DEFAULT_REASONING,
   ).trim();
   if (reasoning.length === 0) throw new Error("dsh-tinytitan: reasoning must not be empty");
+  if (!REASONING_LEVELS.includes(reasoning)) {
+    throw new Error(
+      `dsh-tinytitan: reasoning must be one of ${REASONING_LEVELS.join("|")}, got ${reasoning}`,
+    );
+  }
   const presetId = String(config.presetId ?? DEFAULT_PRESET_ID).trim();
   if (presetId.length === 0) throw new Error("dsh-tinytitan: presetId must not be empty");
   // Config, then environment, then nothing — the same order as `reasoning` and

@@ -391,8 +391,9 @@ TINYTITAN_ALL_MODELS=(ornith ornith122 qwen36 agentworld katcoder qwen38 qwen35-
 # Levels in the order they are offered; anything newer the server adds is
 # kept, after these.
 TINYTITAN_CATALOG_PARSER='
-import json, sys
+import json, re, sys
 LEVELS = ["off", "on", "minimal", "low", "medium", "high", "xhigh", "max"]
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 def field(value):
     text = str(value)
     if not text or any(c in text for c in "\t\r\n"):
@@ -415,7 +416,13 @@ for model in models:
         size = model.get("size_gb")
         family = field(model.get("family") or "-")
         engines = field(model.get("engines") or backend)
-        row = [field(model["id"]), field(model["name"]), field(int(model["quant"])),
+        # A served id is one plain token: the block writes it on `- id:` and
+        # readers take it back with \S+, so a row whose id is not one cannot be
+        # described. The plugin generator refuses the same rows.
+        identifier = field(model["id"])
+        if MODEL_ID.fullmatch(identifier) is None:
+            raise ValueError("id is not a plain model id")
+        row = [identifier, field(model["name"]), field(int(model["quant"])),
                backend, field(model["path"]), field(",".join(levels)),
                "%.1f" % float(size) if size is not None else "-", family, engines]
     except (AttributeError, KeyError, TypeError, ValueError) as error:

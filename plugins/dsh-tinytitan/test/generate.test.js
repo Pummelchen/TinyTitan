@@ -98,6 +98,48 @@ function shellBlock(extra = []) {
   });
 }
 
+/**
+ * `js-yaml`, or a skipped test.
+ *
+ * The writer parses the generated block with the harness's own copy, and CI
+ * runs this suite before `npm ci` installs one here, so a missing module is a
+ * skip rather than a product failure — the same rule the existing
+ * settings-service tests follow.
+ */
+async function yamlModule(t) {
+  try {
+    return (await import("js-yaml")).default;
+  } catch (error) {
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      t.skip("js-yaml is not installed here; the harness's own copy resolves it");
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * `tools/dsh_route.sh --print` over a scratch catalog file.
+ *
+ * A catalog with no `models/` install and no built server is still exercised by
+ * the shell tool: `TINYTITAN_CATALOG_JSON` is the path its own tests use, and
+ * it means the comparison is about the two writers rather than about a build.
+ */
+function shellBlockFor(catalog) {
+  const catalogPath = join(mkdtempSync(join(tmpdir(), "dsh-tinytitan-catalog-")), "catalog.json");
+  writeFileSync(catalogPath, JSON.stringify({ models: catalog }));
+  const env = { ...process.env, TINYTITAN_CATALOG_JSON: catalogPath };
+  delete env.TINYTITAN_MODELS_DIR;
+  delete env.TINYTITAN_PORT;
+  delete env.TINYTITAN_SERVER;
+  return execFileSync("bash", [SHELL, "--print"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
 /** Whether this machine can run the checkout comparison at all. */
 function shellComparable(t) {
   if (!existsSync(SHELL) || !existsSync(SHELL_BINARY) || !existsSync(MODELS_DIR)) {
@@ -220,18 +262,7 @@ test("the shell tool and the generator agree on a synthetic catalog", (t) => {
     t.skip("python3 is not available for the shell tool's catalog parser");
     return;
   }
-  const catalogPath = join(mkdtempSync(join(tmpdir(), "dsh-tinytitan-catalog-")), "catalog.json");
-  writeFileSync(catalogPath, JSON.stringify({ models: SYNTHETIC }));
-  const env = { ...process.env, TINYTITAN_CATALOG_JSON: catalogPath };
-  delete env.TINYTITAN_MODELS_DIR;
-  delete env.TINYTITAN_PORT;
-  delete env.TINYTITAN_SERVER;
-  const printed = execFileSync("bash", [SHELL, "--print"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const printed = shellBlockFor(SYNTHETIC);
   const block = generateBlock(SYNTHETIC);
   assert.equal(block, printed);
   assert.deepEqual(
@@ -252,6 +283,256 @@ test("the shell tool and the generator agree on a synthetic catalog", (t) => {
       "          reasoningEfforts:\n            off:\n            medium: medium\n            xhigh: xhigh\n",
     ),
   );
+});
+
+/**
+ * A catalog whose every free-form field is YAML syntax.
+ *
+ * A catalog is JSON, so a name is any string a hand edit or a future manifest
+ * put there: `Evil: name # x` changes the block's structure unquoted, `true`
+ * parses as a boolean, `[x]` as a flow sequence, and a leading `-` starts a
+ * sequence entry. The writer must keep them literals. The row with a space in
+ * its id is refused (a served id is one `\S+` token in the block the picker and
+ * the default-model repair both read) without taking the valid rows with it.
+ */
+const ADVERSARIAL = [
+  {
+    id: "colon_4-Bit",
+    name: "Evil: name # not a comment",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/colon_4Bit",
+    thinking: ["off", "on"],
+  },
+  {
+    id: "nullish_4-Bit",
+    name: "null",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/nullish_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "bools_4-Bit",
+    name: "true",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/bools_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "flow_4-Bit",
+    name: "[brackets] {braces} &anchor *star !tag |pipe >fold %pct @at",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/flow_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "quotes_4-Bit",
+    name: `he said "hi", then 'bye' \\ back`,
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/quotes_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "unicode_4-Bit",
+    name: "ünïcode 日本語 — em dash",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/unicode_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "leading_4-Bit",
+    name: "- leading dash",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/leading_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "levels_4-Bit",
+    name: "Levels",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/levels_4Bit",
+    thinking: ["off", "xhigh:custom", "hash#tag", "true", '"q"', "split,level"],
+  },
+  {
+    id: "control_4-Bit",
+    name: "bell \u0007 and del \u007f",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/control_4Bit",
+    thinking: ["off"],
+  },
+  {
+    id: "bad id",
+    name: "Bad Id",
+    family: "f_dense",
+    quant: 4,
+    backend: "gpu",
+    engines: "gpu",
+    path: "/models/bad_4Bit",
+    thinking: ["off"],
+  },
+];
+
+/** The literal YAML values the adversarial catalog must produce. */
+const ADVERSARIAL_NAMES = [
+  "Evil: name # not a comment (4-bit)",
+  "null (4-bit)",
+  "true (4-bit)",
+  "[brackets] {braces} &anchor *star !tag |pipe >fold %pct @at (4-bit)",
+  `he said "hi", then 'bye' \\ back (4-bit)`,
+  "ünïcode 日本語 — em dash (4-bit)",
+  "- leading dash (4-bit)",
+  "Levels (4-bit)",
+  "bell \u0007 and del \u007f (4-bit)",
+];
+
+test("adversarial catalog values round-trip as literals through a YAML parser", async (t) => {
+  const yaml = await yamlModule(t);
+  if (!yaml) return;
+  const provider = "evil: provider # x";
+  const block = generateBlock(ADVERSARIAL, { provider, reasoning: "off" });
+  const parsed = yaml.load(block);
+  // No row may add a key of its own at any level: the block is exactly the
+  // route the writer meant to write.
+  assert.deepEqual(Object.keys(parsed), ["llm-pi-ai"]);
+  const providers = parsed["llm-pi-ai"].providers;
+  assert.deepEqual(Object.keys(providers), [provider], "the provider name is one literal key");
+  const route = providers[provider];
+  assert.equal(route.reasoning, "off");
+  assert.equal(route.defaultContextWindow, 262144);
+  assert.equal(route.defaultMaxTokens, 32768);
+  // The refused row is the only one missing, and its id is not in the block.
+  assert.deepEqual(
+    route.models.map((model) => model.name),
+    ADVERSARIAL_NAMES,
+  );
+  assert.deepEqual(
+    route.models.map((model) => model.id),
+    ADVERSARIAL.filter((model) => model.id !== "bad id").map((model) => model.id),
+  );
+  assert.ok(!block.includes("bad id"));
+  assert.equal(typeof route.models[0].maxTokens, "number");
+  // `off` is a bare key with no value; `on` is the wire value of `medium`.
+  assert.deepEqual(route.models[0].reasoningEfforts, { off: null, medium: "on" });
+  // A level the level vocabulary does not name is still offered, as the literal
+  // string it is, and `true` does not become the boolean or the other way round.
+  const levels = route.models[7].reasoningEfforts;
+  assert.deepEqual(Object.keys(levels), [
+    "off",
+    "xhigh:custom",
+    "hash#tag",
+    "true",
+    '"q"',
+    "split",
+    "level",
+  ]);
+  assert.equal(levels["true"], "true");
+  assert.equal(levels['"q"'], '"q"');
+  assert.equal(levels["hash#tag"], "hash#tag");
+});
+
+test("route numbers are written as safe whole numbers, never as text", () => {
+  // The three numeric lines come from resolved config, but `generateBlock` is
+  // exported and a caller that hands it a string is one `#` away from
+  // commenting out the rest of the block.
+  assert.throws(() => generateBlock(FAKE, { port: "8080 # x" }), /port must be a whole number/);
+  assert.throws(() => generateBlock(FAKE, { port: 70000 }), /port must be a whole number/);
+  assert.throws(() => generateBlock(FAKE, { context: 1.5 }), /context must be a whole number/);
+  assert.throws(() => generateBlock(FAKE, { context: 0 }), /context must be a whole number/);
+  assert.throws(() => generateBlock(FAKE, { maxTokens: -1 }), /maxTokens must be a whole number/);
+  assert.throws(
+    () => generateBlock(FAKE, { maxTokens: Number.MAX_SAFE_INTEGER + 1 }),
+    /maxTokens must be a whole number/,
+  );
+  // A canonical decimal string is the shape the shell tool's own arguments
+  // take, and it is written as the number it is.
+  assert.ok(
+    generateBlock(FAKE, { port: "8123" }).startsWith(
+      "# DeepSeek Harness route to the TinyTitan server on port 8123.\n",
+    ),
+  );
+  assert.ok(
+    generateBlock(FAKE, { context: "131072" }).includes("          contextWindow: 131072\n"),
+  );
+});
+
+test("a written settings file parses to the catalog's literal values", async (t) => {
+  const yaml = await yamlModule(t);
+  if (!yaml) return;
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-generate-"));
+  const settingsPath = join(directory, "settings.yaml");
+  // The person's own file, with a comment and their own keys: the replacement
+  // is line-based and must keep both.
+  writeFileSync(
+    settingsPath,
+    "# my profile\nui-theme:\n  preference: dark\nagent-presets:\n  default: qwen38\n",
+  );
+  const written = writeRouteSettings({
+    settingsPath,
+    block: generateBlock(ADVERSARIAL),
+    stamp: "adversarial",
+  });
+  assert.equal(written.changed, true);
+  const parsed = yaml.load(readFileSync(settingsPath, "utf8"));
+  assert.deepEqual(parsed["ui-theme"], { preference: "dark" });
+  assert.deepEqual(parsed["agent-presets"], { default: "qwen38" });
+  const route = parsed["llm-pi-ai"].providers.tinytitan;
+  assert.deepEqual(
+    route.models.map((model) => model.name),
+    ADVERSARIAL_NAMES,
+  );
+});
+
+test("the shell tool and the generator agree on adversarial scalars", async (t) => {
+  if (!existsSync(SHELL)) {
+    t.skip("no tools/dsh_route.sh here; skipping the adversarial comparison");
+    return;
+  }
+  try {
+    execFileSync("python3", ["--version"], { stdio: ["ignore", "ignore", "ignore"] });
+  } catch {
+    t.skip("python3 is not available for the shell tool's catalog parser");
+    return;
+  }
+  const yaml = await yamlModule(t);
+  if (!yaml) return;
+  const printed = shellBlockFor(ADVERSARIAL);
+  const block = generateBlock(ADVERSARIAL);
+  // Byte parity is the contract between the two writers, and it is what makes
+  // the shell tool authoritative wherever a checkout exists.
+  assert.equal(block, printed);
+  // Both writers quote, and the escaped forms parse back to the literals.
+  const route = yaml.load(printed)["llm-pi-ai"].providers.tinytitan;
+  assert.deepEqual(
+    route.models.map((model) => model.name),
+    ADVERSARIAL_NAMES,
+  );
+  assert.ok(!printed.includes("bad id"), "an id that is not a token is refused by both");
 });
 
 test("the block carries the header, the three switches and the effort ladder", () => {

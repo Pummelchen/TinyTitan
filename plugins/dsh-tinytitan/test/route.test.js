@@ -298,6 +298,23 @@ test("config refuses what it cannot use", () => {
   );
 });
 
+test("the reasoning level is one the route can actually declare", () => {
+  // The shell writer refuses anything outside pi-ai's ladder with exit 2, so a
+  // plugin that accepted it would forward `--reasoning loud` and turn a boot-time
+  // refresh into a failure. The value is also a YAML scalar now, so a value that
+  // only parsed by accident is refused here rather than quoted into the route.
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    assert.equal(resolveConfig({ reasoning: level }).reasoning, level);
+  }
+  for (const level of ["loud", "medium: on", "high # thinking", "OFF"]) {
+    assert.throws(
+      () => resolveConfig({ reasoning: level }),
+      /reasoning must be one of/,
+      JSON.stringify(level),
+    );
+  }
+});
+
 test("the reasoning level comes from the config, then the environment, then the default", () => {
   // The route's declared level is what the harness asks for on every call that
   // names none, so it has to be settable from outside without editing a profile.
