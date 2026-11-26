@@ -48,7 +48,15 @@
 #   --help, -h
 #
 # Exits 2 on a bad argument or when no install can be described, so a script can
-# tell "nothing to write" from "wrote nothing".
+# tell "nothing to write" from "wrote nothing"; a replacement that cannot be made
+# exits 1 and leaves the settings file as it was.
+#
+# Two environment variables exist for tests and are inert otherwise.
+# TINYTITAN_SETTINGS_STAMP pins the backup's timestamp suffix;
+# TINYTITAN_SETTINGS_TEST_FAULT=conflict|replace raises the two failure shapes
+# (another editor's save between the read and the rename, and a failure between
+# the complete temporary file and its rename). Both can only make the replacement
+# refuse; neither can let a write through, so neither weakens the file.
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo pipefail/p' "$0" | sed 's/^# \{0,1\}//' | sed '$d'; }
@@ -334,11 +342,9 @@ if [[ "$MODE" == "print" ]]; then
   exit 0
 fi
 
-# --- --write: replace the section, after a backup ---------------------------
+# --- --write: replace the section atomically, after a backup ----------------
 
 [[ -e "$SETTINGS" ]] || die "no DSH settings file at $SETTINGS (pass --settings)"
-backup="${SETTINGS}.bak-$(date -u +%Y%m%dT%H%M%S)"
-cp "$SETTINGS" "$backup"
 
 # Line-based surgery, not a YAML round-trip: the file is the person's, with
 # their comments, and a parse-and-dump would rewrite all of it. A section ends
@@ -349,13 +355,32 @@ cp "$SETTINGS" "$backup"
 # every harness boot) would add three stale comment lines above the new block.
 # The block travels in the environment, not on stdin: `python3 -` reads its
 # *program* from stdin, so a heredoc and a pipe cannot both be used.
-BLOCK="$block" python3 - "$SETTINGS" <<'PY'
-import os, pathlib, re, sys
+#
+# The file is replaced, never truncated and rewritten: the new text goes to an
+# exclusive temporary file in the same directory, fsynced and given the original
+# mode, then the file is re-read and compared with the text this replacement was
+# computed from, a collision-free backup is copied, and one rename puts the
+# temporary file in place. Every failure before that rename leaves the original
+# byte-identical; a no-op writes nothing and makes no backup. This is the same
+# sequence (and the same guarantees) as the plugin's own writer in
+# `plugins/dsh-tinytitan/src/generate.js`.
+# No command substitution around the heredoc: bash 3.2 cannot parse a quoted
+# here-document holding an apostrophe inside `$( )` at all, so Python prints the
+# machine-readable status on stdout (which the plugin reads) and the operator's
+# lines on stderr, and a non-zero exit is the script's under `set -e`.
+ROUTE_COUNT="${#ids[@]}" ROUTE_PROVIDER="$PROVIDER" BLOCK="$block" python3 - "$SETTINGS" <<'PY'
+import os, pathlib, re, shutil, sys, tempfile, time
 
 path = pathlib.Path(sys.argv[1])
 block = os.environ["BLOCK"]
+count = os.environ["ROUTE_COUNT"]
+provider = os.environ["ROUTE_PROVIDER"]
 if not block.endswith("\n"):
     block += "\n"
+fault = os.environ.get("TINYTITAN_SETTINGS_TEST_FAULT", "")
+stamp = os.environ.get("TINYTITAN_SETTINGS_STAMP") or time.strftime(
+    "%Y%m%dT%H%M%S", time.gmtime()
+)
 
 
 def generated_header(line):
@@ -370,41 +395,121 @@ def generated_header(line):
     ) is not None
 
 
-lines = path.read_text().splitlines(keepends=True)
-out, index, replaced = [], 0, False
-while index < len(lines):
-    line = lines[index]
-    if line.startswith("llm-pi-ai:"):
-        index += 1
-        while index < len(lines):
-            following = lines[index]
-            if following.strip() == "" or following[0] in (" ", "\t"):
-                index += 1
-                continue
-            break
-        while out and out[-1].strip() == "":
-            out.pop()
-        while out and generated_header(out[-1]):
-            out.pop()
+def rewritten(original):
+    """The file with exactly one generated block, and whether one was replaced."""
+    lines = original.splitlines(keepends=True)
+    out, index, replaced = [], 0, False
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("llm-pi-ai:"):
+            index += 1
+            while index < len(lines):
+                following = lines[index]
+                if following.strip() == "" or following[0] in (" ", "\t"):
+                    index += 1
+                    continue
+                break
             while out and out[-1].strip() == "":
                 out.pop()
+            while out and generated_header(out[-1]):
+                out.pop()
+                while out and out[-1].strip() == "":
+                    out.pop()
+            if out:
+                out.append("\n")
+            out.append(block)
+            replaced = True
+            continue
+        out.append(line)
+        index += 1
+    if not replaced:
+        while out and out[-1].strip() == "":
+            out.pop()
         if out:
             out.append("\n")
         out.append(block)
-        replaced = True
-        continue
-    out.append(line)
-    index += 1
-if not replaced:
-    while out and out[-1].strip() == "":
-        out.pop()
-    if out:
-        out.append("\n")
-    out.append(block)
-path.write_text("".join(out))
-print("replaced" if replaced else "appended")
-PY
+    return "".join(out), replaced
 
-echo "dsh_route: wrote ${#ids[@]} model(s) for the '${PROVIDER}' route into $SETTINGS" >&2
-echo "           backup: $backup" >&2
-echo "           DSH re-reads settings.yaml per request; no restart needed." >&2
+
+def backup_path():
+    """A backup name that does not exist yet, so two runs never collide."""
+    base = "%s.bak-%s" % (path, stamp)
+    candidate = base
+    for taken in range(1, 1001):
+        if not os.path.exists(candidate):
+            return candidate
+        candidate = "%s-%d" % (base, taken)
+    raise OSError("no free backup name beside %s" % path)
+
+
+def read(file):
+    with file.open("r", encoding="utf-8", newline=None) as handle:
+        return handle.read()
+
+
+# A symlinked profile (settings.yaml kept in a dotfiles checkout) stays a link:
+# the replacement goes to the file it points at, as the plugin's writer does.
+target = pathlib.Path(os.path.realpath(path))
+original = read(path)
+text, replaced = rewritten(original)
+if text == original:
+    print("already current")
+    print(
+        "dsh_route: the route in %s is already current (%s model(s)); nothing written"
+        % (path, count),
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+mode = os.stat(target).st_mode & 0o7777
+try:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".%s.tmp-" % target.name, dir=str(target.parent)
+    )
+except OSError as error:
+    sys.exit("dsh_route: cannot create a temporary file beside %s: %s" % (target, error))
+
+backup = ""
+try:
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fchmod(handle.fileno(), mode)
+            os.fsync(handle.fileno())
+        # An editor can save between the read above and this replacement; the
+        # text was computed from that read, so a file that moved on is refused
+        # rather than overwritten. The compare is not a lock — a non-cooperating
+        # writer can still save after it — but it removes the whole-write window
+        # the in-place truncation had.
+        current = read(target)
+        if fault == "conflict":
+            current += "# another editor saved this file\n"
+        if current != original:
+            sys.exit(
+                "dsh_route: the settings file at %s changed while the route was "
+                "being written; nothing was replaced" % path
+            )
+        backup = backup_path()
+        shutil.copyfile(target, backup)
+        if fault == "replace":
+            sys.exit("dsh_route: injected failure before the settings rename")
+        os.replace(temporary, target)
+        temporary = ""
+    finally:
+        if temporary:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+except OSError as error:
+    sys.exit("dsh_route: could not replace %s: %s" % (path, error))
+
+print("replaced" if replaced else "appended")
+print(
+    "dsh_route: wrote %s model(s) for the '%s' route into %s" % (count, provider, path),
+    file=sys.stderr,
+)
+print("           backup: %s" % backup, file=sys.stderr)
+print("           DSH re-reads settings.yaml per request; no restart needed.", file=sys.stderr)
+PY

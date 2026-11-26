@@ -43,7 +43,10 @@ def catalog_models() -> list[dict]:
 
 
 def run_route(
-    *args: str, catalog: pathlib.Path | None = CATALOG, expect: int = 0
+    *args: str,
+    catalog: pathlib.Path | None = CATALOG,
+    expect: int = 0,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     if catalog is None:
@@ -51,6 +54,9 @@ def run_route(
     else:
         environment["TINYTITAN_CATALOG_JSON"] = str(catalog)
     environment.pop("TINYTITAN_MODELS_DIR", None)
+    environment.pop("TINYTITAN_SETTINGS_STAMP", None)
+    environment.pop("TINYTITAN_SETTINGS_TEST_FAULT", None)
+    environment.update(extra_env or {})
     run = subprocess.run(
         ["bash", str(SCRIPT), *args], text=True, capture_output=True, check=False, env=environment
     )
@@ -194,6 +200,122 @@ class SettingsSurgeryTests(unittest.TestCase):
         text = path.read_text()
         self.assertTrue(text.startswith("ui-theme:\n  preference: dark\n"))
         self.assertIn("llm-pi-ai:", text)
+
+
+class AtomicReplacementTests(unittest.TestCase):
+    """The settings file is replaced, never rewritten in place.
+
+    Before this, `--write` copied the file and then truncate-and-wrote it through
+    Python: a crash or a full disk mid-write left a partial profile, an editor's
+    save in between was overwritten with text computed from the stale file, and
+    every run piled up a backup even when nothing changed. The replacement is now
+    the plugin writer's (`plugins/dsh-tinytitan/src/generate.js`): a temp file in
+    the same directory, fsynced and mode-preserved, a re-read of the exact file
+    the new text was computed from, a collision-free backup, and one rename.
+
+    The two `TINYTITAN_SETTINGS_*` variables are test seams and are inert
+    otherwise; both can only make the replacement refuse, never let a write
+    through.
+    """
+
+    BODY = "ui-theme:\n  preference: dark\n"
+
+    def setUp(self) -> None:
+        self.directory = pathlib.Path(tempfile.mkdtemp(prefix="dsh-route-atomic-"))
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+
+    def settings(self, body: str = BODY) -> pathlib.Path:
+        path = self.directory / "settings.yaml"
+        path.write_text(body)
+        return path
+
+    def backups(self, path: pathlib.Path) -> list[pathlib.Path]:
+        return sorted(path.parent.glob(path.name + ".bak-*"))
+
+    def temp_files(self, path: pathlib.Path) -> list[pathlib.Path]:
+        return sorted(path.parent.glob("." + path.name + ".tmp-*"))
+
+    def write(self, path: pathlib.Path, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return run_route("--models", "qwen38", "--write", "--settings", str(path), **kwargs)
+
+    def test_a_failed_temporary_file_leaves_the_profile_byte_identical(self) -> None:
+        path = self.settings()
+        os.chmod(self.directory, 0o500)
+        try:
+            run = self.write(path, expect=1)
+        finally:
+            os.chmod(self.directory, 0o700)
+        self.assertIn("temporary file", run.stderr)
+        self.assertEqual(path.read_text(), self.BODY)
+        self.assertEqual(self.backups(path), [])
+        self.assertEqual(self.temp_files(path), [])
+
+    def test_a_failure_before_the_rename_leaves_the_profile_intact(self) -> None:
+        # The crash window the in-place writer could not survive: the new text is
+        # complete and durable, and the target has not been touched yet.
+        path = self.settings()
+        run = self.write(path, expect=1, extra_env={"TINYTITAN_SETTINGS_TEST_FAULT": "replace"})
+        self.assertIn("injected failure", run.stderr)
+        self.assertEqual(path.read_text(), self.BODY)
+        self.assertEqual(self.temp_files(path), [])
+        # The backup is a copy of the original being replaced, not a way back.
+        (backup,) = self.backups(path)
+        self.assertEqual(backup.read_text(), self.BODY)
+
+    def test_an_edit_between_the_read_and_the_rename_is_refused(self) -> None:
+        path = self.settings()
+        run = self.write(path, expect=1, extra_env={"TINYTITAN_SETTINGS_TEST_FAULT": "conflict"})
+        self.assertIn("changed while the route was being written", run.stderr)
+        self.assertEqual(path.read_text(), self.BODY)
+        self.assertEqual(self.backups(path), [])
+        self.assertEqual(self.temp_files(path), [])
+
+    def test_a_second_write_of_the_same_block_writes_nothing(self) -> None:
+        path = self.settings()
+        first = self.write(path)
+        self.assertIn("appended", first.stdout)
+        once = path.read_text()
+        backups = self.backups(path)
+        self.assertEqual(len(backups), 1)
+        second = self.write(path)
+        self.assertIn("already current", second.stdout)
+        self.assertEqual(path.read_text(), once)
+        self.assertEqual(self.backups(path), backups, "a no-op must not make another backup")
+
+    def test_a_taken_backup_name_is_not_overwritten(self) -> None:
+        # Two refreshes can land in the same second; the backup name carries the
+        # second, so the older copy must survive and the newer one take a suffix.
+        path = self.settings()
+        older = path.parent / (path.name + ".bak-fixed")
+        older.write_text("an older backup\n")
+        run = self.write(path, extra_env={"TINYTITAN_SETTINGS_STAMP": "fixed"})
+        self.assertIn("appended", run.stdout)
+        self.assertEqual(older.read_text(), "an older backup\n")
+        newer = path.parent / (path.name + ".bak-fixed-1")
+        self.assertTrue(newer.exists(), sorted(self.backups(path)))
+        self.assertEqual(newer.read_text(), self.BODY)
+
+    def test_the_file_mode_is_preserved(self) -> None:
+        path = self.settings()
+        path.chmod(0o640)
+        self.write(path)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+
+    def test_a_symlinked_settings_file_stays_a_symlink(self) -> None:
+        # A profile kept in a dotfiles checkout is a symlink; replacing the link
+        # itself would leave that checkout tracking a regular file.
+        profile = self.directory / "profile"
+        profile.mkdir()
+        target = profile / "settings.yaml"
+        target.write_text(self.BODY)
+        link = self.directory / "settings.yaml"
+        link.symlink_to(target)
+        run = self.write(link)
+        self.assertIn("appended", run.stdout)
+        self.assertTrue(link.is_symlink())
+        self.assertIn("llm-pi-ai:", target.read_text())
+        (backup,) = self.backups(link)
+        self.assertEqual(backup.read_text(), self.BODY)
 
 
 class RefusalTests(unittest.TestCase):

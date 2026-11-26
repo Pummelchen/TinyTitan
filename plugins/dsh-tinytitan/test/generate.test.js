@@ -145,6 +145,27 @@ function shellBlockFor(catalog) {
   });
 }
 
+/** `tools/dsh_route.sh --write` over a scratch catalog file. */
+function shellWrite(catalog, settingsPath, extraEnv = {}) {
+  const catalogPath = join(mkdtempSync(join(tmpdir(), "dsh-tinytitan-catalog-")), "catalog.json");
+  writeFileSync(catalogPath, JSON.stringify({ models: catalog }));
+  const env = { ...process.env, TINYTITAN_CATALOG_JSON: catalogPath, ...extraEnv };
+  for (const name of [
+    "TINYTITAN_MODELS_DIR",
+    "TINYTITAN_PORT",
+    "TINYTITAN_SERVER",
+    "TINYTITAN_BIN_DIR",
+  ]) {
+    delete env[name];
+  }
+  return execFileSync("bash", [SHELL, "--write", "--settings", settingsPath], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
 /** Whether this machine can run the checkout comparison at all. */
 function shellComparable(t) {
   if (!existsSync(SHELL) || !existsSync(SHELL_BINARY) || !existsSync(MODELS_DIR)) {
@@ -510,6 +531,41 @@ test("a written settings file parses to the catalog's literal values", async (t)
   assert.deepEqual(
     route.models.map((model) => model.name),
     ADVERSARIAL_NAMES,
+  );
+});
+
+test("the shell writer's file is exactly the JS writer's replacement", (t) => {
+  if (!existsSync(SHELL)) {
+    t.skip("no tools/dsh_route.sh here; skipping the writer comparison");
+    return;
+  }
+  try {
+    execFileSync("python3", ["--version"], { stdio: ["ignore", "ignore", "ignore"] });
+  } catch {
+    t.skip("python3 is not available for the shell tool's settings surgery");
+    return;
+  }
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const before = "# mine\nui-theme:\n  preference: dark\n";
+  writeFileSync(settingsPath, before);
+
+  const written = shellWrite(ADVERSARIAL, settingsPath);
+  assert.match(written, /appended/);
+  // The whole file, not just the block: the section surgery, the header it
+  // removes and the newline it inserts are the contract the two writers share.
+  const expected = applyRouteToSettings(before, generateBlock(ADVERSARIAL));
+  assert.equal(readFileSync(settingsPath, "utf8"), expected);
+
+  // And the plugin's per-boot run is a no-op the second time, exactly as the JS
+  // writer's is: no second backup, no rewrite.
+  const again = shellWrite(ADVERSARIAL, settingsPath);
+  assert.match(again, /already current/);
+  assert.equal(readFileSync(settingsPath, "utf8"), expected);
+  assert.equal(
+    readdirSync(directory).filter((name) => name.includes(".bak-")).length,
+    1,
+    "a no-op must not make another backup",
   );
 });
 
