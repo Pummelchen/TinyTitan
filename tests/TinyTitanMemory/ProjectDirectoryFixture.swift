@@ -69,10 +69,26 @@ struct ProjectDirectoryFixture {
         return url
     }
 
+    /// Remove the read bit from the directory itself, so it cannot be listed.
+    func makeUnlistable() throws {
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: directory.path)
+    }
+
+    /// Put a plain file where a project directory is expected. Inside the
+    /// fixture so its cleanup owns it; the name has no `.ndjson` extension, so
+    /// it does not disturb a scan of the directory itself.
+    func makeFileWhereADirectoryIsExpected() throws -> URL {
+        let url = directory.appendingPathComponent("not-a-directory")
+        try Data("{}\n".utf8).write(to: url)
+        return url
+    }
+
     func cleanup() {
-        // Restore modes first: a directory containing an unreadable file can
-        // still be removed, but not when the file is a directory without
-        // permissions.
+        // Restore the root's mode first, or the enumerator below cannot walk
+        // into a directory this fixture made unlistable.
+        _ = try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: directory.path)
         if let walker = FileManager.default.enumerator(
             at: directory, includingPropertiesForKeys: nil)
         {

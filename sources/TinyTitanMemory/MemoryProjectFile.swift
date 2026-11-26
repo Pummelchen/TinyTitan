@@ -19,15 +19,41 @@ public struct MemoryProjectDiscovery: Sendable {
         }
     }
 
-    public let projects: [MemoryProjectFile]
-    public let broken: [Broken]
+    /// The directory itself could not be listed. Distinct from `broken`: that
+    /// is a file the scan found and could not read; this is a scan that did
+    /// not happen, so `projects` and `broken` say nothing about the contents.
+    /// `reason` is a safe description — "does not exist", "is not a
+    /// directory", or an errno description — and never a file's contents.
+    public struct ListingFailure: Sendable, Equatable {
+        public let url: URL
+        public let reason: String
 
-    public init(projects: [MemoryProjectFile], broken: [Broken]) {
-        self.projects = projects
-        self.broken = broken
+        public init(url: URL, reason: String) {
+            self.url = url
+            self.reason = reason
+        }
     }
 
-    public var isEmpty: Bool { projects.isEmpty && broken.isEmpty }
+    public let projects: [MemoryProjectFile]
+    public let broken: [Broken]
+    /// Nil when the directory was listed, whatever the files turned out to be.
+    public let listingFailure: ListingFailure?
+
+    public init(
+        projects: [MemoryProjectFile], broken: [Broken],
+        listingFailure: ListingFailure? = nil
+    ) {
+        self.projects = projects
+        self.broken = broken
+        self.listingFailure = listingFailure
+    }
+
+    /// Whether the scan found nothing *and* could see the directory. A
+    /// listing failure is not an empty directory, and a caller that shows the
+    /// result to a person has to handle it first.
+    public var isEmpty: Bool {
+        projects.isEmpty && broken.isEmpty && listingFailure == nil
+    }
 }
 
 /// A project file read without opening it for writing.
@@ -96,12 +122,29 @@ public struct MemoryProjectFile: Sendable {
     /// the workspace vanished.
     public static func discoverAll(in directory: URL) -> MemoryProjectDiscovery {
         let manager = FileManager.default
+        // A directory that cannot be listed is not an empty one. The
+        // existence/type/permission checks come first because the URL-based
+        // enumerator is lazy: on this platform it can hand back a walker for a
+        // missing or unreadable directory and only fail when it is advanced,
+        // with no way to ask what went wrong. A nil walker is still treated as
+        // a failure for the paths where it is the only signal.
+        if let reason = listingReason(for: directory) {
+            return MemoryProjectDiscovery(
+                projects: [], broken: [],
+                listingFailure: MemoryProjectDiscovery.ListingFailure(
+                    url: directory, reason: reason))
+        }
         guard
             let walker = manager.enumerator(
                 at: directory,
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: [.skipsHiddenFiles])
-        else { return MemoryProjectDiscovery(projects: [], broken: []) }
+        else {
+            return MemoryProjectDiscovery(
+                projects: [], broken: [],
+                listingFailure: MemoryProjectDiscovery.ListingFailure(
+                    url: directory, reason: "an I/O error"))
+        }
         var projects: [MemoryProjectFile] = []
         var broken: [MemoryProjectDiscovery.Broken] = []
         for case let url as URL in walker where url.pathExtension == "ndjson" {
@@ -123,6 +166,23 @@ public struct MemoryProjectFile: Sendable {
             broken: broken.sorted {
                 ($0.workspace, $0.url.path) < ($1.workspace, $1.url.path)
             })
+    }
+
+    /// Why `directory` cannot be listed, or nil when it can.
+    ///
+    /// A safe fragment — "does not exist", "is not a directory", or an errno
+    /// description — and never a file's contents.
+    private static func listingReason(for directory: URL) -> String? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory)
+        else { return "does not exist" }
+        guard isDirectory.boolValue else { return "is not a directory" }
+        let accessible = access(directory.path, R_OK | X_OK)
+        guard accessible == 0 else {
+            let code = errno
+            return String(cString: strerror(code))
+        }
+        return nil
     }
 
     /// Picks a project by exact workspace id or by a unique prefix, so

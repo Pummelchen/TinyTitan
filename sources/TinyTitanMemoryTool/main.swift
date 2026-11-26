@@ -67,6 +67,9 @@ func projectName(_ raw: String) -> String {
 
 func resolve(_ raw: String, in directory: URL) -> MemoryProjectFile {
     let discovery = MemoryProjectFile.discoverAll(in: directory)
+    if let failure = discovery.listingFailure {
+        fail("\(failure.url.path) could not be listed: \(failure.reason)")
+    }
     switch MemoryProjectFile.resolve(
         projectName(raw), among: discovery.projects, broken: discovery.broken)
     {
@@ -88,6 +91,12 @@ formatter.dateFormat = "yyyy-MM-dd HH:mm"
 switch command {
 case "projects":
     let discovery = MemoryProjectFile.discoverAll(in: directory)
+    // A directory that cannot be listed is not an empty directory: answering
+    // "no project files" over an unreadable path reports a fact nobody
+    // established.
+    if let failure = discovery.listingFailure {
+        fail("\(failure.url.path) could not be listed: \(failure.reason)")
+    }
     guard !discovery.isEmpty else {
         print("no project files under \(directory.path)")
         exit(0)
