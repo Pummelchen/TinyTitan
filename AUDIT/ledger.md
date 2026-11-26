@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:18 in_progress:2 open:16 start:9 blocked:1**
+**done:20 in_progress:2 open:14 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -46,7 +46,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0034 | S2 | DONE | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 | 0036 | S2 | DONE | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
-| 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
+| 0037 | S3 | DONE | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 | 0038 | S3 | OPEN | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
 | 0039 | S1 | OPEN | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
 | 0040 | S3 | OPEN | TinyTitanRepack | Unchecked width narrowing of the GGUF string-table count |
@@ -55,7 +55,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0043 | S3 | OPEN | TinyTitanRepack | Compression tool plan total multiplies unchecked |
 | 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
 | 0045 | S2 | DONE | DSH plugin | Route token count and port still coerce non-number input |
-| 0046 | S2 | OPEN | DSH plugin | Five more numeric config fields still coerce |
+| 0046 | S2 | DONE | DSH plugin | Five more numeric config fields still coerce |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -347,10 +347,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0037 — CI never compiles the library demo, so its compiler standard can regress
 
-- S3 / Tier C / OPEN / coverage gap
+- S3 / Tier C / DONE / coverage gap
 - Project: CI / release; host: Apple Silicon Mac A
 - Location: .github/workflows/ci.yml; tools/release.sh:520
 - Evidence before: No CI job builds `examples/library-demo` with `swiftc`; `tools/release.sh` only asserts the demo scripts are present in the archive. The direct-swiftc path therefore had no compile in CI, which is how the missing Swift 6 / warnings-as-errors invocation survived.
+- Evidence after: Added a library-demo CI job (xcode-27) that builds a scratch distribution and both demo link forms, asserts arm64 and the dynamic @rpath, and uses separate --out/--scratch-path (a nested scratch would be deleted). Local run of the job commands: library 50,198,608 B archive + 34,549,928 B dylib, both demos exit 0, lipo arm64, LC_RPATH @executable_path/lib, --help 0. See AUDIT/evidence/0037.md.
+- Commit: `812436ca`
 
 ## 0038 — Manifest dependency declarations diverge from actual imports
 
@@ -412,8 +414,10 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0046 — Five more numeric config fields still coerce
 
-- S2 / Tier A / OPEN / L3 numeric validation
+- S2 / Tier A / DONE / L3 numeric validation
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/config.js:262,279,295,315,358
 - Evidence before: Measured: `autoGoalRounds: true` -> 1, `[5]` -> 5; `autonomyRounds: true` -> 1; `handoffHops: [3]` -> 3; `handoffAtTokens: [50000]` -> 50000; `handoffMaxChildren: true` -> 1. Same class as 0026/0033/0045.
+- Evidence after: All five resolvers now use the shared wholeNumber rules with unchanged defaults/ranges/sentinels; booleans, arrays, padded/exponent/hex text, unsafe integers, zero/negative/fraction/NaN/infinity are refused with field-named errors. 2 RED tests; main-worktree npm test 187/187 with 0 skips, lint/format clean, test_dsh_route 24 OK. See AUDIT/evidence/0046.md.
+- Commit: `b8bd6a8f`
 
