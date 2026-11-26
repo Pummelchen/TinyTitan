@@ -32,6 +32,21 @@ import TinyTitanKernelsC
 /// cache and a declared RAM budget means what it says. Allowing the page cache
 /// makes repeat reads faster but grows a second, unbounded cache in exactly the
 /// memory this project exists to leave alone.
+///
+/// ## Lifetime
+///
+/// The C reader has no close-admission protocol: `tinytitan_expert_reader_destroy`
+/// requires that no fetch is active and none is queued. This wrapper meets that
+/// precondition by construction -- every method calls through `self.handle`, so
+/// Swift retains the receiver for the duration of the call, and `deinit` is the
+/// only destroy and runs only when the last reference is gone. A caller may
+/// share one reader across tasks and release its own reference as soon as its
+/// last fetch has returned. Releasing a reader does not cancel an in-flight
+/// fetch; it simply cannot be the last release while one is running.
+///
+/// Offsets are validated by the C layer, which throws `.readFailed` with
+/// `EOVERFLOW` before any I/O when an absolute offset, an `id * stride`, or the
+/// end of a range does not fit `off_t`.
 /// unchecked-invariant: the C reader serializes batch publication under its
 /// mutex and this wrapper stores no mutable Swift state.
 public final class ParallelExpertReader: @unchecked Sendable {

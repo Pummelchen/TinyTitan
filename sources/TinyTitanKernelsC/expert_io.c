@@ -3,15 +3,75 @@
 // v3.x was reaching ~0.62 GB/s by fetching one at a time on the calling thread.
 
 #include "include/tinytitan_expert_io.h"
+#include "include/tinytitan_testing.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #define TINYTITAN_IO_MAX_THREADS 16
+
+// The worker gate the lifecycle test installs, or NULL in every shipping run.
+static tinytitan_worker_gate_fn tinytitan_worker_testing_gate = NULL;
+
+// Strict C99 checked arithmetic for the read range. `pread` takes the offset as
+// a signed `off_t`; a `uint64_t` that does not fit it, or an offset plus length
+// that runs past `off_t`'s last byte, must be refused before the cast rather
+// than handed to the kernel as a wrapped negative position.
+static int tinytitan_checked_add_u64(uint64_t left, uint64_t right, uint64_t *out) {
+    if (right > UINT64_MAX - left) {
+        return 0;
+    }
+    *out = left + right;
+    return 1;
+}
+
+static int tinytitan_checked_mul_u64(uint64_t left, uint64_t right, uint64_t *out) {
+    if (left != 0 && right > UINT64_MAX / left) {
+        return 0;
+    }
+    *out = left * right;
+    return 1;
+}
+
+/// True when `value` round-trips through `off_t`, which is signed on every
+/// POSIX target, so a value above `OFF_MAX` lands negative and is refused.
+static int tinytitan_offset_fits_off_t(uint64_t value) {
+    off_t converted = (off_t)value;
+    return converted >= 0 && (uint64_t)converted == value;
+}
+
+/// 0 when `byte_offset` and the `length` bytes after it are all addressable,
+/// otherwise `EOVERFLOW`.
+///
+/// Darwin's `pread` refuses a count above `INT_MAX` with `EINVAL` even though
+/// POSIX allows up to `SSIZE_MAX`, so the count is bounded here and the failure
+/// is typed instead of reaching the kernel. The last byte, not the one-past
+/// end, is what `off_t` has to hold.
+static int tinytitan_validate_read(uint64_t byte_offset, size_t length) {
+    if (length == 0) {
+        return 0;
+    }
+    if (length > (size_t)INT_MAX) {
+        return EOVERFLOW;
+    }
+    if (!tinytitan_offset_fits_off_t(byte_offset)) {
+        return EOVERFLOW;
+    }
+    uint64_t last = 0;
+    if (!tinytitan_checked_add_u64(byte_offset, (uint64_t)length - 1, &last)) {
+        return EOVERFLOW;
+    }
+    if (!tinytitan_offset_fits_off_t(last)) {
+        return EOVERFLOW;
+    }
+    return 0;
+}
 
 struct tinytitan_expert_reader {
     int fds[TINYTITAN_IO_MAX_THREADS];
@@ -37,13 +97,20 @@ struct tinytitan_expert_reader {
     uint64_t generation;         // so a worker cannot re-run a finished batch
 };
 
-/// Reads one expert with `pread`, looping because a short read is legal.
-static int read_one(int fd, void *dst, size_t stride, uint64_t byte_offset) {
+/// Reads one expert with `pread`, looping because a short read is legal. The
+/// range is validated here as well as in the public entry points, so the
+/// invariant is local to the call that hands the offset to the kernel.
+static int read_one_with(int fd, void *dst, size_t stride, uint64_t byte_offset,
+                         ssize_t (*read_fn)(int, void *, size_t, off_t)) {
+    int range = tinytitan_validate_read(byte_offset, stride);
+    if (range != 0) {
+        return range;
+    }
     unsigned char *out = (unsigned char *)dst;
     off_t base = (off_t)byte_offset;
     size_t done = 0;
     while (done < stride) {
-        ssize_t got = pread(fd, out + done, stride - done, base + (off_t)done);
+        ssize_t got = read_fn(fd, out + done, stride - done, base + (off_t)done);
         if (got > 0) {
             done += (size_t)got;
             continue;
@@ -57,6 +124,19 @@ static int read_one(int fd, void *dst, size_t stride, uint64_t byte_offset) {
         return errno;
     }
     return 0;
+}
+
+static int read_one(int fd, void *dst, size_t stride, uint64_t byte_offset) {
+    return read_one_with(fd, dst, stride, byte_offset, pread);
+}
+
+int tinytitan_expert_reader_testing_read_one(
+    int fd, void *dst, size_t length, uint64_t byte_offset,
+    ssize_t (*read_fn)(int, void *, size_t, off_t)) {
+    if (read_fn == NULL) {
+        return EINVAL;
+    }
+    return read_one_with(fd, dst, length, byte_offset, read_fn);
 }
 
 static void *worker_main(void *arg) {
@@ -93,6 +173,11 @@ static void *worker_main(void *arg) {
             : (uint64_t)r->expert_ids[index] * (uint64_t)r->expert_stride;
         void *dst = r->destinations[index];
         pthread_mutex_unlock(&r->lock);
+
+        // Testing seam: a lifecycle test pauses the pool at a known point.
+        if (tinytitan_worker_testing_gate != NULL) {
+            tinytitan_worker_testing_gate();
+        }
 
         int rc = read_one(fd, dst, length, offset);
 
@@ -292,6 +377,20 @@ int tinytitan_expert_reader_fetch(tinytitan_expert_reader *r,
         return EINVAL;
     }
     if (count == 0) { return 0; }
+    // The id form turns an index into an absolute position here, so the product
+    // and the span it addresses are checked before a batch is published. An
+    // unguarded product can wrap to a small offset and read the wrong expert.
+    for (size_t i = 0; i < count; ++i) {
+        uint64_t offset = 0;
+        if (!tinytitan_checked_mul_u64(
+                (uint64_t)expert_ids[i], (uint64_t)r->expert_stride, &offset)) {
+            return EOVERFLOW;
+        }
+        int range = tinytitan_validate_read(offset, r->expert_stride);
+        if (range != 0) {
+            return range;
+        }
+    }
     return submit_batch(r, expert_ids, NULL, NULL, destinations, count);
 }
 
@@ -303,6 +402,12 @@ int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *r,
         return EINVAL;
     }
     if (count == 0) { return 0; }
+    for (size_t i = 0; i < count; ++i) {
+        int range = tinytitan_validate_read(offsets[i], r->expert_stride);
+        if (range != 0) {
+            return range;
+        }
+    }
     return submit_batch(r, NULL, offsets, NULL, destinations, count);
 }
 
@@ -320,6 +425,10 @@ int tinytitan_expert_reader_fetch_ranges(tinytitan_expert_reader *r,
         if (byte_counts[i] == 0) {
             return EINVAL;
         }
+        int range = tinytitan_validate_read(offsets[i], (size_t)byte_counts[i]);
+        if (range != 0) {
+            return range;
+        }
     }
     if (count == 0) { return 0; }
     return submit_batch(r, NULL, offsets, byte_counts, destinations, count);
@@ -328,4 +437,8 @@ int tinytitan_expert_reader_fetch_ranges(tinytitan_expert_reader *r,
 
 int tinytitan_expert_reader_threads(const tinytitan_expert_reader *r) {
     return r == NULL ? 0 : r->threads;
+}
+
+void tinytitan_expert_reader_testing_set_gate(tinytitan_worker_gate_fn gate) {
+    tinytitan_worker_testing_gate = gate;
 }

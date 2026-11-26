@@ -41,6 +41,18 @@ tinytitan_expert_reader *tinytitan_expert_reader_create(const char *path,
                                                int bypass_cache,
                                                int *out_errno);
 
+/// Stops the pool and frees the reader, including its mutexes and condition
+/// variables.
+///
+/// **Precondition: no fetch is in flight and none may start.** Every
+/// `fetch`/`fetch_offsets`/`fetch_ranges` call must have returned before this is
+/// called. There is deliberately no close-admission or cancellation protocol:
+/// an active submitter waits on `work_done` and a queued one on `batch_idle`,
+/// and freeing the synchronisation objects under either would be a
+/// use-after-free. Owners enforce this by construction -- the Swift
+/// `ParallelExpertReader` is the only caller that frees a reader, its methods
+/// retain `self` for the duration of the C call, and `deinit` runs only when
+/// the last reference is gone, so no call can be in flight.
 void tinytitan_expert_reader_destroy(tinytitan_expert_reader *reader);
 
 /// Reads `count` experts, `expert_ids[i]` into `destinations[i]`, and blocks
@@ -49,6 +61,11 @@ void tinytitan_expert_reader_destroy(tinytitan_expert_reader *reader);
 /// Each destination must hold `expert_stride` bytes. Returns 0 on success, or the
 /// first `errno` observed by any worker; on failure the contents of the
 /// destinations are undefined and the caller must not use them.
+///
+/// `expert_stride` must fit `INT_MAX` (Darwin's `pread` count limit), and
+/// `expert_ids[i] * expert_stride` must be representable as a non-negative
+/// `off_t` with the whole stride after it in range. Violations return
+/// `EOVERFLOW` before a batch is published or any byte is read.
 int tinytitan_expert_reader_fetch(tinytitan_expert_reader *reader,
                               const uint32_t *expert_ids,
                               void *const *destinations,
@@ -59,6 +76,10 @@ int tinytitan_expert_reader_fetch(tinytitan_expert_reader *reader,
 /// Callers that lay experts out as `index * stride` can use the id form; the
 /// streamer cannot, because its regions carry a per-layer base and a container
 /// offset, so an id would silently address the wrong layer.
+///
+/// Each `offsets[i]` must be representable as a non-negative `off_t` and the
+/// `expert_stride` bytes after it must not pass `off_t`'s last byte; otherwise
+/// `EOVERFLOW` is returned before any I/O.
 int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *reader,
                                      const uint64_t *offsets,
                                      void *const *destinations,
@@ -72,7 +93,9 @@ int tinytitan_expert_reader_fetch_offsets(tinytitan_expert_reader *reader,
 /// gate+up share to land before `down` fetches the front range, runs its
 /// phase-1 work when this returns, and fetches the tail (at
 /// `offset + byte_count`, into `destination + byte_count`) while that work
-/// runs. Every `byte_counts[i]` must be at least 1.
+/// runs. Every `byte_counts[i]` must be at least 1 and at most `INT_MAX`, and
+/// the range must be representable as a non-negative `off_t`; otherwise
+/// `EINVAL`/`EOVERFLOW` is returned before any I/O.
 int tinytitan_expert_reader_fetch_ranges(tinytitan_expert_reader *reader,
                                     const uint64_t *offsets,
                                     const uint32_t *byte_counts,
