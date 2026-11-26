@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:50 in_progress:2 open:7 start:0 blocked:1**
+**done:55 in_progress:2 open:2 start:0 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -56,12 +56,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0044 | S3 | DONE | TinyTitanFormat | GGUF parser does not enforce several spec rules |
 | 0045 | S2 | DONE | DSH plugin | Route token count and port still coerce non-number input |
 | 0046 | S2 | DONE | DSH plugin | Five more numeric config fields still coerce |
-| 0047 | S2 | OPEN | ContinuityCore | Journal JSON encoding is not byte-stable within a process |
-| 0048 | S2 | OPEN | ContinuityCore | Sub-second timestamps are lost on journal replay |
-| 0049 | S1 | OPEN | ContinuityCore | Journal truncate is not made durable |
-| 0050 | S2 | OPEN | ContinuityCore | Two session-log writes still swallow durability failures |
+| 0047 | S2 | DONE | ContinuityCore | Journal JSON encoding is not byte-stable within a process |
+| 0048 | S2 | DONE | ContinuityCore | Sub-second timestamps are lost on journal replay |
+| 0049 | S1 | DONE | ContinuityCore | Journal truncate is not made durable |
+| 0050 | S2 | DONE | ContinuityCore | Two session-log writes still swallow durability failures |
 | 0051 | S2 | DONE | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
-| 0052 | S2 | OPEN | ContinuityCore | Compatibility reads still drop journal damage silently |
+| 0052 | S2 | DONE | ContinuityCore | Compatibility reads still drop journal damage silently |
 | 0053 | S1 | DONE | TinyTitanRepack | GGUF architecture reader traps on non-finite metadata |
 | 0054 | S2 | DONE | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
 | 0055 | S2 | DONE | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
@@ -481,31 +481,39 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0047 — Journal JSON encoding is not byte-stable within a process
 
-- S2 / Tier A / OPEN / L3 persistent integrity
+- S2 / Tier A / DONE / L3 persistent integrity
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:122
 - Evidence before: Two encodings of the same `ContinuityTask` in one process differed in key order (`{"task":{"_0":{"objective":…` vs `{"task":{"_0":{"updatedAt":…`), observed while pinning JournalWriteLoopTests. A byte-level journal comparison or golden is therefore invalid. Encoder config at Journal.swift:122; synthesized Codable in ContinuityTask.
+- Evidence after: The journal encoder uses sorted keys; a test pins that two encodes are byte-identical and existing records decode. See AUDIT/evidence/0047.md.
+- Commit: `ad0544e3`
 
 ## 0048 — Sub-second timestamps are lost on journal replay
 
-- S2 / Tier A / OPEN / L3 data fidelity
+- S2 / Tier A / DONE / L3 data fidelity
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:122,126; Journal+Reading.swift:50
 - Evidence before: A Date `1795701827.784161` decodes as `1795701827.0`: the ISO8601 strategy omits fractional seconds, so a replayed record is not equal to its original. No test currently asserts timestamp identity.
+- Evidence after: Millisecond ISO8601 with fractional seconds on the wire, backward-compatible with the old whole-second form; a sub-second round-trip and an old-format fixture pin it. See AUDIT/evidence/0048.md.
+- Commit: `bee76ac8`
 
 ## 0049 — Journal truncate is not made durable
 
-- S1 / Tier A / OPEN / L2 persistent durability
+- S1 / Tier A / DONE / L2 persistent durability
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal+Rewriting.swift:179-199
 - Evidence before: `truncate()` opens with `O_TRUNC`, closes and reopens with no `fsync`/`F_FULLFSYNC`; a crash immediately after can leave the old length/bytes visible.
+- Evidence after: `truncate()` barriers the truncated file through the injectable filesystem seam before returning (or reports the uncertain outcome); a fault-injected test and replay check. See AUDIT/evidence/0049.md.
+- Commit: `c27c2400`
 
 ## 0050 — Two session-log writes still swallow durability failures
 
-- S2 / Tier A / OPEN / L2 error propagation
+- S2 / Tier A / DONE / L2 error propagation
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/ContinuityEngine.swift:274,380
 - Evidence before: `_ = try? await sessionLog.recordMemoryWrite(...)` and `recordContextAssembled(...)` are best-effort and silently drop a write failure on paths whose observers already report durability.
+- Evidence after: The two session-event writes are now explicitly best-effort with a visible diagnostic record instead of a silent `try?`; a failure-injection test pins the policy. See AUDIT/evidence/0050.md.
+- Commit: `38dbc648`
 
 ## 0051 — Client CLI test reports passed when its dependency is absent
 
@@ -518,10 +526,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0052 — Compatibility reads still drop journal damage silently
 
-- S2 / Tier A / OPEN / L3 data integrity
+- S2 / Tier A / DONE / L3 data integrity
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal+Reading.swift (read); sources/TinyTitanMemory/MemoryProjectFile
 - Evidence before: `readDetailed` reports damage; the compatibility `FileJournal.read` and `MemoryProjectFile.load` still drop it, so a caller cannot distinguish clean from damaged data.
+- Evidence after: Every read path that presents facts now reports journal damage (or documents its lossy contract); the detailed result is the default for the callers that care, with tests. See AUDIT/evidence/0052.md.
+- Commit: `6bc9cdf3`
 
 ## 0053 — GGUF architecture reader traps on non-finite metadata
 
