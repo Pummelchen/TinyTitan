@@ -29,3 +29,13 @@ The lint result is from a clean detached worktree at the audit HEAD with `npm ci
 `plugins/dsh-tinytitan`; a lint run from the main worktree fails only in SwiftLint because the nested
 agent worktrees put SwiftNIO's own checkouts inside the walk. That is an audit-tooling artifact, not a
 product finding, and the final verification runs with those worktrees removed.
+
+### Completed numbers (2026-11-26)
+
+- Full suite: `swift test --no-parallel --enable-code-coverage` **exit 0**, **2,539 tests / 446 suites passed**, 0 failed, 132 model/hardware-gated skips.
+- Coverage: `tools/coverage-export.sh` **exit 0**, 1,332 source files, **lines 34.16 % (66,459/194,537)**, functions 34.00 %, regions 31.20 %.
+- Python: converter group **142 tests OK**; installer/launcher group **375 tests OK** (Python 3.13.18).
+- Node: 178 tests with the real installs (after 0031), 0 failed, 0 skipped.
+- `models/` holds only the two Inkling 2 installs, so dense/Ornith model-gated tests skip; no model was fetched.
+
+Sanitizers remain pending under 0009; the baseline is not presented as a clean bill of health.

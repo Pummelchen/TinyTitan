@@ -71,7 +71,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: Repository; host: Unassigned Apple Silicon Mac
 - Location: AUDIT/baseline.md:1
 - Evidence before: No current build, test, coverage, dependency scan, full-history scan or negative control executed.
-- Evidence after: Release build exit 0/0 warnings; test-target build exit 0 with 12 concurrency warnings (0030); 20/20 lint gates green in a clean worktree; full-history secret scan clean; pip-audit/npm audit clean; negative controls fail as required. Full swift test + coverage and sanitizers pending. See AUDIT/baseline.md and AUDIT/evidence/0003.md.
+- Evidence after: Release build exit 0/0 warnings; test-target build exit 0 with 12 concurrency warnings (0030); full suite 2,539 tests/446 suites passed, 0 failed, 132 model/hardware skips; coverage 34.16% lines (66,459/194,537); 20/20 lint gates green in a clean worktree; Python groups 142+375 tests OK; full-history secret scan, pip-audit and npm audit clean. Sanitizers pending under 0009. See AUDIT/evidence/0003.md.
 
 ## 0004 — Enforce required Swift settings in standalone example packages
 
