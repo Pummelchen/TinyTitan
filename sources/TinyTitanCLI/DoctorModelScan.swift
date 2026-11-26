@@ -1,8 +1,9 @@
 import Foundation
-import Legacy6xRuntime
 import TinyTitanLib
 import TinyTitanCore
 import TinyTitanLegacyEngine
+import TinyTitanPluginAPI
+import TinyTitanVariants
 
 /// Reads a `models/` tree without loading a model or touching its weights.
 ///
@@ -90,114 +91,71 @@ enum DoctorModelScanner {
         let reason: String
     }
 
-    /// Why an installed family cannot be run on this build, or nil when it
-    /// can. Shared with `ModelCatalog`'s reasons in spirit, not in code: the
-    /// server target links NIO and doctor deliberately does not.
-    static func unsupportedInstallReason(_ family: ModelFamily) -> String? {
-        switch family {
-        case .qwen36MTP, .qwen38flashMTP, .qwen4flashMTP:
-            return "MTP draft head, served only beside its target"
-        case .k2Horizon:
-            return "K2-Horizon is not served by this CLI: the server's probe "
-                + "backend serves it, and `TinyTitanBench k2gpu` runs it "
-                + "directly (docs/plan-k2-horizon.md)"
-        case .laguna:
-            return "Laguna-S-2.1's decode probe is implemented; the serving "
-                + "graph is not, so the install validates but is not served "
-                + "(docs/plan-laguna-s-2.1.md)"
-        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense:
-            return nil
-        }
-    }
-
     private static func probeInstall(
         _ directory: URL,
         physicalMemory: UInt64,
         contextTokens: Int,
         environment: [String: String]
     ) -> Result<DoctorReport.Model, ProbeFailure> {
-        let identity: ManifestIdentity
-        let manifest: Manifest
+        // Identity comes from the engine plugin that serves the install, never
+        // from a family table here: the adapter and the shipped plugins name
+        // their own installs, and a family that cannot be served says so in its
+        // identity instead of teaching doctor the family list.
+        let identity: ModelIdentity
         do {
-            identity = try ManifestReader.peekIdentity(directoryURL: directory)
-            manifest = try ManifestReader.read(directoryURL: directory)
+            let resolved = try EngineFactories.pluginRegistry.resolve(directory)
+            guard let declared = try resolved.modelIdentity() else {
+                return .failure(
+                    ProbeFailure(
+                        reason: "the engine plugin declares no identity for this install"))
+            }
+            identity = declared
         } catch {
             return .failure(
                 ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }
-        // A family the runtime cannot serve is not a model this machine can
-        // run, whatever its memory fit says. The catalog skips the same set;
-        // doctor reporting K2 as a fit would send a person to launch a model
-        // that stops at Model.load's graph refusal.
-        if let reason = Self.unsupportedInstallReason(identity.family) {
+        if let reason = identity.unsupportedReason {
             return .failure(ProbeFailure(reason: reason))
         }
-        let profile = ModelProfile.resolve(identity: identity)
-        let routedExperts = manifest.expertsPerLayer > 0 && manifest.expertStride > 0
-        let expertSlots: Int?
-        let cacheFloorBytes: UInt64
-        let expertCacheBytes: UInt64
-        if routedExperts {
-            let budget = RuntimeConfiguration.affordableExpertCacheBudget(
-                profile.expertCacheBudgetBytes, physicalMemory: physicalMemory)
-            expertSlots = RuntimeConfiguration.expertCacheSlots(
-                expertStrideBytes: manifest.expertStride,
-                layers: manifest.arch.numLayers,
-                budgetBytes: budget)
-            cacheFloorBytes = clampedProduct(
-                UInt64(RuntimeConfiguration.minimumExpertCacheSlots),
-                manifest.expertStride,
-                UInt64(manifest.arch.numLayers))
-            expertCacheBytes = clampedProduct(
-                UInt64(expertSlots ?? 0),
-                manifest.expertStride,
-                UInt64(manifest.arch.numLayers))
-        } else {
-            expertSlots = nil
-            cacheFloorBytes = 0
-            expertCacheBytes = 0
+        // The memory-fit arithmetic still reads the 6.x tuning profile, so it
+        // lives beside the adapter (`LegacyInstallEstimator`); the report's
+        // identity above is the plugin's.
+        let estimate: LegacyInstallEstimate
+        do {
+            estimate = try LegacyInstallEstimator.estimate(
+                directory: directory, physicalMemory: physicalMemory,
+                contextTokens: contextTokens, environment: environment)
+        } catch {
+            return .failure(
+                ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }
-        let weights = manifest.files["model_weights.bin"]?.size ?? 0
-        let kvPerToken = kvBytesPerToken(manifest.arch, precision: .int8)
-        let kvBytes = clampedProduct(
-            UInt64(kvPerToken), UInt64(contextTokens))
-        let total = clampedSum(weights, kvBytes, expertCacheBytes)
+        let total = clampedSum(
+            estimate.weightBytes, estimate.kvBytes, estimate.expertCacheBytes)
         let fit = DoctorReport.Model.Fit(
-            weightsBytes: weights,
-            kvBytes: kvBytes,
+            weightsBytes: estimate.weightBytes,
+            kvBytes: estimate.kvBytes,
             kvPrecision: KVCachePrecision.int8.label,
             contextTokens: contextTokens,
-            cacheFloorBytes: cacheFloorBytes,
-            expertCacheBytes: expertCacheBytes,
+            cacheFloorBytes: estimate.cacheFloorBytes,
+            expertCacheBytes: estimate.expertCacheBytes,
             totalBytes: total,
             ramBytes: physicalMemory,
             fits: total <= physicalMemory,
             utilization: physicalMemory == 0
                 ? 0 : Double(total) / Double(physicalMemory))
-        let installBytes = PageCachePolicyResolver.installSize(
-            fileSizes: manifest.files.values.map(\.size))
-        let pageCache = PageCachePolicyResolver.resolve(
-            physicalMemory: physicalMemory,
-            installBytes: installBytes,
-            environment: environment)
-        let chunk =
-            profile.prefillChunkTokens
-            ?? defaultPrefillChunkTokens(
-                family: identity.family,
-                fallback: RuntimeConfiguration.production.prefillChunkTokens)
         return .success(
             DoctorReport.Model(
                 id: identity.modelID,
                 directory: directory.lastPathComponent,
-                family: identity.family.rawValue,
+                family: identity.family,
                 weightBits: identity.weightBits,
                 sizeBytes: totalFileSize(directory),
                 fit: fit,
-                expertSlots: expertSlots,
-                prefillChunkTokens: chunk,
+                expertSlots: estimate.expertSlots,
+                prefillChunkTokens: estimate.prefillChunkTokens,
                 pageCache: DoctorReport.Model.PageCache(
-                    policy: pageCache.policy.rawValue,
-                    reason: pageCache.reason),
+                    policy: estimate.pageCachePolicy,
+                    reason: estimate.pageCacheReason),
                 note: nil))
     }
 
@@ -208,7 +166,7 @@ enum DoctorModelScanner {
         do {
             data = try BoundedMetadataRead.read(
                 fileAt: directory.appendingPathComponent("config.json"),
-                maxBytes: ManifestReader.defaultMaxBytes)
+                maxBytes: SSDAIManifestReader.defaultMaxBytes)
         } catch {
             return .failure(
                 ProbeFailure(reason: "unreadable config.json: \(error)"))
@@ -243,39 +201,10 @@ enum DoctorModelScanner {
                 note: "CPU snapshot: fit is not estimated"))
     }
 
-    /// K/V bytes a token occupies across every row-bearing layer, mirroring
-    /// `KVCacheManager`'s storage layout (the same `rowLayout` the allocator
-    /// uses) at the server's default 8-bit KV precision.
-    private static func kvBytesPerToken(
-        _ arch: ManifestArch,
-        precision: KVCachePrecision
-    ) -> Int {
-        var total = 0
-        for mask in arch.fullAttentionLayerMask {
-            if mask == 2 { continue }
-            let elements =
-                mask == 0
-                ? arch.numKVHeads * arch.headDim
-                : arch.numFullKVHeads * arch.fullHeadDim
-            let layout = KVCacheManager.rowLayout(
-                elements: elements, precision: precision)
-            // One K row and one V row per token.
-            total += layout.stride * 2
-        }
-        return total
-    }
-
     private static func clampedSum(_ values: UInt64...) -> UInt64 {
         values.reduce(UInt64(0)) { total, value in
             let (sum, overflow) = total.addingReportingOverflow(value)
             return overflow ? UInt64.max : sum
-        }
-    }
-
-    private static func clampedProduct(_ values: UInt64...) -> UInt64 {
-        values.reduce(UInt64(1)) { total, value in
-            let (product, overflow) = total.multipliedReportingOverflow(by: value)
-            return overflow ? UInt64.max : product
         }
     }
 

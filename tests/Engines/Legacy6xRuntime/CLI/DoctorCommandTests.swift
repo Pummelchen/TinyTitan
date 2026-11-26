@@ -26,7 +26,9 @@ import TinyTitanLib
     }
 
     /// A models tree with one 1 GiB routed-expert install and round geometry.
-    private func makeModelsDirectory() throws -> URL {
+    private func makeModelsDirectory(
+        family: String = "qwen36", modelID: String = "qwen-doctor-toy"
+    ) throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("doctor-\(UUID().uuidString)")
         let models = root.appendingPathComponent("models")
@@ -49,7 +51,7 @@ import TinyTitanLib
             "versionMajor": 1,
             "versionMinor": 0,
             "flags": [String: Bool](),
-            "modelID": "qwen-doctor-toy",
+            "modelID": modelID,
             "arch": [
                 "hiddenSize": 256,
                 "ffnIntermediate": 512,
@@ -72,7 +74,7 @@ import TinyTitanLib
                 "attentionKEqV": true,
                 "hiddenActivation": "silu",
                 "fullAttentionLayerMask": [1, 0],
-                "family": "qwen36",
+                "family": family,
             ] as [String: Any],
             "files": [
                 "model_weights.bin": [
@@ -279,17 +281,39 @@ import TinyTitanLib
         }
     }
 
-    @Test func unsupportedFamiliesAreRefusedWithAReason() {
+    @Test func unsupportedFamiliesAreRefusedWithAReason() throws {
         // A memory fit is not a capability claim: K2's install validates but
         // its graph does not exist, and doctor must say that rather than list
-        // it as a model this machine can run.
-        let k2 = DoctorModelScanner.unsupportedInstallReason(.k2Horizon)
-        #expect(k2?.contains("server's probe backend") == true)
-        #expect(
-            DoctorModelScanner.unsupportedInstallReason(.qwen36MTP)?
-                .contains("MTP draft head") == true)
-        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen36) == nil)
-        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen38flash) == nil)
-        #expect(DoctorModelScanner.unsupportedInstallReason(.qwen35Dense) == nil)
+        // it as a model this machine can run. The reason comes from the
+        // adapter's identity, not from a family table in doctor.
+        let k2Models = try self.makeModelsDirectory(
+            family: "k2_horizon", modelID: "k2-horizon-4bit")
+        defer { try? FileManager.default.removeItem(at: k2Models.deletingLastPathComponent()) }
+        let k2 = DoctorReport.build(
+            self.environment(
+                models: k2Models, capabilities: self.capabilities(apple10: false)))
+        #expect(k2.skipped.count == 1)
+        #expect(k2.skipped.first?.reason.contains("server's probe backend") == true)
+
+        let mtpModels = try self.makeModelsDirectory(
+            family: "qwen36_mtp", modelID: "qwen3.6-35b-a3b-mtp-4bit")
+        defer { try? FileManager.default.removeItem(at: mtpModels.deletingLastPathComponent()) }
+        let mtp = DoctorReport.build(
+            self.environment(
+                models: mtpModels, capabilities: self.capabilities(apple10: false)))
+        #expect(mtp.skipped.count == 1)
+        #expect(mtp.skipped.first?.reason.contains("MTP draft head") == true)
+
+        // A served family is still listed, so the refusal above is about the
+        // family and not about the fixture.
+        let servedModels = try self.makeModelsDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: servedModels.deletingLastPathComponent())
+        }
+        let served = DoctorReport.build(
+            self.environment(
+                models: servedModels, capabilities: self.capabilities(apple10: false)))
+        #expect(served.models.count == 1)
+        #expect(served.skipped.isEmpty)
     }
 }
