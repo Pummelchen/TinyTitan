@@ -218,6 +218,43 @@ import Testing
         #expect(store.delete("b") == false)
     }
 
+    /// The `previous_response_id` conversation is a fresh array on every read.
+    /// The store's byte budget is what bounds that copy: the entry weight counts
+    /// both item arrays, so the copy can never exceed the budget that let the
+    /// entry in. This pins the measurement; the doc comment records why the
+    /// array is kept rather than a lazy view.
+    @Test func conversationCopyIsBoundedByTheEntryBudget() throws {
+        let input = (0..<200).map { _ in item(String(repeating: "i", count: 400)) }
+        let output = (0..<200).map { _ in item(String(repeating: "o", count: 400)) }
+        let entry = ResponseStore.Entry(
+            responseJSON: Data(repeating: 0x61, count: 100),
+            inputItems: input, outputItems: output, created: Date())
+
+        let entryBytes = try #require(ResponseStore.retainedByteCount(of: entry))
+        let copyBytes = try #require(
+            ResponseStore.retainedByteCount(of: entry.conversation))
+
+        #expect(entry.conversation.count == 400)
+        #expect(
+            copyBytes == entryBytes - 100,
+            "the conversation copy must account for both item arrays")
+        #expect(copyBytes <= entryBytes)
+        #expect(entryBytes <= ResponseStore().maximumEntryBytes)
+
+        // A near-budget chain: the store accepts exactly this much and refuses
+        // one byte less, so the copy is bounded by the same number.
+        let fits = ResponseStore(
+            capacity: 2, maximumEntryBytes: entryBytes, maximumTotalBytes: entryBytes)
+        #expect(fits.put(id: "chain", entry: entry) == .stored)
+        #expect(fits.totalRetainedBytes == entryBytes)
+
+        let tooSmall = ResponseStore(
+            capacity: 2, maximumEntryBytes: entryBytes - 1,
+            maximumTotalBytes: entryBytes * 2)
+        #expect(tooSmall.put(id: "chain", entry: entry) == .rejectedEntryTooLarge)
+        #expect(tooSmall.totalRetainedBytes == 0)
+    }
+
     @Test func defaultsAreTheDocumentedBudgets() {
         let store = ResponseStore()
         #expect(store.capacity == 256)

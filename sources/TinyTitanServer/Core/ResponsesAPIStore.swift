@@ -45,6 +45,18 @@ public final class ResponseStore: @unchecked Sendable {
 
         /// What a request naming this response as `previous_response_id`
         /// continues from.
+        ///
+        /// This is an `Array` concatenation, so every read allocates a copy of
+        /// `inputItems + outputItems`. That copy is bounded by the same
+        /// per-entry budget the store enforces: the entry weight counts both
+        /// arrays, so a chain that fits `maximumEntryBytes` cannot make this
+        /// copy larger than that budget. `ResponseStoreTests
+        /// .conversationCopyIsBoundedByTheEntryBudget` pins the measurement.
+        ///
+        /// A lazy view would avoid the copy, but `ResponsesAPIMapper.chatRequest`
+        /// consumes `[Item]` and the response's exact input is `Array` semantics;
+        /// trading those for a micro-optimisation is not worth it while the
+        /// budget already bounds the allocation.
         public var conversation: [ResponsesAPIRequest.Item] { inputItems + outputItems }
     }
 
