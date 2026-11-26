@@ -281,6 +281,102 @@ test("the declared window and cap come from the config, then the environment", (
   }
 });
 
+test("the route token counts come only from real numbers or decimal text", () => {
+  // `context` and `maxTokens` are the route's declared window and cap. Their
+  // documented forms are a whole number in the row and, because they are the
+  // only two config fields with an environment fallback, plain decimal text in
+  // `TINYTITAN_CONTEXT`/`TINYTITAN_MAX_TOKENS`. An unset or *empty* variable
+  // means "say nothing" (the writer's own pin stands); anything else that
+  // `Number()` used to absorb is a malformed profile, not a smaller window.
+  assert.equal(resolveConfig().context, null);
+  assert.equal(resolveConfig().maxTokens, null);
+  assert.equal(resolveConfig({ context: "" }).context, null, "the empty-env sentinel");
+  assert.equal(resolveConfig({ maxTokens: "" }).maxTokens, null);
+  assert.equal(resolveConfig({ context: 131072 }).context, 131072);
+  assert.equal(resolveConfig({ maxTokens: 8192 }).maxTokens, 8192);
+  assert.equal(resolveConfig({ context: "65536" }).context, 65536);
+  assert.equal(resolveConfig({ maxTokens: "16384" }).maxTokens, 16384);
+  assert.equal(
+    resolveConfig({ context: Number.MAX_SAFE_INTEGER }).context,
+    Number.MAX_SAFE_INTEGER,
+  );
+  for (const field of ["context", "maxTokens"]) {
+    for (const rejected of [
+      true,
+      false,
+      [],
+      [65536],
+      {},
+      " ",
+      " 65536",
+      "65536 ",
+      "0x10000",
+      "1e5",
+      "08",
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      assert.throws(
+        () => resolveConfig({ [field]: rejected }),
+        new RegExp(`${field} must be a positive token count`),
+        `${field} ${JSON.stringify(rejected)}`,
+      );
+    }
+  }
+});
+
+test("the port is a real number in range, never a coerced one", () => {
+  // `1` and `65535` are the ends of the documented range; the env form is the
+  // decimal string. Everything `Number()` turned into a port — `true` (1),
+  // `[8096]` (8096), `"1e3"` (1000), a padded string — is refused by name.
+  assert.equal(resolveConfig().port, 8080);
+  assert.equal(resolveConfig({ port: 1 }).port, 1);
+  assert.equal(resolveConfig({ port: 8096 }).port, 8096);
+  assert.equal(resolveConfig({ port: "9123" }).port, 9123);
+  assert.equal(resolveConfig({ port: 65535 }).port, 65535);
+  for (const rejected of [
+    true,
+    false,
+    [],
+    [8096],
+    {},
+    "",
+    " ",
+    " 8096",
+    "8096 ",
+    "1e3",
+    "0x1f90",
+    "8096a",
+    0,
+    -1,
+    1.5,
+    65536,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    assert.throws(
+      () => resolveConfig({ port: rejected }),
+      /port must be a port number/,
+      `port ${JSON.stringify(rejected)}`,
+    );
+  }
+  // The environment form is validated the same way, and the refusal names the
+  // value the operator actually set (`config.port` is undefined here).
+  const saved = process.env.TINYTITAN_PORT;
+  process.env.TINYTITAN_PORT = "eighty";
+  try {
+    assert.throws(() => resolveConfig(), /port must be a port number, got eighty/);
+  } finally {
+    if (saved === undefined) delete process.env.TINYTITAN_PORT;
+    else process.env.TINYTITAN_PORT = saved;
+  }
+});
+
 test("config refuses what it cannot use", () => {
   assert.throws(() => resolveConfig({ port: 0 }), /port must be a port number/);
   assert.throws(() => resolveConfig({ port: "http" }), /port must be a port number/);

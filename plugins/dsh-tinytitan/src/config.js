@@ -147,6 +147,25 @@ const DECIMAL_INTEGER = /^(?:0|[1-9][0-9]*)$/;
 const DECIMAL_FRACTION = /^(?:0|1)(?:\.[0-9]+)?$/;
 
 /**
+ * A configured whole number, from the two types a profile can carry it as.
+ *
+ * A whole-number field reads its value through here rather than through
+ * `Number(value)`, which turned `true` into 1, `[8096]` into 8096, `""` into 0
+ * and `"1e3"`/`"0x1f90"` into numbers. A real number is returned as-is (the
+ * field's own bound still applies), canonical decimal text — the shape a YAML
+ * string or an environment variable arrives as — is parsed, and anything else
+ * answers `NaN` so the caller's existing range check refuses it.
+ *
+ * @param value - one configured value.
+ * @returns the number, or `NaN` for a type or spelling this module does not take.
+ */
+function wholeNumber(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && DECIMAL_INTEGER.test(value)) return Number(value);
+  return Number.NaN;
+}
+
+/**
  * How long to wait after the last `models/` change before refreshing.
  *
  * An install writes thousands of files, so the route is rebuilt once per quiet
@@ -157,9 +176,7 @@ const DECIMAL_FRACTION = /^(?:0|1)(?:\.[0-9]+)?$/;
  */
 function resolveDebounce(value) {
   if (value === undefined || value === null) return 2000;
-  let ms = Number.NaN;
-  if (typeof value === "number") ms = value;
-  else if (typeof value === "string" && DECIMAL_INTEGER.test(value)) ms = Number(value);
+  const ms = wholeNumber(value);
   if (!Number.isSafeInteger(ms) || ms < 0) {
     throw new Error(`dsh-tinytitan: watchDebounceMs must be milliseconds, got ${value}`);
   }
@@ -189,9 +206,7 @@ function resolveDebounce(value) {
  */
 function resolveCompactionHeadroom(value) {
   if (value === undefined || value === null) return null;
-  let tokens = Number.NaN;
-  if (typeof value === "number") tokens = value;
-  else if (typeof value === "string" && DECIMAL_INTEGER.test(value)) tokens = Number(value);
+  const tokens = wholeNumber(value);
   if (!Number.isSafeInteger(tokens) || tokens < 0) {
     throw new Error(
       `dsh-tinytitan: compactionHeadroomTokens must be a whole number of tokens, got ${value}`,
@@ -212,10 +227,21 @@ function resolveCompactionHeadroom(value) {
  * plugin refresh again. `compactionHeadroomTokens` is the other half of that
  * choice, and `README.md` carries the arithmetic that makes a narrow window
  * dangerous.
+ *
+ * The accepted types are the documented ones and nothing else: a safe whole
+ * number in the row, or canonical decimal text for the environment fallback.
+ * `""` stays the "not set" sentinel — an empty `TINYTITAN_CONTEXT` is how a shell
+ * clears the override — while every other type is refused rather than coerced:
+ * `Number(true)` used to declare a one-token window and `Number([65536])` a
+ * 65,536-token one.
+ *
+ * @param field - `context` or `maxTokens`, named in the refusal.
+ * @param value - the configured value, or `undefined`/`null`/`""` for unset.
+ * @returns the token count, or `null`.
  */
 function resolveRouteTokenCount(field, value) {
   if (value === undefined || value === null || value === "") return null;
-  const tokens = Number(value);
+  const tokens = wholeNumber(value);
   if (!Number.isSafeInteger(tokens) || tokens <= 0) {
     throw new Error(`dsh-tinytitan: ${field} must be a positive token count, got ${value}`);
   }
@@ -342,9 +368,13 @@ function resolveHandoffMaxChildren(value) {
  * @returns the resolved config, with every field a value.
  */
 export function resolveConfig(config = {}) {
-  const port = Number(config.port ?? process.env.TINYTITAN_PORT ?? 8080);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`dsh-tinytitan: port must be a port number, got ${config.port}`);
+  // A port is a real number in 1..65535 or canonical decimal text (the
+  // `TINYTITAN_PORT` form); the refusal names the value the operator set, which
+  // for the environment fallback is not `config.port`.
+  const rawPort = config.port ?? process.env.TINYTITAN_PORT ?? 8080;
+  const port = wholeNumber(rawPort);
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`dsh-tinytitan: port must be a port number, got ${rawPort}`);
   }
   const provider = String(config.provider ?? DEFAULT_PROVIDER).trim();
   if (provider.length === 0) throw new Error("dsh-tinytitan: provider must not be empty");
