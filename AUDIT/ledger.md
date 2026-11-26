@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:29 in_progress:2 open:17 start:3 blocked:1**
+**done:35 in_progress:2 open:15 start:3 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -48,12 +48,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0036 | S2 | DONE | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | DONE | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 | 0038 | S3 | DONE | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
-| 0039 | S1 | OPEN | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
-| 0040 | S3 | OPEN | TinyTitanRepack | Unchecked width narrowing of the GGUF string-table count |
-| 0041 | S2 | OPEN | TinyTitanFormat | Expert index maximumEnd adds offset and length unchecked |
-| 0042 | S2 | OPEN | TinyTitanRepack | Writer's raw layer size product is unchecked and unbounded |
-| 0043 | S3 | OPEN | TinyTitanRepack | Compression tool plan total multiplies unchecked |
-| 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
+| 0039 | S1 | DONE | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
+| 0040 | S3 | DONE | TinyTitanRepack | Unchecked width narrowing of the GGUF string-table count |
+| 0041 | S2 | DONE | TinyTitanFormat | Expert index maximumEnd adds offset and length unchecked |
+| 0042 | S2 | DONE | TinyTitanRepack | Writer's raw layer size product is unchecked and unbounded |
+| 0043 | S3 | DONE | TinyTitanRepack | Compression tool plan total multiplies unchecked |
+| 0044 | S3 | DONE | TinyTitanFormat | GGUF parser does not enforce several spec rules |
 | 0045 | S2 | DONE | DSH plugin | Route token count and port still coerce non-number input |
 | 0046 | S2 | DONE | DSH plugin | Five more numeric config fields still coerce |
 | 0047 | S2 | OPEN | ContinuityCore | Journal JSON encoding is not byte-stable within a process |
@@ -62,6 +62,10 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0050 | S2 | OPEN | ContinuityCore | Two session-log writes still swallow durability failures |
 | 0051 | S2 | OPEN | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
 | 0052 | S2 | OPEN | ContinuityCore | Compatibility reads still drop journal damage silently |
+| 0053 | S1 | OPEN | TinyTitanRepack | GGUF architecture reader traps on non-finite metadata |
+| 0054 | S2 | OPEN | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
+| 0055 | S2 | OPEN | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
+| 0056 | S2 | OPEN | TinyTitanRepack | Checkpoint planner resident index and cursor arithmetic unchecked |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -387,45 +391,57 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0039 — GGUF planner multiplies untrusted dimensions unchecked
 
-- S1 / Tier A / OPEN / L3 model parser
+- S1 / Tier A / DONE / L3 model parser
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:63,67
 - Evidence before: The planner reduces an untrusted GGUF header's dimensions with `reduce(*)` and computes `rows * columns * kept.elementBytes` without checked arithmetic; a corrupt header can trap there, the same class as 0028.
+- Evidence after: Every GGUF planner size product and the resident index/cursor are checked; `UInt32(exactly:)` for shapes; throwing roundUp; positivity guards. Pre-fix `[UInt64.max,2]` trapped signal 5. 7 planner + 5 checkpoint tests (model-gated skips); valid plans unchanged. See AUDIT/evidence/0039.md.
+- Commit: `f3693742`
 
 ## 0040 — Unchecked width narrowing of the GGUF string-table count
 
-- S3 / Tier A / OPEN / L3 model parser
+- S3 / Tier A / DONE / L3 model parser
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFPlanner.swift:151
 - Evidence before: `UInt32(stringTable.count)` narrows without a range check. The new 128 MiB header budget makes the overflow practically unreachable, but the conversion is still unchecked.
+- Evidence after: `stringTableOffset` uses `UInt32(exactly:)` with a typed RepackError in both planners; offset 0/MAX/MAX+1/-1 tests. Unreachable for accepted inputs today (128 MiB header cap), checked anyway. See AUDIT/evidence/0040.md.
+- Commit: `c5a100ba`
 
 ## 0041 — Expert index maximumEnd adds offset and length unchecked
 
-- S2 / Tier A / OPEN / L3 format arithmetic
+- S2 / Tier A / DONE / L3 format arithmetic
 - Project: TinyTitanFormat; host: Apple Silicon Mac A
 - Location: sources/TinyTitanFormat/ExpertBlobIndex.swift:404-411
 - Evidence before: `maximumEnd` still computes `offset + length` unchecked, relying on a documented 'came from decode' precondition. A future caller or a decode regression could wrap it.
+- Evidence after: `maximumEnd` uses addingReportingOverflow and returns the documented non-valid UInt64.max on wrap; both consumers already compare against the layer size and refuse it. Pre-fix offset=MAX-4,length=16 trapped signal 5. ExpertBlobIndex 18/18. See AUDIT/evidence/0041.md.
+- Commit: `e7d2ad8c`
 
 ## 0042 — Writer's raw layer size product is unchecked and unbounded
 
-- S2 / Tier A / OPEN / L3 format arithmetic
+- S2 / Tier A / DONE / L3 format arithmetic
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Writing/CompressedExpertLayerWriter.swift:39
 - Evidence before: `rawBytes = expertStride * expertsPerLayer` is unchecked and `validate()` does not bound it. The tool path checks its own product, so this is writer-only today.
+- Evidence after: `validate()` checks `expertStride * expertsPerLayer` before `write` opens a file or allocates; `rawBytes` saturates to a documented non-valid value if used unvalidated. Pre-fix Int.max×3 passed validation and trapped. 8 writer tests. See AUDIT/evidence/0042.md.
+- Commit: `b73acf45`
 
 ## 0043 — Compression tool plan total multiplies unchecked
 
-- S3 / Tier A / OPEN / L3 format arithmetic
+- S3 / Tier A / DONE / L3 format arithmetic
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Workflow/CompressExpertsTool.swift:117
 - Evidence before: The plan total `rawLayerBytes * layers.count` is unchecked. It is a plan/summary value, not a buffer size, so the practical impact is a wrong total rather than a trap.
+- Evidence after: `--compress-experts` checks the raw total immediately after loadInput and the summary sums before layout/receipt with typed RepackError. 2 tool tests + the end-to-end compressed install. See AUDIT/evidence/0043.md.
+- Commit: `413aeab4`
 
 ## 0044 — GGUF parser does not enforce several spec rules
 
-- S3 / Tier A / OPEN / L3 format conformance
+- S3 / Tier A / DONE / L3 format conformance
 - Project: TinyTitanFormat; host: Apple Silicon Mac A
 - Location: sources/TinyTitanFormat/GGUFHeaderV3.swift:170-205
 - Evidence before: BOOL values other than 0/1 are accepted; key ASCII/hierarchical character rules are not enforced; nested arrays are rejected although the current GGUF specification permits them (pre-existing).
+- Evidence after: GGUF keys are 65535-byte ASCII dot-separated [a-z0-9_] segments, BOOL must be 0/1, and the one-level array subset is documented (nested arrays stay typed invalid). 23 parser + 4 caller tests; standard/community keys comply. See AUDIT/evidence/0044.md.
+- Commit: `b083cb65`
 
 ## 0045 — Route token count and port still coerce non-number input
 
@@ -486,4 +502,32 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal+Reading.swift (read); sources/TinyTitanMemory/MemoryProjectFile
 - Evidence before: `readDetailed` reports damage; the compatibility `FileJournal.read` and `MemoryProjectFile.load` still drop it, so a caller cannot distinguish clean from damaged data.
+
+## 0053 — GGUF architecture reader traps on non-finite metadata
+
+- S1 / Tier A / OPEN / L3 untrusted model parser
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:16,19,20,83
+- Evidence before: `Int(Double)` on untrusted metadata traps for NaN, infinity and out-of-range values; `Int(1e300)` was reproduced as exit 133 ('Double value cannot be converted to Int') through `plan`, before the planner arithmetic fixed in 0039.
+
+## 0054 — Architecture reader multiplies layer geometry unchecked
+
+- S2 / Tier A / OPEN / L3 model parser
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:31,87
+- Evidence before: `(passes - 1) * (loopEnd - loopStart)` and `layer + …` products on untrusted metadata are unchecked.
+
+## 0055 — Zero head dimension yields a non-finite attention scale
+
+- S2 / Tier A / OPEN / L3 model parser
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:110
+- Evidence before: `headDim == 0` makes the attention scale divide by zero, producing a non-finite value rather than a typed refusal.
+
+## 0056 — Checkpoint planner resident index and cursor arithmetic unchecked
+
+- S2 / Tier A / OPEN / L3 format arithmetic
+- Project: TinyTitanRepack; host: Apple Silicon Mac A
+- Location: sources/TinyTitanRepack/Core/Planning/Inkling2CheckpointPlanner.swift
+- Evidence before: The resident index (`tensors * entryBytes + header + stringTable`) and the cursor `+=` remain unchecked on the local checkpoint path; the same class as 0039/0043, not reachable from a GGUF header.
 

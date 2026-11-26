@@ -2397,3 +2397,167 @@ Only the detailed read reports corruption; the older read APIs remain lossy.
 **Acceptance:** Every read path either reports damage or documents a compatibility contract; no caller silently treats damage as empty.
 
 ---
+
+### Findings 0053–0056 (GGUF architecture reader / checkpoint planner)
+
+<a id="task-0053"></a>
+#### Task 0053 — GGUF architecture reader traps on non-finite metadata
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:16,19,20,83`  
+**Severity / tier:** S1 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 untrusted model parser  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0039.  
+**Evidence classification:** confirmed by reproduction
+
+##### 1. Detailed problem description
+
+The architecture reader converts untrusted floating metadata with the trapping `Int(Double)` initializer, so a malformed GGUF can crash the planner instead of being refused.
+
+**Recorded evidence:** `Int(Double)` on untrusted metadata traps for NaN, infinity and out-of-range values; `Int(1e300)` was reproduced as exit 133 ('Double value cannot be converted to Int') through `plan`, before the planner arithmetic fixed in 0039.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use `BinaryInteger(exactly:)` or an explicit finite/range check and throw a typed RepackError/ReadError.
+
+2. Validate before any geometry is used.
+
+3. Add synthetic NaN/+inf/-inf/1e300/valid-boundary fixtures.
+
+
+##### 3. Verification — regression and integration
+
+1. Pre-fix fixture traps; post-fix typed error.
+
+2. Valid plans unchanged; focused tests and the full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check every `Int(Double)`/`UInt32(Double)` conversion in the reader.
+
+2. Confirm no valid model is refused.
+
+
+**Acceptance:** Every floating metadata value is checked before an integer conversion; NaN/inf/out-of-range produce a typed error; valid boundaries unchanged.
+
+---
+
+<a id="task-0054"></a>
+#### Task 0054 — Architecture reader multiplies layer geometry unchecked
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:31,87`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 model parser  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0039.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+Two layer-geometry products can overflow before validation.
+
+**Recorded evidence:** `(passes - 1) * (loopEnd - loopStart)` and `layer + …` products on untrusted metadata are unchecked.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use the checked helpers from 0039 and a typed error.
+
+2. Add boundary fixtures.
+
+
+##### 3. Verification — regression and integration
+
+1. Overflow refused; valid layout unchanged; tests pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check adjacent geometry products in the reader.
+
+
+**Acceptance:** The products use the checked helpers and refuse a malformed geometry with a typed error; boundary tests.
+
+---
+
+<a id="task-0055"></a>
+#### Task 0055 — Zero head dimension yields a non-finite attention scale
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:110`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 model parser  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0039.  
+**Evidence classification:** static finding
+
+##### 1. Detailed problem description
+
+A zero head dimension is accepted and produces an infinite attention scale.
+
+**Recorded evidence:** `headDim == 0` makes the attention scale divide by zero, producing a non-finite value rather than a typed refusal.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Validate headDim > 0 (and related divisors) before the scale.
+
+2. Typed error; fixture.
+
+
+##### 3. Verification — regression and integration
+
+1. Zero refused; valid geometry unchanged; tests pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check other zero divisors in the architecture reader.
+
+
+**Acceptance:** Zero head dim (and any zero divisor in the scale) is refused with a typed error; a fixture pins it.
+
+---
+
+<a id="task-0056"></a>
+#### Task 0056 — Checkpoint planner resident index and cursor arithmetic unchecked
+
+**Project / component:** TinyTitanRepack  
+**Location:** `sources/TinyTitanRepack/Core/Planning/Inkling2CheckpointPlanner.swift`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 format arithmetic  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0043.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+The checkpoint planner can overflow its resident index/cursor arithmetic on malformed local input.
+
+**Recorded evidence:** The resident index (`tensors * entryBytes + header + stringTable`) and the cursor `+=` remain unchecked on the local checkpoint path; the same class as 0039/0043, not reachable from a GGUF header.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use the checked helpers and a typed error before allocation/write.
+
+2. Add boundary tests.
+
+
+##### 3. Verification — regression and integration
+
+1. Overflow refused; valid plans unchanged; tests pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check every index/cursor product in the planner.
+
+
+**Acceptance:** The index and cursor use checked arithmetic and refuse a malformed geometry with a typed error; boundary tests.
+
+---
