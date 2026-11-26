@@ -20,7 +20,7 @@ private actor RefusingJournal: ContinuityJournal {
 }
 
 /// Collects log events from the service's `@Sendable` callback.
-private final class LogCollector: Sendable {
+final class TestLogCollector: Sendable {
     private let events = Mutex<[MemoryLogEvent]>([])
 
     func append(_ event: MemoryLogEvent) {
@@ -44,7 +44,7 @@ private final class LogCollector: Sendable {
         let engine = ContinuityEngine(journal: RefusingJournal())
         try await engine.start()
         let store = ContinuityStore(engine: engine)
-        let events = LogCollector()
+        let events = TestLogCollector()
         let service = MemoryService(
             configuration: configuration,
             durableStore: store,

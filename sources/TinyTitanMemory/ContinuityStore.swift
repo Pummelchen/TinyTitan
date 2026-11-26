@@ -295,6 +295,11 @@ public actor ContinuityStore: MemoryStore {
         get async { await engine.journalFailure }
     }
 
+    /// Complete journal lines the last replay could not decode, or nil.
+    public var journalDamage: String? {
+        get async { await engine.journalDamage }
+    }
+
     /// The last automatic compaction the engine could not make, or nil while
     /// the journal has been collapsing. Read by the service, and read
     /// separately from `journalFailure` on purpose: a refused checkpoint loses

@@ -11,6 +11,29 @@ extension ContinuityEngine {
 
     // MARK: - Internals
 
+    /// Complete lines the journal could not decode on the last replay, or nil
+    /// when every complete line was a record.
+    ///
+    /// The good records around them are replayed and the engine runs; what
+    /// this changes is that the file cannot be replaced until someone handles
+    /// the damaged bytes, and the memory service reports the store as
+    /// incomplete rather than healthy.
+    ///
+    /// Read from the journal rather than cached: the explicit recovery step
+    /// clears the journal's damage, and a cached string would keep reporting a
+    /// file that has since been handled as damaged.
+    public var journalDamage: String? {
+        get async {
+            guard let fileJournal = journal as? FileJournal,
+                let damage = await fileJournal.replayDamage
+            else { return nil }
+            // Only the positions: the line did not decode, so there is
+            // nothing safe to quote, and a damaged line may hold a prompt.
+            let lines = damage.lineNumbers.map(String.init).joined(separator: ", ")
+            return "\(damage.lines.count) complete record(s) did not decode (lines \(lines))"
+        }
+    }
+
     func installObservers() async {
         let journal = self.journal
         let journalsContent = configuration.journalsSessionContent

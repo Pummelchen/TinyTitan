@@ -561,6 +561,12 @@ with `journalFailure`, whose `private(set)` setter would otherwise have had to
 become public; it widened to internal instead, since three of the moved
 routines call it.
 
+The audit cluster on the journal grew `ContinuityEngine.swift` past the limit
+again (451 → 511), so the `journalDamage` accessor moved to
+`ContinuityEngine+Internals.swift` (128 → 186) as pure code motion. It is a
+computed property read from the journal, so it needs no stored state and the
+move did not widen anything; the file is 489 lines.
+
 Two CPU-engine cuts followed: `CPUQwen35.swift` (527 → 492) sent the quantized
 row reader and the bfloat widening to `CPUQwen35+Quant.swift` (48), and
 `AffineSnapshot.swift` (538 → 443) sent the shard lookup and the

@@ -164,9 +164,19 @@ extension MemoryService {
     /// prompt and reply are journaled on a path where no caller sees the
     /// write fail.
     func journalFailed(in scope: MemoryScope) async -> Bool {
-        guard let store = workspaces[scope]?.store as? ContinuityStore,
-            let failure = await store.journalFailure
-        else { return false }
+        guard let store = workspaces[scope]?.store as? ContinuityStore else { return false }
+        // A replay that skipped complete records is not a durability failure:
+        // the writes that reached the file are durable. It does mean the store
+        // in RAM is missing facts the file still holds, and that the file
+        // cannot be compacted until someone decides, so the workspace does not
+        // report itself complete.
+        if let damage = await store.journalDamage {
+            if reportedJournalFailures.insert(scope).inserted {
+                log(.degraded(operation: "journal-damage", detail: damage))
+            }
+            return true
+        }
+        guard let failure = await store.journalFailure else { return false }
         if reportedJournalFailures.insert(scope).inserted {
             log(.degraded(operation: "journal", detail: failure))
         }
