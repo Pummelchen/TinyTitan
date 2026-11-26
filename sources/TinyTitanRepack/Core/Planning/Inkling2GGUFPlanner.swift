@@ -101,6 +101,23 @@ enum Inkling2GGUFPlanner {
         return value
     }
 
+    /// A resident string-table offset: `count` bytes into the table.
+    ///
+    /// The resident index stores each name's offset as a `UInt32`, so a table
+    /// that grows past `UInt32.max` cannot be represented. The accepted GGUF
+    /// header budget (128 MiB) and the checkpoint index cap keep this
+    /// unreachable for any accepted input, but the conversion is checked rather
+    /// than trusting that bound to stay true.
+    static func stringTableOffset(
+        _ count: Int, field: String = "resident string table"
+    ) throws -> UInt32 {
+        guard count >= 0, let offset = UInt32(exactly: count) else {
+            throw RepackError.configurationInvalid(
+                detail: "\(field) offset \(count) exceeds UInt32")
+        }
+        return offset
+    }
+
     /// `blk.<layer>.ffn_{gate_up,down}_exps.{weight,scale}` → (layer, sub-tensor key).
     static func expertKey(_ name: String) -> (layer: Int, key: String)? {
         let parts = name.split(separator: ".")
@@ -188,7 +205,7 @@ enum Inkling2GGUFPlanner {
         var stringTable: [UInt8] = []
         var offsets: [UInt32] = []
         for tensor in tensors {
-            offsets.append(UInt32(stringTable.count))
+            offsets.append(try stringTableOffset(stringTable.count))
             stringTable.append(contentsOf: tensor.name.utf8)
         }
         let (indexEntries, entriesOverflow) = tensors.count.multipliedReportingOverflow(

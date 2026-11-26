@@ -131,6 +131,22 @@ import TinyTitanFormat
         }
     }
 
+    /// The resident index addresses names with a `UInt32`; the header/checkpoint
+    /// caps keep a real table far below the limit, so the check is pinned at
+    /// the boundary itself rather than by building a 4 GiB table.
+    @Test("A string-table offset past UInt32 is refused")
+    func stringTableOffsetIsChecked() throws {
+        #expect(try Inkling2GGUFPlanner.stringTableOffset(0) == 0)
+        #expect(
+            try Inkling2GGUFPlanner.stringTableOffset(Int(UInt32.max)) == UInt32.max)
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.stringTableOffset(Int(UInt32.max) + 1)
+        }
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.stringTableOffset(-1)
+        }
+    }
+
     private func source0DataStart() -> UInt64 {
         (try? Self.source().header.dataStart) ?? 0
     }

@@ -118,7 +118,10 @@ enum Inkling2CheckpointPlanner {
         var stringTable: [UInt8] = []
         var offsets: [UInt32] = []
         for entry in tensors {
-            offsets.append(UInt32(stringTable.count))
+            offsets.append(
+                try Inkling2GGUFPlanner.stringTableOffset(
+                    stringTable.count,
+                    field: "resident string table for \(entry.name)"))
             stringTable.append(contentsOf: entry.name.utf8)
         }
         let rawIndex = UInt64(
