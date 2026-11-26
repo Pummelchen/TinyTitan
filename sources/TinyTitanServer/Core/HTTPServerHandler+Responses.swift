@@ -85,6 +85,21 @@ extension ServerHTTPHandler {
             let phaseState = requestPhaseState
             let storedInput = prior + inputItems
             let stores = decoded.stores
+            // The flattened chain is what a stored response retains. Refuse an
+            // over-budget one before generation rather than running the model
+            // and only then discovering the entry cannot be stored.
+            if stores {
+                let inputBytes = ResponseStore.retainedByteCount(of: storedInput) ?? Int.max
+                guard inputBytes <= responseStore.maximumEntryBytes else {
+                    throw ServerRequestError.invalid(
+                        message:
+                            "the stored conversation exceeds the server's "
+                            + "\(responseStore.maximumEntryBytes)-byte budget",
+                        param: decoded.previousResponseID == nil
+                            ? "input" : "previous_response_id",
+                        code: "stored_response_too_large")
+                }
+            }
             let startStream: @Sendable () -> Void = {
                 guard request.stream,
                     streamState.start(
@@ -139,23 +154,29 @@ extension ServerHTTPHandler {
                         id: responseID,
                         duration: started.duration(to: .now),
                         completion: completion)
-                    let final: [String: Any]
                     if request.stream, let outbox {
                         streamState.stop()
-                        final = self.finishResponsesStream(
+                        _ = self.finishResponsesStream(
                             contextBox.value, id: responseID, created: created, echo: echo,
-                            completion: completion, itemState: itemState, outbox: outbox)
+                            completion: completion, itemState: itemState, outbox: outbox,
+                            stores: stores, storedInput: storedInput,
+                            namespaces: echo.namespaces)
                     } else {
-                        final = self.finalResponsesObject(
+                        var object = self.finalResponsesObject(
                             id: responseID, created: created, echo: echo,
                             completion: completion, itemState: nil)
-                        self.writeJSON(contextBox.value, status: .ok, object: final)
-                    }
-                    if stores {
-                        self.storeResponse(
-                            id: responseID, object: final,
-                            input: storedInput, completion: completion,
-                            namespaces: echo.namespaces)
+                        // Attempt the store *before* writing, so a refused entry
+                        // is reported as `store: false` instead of telling the
+                        // client it can be retrieved by an id that is not there.
+                        if stores,
+                            !self.storeResponse(
+                                id: responseID, object: object,
+                                input: storedInput, completion: completion,
+                                namespaces: echo.namespaces)
+                        {
+                            object["store"] = false
+                        }
+                        self.writeJSON(contextBox.value, status: .ok, object: object)
                     }
                 } catch {
                     streamState.stop()
@@ -233,21 +254,39 @@ extension ServerHTTPHandler {
             completedAt: Int(Date().timeIntervalSince1970))
     }
 
+    /// Stores a finished response, reporting whether it can actually be
+    /// retrieved. `false` means the entry was over budget (or unencodable) and
+    /// the caller must report `store: false`; it is never silently dropped
+    /// while the response claims otherwise.
+    @discardableResult
     func storeResponse(
         id: String,
         object: [String: Any],
         input: [ResponsesAPIRequest.Item],
         completion: ServerCompletion,
         namespaces: [String: String]
-    ) {
-        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return }
-        responseStore.put(
+    ) -> Bool {
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else {
+            ServerLog.diagnostic("responses store: response \(id) could not be encoded; not stored")
+            return false
+        }
+        let outcome = responseStore.put(
             id: id,
             entry: ResponseStore.Entry(
                 responseJSON: data, inputItems: input,
                 outputItems: ResponsesAPIMapper.outputAsInput(
                     completion: completion, responseID: id, namespaces: namespaces),
                 created: Date()))
+        switch outcome {
+        case .stored:
+            return true
+        case .rejectedEntryTooLarge, .rejectedNoCapacity, .rejectedUnmeasurableEntry:
+            ServerLog.diagnostic(
+                "responses store: response \(id) not stored (\(outcome)); "
+                    + "budget \(responseStore.maximumEntryBytes) bytes per entry, "
+                    + "\(responseStore.maximumTotalBytes) bytes total")
+            return false
+        }
     }
 
 }

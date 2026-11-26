@@ -206,12 +206,24 @@ client replaying an earlier turn returns what it was given) and
 chat template accepts.
 
 **Storage.** `store` defaults to true, as in the API. A finished response is
-kept in memory (the newest 256) so that `previous_response_id` continues it —
-the stored conversation and its output are prepended to the new input — and
+kept in memory so that `previous_response_id` continues it — the stored
+conversation and its output are prepended to the new input — and
 `GET /v1/responses/{id}`, `GET .../input_items` and `DELETE` work on it.
 `POST .../cancel` answers 400: nothing this server produces is a background
 response. `store: false` keeps nothing, and a `previous_response_id` that
 names nothing is 404 `previous_response_not_found`-style (`not_found`).
+
+The store is bounded by count *and* logical retained bytes: at most 256
+responses, 16 MiB for one entry (the response JSON plus its input and output
+items, with a continuation's flattened chain counted in that entry) and 64 MiB
+in total. Bytes are logical JSON sizes, not RSS. When the total budget is
+reached the oldest entries are evicted; the new entry is never the one evicted.
+An entry larger than a budget is not stored, and the response object reports
+`store: false` — the id is then not retrievable, which is what that field
+means. A `store: true` continuation whose flattened conversation already
+exceeds the per-entry budget is refused before generation with 400
+`stored_response_too_large` (`param` is `previous_response_id`, or `input` for
+the first turn). `store: false` is never subject to either budget.
 
 **The object** has every field the API defines (`background`,
 `completed_at`, `incomplete_details`, `max_tool_calls`, `prompt_cache_key`,

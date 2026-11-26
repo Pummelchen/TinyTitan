@@ -83,7 +83,7 @@ public actor TinyTitanHTTPServer {
     private let childChannels = ChildChannelRegistry(
         maximumChannels: maximumConcurrentConnections)
     /// Finished /v1/responses kept for previous_response_id and retrieval.
-    private let responseStore = ResponseStore()
+    private let responseStore: ResponseStore
     private var channel: Channel?
     private var shutdownTask: Task<Void, any Error>?
 
@@ -96,7 +96,8 @@ public actor TinyTitanHTTPServer {
         reasoningProfile: ServerReasoningProfile = .default,
         group: MultiThreadedEventLoopGroup = .init(numberOfThreads: 1),
         router: (any ModelRouting)? = nil,
-        coordinator: ServerCoordinator? = nil
+        coordinator: ServerCoordinator? = nil,
+        responseStore: ResponseStore? = nil
     ) {
         self.group = group
         self.modelID = modelID
@@ -112,6 +113,7 @@ public actor TinyTitanHTTPServer {
         self.heartbeatInterval = heartbeatInterval
         self.reasoningProfile = reasoningProfile
         self.router = router
+        self.responseStore = responseStore ?? ResponseStore()
     }
 
     public func start(port: Int) async throws -> Channel {

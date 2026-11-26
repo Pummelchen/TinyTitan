@@ -261,7 +261,10 @@ extension ServerHTTPHandler {
         echo: ResponsesAPIEcho,
         completion: ServerCompletion,
         itemState: ResponsesStreamState,
-        outbox: SSEOutbox
+        outbox: SSEOutbox,
+        stores: Bool,
+        storedInput: [ResponsesAPIRequest.Item],
+        namespaces: [String: String]
     ) -> [String: Any] {
         let itemID = ResponsesAPIBuilder.messageItemID(responseID: id)
         // A turn cut off mid-thought still finishes its reasoning item.
@@ -298,9 +301,19 @@ extension ServerHTTPHandler {
                 ],
                 itemState: itemState, outbox: outbox, context: context)
         }
-        let final = finalResponsesObject(
+        var final = finalResponsesObject(
             id: id, created: created, echo: echo,
             completion: completion, itemState: itemState)
+        // The terminal event is the client's only view of whether this response
+        // can be retrieved later. Store before emitting it, and say `false` when
+        // the store refused the entry.
+        if stores,
+            !storeResponse(
+                id: id, object: final, input: storedInput,
+                completion: completion, namespaces: namespaces)
+        {
+            final["store"] = false
+        }
         let name =
             (final["status"] as? String) == "incomplete"
             ? "response.incomplete" : "response.completed"
