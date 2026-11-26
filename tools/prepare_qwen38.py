@@ -909,7 +909,7 @@ def convert_shard(
             if is_multimodal(name):
                 continue
             if is_ngram(name):
-                ngram.add(name, src.get_tensor(name))
+                ngram.add(name, src.get_tensor(name), path)
                 continue
             if is_ple_buffer(name):
                 continue
@@ -943,9 +943,23 @@ class NgramTable:
     lexically as shard_0, shard_1, shard_10, shard_100 ..., so sorting the
     strings would interleave the table and produce a model that loads, runs,
     and is quietly wrong.
+
+    The table is append-only fp16 rows, so its state is a *prefix*: a killed run
+    leaves whole rows in `ngram_table.bin.partial` that are a prefix of the
+    table, and the next run adopts them instead of rebuilding 102 GB. That prefix
+    is also what makes an n-gram source releasable: `hold` names the sources
+    whose rows are not in it yet, and the release rule in `main` keeps them until
+    they are.
     """
 
-    def __init__(self, out: Path, expected_rows: int, dim: int, reuse: Path | None = None):
+    def __init__(
+        self,
+        out: Path,
+        expected_rows: int,
+        dim: int,
+        reuse: Path | None = None,
+        sizes: list[int] | None = None,
+    ):
         self.path = out / "ngram_table.bin"
         self.expected_rows = expected_rows
         self.dim = dim
@@ -954,15 +968,20 @@ class NgramTable:
         self.rows = 0
         self.reused = reuse is not None
         self.skipped = 0
+        #: table index -> the checkpoint shard that supplied its rows. Only the
+        #: entries at or past `next_index` still have a reader.
+        self._sources: dict[int, Path] = {}
+        #: The per-index row counts, which turn the `.partial`'s size back into
+        #: "the first N table indices are already written".
+        self.sizes = list(sizes) if sizes is not None else None
         if reuse is None:
             # Written beside the destination and renamed in `finish`: the table
             # is 102 GB and takes minutes, so a kill during it must not leave a
             # file at the final name that a later run reuses (or, worse, that an
             # installed model already hardlinks to this inode).
             self.temporary = self.path.parent / (self.path.name + ".partial")
-            if self.temporary.exists():
-                self.temporary.unlink()
-            self.handle = self.temporary.open("wb")
+            self._adopt()
+            self.handle = self.temporary.open("ab")
             return
         # Hardlink, not copy and not symlink. Both directories then hold a
         # reference to one inode: deleting either leaves the other intact,
@@ -1006,7 +1025,69 @@ class NgramTable:
     def index_of(name: str) -> int:
         return int(name.rsplit(".shard_", 1)[1].split(".")[0])
 
-    def add(self, name: str, value: np.ndarray) -> None:
+    def _adopt(self) -> None:
+        """Keep the whole rows a killed run wrote before it was killed.
+
+        The file is append-only fp16 rows in numeric index order, so a prefix of
+        it is a prefix of the table. A kill can stop at a row boundary, leave a
+        torn last row (dropped), or stop inside a table index (dropped back to
+        the last whole index); the checkpoint's own per-index row counts map the
+        surviving rows back to "the first N indices are written". The previous
+        run flushed after every block, so what is here is what a *process* kill
+        leaves -- the same guarantee the weight side's `save_file`/rename gives,
+        not a power-loss one.
+        """
+        if not self.temporary.exists():
+            return
+        row_bytes = self.dim * 2
+        size = self.temporary.stat().st_size
+        rows = size // row_bytes
+        if self.sizes is None or rows == 0 or rows > sum(self.sizes):
+            # Nothing usable, or a file this configuration could not have
+            # written: rebuild rather than adopt a prefix of something else.
+            self.temporary.unlink(missing_ok=True)
+            return
+        index = 0
+        consumed = 0
+        for block_rows in self.sizes:
+            if consumed + block_rows > rows:
+                break
+            consumed += block_rows
+            index += 1
+        if consumed != rows or size % row_bytes:
+            # A torn row or a torn block: the bytes past the last whole index
+            # are not a prefix this run can name.
+            with self.temporary.open("r+b") as handle:
+                handle.truncate(consumed * row_bytes)
+        self.rows = consumed
+        self.next_index = index
+        if consumed:
+            print(
+                f"  resuming the n-gram table at {consumed} rows "
+                f"({index} of {len(self.sizes)} index blocks)",
+                flush=True,
+            )
+
+    def durable_index(self) -> int:
+        """The table index the file holds completely; earlier ones are durable.
+
+        `add` writes in index order and flushes after every block, so the file's
+        rows are exactly indices `0 .. durable_index() - 1`. A source whose rows
+        are below this needs neither the file nor the source again.
+        """
+        return self.next_index
+
+    def hold(self) -> set[Path]:
+        """Sources whose n-gram rows are not in the durable prefix yet.
+
+        Rows are written only once every earlier index has arrived, so a source
+        supplying index k is consumed when `next_index > k`. Until then it is the
+        only copy of those rows, and `main`'s release rule keeps it.
+        """
+        durable = self.next_index
+        return {source for index, source in self._sources.items() if index >= durable}
+
+    def add(self, name: str, value: np.ndarray, source: Path | None = None) -> None:
         if self.reused:
             # Two of the 131 checkpoint shards carry n-gram rows alongside
             # ordinary tensors, so they are fetched even when the table is
@@ -1015,7 +1096,16 @@ class NgramTable:
             # is what guarantees it holds all of them -- so drop them.
             self.skipped += 1
             return
-        self.pending[self.index_of(name)] = value
+        index = self.index_of(name)
+        if index < self.next_index:
+            # Already in the adopted prefix: a re-fetched mixed shard, or rows a
+            # previous run wrote. Writing them again would duplicate them.
+            self.skipped += 1
+            return
+        if source is not None:
+            self._sources[index] = source
+        self.pending[index] = value
+        wrote = False
         while self.next_index in self.pending:
             block = self.pending.pop(self.next_index)
             if block.dtype == ml_dtypes.bfloat16:
@@ -1030,6 +1120,13 @@ class NgramTable:
             self.handle.write(np.ascontiguousarray(block).tobytes())
             self.rows += block.shape[0]
             self.next_index += 1
+            wrote = True
+        if wrote:
+            # The durable prefix the release rule and the next run rely on: the
+            # bytes are with the OS, so a killed process leaves them.
+            self.handle.flush()
+        durable = self.next_index
+        self._sources = {i: s for i, s in self._sources.items() if i >= durable}
 
     def summary(self) -> str:
         """What the table cost this build, in the mode it actually ran."""
@@ -1404,6 +1501,13 @@ def main() -> int:
                 "be rebuilt",
                 flush=True,
             )
+        if not constants_match(previous_constants, constants):
+            # A killed run's `.partial` is adopted below as a prefix of the
+            # table. It is only a prefix this build can address if the constants
+            # that wrote it are this build's; under others the rows would be read
+            # against different layer multipliers and produce garbage ids rather
+            # than an error.
+            (args.output / "ngram_table.bin.partial").unlink(missing_ok=True)
 
     reuse = (
         None
@@ -1411,7 +1515,9 @@ def main() -> int:
         else reusable_table_path(args.reuse_ngram_table, constants)
     )
 
-    ngram = NgramTable(args.output, padded, constants["ple_head_dim"], reuse)
+    ngram = NgramTable(
+        args.output, padded, constants["ple_head_dim"], reuse, constants["ngram_heads_vocab_sizes"]
+    )
 
     if reuse is not None:
         # Skip the shards that carry nothing else. Two of the 131 hold n-gram
@@ -1422,6 +1528,25 @@ def main() -> int:
         print(f"reusing n-gram table: {reuse}")
         print(f"  linked, {table_bytes / 1e9:.1f} GB not written")
         print(f"  {len(skippable)} of {len(by_shard)} checkpoint shards not fetched")
+    elif ngram.durable_index():
+        # A `.partial` a killed run left is adopted as the table's prefix (see
+        # `NgramTable._adopt`), so the shards whose rows it already holds are
+        # done: fetching them again would only rewrite rows the table has.
+        already = ngram.durable_index()
+        table_done = {
+            shard
+            for shard, names in by_shard.items()
+            if all(is_ngram(n) and NgramTable.index_of(n) < already for n in names)
+        }
+        if table_done:
+            shards = [s for s in shards if s not in table_done]
+            for stale in table_done:
+                (work / stale).unlink(missing_ok=True)
+            print(
+                f"  {len(table_done)} checkpoint shard(s) are already in the n-gram "
+                f"table's {already} written index block(s); {len(shards)} left",
+                flush=True,
+            )
 
     if writer.index:
         # The shards a previous run finished are converted already; the
@@ -1429,6 +1554,21 @@ def main() -> int:
         converted = {
             s for s in shards if checkpoint_shard_is_converted(by_shard[s], writer.index, args.bits)
         }
+        # ... unless they still owe the n-gram table rows. The table writes its
+        # indices in order, so a shard carrying a high index can have all its
+        # *weights* adopted while its rows have never been written (they were in
+        # the killed run's memory). Such a shard has to be read again for the
+        # rows; `OutputWriter.add` drops the adopted weight tensors it also
+        # carries, so nothing is written twice.
+        owed = {
+            s
+            for s in converted
+            if any(
+                is_ngram(name) and NgramTable.index_of(name) >= ngram.durable_index()
+                for name in by_shard[s]
+            )
+        }
+        converted -= owed
         if converted:
             shards = [s for s in shards if s not in converted]
             # A source kept until its output flushed (see the release below) can
@@ -1507,20 +1647,30 @@ def main() -> int:
     threading.Thread(target=fetcher if workers == 1 else parallel_fetcher, daemon=True).start()
     done = 0
     # A checkpoint shard may leave `--work` only once every tensor converted
-    # from it is in a *finished* output shard. `convert_shard` returns after
-    # `writer.add`, and `add` flushes only when the open block reaches
-    # `OUTPUT_SHARD_BYTES` (4 GiB), so "converted" is not "persisted": the block
-    # it filled may still be in memory. The offset recorded below is the output
-    # position after the source's last tensor; `writer.written()` counts only
-    # finished shards, so `written >= offset` is exactly "this source's bytes
-    # are on disk". An empty-block test (`bytes == 0`) is not the same thing and
-    # never fires: the block at a source boundary is almost never empty, so it
-    # keeps the whole checkpoint until `finish`.
+    # from it is durable, in one of two sinks.
+    #
+    # The weights: `convert_shard` returns after `writer.add`, and `add` flushes
+    # only when the open block reaches `OUTPUT_SHARD_BYTES` (4 GiB), so the offset
+    # recorded below is the output position after the source's last tensor and
+    # `writer.written()` counts only finished shards. An empty-block test
+    # (`bytes == 0`) is not the same thing and never fires: the block at a source
+    # boundary is almost never empty, so it would keep the whole checkpoint until
+    # `finish`.
+    #
+    # The n-gram rows: they go to `ngram_table.bin.partial`, whose flushed prefix
+    # `NgramTable.hold()` names. A row's block is written only once every earlier
+    # index has arrived, so a source can be behind the weights and still be the
+    # only copy of rows the table has not written -- releasing it there is what
+    # made a kill between the weight flush and `ngram.finish()` re-fetch the
+    # n-gram shards.
     pending: dict[Path, int] = {}
 
     def release_durable_sources() -> None:
         written = writer.written()
+        held = ngram.hold()
         for source, offset in list(pending.items()):
+            if source in held:
+                continue
             if written >= offset:
                 source.unlink(missing_ok=True)
                 del pending[source]

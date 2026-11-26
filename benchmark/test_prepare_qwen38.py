@@ -473,6 +473,80 @@ class LocalTableReuseTests(unittest.TestCase):
 
 
 @unittest.skipIf(prepare is None, f"prepare_qwen38 unavailable: {IMPORT_ERROR}")
+class NgramTableDurabilityTests(unittest.TestCase):
+    """The table is an append-only prefix, and a pending row holds its source.
+
+    The table is 102 GB and takes minutes, so a kill during it must not cost a
+    re-fetch of the 128 shards that carry the rows. The `.partial` is a prefix of
+    the table (whole fp16 rows in numeric index order), so the next run adopts it
+    and the release rule can let go of a source once its rows are in that prefix.
+    """
+
+    def setUp(self) -> None:
+        import numpy as np
+
+        self.np = np
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="ngram-durable-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.dim = 4
+        self.sizes = [3, 2, 4]
+        self.rows = sum(self.sizes)
+        self.row_bytes = self.dim * 2
+
+    def name(self, index: int) -> str:
+        return f"model.language_model.layers.0.ple.ngram_embedding.shard_{index}.weight"
+
+    def block(self, index: int):
+        values = self.np.arange(self.sizes[index] * self.dim, dtype=self.np.float16)
+        return values.reshape(self.sizes[index], self.dim)
+
+    def test_a_partial_prefix_is_adopted_and_a_torn_row_is_dropped(self) -> None:
+        table = prepare.NgramTable(self.root, self.rows, self.dim, sizes=self.sizes)
+        table.add(self.name(0), self.block(0), self.root / "s0")
+        table.add(self.name(1), self.block(1), self.root / "s1")
+        table.handle.close()
+        partial = self.root / "ngram_table.bin.partial"
+        prefix = partial.read_bytes()
+        self.assertEqual(len(prefix), 5 * self.row_bytes)
+        with partial.open("ab") as handle:
+            handle.write(b"\x01\x02")  # half a row: a kill mid-write
+
+        resumed = prepare.NgramTable(self.root, self.rows, self.dim, sizes=self.sizes)
+        self.assertEqual(resumed.rows, 5)
+        self.assertEqual(resumed.durable_index(), 2)
+        self.assertEqual(partial.stat().st_size, len(prefix))
+        resumed.add(self.name(2), self.block(2), self.root / "s2")
+        resumed.finish()
+        self.assertEqual(
+            (self.root / "ngram_table.bin").read_bytes(), prefix + self.block(2).tobytes()
+        )
+
+    def test_a_partial_larger_than_the_table_is_discarded(self) -> None:
+        partial = self.root / "ngram_table.bin.partial"
+        partial.write_bytes(b"\x00" * (self.row_bytes * (self.rows + 1)))
+        table = prepare.NgramTable(self.root, self.rows, self.dim, sizes=self.sizes)
+        self.addCleanup(table.handle.close)
+        self.assertEqual(table.rows, 0)
+        self.assertEqual(table.durable_index(), 0)
+        self.assertEqual(partial.stat().st_size, 0, "a foreign prefix was adopted")
+
+    def test_rows_waiting_for_an_earlier_index_hold_their_source(self) -> None:
+        table = prepare.NgramTable(self.root, self.rows, self.dim, sizes=self.sizes)
+        self.addCleanup(table.handle.close)
+        last, middle = self.root / "s-last", self.root / "s-middle"
+        table.add(self.name(2), self.block(2), last)
+        self.assertEqual(table.durable_index(), 0)
+        self.assertEqual(table.hold(), {last})
+        table.add(self.name(0), self.block(0), self.root / "s0")
+        self.assertEqual(table.durable_index(), 1)
+        self.assertIn(last, table.hold(), "index 2 is still waiting for 1")
+        table.add(self.name(1), self.block(1), middle)
+        # 1 arrived and drained 1 and the pending 2: the whole table is written.
+        self.assertEqual(table.durable_index(), 3)
+        self.assertEqual(table.hold(), set())
+
+
+@unittest.skipIf(prepare is None, f"prepare_qwen38 unavailable: {IMPORT_ERROR}")
 class DownloadTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="download-"))

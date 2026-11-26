@@ -215,6 +215,41 @@ def checkpoint() -> tuple[dict[str, bytes], dict[str, dict[str, "np.ndarray"]]]:
         shutil.rmtree(stage, ignore_errors=True)
 
 
+def checkpoint_with_order(order: list[int]):
+    """`checkpoint()` with the shard *contents* permuted.
+
+    `order[k]` is the 0-based index, into the sorted shard names, whose tensors
+    become `model-0000{k+1}`. The snapshot does not depend on the order (the index
+    names every tensor), so the clean baseline still applies -- but the conversion
+    order does, and that is what can put an n-gram shard ahead of the weight
+    shards whose flush would otherwise release its source.
+    """
+    files, plan = checkpoint()
+    names = sorted(plan)
+    permuted = {names[position]: plan[names[source]] for position, source in enumerate(order)}
+    stage = pathlib.Path(tempfile.mkdtemp(prefix="tt-checkpoint-order-"))
+    try:
+        out: dict[str, bytes] = {}
+        weight_map: dict[str, str] = {}
+        total = 0
+        for shard, tensors in permuted.items():
+            path = stage / shard
+            save_file(tensors, str(path))
+            out[shard] = path.read_bytes()
+            for name, value in tensors.items():
+                weight_map[name] = shard
+                total += value.nbytes
+        out["model.safetensors.index.json"] = json.dumps(
+            {"metadata": {"total_size": total}, "weight_map": weight_map}, indent=1
+        ).encode()
+        out["config.json"] = files["config.json"]
+        for name, _required in prepare.TOKENIZER_FILES:
+            out[name] = files[name]
+        return out, permuted
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
 # The output the converter must produce, written out by hand from the plan
 # above. Quantised tensors carry the `.weight`/`.scales`/`.biases` triple; the
 # norm keeps no `.weight` because `rename` strips it for that family.
@@ -1262,20 +1297,14 @@ class KilledProcessTests(unittest.TestCase):
         self.assertEqual(fingerprint(self.out), baseline_fingerprint())
 
 
-@requires_deps
-class DurableReleaseTests(unittest.TestCase):
-    """When a source may leave `--work`, and what a kill there can reuse.
+class _DurableHarness:
+    """Fixture, per-shard offsets and a deterministic kill, for the cases below."""
 
-    The fixture's per-shard output is uneven; a threshold just past the second
-    shard's cumulative output makes the third conversion's flush land inside the
-    third shard. Everything converted before it is then durable, and only the
-    shard the flush stopped in may stay -- the block-empty rule this replaces
-    would keep all five, because the open block is almost never empty at a
-    shard boundary.
-    """
+    def checkpoint(self):
+        return checkpoint()
 
     def setUp(self) -> None:
-        self.files, _plan = checkpoint()
+        self.files, _plan = self.checkpoint()
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-e2e-durable-"))
         self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
         self.mirror_ctx = mirror(self.files)
@@ -1318,29 +1347,8 @@ class DurableReleaseTests(unittest.TestCase):
             patches=patches,
         )
 
-    def kill_after_conversions(self, count: int) -> tuple[str, list[str]]:
-        """SIGKILL the converter once `count` shards have been converted."""
-        driver = self.root / "kill-driver.py"
-        marker = self.root / "converted.txt"
-        driver.write_text(
-            "import os, signal, sys\n"
-            "from pathlib import Path\n"
-            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
-            "import prepare_qwen38 as prepare\n"
-            f"prepare.OUTPUT_SHARD_BYTES = {self.threshold}\n"
-            f"MARKER = Path({str(marker)!r})\n"
-            f"STOP_AFTER = {count}\n"
-            "real = prepare.convert_shard\n"
-            "converted = []\n"
-            "def stopping(path, writer, ngram, width):\n"
-            "    if len(converted) == STOP_AFTER:\n"
-            "        MARKER.write_text('\\n'.join(str(p) for p in converted))\n"
-            "        os.kill(os.getpid(), signal.SIGSTOP)\n"
-            "    real(path, writer, ngram, width)\n"
-            "    converted.append(path)\n"
-            "prepare.convert_shard = stopping\n"
-            "raise SystemExit(prepare.main())\n"
-        )
+    def _run_and_kill(self, driver: pathlib.Path) -> str:
+        """Run the driver and SIGKILL it at its own SIGSTOP."""
         log_path = self.root / "killed.log"
         with log_path.open("w") as log_handle:
             process = subprocess.Popen(
@@ -1380,11 +1388,74 @@ class DurableReleaseTests(unittest.TestCase):
                     f"finished before the kill (exit {process.returncode}):\n"
                     + log_path.read_text()
                 )
+            marker = self.root / "converted.txt"
             converted = marker.read_text().splitlines() if marker.exists() else []
             os.kill(process.pid, signal.SIGKILL)
             os.waitpid(process.pid, 0)
             process.returncode = -signal.SIGKILL
-        return log_path.read_text(), converted
+        self.converted = converted
+        return log_path.read_text()
+
+    def kill_after_conversions(self, count: int) -> tuple[str, list[str]]:
+        """SIGKILL the converter once `count` shards have been converted."""
+        marker = self.root / "converted.txt"
+        driver = self.root / "kill-driver.py"
+        driver.write_text(
+            "import os, signal, sys\n"
+            "from pathlib import Path\n"
+            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
+            "import prepare_qwen38 as prepare\n"
+            f"prepare.OUTPUT_SHARD_BYTES = {self.threshold}\n"
+            f"MARKER = Path({str(marker)!r})\n"
+            f"STOP_AFTER = {count}\n"
+            "real = prepare.convert_shard\n"
+            "converted = []\n"
+            "def stopping(path, writer, ngram, width):\n"
+            "    if len(converted) == STOP_AFTER:\n"
+            "        MARKER.write_text('\\n'.join(str(p) for p in converted))\n"
+            "        os.kill(os.getpid(), signal.SIGSTOP)\n"
+            "    real(path, writer, ngram, width)\n"
+            "    converted.append(path)\n"
+            "prepare.convert_shard = stopping\n"
+            "raise SystemExit(prepare.main())\n"
+        )
+        log = self._run_and_kill(driver)
+        return log, self.converted
+
+    def kill_before_finish(self) -> str:
+        """SIGKILL the run at its first `OutputWriter.finish` call.
+
+        That is after every conversion and before any output shard is renamed, so
+        the n-gram `.partial` holds every row and the weight shards are flushed --
+        the state a kill in the table's last minutes leaves.
+        """
+        driver = self.root / "finish-driver.py"
+        driver.write_text(
+            "import os, signal, sys\n"
+            f"sys.path.insert(0, {str(ROOT / 'tools')!r})\n"
+            "import prepare_qwen38 as prepare\n"
+            f"prepare.OUTPUT_SHARD_BYTES = {self.threshold}\n"
+            "real = prepare.OutputWriter.finish\n"
+            "def stopping(writer):\n"
+            "    os.kill(os.getpid(), signal.SIGSTOP)\n"
+            "    return real(writer)\n"
+            "prepare.OutputWriter.finish = stopping\n"
+            "raise SystemExit(prepare.main())\n"
+        )
+        return self._run_and_kill(driver)
+
+
+@requires_deps
+class DurableReleaseTests(_DurableHarness, unittest.TestCase):
+    """When a source may leave `--work`, and what a kill there can reuse.
+
+    The fixture's per-shard output is uneven; a threshold just past the second
+    shard's cumulative output makes the third conversion's flush land inside the
+    third shard. Everything converted before it is then durable, and only the
+    shard the flush stopped in may stay -- the block-empty rule this replaces
+    would keep all five, because the open block is almost never empty at a
+    shard boundary.
+    """
 
     def test_a_mid_run_flush_releases_the_earlier_sources(self) -> None:
         at_first_finish: dict[str, list[str]] = {}
@@ -1437,6 +1508,99 @@ class DurableReleaseTests(unittest.TestCase):
         for name in released + retained:
             got = [request for request in self.server.requests[mark:] if request["file"] == name]
             self.assertEqual(got, [], f"the resume fetched {name} again:\n{log}")
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
+
+
+@requires_deps
+class NgramTableDurabilityTests(_DurableHarness, unittest.TestCase):
+    """The n-gram table is a second durability sink and a second release gate.
+
+    `convert_shard` sends the table rows to `ngram_table.bin.partial`, not to the
+    weight writer, and the table writes them in numeric index order. A shard
+    carrying a high index (10, 11 here) can arrive before the shard carrying
+    `0-9`, so its rows wait in memory for the whole run: releasing it at its
+    weight offset -- which the offset rule alone does, because a table row adds
+    no weight bytes -- leaves that as the only copy, and a kill then has to fetch
+    it again. The fixture is permuted so that shard comes first and weight shards
+    follow it; `OUTPUT_SHARD_BYTES = 1` makes every weight add durable at once, so
+    anything still in `--work` is held by the table and nothing else.
+    """
+
+    def checkpoint(self):
+        # new 1 = old 4 (o_proj + table indices 10,11), new 2-4 = old 1-3
+        # (weights), new 5 = old 5 (table indices 0-9, which drain 10 and 11).
+        return checkpoint_with_order([3, 0, 1, 2, 4])
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.threshold = 1
+
+    def ngram_only_shards(self) -> list[str]:
+        weight_map = json.loads(self.files["model.safetensors.index.json"])["weight_map"]
+        by_shard: dict[str, list[str]] = {}
+        for name, shard in weight_map.items():
+            by_shard.setdefault(shard, []).append(name)
+        return sorted(
+            shard for shard, names in by_shard.items() if all(prepare.is_ngram(n) for n in names)
+        )
+
+    def test_a_kill_with_rows_still_pending_keeps_the_source(self) -> None:
+        log, converted = self.kill_after_conversions(1)
+        self.assertEqual(len(converted), 1, converted)
+        source = pathlib.Path(converted[0]).name
+        self.assertEqual(source, self.shards[0], "the conversion order is the shard order")
+        self.assertTrue(
+            (self.work / source).is_file(),
+            f"the source whose n-gram rows are still in memory was released:\n{log}",
+        )
+        partial = self.out / "ngram_table.bin.partial"
+        self.assertEqual(partial.stat().st_size if partial.exists() else 0, 0)
+
+        mark = len(self.server.requests)
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        fetched = {
+            request["file"]
+            for request in self.server.requests[mark:]
+            if request["file"].endswith(".safetensors")
+        }
+        self.assertNotIn(source, fetched, f"the resume fetched {source} again:\n{log}")
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
+
+    def test_a_kill_after_the_table_is_written_does_not_fetch_it_again(self) -> None:
+        log = self.kill_before_finish()
+        for name in self.ngram_only_shards():
+            self.assertFalse(
+                (self.work / name).exists(),
+                f"{name} was kept after the table held its rows:\n{log}",
+            )
+        partial = self.out / "ngram_table.bin.partial"
+        self.assertTrue(partial.exists(), f"the table was published before the kill:\n{log}")
+        self.assertFalse((self.out / "ngram_table.bin").exists())
+        self.assertEqual(
+            partial.stat().st_size,
+            expected_table_rows() * head_dim() * 2,
+            "the table's rows on disk are not the whole table: a buffered tail was "
+            "lost, so the resume would rebuild rows this run had already written",
+        )
+
+        mark = len(self.server.requests)
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        self.assertIn("resuming the n-gram table at", log)
+        fetched = {
+            request["file"]
+            for request in self.server.requests[mark:]
+            if request["file"].endswith(".safetensors")
+        }
+        self.assertEqual(fetched, set(), f"the resume fetched {sorted(fetched)} again:\n{log}")
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
+        self.assertEqual(sorted(p.name for p in self.work.glob("*.safetensors")), [])
+
+    def test_a_clean_run_leaves_no_source_behind_and_the_baseline(self) -> None:
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        self.assertEqual(sorted(p.name for p in self.work.glob("*.safetensors")), [])
         self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
 
 
