@@ -1,4 +1,4 @@
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanCore
 
 /// The 6.x loader's value inputs, passed opaquely through Core to its factory.

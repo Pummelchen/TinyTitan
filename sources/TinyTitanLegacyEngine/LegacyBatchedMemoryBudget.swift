@@ -1,4 +1,4 @@
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanCore
 
 package enum LegacyBatchedMemoryBudget {

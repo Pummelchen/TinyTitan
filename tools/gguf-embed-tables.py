@@ -13,12 +13,12 @@ Usage:
 import re
 import sys
 
-OUT = "sources/TinyTitan/Infrastructure/ModelIO/GGUFIQTables.swift"
+OUT = "sources/Engines/Legacy6xRuntime/Infrastructure/ModelIO/GGUFIQTables.swift"
 # The 2-bit and 1-bit grids, split so every generated file stays under the
 # 500-line source limit: iq1s_grid alone is 2,048 entries.
 OUT_GRIDS = [
     (
-        "sources/TinyTitan/Infrastructure/ModelIO/GGUFIQTables+IQ2.swift",
+        "sources/Engines/Legacy6xRuntime/Infrastructure/ModelIO/GGUFIQTables+IQ2.swift",
         [
             ("iq2xxsGrid", "UInt64", "uint64_t", "iq2xxs_grid", 4, None),
             ("iq2xsGrid", "UInt64", "uint64_t", "iq2xs_grid", 4, None),
@@ -26,7 +26,7 @@ OUT_GRIDS = [
         ],
     ),
     (
-        "sources/TinyTitan/Infrastructure/ModelIO/GGUFIQTables+IQ1S.swift",
+        "sources/Engines/Legacy6xRuntime/Infrastructure/ModelIO/GGUFIQTables+IQ1S.swift",
         [("iq1sGridHigh", "UInt64", "uint64_t", "iq1s_grid", 4, (1024, 2048))],
     ),
 ]

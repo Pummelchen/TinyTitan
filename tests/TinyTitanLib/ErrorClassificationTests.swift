@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TinyTitan
+import Legacy6xRuntime
 @testable import TinyTitanCore
 
 @testable import TinyTitanLib

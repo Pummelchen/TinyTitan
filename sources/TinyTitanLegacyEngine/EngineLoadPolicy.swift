@@ -1,4 +1,4 @@
-import TinyTitan
+import Legacy6xRuntime
 
 package func defaultPrefillChunkTokens(family: ModelFamily, fallback: Int) -> Int {
     switch family {

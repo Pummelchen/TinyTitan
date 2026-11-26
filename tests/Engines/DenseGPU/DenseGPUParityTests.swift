@@ -3,7 +3,7 @@ import Foundation
 import Metal
 @testable import TinyTitanCore
 @testable import DenseGPU
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 
 /// The dense-GPU engine's byte-parity oracle (TT-097 Phase 3 Task 13, the
 /// restored `TINYTITAN_DENSE_GPU_EQUIV` bar): the shared DenseGPU engine and
@@ -59,12 +59,12 @@ struct DenseGPUParityTests {
         // extension, so both imports are what makes this member visible
         // (MemberImportVisibility).
         let denseArch = try ArchConfig.resolved(
-            forFamily: TinyTitan.ModelFamily.qwen35Dense, directoryURL: directory)
-        let model = try TinyTitan.Model.load(
+            forFamily: Legacy6xRuntime.ModelFamily.qwen35Dense, directoryURL: directory)
+        let model = try Legacy6xRuntime.Model.load(
             directoryURL: directory, device: dev, expecting: denseArch)
         let ctx = try MetalContext(device: dev)
-        let runtime = try TinyTitan.RuntimeConfiguration(forceLogitsHead: true)
-        let runner = try TinyTitan.RealForwardRunner(
+        let runtime = try Legacy6xRuntime.RuntimeConfiguration(forceLogitsHead: true)
+        let runner = try Legacy6xRuntime.RealForwardRunner(
             model: model, context: ctx, maxContext: 4096,
             runtimeConfiguration: runtime)
         let vocab = runner.cfg.vocabSize

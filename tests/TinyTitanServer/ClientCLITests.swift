@@ -4,7 +4,7 @@ import NIOCore
 import Testing
 @testable import TinyTitanCore
 
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 

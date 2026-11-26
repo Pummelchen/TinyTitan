@@ -1,5 +1,5 @@
 import Foundation
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanCore
 import TinyTitanLib
 
@@ -43,7 +43,7 @@ public final class EngineFactories: @unchecked Sendable {
             mtpDecoder: { factories.mtpDecoder },
             makeScratch: { context, vocabulary, softcap in
                 RawCompletionScratch(
-                    payload: try TinyTitan.RawCompletionScratch(
+                    payload: try Legacy6xRuntime.RawCompletionScratch(
                         context: context, vocab: vocabulary, logitSoftcap: softcap))
             },
             runRawCompletion: { request in try await factories.runRawCompletion(request) },
@@ -298,12 +298,12 @@ public final class EngineFactories: @unchecked Sendable {
     private func runRawCompletion(
         _ request: RawCompletionRequest
     ) async throws -> TinyTitanCore.RawDecodeResult {
-        guard let scratch = request.scratch.payload as? TinyTitan.RawCompletionScratch else {
+        guard let scratch = request.scratch.payload as? Legacy6xRuntime.RawCompletionScratch else {
             throw ServerInferenceError.unsupportedModel(
                 "6.x completion requires its scratch buffers")
         }
         let options = request.wideVerify as? TinyTitanCore.WideVerifyDecodeOptions
-        let result = try await TinyTitan.runRawCompletion(
+        let result = try await Legacy6xRuntime.runRawCompletion(
             producer: request.producer,
             tokenizer: request.tokenizer,
             promptIds: request.promptIDs,

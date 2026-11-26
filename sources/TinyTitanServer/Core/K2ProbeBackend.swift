@@ -1,6 +1,6 @@
 import Foundation
 import Metal
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanLib
 import TinyTitanCore
 import TinyTitanLegacyEngine

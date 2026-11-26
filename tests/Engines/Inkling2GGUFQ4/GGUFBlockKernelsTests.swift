@@ -3,12 +3,12 @@ import Metal
 import Testing
 
 @testable import Inkling2GGUFQ4
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 @testable import TinyTitanCore
 
-typealias GGUFType = TinyTitan.GGUFType
-typealias GGUFGemmTiled = TinyTitan.GGUFGemmTiled
-typealias GGUFGemvIds = TinyTitan.GGUFGemvIds
+typealias GGUFType = Legacy6xRuntime.GGUFType
+typealias GGUFGemmTiled = Legacy6xRuntime.GGUFGemmTiled
+typealias GGUFGemvIds = Legacy6xRuntime.GGUFGemvIds
 
 /// The GPU block decoders (`gguf_block_decoders.metal`) behind the UD-Q2_K_XL
 /// file's tensors, against the bit-exact host decoders: the expert-indexed

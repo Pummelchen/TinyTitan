@@ -1,7 +1,7 @@
 import ContinuityCore
 import Foundation
 import Testing
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanMemory
 @testable import TinyTitanCore
 

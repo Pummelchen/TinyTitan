@@ -1,6 +1,6 @@
 import Testing
 
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 @testable import TinyTitanCore

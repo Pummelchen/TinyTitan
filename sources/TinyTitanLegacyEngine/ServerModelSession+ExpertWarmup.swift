@@ -1,5 +1,5 @@
 import Foundation
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanCore
 import TinyTitanLib
 

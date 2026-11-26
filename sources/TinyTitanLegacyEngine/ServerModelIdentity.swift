@@ -1,4 +1,4 @@
-import TinyTitan
+import Legacy6xRuntime
 
 package enum ServerModelIdentity {
     package static func base(manifestModelID: String, family: ModelFamily) -> String {

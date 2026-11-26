@@ -1,5 +1,5 @@
 import Foundation
-import TinyTitan
+import Legacy6xRuntime
 import TinyTitanCPUEngine
 import TinyTitanCore
 import TinyTitanLegacyEngine

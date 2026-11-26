@@ -3,7 +3,7 @@ import Foundation
 import Metal
 @testable import TinyTitanCore
 @testable import Ornith35B4Bit
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 
 /// Parity of the 7.0 Ornith variant against the 6.x runtime GPU engine on the
 /// same install (the 7.0 release gate). Model-gated: set
@@ -21,8 +21,9 @@ struct OrnithParityTests {
     {
         guard let dev = MTLCreateSystemDefaultDevice() else { throw MetalError.noDevice }
         let ctx = try MetalContext(device: dev)
-        let model = try TinyTitan.Model.load(directoryURL: directory, device: dev)
-        let runner = try TinyTitan.RealForwardRunner(model: model, context: ctx, maxContext: 4096)
+        let model = try Legacy6xRuntime.Model.load(directoryURL: directory, device: dev)
+        let runner = try Legacy6xRuntime.RealForwardRunner(
+            model: model, context: ctx, maxContext: 4096)
         let vocab = runner.cfg.vocabSize
         guard
             let logits = dev.makeBuffer(
@@ -41,7 +42,7 @@ struct OrnithParityTests {
         let ids = prompt.map { Int32($0) }
         let r = try await runner.prefillChunked(
             tokens: ids[...], startPosition: 0, outputMode: .greedyIfAvailable,
-            config: TinyTitan.PrefillRuntimeConfig.defaultChunked,
+            config: Legacy6xRuntime.PrefillRuntimeConfig.defaultChunked,
             into: logits, onProgress: { _ in })
         var pos = r.newPosition
         var next: Int32

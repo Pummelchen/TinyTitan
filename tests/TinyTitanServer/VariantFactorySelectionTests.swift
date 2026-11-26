@@ -3,7 +3,7 @@ import Testing
 import TinyTitanCore
 import TinyTitanVariants
 
-@testable import TinyTitan
+@testable import Legacy6xRuntime
 @testable import TinyTitanLegacyEngine
 @testable import TinyTitanServerCore
 
