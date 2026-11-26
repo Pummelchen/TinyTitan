@@ -17,6 +17,11 @@ public struct EngineFactory: Sendable {
     public let makeContext: @Sendable (MTLDevice?) throws -> MetalContext
     public let prepareLoad: @Sendable (SessionBuildOptions) throws -> EngineLoadPlan
     public let metadata: @Sendable (URL) throws -> EngineModelMetadata
+    /// The host-facing identity of the install (catalog id, display name,
+    /// family, width, sampling and thinking levels). nil for a factory that
+    /// does not describe its installs; the adapter and every shipped plugin
+    /// supply it. Read from the manifest alone: no weights, no Metal.
+    public let identity: (@Sendable (URL) throws -> ModelIdentity)?
     public let validateReasoning:
         @Sendable (EngineModelMetadata, ModelThinkingMode, ModelReasoningEffort?) throws -> Void
     public let resolveArchitecture: @Sendable (URL) throws -> ArchConfig
@@ -65,6 +70,7 @@ public struct EngineFactory: Sendable {
         metadata: @escaping @Sendable (URL) throws -> EngineModelMetadata = { _ in
             throw EngineFactoryError.unsupported("the selected factory has no metadata reader")
         },
+        identity: (@Sendable (URL) throws -> ModelIdentity)? = nil,
         validateReasoning:
             @escaping @Sendable (
                 EngineModelMetadata, ModelThinkingMode, ModelReasoningEffort?
@@ -108,6 +114,7 @@ public struct EngineFactory: Sendable {
         self.makeContext = makeContext
         self.prepareLoad = prepareLoad
         self.metadata = metadata
+        self.identity = identity
         self.validateReasoning = validateReasoning
         self.resolveArchitecture = resolveArchitecture
         self.preview = preview

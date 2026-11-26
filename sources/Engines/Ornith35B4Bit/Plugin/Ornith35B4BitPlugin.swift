@@ -62,6 +62,7 @@ public enum Ornith35B4BitPlugin: EnginePlugin {
             makeContext: { device in try MetalContext.runtimeDefault(device: device) },
             prepareLoad: { options in try plan(options, host: host) },
             metadata: { directory in try metadata(directory) },
+            identity: { directory in try hostIdentity(directory) },
             validateReasoning: { metadata, thinking, effort in
                 let family = ModelFamily(rawValue: metadata.family) ?? .qwen36
                 try family.validateReasoning(thinkingMode: thinking, effort: effort)
@@ -122,6 +123,34 @@ public enum Ornith35B4BitPlugin: EnginePlugin {
         let sampling = ModelProfile.resolve(identity: identity).sampling
         return EngineModelMetadata(
             modelID: identity.modelID, family: identity.family.rawValue,
+            weightBits: identity.weightBits,
+            sampling: SamplingProfile(
+                temperature: sampling.temperature, topK: sampling.topK, topP: sampling.topP,
+                minP: sampling.minP, presencePenalty: sampling.presencePenalty, thinking: nil),
+            reasoningControl: coreControl(identity.family.reasoningControl))
+    }
+
+    /// The catalog's identity for this install: the width suffix, the display
+    /// name the model card publishes, and the sampling row the plugin really
+    /// uses. The host reads this instead of deriving a family from the manifest.
+    static func hostIdentity(_ directory: URL) throws -> ModelIdentity {
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let sampling = ModelProfile.resolve(identity: identity).sampling
+        var base = identity.modelID
+        for suffix in ["-4bit", "-8bit", "-6bit"] where base.hasSuffix(suffix) {
+            base = String(base.dropLast(suffix.count))
+        }
+        let name: String
+        switch base {
+        case "ornith-1.5-35b-a3b": name = "Ornith 1.5 35B-A3B"
+        case "ornith-1.5-35b-a3b-bf16dense": name = "Ornith 1.5 35B-A3B (bf16 dense)"
+        default: name = base
+        }
+        return ModelIdentity(
+            modelID: identity.modelID,
+            catalogID: base + "_\(identity.weightBits)-Bit",
+            displayName: name,
+            family: identity.family.rawValue,
             weightBits: identity.weightBits,
             sampling: SamplingProfile(
                 temperature: sampling.temperature, topK: sampling.topK, topP: sampling.topP,

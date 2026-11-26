@@ -572,6 +572,9 @@ let package = Package(
             dependencies: [
                 .product(name: "yyjson", package: "yyjson"),
                 "TinyTitanCore", "TinyTitanLib", "Legacy6xRuntime", "TinyTitanLegacyEngine",
+                // The identity surface: a resolved plugin declares its
+                // install's catalog id and name (TT-134 group f).
+                "TinyTitanPluginAPI",
                 // The contract suite builds engines the way an embedder does,
                 // through the variant selection table.
                 "TinyTitanVariants",

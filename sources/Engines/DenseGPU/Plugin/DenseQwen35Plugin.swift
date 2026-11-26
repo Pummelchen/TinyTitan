@@ -62,6 +62,7 @@ public enum DenseQwen35Plugin: EnginePlugin {
             makeContext: { device in try MetalContext.runtimeDefault(device: device) },
             prepareLoad: { options in try plan(options, host: host) },
             metadata: { directory in try metadata(directory) },
+            identity: { directory in try hostIdentity(directory) },
             validateReasoning: { metadata, thinking, effort in
                 let family = ModelFamily(rawValue: metadata.family) ?? .qwen35Dense
                 try family.validateReasoning(thinkingMode: thinking, effort: effort)
@@ -113,6 +114,36 @@ public enum DenseQwen35Plugin: EnginePlugin {
         let sampling = ModelProfile.resolve(identity: identity).sampling
         return EngineModelMetadata(
             modelID: identity.modelID, family: identity.family.rawValue,
+            weightBits: identity.weightBits,
+            sampling: SamplingProfile(
+                temperature: sampling.temperature, topK: sampling.topK, topP: sampling.topP,
+                minP: sampling.minP, presencePenalty: sampling.presencePenalty, thinking: nil),
+            reasoningControl: coreControl(identity.family.reasoningControl))
+    }
+
+    /// The catalog's identity for a dense install: the width suffix and the
+    /// size-specific display name (a dense install's manifest carries an id,
+    /// not a card name).
+    static func hostIdentity(_ directory: URL) throws -> ModelIdentity {
+        let identity = try ManifestReader.peekIdentity(directoryURL: directory)
+        let sampling = ModelProfile.resolve(identity: identity).sampling
+        var base = identity.modelID
+        for suffix in ["-4bit", "-8bit", "-6bit"] where base.hasSuffix(suffix) {
+            base = String(base.dropLast(suffix.count))
+        }
+        let name: String
+        switch base {
+        case "qwen3.5-2b": name = "Qwen 3.5 2B"
+        case "qwen3.5-4b": name = "Qwen 3.5 4B"
+        case "qwen3.5-9b": name = "Qwen 3.5 9B"
+        case "unknown/snapshot": name = "Qwen 3.5 dense"
+        default: name = base
+        }
+        return ModelIdentity(
+            modelID: identity.modelID,
+            catalogID: base + "_\(identity.weightBits)-Bit",
+            displayName: name,
+            family: identity.family.rawValue,
             weightBits: identity.weightBits,
             sampling: SamplingProfile(
                 temperature: sampling.temperature, topK: sampling.topK, topP: sampling.topP,

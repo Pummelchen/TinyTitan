@@ -79,6 +79,14 @@ public enum Inkling2GGUFQ4Plugin: EnginePlugin {
                     engineConfiguration: plan)
             },
             metadata: metadata,
+            identity: { directory in
+                let model = try metadata(directory)
+                return ModelIdentity(
+                    modelID: model.modelID, catalogID: model.modelID,
+                    displayName: displayName,
+                    family: model.family, weightBits: model.weightBits,
+                    sampling: model.sampling, reasoningControl: model.reasoningControl)
+            },
             validateReasoning: { _, thinking, effort in
                 guard let effort else { return }
                 guard thinking.isEnabled else {

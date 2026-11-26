@@ -75,6 +75,13 @@ public struct ResolvedPlugin: Sendable {
     public func engineFactory(host: HostServices = .standard) -> EngineFactory {
         plugin.engineFactory(host: host)
     }
+
+    /// The host-facing identity the winning plugin declares for this install.
+    /// `package`: the plugin API's public promise is the protocol; the host's
+    /// catalog and doctor read this without widening it.
+    package func modelIdentity(host: HostServices = .standard) throws -> ModelIdentity? {
+        try plugin.engineFactory(host: host).identity?(probe.directory)
+    }
 }
 
 public enum PluginRegistryError: Error, Equatable, CustomStringConvertible {

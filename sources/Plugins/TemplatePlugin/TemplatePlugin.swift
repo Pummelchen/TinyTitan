@@ -78,6 +78,14 @@ public enum TemplatePlugin: EnginePlugin {
                     modelID: TemplateModel.modelID(directory), family: family, weightBits: 16,
                     sampling: .house, reasoningControl: .binaryThinking)
             },
+            identity: { directory in
+                ModelIdentity(
+                    modelID: TemplateModel.modelID(directory),
+                    catalogID: TemplateModel.modelID(directory),
+                    displayName: displayName,
+                    family: family, weightBits: 16, sampling: .house,
+                    reasoningControl: .binaryThinking)
+            },
             resolveArchitecture: { _ in TemplateModel.architecture },
             preview: { directory, chunk in
                 EngineSessionPreview(

@@ -19,6 +19,7 @@ public final class EngineFactories: @unchecked Sendable {
             makeContext: { device in try MetalContext.runtimeDefault(device: device) },
             prepareLoad: { options in try factories.prepareLoad(options) },
             metadata: { directory in try factories.metadata(directory) },
+            identity: { directory in try ServerModelIdentity.hostIdentity(directory: directory) },
             validateReasoning: { metadata, thinking, effort in
                 let family = ModelFamily(rawValue: metadata.family) ?? .qwen36
                 try family.validateReasoning(thinkingMode: thinking, effort: effort)
