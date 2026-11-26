@@ -34,18 +34,18 @@ extension ServerHTTPHandler {
         // rebinding included) outside the machine's trust. See
         // LoopbackTrustPolicy for the full model.
         if let refusal = LoopbackTrustPolicy.refusal(for: head) {
-            // A HEAD response may never carry a body, including when the
-            // request is refused before routing.
-            if head.method == .HEAD {
-                writeHeadOnly(context, status: refusal.status)
-            } else {
-                writeRequestError(
-                    context,
-                    .invalid(
-                        message: refusal.message, param: nil, code: refusal.code),
-                    status: refusal.status,
-                    surface: anthropic ? .anthropic : .chat)
-            }
+            writeAdmissionRefusal(
+                context, status: refusal.status, code: refusal.code,
+                message: refusal.message,
+                surface: anthropic ? .anthropic : .chat, method: head.method)
+            return
+        }
+        let workspace = WorkspaceHeader.resolve(in: head)
+        if workspace == .duplicate {
+            writeAdmissionRefusal(
+                context, status: .badRequest, code: "duplicate_workspace",
+                message: "more than one X-TinyTitan-Workspace header is ambiguous",
+                surface: anthropic ? .anthropic : .chat, method: head.method)
             return
         }
         let segments = path.split(separator: "/").map(String.init)
@@ -112,7 +112,7 @@ extension ServerHTTPHandler {
                 // every time, which is a fix that compiles, ships and does
                 // nothing -- caught only because the isolation scenario
                 // refuses to run until it sees the header take effect.
-                workspace: WorkspaceHeader.value(in: head))
+                workspace: workspace.value)
         case (.POST, "/v1/responses"):
             guard jsonBody else {
                 writeUnsupportedMediaType(context, surface: .responses)
@@ -121,7 +121,7 @@ extension ServerHTTPHandler {
             handleResponses(
                 body: body,
                 context: context,
-                workspace: WorkspaceHeader.value(in: head))
+                workspace: workspace.value)
         case (.POST, "/v1/responses/compact"):
             // The spec's compaction endpoint: a conversation in, a compacted
             // window out. No model state and no stored response, so it is a
@@ -138,7 +138,7 @@ extension ServerHTTPHandler {
             }
             handleMessages(
                 body: body, context: context,
-                workspace: WorkspaceHeader.value(in: head))
+                workspace: workspace.value)
         case (.POST, "/v1/messages/count_tokens"):
             guard jsonBody else {
                 writeUnsupportedMediaType(context, surface: .anthropic)
@@ -205,6 +205,26 @@ extension ServerHTTPHandler {
         guard head.method == .HEAD, path != "/health", path != "/v1/models" else { return false }
         writeHeadOnly(context, status: .methodNotAllowed)
         return true
+    }
+
+    /// An error found before routing. A HEAD response carries no body even when
+    /// the request is refused here; every other method gets the surface's JSON
+    /// error envelope.
+    func writeAdmissionRefusal(
+        _ context: ChannelHandlerContext,
+        status: HTTPResponseStatus,
+        code: String,
+        message: String,
+        surface: APISurface,
+        method: HTTPMethod
+    ) {
+        guard method != .HEAD else {
+            writeHeadOnly(context, status: status)
+            return
+        }
+        writeRequestError(
+            context, .invalid(message: message, param: nil, code: code),
+            status: status, surface: surface)
     }
 
     func writeUnsupportedMediaType(_ context: ChannelHandlerContext, surface: APISurface) {

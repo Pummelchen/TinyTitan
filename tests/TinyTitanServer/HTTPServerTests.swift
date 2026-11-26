@@ -1481,6 +1481,42 @@ struct HTTPServerTests {
         try await server.shutdown()
     }
 
+    /// The workspace header selects which project's memory a request reads and
+    /// writes. Two of them is an order-dependent selection, not a merge: the
+    /// same duplicate-header rule the media type and Host paths use applies.
+    @Test func duplicateWorkspaceHeaderIsRefused() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"hi"}]}"#
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "POST /v1/chat/completions HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:\(port)\r\n"
+                + "X-TinyTitan-Workspace: project-alpha\r\n"
+                + "X-TinyTitan-Workspace: project-beta\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n"
+                + "Connection: close\r\n\r\n"
+                + body)
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            reply.hasPrefix("HTTP/1.1 400"),
+            "a duplicate workspace header selected a project by order: \(reply)")
+        #expect(reply.contains("duplicate_workspace"))
+        #expect(backend.generations == 0, "a duplicate workspace reached the model")
+
+        try await server.shutdown()
+    }
+
     /// The parts of the media-type grammar a client actually varies -- casing
     /// and valid parameters -- are accepted on a JSON body route.
     @Test func exactJsonMediaTypeCasingAndParametersAreAccepted() async throws {

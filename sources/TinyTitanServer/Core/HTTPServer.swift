@@ -221,11 +221,39 @@ public actor TinyTitanHTTPServer {
 enum WorkspaceHeader {
     static let name = "x-tinytitan-workspace"
 
-    static func value(in head: HTTPRequestHead?) -> String? {
-        guard let raw = head?.headers.first(name: name) else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    /// The header's value, or the reason it cannot be used.
+    ///
+    /// A duplicate is not a merge and not a first-wins pick: the workspace
+    /// selects which project's persistent memory a request reads and writes, so
+    /// choosing one by wire order would let a proxy or a retry append a second
+    /// value and silently move the request to another project. Admission refuses
+    /// it before routing.
+    enum Value: Equatable {
+        case absent
+        case named(String)
+        case duplicate
+
+        var value: String? {
+            if case .named(let value) = self { return value }
+            return nil
+        }
+    }
+
+    static func resolve(in head: HTTPRequestHead?) -> Value {
+        guard let head else { return .absent }
+        let values = head.headers[name]
+        guard !values.isEmpty else { return .absent }
+        guard values.count == 1 else { return .duplicate }
+        let trimmed = values[0].trimmingCharacters(in: .whitespaces)
         // A proxy that adds the header with nothing after it must not create
         // a workspace called "".
-        return trimmed.isEmpty ? nil : trimmed
+        return trimmed.isEmpty ? .absent : .named(trimmed)
+    }
+
+    /// The named workspace, or nil when absent or duplicated. Routed requests
+    /// have already refused `.duplicate`; this spelling stays for callers that
+    /// only want the value.
+    static func value(in head: HTTPRequestHead?) -> String? {
+        resolve(in: head).value
     }
 }
