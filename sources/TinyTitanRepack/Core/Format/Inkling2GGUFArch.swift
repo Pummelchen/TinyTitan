@@ -30,8 +30,15 @@ enum Inkling2GGUFArch {
         let loopEnd = try int("loop.core_end")
         let passes = try int("num_loops")
         let unrolled = try int("block_count")
-        let stored = unrolled - (passes - 1) * (loopEnd - loopStart)
-        guard loopStart >= 0, loopEnd > loopStart, passes >= 1, stored > 0, loopEnd <= stored else {
+        guard loopStart >= 0, loopEnd > loopStart, passes >= 1 else {
+            throw RepackError.configurationInvalid(
+                detail: "Inkling 2 loop geometry \(loopStart)..<\(loopEnd) x \(passes) "
+                    + "does not fit \(unrolled) layer visits")
+        }
+        let stored = try Inkling2Arch.storedLayers(
+            unrolled: unrolled, loopStart: loopStart, loopEnd: loopEnd, passes: passes,
+            field: "Inkling 2 loop geometry")
+        guard stored > 0, loopEnd <= stored else {
             throw RepackError.configurationInvalid(
                 detail: "Inkling 2 loop geometry \(loopStart)..<\(loopEnd) x \(passes) "
                     + "does not fit \(unrolled) layer visits")
@@ -96,10 +103,29 @@ enum Inkling2GGUFArch {
             throw RepackError.configurationInvalid(
                 detail: "Inkling 2 GGUF lacks inkling2.attention.sliding_window_pattern")
         }
+        return try slidingLayers(
+            pattern: pattern, stored: stored, loopStart: loopStart, loopEnd: loopEnd,
+            passes: passes)
+    }
+
+    /// The same mapping over an explicit pattern, so the loop arithmetic can be
+    /// tested without a header.
+    static func slidingLayers(
+        pattern: [Double], stored: Int, loopStart: Int, loopEnd: Int, passes: Int
+    ) throws -> [Int] {
+        let extraLayers = try Inkling2Arch.extraLoopLayers(
+            loopStart: loopStart, loopEnd: loopEnd, passes: passes,
+            field: "sliding-window loop geometry")
         return try (0..<stored).filter { layer in
             // Layers before the loop's end first appear at their own index; a
             // layer after it follows the core's extra passes.
-            let visit = layer < loopEnd ? layer : layer + (passes - 1) * (loopEnd - loopStart)
+            let visit: Int
+            if layer < loopEnd {
+                visit = layer
+            } else {
+                visit = try Inkling2Arch.checkedAdd(
+                    layer, extraLayers, field: "sliding-window visit")
+            }
             guard visit < pattern.count else {
                 throw RepackError.configurationInvalid(
                     detail: "sliding_window_pattern has \(pattern.count) entries, no visit \(visit)"

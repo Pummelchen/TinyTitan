@@ -50,15 +50,66 @@ enum Inkling2Arch {
         /// Values one routed-expert scale covers: 32 for the GGUF's blocks, 16
         /// for the checkpoint's NVFP4 scales.
         var quantGroupSize: Int
+    }
 
-        /// Layer visits the loop unrolls to.
-        var unrolledLayers: Int { storedLayers + (loopPasses - 1) * (loopEnd - loopStart) }
+    /// A checked sum of two untrusted `Int`s.
+    static func checkedAdd(_ lhs: Int, _ rhs: Int, field: String) throws -> Int {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(field) overflows")
+        }
+        return value
+    }
+
+    /// A checked difference of two untrusted `Int`s.
+    static func checkedSubtract(_ lhs: Int, _ rhs: Int, field: String) throws -> Int {
+        let (value, overflow) = lhs.subtractingReportingOverflow(rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(field) overflows")
+        }
+        return value
+    }
+
+    /// A checked product of two untrusted `Int`s.
+    static func checkedMultiply(_ lhs: Int, _ rhs: Int, field: String) throws -> Int {
+        let (value, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(field) overflows")
+        }
+        return value
+    }
+
+    /// The layer visits the loop adds beyond `storedLayers`:
+    /// `(passes - 1) * (loopEnd - loopStart)`, with every step checked.
+    static func extraLoopLayers(
+        loopStart: Int, loopEnd: Int, passes: Int, field: String = "loop geometry"
+    ) throws -> Int {
+        let coreLayers = try checkedSubtract(loopEnd, loopStart, field: field)
+        let extraPasses = try checkedSubtract(passes, 1, field: field)
+        return try checkedMultiply(extraPasses, coreLayers, field: field)
+    }
+
+    /// The stored layer count implied by an unrolled count, checked.
+    static func storedLayers(
+        unrolled: Int, loopStart: Int, loopEnd: Int, passes: Int,
+        field: String = "loop geometry"
+    ) throws -> Int {
+        let extra = try extraLoopLayers(
+            loopStart: loopStart, loopEnd: loopEnd, passes: passes, field: field)
+        return try checkedSubtract(unrolled, extra, field: field)
     }
 
     static func archInfo(_ p: Parameters) throws -> ArchInfo {
-        guard p.loopStart >= 0, p.loopEnd > p.loopStart, p.loopPasses >= 1,
-            p.storedLayers > 0, p.loopEnd <= p.storedLayers
-        else {
+        guard p.loopStart >= 0, p.loopEnd > p.loopStart, p.loopPasses >= 1 else {
+            throw RepackError.configurationInvalid(
+                detail: "Inkling 2 loop geometry \(p.loopStart)..<\(p.loopEnd) x \(p.loopPasses) "
+                    + "does not fit \(p.storedLayers) stored layers")
+        }
+        let extraLayers = try extraLoopLayers(
+            loopStart: p.loopStart, loopEnd: p.loopEnd, passes: p.loopPasses)
+        let unrolledLayers = try checkedAdd(
+            p.storedLayers, extraLayers, field: "unrolled layer count")
+        guard p.storedLayers > 0, p.loopEnd <= p.storedLayers else {
             throw RepackError.configurationInvalid(
                 detail: "Inkling 2 loop geometry \(p.loopStart)..<\(p.loopEnd) x \(p.loopPasses) "
                     + "does not fit \(p.storedLayers) stored layers")
@@ -71,7 +122,7 @@ enum Inkling2Arch {
         let scalars: [String: Double] = [
             "loopStart": Double(p.loopStart), "loopEnd": Double(p.loopEnd),
             "loopPasses": Double(p.loopPasses), "loopGateRank": p.loopGateRank,
-            "unrolledLayers": Double(p.unrolledLayers),
+            "unrolledLayers": Double(unrolledLayers),
             "attentionResidualBlock": p.attentionResidualBlock,
             "relativeLength": p.relativeLength, "relativeExtent": p.relativeExtent,
             "relativeClip": p.relativeClip, "convolutionTaps": p.convolutionTaps,
