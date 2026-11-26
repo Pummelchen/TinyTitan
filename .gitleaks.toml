@@ -33,7 +33,13 @@
 #     the `Inkling2GGUFQ4` and `Inkling2NVFP4` plugins (`InklingQ4Weights.swift`)
 #   * `inkling-q4-k-xl-unsloth`   — the installer/launcher model key in
 #     `tools/tinytitan_models.sh` (`TINYTITAN_MODEL_KEY=inkling-q4-k-xl-unsloth`)
-# All ten are matched by `generic-api-key` only because they look like long
+# The eleventh was found by the full-history scan on 2026-11-26 (2,920 commits):
+#   * `inkling2_gguf_header.bin`  — the tokenizer sidecar's file name, the value
+#     of `tokenizerSource` in `plugins/dsh-tinytitan/src/catalog-scan.js` and in
+#     `AUDIT/evidence/0035.md`. Both files are gone from the tree, so a
+#     working-tree scan was clean while the history still carried it; the gate
+#     reads history, which is why it found it.
+# All eleven are matched by `generic-api-key` only because they look like long
 # opaque tokens. The values are literal, not shape-based, so no future secret
 # that happens to be shaped like a path, a model id or a counter is hidden.
 
@@ -54,4 +60,5 @@ regexes = [
   '''^Inkling2GGUFTensor$''',
   '''^InklingQ4Tensor$''',
   '''^inkling-q4-k-xl-unsloth$''',
+  '''^inkling2_gguf_header\.bin$''',
 ]
