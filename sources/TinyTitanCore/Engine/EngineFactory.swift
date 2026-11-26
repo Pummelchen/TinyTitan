@@ -45,6 +45,13 @@ public struct EngineFactory: Sendable {
     /// under `tokenizer/` (the Inkling 2 Q4 install derives them from its
     /// verified GGUF header). `nil` uses `GFTokenizer.tokenizerFolder`.
     public let tokenizerFolder: (@Sendable (URL) throws -> URL)?
+    /// A cheap precondition for `tokenizerFolder`, for a host that only needs to
+    /// know whether the install *can* produce a tokenizer (the catalog probe).
+    /// It must check a local file or manifest fact, never parse or write the
+    /// derived tokenizer: the Inkling 2 Q4 plugin checks that the GGUF header
+    /// file it exports from is present. `nil` means the hook itself is the only
+    /// check, or there is no hook.
+    public let tokenizerSourceIsPresent: (@Sendable (URL) -> Bool)?
 
     public init(
         prepare: @escaping @Sendable (SessionBuildOptions) -> Void = { _ in },
@@ -94,7 +101,8 @@ public struct EngineFactory: Sendable {
             @escaping @Sendable (any EngineModel, SessionBuildOptions, EngineLoadPlan) -> Int = {
                 _, _, _ in 0
             },
-        tokenizerFolder: (@Sendable (URL) throws -> URL)? = nil
+        tokenizerFolder: (@Sendable (URL) throws -> URL)? = nil,
+        tokenizerSourceIsPresent: (@Sendable (URL) -> Bool)? = nil
     ) {
         self.prepare = prepare
         self.makeContext = makeContext
@@ -114,5 +122,6 @@ public struct EngineFactory: Sendable {
         self.makeWarmup = makeWarmup
         self.perSlotBytes = perSlotBytes
         self.tokenizerFolder = tokenizerFolder
+        self.tokenizerSourceIsPresent = tokenizerSourceIsPresent
     }
 }

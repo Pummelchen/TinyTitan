@@ -16,9 +16,32 @@ extension ModelCatalog {
         } catch {
             return .failure(ProbeFailure(reason: "unreadable plugin metadata: \(error)"))
         }
-        let hasTokenizer =
-            GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil
-            || factory.tokenizerFolder != nil
+        // A plugin's hook is a closure, not proof the install can tokenize. The
+        // catalog must ask the cheapest question that is still true: the
+        // plugin's own source predicate when it has one (the Inkling 2 Q4
+        // install's GGUF header), otherwise the hook itself -- calling it is
+        // what distinguishes "declares a hook" from "can produce a tokenizer".
+        let hasTokenizer: Bool
+        if let sourceIsPresent = factory.tokenizerSourceIsPresent {
+            guard sourceIsPresent(directory) else {
+                return .failure(
+                    ProbeFailure(
+                        reason:
+                            "plugin tokenizer source is missing; the install is incomplete"))
+            }
+            hasTokenizer = true
+        } else if let hook = factory.tokenizerFolder {
+            do {
+                _ = try hook(directory)
+                hasTokenizer = true
+            } catch {
+                return .failure(
+                    ProbeFailure(reason: "plugin tokenizer source is unreadable: \(error)"))
+            }
+        } else {
+            hasTokenizer =
+                GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil
+        }
         guard hasTokenizer else {
             return .failure(
                 ProbeFailure(reason: "no tokenizer/tokenizer.json; the install is incomplete"))

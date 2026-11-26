@@ -72,6 +72,7 @@ These are the 7.0 Core contracts, unchanged:
 | `runRawCompletion` | The generation loop (§5). |
 | `perSlotBytes` | Bytes per extra concurrent sequence; a value no budget meets keeps the width at 1. |
 | `tokenizerFolder` | A folder with `tokenizer.json` and `chat_template.jinja` when the install does not keep `tokenizer/`; nil otherwise. |
+| `tokenizerSourceIsPresent` | Optional cheap predicate (a local file or manifest fact, never a parse or write) that says the install carries the source `tokenizerFolder` exports from. The catalog checks it instead of trusting the hook's presence; nil means the hook itself is the check, or there is none. |
 | `mtpDecoder`, `makeWarmup` | Optional. |
 
 **Runner obligations:**
