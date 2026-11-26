@@ -46,8 +46,7 @@ extension FileJournal {
     /// decode. `read(contentsOf:)` keeps its old shape for the callers that
     /// only want the records; a tool that is diagnosing a file wants this.
     public static func readDetailed(contentsOf url: URL) throws -> JournalReplay {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = Self.makeDecoder()
         // `nil` means the file is not there; anything else that goes wrong is
         // reported, so a caller listing workspaces does not show a file it could
         // not read as an empty one.

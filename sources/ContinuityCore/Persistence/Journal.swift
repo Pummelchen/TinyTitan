@@ -118,13 +118,8 @@ public actor FileJournal: ContinuityJournal {
         self.synchronizesEveryWrite = synchronizesEveryWrite
         self.idleDelay = idleDelay
         self.maximumLatency = maximumLatency
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.withoutEscapingSlashes]
-        self.encoder = encoder
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        self.decoder = decoder
+        self.encoder = Self.makeEncoder()
+        self.decoder = Self.makeDecoder()
 
         try Self.prepareDirectory(for: url)
         self.lockDescriptor = try Self.acquireLock(at: lockURL, journal: url, using: fileSystem)
@@ -143,6 +138,39 @@ public actor FileJournal: ContinuityJournal {
             lockDescriptor = -1
             throw error
         }
+    }
+
+    // MARK: - The JSON contract
+
+    /// The encoder every journal write uses — appends, batches and the
+    /// checkpoint.
+    ///
+    /// `.sortedKeys` is not cosmetic. Foundation's `JSONEncoder` does not
+    /// promise an object's key order and in practice varies it between two
+    /// encodes of the same value in one process. A journal is a sequence of
+    /// bytes that this project compares and reports on, so two records that
+    /// are equal must produce equal bytes; without a fixed order an encode
+    /// difference is indistinguishable from data damage, and a golden or a
+    /// crash-recovery comparison cannot exist at all.
+    ///
+    /// `.withoutEscapingSlashes` keeps the file readable (paths and URLs are
+    /// common in memory values) and has been the format since the journal was
+    /// introduced. Records written before `.sortedKeys` decode exactly the
+    /// same: JSON objects are unordered, and the decoder was always keyed by
+    /// name.
+    static func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
+        return encoder
+    }
+
+    /// The decoder for every journal read. Shared so a decoder and an encoder
+    /// cannot drift into different date strategies.
+    static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 
     deinit {
