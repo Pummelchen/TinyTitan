@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:2 in_progress:4 open:9 start:15 blocked:1**
+**done:7 in_progress:3 open:13 start:11 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -32,15 +32,19 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0020 | S1 | START | TinyTitanServer | Parse media type exactly instead of accepting application/json prefix |
 | 0021 | S1 | OPEN | TinyTitanKernelsC | Prove allocation products and BLAS narrowing safe at Swift–C boundary |
 | 0022 | S1 | OPEN | TinyTitanKernelsC | Prove C reader offset bounds and destruction versus active batch lifecycle |
-| 0023 | S1 | START | DSH plugin | Serialize catalog and configuration fields as safe YAML scalars |
-| 0024 | S1 | START | DSH plugin | Make settings rewrite atomic and detect concurrent updates |
-| 0025 | S2 | START | DSH plugin | Report malformed catalog rows rather than silently dropping them |
-| 0026 | S2 | START | DSH plugin | Require safe integer compaction headroom |
+| 0023 | S1 | DONE | DSH plugin | Serialize catalog and configuration fields as safe YAML scalars |
+| 0024 | S1 | DONE | DSH plugin | Make settings rewrite atomic and detect concurrent updates |
+| 0025 | S2 | DONE | DSH plugin | Report malformed catalog rows rather than silently dropping them |
+| 0026 | S2 | DONE | DSH plugin | Require safe integer compaction headroom |
 | 0027 | S1 | OPEN | TinyTitanFormat | Verify bounded GGUF metadata parser resource use and duplicate handling |
 | 0028 | S1 | OPEN | TinyTitanFormat | Verify overflow-safe compressed expert block-count arithmetic |
 | 0029 | S1 | START | ContinuityCore | Guard against zero-progress write loops |
 | 0030 | S2 | OPEN | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
-| 0031 | S2 | IN_PROGRESS | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
+| 0031 | S2 | DONE | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
+| 0032 | S1 | OPEN | DSH plugin / shell writer | Shell settings writer still truncates in place |
+| 0033 | S2 | OPEN | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
+| 0034 | S2 | OPEN | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
+| 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -206,31 +210,39 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0023 — Serialize catalog and configuration fields as safe YAML scalars
 
-- S1 / Tier A / START / L4 configuration injection
+- S1 / Tier A / DONE / L4 configuration injection
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/generate.js:62-65,163-170,190-240; plugins/dsh-tinytitan/src/config.js:300-309
 - Evidence before: textField rejects newline/tab but permits YAML syntax; builder interpolates ids, names, provider keys, effort values and reasoning as unquoted YAML. Config provider/reasoning only checked for nonempty. Inputs containing YAML special characters can change structure or fail parse.
+- Evidence after: yamlScalar() in generate.js mirrored byte-for-byte by yaml_scalar() in dsh_route.sh; model ids restricted to one token in both writers; numeric lines through a safe-integer chokepoint; reasoning/effort values serialized. 5 RED tests -> green; 178/178 with the real Inkling installs.
+- Commit: `d7c172e2`
 
 ## 0024 — Make settings rewrite atomic and detect concurrent updates
 
-- S1 / Tier A / START / L2 persistent config
+- S1 / Tier A / DONE / L2 persistent config
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/generate.js:346-379
 - Evidence before: Read settings then optional copy backup followed by writeFileSync directly to target. Interrupted write can truncate user profile; concurrent editor changes after read can be overwritten. Backup does not make replacement atomic.
+- Evidence after: One atomic replacement path for the route writer and default repair: exclusive same-directory temp, fchmod to the original mode, fsync, re-read CAS (ESETTINGSCHANGED), collision-free backup, rename; injectable io seam. 5 RED tests -> green.
+- Commit: `4610bc85`
 
 ## 0025 — Report malformed catalog rows rather than silently dropping them
 
-- S2 / Tier A / START / L2 diagnostics
+- S2 / Tier A / DONE / L2 diagnostics
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/generate.js:111-149
 - Evidence before: catalogRows broad catch continues with no diagnostic; comment says corresponding shell parser prints a skip message. Malformed install disappears silently from picker.
+- Evidence after: Typed CatalogRowError refusals only; safe row-specific diagnostics with the id only when it is already a plain token; repeated refreshes deduplicated; unexpected errors rethrown. 6 RED tests -> green.
+- Commit: `361de9fd`
 
 ## 0026 — Require safe integer compaction headroom
 
-- S2 / Tier A / START / L3 numeric validation
+- S2 / Tier A / DONE / L3 numeric validation
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/config.js:149-157
 - Evidence before: resolveCompactionHeadroom uses Number.isInteger, accepts integer-valued unsafe IEEE-754 numbers unlike resolveRouteTokenCount at 173–179.
+- Evidence after: Number.isSafeInteger + nonnegative for numbers; only canonical decimal strings parsed; booleans/arrays/padded/hex/exponent refused. 21 boundary shapes pinned.
+- Commit: `4ebd28db`
 
 ## 0027 — Verify bounded GGUF metadata parser resource use and duplicate handling
 
@@ -262,9 +274,39 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0031 — No-binary catalog scan rejects Inkling 2 installs the server serves
 
-- S2 / Tier A / IN_PROGRESS / L3 client/server contract parity
+- S2 / Tier A / DONE / L3 client/server contract parity
 - Project: DSH plugin; host: Apple Silicon Mac A / Linux primary B
 - Location: plugins/dsh-tinytitan/src/catalog-scan.js:104-150
 - Evidence before: `scanModelsFolder(models, {env:{}})` returns `{models: [], skipped: [inkling-2-mini_GGUF-Q4 (hiddenActivation=situ), inkling-2-mini_NVFP4 (hiddenActivation=situ)]}` while `.build/release/TinyTitanServer --catalog --models-dir models` returns both models (family `inkling2`, ids `inkling-2-mini-gguf-q4` / `inkling-2-mini-nvfp4`). `test/catalog-scan.test.js` 'the scan and the server catalog produce the same picker block' fails on exactly this divergence.
+- Evidence after: catalog-scan mirrors the Inkling 2 TPP/1 plugin (family, situ activation, display names, levels, ids, tokenizer hook); the vacuous parity test was repaired to compare raw rows and assert every model reaches the picker. 178/178, 0 skipped.
 - Fix: Mirror the Inkling 2 family in catalog-scan.js (family/activation/display names/levels/ids/size) and pin it with a synthetic-install parity test.
+- Commit: `740ed7ea`
+
+## 0032 — Shell settings writer still truncates in place
+
+- S1 / Tier A / OPEN / L2 persistent config
+- Project: DSH plugin / shell writer; host: Apple Silicon Mac A / Linux primary B
+- Location: tools/dsh_route.sh:296,359
+- Evidence before: `tools/dsh_route.sh --write` copies a backup and then `path.write_text`s the settings file in place. The same truncate-and-write class fixed in the plugin by 0024: an ENOSPC/crash mid-write truncates the profile, and a concurrent editor save after the read is overwritten. The JS side now writes atomically; the shell side did not change.
+
+## 0033 — Debounce and handoff-ratio config still coerce non-numbers
+
+- S2 / Tier A / OPEN / L3 numeric validation
+- Project: DSH plugin; host: Linux primary B
+- Location: plugins/dsh-tinytitan/src/config.js:131,262
+- Evidence before: `resolveDebounce` and `resolveHandoffWindowRatio` use `Number.isFinite(Number(v))`, which accepts `true` as 1, `""` as 0 and whitespace as 0; the ratio accepts a boolean as 1. The sibling `resolveCompactionHeadroom` was tightened in 0026.
+
+## 0034 — Catalog row normalization is not idempotent and its contract is unnamed
+
+- S2 / Tier A / OPEN / L3 API contract / hollow test risk
+- Project: DSH plugin; host: Linux primary B
+- Location: plugins/dsh-tinytitan/src/generate.js:206,260
+- Evidence before: `catalogRows(catalogRows(raw))` returns `[]`: a normalized row carries `levels` but no `quant`/`thinking`, so feeding it back into `generateBlock` compares two empty blocks. The original server-vs-folder parity test did exactly that and therefore could not fail; 0031 repaired that test to pass raw rows. The two row shapes remain unnamed in the API, so a future caller can repeat the mistake.
+
+## 0035 — Catalog tokenizer probe tests the plugin closure, not a call
+
+- S2 / Tier A / OPEN / L3 model catalog / availability
+- Project: TinyTitanServer; host: Apple Silicon Mac A
+- Location: sources/TinyTitanServer/Core/ModelCatalog+Plugins.swift:19-22
+- Evidence before: The catalog checks `factory.tokenizerFolder != nil`, which only proves the plugin declares a hook. A plugin-backed Q4 install whose GGUF header (the tokenizer source) is missing is still catalogued and then fails on first use. The JS mirror reproduces this deliberately (parity over preference).
 

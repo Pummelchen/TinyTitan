@@ -1381,3 +1381,299 @@ resolveCompactionHeadroom converts with Number then checks Number.isInteger and 
 - Record any new findings under new stable IDs. Do not mistake this manual for exhaustive inspection.
 - Only accept DONE with actual evidence and focused commit where applicable. Remaining discovery under 0007 and Phase E under 0008 are mandatory.
 - All audit files are planning/evidence only until an authorized agent runs the tasks. No production changes were made in creating this manual.
+
+<a id="new-findings"></a>
+
+## New findings appended during remediation
+
+These are permanent IDs discovered after the initial 29-task manual; they are canonical in `AUDIT/ledger.json`. The 29 original specifications above are unchanged.
+
+<a id="task-0030"></a>
+
+### Task 0030 — Test targets accept concurrency warnings despite warnings-as-errors
+
+**Project / component:** Root SwiftPM / tests  
+**Location:** `tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift:35-62`  
+**Severity / tier:** S2 / C  
+**Status at discovery:** OPEN  
+**Category:** language-standard / diagnostics  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0003.  
+**Evidence classification:** static finding from baseline; not yet repaired
+
+#### 1. Detailed problem description
+
+The baseline test build succeeds with 12 Swift concurrency warnings in a test file even though the target declares `-warnings-as-errors`. A warning in a build log is a check nobody runs; the tree's stated standard is zero warnings.
+
+**Recorded evidence:** `swift build --build-tests` exits 0 while emitting 12 `warning:` diagnostics from tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift (SendableClosureCaptures: capture of non-Sendable `read`, mutation/reference of captured `index`/`ranges`, concurrently-executed local function `read` not @Sendable). Every target carries `swiftSettings: tinytitanLanguageStandard` with `-warnings-as-errors`, so either the flag is not reaching this test compile or the diagnostics bypass it. The baseline is therefore red on warnings, not clean.
+
+#### 2. Proposed solution / implementation sequence
+
+1. Capture the exact `swiftc` invocation for TinyTitanTests (verbose build) and confirm whether `-warnings-as-errors` and `-swift-version 6` are present.
+
+2. If the flags are missing, fix the manifest/flag propagation for test targets; if a diagnostic bypasses the flag, document the compiler behaviour and still fix the test code.
+
+3. Fix the test's capture pattern with a real synchronization primitive (or `@Sendable` where correct), without `@unchecked Sendable`, `nonisolated(unsafe)`, or a rule exclusion.
+
+4. Re-run `swift build --build-tests` and require zero warnings, then the full suite.
+
+
+#### 3. Verification — regression and integration
+
+1. Negative control: a scratch `#warning` in a test file must fail the build.
+
+2. Before/after: the 12 diagnostics are gone and the same tests pass.
+
+3. Full `swift build --build-tests` and `swift test --no-parallel` results recorded.
+
+
+#### 4. Self-audit — cold review and closure
+
+1. Confirm no test was weakened or skipped and no warning suppression was added.
+
+2. Confirm the fix preserves the benchmark's intent (concurrent reads) or records why the test changed.
+
+
+**Acceptance:** Identify the exact test compile invocation; make warnings fail the build as declared; remove the 12 diagnostics at their root (lock/Sendable-safe test code), not by suppression; prove with a touch+rebuild and a controlled `#warning` negative control.
+
+---
+
+<a id="task-0031"></a>
+
+### Task 0031 — No-binary catalog scan rejects Inkling 2 installs the server serves
+
+**Project / component:** DSH plugin  
+**Location:** `plugins/dsh-tinytitan/src/catalog-scan.js:104-150`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** IN_PROGRESS  
+**Category:** L3 client/server contract parity  
+**Primary host:** Apple Silicon Mac A / Linux primary B  
+**Prerequisites:** 0003.  
+**Evidence classification:** confirmed baseline failure
+
+#### 1. Detailed problem description
+
+The plugin's no-server fallback is meant to mirror ModelCatalog exactly. It predates Inkling 2: `inkling2` is not a known family, so it falls back to qwen36 and is rejected for `hiddenActivation=situ`. A profile with only Inkling installs and no built server gets an empty picker, and the parity test fails.
+
+**Recorded evidence:** `scanModelsFolder(models, {env:{}})` returns `{models: [], skipped: [inkling-2-mini_GGUF-Q4 (hiddenActivation=situ), inkling-2-mini_NVFP4 (hiddenActivation=situ)]}` while `.build/release/TinyTitanServer --catalog --models-dir models` returns both models (family `inkling2`, ids `inkling-2-mini-gguf-q4` / `inkling-2-mini-nvfp4`). `test/catalog-scan.test.js` 'the scan and the server catalog produce the same picker block' fails on exactly this divergence.
+
+#### 2. Proposed solution / implementation sequence
+
+1. Resolve the `inkling2` family and the `situ` activation exactly as ModelCatalog/ManifestReader do, including MTP exclusion and the GPU family set.
+
+2. Add Inkling display names, thinking levels, id/base spelling and size handling matching the server rows.
+
+3. Add a synthetic Inkling manifest test; keep the server-vs-folder parity test.
+
+
+#### 3. Verification — regression and integration
+
+1. `npm test` green including the parity test against the two on-disk Inkling installs.
+
+2. Byte-identical `generateBlock` for scan vs server; synthetic test independent of installs.
+
+3. `npm run lint` and `npm run format:check` green.
+
+
+#### 4. Self-audit — cold review and closure
+
+1. No special-casing of the two directory names; no weakened parity assertion.
+
+2. Confirm the change cannot make an unsupported family appear as a model.
+
+
+**Acceptance:** The folder scan and the server produce the same picker block for the on-disk Inkling installs and for a synthetic Inkling manifest; the parity test is not weakened; lint/format/tests green.
+
+---
+
+### Further findings (0032–0035) discovered during remediation
+
+<a id="task-0032"></a>
+
+#### Task 0032 — Shell settings writer still truncates in place
+
+**Project / component:** DSH plugin / shell writer  
+**Location:** `tools/dsh_route.sh:296,359`  
+**Severity / tier:** S1 / A  
+**Status at discovery:** OPEN  
+**Category:** L2 persistent config  
+**Primary host:** Apple Silicon Mac A / Linux primary B  
+**Prerequisites:** 0024.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+The plugin's `writeRouteSettings`/`repairDefaultModelSettings` now write through an exclusive temp + fsync + re-read + rename, but the checkout tool `tools/dsh_route.sh --write` still does `copyFileSync`-equivalent backup then an in-place `write_text`. A profile maintained through the shell tool can still be truncated by a failed write, and a concurrent edit can still be overwritten.
+
+**Recorded evidence:** `tools/dsh_route.sh --write` copies a backup and then `path.write_text`s the settings file in place. The same truncate-and-write class fixed in the plugin by 0024: an ENOSPC/crash mid-write truncates the profile, and a concurrent editor save after the read is overwritten. The JS side now writes atomically; the shell side did not change.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Read the shell writer's backup/write path and its tests; define the same no-op, backup and conflict semantics as the JS writer.
+
+2. Write a same-directory temp, flush, preserve mode, then rename; detect a changed original before replacement and fail without writing.
+
+3. Keep the JS/shell byte parity for the generated block; the replacement mechanism need not be byte-identical, but the settings outcome must be.
+
+
+##### 3. Verification — regression and integration
+
+1. Fault-inject the shell write (read-only directory, ENOSPC-like stub, injected editor change) and assert the original is byte-identical on failure.
+
+2. Successful write yields the same settings file as the JS writer for the same input.
+
+3. Run shellcheck, shell portability, the launcher/install Python suites and the plugin npm suite.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check no real profile is touched; scratch dirs only.
+
+2. Confirm the JS parity test still has real assertions and no writer was weakened.
+
+
+**Acceptance:** Both writers share the atomic replacement semantics or the shell path documents a narrower contract; interruption leaves the original byte-identical; a failing-before test exists; JS/shell parity is preserved.
+
+---
+
+<a id="task-0033"></a>
+
+#### Task 0033 — Debounce and handoff-ratio config still coerce non-numbers
+
+**Project / component:** DSH plugin  
+**Location:** `plugins/dsh-tinytitan/src/config.js:131,262`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 numeric validation  
+**Primary host:** Linux primary B  
+**Prerequisites:** 0026.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+Two other config resolvers still rely on `Number.isFinite(Number(v))`, so a boolean or an empty string silently becomes a number and changes routing behaviour.
+
+**Recorded evidence:** `resolveDebounce` and `resolveHandoffWindowRatio` use `Number.isFinite(Number(v))`, which accepts `true` as 1, `""` as 0 and whitespace as 0; the ratio accepts a boolean as 1. The sibling `resolveCompactionHeadroom` was tightened in 0026.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use the same explicit type/range validation as `resolveCompactionHeadroom` (safe integers or documented decimal strings).
+
+2. Keep documented defaults and ranges; reject with a field-named error.
+
+3. Add boundary tests for booleans, arrays, empty/whitespace, unsafe integers and NaN/infinity.
+
+
+##### 3. Verification — regression and integration
+
+1. Before/after tests show the coerced inputs rejected and the documented values unchanged.
+
+2. `npm test`, `npm run lint`, `npm run format:check` green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no documented numeric-string form is rejected accidentally.
+
+2. Confirm no default value changed.
+
+
+**Acceptance:** Both resolvers accept only supported numeric types/strings, reject booleans, arrays, empty/whitespace strings, NaN and infinity, and keep documented defaults; boundary tests pin the change.
+
+---
+
+<a id="task-0034"></a>
+
+#### Task 0034 — Catalog row normalization is not idempotent and its contract is unnamed
+
+**Project / component:** DSH plugin  
+**Location:** `plugins/dsh-tinytitan/src/generate.js:206,260`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 API contract / hollow test risk  
+**Primary host:** Linux primary B  
+**Prerequisites:** 0031.  
+**Evidence classification:** confirmed by reproduction
+
+##### 1. Detailed problem description
+
+Two row shapes circulate: raw server/catalog rows (`quant`, `thinking`) and normalized block rows (`levels`). `generateBlock` normalizes its input, but `catalogRows` is not idempotent, so passing a normalized row silently yields an empty block. A test that fed normalized rows compared two empty blocks and passed vacuously.
+
+**Recorded evidence:** `catalogRows(catalogRows(raw))` returns `[]`: a normalized row carries `levels` but no `quant`/`thinking`, so feeding it back into `generateBlock` compares two empty blocks. The original server-vs-folder parity test did exactly that and therefore could not fail; 0031 repaired that test to pass raw rows. The two row shapes remain unnamed in the API, so a future caller can repeat the mistake.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Make `catalogRows` either idempotent or explicitly reject an already-normalized row with a typed error; document the accepted shape.
+
+2. Add a test that a deliberately divergent server row fails the parity comparison.
+
+3. Keep the repaired 0031 parity test's real assertions.
+
+
+##### 3. Verification — regression and integration
+
+1. Idempotence or typed rejection is pinned.
+
+2. The parity test fails when the scan or the server is changed to disagree.
+
+3. npm test/lint/format green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no test was weakened to accommodate the new contract.
+
+2. Check every `generateBlock` caller for the accepted shape.
+
+
+**Acceptance:** Either `catalogRows` is idempotent (or rejects an already-normalized row with a clear error) and the shape is documented/typed; a test pins the contract and a deliberately divergent row fails the parity assertion.
+
+---
+
+<a id="task-0035"></a>
+
+#### Task 0035 — Catalog tokenizer probe tests the plugin closure, not a call
+
+**Project / component:** TinyTitanServer  
+**Location:** `sources/TinyTitanServer/Core/ModelCatalog+Plugins.swift:19-22`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 model catalog / availability  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0031.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+The catalog's tokenizer probe is `factory.tokenizerFolder != nil`, i.e. it checks the closure's presence, not the folder the closure returns. A Q4 plugin install whose GGUF header is missing is listed but cannot tokenize on first use.
+
+**Recorded evidence:** The catalog checks `factory.tokenizerFolder != nil`, which only proves the plugin declares a hook. A plugin-backed Q4 install whose GGUF header (the tokenizer source) is missing is still catalogued and then fails on first use. The JS mirror reproduces this deliberately (parity over preference).
+
+##### 2. Proposed solution / implementation sequence
+
+1. Call the hook in a bounded probe, or make the plugin expose a cheap validated predicate the catalog can call.
+
+2. Refuse an install that cannot produce a tokenizer, with a safe reason; do not list it as servable.
+
+3. Keep the JS mirror in agreement with whatever the server decides.
+
+
+##### 3. Verification — regression and integration
+
+1. Synthetic install: plugin resolves, tokenizer source absent -> not catalogued (or a documented degraded state).
+
+2. Valid install still catalogued and served.
+
+3. Server tests and the JS parity test agree.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the probe cannot block on large I/O or a network fetch.
+
+2. Confirm the JS mirror is updated, not left divergent.
+
+
+**Acceptance:** The catalog either calls the tokenizer hook (bounded, at probe time) or records the exact precondition honestly; an install that cannot tokenize is not offered as servable; the JS mirror agrees.
+
+---

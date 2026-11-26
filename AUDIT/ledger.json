@@ -974,13 +974,13 @@
       "file:line": "plugins/dsh-tinytitan/src/generate.js:62-65,163-170,190-240; plugins/dsh-tinytitan/src/config.js:300-309",
       "title": "Serialize catalog and configuration fields as safe YAML scalars",
       "category": "L4 configuration injection",
-      "status": "START",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "textField rejects newline/tab but permits YAML syntax; builder interpolates ids, names, provider keys, effort values and reasoning as unquoted YAML. Config provider/reasoning only checked for nonempty. Inputs containing YAML special characters can change structure or fail parse.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "yamlScalar() in generate.js mirrored byte-for-byte by yaml_scalar() in dsh_route.sh; model ids restricted to one token in both writers; numeric lines through a safe-integer chokepoint; reasoning/effort values serialized. 5 RED tests -> green; 178/178 with the real Inkling installs.",
+      "commit": "d7c172e2",
       "blocked-reason": null,
       "acceptance-criteria": "Round-trip adversarial scalar cases and malformed config with YAML parser; enforce intended scalar values; update linked shell writer parity tests as necessary.",
       "classification": "static finding; runtime impact untested",
@@ -1017,13 +1017,13 @@
       "file:line": "plugins/dsh-tinytitan/src/generate.js:346-379",
       "title": "Make settings rewrite atomic and detect concurrent updates",
       "category": "L2 persistent config",
-      "status": "START",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Read settings then optional copy backup followed by writeFileSync directly to target. Interrupted write can truncate user profile; concurrent editor changes after read can be overwritten. Backup does not make replacement atomic.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "One atomic replacement path for the route writer and default repair: exclusive same-directory temp, fchmod to the original mode, fsync, re-read CAS (ESETTINGSCHANGED), collision-free backup, rename; injectable io seam. 5 RED tests -> green.",
+      "commit": "4610bc85",
       "blocked-reason": null,
       "acceptance-criteria": "Fault inject interruption and concurrent edit; use safe replacement preserving file mode and detect conflicts; verify both route/default-model branches.",
       "classification": "static finding; runtime impact untested",
@@ -1062,13 +1062,13 @@
       "file:line": "plugins/dsh-tinytitan/src/generate.js:111-149",
       "title": "Report malformed catalog rows rather than silently dropping them",
       "category": "L2 diagnostics",
-      "status": "START",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "catalogRows broad catch continues with no diagnostic; comment says corresponding shell parser prints a skip message. Malformed install disappears silently from picker.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Typed CatalogRowError refusals only; safe row-specific diagnostics with the id only when it is already a plain token; repeated refreshes deduplicated; unexpected errors rethrown. 6 RED tests -> green.",
+      "commit": "361de9fd",
       "blocked-reason": null,
       "acceptance-criteria": "Retain useful valid rows, report safe row-specific rejection reason; test malformed entries without exposing credentials.",
       "classification": "static finding; runtime impact untested",
@@ -1103,13 +1103,13 @@
       "file:line": "plugins/dsh-tinytitan/src/config.js:149-157",
       "title": "Require safe integer compaction headroom",
       "category": "L3 numeric validation",
-      "status": "START",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "resolveCompactionHeadroom uses Number.isInteger, accepts integer-valued unsafe IEEE-754 numbers unlike resolveRouteTokenCount at 173\u2013179.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Number.isSafeInteger + nonnegative for numbers; only canonical decimal strings parsed; booleans/arrays/padded/hex/exponent refused. 21 boundary shapes pinned.",
+      "commit": "4ebd28db",
       "blocked-reason": null,
       "acceptance-criteria": "Boundary tests for MAX_SAFE_INTEGER, unsafe integer, nonnumeric and boolean inputs; document valid range and type.",
       "classification": "static finding; runtime impact untested",
@@ -1313,13 +1313,13 @@
       "file:line": "plugins/dsh-tinytitan/src/catalog-scan.js:104-150",
       "title": "No-binary catalog scan rejects Inkling 2 installs the server serves",
       "category": "L3 client/server contract parity",
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "host": "Apple Silicon Mac A / Linux primary B",
       "discovered-by": "Baseline Node parity test + manual comparison, 2026-11-26",
       "evidence-before": "`scanModelsFolder(models, {env:{}})` returns `{models: [], skipped: [inkling-2-mini_GGUF-Q4 (hiddenActivation=situ), inkling-2-mini_NVFP4 (hiddenActivation=situ)]}` while `.build/release/TinyTitanServer --catalog --models-dir models` returns both models (family `inkling2`, ids `inkling-2-mini-gguf-q4` / `inkling-2-mini-nvfp4`). `test/catalog-scan.test.js` 'the scan and the server catalog produce the same picker block' fails on exactly this divergence.",
       "fix-summary": "Mirror the Inkling 2 family in catalog-scan.js (family/activation/display names/levels/ids/size) and pin it with a synthetic-install parity test.",
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "catalog-scan mirrors the Inkling 2 TPP/1 plugin (family, situ activation, display names, levels, ids, tokenizer hook); the vacuous parity test was repaired to compare raw rows and assert every model reaches the picker. 178/178, 0 skipped.",
+      "commit": "740ed7ea",
       "blocked-reason": null,
       "acceptance-criteria": "The folder scan and the server produce the same picker block for the on-disk Inkling installs and for a synthetic Inkling manifest; the parity test is not weakened; lint/format/tests green.",
       "classification": "confirmed baseline failure",
@@ -1343,6 +1343,161 @@
           "Confirm the change cannot make an unsupported family appear as a model."
         ]
       }
+    },
+    {
+      "id": "0032",
+      "severity": "S1",
+      "tier": "A",
+      "project": "DSH plugin / shell writer",
+      "file:line": "tools/dsh_route.sh:296,359",
+      "title": "Shell settings writer still truncates in place",
+      "category": "L2 persistent config",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A / Linux primary B",
+      "discovered-by": "0024 sibling audit by the DSH remediation agent",
+      "evidence-before": "`tools/dsh_route.sh --write` copies a backup and then `path.write_text`s the settings file in place. The same truncate-and-write class fixed in the plugin by 0024: an ENOSPC/crash mid-write truncates the profile, and a concurrent editor save after the read is overwritten. The JS side now writes atomically; the shell side did not change.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Both writers share the atomic replacement semantics or the shell path documents a narrower contract; interruption leaves the original byte-identical; a failing-before test exists; JS/shell parity is preserved.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0024"
+        ],
+        "problem_description": "The plugin's `writeRouteSettings`/`repairDefaultModelSettings` now write through an exclusive temp + fsync + re-read + rename, but the checkout tool `tools/dsh_route.sh --write` still does `copyFileSync`-equivalent backup then an in-place `write_text`. A profile maintained through the shell tool can still be truncated by a failed write, and a concurrent edit can still be overwritten.",
+        "proposed_solution": [
+          "Read the shell writer's backup/write path and its tests; define the same no-op, backup and conflict semantics as the JS writer.",
+          "Write a same-directory temp, flush, preserve mode, then rename; detect a changed original before replacement and fail without writing.",
+          "Keep the JS/shell byte parity for the generated block; the replacement mechanism need not be byte-identical, but the settings outcome must be."
+        ],
+        "verification_steps": [
+          "Fault-inject the shell write (read-only directory, ENOSPC-like stub, injected editor change) and assert the original is byte-identical on failure.",
+          "Successful write yields the same settings file as the JS writer for the same input.",
+          "Run shellcheck, shell portability, the launcher/install Python suites and the plugin npm suite."
+        ],
+        "self_audit_steps": [
+          "Check no real profile is touched; scratch dirs only.",
+          "Confirm the JS parity test still has real assertions and no writer was weakened."
+        ]
+      }
+    },
+    {
+      "id": "0033",
+      "severity": "S2",
+      "tier": "A",
+      "project": "DSH plugin",
+      "file:line": "plugins/dsh-tinytitan/src/config.js:131,262",
+      "title": "Debounce and handoff-ratio config still coerce non-numbers",
+      "category": "L3 numeric validation",
+      "status": "OPEN",
+      "host": "Linux primary B",
+      "discovered-by": "0026 sibling audit by the DSH remediation agent",
+      "evidence-before": "`resolveDebounce` and `resolveHandoffWindowRatio` use `Number.isFinite(Number(v))`, which accepts `true` as 1, `\"\"` as 0 and whitespace as 0; the ratio accepts a boolean as 1. The sibling `resolveCompactionHeadroom` was tightened in 0026.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Both resolvers accept only supported numeric types/strings, reject booleans, arrays, empty/whitespace strings, NaN and infinity, and keep documented defaults; boundary tests pin the change.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0026"
+        ],
+        "problem_description": "Two other config resolvers still rely on `Number.isFinite(Number(v))`, so a boolean or an empty string silently becomes a number and changes routing behaviour.",
+        "proposed_solution": [
+          "Use the same explicit type/range validation as `resolveCompactionHeadroom` (safe integers or documented decimal strings).",
+          "Keep documented defaults and ranges; reject with a field-named error.",
+          "Add boundary tests for booleans, arrays, empty/whitespace, unsafe integers and NaN/infinity."
+        ],
+        "verification_steps": [
+          "Before/after tests show the coerced inputs rejected and the documented values unchanged.",
+          "`npm test`, `npm run lint`, `npm run format:check` green."
+        ],
+        "self_audit_steps": [
+          "Confirm no documented numeric-string form is rejected accidentally.",
+          "Confirm no default value changed."
+        ]
+      }
+    },
+    {
+      "id": "0034",
+      "severity": "S2",
+      "tier": "A",
+      "project": "DSH plugin",
+      "file:line": "plugins/dsh-tinytitan/src/generate.js:206,260",
+      "title": "Catalog row normalization is not idempotent and its contract is unnamed",
+      "category": "L3 API contract / hollow test risk",
+      "status": "OPEN",
+      "host": "Linux primary B",
+      "discovered-by": "0031 parity-test repair by the DSH remediation agent",
+      "evidence-before": "`catalogRows(catalogRows(raw))` returns `[]`: a normalized row carries `levels` but no `quant`/`thinking`, so feeding it back into `generateBlock` compares two empty blocks. The original server-vs-folder parity test did exactly that and therefore could not fail; 0031 repaired that test to pass raw rows. The two row shapes remain unnamed in the API, so a future caller can repeat the mistake.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Either `catalogRows` is idempotent (or rejects an already-normalized row with a clear error) and the shape is documented/typed; a test pins the contract and a deliberately divergent row fails the parity assertion.",
+      "classification": "confirmed by reproduction",
+      "manual": {
+        "depends_on": [
+          "0031"
+        ],
+        "problem_description": "Two row shapes circulate: raw server/catalog rows (`quant`, `thinking`) and normalized block rows (`levels`). `generateBlock` normalizes its input, but `catalogRows` is not idempotent, so passing a normalized row silently yields an empty block. A test that fed normalized rows compared two empty blocks and passed vacuously.",
+        "proposed_solution": [
+          "Make `catalogRows` either idempotent or explicitly reject an already-normalized row with a typed error; document the accepted shape.",
+          "Add a test that a deliberately divergent server row fails the parity comparison.",
+          "Keep the repaired 0031 parity test's real assertions."
+        ],
+        "verification_steps": [
+          "Idempotence or typed rejection is pinned.",
+          "The parity test fails when the scan or the server is changed to disagree.",
+          "npm test/lint/format green."
+        ],
+        "self_audit_steps": [
+          "Confirm no test was weakened to accommodate the new contract.",
+          "Check every `generateBlock` caller for the accepted shape."
+        ]
+      }
+    },
+    {
+      "id": "0035",
+      "severity": "S2",
+      "tier": "A",
+      "project": "TinyTitanServer",
+      "file:line": "sources/TinyTitanServer/Core/ModelCatalog+Plugins.swift:19-22",
+      "title": "Catalog tokenizer probe tests the plugin closure, not a call",
+      "category": "L3 model catalog / availability",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0031 mirror audit by the DSH remediation agent",
+      "evidence-before": "The catalog checks `factory.tokenizerFolder != nil`, which only proves the plugin declares a hook. A plugin-backed Q4 install whose GGUF header (the tokenizer source) is missing is still catalogued and then fails on first use. The JS mirror reproduces this deliberately (parity over preference).",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0031"
+        ],
+        "problem_description": "The catalog's tokenizer probe is `factory.tokenizerFolder != nil`, i.e. it checks the closure's presence, not the folder the closure returns. A Q4 plugin install whose GGUF header is missing is listed but cannot tokenize on first use.",
+        "proposed_solution": [
+          "Call the hook in a bounded probe, or make the plugin expose a cheap validated predicate the catalog can call.",
+          "Refuse an install that cannot produce a tokenizer, with a safe reason; do not list it as servable.",
+          "Keep the JS mirror in agreement with whatever the server decides."
+        ],
+        "verification_steps": [
+          "Synthetic install: plugin resolves, tokenizer source absent -> not catalogued (or a documented degraded state).",
+          "Valid install still catalogued and served.",
+          "Server tests and the JS parity test agree."
+        ],
+        "self_audit_steps": [
+          "Confirm the probe cannot block on large I/O or a network fetch.",
+          "Confirm the JS mirror is updated, not left divergent."
+        ]
+      },
+      "acceptance-criteria": "The catalog either calls the tokenizer hook (bounded, at probe time) or records the exact precondition honestly; an install that cannot tokenize is not offered as servable; the JS mirror agrees."
     }
   ],
   "manual_revision": 1,
