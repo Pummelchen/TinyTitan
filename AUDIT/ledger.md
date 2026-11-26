@@ -1,5 +1,7 @@
 # TinyTitan audit ledger — discovery only
 
+**Agent execution instructions:** [TASKS.md](TASKS.md) contains the detailed manual for every task, generated from the canonical `manual` fields in ledger.json. No remediation has been performed.
+
 Pinned source revision: `7b0901d75b3b1e79498874babf93218a617a69ac`. User requested no fixes; this ledger is a task list, not an audit completion certificate. Source of truth: ledger.json. START = statically demonstrated condition (runtime tests not run); OPEN = investigation/gate, not confirmed defect; BLOCKED = existing environment blocker. Severity on candidates is provisional. Existing 0001–0009 retained; 0010 onward newly recorded. **done:0 open:26 blocked:3 new:20**.
 
 | ID | Severity | Status | Project | Title |
