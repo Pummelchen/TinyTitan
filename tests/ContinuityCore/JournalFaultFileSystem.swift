@@ -64,6 +64,7 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         var fsyncs = 0
         var renames = 0
         var unlinks = 0
+        var ftruncates = 0
         var descriptorPaths: [Int32: String] = [:]
         /// The checkpoint pause: signalled when `rename` is entered, released
         /// by the test. A semaphore, not a sleep, so the ordering under test is
@@ -160,6 +161,7 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     var writes: Int { state.withLock { $0.writes } }
     var reads: Int { state.withLock { $0.reads } }
     var renames: Int { state.withLock { $0.renames } }
+    var ftruncates: Int { state.withLock { $0.ftruncates } }
     var fullSyncs: Int { state.withLock { $0.fullSyncs } }
     var fsyncs: Int { state.withLock { $0.fsyncs } }
 
@@ -302,7 +304,8 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     }
 
     func ftruncate(_ descriptor: Int32, offset: off_t) -> Int32 {
-        real.ftruncate(descriptor, offset: offset)
+        state.withLock { $0.ftruncates += 1 }
+        return real.ftruncate(descriptor, offset: offset)
     }
 
     func lock(_ descriptor: Int32, operation: Int32) -> Int32 {
