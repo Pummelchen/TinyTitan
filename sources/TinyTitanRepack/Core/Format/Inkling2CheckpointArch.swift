@@ -27,11 +27,13 @@ enum Inkling2CheckpointArch {
         }
         func int(_ key: String, in object: [String: Any] = text) throws -> Int {
             let value = try number(key, in: object)
-            guard value == value.rounded(), value >= 0 else {
+            guard value == value.rounded(), value >= 0,
+                let exact = Int(exactly: value)
+            else {
                 throw RepackError.configurationInvalid(
                     detail: "Inkling 2 config.json \(key) is not a count: \(value)")
             }
-            return Int(value)
+            return exact
         }
         guard let loop = text["loop_config"] as? [String: Any] else {
             throw RepackError.configurationInvalid(

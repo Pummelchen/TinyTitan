@@ -13,10 +13,12 @@ enum Inkling2GGUFArch {
             }
             return value
         }
-        func int(_ key: String) throws -> Int { Int(try number(key)) }
+        func int(_ key: String) throws -> Int {
+            try Self.integer(try number(key), field: "inkling2.\(key)")
+        }
         func firstOf(_ key: String) throws -> Int {
             if let list = header.numbers("inkling2." + key), let first = list.first {
-                return Int(first)
+                return try Self.integer(first, field: "inkling2.\(key)[0]")
             }
             return try int(key)
         }
@@ -50,7 +52,8 @@ enum Inkling2GGUFArch {
                 experts: try int("expert_count"),
                 expertsPerToken: try int("expert_used_count"),
                 localLayers: try slidingLayers(
-                    header, stored: stored, loopStart: loopStart, loopEnd: loopEnd),
+                    header, stored: stored, loopStart: loopStart, loopEnd: loopEnd,
+                    passes: passes),
                 tiedEmbeddings: !header.tensors.contains { $0.name == "output.weight" },
                 loopStart: loopStart, loopEnd: loopEnd, loopPasses: passes,
                 loopGateRank: try number("loop.gate_rank"),
@@ -70,17 +73,29 @@ enum Inkling2GGUFArch {
                 quantGroupSize: 32))
     }
 
+    /// A metadata value as an exact `Int`, or a typed error.
+    ///
+    /// `Int(exactly:)` rejects NaN, ±infinity, a fractional value and anything
+    /// outside `Int`; a plain `Int(_: Double)` traps on all of those, and the
+    /// values come from a downloaded GGUF's metadata.
+    static func integer(_ value: Double, field: String) throws -> Int {
+        guard let exact = Int(exactly: value) else {
+            throw RepackError.configurationInvalid(
+                detail: "Inkling 2 GGUF \(field) is \(value), not an exact integer")
+        }
+        return exact
+    }
+
     /// The stored layers that use sliding-window attention. The GGUF's pattern
     /// lists one flag per layer *visit* (48); a stored layer's flag is the one
     /// at its first visit — the loop repeats layers, it does not change them.
     static func slidingLayers(
-        _ header: GGUFHeaderV3, stored: Int, loopStart: Int, loopEnd: Int
+        _ header: GGUFHeaderV3, stored: Int, loopStart: Int, loopEnd: Int, passes: Int
     ) throws -> [Int] {
         guard let pattern = header.numbers("inkling2.attention.sliding_window_pattern") else {
             throw RepackError.configurationInvalid(
                 detail: "Inkling 2 GGUF lacks inkling2.attention.sliding_window_pattern")
         }
-        let passes = Int(header.number("inkling2.num_loops") ?? 1)
         return try (0..<stored).filter { layer in
             // Layers before the loop's end first appear at their own index; a
             // layer after it follows the core's extra passes.

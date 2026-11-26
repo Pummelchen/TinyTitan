@@ -65,6 +65,18 @@ import TinyTitanFormat
         }
     }
 
+    /// The checkpoint reader had the same unchecked `Int(value)` as the GGUF
+    /// reader; `1e300` is integral and non-negative, so only an exact
+    /// conversion refuses it.
+    @Test func anOutOfRangeCountIsRefused() {
+        let config = Self.config.replacingOccurrences(
+            of: "\"num_hidden_layers\": 24", with: "\"num_hidden_layers\": 1e300")
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointArch.archInfo(
+                config: Data(config.utf8), tiedEmbeddings: false)
+        }
+    }
+
     @Test func expertTensorNamesMapToBlobKeys() {
         func key(_ name: String) -> String? {
             Inkling2CheckpointPlanner.expertKey(name).map { "\($0.layer) \($0.key)" }
