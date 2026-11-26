@@ -395,7 +395,10 @@ package enum ExpertBlobIndex {
     /// A compressed layer is not `expertsPerLayer * expertStride` bytes long,
     /// and the streamer validates its file size against this instead. The
     /// returned value assumes entries that came from `decode`, which already
-    /// refused a wrapping frame end.
+    /// refused a wrapping frame end; if a caller passes a wrapping frame anyway,
+    /// the result saturates to `UInt64.max` — a value no layer file can have —
+    /// so the caller's `end <= size` check refuses it rather than this function
+    /// trapping.
     package static func maximumEnd(_ entries: [Entry]) -> UInt64 {
         maximumEnd(entries.map(\.frames))
     }
@@ -405,7 +408,10 @@ package enum ExpertBlobIndex {
         var end: UInt64 = 0
         for entry in entries {
             for frame in entry {
-                end = max(end, frame.offset + UInt64(frame.length))
+                let (frameEnd, overflow) = frame.offset.addingReportingOverflow(
+                    UInt64(frame.length))
+                guard !overflow else { return UInt64.max }
+                end = max(end, frameEnd)
             }
         }
         return end

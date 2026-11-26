@@ -119,6 +119,23 @@ struct ExpertBlobIndexTests {
         #expect(ExpertBlobIndex.maximumEnd(entries.map(\.frames)) == 250)
     }
 
+    /// `streamSize(forLayer:)` sizes a compressed layer from this value, and a
+    /// wrapping end must not trap on the way to that caller's `end <= size`
+    /// check. `UInt64.max` is the documented non-valid saturation.
+    @Test("A wrapping frame end saturates instead of trapping")
+    func maximumEndSaturatesOnWrap() {
+        let blob = ExpertBlobIndex.Blob(offset: UInt64.max - 4, length: 16)
+        #expect(ExpertBlobIndex.maximumEnd([[blob]]) == UInt64.max)
+        #expect(
+            ExpertBlobIndex.maximumEnd([ExpertBlobIndex.Entry(frames: [blob])])
+                == UInt64.max)
+        // A valid frame beside it does not change the unrepresentable result.
+        #expect(
+            ExpertBlobIndex.maximumEnd([
+                [ExpertBlobIndex.Blob(offset: 0, length: 10), blob]
+            ]) == UInt64.max)
+    }
+
     /// A wrapping `offset + length` would read as "inside the file" to every
     /// later `end <= streamSize` guard, so it is refused at decode.
     @Test("A frame that wraps the address space is refused")
