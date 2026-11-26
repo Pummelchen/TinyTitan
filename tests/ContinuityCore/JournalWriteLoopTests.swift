@@ -128,11 +128,10 @@ import Testing
         try await journal.sync()
         #expect(fileSystem.writes == 3)
         try await journal.shutDown()
-        // Compared by the record's identity and text, not by bytes: the
-        // encoder's key order is not stable between two encodes in one
-        // process, and `.iso8601` drops sub-second precision on the way back
-        // in, so neither raw bytes nor whole-value equality is the right
-        // assertion. What matters is that the record is there, once.
+        // Compared by the record's identity and text, not by whole-value
+        // equality: `Date()` is finer than the millisecond precision the
+        // journal keeps, so a record created here does not compare equal to
+        // its replay. What matters is that the record is there, once.
         let replayed = try records(at: url)
         #expect(replayed.count == 1)
         guard case .task(let restored)? = replayed.first else {
@@ -157,7 +156,7 @@ import Testing
         try await journal.sync()
         #expect(fileSystem.writes == 4)
         try await journal.shutDown()
-        // Decoded, for the same key-order and timestamp reasons as above.
+        // Decoded, for the same precision reason as above.
         let replayed = try records(at: url)
         #expect(replayed.count == 1)
         guard case .task(let restored)? = replayed.first else {

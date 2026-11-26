@@ -160,17 +160,60 @@ public actor FileJournal: ContinuityJournal {
     /// name.
     static func makeEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        // `Date` is a `Double` of seconds and the journal keeps it to
+        // milliseconds. `.iso8601` truncates to whole seconds, which made a
+        // replayed record unequal to the one that was written and could
+        // reorder two events in the same second; the fractional form is the
+        // same ISO 8601 instant with the precision the type already has.
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            try container.encode(timestamp(date))
+        }
         encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
         return encoder
     }
 
     /// The decoder for every journal read. Shared so a decoder and an encoder
     /// cannot drift into different date strategies.
+    ///
+    /// It accepts both the fractional form this build writes and the
+    /// whole-second form every earlier build wrote, so an existing install
+    /// replays unchanged.
     static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let text = try container.decode(String.self)
+            guard let date = date(fromTimestamp: text) else {
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "not an ISO 8601 timestamp")
+            }
+            return date
+        }
         return decoder
+    }
+
+    /// The on-disk timestamp: an ISO 8601 UTC instant with milliseconds.
+    private static func timestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
+    }
+
+    /// Parses either form. A formatter per call rather than a shared one:
+    /// `ISO8601DateFormatter` is a reference type Foundation does not declare
+    /// `Sendable`, and an encode happens on the actor while a replay of
+    /// another journal happens on the blocking queue.
+    private static func date(fromTimestamp text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = formatter.date(from: text) { return date }
+        // The form every earlier build wrote.
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: text)
     }
 
     deinit {
