@@ -17,16 +17,8 @@
  * @module dsh-tinytitan/generate
  */
 import { execFileSync } from "node:child_process";
-import {
-  accessSync,
-  constants,
-  copyFileSync,
-  existsSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { delimiter, join } from "node:path";
+import * as fs from "node:fs";
+import { basename, delimiter, dirname, join } from "node:path";
 
 import { scanModelsFolder } from "./catalog-scan.js";
 
@@ -443,7 +435,9 @@ export function applyRouteToSettings(settingsText, block) {
  * A refresh that would change nothing writes nothing and makes no backup, so
  * the plugin's per-boot run does not pile up identical `.bak-*` files.
  *
- * @param options - `settingsPath`, `block`, `stamp`, `backup`.
+ * @param options - `settingsPath`, `block`, `stamp`, `backup`, and an injectable
+ *   `io` (a `node:fs`-shaped object) so tests can fail a rename or fake another
+ *   editor's save without touching a real profile.
  * @returns `{settingsPath, backup, changed}`.
  * @throws when the settings file does not exist — the shell tool refuses too,
  *   because creating a settings file from nothing would guess at the profile's
@@ -454,35 +448,134 @@ export function writeRouteSettings({
   block,
   stamp = new Date().toISOString().replace(/[:.]/g, "-"),
   backup = true,
+  io = fs,
 } = {}) {
-  if (!settingsPath || !existsSync(settingsPath)) {
+  if (!settingsPath || !io.existsSync(settingsPath)) {
     throw new Error(`no DSH settings file at ${settingsPath ?? "(no path)"}`);
   }
-  const before = readFileSync(settingsPath, "utf8");
+  const before = io.readFileSync(settingsPath, "utf8");
   return replaceSettingsFile({
     settingsPath,
     before,
     after: applyRouteToSettings(before, block),
     stamp,
     backup,
+    io,
   });
 }
 
+/** How many temporary names to try before giving up on an exclusive create. */
+const TEMPORARY_ATTEMPTS = 16;
+
+/** How many `-N` suffixes a backup name may take before it is an error. */
+const BACKUP_ATTEMPTS = 1000;
+
 /**
- * Back the file up and write the new text, unless nothing changed.
+ * A temporary file beside the target, created exclusively.
+ *
+ * Same directory on purpose: a rename across filesystems is a copy, not an
+ * atomic replacement. The name is audit-owned (`.<name>.tmp-<pid>-<stamp>`), so
+ * the cleanup below can never remove somebody else's file.
+ */
+function openTemporary(io, target, stamp) {
+  const directory = dirname(target);
+  for (let attempt = 0; attempt < TEMPORARY_ATTEMPTS; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `-${attempt}`;
+    const path = join(directory, `.${basename(target)}.tmp-${process.pid}-${stamp}${suffix}`);
+    try {
+      return { path, descriptor: io.openSync(path, "wx", 0o600) };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`could not create a temporary file beside ${target}`);
+}
+
+/** A backup name that does not already exist, so two refreshes never collide. */
+function backupPathFor(io, settingsPath, stamp) {
+  const base = `${settingsPath}.bak-${stamp}`;
+  let candidate = base;
+  for (let taken = 1; io.existsSync(candidate); taken += 1) {
+    if (taken >= BACKUP_ATTEMPTS) throw new Error(`no free backup name beside ${settingsPath}`);
+    candidate = `${base}-${taken}`;
+  }
+  return candidate;
+}
+
+/**
+ * Replace a settings file atomically, unless nothing changed.
  *
  * Shared by the route block writer and the default-model repair so a refresh and
- * a repair cannot disagree about whether a no-op makes a `.bak-*`.
+ * a repair cannot disagree about whether a no-op makes a `.bak-*`, or about how
+ * the file is replaced.
+ *
+ * The sequence is: write the new text to an exclusive same-directory temp file,
+ * set the target's own mode on it, fsync and close it, re-read the target and
+ * refuse if it is no longer the text this replacement was computed from, copy
+ * that exact original to a collision-free backup, and rename the temp over the
+ * target. Every failure before the rename leaves the original byte-identical;
+ * a failure after it (there is none in this function) would not be a rollback,
+ * so nothing here claims to roll back.
+ *
+ * The re-read is a best-effort compare-and-swap, not a lock: a non-cooperating
+ * editor can still save between it and the rename. What it removes is the
+ * unbounded window of the old truncate-and-write, which spanned the whole write.
+ * A profile shared with an editor that does not cooperate is a case for the
+ * editor's own locking, not for a lock file this plugin cannot make anyone take.
+ *
+ * @param options - `settingsPath`, the `before` text the new text was computed
+ *   from, the `after` text, `stamp`, `backup`, and the `io` seam.
+ * @returns `{settingsPath, backup, changed}`.
  */
-function replaceSettingsFile({ settingsPath, before, after, stamp, backup }) {
+function replaceSettingsFile({ settingsPath, before, after, stamp, backup, io = fs }) {
   if (after === before) return { settingsPath, backup: null, changed: false };
-  let backupPath = null;
-  if (backup) {
-    backupPath = `${settingsPath}.bak-${stamp}`;
-    copyFileSync(settingsPath, backupPath);
+  // Resolve symlinks first, so the rename replaces the file the link points at
+  // and the link itself survives; a profile kept in a dotfiles checkout stays a
+  // symlink there.
+  const target = io.realpathSync(settingsPath);
+  const mode = io.statSync(target).mode & 0o7777;
+  const temporary = openTemporary(io, target, stamp);
+  let descriptor = temporary.descriptor;
+  try {
+    io.writeFileSync(descriptor, after);
+    io.fchmodSync(descriptor, mode);
+    io.fsyncSync(descriptor);
+    io.closeSync(descriptor);
+    descriptor = null;
+    const current = io.readFileSync(target, "utf8");
+    if (current !== before) {
+      throw Object.assign(
+        new Error(
+          `the settings file at ${settingsPath} changed while the route was being written; ` +
+            "nothing was replaced",
+        ),
+        { code: "ESETTINGSCHANGED" },
+      );
+    }
+    const backupPath = backup ? backupPathFor(io, settingsPath, stamp) : null;
+    // The backup is the exact original this replacement is based on, taken
+    // after the recheck proved the file still holds those bytes.
+    if (backupPath !== null) io.copyFileSync(target, backupPath);
+    io.renameSync(temporary.path, target);
+    return { settingsPath, backup: backupPath, changed: true };
+  } catch (error) {
+    // Before the rename the target was never opened for writing; only this
+    // process's own temp file is removed. A backup already copied is a copy of
+    // the intact original and is left in place.
+    if (descriptor !== null) {
+      try {
+        io.closeSync(descriptor);
+      } catch {
+        // Already closed by the failed call, or never opened.
+      }
+    }
+    try {
+      io.unlinkSync(temporary.path);
+    } catch {
+      // The rename may have consumed it; nothing else to clean.
+    }
+    throw error;
   }
-  writeFileSync(settingsPath, after);
-  return { settingsPath, backup: backupPath, changed: true };
 }
 
 /** The model ids the `llm-pi-ai` block in these lines serves, in file order. */
@@ -576,7 +669,12 @@ export function applyDefaultModelToSettings(
 /**
  * Read the settings file, repair a dead default in it, and write it back.
  *
- * @param options - `settingsPath`, `provider`, `stamp`, `backup`.
+ * The replacement is the same atomic one the route writer uses
+ * ({@link replaceSettingsFile}), so a repair that fails cannot leave a
+ * half-written profile either.
+ *
+ * @param options - `settingsPath`, `provider`, `stamp`, `backup`, and the `io`
+ *   seam tests inject.
  * @returns `{status, …}` from {@link applyDefaultModelToSettings}, or `skipped`
  *   when there is no file to read.
  */
@@ -585,22 +683,23 @@ export function repairDefaultModelSettings({
   provider = ROUTE_DEFAULTS.provider,
   stamp = new Date().toISOString().replace(/[:.]/g, "-"),
   backup = true,
+  io = fs,
 } = {}) {
-  if (!settingsPath || !existsSync(settingsPath)) {
+  if (!settingsPath || !io.existsSync(settingsPath)) {
     return { status: "skipped", reason: `no settings file at ${settingsPath ?? "(no path)"}` };
   }
-  const before = readFileSync(settingsPath, "utf8");
+  const before = io.readFileSync(settingsPath, "utf8");
   const { text, status, reason, from, to } = applyDefaultModelToSettings(before, { provider });
   if (status !== "repaired") return { status, reason };
-  const written = replaceSettingsFile({ settingsPath, before, after: text, stamp, backup });
+  const written = replaceSettingsFile({ settingsPath, before, after: text, stamp, backup, io });
   return { status, from, to, backup: written.backup };
 }
 
 /** Whether a path is a file this process may execute. */
 export function defaultIsExecutable(path) {
   try {
-    if (!statSync(path).isFile()) return false;
-    accessSync(path, constants.X_OK);
+    if (!fs.statSync(path).isFile()) return false;
+    fs.accessSync(path, fs.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -610,7 +709,7 @@ export function defaultIsExecutable(path) {
 /** Whether a path is a directory. */
 export function defaultIsDirectory(path) {
   try {
-    return statSync(path).isDirectory();
+    return fs.statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -783,7 +882,7 @@ export function collectRoute({
  * `settings.yaml`.
  *
  * @param options - {@link collectRoute} options plus `settingsPath`/`dshHome`,
- *   and injectable `stamp`/`backup` for tests.
+ *   and injectable `stamp`/`backup`/`io` for tests.
  * @returns `{status, detail, …}` with status `written-self-contained`, `missing`
  *   or `failed`.
  */
@@ -792,6 +891,7 @@ export function generateRoute({
   dshHome,
   stamp = new Date().toISOString().replace(/[:.]/g, "-"),
   backup = true,
+  io = fs,
   ...options
 } = {}) {
   const collected = collectRoute(options);
@@ -799,7 +899,7 @@ export function generateRoute({
   const { block, rows, source, serverBinary, modelsDir } = collected;
 
   const path = settingsPath ?? join(String(dshHome ?? ""), "settings.yaml");
-  if (!existsSync(path)) {
+  if (!io.existsSync(path)) {
     const detail = `no DSH settings file at ${path}`;
     options.log?.(`dsh-tinytitan: ${detail}; leaving the llm-pi-ai route as it is`);
     return {
@@ -811,7 +911,7 @@ export function generateRoute({
     };
   }
   try {
-    const written = writeRouteSettings({ settingsPath: path, block, stamp, backup });
+    const written = writeRouteSettings({ settingsPath: path, block, stamp, backup, io });
     const detail = written.changed ? "written" : "already current";
     options.log?.(
       `dsh-tinytitan: route refreshed with the built-in generator ` +

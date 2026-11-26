@@ -156,6 +156,20 @@ to editing the home's `settings.yaml` — the 0.1.6 shape — and refuses to wri
 when that file does not exist; through the service it makes no write at all when
 the refresh would not change a byte.
 
+That file is replaced atomically, because it is somebody's hand-edited profile: a
+backup is copied first (a name already taken gains a `-1`, `-2`, … rather than
+being overwritten), the new text goes to an exclusive temporary file in the same
+directory, which is fsynced and given the original file's permission bits, and
+only then renamed over the settings file. A symlinked `settings.yaml` is resolved
+first so the link survives and its target is what is replaced. Immediately before
+the rename the file is re-read and compared with the bytes the new text was
+computed from; an edit made in between is refused with
+`changed while the route was being written; nothing was replaced` instead of being
+overwritten. That re-read is a best-effort compare-and-swap, not a lock — an
+editor that does not cooperate can still save inside the window between it and the
+rename — and every failure before the rename leaves the original file
+byte-identical.
+
 0.1.6's `adoptDefaultPreset` (re-point the current default preset's stock
 compaction row) has no counterpart here and the field is gone: presets are
 declared rows now, so adopting a shipped one would mean freezing its whole plugin

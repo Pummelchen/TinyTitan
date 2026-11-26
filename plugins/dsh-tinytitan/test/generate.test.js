@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
+import fs, {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -653,6 +657,167 @@ test("a missing settings file is refused with a clear error", () => {
     /no DSH settings file at .*absent\.yaml/,
   );
   assert.throws(() => writeRouteSettings({ block: "x:\n" }), /no DSH settings file/);
+});
+
+/** A `node:fs` seam that fails one call, for the failure-before-rename cases. */
+function failingIo(name, error) {
+  return {
+    ...fs,
+    [name]: () => {
+      throw error;
+    },
+  };
+}
+
+/** Every entry in a directory, sorted, for "nothing was left behind" checks. */
+function entries(directory) {
+  return readdirSync(directory).sort();
+}
+
+test("a failure before the rename leaves the settings file byte-identical", () => {
+  // The old writer called `writeFileSync` on the target: an ENOSPC, a crash or a
+  // failing sync there truncated the person's profile, and a backup is a copy of
+  // what was there, not a way back. The replacement is a temp file in the same
+  // directory plus one rename, so every failure before that rename must leave
+  // the original untouched — bytes and mode.
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const original = "ui-theme:\n  preference: dark\n";
+  writeFileSync(settingsPath, original);
+  chmodSync(settingsPath, 0o640);
+  const block = generateBlock(FAKE);
+
+  for (const [name, error] of [
+    ["renameSync", Object.assign(new Error("EIO: rename failed"), { code: "EIO" })],
+    ["fsyncSync", Object.assign(new Error("EIO: fsync failed"), { code: "EIO" })],
+    ["openSync", Object.assign(new Error("EACCES: no temp"), { code: "EACCES" })],
+  ]) {
+    assert.throws(
+      () =>
+        writeRouteSettings({ settingsPath, block, stamp: "atomic", io: failingIo(name, error) }),
+      new RegExp(error.message),
+      name,
+    );
+    assert.equal(readFileSync(settingsPath, "utf8"), original, `${name}: the profile is intact`);
+    assert.equal(statSync(settingsPath).mode & 0o777, 0o640, `${name}: the mode is intact`);
+    assert.deepEqual(
+      entries(directory).filter((entry) => entry.includes(".tmp-")),
+      [],
+      `${name}: no temporary file is left behind`,
+    );
+  }
+});
+
+test("a write that dies mid-way cannot truncate the profile", () => {
+  // The reported shape: the target is truncated and half-written. Here the temp
+  // write itself dies after a partial write, which is what a full disk looks
+  // like; the target must not have been opened for writing at all.
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const original = "ui-theme:\n  preference: dark\n";
+  writeFileSync(settingsPath, original);
+  const block = generateBlock(FAKE);
+  const io = {
+    ...fs,
+    writeFileSync: (descriptor, text) => {
+      fs.writeFileSync(descriptor, String(text).slice(0, 16));
+      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    },
+  };
+  assert.throws(() => writeRouteSettings({ settingsPath, block, stamp: "half", io }), /ENOSPC/);
+  assert.equal(readFileSync(settingsPath, "utf8"), original);
+  assert.deepEqual(
+    entries(directory).filter((entry) => entry.includes(".tmp-")),
+    [],
+  );
+});
+
+test("an edit between the read and the replacement is refused, not overwritten", () => {
+  // A separate editor can save the file after the writer read it. The old
+  // writer then overwrote that edit with a block computed from the stale text.
+  // The replacement re-reads the exact bytes it based its work on and refuses
+  // when they moved.
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const original = "ui-theme:\n  preference: dark\n";
+  writeFileSync(settingsPath, original);
+  const block = generateBlock(FAKE);
+  let reads = 0;
+  const io = {
+    ...fs,
+    readFileSync: (...args) => {
+      reads += 1;
+      const text = fs.readFileSync(...args);
+      // The first read is the writer's; the recheck sees the other editor's save.
+      return reads === 1 ? text : `${text}ui-theme:\n  preference: light\n`;
+    },
+  };
+  assert.throws(
+    () => writeRouteSettings({ settingsPath, block, stamp: "race", io }),
+    /changed while the route was being written; nothing was replaced/,
+  );
+  // The edit is still the file's content — the reader was faked, not the write.
+  assert.equal(readFileSync(settingsPath, "utf8"), original);
+  assert.ok(!existsSync(`${settingsPath}.bak-race`), "nothing is backed up for a refused write");
+  assert.deepEqual(
+    entries(directory).filter((entry) => entry.includes(".tmp-")),
+    [],
+  );
+});
+
+test("the backup holds the exact bytes replaced and never clobbers an older one", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const original = "ui-theme:\n  preference: dark\n";
+  writeFileSync(settingsPath, original);
+  // Two refreshes in the same second (the default stamp has second resolution in
+  // the shell tool and millisecond in the plugin) must not overwrite each other.
+  writeFileSync(`${settingsPath}.bak-same`, "an older backup\n");
+  const written = writeRouteSettings({ settingsPath, block: generateBlock(FAKE), stamp: "same" });
+  assert.equal(written.backup, `${settingsPath}.bak-same-1`);
+  assert.equal(readFileSync(`${settingsPath}.bak-same`, "utf8"), "an older backup\n");
+  assert.equal(readFileSync(written.backup, "utf8"), original);
+});
+
+test("a symlinked settings file stays a symlink", () => {
+  // A profile that keeps settings.yaml in a dotfiles checkout is a symlink; the
+  // in-place writer followed it, so the replacement has to as well, or the link
+  // becomes a regular file and the person's checkout stops tracking it.
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const profile = join(directory, "profile");
+  mkdirSync(profile);
+  const target = join(profile, "settings.yaml");
+  writeFileSync(target, "ui-theme:\n  preference: dark\n");
+  const link = join(directory, "settings.yaml");
+  symlinkSync(target, link);
+
+  const written = writeRouteSettings({ settingsPath: link, block: generateBlock(FAKE) });
+  assert.equal(written.changed, true);
+  assert.equal(lstatSync(link).isSymbolicLink(), true);
+  assert.ok(readFileSync(target, "utf8").includes("llm-pi-ai:"));
+});
+
+test("the profile's permission bits are preserved, never widened", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  writeFileSync(settingsPath, "ui-theme:\n  preference: dark\n");
+  chmodSync(settingsPath, 0o600);
+  writeRouteSettings({ settingsPath, block: generateBlock(FAKE) });
+  assert.equal(statSync(settingsPath).mode & 0o777, 0o600);
+});
+
+test("the default-model repair is replaced atomically too", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-tinytitan-atomic-"));
+  const settingsPath = join(directory, "settings.yaml");
+  const before = profile(DEAD_DEFAULT);
+  writeFileSync(settingsPath, before);
+  const io = failingIo("renameSync", new Error("EIO: rename failed"));
+  assert.throws(() => repairDefaultModelSettings({ settingsPath, stamp: "repair", io }), /EIO/);
+  assert.equal(readFileSync(settingsPath, "utf8"), before);
+  assert.deepEqual(
+    entries(directory).filter((entry) => entry.includes(".tmp-")),
+    [],
+  );
 });
 
 test("findServerBinary follows explicit, env, PATH, then the checkout", () => {
