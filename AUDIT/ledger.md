@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:45 in_progress:2 open:12 start:0 blocked:1**
+**done:50 in_progress:2 open:7 start:0 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -44,7 +44,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0032 | S1 | DONE | DSH plugin / shell writer | Shell settings writer still truncates in place |
 | 0033 | S2 | DONE | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
 | 0034 | S2 | DONE | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
-| 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
+| 0035 | S2 | DONE | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 | 0036 | S2 | DONE | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | DONE | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 | 0038 | S3 | DONE | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
@@ -60,15 +60,15 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0048 | S2 | OPEN | ContinuityCore | Sub-second timestamps are lost on journal replay |
 | 0049 | S1 | OPEN | ContinuityCore | Journal truncate is not made durable |
 | 0050 | S2 | OPEN | ContinuityCore | Two session-log writes still swallow durability failures |
-| 0051 | S2 | OPEN | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
+| 0051 | S2 | DONE | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
 | 0052 | S2 | OPEN | ContinuityCore | Compatibility reads still drop journal damage silently |
 | 0053 | S1 | DONE | TinyTitanRepack | GGUF architecture reader traps on non-finite metadata |
 | 0054 | S2 | DONE | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
 | 0055 | S2 | DONE | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
 | 0056 | S2 | DONE | TinyTitanRepack | Checkpoint planner resident index and cursor arithmetic unchecked |
-| 0057 | S2 | OPEN | TinyTitanServer | Duplicate workspace header silently picks the first |
-| 0058 | S3 | OPEN | TinyTitanServer | Duplicate anthropic-version silently picks the first |
-| 0059 | S3 | OPEN | TinyTitanServer | ResponseStore.conversation re-concatenates history per continuation |
+| 0057 | S2 | DONE | TinyTitanServer | Duplicate workspace header silently picks the first |
+| 0058 | S3 | DONE | TinyTitanServer | Duplicate anthropic-version silently picks the first |
+| 0059 | S3 | DONE | TinyTitanServer | ResponseStore.conversation re-concatenates history per continuation |
 | 0060 | S3 | OPEN | TinyTitanKernelsC / Swift wrapper | Reader count conversion still traps above UInt32.max |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
@@ -373,10 +373,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0035 — Catalog tokenizer probe tests the plugin closure, not a call
 
-- S2 / Tier A / OPEN / L3 model catalog / availability
+- S2 / Tier A / DONE / L3 model catalog / availability
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/ModelCatalog+Plugins.swift:19-22
 - Evidence before: The catalog checks `factory.tokenizerFolder != nil`, which only proves the plugin declares a hook. A plugin-backed Q4 install whose GGUF header (the tokenizer source) is missing is still catalogued and then fails on first use. The JS mirror reproduces this deliberately (parity over preference).
+- Evidence after: The catalog prefers a plugin factory predicate (`EngineFactory.tokenizerSourceIsPresent`), then a bounded hook call, then the generic tokenizer rule; a synthetic plugin with no source is not catalogued and one with a source is. ModelCatalogTests 16. The DSH JS mirror half of the original commit is retired with the plugin; only the Swift catalog/plugin change and the docs row were brought over. See AUDIT/evidence/0035.md.
+- Commit: `5a1bb3ec`
 
 ## 0036 — Example fixtures bind to the checkout directory name
 
@@ -507,10 +509,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0051 — Client CLI test reports passed when its dependency is absent
 
-- S2 / Tier C / OPEN / test integrity
+- S2 / Tier C / DONE / test integrity
 - Project: TinyTitanServer / tests; host: Apple Silicon Mac A
 - Location: tests/TinyTitanServer/ClientCLITests.swift:73-77
 - Evidence before: The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed. The server audit also observed a half-installed Homebrew CLI failing the suite instead of skipping; the skip must probe `--version` with a timeout, not just file presence.
+- Evidence after: Both CLI tests now use `.enabled(if: usableCLI(...))` with a bounded 5 s `--version` probe; absent or half-installed CLIs skip with a reason, a working one runs the exercise. A probe test covers exit 0/1/stalled/missing. See AUDIT/evidence/0051.md.
+- Commit: `7a1c38e9`
 
 ## 0052 — Compatibility reads still drop journal damage silently
 
@@ -557,24 +561,30 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0057 — Duplicate workspace header silently picks the first
 
-- S2 / Tier A / OPEN / L4 input validation / cross-project contract
+- S2 / Tier A / DONE / L4 input validation / cross-project contract
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/HTTPServer.swift:225
 - Evidence before: `WorkspaceHeader.value(in:)` uses `headers.first(name:)`, so duplicate `X-TinyTitan-Workspace` headers silently choose the first; the cross-project workspace input should follow the duplicate-header policy the media/Host paths now use.
+- Evidence after: `WorkspaceHeader.resolve` refuses a duplicate `X-TinyTitan-Workspace` with 400 `duplicate_workspace` (bodyless for HEAD); a single header still reaches the backend. Raw-socket test. See AUDIT/evidence/0057.md.
+- Commit: `e24291ef`
 
 ## 0058 — Duplicate anthropic-version silently picks the first
 
-- S3 / Tier A / OPEN / L3 input validation
+- S3 / Tier A / DONE / L3 input validation
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:30
 - Evidence before: `anthropic-version` presence uses `first(name:)`; duplicate headers silently choose one, affecting only the route/error shape.
+- Evidence after: A duplicate `anthropic-version` is refused 400 through the Anthropic envelope before routing; a single value still selects Messages. Tests pin both. See AUDIT/evidence/0058.md.
+- Commit: `bd78bd84`
 
 ## 0059 — ResponseStore.conversation re-concatenates history per continuation
 
-- S3 / Tier A / OPEN / L5 resource use
+- S3 / Tier A / DONE / L5 resource use
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/ResponsesAPIStore.swift:48
 - Evidence before: `conversation` still returns `inputItems + outputItems` per continuation, an O(history) allocation on every stored follow-up; the new byte budget bounds it but does not remove the cost.
+- Evidence after: Kept the exact `inputItems + outputItems` array (bounded by the 0018 per-entry budget); added a test pinning copyBytes == entryBytes - responseJSON and acceptance/refusal exactly at the boundary. Documented O(history) copy residual. See AUDIT/evidence/0059.md.
+- Commit: `51a842ac`
 
 ## 0060 — Reader count conversion still traps above UInt32.max
 
