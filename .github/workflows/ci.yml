@@ -1110,6 +1110,35 @@ jobs:
           exit(failures.zero? ? 0 : 1)
           RUBY
 
+  # The demo is a shipped release artifact, and its build scripts do not read a
+  # SwiftPM manifest: the strict standard (Swift 6, complete concurrency,
+  # -warnings-as-errors) lives only in those two scripts. No CI job compiled
+  # it, which is how the missing standard survived. Build a scratch library
+  # distribution and both link forms here; no model, no publish.
+  library-demo:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build a scratch distribution and both demo link forms
+        run: |
+          set -euo pipefail
+          # The scratch and the output must not share a parent: build_library.sh
+          # removes --out before staging, so a build directory inside it would
+          # be deleted with the products still inside.
+          scratch="$RUNNER_TEMP/library-demo-build"
+          dist="$RUNNER_TEMP/library-demo-dist"
+          tools/build_library.sh 0.0.0-ci --out "$dist" --scratch-path "$scratch"
+          examples/library-demo/build-static.sh "$dist"
+          examples/library-demo/build-dynamic.sh "$dist"
+          for demo in examples/library-demo/tinytitan-demo-static \
+                      examples/library-demo/tinytitan-demo-dynamic; do
+            archs="$(lipo -archs "$demo")"
+            [[ "$archs" == "arm64" ]] || { echo "::error::$demo is $archs, not arm64"; exit 1; }
+          done
+          otool -L examples/library-demo/tinytitan-demo-dynamic \
+            | grep -q '@rpath/libTinyTitanLib.dylib'
+
   # Separate job: the instrumented build plus the ~3.5x slower suite would
   # roughly double the main job's wall time, and its feedback is orthogonal to
   # a functional failure. Runs in parallel with `test`.
