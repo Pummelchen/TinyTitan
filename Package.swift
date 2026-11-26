@@ -147,37 +147,37 @@ let package = Package(
         // only the generic library — the variant-isolation gate enforces it.
         .target(
             name: "Qwen35Dense2B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense2B4Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
             name: "Qwen35Dense2B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense2B8Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
             name: "Qwen35Dense4B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense4B4Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
             name: "Qwen35Dense4B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense4B8Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
             name: "Qwen35Dense9B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense9B4Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
             name: "Qwen35Dense9B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC"],
+            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
             path: "sources/Engines/Qwen35Dense9B8Bit",
             swiftSettings: tinytitanLanguageStandard
         ),
@@ -259,7 +259,7 @@ let package = Package(
         // drift from what the server actually needs.
         .target(
             name: "TinyTitanLib",
-            dependencies: ["TinyTitanCore", "TinyTitanFormat"],
+            dependencies: ["TinyTitanCore"],
             path: "sources/TinyTitanLib",
             swiftSettings: tinytitanLanguageStandard
         ),
@@ -397,7 +397,8 @@ let package = Package(
             name: "TinyTitanServer",
             dependencies: [
                 "TinyTitanServerCore", "TinyTitanVariants", "TinyTitanCPUEngine",
-                "TinyTitanPluginAPI",
+                "TinyTitanPluginAPI", "TinyTitanCore", "TinyTitanLegacyEngine",
+                "TinyTitanLib", "TinyTitanMemory",
             ],
             path: "sources/TinyTitanServer/Command",
             swiftSettings: tinytitanLanguageStandard
