@@ -124,9 +124,32 @@ void tinytitan_delta_rule_range(const float *query,
 /// form `benchmark/gdn_chunked_scan.py` checks. `queries`, `keys` and `values`
 /// point at token 0 of this head, with the strides between tokens; `alphas`
 /// and `betas` are per token for this head. `readouts` is written
-/// `tokens`-by-`dv`, `state` is updated in place. Returns 0 on success and 1
-/// if its scratch allocation failed (the sequential fallback still ran when
-/// `dv` fits the fixed buffer).
+/// `tokens`-by-`dv`, `state` is updated in place.
+///
+/// Every dimension, stride and allocation product is validated before anything
+/// is allocated or written, because this entry point cannot see the caller's
+/// buffers. A stride smaller than the width it indexes, a zero alpha/beta
+/// stride, a `2 * tokens` or `size_t` product that would wrap, or a BLAS extent
+/// above `INT_MAX` is refused with `TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY`
+/// and leaves `state` and `readouts` untouched. A zero token or head width is a
+/// no-op and returns `TINYTITAN_DELTA_RULE_CHUNK_OK`.
+///
+/// The return values are:
+/// - `TINYTITAN_DELTA_RULE_CHUNK_OK` — the BLAS path produced the result.
+/// - `TINYTITAN_DELTA_RULE_CHUNK_FELL_BACK` — the scratch allocation failed,
+///   and the fixed-buffer sequential fallback produced the result; it is valid.
+/// - `TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY` — rejected as above.
+/// - `TINYTITAN_DELTA_RULE_CHUNK_ALLOCATION_FAILED` — the scratch allocation
+///   failed and `dv` is past the fallback's fixed buffer, so nothing was
+///   written. The caller must treat `state` and `readouts` as unwritten.
+///
+/// Valid geometry keeps the historical arithmetic and summation order exactly:
+/// the checks only reject input the old code would have run off the end for.
+#define TINYTITAN_DELTA_RULE_CHUNK_OK 0
+#define TINYTITAN_DELTA_RULE_CHUNK_FELL_BACK 1
+#define TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY 2
+#define TINYTITAN_DELTA_RULE_CHUNK_ALLOCATION_FAILED 3
+
 int tinytitan_delta_rule_chunk(const float *queries,
                                size_t queryStride,
                                const float *keys,

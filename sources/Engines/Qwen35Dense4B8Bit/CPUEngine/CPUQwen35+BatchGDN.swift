@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import TinyTitanKernelsC
 import TinyTitanCore
 
@@ -83,7 +84,7 @@ extension CPUQwen35 {
             let (alphas, betas) = gdnAlphaBeta(
                 aRows: aRows, bRows: bRows, decayLog: decayLog, decayBias: decayBias,
                 start: start, count: count, heads: hv)
-            gdnApplyChunk(
+            try gdnApplyChunk(
                 convolved: convolved, alphas: alphas, betas: betas,
                 count: count, convDim: convDim, keyWidth: keyWidth,
                 valueWidth: valueWidth, dk: dk, dv: dv, repeats: repeats,
@@ -189,15 +190,21 @@ extension CPUQwen35 {
 
     /// Runs the chunked delta rule for every head, splitting heads across the
     /// performance cores when there are enough of them.
+    ///
+    /// The kernel validates the geometry and its scratch allocation before it
+    /// writes anything. A failed allocation that still produced the chunk
+    /// through the fixed-buffer fallback is a success; a rejected geometry or
+    /// an allocation that left the readout unwritten is thrown instead of
+    /// silently returning zeros.
     func gdnApplyChunk(
         convolved: [Float], alphas: [Float], betas: [Float],
         count: Int, convDim: Int, keyWidth: Int, valueWidth: Int,
         dk: Int, dv: Int, repeats: Int,
         state: inout [Float], readout: inout [Float], readoutBase: Int, threads: Int
-    ) {
+    ) throws {
         let usable = max(1, min(threads, (alphas.count / count) / 8))
         let heads = alphas.count / count
-        convolved.withUnsafeBufferPointer { convolvedBuffer in
+        let status: Int32 = convolved.withUnsafeBufferPointer { convolvedBuffer in
             alphas.withUnsafeBufferPointer { alphaBuffer in
                 betas.withUnsafeBufferPointer { betaBuffer in
                     state.withUnsafeMutableBufferPointer { stateBuffer in
@@ -207,10 +214,11 @@ extension CPUQwen35 {
                                 let betaBase = betaBuffer.baseAddress,
                                 let stateBase = stateBuffer.baseAddress,
                                 let outputBase = outputBuffer.baseAddress
-                            else { return }
+                            else { return 0 }
                             if usable <= 1 {
+                                var chunkStatus: Int32 = 0
                                 for head in 0..<heads {
-                                    _ = tinytitan_delta_rule_chunk(
+                                    let result = tinytitan_delta_rule_chunk(
                                         convolvedBase + (head / repeats) * dk, convDim,
                                         convolvedBase + keyWidth + (head / repeats) * dk, convDim,
                                         convolvedBase + 2 * keyWidth + head * dv, convDim,
@@ -219,7 +227,11 @@ extension CPUQwen35 {
                                         count, dk, dv,
                                         stateBase + head * dv * dk,
                                         outputBase + readoutBase + head * dv, valueWidth)
+                                    if result != 0 && chunkStatus == 0 {
+                                        chunkStatus = result
+                                    }
                                 }
+                                return chunkStatus
                             } else {
                                 let headChunk = (heads + usable - 1) / usable
                                 nonisolated(unsafe) let cBase = convolvedBase
@@ -228,12 +240,13 @@ extension CPUQwen35 {
                                 nonisolated(unsafe) let sBase = stateBase
                                 nonisolated(unsafe) let oBase = outputBase
                                 let base = readoutBase
+                                let firstStatus = Mutex<Int32>(0)
                                 DispatchQueue.concurrentPerform(iterations: usable) { slice in
                                     let first = slice * headChunk
                                     guard first < heads else { return }
                                     let last = min(first + headChunk, heads)
                                     for head in first..<last {
-                                        _ = tinytitan_delta_rule_chunk(
+                                        let result = tinytitan_delta_rule_chunk(
                                             cBase + (head / repeats) * dk, convDim,
                                             cBase + keyWidth + (head / repeats) * dk, convDim,
                                             cBase + 2 * keyWidth + head * dv, convDim,
@@ -242,13 +255,31 @@ extension CPUQwen35 {
                                             count, dk, dv,
                                             sBase + head * dv * dk,
                                             oBase + base + head * dv, valueWidth)
+                                        if result != 0 {
+                                            firstStatus.withLock { current in
+                                                if current == 0 { current = result }
+                                            }
+                                        }
                                     }
                                 }
+                                return firstStatus.withLock { $0 }
                             }
                         }
                     }
                 }
             }
+        }
+        switch status {
+        case 0:  // TINYTITAN_DELTA_RULE_CHUNK_OK
+            return
+        case 1:  // TINYTITAN_DELTA_RULE_CHUNK_FELL_BACK: the result is valid
+            return
+        case 3:  // TINYTITAN_DELTA_RULE_CHUNK_ALLOCATION_FAILED: no output
+            throw ModelError.posixFailed(
+                call: "tinytitan_delta_rule_chunk scratch allocation", errno: ENOMEM)
+        default:  // 2: TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY
+            throw ModelError.internalInconsistency(
+                detail: "delta-rule chunk geometry was rejected by the kernel (status \(status))")
         }
     }
 

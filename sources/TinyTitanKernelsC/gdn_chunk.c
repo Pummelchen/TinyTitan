@@ -26,12 +26,51 @@
 // bit.
 
 #include "include/tinytitan_kernels.h"
+#include "include/tinytitan_testing.h"
 
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define TINYTITAN_CHUNK_FALLBACK_DV 256
+
+// Strict C99 checked size_t arithmetic. The dimensions arrive through a C entry
+// point that cannot see the caller's buffers, so a product that would wrap must
+// be refused before it sizes an allocation: `2 * tokens * dk * sizeof(float)`
+// wrapping to a small number is exactly how an under-allocation turns into a
+// memcpy past the end.
+static int tinytitan_checked_add_size(size_t left, size_t right, size_t *out) {
+    if (right > SIZE_MAX - left) {
+        return 0;
+    }
+    *out = left + right;
+    return 1;
+}
+
+static int tinytitan_checked_mul_size(size_t left, size_t right, size_t *out) {
+    if (left != 0 && right > SIZE_MAX / left) {
+        return 0;
+    }
+    *out = left * right;
+    return 1;
+}
+
+/// Bytes for `rows * columns` floats, checked as a product and then as a byte
+/// count. Both halves are needed: the element product can fit while the byte
+/// product does not.
+static int tinytitan_scratch_bytes(size_t rows, size_t columns, size_t *out) {
+    size_t elements = 0;
+    if (!tinytitan_checked_mul_size(rows, columns, &elements)) {
+        return 0;
+    }
+    if (elements > SIZE_MAX / sizeof(float)) {
+        return 0;
+    }
+    *out = elements * sizeof(float);
+    return 1;
+}
 
 static void tinytitan_delta_rule_chunk_sequential(const float *queries, size_t queryStride,
                                                   const float *keys, size_t keyStride,
@@ -67,26 +106,63 @@ static void tinytitan_delta_rule_chunk_sequential(const float *queries, size_t q
     }
 }
 
-/// 0 on success; 1 if the scratch allocation failed (the sequential fallback
-/// still produced a result when dv fits the fixed buffer).
-int tinytitan_delta_rule_chunk(const float *queries, size_t queryStride,
-                               const float *keys, size_t keyStride,
-                               const float *values, size_t valueStride,
-                               const float *alphas, size_t alphaStride,
-                               const float *betas, size_t betaStride,
-                               size_t tokens, size_t dk, size_t dv,
-                               float *state, float *readouts, size_t readoutStride) {
+/// The body of `tinytitan_delta_rule_chunk`, with the scratch allocator passed
+/// in so the allocation-failure paths are testable without a real OOM.
+static int delta_rule_chunk_impl(const float *queries, size_t queryStride,
+                                 const float *keys, size_t keyStride,
+                                 const float *values, size_t valueStride,
+                                 const float *alphas, size_t alphaStride,
+                                 const float *betas, size_t betaStride,
+                                 size_t tokens, size_t dk, size_t dv,
+                                 float *state, float *readouts, size_t readoutStride,
+                                 tinytitan_scratch_alloc_fn allocate) {
     if (tokens == 0 || dk == 0 || dv == 0) {
-        return 0;
+        return TINYTITAN_DELTA_RULE_CHUNK_OK;
     }
-    const size_t twoTokens = 2 * tokens;
-    float *keysQueries = malloc(twoTokens * dk * sizeof(float));
-    float *products = malloc(dv * twoTokens * sizeof(float));
-    float *gram = malloc(tokens * twoTokens * sizeof(float));
-    float *corrections = malloc(tokens * dv * sizeof(float));
-    float *weighted = malloc(dv * tokens * sizeof(float));
-    float *update = malloc(dv * dk * sizeof(float));
-    float *decay = malloc(tokens * sizeof(float));
+    // A stride below the width it indexes makes every row overlap the next one,
+    // which is a caller error rather than a geometry this kernel can honour.
+    if (queryStride < dk || keyStride < dk || valueStride < dv
+        || readoutStride < dv || alphaStride == 0 || betaStride == 0) {
+        return TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY;
+    }
+    // Every allocation below is sized from these products; compute and check
+    // them first so an impossibly large geometry is refused before the
+    // allocator is asked for anything.
+    size_t twoTokens = 0;
+    if (!tinytitan_checked_add_size(tokens, tokens, &twoTokens)) {
+        return TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY;
+    }
+    size_t keysQueriesBytes = 0;
+    size_t productsBytes = 0;
+    size_t gramBytes = 0;
+    size_t correctionsBytes = 0;
+    size_t weightedBytes = 0;
+    size_t updateBytes = 0;
+    size_t decayBytes = 0;
+    if (!tinytitan_scratch_bytes(twoTokens, dk, &keysQueriesBytes)
+        || !tinytitan_scratch_bytes(dv, twoTokens, &productsBytes)
+        || !tinytitan_scratch_bytes(tokens, twoTokens, &gramBytes)
+        || !tinytitan_scratch_bytes(tokens, dv, &correctionsBytes)
+        || !tinytitan_scratch_bytes(dv, tokens, &weightedBytes)
+        || !tinytitan_scratch_bytes(dv, dk, &updateBytes)
+        || !tinytitan_scratch_bytes(tokens, 1, &decayBytes)) {
+        return TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY;
+    }
+    // Every BLAS extent below is narrowed to `int`; `twoTokens` is both an
+    // extent and a leading dimension. Reject before the cast.
+    if (tokens > (size_t)INT_MAX / 2
+        || dk > (size_t)INT_MAX
+        || dv > (size_t)INT_MAX) {
+        return TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY;
+    }
+
+    float *keysQueries = allocate(keysQueriesBytes);
+    float *products = allocate(productsBytes);
+    float *gram = allocate(gramBytes);
+    float *corrections = allocate(correctionsBytes);
+    float *weighted = allocate(weightedBytes);
+    float *update = allocate(updateBytes);
+    float *decay = allocate(decayBytes);
     if (keysQueries == NULL || products == NULL || gram == NULL || corrections == NULL
         || weighted == NULL || update == NULL || decay == NULL) {
         free(keysQueries);
@@ -96,13 +172,18 @@ int tinytitan_delta_rule_chunk(const float *queries, size_t queryStride,
         free(weighted);
         free(update);
         free(decay);
+        // The sequential fallback has a fixed stack buffer, so it can only
+        // stand in when dv fits it. When it does, the result is complete and
+        // valid and the caller may use it; when it does not, nothing has been
+        // written and the caller must not use state or readouts.
         if (dv <= TINYTITAN_CHUNK_FALLBACK_DV) {
             tinytitan_delta_rule_chunk_sequential(
                 queries, queryStride, keys, keyStride, values, valueStride,
                 alphas, alphaStride, betas, betaStride, tokens, dk, dv, state,
                 readouts, readoutStride);
+            return TINYTITAN_DELTA_RULE_CHUNK_FELL_BACK;
         }
-        return 1;
+        return TINYTITAN_DELTA_RULE_CHUNK_ALLOCATION_FAILED;
     }
 
     // Contiguous [K ; Q] rows, because the source rows are strided by the
@@ -191,5 +272,36 @@ int tinytitan_delta_rule_chunk(const float *queries, size_t queryStride,
     free(weighted);
     free(update);
     free(decay);
-    return 0;
+    return TINYTITAN_DELTA_RULE_CHUNK_OK;
+}
+
+int tinytitan_delta_rule_chunk(const float *queries, size_t queryStride,
+                               const float *keys, size_t keyStride,
+                               const float *values, size_t valueStride,
+                               const float *alphas, size_t alphaStride,
+                               const float *betas, size_t betaStride,
+                               size_t tokens, size_t dk, size_t dv,
+                               float *state, float *readouts, size_t readoutStride) {
+    return delta_rule_chunk_impl(
+        queries, queryStride, keys, keyStride, values, valueStride,
+        alphas, alphaStride, betas, betaStride, tokens, dk, dv, state,
+        readouts, readoutStride, malloc);
+}
+
+int tinytitan_delta_rule_chunk_with_allocator(
+    const float *queries, size_t queryStride,
+    const float *keys, size_t keyStride,
+    const float *values, size_t valueStride,
+    const float *alphas, size_t alphaStride,
+    const float *betas, size_t betaStride,
+    size_t tokens, size_t dk, size_t dv,
+    float *state, float *readouts, size_t readoutStride,
+    tinytitan_scratch_alloc_fn allocate) {
+    if (allocate == NULL) {
+        return TINYTITAN_DELTA_RULE_CHUNK_INVALID_GEOMETRY;
+    }
+    return delta_rule_chunk_impl(
+        queries, queryStride, keys, keyStride, values, valueStride,
+        alphas, alphaStride, betas, betaStride, tokens, dk, dv, state,
+        readouts, readoutStride, allocate);
 }
