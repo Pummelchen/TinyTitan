@@ -356,6 +356,11 @@ public actor FileJournal: ContinuityJournal {
         rewriting = true
     }
 
+    /// Appends waiting for a compaction or truncation to finish. Internal for
+    /// the serialization test, which otherwise has no way to observe a waiter
+    /// without timing one.
+    var rewriteWaiterCount: Int { rewriteWaiters.count }
+
     func releaseRewrite() {
         rewriting = false
         let waiters = rewriteWaiters

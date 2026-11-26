@@ -20,6 +20,8 @@ extension ContinuityEngine {
         // their reply. It is recorded as a durability failure instead.
         await sessionLog.setObserver { [weak self] event in
             guard journalsContent || !Self.carriesContent(event) else { return }
+            // A compaction must not replace the file underneath this write.
+            await self?.awaitJournalRewrite()
             do {
                 try await journal.append(.event(event))
             } catch {
@@ -39,6 +41,11 @@ extension ContinuityEngine {
             case .written(let result): entry = .memory(result.item)
             case .statusChanged(let item): entry = .memory(item)
             }
+            // The fact is already in RAM; this is the write that carries it
+            // to the file. It waits for any compaction to finish, because the
+            // checkpoint being written was taken from a snapshot that cannot
+            // contain a record not yet appended.
+            await self?.awaitJournalRewrite()
             do {
                 try await journal.append(entry)
             } catch {
@@ -81,6 +88,7 @@ extension ContinuityEngine {
     }
 
     func record(_ entry: JournalRecord) async throws {
+        await awaitJournalRewrite()
         do {
             try await journal.append(entry)
         } catch {
@@ -88,6 +96,27 @@ extension ContinuityEngine {
             throw error
         }
         journaledRecords += 1
+    }
+
+    /// Wait until no compaction owns the snapshot.
+    func awaitJournalRewrite() async {
+        while rewritingJournal {
+            await withCheckedContinuation { journalRewriteWaiters.append($0) }
+        }
+    }
+
+    /// Take the snapshot for a compaction. Every journal append waits until
+    /// `endJournalRewrite` resumes it.
+    func beginJournalRewrite() async {
+        await awaitJournalRewrite()
+        rewritingJournal = true
+    }
+
+    func endJournalRewrite() {
+        rewritingJournal = false
+        let waiters = journalRewriteWaiters
+        journalRewriteWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     func restoreFromJournal() async throws {

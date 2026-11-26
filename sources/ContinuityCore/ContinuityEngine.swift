@@ -34,6 +34,13 @@ public actor ContinuityEngine {
     /// outlived a later successful collapse would report an unbounded file
     /// where there is none.
     public internal(set) var compactionFailure: String?
+    /// A compaction owns the in-memory snapshot while it is being taken and
+    /// written. Journal appends wait for it, so no record can land in the file
+    /// after the snapshot was read but before the checkpoint replaced it —
+    /// a record the snapshot does not contain and the replacement would
+    /// discard.
+    var rewritingJournal = false
+    var journalRewriteWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(
         configuration: ContinuityConfiguration = ContinuityConfiguration(),
@@ -452,6 +459,13 @@ public actor ContinuityEngine {
     /// A collapse that lands is also the proof that the file stopped growing,
     /// so it clears `compactionFailure`.
     public func compactJournal() async throws {
+        // Admission first, then the snapshots: a write that is already in
+        // flight has already changed the stores, so a snapshot taken after it
+        // is admitted cannot miss it. A write admitted *after* this point
+        // waits for the replacement, which is what keeps it from landing in a
+        // file that is about to be replaced.
+        await beginJournalRewrite()
+        defer { endJournalRewrite() }
         let log = await sessionLog.snapshot()
         let store = await memory.snapshot()
         try await journal.compact(sessionLog: log, memory: store)
