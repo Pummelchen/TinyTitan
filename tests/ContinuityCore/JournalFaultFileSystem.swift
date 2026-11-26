@@ -49,6 +49,9 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         var renameFailure: Int32?
         var unlinkFailure: Int32?
         var writePlan: [WriteOutcome] = []
+        /// The append pause: signalled when `write` is entered and released by
+        /// the test. Consumed by the first call.
+        var writeGate: (entered: DispatchSemaphore, release: DispatchSemaphore)?
         /// Signalled on a `write` to one path, so a test can wait for an
         /// append to reach the filesystem instead of sleeping and hoping.
         var writeSignalPath: String?
@@ -132,6 +135,12 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         state.withLock { $0.writePlan = outcomes }
     }
 
+    func holdWrite(entered: DispatchSemaphore, release: DispatchSemaphore) {
+        state.withLock {
+            $0.writeGate = (entered: entered, release: release)
+        }
+    }
+
     func signalWrites(at path: String, _ semaphore: DispatchSemaphore?) {
         state.withLock {
             $0.writeSignalPath = path
@@ -201,15 +210,23 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     }
 
     func write(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) -> Int {
-        let outcome = state.withLock { state -> WriteOutcome in
+        let decision = state.withLock {
+            state -> (outcome: WriteOutcome, gate: State.PendingGate?) in
             state.writes += 1
+            let gate = state.writeGate.map(State.PendingGate.init)
+            state.writeGate = nil
             if let path = state.descriptorPaths[descriptor],
                 path == state.writeSignalPath
             {
                 state.writeSignal?.signal()
             }
-            return state.writePlan.isEmpty ? .all : state.writePlan.removeFirst()
+            return (state.writePlan.isEmpty ? .all : state.writePlan.removeFirst(), gate)
         }
+        if let gate = decision.gate {
+            gate.entered.signal()
+            gate.release.wait()
+        }
+        let outcome = decision.outcome
         switch outcome {
         case .all:
             return real.write(descriptor, bytes: bytes)

@@ -271,7 +271,19 @@ public actor ContinuityEngine {
             tags: tags,
             dependencies: dependencies,
             expectedVersion: expectedVersion)
-        _ = try? await sessionLog.recordMemoryWrite(sessionID: sessionID, item: result.item)
+        // Best-effort, and said: the fact is already written and its record
+        // carries the provenance the session event repeats, so failing the
+        // caller here would report a write that did land as one that did not.
+        // The event is still part of the log, and losing it means the replay
+        // cannot reconstruct this turn's history — so the failure goes on the
+        // engine's durability channel rather than nowhere. The error's
+        // description names the session or the kind, never the record's value.
+        do {
+            _ = try await sessionLog.recordMemoryWrite(
+                sessionID: sessionID, item: result.item)
+        } catch {
+            journalWriteFailed(error)
+        }
         return result
     }
 
@@ -336,52 +348,6 @@ public actor ContinuityEngine {
         try await memory.setStatus(
             taskID: taskID, namespace: namespace, key: key,
             status: .active)
-    }
-
-    // MARK: - Context
-
-    /// Build the block of text to put in front of the model.
-    ///
-    /// Records a `contextAssembled` event when a session is given, so the log
-    /// can later show what the model was looking at when it answered.
-    public func assembleContext(
-        taskID: UUID,
-        sessionID: UUID? = nil,
-        focus: String? = nil,
-        budget: ContextBudget? = nil,
-        query: MemoryQuery = .active
-    ) async throws -> ContextSnapshot {
-        guard let task = await sessionLog.task(taskID) else {
-            throw ContinuityError.unknownTask(taskID)
-        }
-        let effectiveBudget = budget ?? configuration.defaultBudget
-        let candidates = await memory.query(taskID: taskID, query)
-        let all = await memory.query(
-            taskID: taskID,
-            MemoryQuery(
-                statuses: [.active, .disputed],
-                order: .address))
-        var index: [String: MemoryItem] = [:]
-        for item in all { index[item.address] = item }
-        let turns =
-            effectiveBudget.recentTurnCount > 0
-            ? await sessionLog.turns(taskID: taskID, limit: effectiveBudget.recentTurnCount)
-            : []
-        let request = ContextRequest(
-            task: task,
-            sessionID: sessionID,
-            items: candidates,
-            index: index,
-            turns: turns,
-            budget: effectiveBudget,
-            focus: focus)
-        let snapshot = try assembler.assemble(request)
-        if let sessionID {
-            _ = try? await sessionLog.recordContextAssembled(
-                sessionID: sessionID,
-                snapshot: snapshot)
-        }
-        return snapshot
     }
 
     // MARK: - Reading the log

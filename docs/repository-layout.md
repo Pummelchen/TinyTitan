@@ -566,6 +566,11 @@ again (451 → 511), so the `journalDamage` accessor moved to
 computed property read from the journal, so it needs no stored state and the
 move did not widen anything; the file is 489 lines.
 
+The 0050 audit added the best-effort session-event reporting to
+`ContinuityEngine.swift` and pushed it over the limit (489 → 510), so its
+`assembleContext` moved to `ContinuityEngine+Context.swift` (67) as pure code
+motion; the file is 455 lines and no signature changed.
+
 Two CPU-engine cuts followed: `CPUQwen35.swift` (527 → 492) sent the quantized
 row reader and the bfloat widening to `CPUQwen35+Quant.swift` (48), and
 `AffineSnapshot.swift` (538 → 443) sent the shard lookup and the
