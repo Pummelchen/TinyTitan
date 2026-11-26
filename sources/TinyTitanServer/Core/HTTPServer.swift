@@ -20,21 +20,45 @@ public actor TinyTitanHTTPServer {
     /// Ceiling on the *aggregate* request header block, checked when the head
     /// arrives.
     ///
-    /// NIO caps a single header field at 80 KiB and nothing else: it has no
-    /// field-count or total-size limit, and `HTTPDecoder` exposes none to
-    /// configure (only `leftOverBytesStrategy` and
-    /// `informationalResponseStrategy`). So a client can send an unbounded
-    /// number of small headers and the decoder will accumulate all of them
-    /// before this handler is handed the head. What this bound can do is refuse
-    /// the request before any routing or generation work and say why; it cannot
-    /// stop NIO's own buffering, which is why the value is generous rather than
-    /// tight — 16 KiB is far more than any real client sends and small enough
-    /// that a request that trips it is not one worth serving.
+    /// SwiftNIO 2.100's decoder does have an aggregate bound
+    /// (`NIOHTTPDecoderLimitConfiguration.maxHeaderListSize`), and
+    /// `decoderLimitConfiguration` below wires it; this application check is
+    /// the tighter, documented policy and is what answers 431 for a head the
+    /// decoder admitted. The decoder's bound is the outer backstop that stops
+    /// buffering for a head that never completes. Before the decoder limit was
+    /// wired, a client could send an unbounded number of small headers and the
+    /// decoder accumulated every one before this handler saw a head at all.
     public static let maximumRequestHeaderBytes = 16 * 1024
 
     /// Ceiling on the number of header fields, for the same reason. A field
     /// count is what a hostile client can inflate without inflating bytes.
     public static let maximumRequestHeaderFields = 128
+
+    /// The pre-decode hard bound on a request's header list (field names and
+    /// values, including the URI and trailers as NIO counts them).
+    ///
+    /// Twice the application byte budget so a head the application would
+    /// accept can never be refused by the decoder for byte count alone, while
+    /// a stream that never terminates its head is still bounded to a few tens
+    /// of KiB per connection. A request over this bound gets NIO's protocol
+    /// error 400 before any `HTTPRequestHead` is emitted; a completed head
+    /// between this bound and the 16 KiB policy gets the documented 431.
+    public static let maximumDecoderHeaderListBytes = 32 * 1024
+
+    /// Decoder limits for the server pipeline: one field may not exceed the
+    /// application's whole byte budget, the list is bounded by
+    /// `maximumDecoderHeaderListBytes`, and the field count stays at NIO's
+    /// bound of twice the application policy. Keeping the decoder count above
+    /// 128 is deliberate: a 129-field head is answered by the application's
+    /// `request_headers_too_large` (431), and the decoder only catches a stream
+    /// that is still inflating fields without completing the head.
+    static var decoderLimitConfiguration: NIOHTTPDecoderLimitConfiguration {
+        var limits = NIOHTTPDecoderLimitConfiguration()
+        limits.maxHeaderFieldSize = maximumRequestHeaderBytes
+        limits.maxHeaderListSize = maximumDecoderHeaderListBytes
+        limits.maxHeaderFieldCount = maximumRequestHeaderFields * 2
+        return limits
+    }
 
     /// How much of a refused request's body is read and discarded before the
     /// connection is closed.
@@ -106,7 +130,8 @@ public actor TinyTitanHTTPServer {
                 childChannels.insert(channel)
                 return channel.pipeline.configureHTTPServerPipeline(
                     withPipeliningAssistance: true,
-                    withErrorHandling: true
+                    withErrorHandling: true,
+                    withDecoderLimitConfiguration: Self.decoderLimitConfiguration
                 ).flatMap {
                     channel.pipeline.addHandler(
                         ServerHTTPHandler(

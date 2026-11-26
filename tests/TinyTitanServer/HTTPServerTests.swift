@@ -359,6 +359,210 @@ struct HTTPServerTests {
         try await server.shutdown()
     }
 
+    /// The decoder configuration the listener installs, pinned as a value: the
+    /// pre-decode bound is a hard cap, so the buffered bytes for a head cannot
+    /// exceed it however long the client dribbles fields. 32 KiB per
+    /// connection against the 64-connection cap is ~2 MiB, before any body is
+    /// read.
+    @Test func decoderLimitsBoundAHeadBeforeItCompletes() {
+        let limits = TinyTitanHTTPServer.decoderLimitConfiguration
+        #expect(limits.maxHeaderFieldSize == TinyTitanHTTPServer.maximumRequestHeaderBytes)
+        #expect(limits.maxHeaderListSize == TinyTitanHTTPServer.maximumDecoderHeaderListBytes)
+        #expect(limits.maxHeaderFieldCount == TinyTitanHTTPServer.maximumRequestHeaderFields * 2)
+        #expect(limits.maxHeaderListSize > TinyTitanHTTPServer.maximumRequestHeaderBytes)
+    }
+
+    /// See `incrementallySuppliedOversizedHeadersAreRefusedBeforeTheHeadCompletes`
+    /// for why this is measured before the head can complete.
+    ///
+    /// A header block that the decoder admits but the application budget
+    /// refuses still gets the 431 the API documents, not the decoder's own 400:
+    /// the pre-decode limit is the outer backstop, the 16 KiB policy stays the
+    /// rule a well-behaved over-limit client meets.
+    @Test func headerBlockOverTheApplicationLimitButUnderTheDecoderLimitIs431() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"hi"}]}"#
+        let value = String(repeating: "a", count: 1_000)
+        var head =
+            "POST /v1/chat/completions HTTP/1.1\r\n"
+            + "Host: 127.0.0.1:\(port)\r\n"
+            + "Content-Type: application/json\r\n"
+            + "Content-Length: \(body.utf8.count)\r\n"
+        // ~20 KiB of field names and values: over the 16 KiB application
+        // budget, under the 32 KiB decoder bound.
+        for index in 0..<20 { head += "x-fill-\(index): \(value)\r\n" }
+        head += "\r\n" + body
+
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(socket: socket, text: head)
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(reply.hasPrefix("HTTP/1.1 431"), "expected the application limit: \(reply)")
+        #expect(reply.contains("request_headers_too_large"))
+        #expect(backend.generations == 0)
+
+        try await server.shutdown()
+    }
+
+    /// The property the application check cannot provide: NIO buffers header
+    /// fields as they arrive, so a client that keeps sending small headers and
+    /// never writes the terminating CRLF grew the decoder's buffer without
+    /// limit. The 16 KiB/128-field head check only runs once the head exists.
+    ///
+    /// This test never terminates the head. It fills past the decoder's
+    /// aggregate bound and requires an answer *before* the CRLF -- without the
+    /// decoder limit there is no answer at all (the read times out), so this
+    /// fails, rather than hanging, on the old code.
+    @Test func incrementallySuppliedOversizedHeadersAreRefusedBeforeTheHeadCompletes() async throws
+    {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text: "GET /health HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\n")
+        let fill = String(repeating: "a", count: 1_000)
+        for index in 0..<40 {
+            try writeAll(socket: socket, text: "x-fill-\(index): \(fill)\r\n")
+        }
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            reply.hasPrefix("HTTP/1.1 400"),
+            "the decoder waited for a terminated head: \(reply)")
+        #expect(backend.generations == 0)
+
+        try await server.shutdown()
+    }
+
+    /// One field larger than any head the application budget could accept is
+    /// refused while its value is still arriving. `maxHeaderFieldSize` bounds
+    /// the single field; the aggregate bound alone would let it grow to it.
+    @Test func aSingleOversizedHeaderFieldIsRefusedBeforeTheHeadCompletes() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "GET /health HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\nx-long: "
+                + String(repeating: "a", count: 20 * 1_024))
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            reply.hasPrefix("HTTP/1.1 400"),
+            "a 20 KiB field was buffered instead of refused: \(reply)")
+        #expect(backend.generations == 0)
+
+        try await server.shutdown()
+    }
+
+    /// Headers just inside both application limits are still served, so the
+    /// pre-decode bound did not become a second, hidden policy.
+    @Test func headersAtBothApplicationLimitsAreServed() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        // Exactly 128 fields: Host, Connection and 126 small ones.
+        var fieldsHead = "GET /health HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\n"
+        for index in 0..<(TinyTitanHTTPServer.maximumRequestHeaderFields - 2) {
+            fieldsHead += "x-h-\(index): v\r\n"
+        }
+        fieldsHead += "Connection: close\r\n\r\n"
+        let fieldsReply = try rawExchange(
+            port: port, request: fieldsHead, until: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            fieldsReply.hasPrefix("HTTP/1.1 200"),
+            "128 fields were refused: \(fieldsReply)")
+
+        // ~15 KiB total: under the 16 KiB budget, well under the decoder's.
+        var bytesHead = "GET /health HTTP/1.1\r\nHost: 127.0.0.1:\(port)\r\n"
+        let value = String(repeating: "a", count: 1_000)
+        for index in 0..<15 { bytesHead += "x-fill-\(index): \(value)\r\n" }
+        bytesHead += "Connection: close\r\n\r\n"
+        let bytesReply = try rawExchange(
+            port: port, request: bytesHead, until: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            bytesReply.hasPrefix("HTTP/1.1 200"),
+            "a 15 KiB header block was refused: \(bytesReply)")
+
+        try await server.shutdown()
+    }
+
+    /// A chunked body with a trailer still parses; the decoder limits apply to
+    /// the request's header list, not to its framing.
+    @Test func chunkedRequestWithTrailerStillRoutes() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"hi"}]}"#
+        let chunk = String(body.utf8.count, radix: 16)
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "POST /v1/chat/completions HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:\(port)\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+                + "\(chunk)\r\n\(body)\r\n0\r\nX-Trailer: v\r\n\r\n")
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(reply.hasPrefix("HTTP/1.1 200"), "chunked request failed: \(reply)")
+        #expect(backend.generations == 1)
+
+        try await server.shutdown()
+    }
+
+    /// A body larger than the header budget is still a body: the decoder bound
+    /// must not be mistaken for a request-size cap.
+    @Test func bodyLargerThanTheHeaderBudgetStillRoutes() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let text = String(repeating: "x", count: 100_000)
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"\#(text)"}]}"#
+        var request = URLRequest(
+            url: try localURL(port: port, "/v1/chat/completions"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = Data(body.utf8)
+        let (_, response) = try await URLSession.shared.data(for: request)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        #expect(backend.generations == 1)
+
+        try await server.shutdown()
+    }
+
     /// An oversized body is refused, and the refusal is readable.
     ///
     /// The 413 used to be written at `.end`, so the server read and discarded the
@@ -1519,4 +1723,15 @@ private func readUntil(
         if condition(result) { return result }
     }
     throw RawSocketError.timeout
+}
+
+/// One request on a fresh connection, answered or timed out.
+private func rawExchange(
+    port: Int, request: String, until: @escaping (String) -> Bool
+) throws -> String {
+    let socket = try connectedSocket(port: port)
+    defer { Darwin.close(socket) }
+    try writeAll(socket: socket, text: request)
+    return try readUntil(
+        socket: socket, timeoutMilliseconds: 2_000, condition: until)
 }
