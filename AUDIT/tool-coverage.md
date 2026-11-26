@@ -1,0 +1,3 @@
+# Tool coverage — NOT ESTABLISHED
+
+No deliberate negative-control run was executed. Required probes on pinned primary hosts: Swift non-Sendable actor/Task boundary; SwiftLint force unwrap; C99 implicit declaration and GNU nested function/typeof; Ruff bare except; every other check delegated to a tool. Record exact snippets, versions, commands, nonzero exit and diagnostics, then remove scratch inputs. Existing configuration comments describing prior audit proofs do not substitute for current proof. For example manifests and direct compiler scripts see ledger 0004–0005. No check delegated as proven yet.
