@@ -34,7 +34,14 @@ let package = Package(
         .macOS(.v26)
     ],
     dependencies: [
-        .package(path: "../..")
+        // `name:` is not decoration. SwiftPM derives a path dependency's
+        // identity from the last component of the path, so in a checkout or
+        // worktree whose directory is not called `TinyTitan` the dependency
+        // would be named after that directory instead, and `package:
+        // "TinyTitan"` below would fail to resolve (`unknown package
+        // 'TinyTitan' ... valid packages are: '<directory name>'`). Naming it
+        // here is what lets the fixture build from any directory.
+        .package(name: "TinyTitan", path: "../..")
     ],
     targets: [
         .executableTarget(
