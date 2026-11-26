@@ -79,7 +79,11 @@ except SystemExit as exc:  # the module exits when a dependency is missing
 
 REPO = "Qwen/Qwen3.8-Flash-Next"
 PREFIX = f"/{REPO}"
-HEAD_DIM_DIVISOR = 1  # `make_ngram_vocab_size_divisible_by`, so rows == table rows
+# `make_ngram_vocab_size_divisible_by`. 1 makes the padded row count equal the
+# sum of the head sizes, which is why the two numbers were conflated; the padded
+# fixture below uses a real divisor so they differ.
+HEAD_DIM_DIVISOR = 1
+PADDED_DIVISOR = 64
 
 
 def requires_deps(obj):
@@ -90,11 +94,13 @@ def requires_deps(obj):
 # --- the synthetic checkpoint ----------------------------------------------
 
 
-def text_config() -> dict:
+def text_config(divisor: int = HEAD_DIM_DIVISOR) -> dict:
     """The config keys the converter reads, sized to stay a few kB.
 
     Twelve n-gram heads (six orders x two) is deliberate: it produces shard_10
-    and shard_11, whose names sort before shard_2 lexically.
+    and shard_11, whose names sort before shard_2 lexically. `divisor` is the
+    checkpoint's `make_ngram_vocab_size_divisible_by`: the table file is padded
+    to a multiple of it, which with 1 is the same as the sum of the head sizes.
     """
     return {
         "heads_per_ngram": 6,
@@ -104,7 +110,7 @@ def text_config() -> dict:
         "eos_token_id": 2,
         "seed": 1234,
         "ple_embed_dim": 96,
-        "make_ngram_vocab_size_divisible_by": HEAD_DIM_DIVISOR,
+        "make_ngram_vocab_size_divisible_by": divisor,
     }
 
 
@@ -123,6 +129,12 @@ def ngram_sizes() -> list[int]:
 
 def head_dim() -> int:
     return prepare.ple_constants(text_config())["ple_head_dim"]
+
+
+def padded_rows(divisor: int) -> int:
+    """The row count the table file carries at this divisor (data + padding)."""
+    rows = expected_table_rows()
+    return -(-rows // divisor) * divisor
 
 
 def ngram_block(index: int, size: int, dim: int) -> "np.ndarray":
@@ -146,7 +158,9 @@ def expected_table_rows() -> int:
     return sum(ngram_sizes())
 
 
-def checkpoint() -> tuple[dict[str, bytes], dict[str, dict[str, "np.ndarray"]]]:
+def checkpoint(
+    divisor: int = HEAD_DIM_DIVISOR,
+) -> tuple[dict[str, bytes], dict[str, dict[str, "np.ndarray"]]]:
     """Every file the mirror serves, plus the tensor plan behind them.
 
     The plan is what the semantic checks compare the converted snapshot
@@ -205,7 +219,10 @@ def checkpoint() -> tuple[dict[str, bytes], dict[str, dict[str, "np.ndarray"]]]:
             {"metadata": {"total_size": total}, "weight_map": weight_map}, indent=1
         ).encode()
         files["config.json"] = json.dumps(
-            {"architectures": ["Qwen3.8FlashNextForCausalLM"], "text_config": text_config()},
+            {
+                "architectures": ["Qwen3.8FlashNextForCausalLM"],
+                "text_config": text_config(divisor),
+            },
             indent=1,
         ).encode()
         for name, _required in prepare.TOKENIZER_FILES:
@@ -510,14 +527,13 @@ def fingerprint(out: pathlib.Path) -> dict:
     }
 
 
-_BASELINE: dict | None = None
+_BASELINES: dict[int, dict] = {}
 
 
-def baseline_fingerprint() -> dict:
-    """The snapshot a clean run of the same checkpoint produces, cached."""
-    global _BASELINE
-    if _BASELINE is None:
-        files, _plan = checkpoint()
+def baseline_fingerprint(divisor: int = HEAD_DIM_DIVISOR) -> dict:
+    """The snapshot a clean run of this checkpoint produces, cached per divisor."""
+    if divisor not in _BASELINES:
+        files, _plan = checkpoint(divisor)
         root = pathlib.Path(tempfile.mkdtemp(prefix="tt-baseline-"))
         try:
             with mirror(files) as server:
@@ -526,10 +542,10 @@ def baseline_fingerprint() -> dict:
                 )
             if code != 0:
                 raise AssertionError(f"the clean baseline run failed:\n{log}")
-            _BASELINE = fingerprint(root / "out")
+            _BASELINES[divisor] = fingerprint(root / "out")
         finally:
             shutil.rmtree(root, ignore_errors=True)
-    return _BASELINE
+    return _BASELINES[divisor]
 
 
 def dequantise(packed, scales, biases, bits: int, group: int = 64):
@@ -1602,6 +1618,72 @@ class NgramTableDurabilityTests(_DurableHarness, unittest.TestCase):
         self.assertEqual(code, 0, log)
         self.assertEqual(sorted(p.name for p in self.work.glob("*.safetensors")), [])
         self.assertEqual(fingerprint(self.out), baseline_fingerprint(), log)
+
+
+@requires_deps
+class PaddedTableTests(unittest.TestCase):
+    """`make_ngram_vocab_size_divisible_by > 1`: the file is padded, the data is not.
+
+    The first synthetic fixture used divisor 1, where the padded row count equals
+    the sum of `ngram_heads_vocab_sizes` and the two were indistinguishable.
+    `finish` then compared the written rows against the padded count, so a
+    checkpoint whose head sizes do not fill the last alignment block could never
+    finish -- this fixture is the smallest such checkpoint.
+    """
+
+    def setUp(self) -> None:
+        self.files, _plan = checkpoint(PADDED_DIVISOR)
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-e2e-padded-"))
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self.mirror_ctx = mirror(self.files)
+        self.server = self.mirror_ctx.__enter__()
+        self.addCleanup(self.mirror_ctx.__exit__, None, None, None)
+        self.out = self.root / "out"
+        self.work = self.root / "work"
+
+    def convert(self) -> tuple[int, str]:
+        return run_converter(self.out, self.work, self.server.base, patch_sleep=False)
+
+    def table_file(self) -> pathlib.Path:
+        return self.out / "ngram_table.bin"
+
+    def test_a_clean_padded_run_finishes_and_pads_the_tail(self) -> None:
+        # Before this fix the run died in `finish`: "n-gram table has 1040 rows,
+        # expected 1088" -- a count no shard carries.
+        code, log = self.convert()
+        self.assertEqual(code, 0, log)
+        padding_rows = padded_rows(PADDED_DIVISOR) - expected_table_rows()
+        self.assertGreater(padding_rows, 0, "the fixture no longer exercises padding")
+        self.assertIn(f"{expected_table_rows()} rows + {padding_rows} padding", log)
+        table = self.table_file()
+        self.assertEqual(table.stat().st_size, padded_rows(PADDED_DIVISOR) * head_dim() * 2)
+        data = expected_table_bytes()
+        self.assertEqual(
+            table.read_bytes(),
+            data + b"\x00" * (table.stat().st_size - len(data)),
+            "the addressable rows changed, or the tail is not zero padding",
+        )
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint(PADDED_DIVISOR), log)
+
+    def test_the_reuse_gate_accepts_the_padded_size(self) -> None:
+        # The constants address the sum; the file's length is the padded count,
+        # which is the size the automatic reuse and `--reuse-ngram-table` check.
+        code, log = self.convert()
+        self.assertEqual(code, 0, log)
+        constants = prepare.ple_constants(text_config(PADDED_DIVISOR))
+        previous = prepare.read_json_file(self.out / "ple_constants.json")
+        padded = padded_rows(PADDED_DIVISOR) * head_dim() * 2
+        self.assertEqual(self.table_file().stat().st_size, padded)
+        self.assertIsNotNone(
+            prepare.reusable_local_table(self.out, padded, previous, constants),
+            "the reuse gate rejects the size this converter writes",
+        )
+        self.assertIsNone(
+            prepare.reusable_local_table(
+                self.out, expected_table_rows() * head_dim() * 2, previous, constants
+            ),
+            "the reuse gate accepted the unpadded size, so it is not checking the file",
+        )
 
 
 @requires_deps

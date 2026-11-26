@@ -950,6 +950,18 @@ class NgramTable:
     is also what makes an n-gram source releasable: `hold` names the sources
     whose rows are not in it yet, and the release rule in `main` keeps them until
     they are.
+
+    **Two row counts, and they are not the same.** `ngram_heads_offsets` and the
+    runtime's `tableRowCount()` address exactly `sum(ngram_heads_vocab_sizes)`
+    rows; the reference pads the file past the last addressable row so its length
+    is a multiple of `make_ngram_vocab_size_divisible_by`, and the runtime's
+    reader accepts at most 1 MiB of that surplus. So `finish` checks the
+    *addressable* count (the sum) and then writes the tail padding as zeros: the
+    file is `expected_rows` (`padded`) rows long, which is the size the reuse
+    gate checks, while the data it must contain is the sum. The first synthetic
+    fixture used `divisible_by = 1`, where the two numbers coincide and the
+    distinction was invisible; with a real divisor the old check demanded padding
+    rows from `add` and no build could finish.
     """
 
     def __init__(
@@ -961,7 +973,11 @@ class NgramTable:
         sizes: list[int] | None = None,
     ):
         self.path = out / "ngram_table.bin"
+        #: Rows in the finished file: the addressable sum plus tail padding.
         self.expected_rows = expected_rows
+        #: Rows `ngram_heads_offsets` addresses, or None when the caller did not
+        #: supply the per-index counts (only the reuse path does that).
+        self.data_rows = sum(sizes) if sizes is not None else None
         self.dim = dim
         self.pending: dict[int, np.ndarray] = {}
         self.next_index = 0
@@ -1042,11 +1058,15 @@ class NgramTable:
         row_bytes = self.dim * 2
         size = self.temporary.stat().st_size
         rows = size // row_bytes
-        if self.sizes is None or rows == 0 or rows > sum(self.sizes):
+        if self.sizes is None or rows == 0 or rows > self.expected_rows:
             # Nothing usable, or a file this configuration could not have
             # written: rebuild rather than adopt a prefix of something else.
             self.temporary.unlink(missing_ok=True)
             return
+        # A prefix that reaches into the padding means the data was complete and
+        # only the tail was being written: keep the data, drop the padding and
+        # write it again in `finish`.
+        rows = min(rows, self.data_rows)
         index = 0
         consumed = 0
         for block_rows in self.sizes:
@@ -1054,9 +1074,10 @@ class NgramTable:
                 break
             consumed += block_rows
             index += 1
-        if consumed != rows or size % row_bytes:
-            # A torn row or a torn block: the bytes past the last whole index
-            # are not a prefix this run can name.
+        if size != consumed * row_bytes:
+            # A torn row, a torn block, or padding the previous run wrote before
+            # it was killed: the bytes past the last whole data index are not a
+            # prefix this run needs, and `finish` writes the padding again.
             with self.temporary.open("r+b") as handle:
                 handle.truncate(consumed * row_bytes)
         self.rows = consumed
@@ -1135,6 +1156,9 @@ class NgramTable:
                 f"linked, {self.expected_rows} rows "
                 f"({self.expected_rows * self.dim * 2 / 1e9:.1f} GB not written)"
             )
+        padding = self.expected_rows - self.rows
+        if padding > 0:
+            return f"{self.rows} rows + {padding} padding"
         return f"{self.rows} rows"
 
     def finish(self) -> None:
@@ -1147,15 +1171,33 @@ class NgramTable:
                     f"(already in the linked table)"
                 )
             return
-        self.handle.close()
         if self.pending:
             raise ValueError(
                 f"n-gram shards never became contiguous: {sorted(self.pending)[:5]} still pending"
             )
-        if self.rows != self.expected_rows:
-            raise ValueError(f"n-gram table has {self.rows} rows, expected {self.expected_rows}")
+        # The *addressable* count, not the padded one: `ngram_heads_offsets`
+        # ends at this row, and the rows beyond it are padding the reference
+        # writes to align the file. Comparing against the padded count -- as the
+        # first version did -- asked `add` for rows no shard carries, so a
+        # checkpoint whose vocab sizes do not already fill the last alignment
+        # block could never finish.
+        expected = self.data_rows if self.data_rows is not None else self.expected_rows
+        if self.rows != expected:
+            raise ValueError(
+                f"n-gram table has {self.rows} addressable rows, expected {expected} "
+                f"(the sum of ngram_heads_vocab_sizes)"
+            )
+        padding = self.expected_rows - self.rows
+        if padding > 0:
+            # Tail padding past the last addressable row, as zeros: the runtime
+            # never reads it (its reader allows up to 1 MiB of surplus past the
+            # sum), but the file's length is what the reuse gate checks and what
+            # the reference produces.
+            self.handle.write(b"\x00" * (padding * self.dim * 2))
+        self.handle.close()
         # Published only once it is whole: a run that dies earlier leaves
-        # `ngram_table.bin.partial`, which the next run deletes and rebuilds.
+        # `ngram_table.bin.partial`, which the next run adopts (data rows) or
+        # rebuilds.
         os.replace(self.temporary, self.path)
 
 

@@ -530,6 +530,52 @@ class NgramTableDurabilityTests(unittest.TestCase):
         self.assertEqual(table.durable_index(), 0)
         self.assertEqual(partial.stat().st_size, 0, "a foreign prefix was adopted")
 
+    def test_a_padded_table_finishes_on_its_addressable_rows(self) -> None:
+        # The finished file carries `expected_rows` (alignment-padded) rows, but
+        # only the sum of `ngram_heads_vocab_sizes` is addressable. Comparing
+        # `rows` against the padded count -- as the first version did -- asks
+        # `add` for rows no shard carries, so no build with a real divisor could
+        # finish. The tail is written as zeros here.
+        padded = 12
+        table = prepare.NgramTable(self.root, padded, self.dim, sizes=self.sizes)
+        for index in range(3):
+            table.add(self.name(index), self.block(index), self.root / f"s{index}")
+        table.finish()
+        data = b"".join(self.block(index).tobytes() for index in range(3))
+        self.assertEqual(
+            (self.root / "ngram_table.bin").read_bytes(),
+            data + b"\x00" * ((padded - self.rows) * self.dim * 2),
+        )
+
+    def test_a_short_table_is_refused_against_the_sum_not_the_padding(self) -> None:
+        table = prepare.NgramTable(self.root, 12, self.dim, sizes=self.sizes)
+        table.add(self.name(0), self.block(0), self.root / "s0")
+        try:
+            with self.assertRaisesRegex(ValueError, r"3 addressable rows, expected 9"):
+                table.finish()
+        finally:
+            table.handle.close()
+
+    def test_a_partial_that_includes_the_padding_is_adopted_as_complete_data(self) -> None:
+        # A kill between writing the tail padding and the rename leaves a file of
+        # the padded length: the data is complete, so the next run keeps it and
+        # writes the padding again rather than discarding the table.
+        padded = 12
+        table = prepare.NgramTable(self.root, padded, self.dim, sizes=self.sizes)
+        for index in range(3):
+            table.add(self.name(index), self.block(index), self.root / f"s{index}")
+        table.handle.write(b"\x00" * ((padded - self.rows) * self.dim * 2))
+        table.handle.close()
+        partial = self.root / "ngram_table.bin.partial"
+        self.assertEqual(partial.stat().st_size, padded * self.dim * 2)
+
+        resumed = prepare.NgramTable(self.root, padded, self.dim, sizes=self.sizes)
+        self.assertEqual(resumed.rows, self.rows)
+        self.assertEqual(resumed.durable_index(), 3)
+        self.assertEqual(partial.stat().st_size, self.rows * self.dim * 2)
+        resumed.finish()
+        self.assertEqual((self.root / "ngram_table.bin").stat().st_size, padded * self.dim * 2)
+
     def test_rows_waiting_for_an_earlier_index_hold_their_source(self) -> None:
         table = prepare.NgramTable(self.root, self.rows, self.dim, sizes=self.sizes)
         self.addCleanup(table.handle.close)
