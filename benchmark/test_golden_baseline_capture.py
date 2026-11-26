@@ -62,6 +62,30 @@ exit "${STUB_PGREP_RC:-1}"
 # copied checkout has to carry it too or the script dies at the source line.
 GUARD = ROOT / "tools" / "model-guard.sh"
 
+# `--server` names the model it asks for by the catalog id, and the gate used to
+# derive that id from the manifest as `<modelID>_<bits>-Bit`. That is the legacy
+# install convention; a plugin declares its own id (Inkling 2 Q4 is
+# `inkling-2-mini-gguf-q4`, with no width suffix), so the guess named a model no
+# front end accepts and the leg died on "unknown model" before comparing
+# anything. The stub answers `--catalog --models-dir` the way the real server
+# does, with the path of the fixture install and a chosen id, and the launcher
+# stub records the `--model` it was asked to start so the test can read it.
+SERVER_STUB = """#!/bin/sh
+id="${GOLDEN_FIXTURE_CATALOG_ID-}"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+if [ -n "$id" ]; then
+  printf '{"models":[{"id":"%s","path":"%s"}]}\\n' "$id" "$root/models/ornith-1.5_35B_A3B_8Bit"
+else
+  printf '{"models":[]}\\n'
+fi
+exit 0
+"""
+
+LAUNCHER_STUB = """#!/bin/sh
+printf '%s\\n' "$*" > "${GOLDEN_FIXTURE_LAUNCHER_ARGS:?}"
+exit 0
+"""
+
 
 @contextlib.contextmanager
 def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
@@ -84,6 +108,12 @@ def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
         cli = build / "TinyTitanCLI"
         cli.write_text(CLI_STUB, encoding="utf-8")
         cli.chmod(0o755)
+        server = build / "TinyTitanServer"
+        server.write_text(SERVER_STUB, encoding="utf-8")
+        server.chmod(0o755)
+        launcher = root / "tools" / "server_launcher.sh"
+        launcher.write_text(LAUNCHER_STUB, encoding="utf-8")
+        launcher.chmod(0o755)
         stubs = root / "stubs"
         stubs.mkdir()
         pgrep = stubs / "pgrep"
@@ -92,6 +122,15 @@ def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
         model = root / "models" / MODEL_DIR
         model.mkdir(parents=True)
         (model / "verified-install.json").write_text("{}\n", encoding="utf-8")
+        # Enough of a manifest for the pre-fix id guess (`<modelID>_<bits>-Bit`)
+        # to run: with it present, the old function produced a name and started
+        # the launcher, which is what makes the two catalog-id tests fail on the
+        # old code instead of dying on a missing file.
+        (model / "manifest.json").write_text(
+            '{"modelID": "ornith-1.5_35B_A3B_8Bit",'
+            ' "quant": {"routedExpert": {"weightBits": 8}}}\n',
+            encoding="utf-8",
+        )
         golden = root / "benchmark" / "golden"
         if golden_is_file:
             golden.parent.mkdir(parents=True)
@@ -104,24 +143,39 @@ def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
 
 
 def run(
-    root: pathlib.Path, output: str, *args: str, **operator_values: str
+    root: pathlib.Path,
+    output: str,
+    *args: str,
+    env_overrides: dict[str, str] | None = None,
+    **operator_values: str,
 ) -> subprocess.CompletedProcess[str]:
     """Run the copied script, optionally with the operator's own numbers set.
 
     `MAX_NEW`, `SEED`, `PORT` and `READY_TIMEOUT` are environment defaults the
     script reads, so a test names the one it is about; anything left out stays at
-    the script's own default.
+    the script's own default. `GOLDEN_FIXTURE_CATALOG_ID` and
+    `GOLDEN_FIXTURE_LAUNCHER_ARGS` go to the two `--server` stubs, and are
+    removed from the inherited environment like the pgrep answers so one test's
+    choice cannot leak into the next.
     """
     env = dict(os.environ)
     env["PATH"] = f"{root / 'stubs'}{os.pathsep}{env['PATH']}"
     env["GOLDEN_FIXTURE_OUTPUT"] = output
-    for key in ("STUB_PGREP_RC", "STUB_PGREP_OUT", "STUB_PGREP_ERR"):
+    for key in (
+        "STUB_PGREP_RC",
+        "STUB_PGREP_OUT",
+        "STUB_PGREP_ERR",
+        "GOLDEN_FIXTURE_CATALOG_ID",
+        "GOLDEN_FIXTURE_LAUNCHER_ARGS",
+    ):
         env.pop(key, None)
     for key in ("MAX_NEW", "SEED", "PORT", "READY_TIMEOUT"):
         if key in operator_values:
             env[key] = operator_values[key]
         else:
             env.pop(key, None)
+    for key, value in (env_overrides or {}).items():
+        env[key] = value
     result = subprocess.run(
         ["/bin/bash", str(root / "tools" / "golden-baseline.sh"), *args],
         capture_output=True,
@@ -379,6 +433,54 @@ class GoldenOperatorNumbers(unittest.TestCase):
             checked = run(root, SAMPLE, "--check", "ornith-8")
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             self.assertIn("identical to baseline", checked.stdout)
+
+
+class GoldenServerCatalogId(unittest.TestCase):
+    """The `--server` leg must name the model the catalog lists.
+
+    It used to build `<modelID>_<bits>-Bit` from the manifest, which is right for
+    the legacy families and wrong for a plugin that declares its own id. The
+    launcher then rejected the name ("unknown model") and the leg reported the
+    failure as a server that died during load, so the two front ends were never
+    compared for that model.
+    """
+
+    def run_server(self, root: pathlib.Path, catalog_id: str):
+        log = root / "launcher-args.txt"
+        result = run(
+            root,
+            SAMPLE,
+            "--server",
+            "ornith-8",
+            env_overrides={
+                "GOLDEN_FIXTURE_CATALOG_ID": catalog_id,
+                "GOLDEN_FIXTURE_LAUNCHER_ARGS": str(log),
+            },
+        )
+        return result, log
+
+    def test_the_launcher_is_given_the_catalog_id(self) -> None:
+        # Deliberately not the `<modelID>_8-Bit` the old guess produced: the id
+        # is read from the catalog, so an id that follows no convention still
+        # reaches the launcher intact.
+        with tree() as root:
+            result, log = self.run_server(root, "inkling-2-mini-gguf-q4")
+            self.assertTrue(log.exists(), result.stdout + result.stderr)
+            argv = log.read_text(encoding="utf-8").split()
+            self.assertEqual(argv[argv.index("--model") + 1], "inkling-2-mini-gguf-q4")
+            self.assertNotIn("unknown model", result.stdout + result.stderr)
+
+    def test_an_install_the_catalog_does_not_list_is_refused_before_the_launcher(
+        self,
+    ) -> None:
+        # An install the catalog skipped is a refusal, not a guessed name. This
+        # is also the shape that hid the defect: the old code never asked, so a
+        # catalog that omitted the install could not be noticed.
+        with tree() as root:
+            result, log = self.run_server(root, "")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("cannot read the catalog id", result.stdout)
+            self.assertFalse(log.exists(), "the launcher ran without a catalog id")
 
 
 if __name__ == "__main__":

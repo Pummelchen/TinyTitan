@@ -62,13 +62,28 @@ LAUNCHER="$ROOT/tools/server_launcher.sh"
 # The launcher resolves a model key or the catalog id the server advertises
 # (`<modelID>_<bits>-Bit`), not a directory, so read the id the install itself
 # declares. python3 is already a dependency of this script.
+# The catalog id a server request names, resolved from the server's own catalog
+# rather than guessed from the manifest.
+#
+# This used to print `<modelID>_<bits>-Bit`, which is the legacy install
+# convention and is right for every family the 6.x runtime owns. A plugin
+# declares its own id (Inkling 2 Q4 is `inkling-2-mini-gguf-q4`, no width
+# suffix), so the guess produced a name no front end accepts and the `--server`
+# leg died on "unknown model" before it could compare anything. The catalog is
+# the same source `/v1/models` answers from, so matching the install by path is
+# the question this gate actually means to ask. `--catalog` reads manifests and
+# loads nothing.
 catalog_id_for() {
-  python3 - "$1" <<'PY'
-import json, pathlib, sys
-manifest = pathlib.Path(sys.argv[1]) / "manifest.json"
-data = json.loads(manifest.read_text())
-bits = data["quant"]["routedExpert"]["weightBits"]
-print(f'{data["modelID"]}_{bits}-Bit')
+  local model="$1" catalog
+  catalog="$("$SERVER" --catalog --models-dir "$ROOT/models" 2>/dev/null)" || return 1
+  python3 - "$model" "$catalog" <<'PY'
+import json, os, sys
+want = os.path.realpath(sys.argv[1])
+for entry in json.loads(sys.argv[2])["models"]:
+    if os.path.realpath(entry["path"]) == want:
+        print(entry["id"])
+        raise SystemExit(0)
+raise SystemExit(1)
 PY
 }
 OUT_DIR="${OUT_DIR:-$ROOT/benchmark/golden}"
