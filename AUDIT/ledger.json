@@ -414,13 +414,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:336-372",
       "title": "Checkpoint replacement ignores durability failures",
       "category": "L2/L4 persistent data",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "writeCheckpoint ignores fallback fsync result at 359; ignores directory open failure and directory fsync result at 367\u2013371, then returns success. A failed data barrier does not prevent rename of the replacement.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Confirmed: fallback fsync, strong barrier, parent-directory open/sync were unchecked and success returned after rename. New injectable JournalFileSystem; data-barrier failure now keeps the original and does not rename; directory failure is a post-commit/uncertain outcome; 8 durability tests fail on the old decision points and pass. See AUDIT/evidence/0010.md.",
+      "commit": "324c062c",
       "blocked-reason": null,
       "acceptance-criteria": "Inject file and directory sync errors; preserve old journal before successful data sync; report uncertain durability after rename. Verify replay and crash recovery.",
       "classification": "static finding; runtime impact untested",
@@ -458,13 +458,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:132-150,188-207",
       "title": "Prevent actor reentrancy from clearing unsynced append accounting",
       "category": "L2 concurrency",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "performBarrier awaits a blocking queue then sets pendingSinceSync to zero if descriptor unchanged. Actor can accept append while suspended; those records may be written after barrier syscall but before completion. Comment claiming appends queue behind the await is not a Swift actor guarantee.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Completed barrier set pendingSinceSync=0 and actor reentrancy admitted a later append; descriptor number was used as identity. Now a watermark: only records the completed barrier covered are settled; 4 tests (2 fail on old). Existing barrier tests unchanged. See AUDIT/evidence/0011.md.",
+      "commit": "a3f1f353",
       "blocked-reason": null,
       "acceptance-criteria": "Deterministic barrier/append interleaving test; count only records captured by completed durability barrier, preserve newer pending writes.",
       "classification": "static finding; runtime impact untested",
@@ -501,13 +501,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:294-329,105-124",
       "title": "Establish serialization of append versus compaction",
       "category": "L2 concurrency / data loss risk",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "compact awaits a checkpoint replacement on a blocking queue; append writes to existing descriptor. Unless every caller provides external serialization, an append during suspension may land on the old inode and disappear after reopen. Caller contract not yet established.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Reproduced data loss: an append during the paused rename wrote to the old inode and was lost; engine snapshots could be stale. Serialized append/compact and snapshot capture with a rewrite gate; 5 tests (3 fail with the gates disabled). See AUDIT/evidence/0012.md.",
+      "commit": "3c2249c5",
       "blocked-reason": null,
       "acceptance-criteria": "Trace all FileJournal callers; reproduce with controlled suspension; guarantee append preservation or explicitly enforce isolation.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -545,13 +545,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:140-146,393-400",
       "title": "Propagate asynchronous journal durability failures",
       "category": "L2 error propagation",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Scheduled performBarrier uses try?; shutDown also discards errors from settleBarrier and performBarrier before closing and releasing lock, despite async throws signature.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Scheduled barrier used try? and shutDown swallowed both flushes; engine shutDown swallowed too. Background failures now surface as actor-owned degraded state, shutdown flushes and throws, resources always release; 6 tests. See AUDIT/evidence/0013.md.",
+      "commit": "e96be3f7",
       "blocked-reason": null,
       "acceptance-criteria": "Fault inject fsync errors; expose degraded status and shutdown error while guaranteeing resource cleanup; verify retry and pending count.",
       "classification": "static finding; runtime impact untested",
@@ -589,13 +589,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:273-289",
       "title": "Distinguish corrupt complete journal records from torn tail",
       "category": "L3 persistent integrity",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "decodeRecords silently drops every complete line whose JSON decoding fails, not just a final unterminated tail; no diagnostic is returned. Corruption or incompatible records may be lost before compaction.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Complete undecodable lines were silently dropped and then compacted over. `readDetailed` reports typed damage (line/reason), compaction refuses over a damaged replay, and callers surface it; 8 tests (6 fail on old, including destructive compaction). See AUDIT/evidence/0014.md.",
+      "commit": "a70485b9",
       "blocked-reason": null,
       "acceptance-criteria": "Test middle-line corruption and incompatible records; report rejected record positions, preserve recoverability and avoid destructive compaction without policy.",
       "classification": "static finding; runtime impact untested",
@@ -632,13 +632,13 @@
       "file:line": "sources/ContinuityCore/Persistence/FileJournal+Opening.swift:40-79; sources/ContinuityCore/Persistence/Journal.swift:251-270",
       "title": "Validate journal file type, ownership and permissions",
       "category": "L4 filesystem boundary",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "O_NOFOLLOW and 0600 apply to final write path/creation, but existing file mode/type is not checked in shown openers; readContents follows final symlinks and reads until EOF. Parent-directory symlinks are intentional. Determine whether untrusted workspaces can supply FIFO, device, hardlink or permissive files.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Existing file type/owner/mode were unchecked and the read path followed links/blocked on FIFOs. Checked from the opened descriptor, O_NOFOLLOW on the final read, FIFO refused non-blocking; 10 tests (6 fail on old; FIFO block was killed at 25 s). The fixture commit 64d98d0c sets owner-only mode. See AUDIT/evidence/0015.md.",
+      "commit": "1af98d28",
       "blocked-reason": null,
       "acceptance-criteria": "Trace workspace path trust; test non-regular files and existing insecure modes on scratch store; ensure no blocking or unintended read/write; preserve documented directory symlink support.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -675,13 +675,13 @@
       "file:line": "sources/ContinuityCore/Persistence/FileJournal+Opening.swift:105-129",
       "title": "Handle short pread during tail repair without truncating unread bytes",
       "category": "L3 data integrity",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Tail repair accepts any nonnegative read length, searches only the returned prefix, then sets end to offset, skipping an unread suffix if a short read occurs. Subsequent ftruncate may discard a complete record.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Tail repair searched only the short-read prefix and stepped over the unread suffix, truncating valid records. Exact-range pread loop (EINTR retried, zero/EOF rejected); 9 tests (3 fail on old). See AUDIT/evidence/0016.md.",
+      "commit": "635072c0",
       "blocked-reason": null,
       "acceptance-criteria": "Inject short reads and EINTR; require complete range reads or fail without truncating; verify byte-identical valid tail.",
       "classification": "static finding; runtime impact untested",
@@ -1231,13 +1231,13 @@
       "file:line": "sources/ContinuityCore/Persistence/Journal.swift:155-170,410-424",
       "title": "Guard against zero-progress write loops",
       "category": "L2 I/O lifecycle",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Both writeFully loops advance offset only by write return value; zero return with remaining bytes neither throws nor advances, causing nontermination if such a write occurs.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Zero-progress writes spun; both append and checkpoint loops advanced by zero. Now zero progress is a typed write failure, EINTR retried, short writes continue; 7 tests (3 fail on old). The fixture decodes rather than byte-compares. See AUDIT/evidence/0029.md.",
+      "commit": "e2861bbd",
       "blocked-reason": null,
       "acceptance-criteria": "Inject zero-write result on scratch descriptor seam; fail with explicit I/O error instead of spinning; preserve EINTR retry.",
       "classification": "static finding; runtime impact untested",
@@ -1912,6 +1912,235 @@
           "Confirm the defaults and ranges are unchanged."
         ]
       }
+    },
+    {
+      "id": "0047",
+      "severity": "S2",
+      "tier": "A",
+      "project": "ContinuityCore",
+      "file:line": "sources/ContinuityCore/Persistence/Journal.swift:122",
+      "title": "Journal JSON encoding is not byte-stable within a process",
+      "category": "L3 persistent integrity",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0010/0029 journal audit",
+      "evidence-before": "Two encodings of the same `ContinuityTask` in one process differed in key order (`{\"task\":{\"_0\":{\"objective\":\u2026` vs `{\"task\":{\"_0\":{\"updatedAt\":\u2026`), observed while pinning JournalWriteLoopTests. A byte-level journal comparison or golden is therefore invalid. Encoder config at Journal.swift:122; synthesized Codable in ContinuityTask.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Encoding is deterministic (sorted keys or an explicit order) or every comparison is semantic; a test proves two encodes are byte-identical and existing records still decode.",
+      "classification": "confirmed by reproduction",
+      "manual": {
+        "depends_on": [
+          "0010"
+        ],
+        "problem_description": "Foundation's JSONEncoder does not promise stable key order. The journal writes records as JSON and the audit's tests compared bytes, so an encode-order change can look like data damage and a golden can fail spuriously.",
+        "proposed_solution": [
+          "Set `.sortedKeys` (and a documented output format) on the journal encoder, or make every comparison decode-and-compare.",
+          "Add a test that two encodes of the same value are byte-identical and that an existing record decodes unchanged.",
+          "Do not change the on-disk schema; keep backward compatibility."
+        ],
+        "verification_steps": [
+          "Before: two encodes differ; after: identical.",
+          "Existing journal replay and compaction tests pass.",
+          "No record payload changes semantically."
+        ],
+        "self_audit_steps": [
+          "Confirm the encoder is used for every journal write path, not only the test seam.",
+          "Confirm no golden was regenerated to hide a real change."
+        ]
+      }
+    },
+    {
+      "id": "0048",
+      "severity": "S2",
+      "tier": "A",
+      "project": "ContinuityCore",
+      "file:line": "sources/ContinuityCore/Persistence/Journal.swift:122,126; Journal+Reading.swift:50",
+      "title": "Sub-second timestamps are lost on journal replay",
+      "category": "L3 data fidelity",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "journal audit",
+      "evidence-before": "A Date `1795701827.784161` decodes as `1795701827.0`: the ISO8601 strategy omits fractional seconds, so a replayed record is not equal to its original. No test currently asserts timestamp identity.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "A record's timestamp survives a write/replay round trip at the documented precision, without breaking existing records.",
+      "classification": "confirmed by reproduction",
+      "manual": {
+        "depends_on": [
+          "0010"
+        ],
+        "problem_description": "The encoder/decoder uses ISO8601 without fractional seconds; replay truncates sub-second precision silently.",
+        "proposed_solution": [
+          "Use an ISO8601 strategy with fractional seconds (or a documented lossless format) and keep decoding the old form.",
+          "Add a round-trip test with a sub-second Date and an old-format fixture.",
+          "Document the precision in the journal format."
+        ],
+        "verification_steps": [
+          "Round trip preserves the timestamp; old records decode.",
+          "Journal tests and the full suite pass."
+        ],
+        "self_audit_steps": [
+          "Confirm the change does not alter ordering/retention semantics.",
+          "Confirm no test fixture is weakened."
+        ]
+      }
+    },
+    {
+      "id": "0049",
+      "severity": "S1",
+      "tier": "A",
+      "project": "ContinuityCore",
+      "file:line": "sources/ContinuityCore/Persistence/Journal+Rewriting.swift:179-199",
+      "title": "Journal truncate is not made durable",
+      "category": "L2 persistent durability",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "journal audit",
+      "evidence-before": "`truncate()` opens with `O_TRUNC`, closes and reopens with no `fsync`/`F_FULLFSYNC`; a crash immediately after can leave the old length/bytes visible.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "A truncated journal is durable before the operation returns (or the failure/uncertainty is reported), using the journal's injectable filesystem seam and tests.",
+      "classification": "static finding",
+      "manual": {
+        "depends_on": [
+          "0010"
+        ],
+        "problem_description": "Truncation changes the file without a data barrier; the next append may be durable while the truncation is not.",
+        "proposed_solution": [
+          "Barrier the truncated file (fsync/F_FULLFSYNC as appropriate) before returning; report failure/uncertainty.",
+          "Use the existing fault seam for tests; do not block on unsupported directory sync.",
+          "Verify replay after a simulated failure."
+        ],
+        "verification_steps": [
+          "Injected barrier failure is reported and recovery behaves; success is durable.",
+          "Journal tests, TSan and the full suite pass."
+        ],
+        "self_audit_steps": [
+          "Check the descriptor/lock lifetime across the barrier.",
+          "Confirm no data-loss fallback is introduced."
+        ]
+      }
+    },
+    {
+      "id": "0050",
+      "severity": "S2",
+      "tier": "A",
+      "project": "ContinuityCore",
+      "file:line": "sources/ContinuityCore/ContinuityEngine.swift:274,380",
+      "title": "Two session-log writes still swallow durability failures",
+      "category": "L2 error propagation",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0013 journal audit",
+      "evidence-before": "`_ = try? await sessionLog.recordMemoryWrite(...)` and `recordContextAssembled(...)` are best-effort and silently drop a write failure on paths whose observers already report durability.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Either the writes are explicitly best-effort with a documented diagnostic, or failures reach the caller/degraded state; a test pins the chosen policy.",
+      "classification": "static finding",
+      "manual": {
+        "depends_on": [
+          "0013"
+        ],
+        "problem_description": "Two session-log writes discard errors, so an observer can miss a memory/context record while the engine reports success.",
+        "proposed_solution": [
+          "Decide the policy (best-effort vs durable); document it.",
+          "If durable, propagate the typed failure or record degraded state; do not log record contents.",
+          "Add a failure-injection test."
+        ],
+        "verification_steps": [
+          "Injected failure is visible per the policy; successful writes unchanged.",
+          "Full suite and TSan pass."
+        ],
+        "self_audit_steps": [
+          "Confirm the change does not turn a normal cancellation into a corruption report.",
+          "Check no secrets in logs."
+        ]
+      }
+    },
+    {
+      "id": "0051",
+      "severity": "S2",
+      "tier": "C",
+      "project": "TinyTitanServer / tests",
+      "file:line": "tests/TinyTitanServer/ClientCLITests.swift:73-77",
+      "title": "Client CLI test reports passed when its dependency is absent",
+      "category": "test integrity",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "journal audit (broken Node environment)",
+      "evidence-before": "The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "An absent dependency is recorded as a real skip (or a failure), not a pass; the gate catches this shape.",
+      "classification": "confirmed test defect",
+      "manual": {
+        "depends_on": [
+          "0009"
+        ],
+        "problem_description": "A test's early return on a missing external binary is indistinguishable from a pass.",
+        "proposed_solution": [
+          "Use the test framework's skip facility (`.enabled(if:)`/`XCTSkip` or the swift-testing equivalent) with the reason.",
+          "Consider extending the `test-skip` gate to this print/return shape.",
+          "Verify the test skips when codex is absent and runs when present."
+        ],
+        "verification_steps": [
+          "Absent binary -> recorded skip; present -> runs.",
+          "Gate scan reports the new shape."
+        ],
+        "self_audit_steps": [
+          "Confirm no real test is skipped just to make the suite green.",
+          "Confirm the gate change has a negative control."
+        ]
+      }
+    },
+    {
+      "id": "0052",
+      "severity": "S2",
+      "tier": "A",
+      "project": "ContinuityCore",
+      "file:line": "sources/ContinuityCore/Persistence/Journal+Reading.swift (read); sources/TinyTitanMemory/MemoryProjectFile",
+      "title": "Compatibility reads still drop journal damage silently",
+      "category": "L3 data integrity",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0014 journal audit",
+      "evidence-before": "`readDetailed` reports damage; the compatibility `FileJournal.read` and `MemoryProjectFile.load` still drop it, so a caller cannot distinguish clean from damaged data.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "residual risk from 0014",
+      "manual": {
+        "depends_on": [
+          "0014"
+        ],
+        "problem_description": "Only the detailed read reports corruption; the older read APIs remain lossy.",
+        "proposed_solution": [
+          "Audit every read caller and either move it to `readDetailed` or document/handle the lossy contract.",
+          "Add tests for the chosen behavior.",
+          "Keep the tool's compatibility if it relies on the old API."
+        ],
+        "verification_steps": [
+          "Damaged journal is reported (or explicitly best-effort) on every path.",
+          "Full suite passes."
+        ],
+        "self_audit_steps": [
+          "Confirm no caller silently reports an empty history as clean.",
+          "Confirm no record contents are logged."
+        ]
+      },
+      "acceptance-criteria": "Every read path either reports damage or documents a compatibility contract; no caller silently treats damage as empty."
     }
   ],
   "manual_revision": 1,

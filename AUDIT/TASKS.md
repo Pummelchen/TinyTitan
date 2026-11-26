@@ -2123,3 +2123,277 @@ Five option resolvers still pass values through `Number(value)`, so a boolean or
 **Acceptance:** All five resolvers use the shared explicit type/range rules, keep documented defaults/ranges/sentinels, and have boundary tests proving the coercions refused.
 
 ---
+
+### Findings 0047–0052 (journal durability/fidelity, test integrity)
+
+<a id="task-0047"></a>
+#### Task 0047 — Journal JSON encoding is not byte-stable within a process
+
+**Project / component:** ContinuityCore  
+**Location:** `sources/ContinuityCore/Persistence/Journal.swift:122`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 persistent integrity  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0010.  
+**Evidence classification:** confirmed by reproduction
+
+##### 1. Detailed problem description
+
+Foundation's JSONEncoder does not promise stable key order. The journal writes records as JSON and the audit's tests compared bytes, so an encode-order change can look like data damage and a golden can fail spuriously.
+
+**Recorded evidence:** Two encodings of the same `ContinuityTask` in one process differed in key order (`{"task":{"_0":{"objective":…` vs `{"task":{"_0":{"updatedAt":…`), observed while pinning JournalWriteLoopTests. A byte-level journal comparison or golden is therefore invalid. Encoder config at Journal.swift:122; synthesized Codable in ContinuityTask.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Set `.sortedKeys` (and a documented output format) on the journal encoder, or make every comparison decode-and-compare.
+
+2. Add a test that two encodes of the same value are byte-identical and that an existing record decodes unchanged.
+
+3. Do not change the on-disk schema; keep backward compatibility.
+
+
+##### 3. Verification — regression and integration
+
+1. Before: two encodes differ; after: identical.
+
+2. Existing journal replay and compaction tests pass.
+
+3. No record payload changes semantically.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the encoder is used for every journal write path, not only the test seam.
+
+2. Confirm no golden was regenerated to hide a real change.
+
+
+**Acceptance:** Encoding is deterministic (sorted keys or an explicit order) or every comparison is semantic; a test proves two encodes are byte-identical and existing records still decode.
+
+---
+
+<a id="task-0048"></a>
+#### Task 0048 — Sub-second timestamps are lost on journal replay
+
+**Project / component:** ContinuityCore  
+**Location:** `sources/ContinuityCore/Persistence/Journal.swift:122,126; Journal+Reading.swift:50`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 data fidelity  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0010.  
+**Evidence classification:** confirmed by reproduction
+
+##### 1. Detailed problem description
+
+The encoder/decoder uses ISO8601 without fractional seconds; replay truncates sub-second precision silently.
+
+**Recorded evidence:** A Date `1795701827.784161` decodes as `1795701827.0`: the ISO8601 strategy omits fractional seconds, so a replayed record is not equal to its original. No test currently asserts timestamp identity.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use an ISO8601 strategy with fractional seconds (or a documented lossless format) and keep decoding the old form.
+
+2. Add a round-trip test with a sub-second Date and an old-format fixture.
+
+3. Document the precision in the journal format.
+
+
+##### 3. Verification — regression and integration
+
+1. Round trip preserves the timestamp; old records decode.
+
+2. Journal tests and the full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the change does not alter ordering/retention semantics.
+
+2. Confirm no test fixture is weakened.
+
+
+**Acceptance:** A record's timestamp survives a write/replay round trip at the documented precision, without breaking existing records.
+
+---
+
+<a id="task-0049"></a>
+#### Task 0049 — Journal truncate is not made durable
+
+**Project / component:** ContinuityCore  
+**Location:** `sources/ContinuityCore/Persistence/Journal+Rewriting.swift:179-199`  
+**Severity / tier:** S1 / A  
+**Status at discovery:** OPEN  
+**Category:** L2 persistent durability  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0010.  
+**Evidence classification:** static finding
+
+##### 1. Detailed problem description
+
+Truncation changes the file without a data barrier; the next append may be durable while the truncation is not.
+
+**Recorded evidence:** `truncate()` opens with `O_TRUNC`, closes and reopens with no `fsync`/`F_FULLFSYNC`; a crash immediately after can leave the old length/bytes visible.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Barrier the truncated file (fsync/F_FULLFSYNC as appropriate) before returning; report failure/uncertainty.
+
+2. Use the existing fault seam for tests; do not block on unsupported directory sync.
+
+3. Verify replay after a simulated failure.
+
+
+##### 3. Verification — regression and integration
+
+1. Injected barrier failure is reported and recovery behaves; success is durable.
+
+2. Journal tests, TSan and the full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Check the descriptor/lock lifetime across the barrier.
+
+2. Confirm no data-loss fallback is introduced.
+
+
+**Acceptance:** A truncated journal is durable before the operation returns (or the failure/uncertainty is reported), using the journal's injectable filesystem seam and tests.
+
+---
+
+<a id="task-0050"></a>
+#### Task 0050 — Two session-log writes still swallow durability failures
+
+**Project / component:** ContinuityCore  
+**Location:** `sources/ContinuityCore/ContinuityEngine.swift:274,380`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L2 error propagation  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0013.  
+**Evidence classification:** static finding
+
+##### 1. Detailed problem description
+
+Two session-log writes discard errors, so an observer can miss a memory/context record while the engine reports success.
+
+**Recorded evidence:** `_ = try? await sessionLog.recordMemoryWrite(...)` and `recordContextAssembled(...)` are best-effort and silently drop a write failure on paths whose observers already report durability.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Decide the policy (best-effort vs durable); document it.
+
+2. If durable, propagate the typed failure or record degraded state; do not log record contents.
+
+3. Add a failure-injection test.
+
+
+##### 3. Verification — regression and integration
+
+1. Injected failure is visible per the policy; successful writes unchanged.
+
+2. Full suite and TSan pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the change does not turn a normal cancellation into a corruption report.
+
+2. Check no secrets in logs.
+
+
+**Acceptance:** Either the writes are explicitly best-effort with a documented diagnostic, or failures reach the caller/degraded state; a test pins the chosen policy.
+
+---
+
+<a id="task-0051"></a>
+#### Task 0051 — Client CLI test reports passed when its dependency is absent
+
+**Project / component:** TinyTitanServer / tests  
+**Location:** `tests/TinyTitanServer/ClientCLITests.swift:73-77`  
+**Severity / tier:** S2 / C  
+**Status at discovery:** OPEN  
+**Category:** test integrity  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0009.  
+**Evidence classification:** confirmed test defect
+
+##### 1. Detailed problem description
+
+A test's early return on a missing external binary is indistinguishable from a pass.
+
+**Recorded evidence:** The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use the test framework's skip facility (`.enabled(if:)`/`XCTSkip` or the swift-testing equivalent) with the reason.
+
+2. Consider extending the `test-skip` gate to this print/return shape.
+
+3. Verify the test skips when codex is absent and runs when present.
+
+
+##### 3. Verification — regression and integration
+
+1. Absent binary -> recorded skip; present -> runs.
+
+2. Gate scan reports the new shape.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no real test is skipped just to make the suite green.
+
+2. Confirm the gate change has a negative control.
+
+
+**Acceptance:** An absent dependency is recorded as a real skip (or a failure), not a pass; the gate catches this shape.
+
+---
+
+<a id="task-0052"></a>
+#### Task 0052 — Compatibility reads still drop journal damage silently
+
+**Project / component:** ContinuityCore  
+**Location:** `sources/ContinuityCore/Persistence/Journal+Reading.swift (read); sources/TinyTitanMemory/MemoryProjectFile`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 data integrity  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0014.  
+**Evidence classification:** residual risk from 0014
+
+##### 1. Detailed problem description
+
+Only the detailed read reports corruption; the older read APIs remain lossy.
+
+**Recorded evidence:** `readDetailed` reports damage; the compatibility `FileJournal.read` and `MemoryProjectFile.load` still drop it, so a caller cannot distinguish clean from damaged data.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Audit every read caller and either move it to `readDetailed` or document/handle the lossy contract.
+
+2. Add tests for the chosen behavior.
+
+3. Keep the tool's compatibility if it relies on the old API.
+
+
+##### 3. Verification — regression and integration
+
+1. Damaged journal is reported (or explicitly best-effort) on every path.
+
+2. Full suite passes.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no caller silently reports an empty history as clean.
+
+2. Confirm no record contents are logged.
+
+
+**Acceptance:** Every read path either reports damage or documents a compatibility contract; no caller silently treats damage as empty.
+
+---

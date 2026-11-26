@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:21 in_progress:2 open:13 start:9 blocked:1**
+**done:29 in_progress:2 open:17 start:3 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -19,13 +19,13 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0007 | S0 | OPEN | Repository | Complete L0–L7, facade and unused-code audit, remediation and convergence |
 | 0008 | S0 | BLOCKED | Repository | Run Phase E once on an independent fresh-clone host |
 | 0009 | S1 | IN_PROGRESS | Repository | Verify sanitizer and dependency/SAST/secret-scan coverage for every applicable language |
-| 0010 | S0 | START | ContinuityCore | Checkpoint replacement ignores durability failures |
-| 0011 | S1 | START | ContinuityCore | Prevent actor reentrancy from clearing unsynced append accounting |
-| 0012 | S1 | OPEN | ContinuityCore | Establish serialization of append versus compaction |
-| 0013 | S1 | START | ContinuityCore | Propagate asynchronous journal durability failures |
-| 0014 | S1 | START | ContinuityCore | Distinguish corrupt complete journal records from torn tail |
-| 0015 | S1 | OPEN | ContinuityCore | Validate journal file type, ownership and permissions |
-| 0016 | S1 | START | ContinuityCore | Handle short pread during tail repair without truncating unread bytes |
+| 0010 | S0 | DONE | ContinuityCore | Checkpoint replacement ignores durability failures |
+| 0011 | S1 | DONE | ContinuityCore | Prevent actor reentrancy from clearing unsynced append accounting |
+| 0012 | S1 | DONE | ContinuityCore | Establish serialization of append versus compaction |
+| 0013 | S1 | DONE | ContinuityCore | Propagate asynchronous journal durability failures |
+| 0014 | S1 | DONE | ContinuityCore | Distinguish corrupt complete journal records from torn tail |
+| 0015 | S1 | DONE | ContinuityCore | Validate journal file type, ownership and permissions |
+| 0016 | S1 | DONE | ContinuityCore | Handle short pread during tail repair without truncating unread bytes |
 | 0017 | S1 | START | TinyTitanServer | Bound HTTP header buffering before decoder completes |
 | 0018 | S1 | START | TinyTitanServer | Bound stored response memory by bytes and chain size |
 | 0019 | S1 | OPEN | TinyTitanServer | Validate loopback trust boundary, Host and browser-origin protections |
@@ -38,7 +38,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0026 | S2 | DONE | DSH plugin | Require safe integer compaction headroom |
 | 0027 | S1 | DONE | TinyTitanFormat | Verify bounded GGUF metadata parser resource use and duplicate handling |
 | 0028 | S1 | DONE | TinyTitanFormat | Verify overflow-safe compressed expert block-count arithmetic |
-| 0029 | S1 | START | ContinuityCore | Guard against zero-progress write loops |
+| 0029 | S1 | DONE | ContinuityCore | Guard against zero-progress write loops |
 | 0030 | S2 | DONE | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
 | 0031 | S2 | DONE | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
 | 0032 | S1 | DONE | DSH plugin / shell writer | Shell settings writer still truncates in place |
@@ -56,6 +56,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
 | 0045 | S2 | DONE | DSH plugin | Route token count and port still coerce non-number input |
 | 0046 | S2 | DONE | DSH plugin | Five more numeric config fields still coerce |
+| 0047 | S2 | OPEN | ContinuityCore | Journal JSON encoding is not byte-stable within a process |
+| 0048 | S2 | OPEN | ContinuityCore | Sub-second timestamps are lost on journal replay |
+| 0049 | S1 | OPEN | ContinuityCore | Journal truncate is not made durable |
+| 0050 | S2 | OPEN | ContinuityCore | Two session-log writes still swallow durability failures |
+| 0051 | S2 | OPEN | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
+| 0052 | S2 | OPEN | ContinuityCore | Compatibility reads still drop journal damage silently |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -134,52 +140,66 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0010 — Checkpoint replacement ignores durability failures
 
-- S0 / Tier A / START / L2/L4 persistent data
+- S0 / Tier A / DONE / L2/L4 persistent data
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:336-372
 - Evidence before: writeCheckpoint ignores fallback fsync result at 359; ignores directory open failure and directory fsync result at 367–371, then returns success. A failed data barrier does not prevent rename of the replacement.
+- Evidence after: Confirmed: fallback fsync, strong barrier, parent-directory open/sync were unchecked and success returned after rename. New injectable JournalFileSystem; data-barrier failure now keeps the original and does not rename; directory failure is a post-commit/uncertain outcome; 8 durability tests fail on the old decision points and pass. See AUDIT/evidence/0010.md.
+- Commit: `324c062c`
 
 ## 0011 — Prevent actor reentrancy from clearing unsynced append accounting
 
-- S1 / Tier A / START / L2 concurrency
+- S1 / Tier A / DONE / L2 concurrency
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:132-150,188-207
 - Evidence before: performBarrier awaits a blocking queue then sets pendingSinceSync to zero if descriptor unchanged. Actor can accept append while suspended; those records may be written after barrier syscall but before completion. Comment claiming appends queue behind the await is not a Swift actor guarantee.
+- Evidence after: Completed barrier set pendingSinceSync=0 and actor reentrancy admitted a later append; descriptor number was used as identity. Now a watermark: only records the completed barrier covered are settled; 4 tests (2 fail on old). Existing barrier tests unchanged. See AUDIT/evidence/0011.md.
+- Commit: `a3f1f353`
 
 ## 0012 — Establish serialization of append versus compaction
 
-- S1 / Tier A / OPEN / L2 concurrency / data loss risk
+- S1 / Tier A / DONE / L2 concurrency / data loss risk
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:294-329,105-124
 - Evidence before: compact awaits a checkpoint replacement on a blocking queue; append writes to existing descriptor. Unless every caller provides external serialization, an append during suspension may land on the old inode and disappear after reopen. Caller contract not yet established.
+- Evidence after: Reproduced data loss: an append during the paused rename wrote to the old inode and was lost; engine snapshots could be stale. Serialized append/compact and snapshot capture with a rewrite gate; 5 tests (3 fail with the gates disabled). See AUDIT/evidence/0012.md.
+- Commit: `3c2249c5`
 
 ## 0013 — Propagate asynchronous journal durability failures
 
-- S1 / Tier A / START / L2 error propagation
+- S1 / Tier A / DONE / L2 error propagation
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:140-146,393-400
 - Evidence before: Scheduled performBarrier uses try?; shutDown also discards errors from settleBarrier and performBarrier before closing and releasing lock, despite async throws signature.
+- Evidence after: Scheduled barrier used try? and shutDown swallowed both flushes; engine shutDown swallowed too. Background failures now surface as actor-owned degraded state, shutdown flushes and throws, resources always release; 6 tests. See AUDIT/evidence/0013.md.
+- Commit: `e96be3f7`
 
 ## 0014 — Distinguish corrupt complete journal records from torn tail
 
-- S1 / Tier A / START / L3 persistent integrity
+- S1 / Tier A / DONE / L3 persistent integrity
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:273-289
 - Evidence before: decodeRecords silently drops every complete line whose JSON decoding fails, not just a final unterminated tail; no diagnostic is returned. Corruption or incompatible records may be lost before compaction.
+- Evidence after: Complete undecodable lines were silently dropped and then compacted over. `readDetailed` reports typed damage (line/reason), compaction refuses over a damaged replay, and callers surface it; 8 tests (6 fail on old, including destructive compaction). See AUDIT/evidence/0014.md.
+- Commit: `a70485b9`
 
 ## 0015 — Validate journal file type, ownership and permissions
 
-- S1 / Tier A / OPEN / L4 filesystem boundary
+- S1 / Tier A / DONE / L4 filesystem boundary
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/FileJournal+Opening.swift:40-79; sources/ContinuityCore/Persistence/Journal.swift:251-270
 - Evidence before: O_NOFOLLOW and 0600 apply to final write path/creation, but existing file mode/type is not checked in shown openers; readContents follows final symlinks and reads until EOF. Parent-directory symlinks are intentional. Determine whether untrusted workspaces can supply FIFO, device, hardlink or permissive files.
+- Evidence after: Existing file type/owner/mode were unchecked and the read path followed links/blocked on FIFOs. Checked from the opened descriptor, O_NOFOLLOW on the final read, FIFO refused non-blocking; 10 tests (6 fail on old; FIFO block was killed at 25 s). The fixture commit 64d98d0c sets owner-only mode. See AUDIT/evidence/0015.md.
+- Commit: `1af98d28`
 
 ## 0016 — Handle short pread during tail repair without truncating unread bytes
 
-- S1 / Tier A / START / L3 data integrity
+- S1 / Tier A / DONE / L3 data integrity
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/FileJournal+Opening.swift:105-129
 - Evidence before: Tail repair accepts any nonnegative read length, searches only the returned prefix, then sets end to offset, skipping an unread suffix if a short read occurs. Subsequent ftruncate may discard a complete record.
+- Evidence after: Tail repair searched only the short-read prefix and stepped over the unread suffix, truncating valid records. Exact-range pread loop (EINTR retried, zero/EOF rejected); 9 tests (3 fail on old). See AUDIT/evidence/0016.md.
+- Commit: `635072c0`
 
 ## 0017 — Bound HTTP header buffering before decoder completes
 
@@ -279,10 +299,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0029 — Guard against zero-progress write loops
 
-- S1 / Tier A / START / L2 I/O lifecycle
+- S1 / Tier A / DONE / L2 I/O lifecycle
 - Project: ContinuityCore; host: Apple Silicon Mac A
 - Location: sources/ContinuityCore/Persistence/Journal.swift:155-170,410-424
 - Evidence before: Both writeFully loops advance offset only by write return value; zero return with remaining bytes neither throws nor advances, causing nontermination if such a write occurs.
+- Evidence after: Zero-progress writes spun; both append and checkpoint loops advanced by zero. Now zero progress is a typed write failure, EINTR retried, short writes continue; 7 tests (3 fail on old). The fixture decodes rather than byte-compares. See AUDIT/evidence/0029.md.
+- Commit: `e2861bbd`
 
 ## 0030 — Test targets accept concurrency warnings despite warnings-as-errors
 
@@ -422,4 +444,46 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Evidence before: Measured: `autoGoalRounds: true` -> 1, `[5]` -> 5; `autonomyRounds: true` -> 1; `handoffHops: [3]` -> 3; `handoffAtTokens: [50000]` -> 50000; `handoffMaxChildren: true` -> 1. Same class as 0026/0033/0045.
 - Evidence after: All five resolvers now use the shared wholeNumber rules with unchanged defaults/ranges/sentinels; booleans, arrays, padded/exponent/hex text, unsafe integers, zero/negative/fraction/NaN/infinity are refused with field-named errors. 2 RED tests; main-worktree npm test 187/187 with 0 skips, lint/format clean, test_dsh_route 24 OK. See AUDIT/evidence/0046.md.
 - Commit: `b8bd6a8f`
+
+## 0047 — Journal JSON encoding is not byte-stable within a process
+
+- S2 / Tier A / OPEN / L3 persistent integrity
+- Project: ContinuityCore; host: Apple Silicon Mac A
+- Location: sources/ContinuityCore/Persistence/Journal.swift:122
+- Evidence before: Two encodings of the same `ContinuityTask` in one process differed in key order (`{"task":{"_0":{"objective":…` vs `{"task":{"_0":{"updatedAt":…`), observed while pinning JournalWriteLoopTests. A byte-level journal comparison or golden is therefore invalid. Encoder config at Journal.swift:122; synthesized Codable in ContinuityTask.
+
+## 0048 — Sub-second timestamps are lost on journal replay
+
+- S2 / Tier A / OPEN / L3 data fidelity
+- Project: ContinuityCore; host: Apple Silicon Mac A
+- Location: sources/ContinuityCore/Persistence/Journal.swift:122,126; Journal+Reading.swift:50
+- Evidence before: A Date `1795701827.784161` decodes as `1795701827.0`: the ISO8601 strategy omits fractional seconds, so a replayed record is not equal to its original. No test currently asserts timestamp identity.
+
+## 0049 — Journal truncate is not made durable
+
+- S1 / Tier A / OPEN / L2 persistent durability
+- Project: ContinuityCore; host: Apple Silicon Mac A
+- Location: sources/ContinuityCore/Persistence/Journal+Rewriting.swift:179-199
+- Evidence before: `truncate()` opens with `O_TRUNC`, closes and reopens with no `fsync`/`F_FULLFSYNC`; a crash immediately after can leave the old length/bytes visible.
+
+## 0050 — Two session-log writes still swallow durability failures
+
+- S2 / Tier A / OPEN / L2 error propagation
+- Project: ContinuityCore; host: Apple Silicon Mac A
+- Location: sources/ContinuityCore/ContinuityEngine.swift:274,380
+- Evidence before: `_ = try? await sessionLog.recordMemoryWrite(...)` and `recordContextAssembled(...)` are best-effort and silently drop a write failure on paths whose observers already report durability.
+
+## 0051 — Client CLI test reports passed when its dependency is absent
+
+- S2 / Tier C / OPEN / test integrity
+- Project: TinyTitanServer / tests; host: Apple Silicon Mac A
+- Location: tests/TinyTitanServer/ClientCLITests.swift:73-77
+- Evidence before: The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed.
+
+## 0052 — Compatibility reads still drop journal damage silently
+
+- S2 / Tier A / OPEN / L3 data integrity
+- Project: ContinuityCore; host: Apple Silicon Mac A
+- Location: sources/ContinuityCore/Persistence/Journal+Reading.swift (read); sources/TinyTitanMemory/MemoryProjectFile
+- Evidence before: `readDetailed` reports damage; the compatibility `FileJournal.read` and `MemoryProjectFile.load` still drop it, so a caller cannot distinguish clean from damaged data.
 
