@@ -36,7 +36,17 @@ public struct CompressedExpertLayerGeometry: Sendable, Equatable {
     public var framesPerExpert: Int { splitBytes == nil ? 1 : 2 }
 
     /// Bytes one expert occupies in the raw layer.
-    public var rawBytes: UInt64 { expertStride * UInt64(expertsPerLayer) }
+    ///
+    /// Only meaningful for a geometry that passed `validate()`: a product that
+    /// overflows `UInt64` saturates to `UInt64.max`, which no real layer file
+    /// can match, so a caller that skipped validation fails its size check
+    /// instead of trapping here. `validate()` refuses that geometry outright.
+    public var rawBytes: UInt64 {
+        guard expertsPerLayer > 0 else { return 0 }
+        let (value, overflow) = expertStride.multipliedReportingOverflow(
+            by: UInt64(expertsPerLayer))
+        return overflow ? UInt64.max : value
+    }
 
     /// The halves of one expert, in decode order.
     public var frameRanges: [Range<UInt64>] {
@@ -53,6 +63,17 @@ public struct CompressedExpertLayerGeometry: Sendable, Equatable {
         guard expertStride > 0, expertStride <= UInt64(Int.max) else {
             throw RepackError.configurationInvalid(
                 detail: "expert stride \(expertStride) is not addressable")
+        }
+        // The raw layer's size is `expertStride * expertsPerLayer`; it is
+        // compared with the source file before any buffer is allocated or
+        // written, so a product that cannot fit `UInt64` has to be refused here.
+        let (_, rawOverflow) = expertStride.multipliedReportingOverflow(
+            by: UInt64(expertsPerLayer))
+        guard !rawOverflow else {
+            throw RepackError.configurationInvalid(
+                detail:
+                    "\(expertsPerLayer) experts of \(expertStride) bytes overflow the "
+                    + "raw layer size")
         }
         // The streamer's own rule: an interior boundary is the only kind that
         // lets phase 1 start while the tail is in flight. Anything else is a

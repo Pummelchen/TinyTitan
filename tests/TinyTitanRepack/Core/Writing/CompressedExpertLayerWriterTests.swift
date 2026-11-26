@@ -141,6 +141,30 @@ struct CompressedExpertLayerWriterTests {
         }
     }
 
+    /// `rawBytes` is `expertStride * expertsPerLayer`, and `validate()` used to
+    /// leave that product unchecked even though it bounds each factor. It has
+    /// to be refused before `write` opens a file or allocates a buffer.
+    @Test("A geometry whose raw size overflows is refused before writing")
+    func refusesOverflowingRawSize() {
+        let geometry = CompressedExpertLayerGeometry(
+            expertStride: UInt64(Int.max), expertsPerLayer: 3, splitBytes: nil)
+        #expect(throws: RepackError.self) { try geometry.validate() }
+    }
+
+    @Test("The raw size accessor saturates instead of trapping")
+    func rawBytesSaturates() {
+        let geometry = CompressedExpertLayerGeometry(
+            expertStride: UInt64(Int.max), expertsPerLayer: 3, splitBytes: nil)
+        #expect(geometry.rawBytes == UInt64.max)
+    }
+
+    @Test("A valid geometry's raw size is the exact product")
+    func rawBytesIsTheExactProduct() {
+        let geometry = CompressedExpertLayerGeometry(
+            expertStride: 1 << 40, expertsPerLayer: 1 << 20, splitBytes: nil)
+        #expect(geometry.rawBytes == 1 << 60)
+    }
+
     @Test("The sidecar is named after the layer, not after its extension")
     func sidecarNaming() {
         #expect(
