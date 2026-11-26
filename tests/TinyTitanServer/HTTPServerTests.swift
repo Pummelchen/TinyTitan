@@ -1517,6 +1517,76 @@ struct HTTPServerTests {
         try await server.shutdown()
     }
 
+    /// A route header is not a boolean: two `anthropic-version` fields claim
+    /// two surfaces, and `first(name:)` used to pick one by wire order.
+    @Test func duplicateAnthropicVersionIsRefused() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body =
+            #"{"model":"test-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}"#
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "POST /v1/messages HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:\(port)\r\n"
+                + "anthropic-version: 2023-06-01\r\n"
+                + "anthropic-version: 2024-01-01\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n"
+                + "Connection: close\r\n\r\n"
+                + body)
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(
+            reply.hasPrefix("HTTP/1.1 400"),
+            "a duplicate anthropic-version selected a surface by order: \(reply)")
+        #expect(reply.contains("invalid_request_error"))
+        #expect(reply.contains("anthropic-version"))
+        #expect(backend.generations == 0)
+
+        try await server.shutdown()
+    }
+
+    /// The control for the duplicate: one anthropic-version still selects the
+    /// Messages surface and reaches the backend.
+    @Test func aSingleAnthropicVersionSelectsTheMessagesSurface() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: 1, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body =
+            #"{"model":"test-model","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}"#
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "POST /v1/messages HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:\(port)\r\n"
+                + "anthropic-version: 2023-06-01\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n"
+                + "Connection: close\r\n\r\n"
+                + body)
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(reply.hasPrefix("HTTP/1.1 200"), "single anthropic-version: \(reply)")
+        #expect(reply.lowercased().contains("request-id"))
+        #expect(backend.generations == 1)
+
+        try await server.shutdown()
+    }
+
     /// The parts of the media-type grammar a client actually varies -- casing
     /// and valid parameters -- are accepted on a JSON body route.
     @Test func exactJsonMediaTypeCasingAndParametersAreAccepted() async throws {

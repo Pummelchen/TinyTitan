@@ -25,10 +25,20 @@ extension ServerHTTPHandler {
                 omittingEmptySubsequences: false
             ).first.map(String.init) ?? head.uri
         // A client that sends anthropic-version is speaking the Messages API;
-        // the shared paths (/v1/models, 404s) answer in its shape.
+        // the shared paths (/v1/models, 404s) answer in its shape. Two such
+        // headers claim two surfaces, and choosing one by wire order would make
+        // the surface depend on header order; refuse it before routing.
+        let anthropicVersions = head.headers["anthropic-version"]
         let anthropic =
-            head.headers.first(name: "anthropic-version") != nil
+            !anthropicVersions.isEmpty
             || path.hasPrefix("/v1/messages")
+        if anthropicVersions.count > 1 {
+            writeAdmissionRefusal(
+                context, status: .badRequest, code: "duplicate_anthropic_version",
+                message: "more than one anthropic-version header is ambiguous",
+                surface: .anthropic, method: head.method)
+            return
+        }
         // S27 and 0019: the listener is loopback-only and unauthenticated, so
         // the Host/Origin/Referer boundary is what keeps a browser page (DNS
         // rebinding included) outside the machine's trust. See
