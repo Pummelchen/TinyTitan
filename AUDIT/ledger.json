@@ -3,14 +3,14 @@
   "revision": "7b0901d75b3b1e79498874babf93218a617a69ac",
   "branch": "audit/2026-11-26",
   "date": "2026-11-26",
-  "state": "DISCOVERY_INCOMPLETE",
-  "scope": "Discovery-only by user instruction, supersedes interleaved repair for this session. No code or check fixes; existing tasks retained. Static findings and investigation candidates distinguished. Full scanner and line review remain incomplete.",
+  "state": "REMEDIATION_IN_PROGRESS",
+  "scope": "Remediation on the primary Apple Silicon host, one focused commit per task; discovery continues (0007) and new findings take the next stable IDs. Gate tasks 0001/0006 are met on this host.",
   "tasks": [
     {
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
+      "evidence-after": "macOS 27.2.1 arm64, Xcode 27.2 (27B52), Swift 6.4.2, 24 GiB; swift build -c release exit 0 with 0 warnings in 202.59 s. See AUDIT/evidence/0001.md.",
       "commit": null,
       "blocked-reason": {
         "owner": "Pummelchen (repository owner; assignment proposed)",
@@ -28,7 +28,7 @@
       "file:line": "Package.swift:1",
       "title": "Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host",
       "category": "verification prerequisite",
-      "status": "BLOCKED",
+      "status": "DONE",
       "evidence-before": "Local host is Linux x86_64; xcodebuild absent; direct GitHub clone fails DNS. Existing CI specifies xcode-27 but no shell/runner access was established.",
       "manual": {
         "depends_on": [],
@@ -56,7 +56,7 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
+      "evidence-after": "Inventory reconciles exactly with the pinned tree (2,520/2,520, A 1,522 / C 998) and with swift package describe (46/46 targets). Source-derived two-hop contract table still incomplete. See AUDIT/evidence/0002.md.",
       "commit": null,
       "blocked-reason": null,
       "id": "0002",
@@ -66,7 +66,7 @@
       "file:line": "AUDIT/inventory.md:1",
       "title": "Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation",
       "category": "audit gate",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "evidence-before": "Tree and manifests enumerated; source-level contract mapping and individual classification not complete.",
       "manual": {
         "depends_on": [
@@ -77,7 +77,7 @@
         "proposed_solution": [
           "Reconcile AUDIT/inventory.json with `git ls-tree -r --name-only` at the pinned source commit, then list additions since the audit base separately. Do not confuse generated audit documents with product source.",
           "Enumerate all root and nested Package.swift targets and products, Node packages, direct swiftc scripts, C/Metal compilation paths, Python and shell entry points, CI/release scripts and configuration-only integrations. Record project, module, language, build mechanism, executable entry point and primary host.",
-          "For every production module derive direct dependencies from imports, manifest targets and actual calls, then expand exactly two hops. Add a separate contract table: producer, consumers, schema/protocol or format version, transport/storage, validation owner, failure policy, trust boundary, tests. Include server/CLI/DSH/OpenCode, SSDAI/GGUF/repack, ContinuityCore and memory, plugin registry, Swift–C and Metal ABI.",
+          "For every production module derive direct dependencies from imports, manifest targets and actual calls, then expand exactly two hops. Add a separate contract table: producer, consumers, schema/protocol or format version, transport/storage, validation owner, failure policy, trust boundary, tests. Include server/CLI/DSH/OpenCode, SSDAI/GGUF/repack, ContinuityCore and memory, plugin registry, Swift\u2013C and Metal ABI.",
           "Assign tiers per actual behavior: untrusted parsing, credentials, network, persistence, privileged actions, native memory and shared contracts => A; other production => B; tests/docs/glue => C only if no A behavior. Unsure => A. Record the rationale for each module and any changed tier. No blanket classification based on extension.",
           "Identify each deployable and its health/startup/shutdown/rollback surface. Commit inventory and tier table before product fixes."
         ],
@@ -90,7 +90,7 @@
         "self_audit_steps": [
           "Cold-read all tier changes and the dependency graph; confirm uncertain modules remain A and no depth beyond two hops is claimed.",
           "Verify inventory counts against a fresh tree enumeration and report actual inspection coverage separately.",
-          "Do not mark DONE until the inventory and contract mapping—not the entire later audit—are complete and committed."
+          "Do not mark DONE until the inventory and contract mapping\u2014not the entire later audit\u2014are complete and committed."
         ]
       }
     },
@@ -98,7 +98,7 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
+      "evidence-after": "Release build exit 0/0 warnings; test-target build exit 0 with 12 concurrency warnings (0030); 20/20 lint gates green in a clean worktree; full-history secret scan clean; pip-audit/npm audit clean; negative controls fail as required. Full swift test + coverage and sanitizers pending. See AUDIT/baseline.md and AUDIT/evidence/0003.md.",
       "commit": null,
       "blocked-reason": null,
       "id": "0003",
@@ -108,7 +108,7 @@
       "file:line": "AUDIT/baseline.md:1",
       "title": "Produce current pinned baseline and tool coverage proofs",
       "category": "audit gate",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "evidence-before": "No current build, test, coverage, dependency scan, full-history scan or negative control executed.",
       "manual": {
         "depends_on": [
@@ -223,7 +223,7 @@
       "host": "Linux x86_64 primary for standalone Node and portable tooling",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
+      "evidence-after": "Full history present (2,851 commits, not shallow); Node 24.22.2 pinned via /opt/homebrew/opt/node@24, Python 3.13.18 installed for the declared floor, Ruff 0.16.7, ShellCheck 0.11.0, Gitleaks 8.30.1, pip-audit 2.10.1 in an isolated venv. npm ci/test/lint/format:check run; one real test failure recorded as 0031. See AUDIT/evidence/0006.md.",
       "commit": null,
       "blocked-reason": {
         "owner": "Pummelchen (repository owner; assignment proposed)",
@@ -241,7 +241,7 @@
       "file:line": "AUDIT/environment.md:1",
       "title": "Obtain executable clone and pinned non-Apple toolchains",
       "category": "verification prerequisite",
-      "status": "BLOCKED",
+      "status": "DONE",
       "evidence-before": "Linux local Git clone cannot resolve github.com; Node v22.16.0 does not meet plugin >=24.9; Ruff, gitleaks, shellcheck, pip-audit and CodeQL unavailable.",
       "manual": {
         "depends_on": [],
@@ -277,7 +277,7 @@
       "tier": "A",
       "project": "Repository",
       "file:line": "AUDIT/ledger.md:1",
-      "title": "Complete L0–L7, facade and unused-code audit, remediation and convergence",
+      "title": "Complete L0\u2013L7, facade and unused-code audit, remediation and convergence",
       "category": "audit gate",
       "status": "OPEN",
       "evidence-before": "Discovery only. Tier A source lines and scanners have not been exhaustively evaluated; no substantive remediation performed.",
@@ -290,12 +290,12 @@
         ],
         "problem_description": "The 29-entry ledger is not exhaustive: selected source excerpts were reviewed but entire inference engines, Metal, most library/runtime, memory and repack paths, CI/release and full scanner coverage remain outstanding. There is no basis for treating this list as complete or a clean bill of health. Original execution specification requires discovery, severity-order closure and convergence; the user's current request is only to document, not perform those changes.",
         "proposed_solution": [
-          "Resume from this ledger and AUDIT/discovery-coverage.md; never replace existing IDs. Establish a coverage matrix with one row per module and columns L0–L7, tier, contracts, facade review, unused-code scope, scanner proof, reviewed revision and evidence. Record not-applicable reasons and actual inspection coverage.",
+          "Resume from this ledger and AUDIT/discovery-coverage.md; never replace existing IDs. Establish a coverage matrix with one row per module and columns L0\u2013L7, tier, contracts, facade review, unused-code scope, scanner proof, reviewed revision and evidence. Record not-applicable reasons and actual inspection coverage.",
           "L0 once: reproducible builds, dependency pins, lockfiles, CI security, ignored artifacts, full-history secrets. L1 A+B: architecture, cycles, contracts, config/error boundaries. L2 A manual: API invariants, lifetime, cancellation/retries/queues. L3 A line-by-line and B sampled: arithmetic, logic, encoding, timezone, return paths. L4 A manual+SAST/B scanner/C secrets: authorization, injection, file/URL trust, native memory, LLM actions. L5 A/hot paths: allocations, I/O, bounded queues and latency. L6 A failure/boundary/critical coverage and B critical gate. L7 each service: health, startup validation, shutdown and rollback.",
           "Prioritize remaining modules: (a) ContinuityCore + TinyTitanMemory/MemoryTool, (b) HTTP handler/mapper/router/backend, (c) format/repack/remote/model install and credentials, (d) C/Metal and Swift unsafe seams, (e) engine variants, legacy/core tokenizer and runtime, (f) library/CLI/plugin registry, (g) DSH/OpenCode, (h) tools/release/benchmark. Identify migration or credential scripts as A regardless of language.",
           "Hunt production facades with actual reachability, not TODO-marker counts. Review unused code in A and code orphaned by audit changes only. Never delete unless reachability proof and an authorized focused task; prefer deprecation/removal ticket.",
           "Record each evidence-backed new finding immediately as next ID, with precise location, reproduction or static proof, proposed fix, verification, affected consumers and severity. Batch mechanical S3 by rule. Record possible issues as OPEN investigation rather than fabricating confirmed bugs.",
-          "When authorized to remediate, drain verified S0→S1→S2→S3 with gates; prerequisites may run before severity order. Repeat L4+facade and touched tiers until a complete sweep adds no actionable task. Leave unresolved or unreviewed items open; no artificial closure."
+          "When authorized to remediate, drain verified S0\u2192S1\u2192S2\u2192S3 with gates; prerequisites may run before severity order. Repeat L4+facade and touched tiers until a complete sweep adds no actionable task. Leave unresolved or unreviewed items open; no artificial closure."
         ],
         "verification_steps": [
           "Reconcile module coverage matrix against inventory (no missing Tier A modules); spot-check review evidence against source lines and commit IDs. Verify scanner delegation has negative controls.",
@@ -366,7 +366,7 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
+      "evidence-after": "Gitleaks full history clean (2,791 commits); pip-audit clean; npm audit 0; Python/Swift/C negative controls proven. TSan, ASan+UBSan and the CodeQL scope are still pending. See AUDIT/evidence/0009.md.",
       "commit": null,
       "blocked-reason": null,
       "id": "0009",
@@ -376,7 +376,7 @@
       "file:line": "AUDIT/environment.md:1",
       "title": "Verify sanitizer and dependency/SAST/secret-scan coverage for every applicable language",
       "category": "audit gate",
-      "status": "OPEN",
+      "status": "IN_PROGRESS",
       "evidence-before": "CI declares Swift TSan, pip-audit, npm audit, gitleaks and CodeQL. Full C ASan+UBSan suite and applicable Swift/C/JS/Metal/Shell tool coverage not established; no scan output from current revision.",
       "manual": {
         "depends_on": [
@@ -417,7 +417,7 @@
       "status": "START",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
-      "evidence-before": "writeCheckpoint ignores fallback fsync result at 359; ignores directory open failure and directory fsync result at 367–371, then returns success. A failed data barrier does not prevent rename of the replacement.",
+      "evidence-before": "writeCheckpoint ignores fallback fsync result at 359; ignores directory open failure and directory fsync result at 367\u2013371, then returns success. A failed data barrier does not prevent rename of the replacement.",
       "fix-summary": null,
       "evidence-after": null,
       "commit": null,
@@ -429,9 +429,9 @@
           "0003",
           "0009"
         ],
-        "problem_description": "FileJournal.writeCheckpoint writes a replacement then calls F_FULLFSYNC; if it fails the fallback fsync result is ignored (line 359). It then renames over the original journal, attempts to open and sync the parent directory, ignores failure and returns success (367–372). A failed replacement-data barrier must not be followed by replacement of the only durable original. A directory sync failure after rename has different semantics: replacement may be visible but durability uncertain. Existing code conflates these states. Data loss is conditional on I/O failure/crash; no runtime reproduction yet.",
+        "problem_description": "FileJournal.writeCheckpoint writes a replacement then calls F_FULLFSYNC; if it fails the fallback fsync result is ignored (line 359). It then renames over the original journal, attempts to open and sync the parent directory, ignores failure and returns success (367\u2013372). A failed replacement-data barrier must not be followed by replacement of the only durable original. A directory sync failure after rename has different semantics: replacement may be visible but durability uncertain. Existing code conflates these states. Data loss is conditional on I/O failure/crash; no runtime reproduction yet.",
         "proposed_solution": [
-          "Read Journal.swift end-to-end, JournalError/JournalTypes, callers of compact/shutDown and existing JournalTests. Identify exact commit point (rename) and descriptor ownership. Coordinate design with 0011–0014, 0015 and 0029; keep focused task scope.",
+          "Read Journal.swift end-to-end, JournalError/JournalTypes, callers of compact/shutDown and existing JournalTests. Identify exact commit point (rename) and descriptor ownership. Coordinate design with 0011\u20130014, 0015 and 0029; keep focused task scope.",
           "Introduce a small injectable syscall/filesystem interface or equivalent deterministic test seam for data sync, directory open/sync, rename, close and cleanup. Production default must call real syscalls. Capture errno immediately; do not use broad catch/try? to hide durability errors.",
           "Use the existing strong Darwin barrier with checked fallback where supported. If both fail before rename, close and clean temporary file, return typed failure, keep original bytes/inode and append descriptor usable. Do not rename failed temp. If directory open/sync fails after rename, return explicit post-commit/uncertain-durability outcome; do not pretend rollback happened or blindly delete the new checkpoint.",
           "Ensure compact reconciles descriptor with visible inode even when post-rename directory barrier failed; no later append should target an unlinked old inode. Preserve sidecar lock, O_NOFOLLOW and permissions. Decide whether directory sync unsupported is a separately documented policy, not unconditional success.",
@@ -661,7 +661,7 @@
           "Document any platform-specific limitations and residual local trust assumptions. If evidence disproves candidate, attach enforced invariant and tests."
         ],
         "self_audit_steps": [
-          "Cold-read open→fstat→use ordering; check no gap where unchecked descriptor is truncated. Review parent symlink behavior and permissions without broadening access.",
+          "Cold-read open\u2192fstat\u2192use ordering; check no gap where unchecked descriptor is truncated. Review parent symlink behavior and permissions without broadening access.",
           "Ensure failure does not delete, chmod or overwrite user data. Review all lock/append/replay/checkpoint paths, not only first open.",
           "Confirm threat model and tests support severity/closure decision."
         ]
@@ -884,7 +884,7 @@
       "tier": "A",
       "project": "TinyTitanKernelsC",
       "file:line": "sources/TinyTitanKernelsC/gdn_chunk.c:72-126",
-      "title": "Prove allocation products and BLAS narrowing safe at Swift–C boundary",
+      "title": "Prove allocation products and BLAS narrowing safe at Swift\u2013C boundary",
       "category": "L4 native memory",
       "status": "OPEN",
       "host": "Apple Silicon Mac A",
@@ -1106,7 +1106,7 @@
       "status": "START",
       "host": "Linux primary B",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
-      "evidence-before": "resolveCompactionHeadroom uses Number.isInteger, accepts integer-valued unsafe IEEE-754 numbers unlike resolveRouteTokenCount at 173–179.",
+      "evidence-before": "resolveCompactionHeadroom uses Number.isInteger, accepts integer-valued unsafe IEEE-754 numbers unlike resolveRouteTokenCount at 173\u2013179.",
       "fix-summary": null,
       "evidence-after": null,
       "commit": null,
@@ -1203,7 +1203,7 @@
           "0002",
           "0003"
         ],
-        "problem_description": "Investigation. ExpertBlobIndex uses ceiling division `(phaseBytes + blockBytes - 1) / blockBytes` at lines 62–63 after positivity guard. Addition may overflow at integer limits depending on actual type and upstream bounds; Int conversion may trap if result exceeds Int range. A correct validated caller could render it unreachable. Need inspect phase size, block exponent and format constraints before claiming corrupt-model crash.",
+        "problem_description": "Investigation. ExpertBlobIndex uses ceiling division `(phaseBytes + blockBytes - 1) / blockBytes` at lines 62\u201363 after positivity guard. Addition may overflow at integer limits depending on actual type and upstream bounds; Int conversion may trap if result exceeds Int range. A correct validated caller could render it unreachable. Need inspect phase size, block exponent and format constraints before claiming corrupt-model crash.",
         "proposed_solution": [
           "Read ExpertBlobIndex.swift entire function/type definitions and every caller in writer/reader/planner. Trace phaseBytes and blockBytes from manifest/index geometry and max allowed sizes; confirm types and conversion ranges.",
           "If unsafe, compute ceiling using quotient plus nonzero remainder (or checked add), check result fits target Int and format maximum block count. Preserve existing zero/invalid-input contract unless a separate validated contract task changes it; reject malformed data through typed error rather than trap or fake zero.",
@@ -1212,7 +1212,7 @@
         ],
         "verification_steps": [
           "Add unit/format tests for phase 0, block 0, one byte, exact multiple, one past multiple, max supported phase, maximum representable integer and invalid huge input. Assert mathematically correct ceiling or typed rejection; no trap or giant allocation.",
-          "Use synthetic expert-index fixture with malformed phase geometry through reader path and valid writer→reader roundtrip for representative block exponents/frame counts. Verify valid serialized bytes unchanged.",
+          "Use synthetic expert-index fixture with malformed phase geometry through reader path and valid writer\u2192reader roundtrip for representative block exponents/frame counts. Verify valid serialized bytes unchanged.",
           "Run relevant format/repack tests identified by `git grep`, full suite and `tools/lint.sh`; run sanitizer/format fuzz gates where applicable. Demonstrate pre-fix failure or enforced prior invariant.",
           "Confirm every consumer handles failure rather than interpreting it as a valid empty expert."
         ],
@@ -1250,7 +1250,7 @@
         "proposed_solution": [
           "Inspect both instance/static writeFully and any shared POSIX helper; consider consolidating into a single scoped helper while preserving path-specific typed error and descriptor ownership. Use a deterministic write seam shared with journal durability fault tests.",
           "For each positive remaining byte count require positive progress; on zero throw explicit JournalError.writeFailed (appropriate EIO or documented equivalent), capture errno only for negative return. Retry EINTR, continue short positive write, propagate hard error. Guard impossible return >remaining if seam permits; checked pointer offset.",
-          "Preserve empty Data no-op behavior. Partial append failure may leave torn tail; ensure caller reports failure and next append does not silently combine with partial record—trace and file linked task if needed. Checkpoint failure must not rename incomplete file (0010).",
+          "Preserve empty Data no-op behavior. Partial append failure may leave torn tail; ensure caller reports failure and next append does not silently combine with partial record\u2014trace and file linked task if needed. Checkpoint failure must not rename incomplete file (0010).",
           "Do not add sleep, arbitrary retry counts for normal short writes, or a success fallback that drops bytes."
         ],
         "verification_steps": [
@@ -1262,6 +1262,85 @@
           "Cold-read loop progress proof for every branch and pointer offset; confirm both helpers covered and no duplicate unpatched loop.",
           "Verify error reporting and cleanup propagate to memory callers; no catch suppresses failure. Check 0010 and 0016 related I/O invariants.",
           "Confirm tests fail on original path and prove normal short-write semantics unchanged."
+        ]
+      }
+    },
+    {
+      "id": "0030",
+      "severity": "S2",
+      "tier": "C",
+      "project": "Root SwiftPM / tests",
+      "file:line": "tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift:35-62",
+      "title": "Test targets accept concurrency warnings despite warnings-as-errors",
+      "category": "language-standard / diagnostics",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "Baseline build 2026-11-26",
+      "evidence-before": "`swift build --build-tests` exits 0 while emitting 12 `warning:` diagnostics from tests/TinyTitan/Kernels/MoE/GGUFReadScalingTests.swift (SendableClosureCaptures: capture of non-Sendable `read`, mutation/reference of captured `index`/`ranges`, concurrently-executed local function `read` not @Sendable). Every target carries `swiftSettings: tinytitanLanguageStandard` with `-warnings-as-errors`, so either the flag is not reaching this test compile or the diagnostics bypass it. The baseline is therefore red on warnings, not clean.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Identify the exact test compile invocation; make warnings fail the build as declared; remove the 12 diagnostics at their root (lock/Sendable-safe test code), not by suppression; prove with a touch+rebuild and a controlled `#warning` negative control.",
+      "classification": "static finding from baseline; not yet repaired",
+      "manual": {
+        "depends_on": [
+          "0003"
+        ],
+        "problem_description": "The baseline test build succeeds with 12 Swift concurrency warnings in a test file even though the target declares `-warnings-as-errors`. A warning in a build log is a check nobody runs; the tree's stated standard is zero warnings.",
+        "proposed_solution": [
+          "Capture the exact `swiftc` invocation for TinyTitanTests (verbose build) and confirm whether `-warnings-as-errors` and `-swift-version 6` are present.",
+          "If the flags are missing, fix the manifest/flag propagation for test targets; if a diagnostic bypasses the flag, document the compiler behaviour and still fix the test code.",
+          "Fix the test's capture pattern with a real synchronization primitive (or `@Sendable` where correct), without `@unchecked Sendable`, `nonisolated(unsafe)`, or a rule exclusion.",
+          "Re-run `swift build --build-tests` and require zero warnings, then the full suite."
+        ],
+        "verification_steps": [
+          "Negative control: a scratch `#warning` in a test file must fail the build.",
+          "Before/after: the 12 diagnostics are gone and the same tests pass.",
+          "Full `swift build --build-tests` and `swift test --no-parallel` results recorded."
+        ],
+        "self_audit_steps": [
+          "Confirm no test was weakened or skipped and no warning suppression was added.",
+          "Confirm the fix preserves the benchmark's intent (concurrent reads) or records why the test changed."
+        ]
+      }
+    },
+    {
+      "id": "0031",
+      "severity": "S2",
+      "tier": "A",
+      "project": "DSH plugin",
+      "file:line": "plugins/dsh-tinytitan/src/catalog-scan.js:104-150",
+      "title": "No-binary catalog scan rejects Inkling 2 installs the server serves",
+      "category": "L3 client/server contract parity",
+      "status": "IN_PROGRESS",
+      "host": "Apple Silicon Mac A / Linux primary B",
+      "discovered-by": "Baseline Node parity test + manual comparison, 2026-11-26",
+      "evidence-before": "`scanModelsFolder(models, {env:{}})` returns `{models: [], skipped: [inkling-2-mini_GGUF-Q4 (hiddenActivation=situ), inkling-2-mini_NVFP4 (hiddenActivation=situ)]}` while `.build/release/TinyTitanServer --catalog --models-dir models` returns both models (family `inkling2`, ids `inkling-2-mini-gguf-q4` / `inkling-2-mini-nvfp4`). `test/catalog-scan.test.js` 'the scan and the server catalog produce the same picker block' fails on exactly this divergence.",
+      "fix-summary": "Mirror the Inkling 2 family in catalog-scan.js (family/activation/display names/levels/ids/size) and pin it with a synthetic-install parity test.",
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "The folder scan and the server produce the same picker block for the on-disk Inkling installs and for a synthetic Inkling manifest; the parity test is not weakened; lint/format/tests green.",
+      "classification": "confirmed baseline failure",
+      "manual": {
+        "depends_on": [
+          "0003"
+        ],
+        "problem_description": "The plugin's no-server fallback is meant to mirror ModelCatalog exactly. It predates Inkling 2: `inkling2` is not a known family, so it falls back to qwen36 and is rejected for `hiddenActivation=situ`. A profile with only Inkling installs and no built server gets an empty picker, and the parity test fails.",
+        "proposed_solution": [
+          "Resolve the `inkling2` family and the `situ` activation exactly as ModelCatalog/ManifestReader do, including MTP exclusion and the GPU family set.",
+          "Add Inkling display names, thinking levels, id/base spelling and size handling matching the server rows.",
+          "Add a synthetic Inkling manifest test; keep the server-vs-folder parity test."
+        ],
+        "verification_steps": [
+          "`npm test` green including the parity test against the two on-disk Inkling installs.",
+          "Byte-identical `generateBlock` for scan vs server; synthetic test independent of installs.",
+          "`npm run lint` and `npm run format:check` green."
+        ],
+        "self_audit_steps": [
+          "No special-casing of the two directory names; no weakened parity assertion.",
+          "Confirm the change cannot make an unsupported family appear as a model."
         ]
       }
     }
