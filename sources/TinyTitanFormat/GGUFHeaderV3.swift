@@ -25,6 +25,15 @@ import Foundation
 /// name-keyed dictionaries silently keep one of two different values. Both are
 /// rejected with `.invalid` before any lookup can see them. GGUF writers store
 /// metadata in a dictionary, so a valid file carries each name once.
+///
+/// **Keys and values follow the format's contract.** A metadata key is ASCII
+/// and dot-separated `lower_snake_case` segments (the standard keys, including
+/// numeric segments such as `general.base_model.0.name`, all qualify); a BOOL
+/// is exactly 0 or 1. **Arrays are one level deep**: this reader stores a
+/// scalar, a flat numeric array, or a string array's length. The GGUF spec
+/// permits arrays of arrays, but no model in this tree uses one, and supporting
+/// it would need a recursive value type; a nested array is therefore a typed
+/// `.invalid("nested array")`, never a flattened or dropped level.
 package struct GGUFHeaderV3: Sendable {
     package enum Value: Sendable, Equatable {
         case integer(Int64)
@@ -99,11 +108,7 @@ package struct GGUFHeaderV3: Sendable {
         var metadata: [String: Value] = [:]
         for _ in 0..<keyCount {
             let key = try cursor.string()
-            guard key.utf8.count <= Self.maximumMetadataKeyBytes else {
-                throw ReadError.invalid(
-                    "metadata key is \(key.utf8.count) bytes; the format allows "
-                        + "\(Self.maximumMetadataKeyBytes)")
-            }
+            try Self.validateMetadataKey(key)
             guard metadata[key] == nil else {
                 throw ReadError.invalid("duplicate metadata key \(key)")
             }
@@ -197,6 +202,39 @@ package struct GGUFHeaderV3: Sendable {
         if case .numbers(let value)? = metadata[key] { return value }
         return nil
     }
+
+    /// The GGUF key contract: at most 65 535 bytes, ASCII, and dot-separated
+    /// `lower_snake_case` segments. Numeric segments are allowed because the
+    /// spec itself defines `general.base_model.{id}.name`.
+    private static func validateMetadataKey(_ key: String) throws {
+        guard key.utf8.count <= maximumMetadataKeyBytes else {
+            throw ReadError.invalid(
+                "metadata key is \(key.utf8.count) bytes; the format allows "
+                    + "\(maximumMetadataKeyBytes)")
+        }
+        var segmentBytes = 0
+        for byte in key.utf8 {
+            if byte == UInt8(ascii: ".") {
+                guard segmentBytes > 0 else {
+                    throw ReadError.invalid(
+                        "metadata key \(key) has an empty segment")
+                }
+                segmentBytes = 0
+                continue
+            }
+            let isLowercase = byte >= UInt8(ascii: "a") && byte <= UInt8(ascii: "z")
+            let isDigit = byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9")
+            let isUnderscore = byte == UInt8(ascii: "_")
+            guard isLowercase || isDigit || isUnderscore else {
+                throw ReadError.invalid(
+                    "metadata key \(key) is not ASCII lower_snake_case")
+            }
+            segmentBytes += 1
+        }
+        guard segmentBytes > 0 else {
+            throw ReadError.invalid("metadata key \(key) has an empty segment")
+        }
+    }
 }
 
 private struct Cursor {
@@ -273,7 +311,13 @@ private struct Cursor {
         case 4: return .unsigned(UInt64(try u32()))
         case 5: return .integer(Int64(Int32(bitPattern: try u32())))
         case 6: return .real(Double(Float(bitPattern: try u32())))
-        case 7: return .boolean((try raw(1).first ?? 0) != 0)
+        case 7:
+            let byte = try raw(1).first ?? 0
+            guard byte <= 1 else {
+                throw GGUFHeaderV3.ReadError.invalid(
+                    "boolean value \(byte) is not 0 or 1")
+            }
+            return .boolean(byte == 1)
         case 8: return .string(try string())
         case 9: return try array()
         case 10: return .unsigned(try u64())

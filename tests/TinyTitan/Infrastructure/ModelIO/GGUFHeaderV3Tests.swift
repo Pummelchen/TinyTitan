@@ -327,6 +327,69 @@ private struct GGUFBuilder {
         expectInvalid(builder.bytes, containing: "metadata key is 65536 bytes")
     }
 
+    /// The GGUF key contract: ASCII, dot-separated `lower_snake_case`
+    /// segments. A key outside it cannot identify its value.
+    @Test func metadataKeysMustBeASCIILowerSnakeCase() throws {
+        let keys = [
+            "General.architecture",  // uppercase
+            "general Architecture",  // space
+            "general..architecture",  // empty segment
+            ".leading",  // empty first segment
+            "trailing.",  // empty last segment
+            "general-architecture",  // hyphen
+            "général.architecture",  // non-ASCII
+        ]
+        for key in keys {
+            var builder = GGUFBuilder.header(keys: 1)
+            builder.string(key)
+            builder.u32(0)
+            builder.raw([1])
+            expectInvalid(builder.bytes, containing: "metadata key", "\(key)")
+        }
+        // The standard dotted form, numeric segments included, still parses.
+        var valid = GGUFBuilder.header(keys: 1)
+        valid.string("general.base_model.0.name")
+        valid.u32(8)
+        valid.string("parent")
+        let header = try GGUFHeaderV3(bytes: valid.bytes)
+        #expect(header.string("general.base_model.0.name") == "parent")
+    }
+
+    /// The spec defines BOOL as one byte where 0 is false and 1 is true and
+    /// says anything else is invalid. Accepting 2 silently turns corruption
+    /// into `true`.
+    @Test func booleanMetadataOnlyAcceptsZeroOrOne() {
+        for byte: UInt8 in [0, 1] {
+            var builder = GGUFBuilder.header(keys: 1)
+            builder.string("a")
+            builder.u32(7)
+            builder.raw([byte])
+            let header = try? GGUFHeaderV3(bytes: builder.bytes)
+            #expect(header?.metadata["a"] == .boolean(byte == 1), "\(byte)")
+        }
+        for byte: UInt8 in [2, 255] {
+            var builder = GGUFBuilder.header(keys: 1)
+            builder.string("a")
+            builder.u32(7)
+            builder.raw([byte])
+            expectInvalid(builder.bytes, containing: "boolean value \(byte)", "\(byte)")
+        }
+    }
+
+    /// Arrays of arrays are outside the subset this reader stores. The spec
+    /// allows them; this reader refuses them explicitly (see the type's doc)
+    /// rather than flattening or dropping a level.
+    @Test func nestedArraysAreRefusedExplicitly() {
+        for count: UInt64 in [0, 1] {
+            var builder = GGUFBuilder.header(keys: 1)
+            builder.string("a")
+            builder.u32(9)
+            builder.u32(9)
+            builder.u64(count)
+            expectInvalid(builder.bytes, containing: "nested array", "\(count)")
+        }
+    }
+
     /// The shared caller policy: grow by doubling, never past the budget, and
     /// stop (nil) when the hint itself asks for more than a header may be.
     @Test func headerGrowthIsBounded() {
