@@ -87,6 +87,12 @@ enum Inkling2CheckpointPlanner {
             }
         }
         let arch = source.arch
+        guard arch.numLayers > 0, arch.numExperts > 0 else {
+            throw RepackError.configurationInvalid(
+                detail:
+                    "Inkling 2 architecture declares \(arch.numLayers) layers and "
+                    + "\(arch.numExperts) experts; both must be positive")
+        }
         guard Set(experts.keys) == Set(0..<arch.numLayers) else {
             throw RepackError.configurationInvalid(
                 detail: "routed experts cover layers \(experts.keys.sorted()), "
@@ -112,6 +118,35 @@ enum Inkling2CheckpointPlanner {
             absoluteOffset: tensor.absoluteOffset, sizeBytes: tensor.sizeBytes)
     }
 
+    /// A checked sum of two cursor positions.
+    static func checkedAdd(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(field) overflows")
+        }
+        return value
+    }
+
+    /// A checked product of two cursor sizes.
+    static func checkedProduct(_ lhs: UInt64, _ rhs: UInt64, field: String) throws -> UInt64 {
+        let (value, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(field) overflows")
+        }
+        return value
+    }
+
+    /// The resident index's byte size: header + one entry per tensor + the
+    /// string table, every step checked.
+    static func residentIndexSize(tensorCount: Int, stringBytes: Int) throws -> Int {
+        let entries = try Inkling2Arch.checkedMultiply(
+            tensorCount, SSDAIBinary.indexEntryBytes, field: "resident index entries")
+        let body = try Inkling2Arch.checkedAdd(
+            SSDAIBinary.indexHeaderBytes, entries, field: "resident index size")
+        return try Inkling2Arch.checkedAdd(
+            body, stringBytes, field: "resident index size")
+    }
+
     private static func planResident(
         _ tensors: [(tensor: SourceTensor, name: String)], outputDir: String
     ) throws -> ResidentFilePlan {
@@ -124,9 +159,13 @@ enum Inkling2CheckpointPlanner {
                     field: "resident string table for \(entry.name)"))
             stringTable.append(contentsOf: entry.name.utf8)
         }
-        let rawIndex = UInt64(
-            SSDAIBinary.indexHeaderBytes + tensors.count * SSDAIBinary.indexEntryBytes
-                + stringTable.count)
+        let rawIndexValue = try residentIndexSize(
+            tensorCount: tensors.count, stringBytes: stringTable.count)
+        guard rawIndexValue >= 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "the resident index size \(rawIndexValue) is negative")
+        }
+        let rawIndex = UInt64(rawIndexValue)
         let indexSize = try Inkling2GGUFPlanner.roundUp(
             rawIndex, to: Layout.pageBytes, field: "resident index size")
         var cursor = indexSize
@@ -155,7 +194,8 @@ enum Inkling2CheckpointPlanner {
                     scaleOffset: 0, scaleSize: 0, biasOffset: 0, biasSize: 0,
                     quantSpec: nil, sourceWeight: opaqueCopy(tensor),
                     sourceScales: nil, sourceBiases: nil))
-            cursor += tensor.sizeBytes
+            cursor = try checkedAdd(
+                cursor, tensor.sizeBytes, field: "\(name) resident end")
         }
         return ResidentFilePlan(
             path: (outputDir as NSString).appendingPathComponent("model_weights.bin"),
@@ -209,10 +249,17 @@ enum Inkling2CheckpointPlanner {
                 throw RepackError.configurationInvalid(
                     detail: "\(label): \(tensor.shape) does not lead with \(experts) experts")
             }
-            guard dtypeName == sourceDType, tensor.sizeBytes == bytes * UInt64(experts) else {
+            guard dtypeName == sourceDType else {
                 throw RepackError.configurationInvalid(
                     detail: "\(label): \(dtypeName ?? "\(tensor.dtype)") \(tensor.shape) "
                         + "is not \(experts) x \(bytes) bytes of \(sourceDType ?? "F32")")
+            }
+            let expectedBytes = try checkedProduct(
+                bytes, UInt64(experts), field: "\(label) source bytes")
+            guard tensor.sizeBytes == expectedBytes else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(label): \(tensor.sizeBytes) bytes, not \(expectedBytes) "
+                        + "for \(experts) experts of \(bytes) bytes")
             }
             cursor = try Inkling2GGUFPlanner.roundUp(
                 cursor, to: blobAlignment, field: "layer \(layer) \(key) offset")
@@ -222,7 +269,8 @@ enum Inkling2CheckpointPlanner {
                     offsetInExpertBlob: cursor, sizeInExpertBlob: bytes,
                     sourceOffsetPerExpert: bytes, sourceTensor: opaqueCopy(tensor),
                     bitsForWeights: bits))
-            cursor += bytes
+            cursor = try checkedAdd(
+                cursor, bytes, field: "layer \(layer) \(key) end")
         }
         var matrices: [(role: String, rows: UInt64, columns: UInt64)] = []
         for role in ["gate_up", "down"] {
@@ -231,7 +279,14 @@ enum Inkling2CheckpointPlanner {
                     detail: "layer \(layer) \(role): expected [experts, rows, columns]")
             }
             let packed = tensor.shape[2]
-            matrices.append((role, tensor.shape[1], encoding == .nvfp4 ? packed * 2 : packed))
+            let columns: UInt64
+            if encoding == .nvfp4 {
+                columns = try checkedProduct(
+                    packed, 2, field: "layer \(layer) \(role) columns")
+            } else {
+                columns = packed
+            }
+            matrices.append((role, tensor.shape[1], columns))
         }
         for (role, rows, columns) in matrices {
             try add(

@@ -88,6 +88,34 @@ import TinyTitanFormat
         }
     }
 
+    @Test func residentIndexSizeIsChecked() throws {
+        #expect(
+            try Inkling2CheckpointPlanner.residentIndexSize(
+                tensorCount: 0, stringBytes: 0) == SSDAIBinary.indexHeaderBytes)
+        let three = try Inkling2CheckpointPlanner.residentIndexSize(
+            tensorCount: 3, stringBytes: 10)
+        #expect(three == SSDAIBinary.indexHeaderBytes + 3 * SSDAIBinary.indexEntryBytes + 10)
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointPlanner.residentIndexSize(
+                tensorCount: Int.max, stringBytes: 0)
+        }
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointPlanner.residentIndexSize(
+                tensorCount: 1, stringBytes: Int.max)
+        }
+    }
+
+    @Test func cursorArithmeticIsChecked() throws {
+        #expect(try Inkling2CheckpointPlanner.checkedAdd(1, 2, field: "x") == 3)
+        #expect(try Inkling2CheckpointPlanner.checkedProduct(3, 4, field: "x") == 12)
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointPlanner.checkedAdd(UInt64.max, 1, field: "x")
+        }
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointPlanner.checkedProduct(UInt64.max, 2, field: "x")
+        }
+    }
+
     @Test func expertTensorNamesMapToBlobKeys() {
         func key(_ name: String) -> String? {
             Inkling2CheckpointPlanner.expertKey(name).map { "\($0.layer) \($0.key)" }
