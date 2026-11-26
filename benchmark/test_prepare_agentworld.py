@@ -36,6 +36,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -148,6 +150,118 @@ class FusedExpertsBothWidthsTests(unittest.TestCase):
 
 
 @unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class DurableSourceTests(unittest.TestCase):
+    """A source shard is dropped only once its output is on disk.
+
+    The converter buffers converted tensors twice -- in `OutputWriter` until
+    `OUTPUT_SHARD_BYTES` and, for a per-expert checkpoint, in `FusedExperts`
+    until the whole layer has arrived. Deleting a source while either holds its
+    bytes is what made a kill before the first flush resume by re-downloading
+    everything; these pin both halves of the rule and the two-width case.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = pathlib.Path(self.tmp.name)
+
+    @staticmethod
+    def writer(buffered: int):
+        """The writer surface the release rule reads."""
+        return SimpleNamespace(bytes=buffered)
+
+    def source(self, name: str) -> pathlib.Path:
+        path = self.dir / name
+        path.write_bytes(b"a checkpoint shard")
+        return path
+
+    def test_a_source_waiting_on_one_writer_stays(self):
+        # `--bits 4 8`: the 8-bit writer filled its block and flushed, the
+        # 4-bit one has not. Only one width is durable, so nothing may go.
+        source = self.source("model-00001-of-00013.safetensors")
+        pending = [source]
+        prepare.release_durable_sources(
+            pending,
+            {4: self.writer(1024), 8: self.writer(0)},
+            prepare.FusedExperts(),
+        )
+        self.assertTrue(source.exists())
+        self.assertEqual(pending, [source])
+
+    def test_a_source_is_dropped_once_every_writer_flushed(self):
+        source = self.source("model-00001-of-00013.safetensors")
+        pending = [source]
+        prepare.release_durable_sources(
+            pending, {4: self.writer(0), 8: self.writer(0)}, prepare.FusedExperts()
+        )
+        self.assertFalse(source.exists())
+        self.assertEqual(pending, [])
+
+    def test_a_source_with_experts_still_buffered_stays_after_a_flush(self):
+        # The writers flushed (a layer completed), but this shard supplied an
+        # expert for a layer that has not arrived yet: its bytes exist only in
+        # `FusedExperts`. A writer-only rule deletes the only remaining copy.
+        import numpy as np
+
+        held = self.source("model-00001-of-00013.safetensors")
+        released = self.source("model-00002-of-00013.safetensors")
+        fused = prepare.FusedExperts()
+        fused.add(EXPERT.format(0), np.full((64, 64), 1, dtype=np.float32), 4, None, held)
+        pending = [held, released]
+        prepare.release_durable_sources(pending, {4: self.writer(0)}, fused)
+        self.assertTrue(held.exists())
+        self.assertFalse(released.exists())
+        self.assertEqual(pending, [held])
+
+    def test_a_completed_layer_releases_its_sources_from_the_fused_buffer(self):
+        import numpy as np
+
+        source = self.source("model-00001-of-00013.safetensors")
+        fused = prepare.FusedExperts()
+        for expert in (0, 1):
+            fused.add(
+                EXPERT.format(expert), np.full((64, 64), expert, dtype=np.float32), 4, None, source
+            )
+        self.assertEqual(fused.hold(), {source})
+        fused.release(experts_per_layer=2, writers={4: Recorder()})
+        self.assertEqual(fused.hold(), set())
+
+
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class CompleteSourceDownloadTests(unittest.TestCase):
+    def test_a_complete_source_is_returned_without_a_probe_or_a_fetch(self):
+        # A killed run leaves complete sources in `--work`, and the resume must
+        # not spend a request on them: `main` passes the size it already
+        # derived, so neither the header probe nor a body range is issued.
+        with tempfile.TemporaryDirectory() as tmp:
+            work = pathlib.Path(tmp)
+            source = work / "model-00000-of-00013.safetensors"
+            source.write_bytes(b"verified bytes")
+            with mock.patch.object(
+                prepare, "expected_size", side_effect=AssertionError("size was probed")
+            ):
+                self.assertEqual(
+                    prepare.download(source.name, work, expected=len(source.read_bytes())),
+                    source,
+                )
+            self.assertEqual(source.read_bytes(), b"verified bytes")
+
+    def test_a_wrong_size_still_goes_through_the_normal_check(self):
+        # The shortcut is a size check, not a name check: a shorter file takes
+        # the resume path and asks for the rest.
+        with tempfile.TemporaryDirectory() as tmp:
+            work = pathlib.Path(tmp)
+            source = work / "model-00000-of-00013.safetensors"
+            source.write_bytes(b"short")
+            with mock.patch.object(
+                prepare, "expected_size", side_effect=RuntimeError("probed")
+            ) as probe:
+                with self.assertRaisesRegex(RuntimeError, "probed"):
+                    prepare.download(source.name, work, expected=1024)
+            probe.assert_called_once_with(source.name)
+
+
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
 class ConvertShardBothWidthsTests(unittest.TestCase):
     """The regression, through the caller that failed: `convert_shard`."""
 
@@ -177,6 +291,17 @@ class PrefetchShutdownTests(unittest.TestCase):
     raises), and CPython 3.14 turns a daemon thread writing stdout at
     interpreter finalization into a fatal error that calls `abort()`.
     """
+
+    def setUp(self):
+        # Closing the generator runs `prefetch_shards`'s `finally`, which sets
+        # the process-global stop flag on purpose -- that is how a shutdown
+        # stops the fetchers. The product runs one conversion per process; this
+        # suite does not, so restore it and never hand it to the next suite
+        # (`download` refuses to start a shard while it is set).
+        prepare._stopping.clear()
+
+    def tearDown(self):
+        prepare._stopping.clear()
 
     def test_closing_the_generator_leaves_no_fetcher_thread_running(self):
         import threading

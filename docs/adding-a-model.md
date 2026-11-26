@@ -280,7 +280,12 @@ checklist above:
    a ~142 GB peak for the 8-bit width instead of ~255 GB. It consumes the
    snapshot: a failed repack after a retirement needs the snapshot rebuilt, which
    is the trade the checklist's "converted widths are reproducible from the
-   source" already assumes.
+   source" already assumes. The converter itself holds a source shard until
+   every tensor converted from it is in a finished output shard (4 GiB of
+   output), which is ~8 GB of bf16 source at the 8-bit width and ~15 GB at
+   4-bit, and keeps a per-expert source longer while its layer's experts are
+   still buffered; a kill before that flush resumes by converting those files
+   again instead of fetching them.
 
 ## 6. After the checkout moves
 

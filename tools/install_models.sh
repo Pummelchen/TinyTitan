@@ -701,11 +701,14 @@ install_one() {
         ;;
       convert_qwen35moe)
         # Qwen's own bf16 release, quantized one shard at a time by
-        # tools/prepare_agentworld.py (about 70 GB fetched, at most two
-        # shards on disk), then repacked. `--bits 4 8` writes *both* widths
-        # from that one download, to `$WORK/<preset>-affine-{4,8}bit`, so
-        # neither width may be thrown away: the snapshot is kept until both
-        # installs exist, and the other width then costs no fetch at all.
+        # tools/prepare_agentworld.py (about 70 GB fetched; a source shard is
+        # deleted once its output reaches a finished shard, so the sources
+        # since the last 4 GiB flush -- ~14 GB of bf16 at this width -- stay
+        # beside the fetch-ahead shards), then repacked. `--bits 4 8` writes
+        # *both* widths from that one download, to
+        # `$WORK/<preset>-affine-{4,8}bit`, so neither width may be thrown
+        # away: the snapshot is kept until both installs exist, and the other
+        # width then costs no fetch at all.
         [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
         local preset="${preset_field:-${name%-8bit}}" model_id
         case "$preset" in
@@ -737,10 +740,14 @@ install_one() {
       convert_qwen35moe_solo)
         # The 122B path. One width per run, because the two snapshots plus an
         # install cannot coexist on a 1 TB Mac (69.5 + 129.8 + 120 GB). The
-        # converter streams the 250 GB source four shards at a time and deletes
-        # each as it converts, so the fetch is the only thing that repeats.
-        # A width that was already converted by hand is reused rather than
-        # fetched again; a partial snapshot is resumed by the converter.
+        # converter streams the 250 GB source with four fetchers and deletes a
+        # shard once every tensor converted from it is in a finished output
+        # shard (four per-expert sources can still be held in the fused buffer,
+        # see `FusedExperts.hold`), so the fetch is the only thing that repeats
+        # -- and a kill before the first flush now resumes from the sources on
+        # disk instead of re-fetching them. A width that was already converted
+        # by hand is reused rather than fetched again; a partial snapshot is
+        # resumed by the converter.
         [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
         local preset="${preset_field:-${name%-8bit}}" model_id
         case "$preset" in

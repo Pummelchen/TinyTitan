@@ -8,13 +8,17 @@ top-8, gated-DeltaNet with full attention every fourth layer). What differs
 is the source: Qwen ships it as bf16 under the vision wrapper's tensor names,
 with the routed experts fused per layer. So this is prepare_qwen38.py's job
 -- fetch one shard at a time, quantize, write MLX-shaped output, delete the
-shard -- with this family's renames and slot policy, and without Qwen3.8's
-n-gram table, PLE constants and indexer.
+shard once its output has reached disk -- with this family's renames and slot
+policy, and without Qwen3.8's n-gram table, PLE constants and indexer.
 
 Disk footprint while running: up to twenty source shards (~90 GB), a few
 completed ones waiting to convert, plus the output (about 19.5 GB at 4-bit,
-37.8 GB at 8-bit). The install TinyTitanRepack writes afterwards is a second
-copy of the output.
+37.8 GB at 8-bit). A source shard is not deleted the moment it converts: it
+stays until every tensor converted from it is in a finished output shard, so a
+kill before the first 4 GiB flush resumes from the sources on disk instead of
+re-fetching them. That adds the sources since the last flush -- about 4 GiB of
+output expressed in source bytes, ~14 GB bf16 at this width -- to the peak. The
+install TinyTitanRepack writes afterwards is a second copy of the output.
 
     python3.13 tools/prepare_agentworld.py --plan            # no download
     python3.13 tools/prepare_agentworld.py --bits 4 \\
@@ -363,6 +367,11 @@ class FusedExperts:
     Only one layer's tensors are held: `release` drops an entry as soon as its
     last expert lands, so the peak is one layer's three projections (about
     1.5 GiB at 4-bit) plus the writer's open block.
+
+    Each target also records the *source shards* that contributed to it, which
+    is what `hold` answers: an expert in memory is converted bytes that are not
+    on disk yet, so the checkpoint shard it came from may not be deleted until
+    its layer is emitted and the writers flush (see `release_durable_sources`).
     """
 
     def __init__(self) -> None:
@@ -376,7 +385,14 @@ class FusedExperts:
         # is what `_layers` is already keyed by.
         self._seen: set[tuple[int, str]] = set()
 
-    def add(self, name: str, value: np.ndarray, width: int, writer: "OutputWriter") -> None:
+    def add(
+        self,
+        name: str,
+        value: np.ndarray,
+        width: int,
+        writer: "OutputWriter",
+        source: Path | None = None,
+    ) -> None:
         if (width, name) in self._seen:
             raise ValueError(f"duplicate source tensor {name}")
         self._seen.add((width, name))
@@ -387,8 +403,10 @@ class FusedExperts:
         for out_name, piece in routed_slices(name, value):
             target = self._layers.get((width, out_name))
             if target is None:
-                target = {"stack": None, "experts": set()}
+                target = {"stack": None, "experts": set(), "sources": set()}
                 self._layers[(width, out_name)] = target
+            if source is not None:
+                target["sources"].add(source)
             piece = np.ascontiguousarray(piece)
             if routed is None:
                 # Fused source: this one tensor is the whole expert axis.
@@ -439,6 +457,19 @@ class FusedExperts:
             f"{width}-bit {out_name} ({len(target['experts'])} experts)"
             for (width, out_name), target in sorted(self._layers.items())
         ]
+
+    def hold(self) -> set[Path]:
+        """Source shards with at least one expert still buffered here.
+
+        Their converted bytes are only in memory, so the checkpoint shards they
+        came from are the only copy of the work: deleting one before the layer
+        is emitted and the writers flush is what made a killed per-expert
+        conversion re-fetch everything since the last output flush.
+        """
+        held: set[Path] = set()
+        for target in self._layers.values():
+            held |= target["sources"]
+        return held
 
 
 def emit_fused(
@@ -643,7 +674,9 @@ def resolve_url(shard: str) -> str:
     return locations[-1] if locations else f"{BASE}/{shard}"
 
 
-def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
+def download(
+    shard: str, work: Path, progress: Progress | None = None, expected: int | None = None
+) -> Path:
     """Fetch one shard in verified chunks, continuing a partial file.
 
     The host cannot deliver 5.3 GB in one connection: it truncates the response
@@ -663,6 +696,14 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
     the bytes it lands into it, and routes its own resume and retry messages
     through it so a message never lands in the middle of the bar. Without one it
     prints exactly what it always did, which is what `--plan` and the tests see.
+
+    `expected` is the shard's size, which `main` has already derived for every
+    shard to size the progress line. A file already that long is what a killed
+    run leaves behind before its output flushes, and it is returned without a
+    *body* fetch: the resume that matters on a 250 GB fetch must not move bytes
+    it already has. The size is still re-derived from the shard's own header
+    when it is not known here, because that header, not a server's word, is
+    what makes a partly-written file detectable.
     """
 
     def tell(text: str) -> None:
@@ -677,7 +718,12 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
         raise InterruptedError(f"{shard}: stopped before this shard started")
     dest = work / shard
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if expected is not None and dest.is_file() and dest.stat().st_size == expected:
+        if progress is not None:
+            progress.add(expected)
+        return dest
     expected = expected_size(shard)
+
     have = dest.stat().st_size if dest.exists() else 0
     if have > expected:
         # Longer than the shard can be: a previous run appended wrongly.
@@ -685,6 +731,8 @@ def download(shard: str, work: Path, progress: Progress | None = None) -> Path:
         dest.unlink()
         have = 0
     if have == expected:
+        if progress is not None:
+            progress.add(expected)
         return dest
     if have:
         tell(f"    {shard}: resuming at {have / 1e9:.2f} GB of {expected / 1e9:.2f} GB")
@@ -1023,7 +1071,7 @@ def convert_shard(
                 # checkpoint supplies one expert per tensor, and the repacker
                 # needs the whole layer's stack in one tensor.
                 for width, writer in writers.items():
-                    fused.add(name, value, width, writer)
+                    fused.add(name, value, width, writer, path)
                 continue
             for out_name, _ in outputs_for(name, list(value.shape)):
                 if out_name.endswith("switch_mlp.gate_proj.weight"):
@@ -1044,6 +1092,43 @@ def convert_shard(
                     writer.add(stem + ".scales", scales)
                     writer.add(stem + ".biases", biases)
     fused.release(experts_per_layer, writers)
+
+
+def release_durable_sources(
+    pending: list[Path], writers: dict[int, "OutputWriter"], fused: "FusedExperts"
+) -> None:
+    """Unlink every converted source whose output has reached disk.
+
+    A checkpoint shard may leave `--work` only once every tensor converted from
+    it is durable, and "converted" is not "durable":
+
+    - `OutputWriter.add` buffers tensors in `block` until `OUTPUT_SHARD_BYTES`
+      (4 GiB) and only `flush` writes them, so `writer.bytes == 0` -- an empty
+      block -- is the durable point for a start-of-shard tensor.
+    - A per-expert checkpoint's routed experts sit in `FusedExperts` until their
+      whole layer has arrived, which can be many shards later, so
+      `fused.hold()` names the sources that must stay even after a flush.
+
+    The main loop used to `unlink` each source as `convert_shard` returned, with
+    both buffers still holding its bytes. A kill before the next flush then lost
+    the converted work while the source was already gone, so the resume fetched
+    every shard since the last flush again -- most of a fetch on a 250 GB
+    checkpoint, and nothing adoptable at all if the kill came before the first
+    output shard.
+
+    Both widths of a `--bits 4 8` pass are separate writers, so *every* writer
+    must have flushed, not just the one that filled its block last.
+    """
+    if any(writer.bytes for writer in writers.values()):
+        return
+    held = fused.hold()
+    still_pending = []
+    for source in pending:
+        if source in held:
+            still_pending.append(source)
+        else:
+            source.unlink(missing_ok=True)
+    pending[:] = still_pending
 
 
 def plan(index: dict, width: int) -> None:
@@ -1164,6 +1249,20 @@ def main() -> int:
     work.mkdir(parents=True, exist_ok=True)
     # Shards that carry only skipped tensors (vision, MTP) are not fetched.
     shards = sorted({s for n, s in index["weight_map"].items() if not skipped(n)})
+    # Say what the resume can reuse *before* the first shard request: a run that
+    # was killed leaves its in-flight sources in `--work`, and a source is kept
+    # there until every tensor converted from it is in a finished output shard
+    # (see `release_durable_sources`). A complete one is re-read from disk
+    # instead of fetched; a partial one continues from its last byte.
+    resumable = [s for s in shards if (work / s).is_file()]
+    if resumable:
+        resumable_bytes = sum((work / s).stat().st_size for s in resumable)
+        print(
+            f"  resuming: {len(resumable)} checkpoint shard(s) already in {work} "
+            f"({resumable_bytes / 1e9:.2f} GB); a complete one is not downloaded "
+            "again, a partial one continues from its last byte",
+            flush=True,
+        )
     if len(widths) == 1:
         outputs = {widths[0]: args.output}
     else:
@@ -1191,23 +1290,31 @@ def main() -> int:
     # run at once (a small fetch pool feeds the converter), so a download bar
     # and a convert bar would fight over the terminal; one line carrying both
     # numbers says exactly where the run is.
-    def stage_total() -> float | None:
-        total = 0.0
-        for name in shards:
-            try:
-                total += expected_size(name)
-            except Exception:  # noqa: BLE001  # an unreadable header is not fatal here
-                return None
-        return total or None
-
-    progress = Progress("converting", stage_total())
+    #
+    # The sizes are derived once here and handed to `download`, so a source that
+    # is already complete on disk is not asked for again -- and an unreadable
+    # header stays non-fatal for the line, while the fetch reports it itself.
+    sizes: dict[str, int] = {}
+    for name in shards:
+        try:
+            sizes[name] = expected_size(name)
+        except Exception:  # noqa: BLE001  # an unreadable header is not fatal here
+            continue
+    progress = Progress("converting", sum(sizes.values()) or None)
+    # A source may leave `--work` only once its output has reached disk. Both
+    # buffers are named in `release_durable_sources`: the writer block (up to
+    # 4 GiB) and, for a per-expert checkpoint, `FusedExperts` until the layer
+    # is whole. Until then a kill resumes from these files instead of fetching
+    # them again.
+    pending: list[Path] = []
     done = 0
     try:
-        for path in prefetch_shards(shards, lambda s: download(s, work, progress)):
+        for path in prefetch_shards(shards, lambda s: download(s, work, progress, sizes.get(s))):
             done += 1
             progress.show(f"{done}/{len(shards)} shards  {progress.amount}")
             convert_shard(path, writers, fused, experts_per_layer)
-            path.unlink()
+            pending.append(path)
+            release_durable_sources(pending, writers, fused)
     except BaseException:
         stop_download()
         progress.finish()
@@ -1228,6 +1335,11 @@ def main() -> int:
             fetch_tokenizer(out)
         print(f"\naffine snapshot written to {out}")
         print(f"  {writer.shard_no} shards, {writer.total / 1e9:.1f} GB")
+    # The completion point, after every writer's `finish`: each block is empty
+    # and every shard is named, so no source has a reader left. Not earlier, so
+    # a failure between the last conversion and this line (a tokenizer fetch, a
+    # config write) still leaves the sources a retry converts from disk.
+    release_durable_sources(pending, writers, fused)
     return 0
 
 
