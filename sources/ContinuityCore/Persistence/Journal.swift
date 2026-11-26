@@ -340,8 +340,20 @@ public actor FileJournal: ContinuityJournal {
     /// descriptor is never closed or replaced underneath the drive.
     func settleBarrier() async {
         barrier?.cancel()
-        if let running = barrier { await running.value }
+        await awaitScheduledBarrier()
         barrier = nil
+    }
+
+    /// Waits for the barrier that is currently scheduled, without cancelling
+    /// it.
+    ///
+    /// `settleBarrier` cancels first, which is right for a caller about to
+    /// replace the file and wrong for a test or a diagnostic that wants to
+    /// observe what the scheduled barrier actually did. Awaiting the task is
+    /// the only deterministic way to see that: the task records its outcome on
+    /// this actor before it completes.
+    func awaitScheduledBarrier() async {
+        if let running = barrier { await running.value }
     }
 
     /// Flush, close the journal and release the workspace lock.

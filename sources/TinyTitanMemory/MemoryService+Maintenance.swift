@@ -116,8 +116,15 @@ extension MemoryService {
         // The background sweep goes first: it drives the same engine, and a
         // judgement must not be in flight while the weights are released.
         await retrievalHinter?.shutdown()
-        for workspace in workspaces.values {
-            await workspace.engine?.shutDown()
+        for (scope, entry) in workspaces {
+            await entry.engine?.shutDown()
+            // A flush or close that failed during shutdown is on the engine's
+            // durability channel, and this is the last moment anyone can read
+            // it. Not reporting it would make the process exit a clean one.
+            // `journalFailed` is silent when there is nothing to say and logs
+            // at most once per workspace, so a failure already reported during
+            // the session is not repeated here.
+            _ = await journalFailed(in: scope)
         }
         workspaces.removeAll()
         lastUsed.removeAll()

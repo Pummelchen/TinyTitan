@@ -125,7 +125,15 @@ public actor ContinuityEngine {
         // A session boundary is the natural durability point: it is the
         // moment where losing the last few records would actually cost
         // something, and it is rare enough that the barrier is free.
-        try? await flush()
+        //
+        // The turn still completes: the reply is owed and the event is
+        // already in the log. What must not happen is the failure disappearing
+        // — `journalFailure` is how the service learns the file is behind.
+        do {
+            try await flush()
+        } catch {
+            journalWriteFailed(error)
+        }
         return session
     }
 
@@ -143,10 +151,26 @@ public actor ContinuityEngine {
     /// Waiting for deallocation is not a contract anyone can rely on.
     ///
     /// The engine keeps working afterwards; it simply stops persisting.
+    /// Flushes before it closes, and records a flush or close that fails on
+    /// `journalFailure` rather than reporting a clean shutdown. The engine
+    /// keeps working afterwards; it simply stops persisting.
+    ///
+    /// Non-throwing on purpose: every caller is a shutdown path, and a
+    /// caller that cannot close because the drive failed would be worse off.
+    /// The failure is not lost — it is on the engine's durable channel, which
+    /// the memory service reads and logs.
     public func shutDown() async {
-        try? await flush()
+        do {
+            try await flush()
+        } catch {
+            journalWriteFailed(error)
+        }
         guard let journal = journal as? FileJournal else { return }
-        try? await journal.shutDown()
+        do {
+            try await journal.shutDown()
+        } catch {
+            journalWriteFailed(error)
+        }
     }
 
     // MARK: - Recording
