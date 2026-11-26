@@ -717,13 +717,13 @@
       "file:line": "sources/TinyTitanServer/Core/HTTPServer.swift:20-37,102-120",
       "title": "Bound HTTP header buffering before decoder completes",
       "category": "L4 resource exhaustion",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Source explicitly acknowledges NIO accumulates unbounded small headers before application aggregate-limit checks. Pipeline config has no earlier aggregate bound. Server binds loopback, limiting exposure but not local denial of service.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "NIO 2.100 NIOHTTPDecoderLimitConfiguration wired via withDecoderLimitConfiguration: 32 KiB list, 16 KiB field, 256 fields; application 431 at 16 KiB/128 fields remains. Incremental oversized heads refused 400 pre-decode; 40 HTTP tests. See AUDIT/evidence/0017.md.",
+      "commit": "12a3560e",
       "blocked-reason": null,
       "acceptance-criteria": "Add pre-decode aggregate header byte/count gate or prove equivalent decoder protection; test incrementally supplied oversized headers and bounded RSS.",
       "classification": "static finding; runtime impact untested",
@@ -760,13 +760,13 @@
       "file:line": "sources/TinyTitanServer/Core/ResponsesAPIStore.swift:17-54; sources/TinyTitanServer/Core/HTTPServerHandler+Responses.swift:43-53,70-87",
       "title": "Bound stored response memory by bytes and chain size",
       "category": "L5 resource exhaustion",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "ResponseStore caps number of entries, not bytes; each continuation flattens prior conversation into storedInput, and entries retain input/output plus response JSON. A count cap does not bound accumulated history byte size. Generation context limits may reduce practical impact; measure.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "ResponseStore now has 16 MiB per-entry / 64 MiB total / 256 entry bounds with checked accounting, deterministic eviction, refused puts that change nothing and store:false for oversize; chain refusal 400. 12 store + 5 HTTP tests; TSan store suite. See AUDIT/evidence/0018.md.",
+      "commit": "422f99bb",
       "blocked-reason": null,
       "acceptance-criteria": "Test long continuation chains and many near-limit responses; enforce aggregate byte budget and chain bounds; document eviction semantics.",
       "classification": "static finding; runtime impact untested",
@@ -802,13 +802,13 @@
       "file:line": "sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:22-54,377-395; sources/TinyTitanServer/Core/HTTPServer.swift:125",
       "title": "Validate loopback trust boundary, Host and browser-origin protections",
       "category": "L4 local service",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Server explicitly binds loopback; route checks Host presence only and JSON content type via prefix. Review DNS rebinding and local multi-user process access, including stored responses and model unload. No remote exploit established.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "LoopbackTrustPolicy: loopback Host (IPv4/localhost/::1, optional valid port), HTTP/1.1 Host required, HTTP/1.0 checked if present, duplicate Host/Origin/Referer and foreign Origin/Referer refused, refused HEAD bodyless. 13 tests; no CORS/auth. See AUDIT/evidence/0019.md.",
+      "commit": "d225c257",
       "blocked-reason": null,
       "acceptance-criteria": "Document single-user trust model; test allowed Host values, browser origin behavior, invalid media types and control endpoints; implement mitigation if threat model requires.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -846,13 +846,13 @@
       "file:line": "sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:42-54",
       "title": "Parse media type exactly instead of accepting application/json prefix",
       "category": "L3 input validation",
-      "status": "START",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "hasPrefix(\"application/json\") accepts unrelated media types such as application/jsonx. Expected exact media type with optional parameters; bodyless route policy remains separate.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Exact media-type parser: application/json only, case-insensitive type/subtype/params, valid params accepted, +json/duplicates/malformed refused; absent header only on the bodyless unload route. 8 parser + extended route-matrix tests; 81 server tests in the merged run. See AUDIT/evidence/0020.md.",
+      "commit": "7fa48ea8",
       "blocked-reason": null,
       "acceptance-criteria": "Test valid parameters, casing and invalid suffixes across API surfaces.",
       "classification": "static finding; runtime impact untested",
@@ -2077,7 +2077,7 @@
       "status": "OPEN",
       "host": "Apple Silicon Mac A",
       "discovered-by": "journal audit (broken Node environment)",
-      "evidence-before": "The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed.",
+      "evidence-before": "The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed. The server audit also observed a half-installed Homebrew CLI failing the suite instead of skipping; the skip must probe `--version` with a timeout, not just file presence.",
       "fix-summary": null,
       "evidence-after": null,
       "commit": null,
@@ -2284,6 +2284,117 @@
           "Check every index/cursor product in the planner."
         ]
       }
+    },
+    {
+      "id": "0057",
+      "severity": "S2",
+      "tier": "A",
+      "project": "TinyTitanServer",
+      "file:line": "sources/TinyTitanServer/Core/HTTPServer.swift:225",
+      "title": "Duplicate workspace header silently picks the first",
+      "category": "L4 input validation / cross-project contract",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0019/0020 server audit",
+      "evidence-before": "`WorkspaceHeader.value(in:)` uses `headers.first(name:)`, so duplicate `X-TinyTitan-Workspace` headers silently choose the first; the cross-project workspace input should follow the duplicate-header policy the media/Host paths now use.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "A duplicate workspace header is refused (or a documented deterministic policy is enforced) with a test; a single valid header is unchanged.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0019"
+        ],
+        "problem_description": "A duplicated workspace header can make the selected workspace depend on header order.",
+        "proposed_solution": [
+          "Apply the duplicate-header refusal used by Content-Type/Host, or document a deterministic policy.",
+          "Add a raw-socket test for the duplicate.",
+          "Keep the documented single-header clients working."
+        ],
+        "verification_steps": [
+          "Duplicate refused; single header routes as before.",
+          "Server tests and full suite pass."
+        ],
+        "self_audit_steps": [
+          "Check every `first(name:)` on a security-relevant header."
+        ]
+      }
+    },
+    {
+      "id": "0058",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanServer",
+      "file:line": "sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:30",
+      "title": "Duplicate anthropic-version silently picks the first",
+      "category": "L3 input validation",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0020 server audit",
+      "evidence-before": "`anthropic-version` presence uses `first(name:)`; duplicate headers silently choose one, affecting only the route/error shape.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "Duplicate anthropic-version is refused or deterministically handled with a test; single-header clients unchanged.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0020"
+        ],
+        "problem_description": "A duplicated routing header can select the surface by header order.",
+        "proposed_solution": [
+          "Apply the duplicate policy; test both shapes.",
+          "Keep the Anthropic surface for a single header."
+        ],
+        "verification_steps": [
+          "Duplicate refused; single header unchanged.",
+          "Server/full suite pass."
+        ],
+        "self_audit_steps": [
+          "Confirm no legitimate client sends duplicates."
+        ]
+      }
+    },
+    {
+      "id": "0059",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanServer",
+      "file:line": "sources/TinyTitanServer/Core/ResponsesAPIStore.swift:48",
+      "title": "ResponseStore.conversation re-concatenates history per continuation",
+      "category": "L5 resource use",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0018 server audit",
+      "evidence-before": "`conversation` still returns `inputItems + outputItems` per continuation, an O(history) allocation on every stored follow-up; the new byte budget bounds it but does not remove the cost.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "classification": "static performance finding",
+      "manual": {
+        "depends_on": [
+          "0018"
+        ],
+        "problem_description": "Every continuation allocates a flattened copy of the prior conversation.",
+        "proposed_solution": [
+          "Store or return a bounded view (lazy concatenation) or measure and accept the cost with the budget.",
+          "Keep lookup/eviction semantics.",
+          "Test the representation/measure the allocation."
+        ],
+        "verification_steps": [
+          "API behaviour unchanged; a measurement or a representation test.",
+          "Full suite and TSan pass."
+        ],
+        "self_audit_steps": [
+          "Confirm the API/eviction semantics are unchanged.",
+          "Confirm the measurement is honest and no request shape is unbounded."
+        ]
+      },
+      "acceptance-criteria": "The retained representation does not allocate a full copy per read, or the cost is measured and documented; the API semantics are unchanged."
     }
   ],
   "manual_revision": 1,

@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:35 in_progress:2 open:15 start:3 blocked:1**
+**done:39 in_progress:2 open:17 start:0 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -26,10 +26,10 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0014 | S1 | DONE | ContinuityCore | Distinguish corrupt complete journal records from torn tail |
 | 0015 | S1 | DONE | ContinuityCore | Validate journal file type, ownership and permissions |
 | 0016 | S1 | DONE | ContinuityCore | Handle short pread during tail repair without truncating unread bytes |
-| 0017 | S1 | START | TinyTitanServer | Bound HTTP header buffering before decoder completes |
-| 0018 | S1 | START | TinyTitanServer | Bound stored response memory by bytes and chain size |
-| 0019 | S1 | OPEN | TinyTitanServer | Validate loopback trust boundary, Host and browser-origin protections |
-| 0020 | S1 | START | TinyTitanServer | Parse media type exactly instead of accepting application/json prefix |
+| 0017 | S1 | DONE | TinyTitanServer | Bound HTTP header buffering before decoder completes |
+| 0018 | S1 | DONE | TinyTitanServer | Bound stored response memory by bytes and chain size |
+| 0019 | S1 | DONE | TinyTitanServer | Validate loopback trust boundary, Host and browser-origin protections |
+| 0020 | S1 | DONE | TinyTitanServer | Parse media type exactly instead of accepting application/json prefix |
 | 0021 | S1 | OPEN | TinyTitanKernelsC | Prove allocation products and BLAS narrowing safe at Swift–C boundary |
 | 0022 | S1 | OPEN | TinyTitanKernelsC | Prove C reader offset bounds and destruction versus active batch lifecycle |
 | 0023 | S1 | DONE | DSH plugin | Serialize catalog and configuration fields as safe YAML scalars |
@@ -66,6 +66,9 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0054 | S2 | OPEN | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
 | 0055 | S2 | OPEN | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
 | 0056 | S2 | OPEN | TinyTitanRepack | Checkpoint planner resident index and cursor arithmetic unchecked |
+| 0057 | S2 | OPEN | TinyTitanServer | Duplicate workspace header silently picks the first |
+| 0058 | S3 | OPEN | TinyTitanServer | Duplicate anthropic-version silently picks the first |
+| 0059 | S3 | OPEN | TinyTitanServer | ResponseStore.conversation re-concatenates history per continuation |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -207,31 +210,39 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0017 — Bound HTTP header buffering before decoder completes
 
-- S1 / Tier A / START / L4 resource exhaustion
+- S1 / Tier A / DONE / L4 resource exhaustion
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/HTTPServer.swift:20-37,102-120
 - Evidence before: Source explicitly acknowledges NIO accumulates unbounded small headers before application aggregate-limit checks. Pipeline config has no earlier aggregate bound. Server binds loopback, limiting exposure but not local denial of service.
+- Evidence after: NIO 2.100 NIOHTTPDecoderLimitConfiguration wired via withDecoderLimitConfiguration: 32 KiB list, 16 KiB field, 256 fields; application 431 at 16 KiB/128 fields remains. Incremental oversized heads refused 400 pre-decode; 40 HTTP tests. See AUDIT/evidence/0017.md.
+- Commit: `12a3560e`
 
 ## 0018 — Bound stored response memory by bytes and chain size
 
-- S1 / Tier A / START / L5 resource exhaustion
+- S1 / Tier A / DONE / L5 resource exhaustion
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/ResponsesAPIStore.swift:17-54; sources/TinyTitanServer/Core/HTTPServerHandler+Responses.swift:43-53,70-87
 - Evidence before: ResponseStore caps number of entries, not bytes; each continuation flattens prior conversation into storedInput, and entries retain input/output plus response JSON. A count cap does not bound accumulated history byte size. Generation context limits may reduce practical impact; measure.
+- Evidence after: ResponseStore now has 16 MiB per-entry / 64 MiB total / 256 entry bounds with checked accounting, deterministic eviction, refused puts that change nothing and store:false for oversize; chain refusal 400. 12 store + 5 HTTP tests; TSan store suite. See AUDIT/evidence/0018.md.
+- Commit: `422f99bb`
 
 ## 0019 — Validate loopback trust boundary, Host and browser-origin protections
 
-- S1 / Tier A / OPEN / L4 local service
+- S1 / Tier A / DONE / L4 local service
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:22-54,377-395; sources/TinyTitanServer/Core/HTTPServer.swift:125
 - Evidence before: Server explicitly binds loopback; route checks Host presence only and JSON content type via prefix. Review DNS rebinding and local multi-user process access, including stored responses and model unload. No remote exploit established.
+- Evidence after: LoopbackTrustPolicy: loopback Host (IPv4/localhost/::1, optional valid port), HTTP/1.1 Host required, HTTP/1.0 checked if present, duplicate Host/Origin/Referer and foreign Origin/Referer refused, refused HEAD bodyless. 13 tests; no CORS/auth. See AUDIT/evidence/0019.md.
+- Commit: `d225c257`
 
 ## 0020 — Parse media type exactly instead of accepting application/json prefix
 
-- S1 / Tier A / START / L3 input validation
+- S1 / Tier A / DONE / L3 input validation
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:42-54
 - Evidence before: hasPrefix("application/json") accepts unrelated media types such as application/jsonx. Expected exact media type with optional parameters; bodyless route policy remains separate.
+- Evidence after: Exact media-type parser: application/json only, case-insensitive type/subtype/params, valid params accepted, +json/duplicates/malformed refused; absent header only on the bodyless unload route. 8 parser + extended route-matrix tests; 81 server tests in the merged run. See AUDIT/evidence/0020.md.
+- Commit: `7fa48ea8`
 
 ## 0021 — Prove allocation products and BLAS narrowing safe at Swift–C boundary
 
@@ -494,7 +505,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - S2 / Tier C / OPEN / test integrity
 - Project: TinyTitanServer / tests; host: Apple Silicon Mac A
 - Location: tests/TinyTitanServer/ClientCLITests.swift:73-77
-- Evidence before: The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed.
+- Evidence before: The test `print`s and returns when `codex` is absent, so it reports passed while asserting nothing; the `test-skip` gate does not catch this shape. It is also why the broken-Node environment surfaced as a failure rather than a skip when codex is installed. The server audit also observed a half-installed Homebrew CLI failing the suite instead of skipping; the skip must probe `--version` with a timeout, not just file presence.
 
 ## 0052 — Compatibility reads still drop journal damage silently
 
@@ -530,4 +541,25 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2CheckpointPlanner.swift
 - Evidence before: The resident index (`tensors * entryBytes + header + stringTable`) and the cursor `+=` remain unchecked on the local checkpoint path; the same class as 0039/0043, not reachable from a GGUF header.
+
+## 0057 — Duplicate workspace header silently picks the first
+
+- S2 / Tier A / OPEN / L4 input validation / cross-project contract
+- Project: TinyTitanServer; host: Apple Silicon Mac A
+- Location: sources/TinyTitanServer/Core/HTTPServer.swift:225
+- Evidence before: `WorkspaceHeader.value(in:)` uses `headers.first(name:)`, so duplicate `X-TinyTitan-Workspace` headers silently choose the first; the cross-project workspace input should follow the duplicate-header policy the media/Host paths now use.
+
+## 0058 — Duplicate anthropic-version silently picks the first
+
+- S3 / Tier A / OPEN / L3 input validation
+- Project: TinyTitanServer; host: Apple Silicon Mac A
+- Location: sources/TinyTitanServer/Core/HTTPServerHandler+Routes.swift:30
+- Evidence before: `anthropic-version` presence uses `first(name:)`; duplicate headers silently choose one, affecting only the route/error shape.
+
+## 0059 — ResponseStore.conversation re-concatenates history per continuation
+
+- S3 / Tier A / OPEN / L5 resource use
+- Project: TinyTitanServer; host: Apple Silicon Mac A
+- Location: sources/TinyTitanServer/Core/ResponsesAPIStore.swift:48
+- Evidence before: `conversation` still returns `inputItems + outputItems` per continuation, an O(history) allocation on every stored follow-up; the new byte budget bounds it but does not remove the cost.
 
