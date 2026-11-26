@@ -83,9 +83,13 @@ public final class ParallelExpertReader: @unchecked Sendable {
         }
     }
 
+    /// The C reader's pool ceiling. `threads` is clamped to `1...16` here and
+    /// again by the C layer, so no `Int` value can trap in the conversion.
+    private static let maximumThreads = 16
+
     /// - Parameters:
-    ///   - threads: readers to run concurrently; clamped to 1...16 by the C layer.
-    ///     Four saturates the development machine.
+    ///   - threads: readers to run concurrently; clamped to 1...16 here and by
+    ///     the C layer. Four saturates the development machine.
     ///   - bypassCache: keep reads out of the page cache. Default on, because a
     ///     bounded footprint is the point of streaming.
     public init(
@@ -95,12 +99,13 @@ public final class ParallelExpertReader: @unchecked Sendable {
         bypassCache: Bool = true
     ) throws {
         precondition(expertStride > 0, "expertStride must be positive")
+        let boundedThreads = min(max(threads, 1), Self.maximumThreads)
         var failure: Int32 = 0
         guard
             let handle = tinytitan_expert_reader_create(
                 path,
                 expertStride,
-                Int32(threads),
+                Int32(boundedThreads),
                 bypassCache ? 1 : 0,
                 &failure)
         else {

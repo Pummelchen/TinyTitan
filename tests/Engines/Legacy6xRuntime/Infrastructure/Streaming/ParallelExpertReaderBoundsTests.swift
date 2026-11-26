@@ -332,6 +332,27 @@ import TinyTitanKernelsC
         #expect(Self.injectedReadIndex >= 3)
     }
 
+    // MARK: - Thread count
+
+    /// `threads` is `Int`-wide and used to be narrowed with `Int32(threads)`,
+    /// which traps above `Int32.max`. The documented clamp is 1...16, applied
+    /// on both sides, so every `Int` is a safe request.
+    @Test func outOfRangeThreadRequestsClampInsteadOfTrapping() throws {
+        let url = try Self.makeFixture(blocks: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        func threadCount(for threads: Int) throws -> Int {
+            try ParallelExpertReader(
+                path: url.path, expertStride: Self.stride, threads: threads
+            ).threadCount
+        }
+
+        #expect(try threadCount(for: Int(Int32.max)) == 16)
+        #expect(try threadCount(for: Int(Int32.max) + 1) == 16)
+        #expect(try threadCount(for: Int.max) == 16)
+        #expect(try threadCount(for: Int.min) == 1)
+    }
+
     // MARK: - Lifecycle
 
     /// A worker paused mid-batch, a second submit queued behind it, and a
