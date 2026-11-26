@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:20 in_progress:2 open:14 start:9 blocked:1**
+**done:21 in_progress:2 open:13 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -47,7 +47,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 | 0036 | S2 | DONE | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | DONE | CI / release | CI never compiles the library demo, so its compiler standard can regress |
-| 0038 | S3 | OPEN | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
+| 0038 | S3 | DONE | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
 | 0039 | S1 | OPEN | TinyTitanRepack | GGUF planner multiplies untrusted dimensions unchecked |
 | 0040 | S3 | OPEN | TinyTitanRepack | Unchecked width narrowing of the GGUF string-table count |
 | 0041 | S2 | OPEN | TinyTitanFormat | Expert index maximumEnd adds offset and length unchecked |
@@ -356,10 +356,12 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0038 — Manifest dependency declarations diverge from actual imports
 
-- S3 / Tier C / OPEN / build hygiene
+- S3 / Tier C / DONE / build hygiene
 - Project: Root SwiftPM / manifests; host: Apple Silicon Mac A
 - Location: Package.swift: TinyTitanServer, Qwen35Dense*, TinyTitanLib targets
 - Evidence before: The source-derived graph in AUDIT/contracts.md shows TinyTitanServer imports TinyTitanCore, TinyTitanLegacyEngine, TinyTitanLib and TinyTitanMemory without declaring them directly (they arrive through TinyTitanServerCore), while the six Qwen35Dense* targets and TinyTitanLib declare TinyTitanFormat with no direct import. The build succeeds today; the declarations are fragile/unused rather than failing.
+- Evidence after: TinyTitanServer declares the four modules its main.swift imports; the six dense targets and TinyTitanLib drop their unused TinyTitanFormat. Verified by swift package dump-package, swift build -c release (exit 0, 596 s) and swift build --build-tests (exit 0, 0 warnings). See AUDIT/evidence/0038.md.
+- Commit: `15fa7f65`
 
 ## 0039 — GGUF planner multiplies untrusted dimensions unchecked
 
