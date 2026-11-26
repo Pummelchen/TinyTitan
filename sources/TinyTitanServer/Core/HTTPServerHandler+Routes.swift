@@ -39,19 +39,19 @@ extension ServerHTTPHandler {
             head.headers.first(name: "anthropic-version") != nil
             || path.hasPrefix("/v1/messages")
         let segments = path.split(separator: "/").map(String.init)
-        let jsonBody =
-            head.headers.first(name: "content-type")?
-            .lowercased().hasPrefix("application/json") == true
+        // A media type is parsed exactly, not by prefix: `application/jsonx`
+        // and `application/vnd.api+json` are not `application/json`. A duplicate
+        // or malformed `Content-Type` is refused the same way -- choosing one of
+        // two values would make admission depend on header order.
+        let contentType = head.headers.requestContentType()
+        let jsonBody = contentType.isJSON
         // AUD-147's gate for a route that reads *no* body. `jsonBody` cannot be
         // copied here: `curl -X POST` sends no content-type, and that is how this
         // route is documented and tested -- the absent-header path is the CLI's
         // contract, which is the AUD-132 lesson. What still has to be refused is a
         // browser form POST, and a form always *does* name a content-type, so
         // "absent" is the CLI and "present but not JSON" is the form.
-        let notAForm =
-            head.headers.first(name: "content-type").map {
-                $0.lowercased().hasPrefix("application/json")
-            } ?? true
+        let notAForm = contentType.isAbsent || contentType.isJSON
         // S28: only the two read routes answer HEAD; see `refuseUnsupportedHEAD`.
         if refuseUnsupportedHEAD(head, path: path, context: context) { return }
         switch (head.method, path) {

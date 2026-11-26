@@ -184,6 +184,28 @@ private actor ThrowingMidStreamBackend: ServerInferenceBackend {
     }
 }
 
+/// Counts generation calls, so a content-type refusal can be asserted to have
+/// happened *before* the backend was reached rather than after it answered.
+///
+/// unchecked-invariant: `generations` is only touched under `lock`.
+private final class CountingBackend: ServerInferenceBackend, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _generations = 0
+
+    var generations: Int { lock.withLock { _generations } }
+
+    func generate(
+        _ request: ValidatedChatRequest,
+        onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
+    ) async throws -> ServerCompletion {
+        lock.withLock { _generations += 1 }
+        onEvent(.content("counted"))
+        return ServerCompletion(
+            content: "counted", toolCalls: [], finishReason: "stop",
+            usage: OpenAIUsage(promptTokens: 1, completionTokens: 1, totalTokens: 2))
+    }
+}
+
 /// Counts how often a residency-managed backend was built, so the unload
 /// endpoint's release/reload cycle is observable without a model on disk.
 private final class LoadCounter: @unchecked Sendable {
@@ -1086,15 +1108,26 @@ struct HTTPServerTests {
     /// cannot name `application/json`, so it is refused here; the request that
     /// the CLI and the tests above make -- `curl -X POST`, no content-type --
     /// still works, because the absent header is that route's contract.
+    ///
+    /// A media type is a type/subtype plus parameters, not a string prefix.
+    /// `application/jsonx` and `application/vnd.api+json` are different types,
+    /// and accepting either would let a page that can set a header this server
+    /// did not intend through the same gate.
     @Test func unloadRefusesABrowserFormPost() async throws {
+        let backend = CountingBackend()
         let server = TinyTitanHTTPServer(
             modelID: "test-model",
             queueLimit: 1,
-            backend: ScriptedServerBackend())
+            backend: backend)
         let channel = try await server.start(port: 0)
         let port = try #require(channel.localAddress?.port)
 
-        for encoding in ["application/x-www-form-urlencoded", "text/plain", "multipart/form-data"] {
+        let rejected = [
+            "application/x-www-form-urlencoded", "text/plain", "multipart/form-data",
+            "application/jsonx", "application/json-foo", "application/vnd.api+json",
+            "application/json;", "application/json; charset",
+        ]
+        for encoding in rejected {
             var request = URLRequest(
                 url: try localURL(port: port, "/v1/models/unload"))
             request.httpMethod = "POST"
@@ -1103,10 +1136,44 @@ struct HTTPServerTests {
             let (data, response) = try await URLSession.shared.data(for: request)
             #expect(
                 (response as? HTTPURLResponse)?.statusCode == 415,
-                "\(encoding) is a form, not a client")
+                "\(encoding) is not application/json")
             #expect(data.lossyUTF8String.contains("unsupported_media_type"))
             #expect(!data.lossyUTF8String.contains("\"unloaded\""))
         }
+
+        try await server.shutdown()
+    }
+
+    /// The bodyless unload contract in the other direction: an exact
+    /// `application/json` media type -- in any casing, with valid parameters --
+    /// is admitted, and so is the absent header `curl -X POST` sends.
+    @Test func unloadAcceptsExactJsonAndAbsentMediaType() async throws {
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: ScriptedServerBackend())
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let accepted = [
+            "application/json", "Application/JSON", "application/json; charset=utf-8",
+            " application/json ; charset=\"UTF-8\" ",
+        ]
+        for encoding in accepted {
+            var request = URLRequest(
+                url: try localURL(port: port, "/v1/models/unload"))
+            request.httpMethod = "POST"
+            request.setValue(encoding, forHTTPHeaderField: "content-type")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            #expect(
+                (response as? HTTPURLResponse)?.statusCode == 200,
+                "\(encoding) is exactly application/json")
+        }
+        // The absent-header allowance is this route's documented CLI contract.
+        var bare = URLRequest(url: try localURL(port: port, "/v1/models/unload"))
+        bare.httpMethod = "POST"
+        let (_, bareResponse) = try await URLSession.shared.data(for: bare)
+        #expect((bareResponse as? HTTPURLResponse)?.statusCode == 200)
 
         try await server.shutdown()
     }
@@ -1124,37 +1191,120 @@ struct HTTPServerTests {
     /// slash, because the encoder escapes `/` as `\/` and the full sentence does not
     /// appear in either body as written.
     @Test func everyJsonRouteRefusesANonJsonContentType() async throws {
+        let backend = CountingBackend()
         let server = TinyTitanHTTPServer(
             modelID: "test-model",
             queueLimit: 1,
-            backend: ScriptedServerBackend())
+            backend: backend)
         let channel = try await server.start(port: 0)
         let port = try #require(channel.localAddress?.port)
 
         let openAIRoutes = ["/v1/chat/completions", "/v1/responses", "/v1/responses/compact"]
         let anthropicRoutes = ["/v1/messages", "/v1/messages/count_tokens"]
+        // A prefix is not a media type. `application/jsonx`, a vendor `+json`
+        // suffix, a dangling parameter separator and a parameter with no value
+        // are all *not* `application/json`, and none may reach a handler.
+        let rejectedTypes = [
+            "text/plain", "application/x-www-form-urlencoded", "application/jsonx",
+            "application/json-foo", "application/vnd.api+json", "application/json;",
+            "application/json; charset", "application/json; =utf-8",
+            "application/json; charset=utf-8; charset=utf-8",
+        ]
         for route in openAIRoutes + anthropicRoutes {
-            var request = URLRequest(url: try localURL(port: port, route))
-            request.httpMethod = "POST"
-            request.setValue("text/plain", forHTTPHeaderField: "content-type")
-            request.httpBody = Data(
-                #"""
-                {"model":"test-model","messages":[{"role":"user","content":"hi"}]}
-                """#.utf8)
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let text = data.lossyUTF8String
-            #expect(
-                (response as? HTTPURLResponse)?.statusCode == 415,
-                "\(route) accepts a form POST")
-            #expect(
-                text.contains("content-type must be application"),
-                "\(route) answered 415 without naming the rule")
-            if openAIRoutes.contains(route) {
-                #expect(text.contains("unsupported_media_type"), "\(route) lost its code")
-            } else {
-                #expect(text.contains("invalid_request_error"), "\(route) lost its type")
+            for rejected in rejectedTypes {
+                var request = URLRequest(url: try localURL(port: port, route))
+                request.httpMethod = "POST"
+                request.setValue(rejected, forHTTPHeaderField: "content-type")
+                request.httpBody = Data(
+                    #"""
+                    {"model":"test-model","messages":[{"role":"user","content":"hi"}]}
+                    """#.utf8)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let text = data.lossyUTF8String
+                #expect(
+                    (response as? HTTPURLResponse)?.statusCode == 415,
+                    "\(route) accepts \(rejected)")
+                #expect(
+                    text.contains("content-type must be application"),
+                    "\(route) answered 415 without naming the rule")
+                if openAIRoutes.contains(route) {
+                    #expect(text.contains("unsupported_media_type"), "\(route) lost its code")
+                } else {
+                    #expect(text.contains("invalid_request_error"), "\(route) lost its type")
+                }
             }
         }
+        #expect(
+            backend.generations == 0,
+            "a refused media type reached the generation path")
+
+        try await server.shutdown()
+    }
+
+    /// A request that names `Content-Type` twice is ambiguous, not a merge:
+    /// HTTP does not define how two media types combine, and `first(name:)`
+    /// silently picked one. It is refused like any other unusable media type,
+    /// and the backend is never reached.
+    @Test func duplicateContentTypeIsRefused() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"hi"}]}"#
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        try writeAll(
+            socket: socket,
+            text:
+                "POST /v1/chat/completions HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:\(port)\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: \(body.utf8.count)\r\n"
+                + "Connection: close\r\n"
+                + "\r\n"
+                + body)
+        let reply = try readUntil(
+            socket: socket, timeoutMilliseconds: 2_000,
+            condition: { $0.contains("HTTP/1.1 ") })
+        #expect(reply.contains("HTTP/1.1 415"), "duplicate Content-Type was admitted: \(reply)")
+        #expect(backend.generations == 0)
+
+        try await server.shutdown()
+    }
+
+    /// The parts of the media-type grammar a client actually varies -- casing
+    /// and valid parameters -- are accepted on a JSON body route.
+    @Test func exactJsonMediaTypeCasingAndParametersAreAccepted() async throws {
+        let backend = CountingBackend()
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model",
+            queueLimit: 1,
+            backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+
+        let accepted = [
+            "application/json", "Application/JSON", "APPLICATION/JSON;charset=UTF-8",
+            "application/json ; charset=\"utf-8\"",
+        ]
+        let body = #"{"model":"test-model","messages":[{"role":"user","content":"hi"}]}"#
+        for mediaType in accepted {
+            var request = URLRequest(
+                url: try localURL(port: port, "/v1/chat/completions"))
+            request.httpMethod = "POST"
+            request.setValue(mediaType, forHTTPHeaderField: "content-type")
+            request.httpBody = Data(body.utf8)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            #expect(
+                (response as? HTTPURLResponse)?.statusCode == 200,
+                "a JSON body route refused \(mediaType)")
+        }
+        #expect(backend.generations == accepted.count)
 
         try await server.shutdown()
     }
