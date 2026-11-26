@@ -9,6 +9,25 @@ supported.
 TinyTitan is a research project. It is not intended for production,
 multi-user, or security-critical deployments.
 
+## Local server trust model
+
+The OpenAI/Anthropic-compatible server binds `127.0.0.1` only. It has no TLS and
+no authentication; `Authorization` and `x-api-key` are accepted and ignored.
+The trust boundary is the machine:
+
+- Other local processes can call the server and are accepted. They already have
+  the operator's privileges, so authentication here would not be a boundary.
+- Browser pages are not trusted. CORS is not enabled (no preflight answer, no
+  `Access-Control-Allow-Origin`), and requests whose `Host`, `Origin` or
+  `Referer` does not name a loopback host are refused before routing. That is
+  what closes DNS rebinding, where a page's own hostname resolves to
+  `127.0.0.1` and the browser treats the server as same-origin.
+
+Do not expose the port through a proxy, tunnel or reverse proxy, and do not
+change the bind address to a non-loopback interface. See
+[`docs/server-api.md`](docs/server-api.md#trust-boundary) for the exact header
+policy and error codes.
+
 ## Reporting a vulnerability
 
 Do not open a public issue for a suspected security vulnerability. Use

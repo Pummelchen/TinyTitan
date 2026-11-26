@@ -19,15 +19,6 @@ extension ServerHTTPHandler {
         body: ByteBuffer,
         context: ChannelHandlerContext
     ) {
-        // S27: HTTP/1.1 requires a Host header; reject requests without one.
-        if head.version == .http1_1, head.headers.first(name: "host") == nil {
-            writeError(
-                context, status: .badRequest,
-                OpenAIErrorEnvelope(
-                    message: "missing Host header",
-                    code: "missing_host"))
-            return
-        }
         let path =
             head.uri.split(
                 separator: "?", maxSplits: 1,
@@ -38,6 +29,25 @@ extension ServerHTTPHandler {
         let anthropic =
             head.headers.first(name: "anthropic-version") != nil
             || path.hasPrefix("/v1/messages")
+        // S27 and 0019: the listener is loopback-only and unauthenticated, so
+        // the Host/Origin/Referer boundary is what keeps a browser page (DNS
+        // rebinding included) outside the machine's trust. See
+        // LoopbackTrustPolicy for the full model.
+        if let refusal = LoopbackTrustPolicy.refusal(for: head) {
+            // A HEAD response may never carry a body, including when the
+            // request is refused before routing.
+            if head.method == .HEAD {
+                writeHeadOnly(context, status: refusal.status)
+            } else {
+                writeRequestError(
+                    context,
+                    .invalid(
+                        message: refusal.message, param: nil, code: refusal.code),
+                    status: refusal.status,
+                    surface: anthropic ? .anthropic : .chat)
+            }
+            return
+        }
         let segments = path.split(separator: "/").map(String.init)
         // A media type is parsed exactly, not by prefix: `application/jsonx`
         // and `application/vnd.api+json` are not `application/json`. A duplicate

@@ -21,6 +21,37 @@ ignored, because the server binds to 127.0.0.1 and the machine is the trust
 boundary. Every response carries `openai-version: 2020-10-01`; Anthropic
 responses also carry `request-id`.
 
+## Trust boundary
+
+The listener is `127.0.0.1` only, with no TLS and no authentication. Two kinds of
+caller are treated differently:
+
+- **Other processes on this machine** can reach the port and are accepted. They
+  already run with the operator's privileges, so a credential in this server
+  would not exclude them. That is the documented, residual local risk.
+- **A web page the operator visits** is not trusted. A page cannot read this
+  server's responses cross-origin (CORS is not enabled: preflights are not
+  answered and no `Access-Control-Allow-Origin` is sent), but DNS rebinding can
+  make its own hostname resolve to `127.0.0.1` and its `fetch` same-origin. The
+  `Host` header still names the attacker's host, and that is what the server
+  checks.
+
+Every request is admitted only when:
+
+- `Host` is `127.0.0.1`, `localhost`, or IPv6 loopback (`::1`), with an optional
+  valid port. HTTP/1.1 requires the header; HTTP/1.0 may omit it, but a present
+  value is checked.
+- `Origin` and `Referer`, when present, name a loopback host (any port). CLI
+  clients send neither header.
+- `Host`, `Origin` and `Referer` each appear at most once.
+
+A refused request is answered before routing, with `untrusted_host`,
+`untrusted_origin` or `untrusted_referer` (403) or `duplicate_host`,
+`duplicate_origin`, `duplicate_referer` or `invalid_host` (400); no model is
+loaded, generated against or unloaded. `POST /v1/models/unload` still accepts
+the bodyless `curl -X POST` (no `Content-Type`) this document's clients use, and
+refuses a browser form POST.
+
 ## The model name
 
 What a request may name depends on how the server was started. Both modes refuse
