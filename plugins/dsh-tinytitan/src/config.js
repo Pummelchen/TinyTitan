@@ -154,20 +154,36 @@ function resolveDebounce(value) {
   return ms;
 }
 
+/** Decimal text naming a whole number: `0`, `8192`, and nothing with a sign. */
+const DECIMAL_INTEGER = /^(?:0|[1-9][0-9]*)$/;
+
 /**
  * The compaction engine's headroom, when the operator names one.
  *
  * `null` (the default) leaves the field out of the generated preset, so the
- * harness's own default stands. A number is passed through: the engine subtracts
- * it from the message budget before applying `thresholdRatio`, so 0 puts that
- * ratio back in charge on a wide window and a small value keeps a guard on a
+ * harness's own default stands. A safe whole number is passed through: the engine
+ * subtracts it from the message budget before applying `thresholdRatio`, so 0 puts
+ * that ratio back in charge on a wide window and a small value keeps a guard on a
  * narrow one — see `buildTinytitanPlugins` for the arithmetic and the trap this
  * exists for.
+ *
+ * The type is explicit because the value is arithmetic, not text: a number must
+ * be a safe integer (`MAX_SAFE_INTEGER` is the largest value that survives the
+ * subtraction exactly), a string must be plain decimal text naming one — the
+ * shape an environment-driven config can carry — and everything else is refused
+ * rather than coerced. `Number.isInteger` alone took `true` as 1, `[]` as 0, and
+ * an empty or whitespace string as 0, and accepted integer-valued numbers past
+ * the safe range where the budget silently loses precision.
+ *
+ * @param value - the configured headroom, or `undefined`/`null` for unset.
+ * @returns the token count, or `null`.
  */
 function resolveCompactionHeadroom(value) {
   if (value === undefined || value === null) return null;
-  const tokens = Number(value);
-  if (!Number.isInteger(tokens) || tokens < 0) {
+  let tokens = Number.NaN;
+  if (typeof value === "number") tokens = value;
+  else if (typeof value === "string" && DECIMAL_INTEGER.test(value)) tokens = Number(value);
+  if (!Number.isSafeInteger(tokens) || tokens < 0) {
     throw new Error(
       `dsh-tinytitan: compactionHeadroomTokens must be a whole number of tokens, got ${value}`,
     );

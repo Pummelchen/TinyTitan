@@ -315,6 +315,52 @@ test("the reasoning level is one the route can actually declare", () => {
   }
 });
 
+test("compaction headroom is a safe whole number of tokens, or unset", () => {
+  // Unset means the generated preset names no headroom, so the harness's own
+  // 65536 stands; `0` is a real choice (put the ratio back in charge) and must
+  // not collapse into "unset".
+  assert.equal(resolveConfig().compactionHeadroomTokens, null);
+  assert.equal(resolveConfig({ compactionHeadroomTokens: 0 }).compactionHeadroomTokens, 0);
+  assert.equal(resolveConfig({ compactionHeadroomTokens: 8192 }).compactionHeadroomTokens, 8192);
+  // A decimal string is the shape an environment-driven config can arrive in;
+  // it is parsed exactly and nothing else is.
+  assert.equal(resolveConfig({ compactionHeadroomTokens: "8192" }).compactionHeadroomTokens, 8192);
+  // The largest value the arithmetic can hold without silently losing precision.
+  assert.equal(
+    resolveConfig({ compactionHeadroomTokens: Number.MAX_SAFE_INTEGER }).compactionHeadroomTokens,
+    Number.MAX_SAFE_INTEGER,
+  );
+  // Everything the old `Number.isInteger(tokens) && tokens >= 0` accepted by
+  // coercion, plus the unsafe integers it accepted outright.
+  for (const rejected of [
+    Number.MAX_SAFE_INTEGER + 1,
+    1e21,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    true,
+    false,
+    [],
+    [8192],
+    {},
+    "",
+    " ",
+    "8192 ",
+    " 8192",
+    "08,192",
+    "8.5",
+    "0x2000",
+    "1e4",
+  ]) {
+    assert.throws(
+      () => resolveConfig({ compactionHeadroomTokens: rejected }),
+      /compactionHeadroomTokens must be a whole number of tokens/,
+      JSON.stringify(rejected),
+    );
+  }
+});
+
 test("the reasoning level comes from the config, then the environment, then the default", () => {
   // The route's declared level is what the harness asks for on every call that
   // names none, so it has to be settable from outside without editing a profile.
