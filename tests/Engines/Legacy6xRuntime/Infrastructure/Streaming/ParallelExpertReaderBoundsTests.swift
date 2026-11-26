@@ -264,6 +264,52 @@ import TinyTitanKernelsC
         }
     }
 
+    // MARK: - Count conversion
+
+    /// `byteCounts` is `Int`-wide, the C reader's is `uint32_t`. The conversion
+    /// must not trap: a representable count reaches the C layer (which refuses
+    /// the range as `EOVERFLOW` before reading), and one above `UInt32.max` is
+    /// a typed refusal naming the offending element.
+    @Test func byteCountConversionIsCheckedNotTrapping() throws {
+        let url = try Self.makeFixture(blocks: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let reader = try ParallelExpertReader(
+            path: url.path, expertStride: Self.stride, threads: 1)
+        let destination = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
+        defer { destination.deallocate() }
+
+        do {
+            try reader.fetch(
+                offsets: [0], byteCounts: [Int(UInt32.max)], into: [destination])
+            Issue.record("a range above INT_MAX must be refused by the C layer")
+        } catch let failure as ParallelExpertReader.Failure {
+            guard case .readFailed(let code) = failure else {
+                Issue.record("unexpected failure \(failure)")
+                return
+            }
+            #expect(code == EOVERFLOW)
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+
+        let tooWide = Int(UInt32.max) + 1
+        do {
+            try reader.fetch(
+                offsets: [0, 0], byteCounts: [1, tooWide],
+                into: [destination, destination])
+            Issue.record("a count above UInt32.max must be refused by the wrapper")
+        } catch let failure as ParallelExpertReader.Failure {
+            guard case .countOutOfRange(let index, let count) = failure else {
+                Issue.record("unexpected failure \(failure)")
+                return
+            }
+            #expect(index == 1)
+            #expect(count == tooWide)
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+    }
+
     // MARK: - Short read and EINTR
 
     /// The per-item loop must keep the bytes it already read across a short

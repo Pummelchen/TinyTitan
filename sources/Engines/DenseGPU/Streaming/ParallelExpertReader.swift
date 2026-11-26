@@ -63,6 +63,11 @@ public final class ParallelExpertReader: @unchecked Sendable {
     public enum Failure: Error, CustomStringConvertible {
         case openFailed(path: String, errno: Int32)
         case readFailed(errno: Int32)
+        /// A `byteCounts` element cannot be passed to the C reader, which takes
+        /// a `uint32_t` per range. The Swift API is `Int`-wide, so an
+        /// out-of-range request is a typed refusal rather than a trapping
+        /// conversion.
+        case countOutOfRange(index: Int, count: Int)
 
         public var description: String {
             switch self {
@@ -71,6 +76,9 @@ public final class ParallelExpertReader: @unchecked Sendable {
                     + String(cString: strerror(code))
             case .readFailed(let code):
                 return "parallel expert read failed: \(String(cString: strerror(code)))"
+            case .countOutOfRange(let index, let count):
+                return "parallel expert read count \(count) at index \(index) "
+                    + "does not fit the C reader's 32-bit range count"
             }
         }
     }
@@ -161,7 +169,17 @@ public final class ParallelExpertReader: @unchecked Sendable {
         precondition(
             byteCounts.allSatisfy { $0 > 0 },
             "byteCounts must all be positive")
-        let counts = byteCounts.map { UInt32($0) }
+        // The C entry point takes a uint32_t per range. Converting with
+        // `UInt32(_:)` would trap on an over-wide count; this API is `Int`-wide,
+        // so an unrepresentable value is a typed refusal instead.
+        var counts: [UInt32] = []
+        counts.reserveCapacity(byteCounts.count)
+        for (index, count) in byteCounts.enumerated() {
+            guard let value = UInt32(exactly: count) else {
+                throw Failure.countOutOfRange(index: index, count: count)
+            }
+            counts.append(value)
+        }
         let status = destinations.withUnsafeBufferPointer { dst in
             dst.withMemoryRebound(to: UnsafeMutableRawPointer?.self) { rebound in
                 offsets.withUnsafeBufferPointer { offs in
