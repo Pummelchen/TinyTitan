@@ -212,6 +212,64 @@ test("resolveConfig defaults the switch off and validates the cap", () => {
   assert.throws(() => resolveConfig({ autoGoalRounds: "many", log: () => {} }), /positive integer/);
 });
 
+test("the goal and autonomy round caps take only whole numbers", () => {
+  // Both caps are a promise about how much unattended work one prompt may buy,
+  // so a profile that says `true` must not mean "1 round" and one that says
+  // `[30]` must not mean 30. The documented forms are a positive whole number
+  // or canonical decimal text; `""` is the "not set" sentinel and keeps the
+  // default. `Number(value)` used to absorb the rest.
+  const accepted = [
+    ["autoGoalRounds", 1, 1],
+    ["autoGoalRounds", 30, 30],
+    ["autoGoalRounds", "30", 30],
+    ["autoGoalRounds", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    ["autonomyRounds", 1, 1],
+    ["autonomyRounds", 30, 30],
+    ["autonomyRounds", "30", 30],
+    ["autonomyRounds", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  ];
+  for (const [field, value, expected] of accepted) {
+    assert.equal(resolveConfig({ [field]: value, log: () => {} })[field], expected);
+  }
+  assert.equal(resolveConfig({ log: () => {} }).autoGoalRounds, DEFAULT_AUTO_GOAL_ROUNDS);
+  assert.equal(resolveConfig({ log: () => {} }).autonomyRounds, AUTONOMY_DEFAULT_ROUNDS);
+  assert.equal(
+    resolveConfig({ autoGoalRounds: "", log: () => {} }).autoGoalRounds,
+    DEFAULT_AUTO_GOAL_ROUNDS,
+  );
+  assert.equal(
+    resolveConfig({ autonomyRounds: "", log: () => {} }).autonomyRounds,
+    AUTONOMY_DEFAULT_ROUNDS,
+  );
+  for (const field of ["autoGoalRounds", "autonomyRounds"]) {
+    for (const rejected of [
+      true,
+      false,
+      [],
+      [5],
+      {},
+      " ",
+      " 5",
+      "5 ",
+      "1e2",
+      "0x10",
+      "05",
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      assert.throws(
+        () => resolveConfig({ [field]: rejected, log: () => {} }),
+        new RegExp(`${field} must be a positive integer`),
+        `${field} ${JSON.stringify(rejected)}`,
+      );
+    }
+  }
+});
+
 test("resolveConfig carries the autonomy switches and validates their budget", () => {
   const base = resolveConfig({ log: () => {} });
   assert.equal(base.autonomy, false);

@@ -255,11 +255,14 @@ function resolveRouteTokenCount(field, value) {
  * unattended goal is not stopped by a small round budget; a profile can lower it
  * to bound prompts a person did not mark as long-running work. A positive
  * integer is required — the value is a promise about how much unattended work a
- * stray prompt may buy, so it is never derived or guessed.
+ * stray prompt may buy, so it is never derived or guessed. Read through
+ * `wholeNumber`: a positive safe integer or canonical decimal text, with `""`
+ * (the empty-env sentinel) keeping the default; a boolean or an array is refused
+ * rather than coerced to 1 or to its single element.
  */
 function resolveAutoGoalRounds(value) {
   if (value === undefined || value === null || value === "") return DEFAULT_AUTO_GOAL_ROUNDS;
-  const rounds = Number(value);
+  const rounds = wholeNumber(value);
   if (!Number.isSafeInteger(rounds) || rounds <= 0) {
     throw new Error(`dsh-tinytitan: autoGoalRounds must be a positive integer, got ${value}`);
   }
@@ -272,11 +275,13 @@ function resolveAutoGoalRounds(value) {
  * Only read when `autonomy` is on. The harness enforces its own ceiling on a
  * call override, so this is a policy default rather than a hard stop; a positive
  * integer is still required, because "keep going" without a number is not a
- * budget anyone can reason about.
+ * budget anyone can reason about. Read through `wholeNumber`, like the goal cap:
+ * a positive safe integer or canonical decimal text, `""` keeps the default, and
+ * a boolean or an array is refused rather than coerced.
  */
 function resolveAutonomyRounds(value) {
   if (value === undefined || value === null || value === "") return AUTONOMY_DEFAULT_ROUNDS;
-  const rounds = Number(value);
+  const rounds = wholeNumber(value);
   if (!Number.isSafeInteger(rounds) || rounds <= 0) {
     throw new Error(`dsh-tinytitan: autonomyRounds must be a positive integer, got ${value}`);
   }
@@ -288,11 +293,13 @@ function resolveAutonomyRounds(value) {
  *
  * Only read when `handoff` is on. Each hop is a child session with its own
  * context and model calls, so the chain needs a number: "keep going until it is
- * done" is a policy, not an unbounded budget.
+ * done" is a policy, not an unbounded budget. Read through `wholeNumber`: a
+ * positive safe integer or canonical decimal text, `""` keeps the default, and a
+ * boolean or an array is refused rather than coerced.
  */
 function resolveHandoffHops(value) {
   if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_HOPS;
-  const hops = Number(value);
+  const hops = wholeNumber(value);
   if (!Number.isSafeInteger(hops) || hops <= 0) {
     throw new Error(`dsh-tinytitan: handoffHops must be a positive integer, got ${value}`);
   }
@@ -308,11 +315,13 @@ function resolveHandoffHops(value) {
  * 1,000,000-token route at 600,000, and a 1,048,576-token one at 629,145. An
  * explicit positive integer pins one number.
  * `0` is refused on purpose: a zero budget hands off at the first turn, which is
- * how an unbounded chain was found once already.
+ * how an unbounded chain was found once already. Read through `wholeNumber`: a
+ * positive safe integer or canonical decimal text (no `0`), `""` means auto, and
+ * a boolean or an array is refused rather than coerced.
  */
 function resolveHandoffAtTokens(value) {
   if (value === undefined || value === null || value === "") return null;
-  const tokens = Number(value);
+  const tokens = wholeNumber(value);
   if (!Number.isSafeInteger(tokens) || tokens <= 0) {
     throw new Error(`dsh-tinytitan: handoffAtTokens must be a positive integer, got ${value}`);
   }
@@ -351,11 +360,13 @@ function resolveHandoffWindowRatio(value) {
  *
  * Only read when `handoff` is on. The per-goal cap bounds one chain; this is the
  * process-wide ceiling that makes a runaway impossible even across several
- * goals, which is the shape the one observed runaway took.
+ * goals, which is the shape the one observed runaway took. Read through
+ * `wholeNumber`: a positive safe integer or canonical decimal text, `""` keeps
+ * the default, and a boolean or an array is refused rather than coerced.
  */
 function resolveHandoffMaxChildren(value) {
   if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_MAX_CHILDREN;
-  const children = Number(value);
+  const children = wholeNumber(value);
   if (!Number.isSafeInteger(children) || children <= 0) {
     throw new Error(`dsh-tinytitan: handoffMaxChildren must be a positive integer, got ${value}`);
   }

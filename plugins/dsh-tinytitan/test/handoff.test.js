@@ -685,6 +685,68 @@ test("an explicit budget wins over the window, and a missing one falls back", as
   }
 });
 
+test("the handoff budgets take only whole numbers", () => {
+  // Hops, the pinned prompt-token budget and the process-wide child ceiling are
+  // all arithmetic in the handoff driver. A profile that says `true` must not
+  // mean one hop or one child, and `[50000]` must not mean a 50,000-token
+  // budget; the documented forms are a positive whole number or canonical
+  // decimal text, and `""` is the "not set" sentinel.
+  const accepted = [
+    ["handoffHops", 1, 1],
+    ["handoffHops", 9, 9],
+    ["handoffHops", "3", 3],
+    ["handoffHops", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    ["handoffAtTokens", 1, 1],
+    ["handoffAtTokens", 50000, 50000],
+    ["handoffAtTokens", "50000", 50000],
+    ["handoffAtTokens", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+    ["handoffMaxChildren", 1, 1],
+    ["handoffMaxChildren", 2, 2],
+    ["handoffMaxChildren", "8", 8],
+    ["handoffMaxChildren", Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  ];
+  for (const [field, value, expected] of accepted) {
+    assert.equal(resolveConfig({ [field]: value, log: () => {} })[field], expected);
+  }
+  const base = resolveConfig({ log: () => {} });
+  assert.equal(base.handoffHops, DEFAULT_HANDOFF_HOPS);
+  assert.equal(base.handoffAtTokens, null);
+  assert.equal(base.handoffMaxChildren, DEFAULT_HANDOFF_MAX_CHILDREN);
+  assert.equal(resolveConfig({ handoffHops: "", log: () => {} }).handoffHops, DEFAULT_HANDOFF_HOPS);
+  assert.equal(resolveConfig({ handoffAtTokens: "", log: () => {} }).handoffAtTokens, null);
+  assert.equal(
+    resolveConfig({ handoffMaxChildren: "", log: () => {} }).handoffMaxChildren,
+    DEFAULT_HANDOFF_MAX_CHILDREN,
+  );
+  for (const field of ["handoffHops", "handoffAtTokens", "handoffMaxChildren"]) {
+    for (const rejected of [
+      true,
+      false,
+      [],
+      [5],
+      {},
+      " ",
+      " 5",
+      "5 ",
+      "1e2",
+      "0x10",
+      "05",
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      assert.throws(
+        () => resolveConfig({ [field]: rejected, log: () => {} }),
+        new RegExp(`${field} must be a positive integer`),
+        `${field} ${JSON.stringify(rejected)}`,
+      );
+    }
+  }
+});
+
 test("resolveConfig carries the handoff switches and refuses a zero budget", () => {
   const base = resolveConfig({ log: () => {} });
   assert.equal(base.handoff, false);
