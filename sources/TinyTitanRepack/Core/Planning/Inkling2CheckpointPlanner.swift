@@ -124,7 +124,8 @@ enum Inkling2CheckpointPlanner {
         let rawIndex = UInt64(
             SSDAIBinary.indexHeaderBytes + tensors.count * SSDAIBinary.indexEntryBytes
                 + stringTable.count)
-        let indexSize = Inkling2GGUFPlanner.roundUp(rawIndex, to: Layout.pageBytes)
+        let indexSize = try Inkling2GGUFPlanner.roundUp(
+            rawIndex, to: Layout.pageBytes, field: "resident index size")
         var cursor = indexSize
         var entries: [ResidentEntry] = []
         for (tensor, name) in tensors {
@@ -140,7 +141,8 @@ enum Inkling2CheckpointPlanner {
             guard tensor.shape.count <= 4, tensor.shape.allSatisfy({ $0 <= UInt32.max }) else {
                 throw RepackError.configurationInvalid(detail: "\(name): shape \(tensor.shape)")
             }
-            cursor = Inkling2GGUFPlanner.roundUp(cursor, to: residentAlignment)
+            cursor = try Inkling2GGUFPlanner.roundUp(
+                cursor, to: residentAlignment, field: "\(name) resident offset")
             let shape = tensor.shape.map { UInt32($0) }
             entries.append(
                 ResidentEntry(
@@ -209,7 +211,8 @@ enum Inkling2CheckpointPlanner {
                     detail: "\(label): \(dtypeName ?? "\(tensor.dtype)") \(tensor.shape) "
                         + "is not \(experts) x \(bytes) bytes of \(sourceDType ?? "F32")")
             }
-            cursor = Inkling2GGUFPlanner.roundUp(cursor, to: blobAlignment)
+            cursor = try Inkling2GGUFPlanner.roundUp(
+                cursor, to: blobAlignment, field: "layer \(layer) \(key) offset")
             slices.append(
                 PerExpertTensorSlice(
                     role: role, component: component, dtype: code, logicalShape: shape,
@@ -252,7 +255,8 @@ enum Inkling2CheckpointPlanner {
             path: (outputDir as NSString).appendingPathComponent(
                 String(format: "packed_experts/layer_%02d.bin", layer)),
             expertsPerLayer: experts,
-            expertStride: Inkling2GGUFPlanner.roundUp(cursor, to: Layout.pageBytes),
+            expertStride: try Inkling2GGUFPlanner.roundUp(
+                cursor, to: Layout.pageBytes, field: "layer \(layer) expert stride"),
             subTensors: slices)
     }
 }

@@ -56,15 +56,49 @@ enum Inkling2GGUFPlanner {
 
     /// Bytes of a `rows x columns` matrix (ggml order: `dimensions[0]` is the
     /// row length; every later dimension multiplies into the rows).
+    ///
+    /// Every product is checked: the dimensions come from the GGUF header, so a
+    /// hostile tensor can name values whose product wraps `UInt64`. The typed
+    /// error is raised before the result can size a buffer or an offset.
     static func bytes(of dimensions: [UInt64], kept: Kept, tensor name: String) throws -> UInt64 {
         guard let columns = dimensions.first else {
             throw RepackError.configurationInvalid(detail: "\(name): no dimensions")
         }
-        let rows = dimensions.dropFirst().reduce(UInt64(1), *)
+        let rows = try dimensions.dropFirst().reduce(1) { total, dimension in
+            try checkedProduct(
+                total, dimension, tensor: name, field: "dimensions \(dimensions)")
+        }
         if let block = kept.block {
             return try block.payloadBytes(rows: rows, columns: columns, field: name)
         }
-        return rows * columns * kept.elementBytes
+        let values = try checkedProduct(
+            rows, columns, tensor: name, field: "dimensions \(dimensions)")
+        return try checkedProduct(
+            values, kept.elementBytes, tensor: name,
+            field: "dimensions \(dimensions) element size")
+    }
+
+    /// A product of two untrusted sizes, or a typed planner error naming the
+    /// tensor and the field.
+    private static func checkedProduct(
+        _ lhs: UInt64, _ rhs: UInt64, tensor name: String, field: String
+    ) throws -> UInt64 {
+        let (value, overflow) = lhs.multipliedReportingOverflow(by: rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(name): \(field) overflows")
+        }
+        return value
+    }
+
+    /// A sum of two untrusted sizes, or a typed planner error.
+    private static func checkedAdd(
+        _ lhs: UInt64, _ rhs: UInt64, tensor name: String, field: String
+    ) throws -> UInt64 {
+        let (value, overflow) = lhs.addingReportingOverflow(rhs)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(detail: "\(name): \(field) overflows")
+        }
+        return value
     }
 
     /// `blk.<layer>.ffn_{gate_up,down}_exps.{weight,scale}` → (layer, sub-tensor key).
@@ -92,6 +126,12 @@ enum Inkling2GGUFPlanner {
                     + "\(header.string("general.architecture") ?? "none"))")
         }
         let arch = try Inkling2GGUFArch.archInfo(header)
+        guard arch.numLayers > 0, arch.numExperts > 0 else {
+            throw RepackError.configurationInvalid(
+                detail:
+                    "Inkling 2 GGUF declares \(arch.numLayers) layers and "
+                    + "\(arch.numExperts) experts; both must be positive")
+        }
         var residentTensors: [GGUFHeaderV3.Tensor] = []
         var expertTensors: [Int: [String: GGUFHeaderV3.Tensor]] = [:]
         for tensor in header.tensors {
@@ -151,10 +191,18 @@ enum Inkling2GGUFPlanner {
             offsets.append(UInt32(stringTable.count))
             stringTable.append(contentsOf: tensor.name.utf8)
         }
-        let rawIndex = UInt64(
-            SSDAIBinary.indexHeaderBytes + tensors.count * SSDAIBinary.indexEntryBytes
-                + stringTable.count)
-        let indexSize = roundUp(rawIndex, to: Layout.pageBytes)
+        let (indexEntries, entriesOverflow) = tensors.count.multipliedReportingOverflow(
+            by: SSDAIBinary.indexEntryBytes)
+        let (indexBody, headerOverflow) = SSDAIBinary.indexHeaderBytes.addingReportingOverflow(
+            indexEntries)
+        let (rawIndexValue, rawOverflow) = indexBody.addingReportingOverflow(stringTable.count)
+        guard !entriesOverflow, !headerOverflow, !rawOverflow, rawIndexValue >= 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "the resident index of \(tensors.count) tensors overflows")
+        }
+        let rawIndex = UInt64(rawIndexValue)
+        let indexSize = try roundUp(
+            rawIndex, to: Layout.pageBytes, field: "resident index size")
         var cursor = indexSize
         var entries: [ResidentEntry] = []
         for tensor in tensors {
@@ -163,8 +211,16 @@ enum Inkling2GGUFPlanner {
             guard tensor.dimensions.count <= 4 else {
                 throw RepackError.configurationInvalid(detail: "\(tensor.name): rank above 4")
             }
-            cursor = roundUp(cursor, to: residentAlignment)
-            let shape = tensor.dimensions.reversed().map { UInt32($0) }
+            cursor = try roundUp(
+                cursor, to: residentAlignment, field: "\(tensor.name) resident offset")
+            var shape: [UInt32] = []
+            for dimension in tensor.dimensions.reversed() {
+                guard let narrowed = UInt32(exactly: dimension) else {
+                    throw RepackError.configurationInvalid(
+                        detail: "\(tensor.name): dimension \(dimension) exceeds UInt32")
+                }
+                shape.append(narrowed)
+            }
             entries.append(
                 ResidentEntry(
                     name: tensor.name, dtype: kept.code,
@@ -174,7 +230,8 @@ enum Inkling2GGUFPlanner {
                     quantSpec: nil,
                     sourceWeight: try sourceTensor(tensor, size: size, source: source),
                     sourceScales: nil, sourceBiases: nil))
-            cursor += size
+            cursor = try checkedAdd(
+                cursor, size, tensor: tensor.name, field: "resident offset")
         }
         return ResidentFilePlan(
             path: (outputDir as NSString).appendingPathComponent("model_weights.bin"),
@@ -186,6 +243,10 @@ enum Inkling2GGUFPlanner {
         _ layer: Int, tensors: [String: GGUFHeaderV3.Tensor], experts: Int,
         source: Source, outputDir: String
     ) throws -> LayerFilePlan {
+        guard experts > 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "layer \(layer): \(experts) experts")
+        }
         var slices: [PerExpertTensorSlice] = []
         var cursor: UInt64 = 0
         // Weights first, then their scales, each 64-byte aligned in the blob.
@@ -206,7 +267,8 @@ enum Inkling2GGUFPlanner {
                 tensor.dimensions.count == 1 ? [UInt64(1)] : Array(tensor.dimensions.dropLast())
             let perExpert = try bytes(of: perExpertDimensions, kept: kept, tensor: tensor.name)
             let isScale = key.hasSuffix("_scale")
-            cursor = roundUp(cursor, to: blobAlignment)
+            cursor = try roundUp(
+                cursor, to: blobAlignment, field: "layer \(layer) \(key) offset")
             slices.append(
                 PerExpertTensorSlice(
                     role: isScale ? String(key.dropLast("_scale".count)) : key,
@@ -216,20 +278,38 @@ enum Inkling2GGUFPlanner {
                     offsetInExpertBlob: cursor, sizeInExpertBlob: perExpert,
                     sourceOffsetPerExpert: perExpert,
                     sourceTensor: try sourceTensor(
-                        tensor, size: perExpert * UInt64(experts), source: source),
+                        tensor,
+                        size: try checkedProduct(
+                            perExpert, UInt64(experts), tensor: tensor.name,
+                            field: "per-expert bytes"),
+                        source: source),
                     bitsForWeights: isScale ? nil : kept.bits))
-            cursor += perExpert
+            cursor = try checkedAdd(
+                cursor, perExpert, tensor: tensor.name, field: "layer \(layer) \(key) end")
         }
         return LayerFilePlan(
             layerIndex: layer,
             path: (outputDir as NSString).appendingPathComponent(
                 String(format: "packed_experts/layer_%02d.bin", layer)),
             expertsPerLayer: experts,
-            expertStride: roundUp(cursor, to: Layout.pageBytes),
+            expertStride: try roundUp(
+                cursor, to: Layout.pageBytes, field: "layer \(layer) expert stride"),
             subTensors: slices)
     }
 
-    static func roundUp(_ value: UInt64, to alignment: UInt64) -> UInt64 {
-        (value + alignment - 1) / alignment * alignment
+    /// Rounds `value` up to `alignment`, refusing a value that cannot be
+    /// represented instead of trapping on the `+ alignment - 1` intermediate.
+    static func roundUp(
+        _ value: UInt64, to alignment: UInt64, field: String = "offset"
+    ) throws -> UInt64 {
+        guard alignment > 0 else {
+            throw RepackError.configurationInvalid(detail: "\(field): alignment is zero")
+        }
+        let (padded, overflow) = value.addingReportingOverflow(alignment - 1)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(
+                detail: "\(field): \(value) cannot be rounded to \(alignment)")
+        }
+        return (padded / alignment) * alignment
     }
 }

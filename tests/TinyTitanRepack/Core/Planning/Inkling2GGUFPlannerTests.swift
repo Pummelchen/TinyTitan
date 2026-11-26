@@ -56,7 +56,8 @@ import TinyTitanFormat
         #expect(plan.arch.variantGeometry?.scalars["loopPasses"] == 3)
         #expect(plan.resident.entries.count == 734 - 88)
         // NVFP4 layers: 2,985,984 + 1,492,992 + two 4-byte scales, page-rounded.
-        let nvfp4Stride = Inkling2GGUFPlanner.roundUp(2_985_984 + 1_492_992 + 64 + 4, to: 16_384)
+        let nvfp4Stride = try Inkling2GGUFPlanner.roundUp(
+            2_985_984 + 1_492_992 + 64 + 4, to: 16_384)
         #expect(plan.layers[0].expertStride == nvfp4Stride)
         #expect(plan.layers[20].expertStride > nvfp4Stride)
         #expect(plan.manifestExpertStride == plan.layers[20].expertStride)
@@ -80,6 +81,54 @@ import TinyTitanFormat
         #expect(copied == tensorBytes + (plan.passthroughFiles.first?.size ?? 0))
         let layout = try SSDAIJSON.encodeLayout(plan: plan, expertStride: plan.manifestExpertStride)
         _ = try SSDAIPackedExpertsLayoutCodec.decode(layout)
+    }
+
+    /// The header's dimensions are untrusted. A product that wraps `UInt64`
+    /// must be a typed planner error, not arithmetic that traps before the
+    /// planner can refuse the file.
+    @Test("A dimension product that cannot fit is refused")
+    func oversizedDimensionsAreRefused() throws {
+        let f32 = try Inkling2GGUFPlanner.kept(ggmlType: 0, tensor: "w")
+        // The rows product itself overflows: UInt64.max * 2.
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.bytes(
+                of: [UInt64.max, 2], kept: f32, tensor: "w")
+        }
+        // rows * columns fits, rows * columns * elementBytes does not.
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.bytes(
+                of: [1 << 62, 2], kept: f32, tensor: "w")
+        }
+        // A block encoding computes the same rows product before payloadBytes.
+        let nvfp4 = try Inkling2GGUFPlanner.kept(ggmlType: 40, tensor: "w")
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.bytes(
+                of: [64, UInt64.max, 2], kept: nvfp4, tensor: "w")
+        }
+    }
+
+    @Test("Valid dimensions keep their exact byte counts")
+    func validDimensionsKeepTheirByteCounts() throws {
+        let f32 = try Inkling2GGUFPlanner.kept(ggmlType: 0, tensor: "w")
+        #expect(try Inkling2GGUFPlanner.bytes(of: [64, 2], kept: f32, tensor: "w") == 512)
+        #expect(
+            try Inkling2GGUFPlanner.bytes(of: [64, 2, 3], kept: f32, tensor: "w") == 1_536)
+        let q8 = try Inkling2GGUFPlanner.kept(ggmlType: 8, tensor: "w")
+        // 4 rows of 32 values = 4 blocks of 34 bytes.
+        #expect(try Inkling2GGUFPlanner.bytes(of: [32, 4], kept: q8, tensor: "w") == 136)
+    }
+
+    @Test("Rounding up refuses a value that cannot be aligned")
+    func roundingUpRejectsOverflow() throws {
+        #expect(try Inkling2GGUFPlanner.roundUp(0, to: 16_384) == 0)
+        #expect(try Inkling2GGUFPlanner.roundUp(1, to: 16_384) == 16_384)
+        #expect(try Inkling2GGUFPlanner.roundUp(16_384, to: 16_384) == 16_384)
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.roundUp(UInt64.max, to: 16_384)
+        }
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFPlanner.roundUp(0, to: 0)
+        }
     }
 
     private func source0DataStart() -> UInt64 {

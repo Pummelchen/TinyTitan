@@ -88,7 +88,7 @@ import TinyTitanFormat
         let nvfp4 = values + scales
         #expect(
             plan.layers[0].expertStride
-                == Inkling2GGUFPlanner.roundUp(nvfp4 + 64 + 4, to: 16_384))
+                == (try Inkling2GGUFPlanner.roundUp(nvfp4 + 64 + 4, to: 16_384)))
         #expect(plan.layers[0].subTensors.map(\.dtype) == [6, 6, 200, 200, 3, 3])
         #expect(plan.layers[20].subTensors.map(\.dtype) == [7, 7, 201, 201])
         #expect(plan.layers[20].subTensors.first?.bitsForWeights == 8)
