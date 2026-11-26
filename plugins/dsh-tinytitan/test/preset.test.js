@@ -2,9 +2,10 @@
  * Building the `tinytitan` agent preset from the shipped `standard` composition.
  *
  * `buildTinytitanPlugins` is the pure half and is tested directly. The parser
- * (`standardPlugins`) needs the harness's own `js-yaml` and
- * `@deepseek-ai/cordis-plugin-include`, so it is exercised when those resolve
- * (inside a harness, or after `npm ci`) and skipped with a reason otherwise.
+ * (`standardPlugins`) needs the harness's `@deepseek-ai/cordis-plugin-include`
+ * (its `parseEntryYaml`, which reads the Include dialect including `!!js`), so it
+ * is exercised when that resolves (inside a harness, or after `npm ci`) and
+ * skipped with a reason otherwise.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -237,13 +238,19 @@ test("standardPlugins reads the preset-standard declaration", async (t) => {
     plugins = await standardPlugins({ path: STANDARD_PATCH });
   } catch (error) {
     if (error?.code === "ERR_MODULE_NOT_FOUND") {
-      t.skip("js-yaml / @deepseek-ai/cordis-plugin-include are not installed here");
+      t.skip("@deepseek-ai/cordis-plugin-include (parseEntryYaml) is not installed here");
       return;
     }
     throw error;
   }
   assert.ok(Array.isArray(plugins) && plugins.length > 0);
   assert.ok(plugins.some((row) => row.id === "compaction"));
+  // The Include dialect, not plain YAML: a `!!js` scalar arrives as the literal
+  // expression node the loader evaluates, which is what 0.2.3-alpha.2's
+  // `parseEntryYaml` returns and what the old `entryListSchema` did.
+  assert.deepEqual(plugins.find((row) => row.id === "tool-bash")?.disabled, {
+    __jsExpr: "process.platform === 'win32'",
+  });
   assert.match(readFileSync(STANDARD_PATCH, "utf8"), /preset-standard/);
 });
 

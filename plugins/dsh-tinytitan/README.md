@@ -33,7 +33,7 @@ Two jobs, both at boot, both idempotent:
 
 ## Supported harness version
 
-This bundle supports **exactly one DeepSeek Harness release: `0.2.2-rc.5`** —
+This bundle supports **exactly one DeepSeek Harness release: `0.2.3-alpha.2`** —
 not older, not newer, and not a build from `main`. Both jobs above are written
 against that release: the preset is generated from _its_ shipped `standard`
 composition (the `preset-standard` row of
@@ -46,6 +46,10 @@ The pin lives in three places that cannot import each other — `package.json`'s
 `peerDependencies` (exact, no range), `SUPPORTED_DSH_VERSION` in `src/support.js`,
 and **the bundle's own `version`**, which is the release it supports rather than a
 number of its own — and `test/support.test.js` fails if any of them disagrees.
+
+0.2.3-alpha.2 requires **Node 24.22.3 or later in the 24.x series, or 26.13.1 or
+later**; `package.json`'s `engines.node` (`^24.22.3 || >=26.13.1`) refuses the
+other lines before the plugin can load.
 
 On any other release — older, newer, or a build from `main` — the plugin **refuses
 to run**. It writes one line to **stderr** naming both versions and does nothing

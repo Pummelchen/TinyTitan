@@ -88,21 +88,22 @@ export function standardPresetPath() {
 /**
  * Read the `preset-standard` row's child plugin list from the shipped patch.
  *
- * YAML is loaded with the harness's own `entryListSchema` so `!!js` rows become
- * the `{ __jsExpr }` objects the loader and the preset registry evaluate.
- * `js-yaml` and `@deepseek-ai/cordis-plugin-include` are imported lazily: this
- * module is imported at boot in the harness (where both resolve) and in the
+ * YAML is parsed with the harness's own `parseEntryYaml` (its Include dialect:
+ * YAML 1.2 core plus `!!js`), so a `!!js` row becomes the `{ __jsExpr }` node
+ * the loader and the preset registry evaluate. The module is imported lazily:
+ * this module is imported at boot in the harness (where it resolves) and in the
  * package's own test run (where only the pure builder is exercised).
+ *
+ * 0.2.3-alpha.2 replaced `cordis-plugin-include`'s `entryListSchema` export with
+ * `parseEntryYaml`; the old named import is `undefined` there, which made
+ * `yaml.load(..., { schema: undefined })` reject every `!!js` row.
  *
  * @param options - `path` override, injectable for tests.
  * @returns the agent-plane entry list.
  */
 export async function standardPlugins({ path = standardPresetPath() } = {}) {
-  const [{ default: yaml }, { entryListSchema }] = await Promise.all([
-    import("js-yaml"),
-    import("@deepseek-ai/cordis-plugin-include"),
-  ]);
-  const document = yaml.load(readFileSync(path, "utf8"), { schema: entryListSchema });
+  const { parseEntryYaml } = await import("@deepseek-ai/cordis-plugin-include");
+  const document = parseEntryYaml(readFileSync(path, "utf8"));
   const entries = Array.isArray(document) ? document : [];
   const row = entries
     .flatMap((entry) => (entry && Array.isArray(entry.insert) ? entry.insert : []))
