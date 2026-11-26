@@ -20,24 +20,51 @@ import Foundation
 /// exits, so a crash never leaves a journal that cannot be reopened.
 public actor FileJournal: ContinuityJournal {
     public let url: URL
-    private let lockURL: URL
-    private var lockDescriptor: Int32 = -1
-    private var descriptor: Int32 = -1
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    let lockURL: URL
+    /// Every blocking syscall runs through this, so a failure the drive will
+    /// not produce on request can be produced in a test. Production is
+    /// `SystemJournalFileSystem`.
+    let fileSystem: any JournalFileSystem
+    var lockDescriptor: Int32 = -1
+    var descriptor: Int32 = -1
+    let encoder: JSONEncoder
+    let decoder: JSONDecoder
     private let synchronizesEveryWrite: Bool
-    private var pendingSinceSync = 0
+    /// Identifies the descriptor, not its number. `compact` closes one
+    /// descriptor and opens another, and the kernel may hand back the same
+    /// number; a barrier that resumed holding only the number would then
+    /// settle a watermark against a file that descriptor never wrote.
+    var descriptorGeneration: UInt64 = 0
+    /// Records accepted by `append`, and records a completed barrier covers.
+    /// The difference is what `pendingRecords` reports, and it is the reason a
+    /// barrier settles the watermark it captured rather than zeroing the
+    /// count: an append admitted while the barrier was in flight was not
+    /// covered by it, even if the drive happened to flush it too.
+    var appendedRecords: UInt64 = 0
+    var durableRecords: UInt64 = 0
+    /// The last barrier that failed, or nil once one succeeds again. This is
+    /// the scheduled barrier's only way to tell anyone: it has no caller.
+    public private(set) var durabilityFailure: JournalError?
+    /// Complete lines the last `replay` could not decode, or nil when every
+    /// complete line was a record. A final unterminated line is not damage; it
+    /// is a torn write that never reported success.
+    public internal(set) var replayDamage: JournalReplayDamage?
     /// Delay after the last append before the durability barrier is taken.
     private let idleDelay: Duration
     /// Longest a record may wait for a barrier while appends keep arriving.
     private let maximumLatency: Duration
     private var barrier: Task<Void, Never>?
-    private var lastBarrier = ContinuousClock.now
+    var lastBarrier = ContinuousClock.now
+    /// A compaction or truncation owns the descriptor while it replaces the
+    /// file, and a shutdown owns it while it closes it. Appends wait for that
+    /// to finish rather than writing into an inode nobody will read again.
+    private var rewriting = false
+    private var rewriteWaiters: [CheckedContinuation<Void, Never>] = []
     /// Every blocking syscall this type makes runs here, not on the
     /// cooperative pool. A barrier is tens of milliseconds of the drive
     /// doing nothing else; on a Mac with a two-thread pool that would be
     /// half of every actor in the process stalled behind a memory write.
-    private static let blockingQueue = DispatchQueue(
+    static let blockingQueue = DispatchQueue(
         label: "ContinuityCore.journal",
         qos: .utility)
 
@@ -62,8 +89,26 @@ public actor FileJournal: ContinuityJournal {
         idleDelay: Duration = .seconds(2),
         maximumLatency: Duration = .seconds(30)
     ) throws {
+        try self.init(
+            url: url,
+            fileSystem: SystemJournalFileSystem(),
+            synchronizesEveryWrite: synchronizesEveryWrite,
+            idleDelay: idleDelay,
+            maximumLatency: maximumLatency)
+    }
+
+    /// The seam, internal so a test can hand in a failing filesystem. The
+    /// public initializer above is the only one production code uses.
+    init(
+        url: URL,
+        fileSystem: any JournalFileSystem,
+        synchronizesEveryWrite: Bool = false,
+        idleDelay: Duration = .seconds(2),
+        maximumLatency: Duration = .seconds(30)
+    ) throws {
         self.url = url
         self.lockURL = url.appendingPathExtension("lock")
+        self.fileSystem = fileSystem
         self.synchronizesEveryWrite = synchronizesEveryWrite
         self.idleDelay = idleDelay
         self.maximumLatency = maximumLatency
@@ -76,28 +121,30 @@ public actor FileJournal: ContinuityJournal {
         self.decoder = decoder
 
         try Self.prepareDirectory(for: url)
-        self.lockDescriptor = try Self.acquireLock(at: lockURL, journal: url)
+        self.lockDescriptor = try Self.acquireLock(at: lockURL, journal: url, using: fileSystem)
         do {
-            self.descriptor = try Self.openForAppend(url)
-            try Self.dropDanglingTail(descriptor: self.descriptor, url: url)
+            self.descriptor = try Self.openForAppend(url, using: fileSystem)
+            self.descriptorGeneration = 1
+            try Self.dropDanglingTail(
+                descriptor: self.descriptor, url: url, using: fileSystem)
         } catch {
             // A thrown initializer never runs `deinit`, so both descriptors
             // this call opened have to go back here or the workspace leaks an
             // open file and a lock the process no longer owns.
-            if descriptor >= 0 { close(descriptor) }
+            if descriptor >= 0 { fileSystem.close(descriptor) }
             descriptor = -1
-            close(lockDescriptor)
+            fileSystem.close(lockDescriptor)
             lockDescriptor = -1
             throw error
         }
     }
 
     deinit {
-        if descriptor >= 0 { close(descriptor) }
+        if descriptor >= 0 { fileSystem.close(descriptor) }
         // Closing releases the flock. Doing it explicitly rather than relying
         // on process exit means a journal dropped mid-run frees its workspace
         // for another server immediately.
-        if lockDescriptor >= 0 { close(lockDescriptor) }
+        if lockDescriptor >= 0 { fileSystem.close(lockDescriptor) }
     }
 
     // MARK: - Writing
@@ -105,8 +152,9 @@ public actor FileJournal: ContinuityJournal {
     public func append(_ record: JournalRecord) async throws {
         var data = try encoder.encode(record)
         data.append(0x0A)
-        try writeFully(data)
-        pendingSinceSync += 1
+        await awaitRewrite()
+        if let error = writeFully(data) { throw error }
+        appendedRecords &+= 1
         try await afterAppend()
     }
 
@@ -119,8 +167,9 @@ public actor FileJournal: ContinuityJournal {
             data.append(try encoder.encode(record))
             data.append(0x0A)
         }
-        try writeFully(data)
-        pendingSinceSync += records.count
+        await awaitRewrite()
+        if let error = writeFully(data) { throw error }
+        appendedRecords &+= UInt64(records.count)
         try await afterAppend()
     }
 
@@ -131,7 +180,7 @@ public actor FileJournal: ContinuityJournal {
     /// forced only when a record has been waiting longer than the maximum.
     private func afterAppend() async throws {
         if synchronizesEveryWrite {
-            try await performBarrier()
+            if let error = await performBarrier() { throw error }
             return
         }
         let overdue = ContinuousClock.now - lastBarrier > maximumLatency
@@ -139,35 +188,74 @@ public actor FileJournal: ContinuityJournal {
         let delay = overdue ? Duration.zero : idleDelay
         barrier = Task { [weak self] in
             if delay > .zero {
-                try? await Task.sleep(for: delay)
+                guard await Self.sleepUnlessCancelled(delay) else { return }
             }
             guard !Task.isCancelled, let self else { return }
-            try? await self.performBarrier()
+            // The failure is recorded on the actor by `performBarrier`. A
+            // scheduled barrier has no caller to throw to, which is why the
+            // old `try?` here left a store reporting itself durable after its
+            // drive had stopped accepting writes.
+            _ = await self.performBarrier()
+        }
+    }
+
+    /// True unless the task was cancelled first. `Task.sleep` has exactly one
+    /// error, cancellation, and a cancelled barrier is replaced by the append
+    /// that cancelled it — not a storage failure.
+    private static func sleepUnlessCancelled(_ delay: Duration) async -> Bool {
+        do {
+            try await Task.sleep(for: delay)
+            return true
+        } catch {
+            return false
         }
     }
 
     /// Records written but not yet behind a barrier. For diagnostics.
-    public var pendingRecords: Int { pendingSinceSync }
+    public var pendingRecords: Int {
+        let pending = appendedRecords &- durableRecords
+        return pending > UInt64(Int.max) ? Int.max : Int(pending)
+    }
 
-    /// Writes every byte or throws. A short write is normal for `write(2)` on
-    /// a large buffer and silently dropping the remainder would corrupt the
-    /// record that followed it.
-    private func writeFully(_ data: Data) throws {
-        guard descriptor >= 0 else { throw JournalError.writeFailed(url, errno: EBADF) }
-        try data.withUnsafeBytes { buffer in
-            // An empty write has no base address and nothing to write.
-            guard let base = buffer.baseAddress else { return }
+    /// Writes every byte, or says why not. A short write is normal for
+    /// `write(2)` on a large buffer and silently dropping the remainder would
+    /// corrupt the record that followed it; a zero write with bytes remaining
+    /// would loop forever, so it is reported instead of retried.
+    func writeFully(_ data: Data) -> JournalError? {
+        guard descriptor >= 0 else { return .writeFailed(url, errno: EBADF) }
+        return Self.writeFully(data, to: descriptor, url: url, using: fileSystem)
+    }
+
+    /// The same loop for a descriptor this actor does not own — the checkpoint
+    /// temp is written through one.
+    static func writeFully(
+        _ data: Data, to descriptor: Int32, url: URL,
+        using fileSystem: any JournalFileSystem
+    ) -> JournalError? {
+        data.withUnsafeBytes { buffer -> JournalError? in
+            // An empty write has no bytes to write and nothing to fail.
+            guard !buffer.isEmpty else { return nil }
             var offset = 0
             while offset < buffer.count {
-                let written = write(
-                    descriptor, base.advanced(by: offset),
-                    buffer.count - offset)
+                let written = fileSystem.write(
+                    descriptor, bytes: UnsafeRawBufferPointer(rebasing: buffer[offset...]))
+                if written == 0 {
+                    // The only write that may advance nothing is the one with
+                    // nothing to write, and an empty buffer never enters this
+                    // loop. Continuing would spin at full CPU until something
+                    // else kills the process, with the record half-written.
+                    return .writeFailed(url, errno: EIO)
+                }
                 if written < 0 {
-                    if errno == EINTR { continue }
-                    throw JournalError.writeFailed(url, errno: errno)
+                    if written == -EINTR { continue }
+                    return .writeFailed(url, errno: Int32(-written))
+                }
+                if written > buffer.count - offset {
+                    return .writeFailed(url, errno: EIO)
                 }
                 offset += written
             }
+            return nil
         }
     }
 
@@ -179,249 +267,102 @@ public actor FileJournal: ContinuityJournal {
     public func sync() async throws {
         barrier?.cancel()
         barrier = nil
-        try await performBarrier()
+        if let error = await performBarrier() { throw error }
     }
 
     /// The barrier itself, on the blocking queue. The actor suspends until
     /// it is done, so appends queue behind it in order, but no pool thread is
     /// held while the drive works.
-    private func performBarrier() async throws {
-        guard descriptor >= 0, pendingSinceSync > 0 else { return }
+    ///
+    /// Answers the failure rather than throwing it: the scheduled barrier has
+    /// no caller to receive a throw, and it must record the same failure the
+    /// explicit `sync` reports. Both read the actor-owned
+    /// `durabilityFailure`.
+    private func performBarrier() async -> JournalError? {
+        guard descriptor >= 0, appendedRecords != durableRecords else { return nil }
         let target = descriptor
-        let failure: Int32 = await withCheckedContinuation { continuation in
+        let generation = descriptorGeneration
+        // The watermark belongs to the moment the barrier is dispatched. A
+        // record appended while the drive works is not covered by this
+        // barrier, whatever the kernel does with it.
+        let watermark = appendedRecords
+        let fileSystem = self.fileSystem
+        let code: Int32 = await withCheckedContinuation { continuation in
             Self.blockingQueue.async {
-                var code: Int32 = 0
-                if fcntl(target, F_FULLFSYNC) == -1 {
+                var result = fileSystem.fullSync(target)
+                if result != 0 {
                     // Not every filesystem implements it; fall back rather
-                    // than fail.
-                    if fsync(target) != 0 { code = errno }
+                    // than fail, but only to a fallback that is checked.
+                    result = fileSystem.fsync(target)
                 }
-                continuation.resume(returning: code)
+                continuation.resume(returning: result)
             }
         }
-        // The descriptor may have been swapped by a compaction while the
-        // barrier was in flight; only settle the count if it was not.
-        guard target == descriptor else { return }
-        if failure != 0 { throw JournalError.writeFailed(url, errno: failure) }
-        pendingSinceSync = 0
+        // A compaction may have swapped the descriptor while the barrier was
+        // in flight. The old file is not the journal any more, and the new
+        // one has its own accounting.
+        guard generation == descriptorGeneration else { return nil }
+        if code != 0 {
+            let error = JournalError.writeFailed(url, errno: -code)
+            durabilityFailure = error
+            return error
+        }
+        if watermark > durableRecords { durableRecords = watermark }
+        durabilityFailure = nil
         lastBarrier = ContinuousClock.now
+        return nil
     }
 
-    // MARK: - Reading
+    // MARK: - Descriptor ownership
 
-    public func replay() async throws -> [JournalRecord] {
-        // Reading and decoding a journal is the one bulk operation this type
-        // does, and it is done once, at start. It still goes to the blocking
-        // queue: a large file on a slow disk must not pin a pool thread.
-        let path = url.path
-        let decoder = self.decoder
-        return try await withCheckedThrowingContinuation { continuation in
-            Self.blockingQueue.async {
-                do {
-                    let contents = try Self.readContents(atPath: path) ?? Data()
-                    continuation.resume(returning: Self.decodeRecords(contents, decoder: decoder))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
+    /// Wait until no compaction or truncation is replacing the file.
+    func awaitRewrite() async {
+        while rewriting {
+            await withCheckedContinuation { rewriteWaiters.append($0) }
         }
     }
 
-    /// Read a journal without opening it for writing.
-    ///
-    /// Takes no lock, so it is safe to point at the file of a running server.
-    /// A store only its own process can look at is a store nobody can debug.
-    public static func read(contentsOf url: URL) throws -> [JournalRecord] {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        // `nil` means the file is not there; anything else that goes wrong is
-        // reported, so a caller listing workspaces does not show a file it could
-        // not read as an empty one.
-        guard let contents = try readContents(atPath: url.path) else { return [] }
-        return decodeRecords(contents, decoder: decoder)
+    /// Take exclusive ownership of the descriptor. The caller must release it
+    /// on every path, including a throw.
+    func acquireRewrite() async {
+        await awaitRewrite()
+        rewriting = true
     }
 
-    /// The journal's bytes, or `nil` when there is no file at that path.
-    ///
-    /// The two cases have to be distinguishable: this is what the engine replays
-    /// before it compacts, so reading a file that exists but cannot be read as
-    /// "no records" writes a checkpoint over the only copy of those records.
-    /// `FileManager.contents` answers `nil` for both and drops the errno with
-    /// it.
-    private static func readContents(atPath path: String) throws -> Data? {
-        let descriptor = open(path, O_RDONLY | O_CLOEXEC)
-        if descriptor < 0 {
-            if errno == ENOENT { return nil }
-            throw JournalError.readFailed(URL(fileURLWithPath: path), errno: errno)
-        }
-        defer { close(descriptor) }
-        var contents = Data()
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        while true {
-            // `Darwin.read`, not a member: this type has a `read` of its own
-            // and the unqualified name resolves to it.
-            let count = Darwin.read(descriptor, &buffer, buffer.count)
-            if count < 0 {
-                if errno == EINTR { continue }
-                throw JournalError.readFailed(URL(fileURLWithPath: path), errno: errno)
-            }
-            if count == 0 { return contents }
-            contents.append(contentsOf: buffer[0..<count])
-        }
+    func releaseRewrite() {
+        rewriting = false
+        let waiters = rewriteWaiters
+        rewriteWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
-    /// Splits a journal into records, dropping anything that will not decode.
-    ///
-    /// A line that will not decode is a torn tail or a record from an
-    /// incompatible build. Skipping is right: refusing to start because of one
-    /// bad line would strand every good one behind it.
-    static func decodeRecords(_ contents: Data, decoder: JSONDecoder) -> [JournalRecord] {
-        var records: [JournalRecord] = []
-        var start = contents.startIndex
-        while let newline = contents[start...].firstIndex(of: 0x0A) {
-            let line = contents[start..<newline]
-            start = contents.index(after: newline)
-            guard !line.isEmpty else { continue }
-            if let record = try? decoder.decode(JournalRecord.self, from: Data(line)) {
-                records.append(record)
-            }
-        }
-        return records
-    }
-
-    // MARK: - Rewriting
-
-    public func compact(sessionLog: SessionLogSnapshot, memory: MemorySnapshot) async throws {
-        try await settleBarrier()
-        var data = try encoder.encode(JournalRecord.checkpoint(sessionLog, memory))
-        data.append(0x0A)
-        let temporary = url.appendingPathExtension("compacting")
-        let target = url
-        let payload = data
-        // Write, barrier, rename and directory barrier all happen on the
-        // blocking queue: compaction is the largest write this type makes and
-        // the one most likely to be big enough to notice.
-        let outcome: Result<Void, JournalError> = await withCheckedContinuation { continuation in
-            Self.blockingQueue.async {
-                continuation.resume(
-                    returning: Self.writeCheckpoint(
-                        payload, to: temporary,
-                        replacing: target))
-            }
-        }
-        if case .failure(let error) = outcome { throw error }
-
-        // The lock lives on a sidecar, so swapping this file never gives it
-        // up. Reopen the append descriptor on the new inode.
-        //
-        // Forgetting the number before reopening is the point: if
-        // `openForAppend` throws, the field must not still hold the descriptor
-        // just closed, or the `descriptor >= 0` guard in `writeFully` and
-        // `barrier` passes and a later append writes into whatever object the
-        // kernel has since handed that number to.
-        if descriptor >= 0 {
-            close(descriptor)
-            descriptor = -1
-        }
-        descriptor = try Self.openForAppend(url)
-        pendingSinceSync = 0
-        lastBarrier = ContinuousClock.now
-    }
-
-    /// The checkpoint write, in full, for the blocking queue.
-    ///
-    /// Replace only once the new file is complete on disk, so a crash during
-    /// compaction leaves the old journal intact, and sync the directory so
-    /// the rename itself is durable rather than only the bytes it points at.
-    private static func writeCheckpoint(
-        _ data: Data, to temporary: URL,
-        replacing target: URL
-    ) -> Result<Void, JournalError> {
-        try? FileManager.default.removeItem(at: temporary)
-        // The temp name is predicted rather than unique, so the removeItem
-        // above is not a guard: it unlinks a planted link along with its
-        // anchor. O_NOFOLLOW is what stops the create writing through one.
-        let handle = open(
-            temporary.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard handle >= 0 else {
-            return .failure(.cannotOpen(temporary, underlying: String(cString: strerror(errno))))
-        }
-        do {
-            try writeFully(data, to: handle, url: temporary)
-        } catch let error as JournalError {
-            close(handle)
-            try? FileManager.default.removeItem(at: temporary)
-            return .failure(error)
-        } catch {
-            close(handle)
-            return .failure(.writeFailed(temporary, errno: EIO))
-        }
-        if fcntl(handle, F_FULLFSYNC) == -1 { _ = fsync(handle) }
-        close(handle)
-
-        guard rename(temporary.path, target.path) == 0 else {
-            let code = errno
-            try? FileManager.default.removeItem(at: temporary)
-            return .failure(.writeFailed(target, errno: code))
-        }
-        let directory = open(target.deletingLastPathComponent().path, O_RDONLY | O_CLOEXEC)
-        if directory >= 0 {
-            _ = fsync(directory)
-            close(directory)
-        }
-        return .success(())
-    }
-
-    public func truncate() async throws {
-        try await settleBarrier()
-        if descriptor >= 0 { close(descriptor) }
-        descriptor = -1
-        let emptied = open(
-            url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard emptied >= 0 else {
-            throw JournalError.cannotOpen(url, underlying: String(cString: strerror(errno)))
-        }
-        close(emptied)
-        descriptor = try Self.openForAppend(url)
-        pendingSinceSync = 0
+    /// Cancels a scheduled barrier and waits for one already running, so a
+    /// descriptor is never closed or replaced underneath the drive.
+    func settleBarrier() async {
+        barrier?.cancel()
+        if let running = barrier { await running.value }
+        barrier = nil
     }
 
     /// Flush, close the journal and release the workspace lock.
     ///
     /// Named `shutDown` rather than `close` so it cannot be confused with
     /// `close(2)`, which this type calls throughout.
+    ///
+    /// A flush that fails still closes the descriptors and releases the lock —
+    /// a caller that cannot shut down cleanly must still be able to shut down
+    /// once — and the failure is thrown afterwards, so a storage failure is
+    /// never reported as a clean shutdown.
     public func shutDown() async throws {
-        try? await settleBarrier()
-        try? await performBarrier()
-        if descriptor >= 0 { close(descriptor) }
+        await acquireRewrite()
+        defer { releaseRewrite() }
+        await settleBarrier()
+        let failure = await performBarrier()
+        if descriptor >= 0 { fileSystem.close(descriptor) }
         descriptor = -1
-        if lockDescriptor >= 0 { close(lockDescriptor) }
+        descriptorGeneration &+= 1
+        if lockDescriptor >= 0 { fileSystem.close(lockDescriptor) }
         lockDescriptor = -1
-    }
-
-    /// Cancels a scheduled barrier and waits for one already running, so a
-    /// descriptor is never closed or replaced underneath the drive.
-    private func settleBarrier() async throws {
-        barrier?.cancel()
-        if let running = barrier { await running.value }
-        barrier = nil
-    }
-
-    private static func writeFully(_ data: Data, to descriptor: Int32, url: URL) throws {
-        try data.withUnsafeBytes { buffer in
-            // An empty write has no base address and nothing to write.
-            guard let base = buffer.baseAddress else { return }
-            var offset = 0
-            while offset < buffer.count {
-                let written = write(
-                    descriptor, base.advanced(by: offset),
-                    buffer.count - offset)
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    throw JournalError.writeFailed(url, errno: errno)
-                }
-                offset += written
-            }
-        }
+        if let failure { throw failure }
     }
 }
