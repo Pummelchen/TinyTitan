@@ -1,18 +1,26 @@
 #!/usr/bin/env python3.13
-"""Plan the K2-Horizon-MoVA-36B-A4B conversion from the index alone.
+"""Plan and run the K2-Horizon-MoVA-36B-A4B conversion.
 
 The checkpoint (IFM/K2-Horizon-MoVA-36B-A4B) is a new architecture, not a
 Qwen variant: 48 layers, 100 routed experts at top-8 plus a shared expert, a
 grouped two-way RMS norm, a softplus attention gate, and MoVA -- 64 routed
-value experts inside the attention of every sparse layer. This script is the
-first step of the port and follows `docs/adding-a-model.md` section 2: it
-fetches only the config, the index and the safetensors headers, classifies
-every tensor, checks the group alignment the affine quantizer needs, and
-prints the output size for 4 and 8 bits.
+value experts inside the attention of every sparse layer.
 
-It downloads no weights and writes no files.
+`--plan` is the cheap first step and follows `docs/adding-a-model.md` section 2:
+it fetches only the config, the index and the safetensors headers, classifies
+every tensor, checks the group alignment the affine quantizer needs, and prints
+the output size for 4 and 8 bits. It downloads no weights and writes no files.
+
+`--from-hf` streams the pinned checkpoint shard by shard, quantizes it at every
+requested width and writes the affine snapshots. A source shard leaves `--work`
+only once the writer that consumed it has flushed past it, so a kill before the
+first flush resumes from the bytes already on disk instead of re-fetching them
+(see `release_durable_sources`). `--source/--output` converts a local checkpoint
+directory the same way, and `--self-test` exercises the quantizer on a fixture.
 
     python3.13 tools/prepare_k2_horizon.py --plan
+    python3.13 tools/prepare_k2_horizon.py --from-hf --work .build/k2-shards \\
+        --output .build/k2-affine
 """
 
 from __future__ import annotations
@@ -23,6 +31,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 
 REPO = "IFM/K2-Horizon-MoVA-36B-A4B"
@@ -30,6 +39,10 @@ REVISION = "e9ce717642b2074082875be233c02c729ba47960"
 BASE = f"https://huggingface.co/{REPO}/resolve/{REVISION}"
 GROUP_SIZE = 64
 RETRY = ("--retry", "5", "--retry-delay", "2", "--retry-all-errors")
+# A safetensors header is metadata, not weights. Bound what a corrupt length can
+# make a reader allocate: the largest real header here is the 16,998-tensor
+# index of the 36B checkpoint at a couple of MB.
+MAX_HEADER_BYTES = 64 << 20
 
 
 def fetch(remote: str, byte_range: str | None = None) -> bytes:
@@ -49,10 +62,79 @@ def fetch_json(remote: str) -> dict:
     return json.loads(fetch(remote))
 
 
-def fetch_header(shard: str) -> dict:
+@lru_cache(maxsize=None)
+def header(shard: str) -> tuple[int, dict]:
+    """A shard's header length and its tensor table, fetched once per process.
+
+    Both `plan` (classification) and the conversion (sizing a local source) read
+    it, and the conversion reads it once per shard, so the result is cached: a
+    probe is two ranged requests and a resume must not repeat them.
+    """
     prefix = fetch(shard, "0-7")
-    size = struct.unpack("<Q", prefix[:8])[0]
-    return json.loads(fetch(shard, f"8-{8 + size - 1}"))
+    if len(prefix) != 8:
+        raise SystemExit(f"{shard}: {len(prefix)} bytes of length prefix, expected 8")
+    header_len = struct.unpack("<Q", prefix[:8])[0]
+    if not 0 < header_len <= MAX_HEADER_BYTES:
+        raise SystemExit(f"{shard}: header length {header_len} is not plausible")
+    body = fetch(shard, f"8-{8 + header_len - 1}")
+    if len(body) != header_len:
+        raise SystemExit(f"{shard}: header {len(body)} bytes, expected {header_len}")
+    return header_len, json.loads(body)
+
+
+def fetch_header(shard: str) -> dict:
+    return header(shard)[1]
+
+
+@lru_cache(maxsize=None)
+def expected_size(shard: str) -> int:
+    """The shard's exact length in bytes, derived from its own header.
+
+    8 bytes of length, the header, then the payload its last tensor ends at.
+    This is the number that makes a partly-written file detectable, so it comes
+    from the shard rather than from a server's `Content-Length`.
+    """
+    header_len, tensors = header(shard)
+    payload = [meta["data_offsets"][1] for name, meta in tensors.items() if name != "__metadata__"]
+    if not payload:
+        raise SystemExit(f"{shard}: header carries no tensors")
+    return 8 + header_len + max(payload)
+
+
+def local_declared_size(path: Path) -> int | None:
+    """The length a local shard's *own* header declares, or None if unreadable.
+
+    A complete source has to be recognisable without asking the network: the
+    resume that matters must not spend a request to confirm a file it already
+    has. A safetensors shard states its payload end in its header, so
+    `size == declared` is complete and `size < declared` is exactly "partial" --
+    a truncated file still declares the full length. Unreadable, oversized or
+    inconsistent headers return None, and the caller discards such a file rather
+    than resuming onto a corrupt prefix.
+    """
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(8)
+            if len(prefix) != 8:
+                return None
+            header_len = struct.unpack("<Q", prefix)[0]
+            if not 0 < header_len <= MAX_HEADER_BYTES:
+                return None
+            body = handle.read(header_len)
+    except OSError:
+        return None
+    if len(body) != header_len:
+        return None
+    try:
+        tensors = json.loads(body)
+        payload = [
+            meta["data_offsets"][1] for name, meta in tensors.items() if name != "__metadata__"
+        ]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+    if not payload:
+        return None
+    return 8 + header_len + max(payload)
 
 
 def is_bf16(name: str) -> bool:
@@ -320,12 +402,77 @@ class ShardWriter:
             )
         )
 
+    def offset(self) -> int:
+        """The output byte position after the last tensor added, right now.
 
-def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
-    """Download each shard, convert it at every width, then delete it."""
+        `total_bytes` counts only *finished* shards and `pending_bytes` the open
+        block, so this is the end of everything converted so far. Recorded per
+        source, it is what `release_durable_sources` compares a flush against.
+        """
+        return self.total_bytes + self.pending_bytes
+
+
+def release_durable_sources(
+    pending: dict[Path, dict[int, int]], writers: dict[int, "ShardWriter"]
+) -> None:
+    """Unlink every converted source whose output has reached a finished shard.
+
+    `pending` pairs a source shard with the output offset its last tensor ended
+    at, per width (`writer.offset()` when it was converted). `total_bytes` only
+    moves when `flush` writes a shard, so `writer.total_bytes >= offset` is
+    exactly "every tensor converted from this source is on disk". A source is
+    dropped only when *every* width has written past it: on the default
+    `--bits 4 8` pass the two writers hold different byte counts.
+
+    An empty-block test (`pending_bytes == 0`) is the wrong instrument here, and
+    it was the first shape tried: `add` flushes in the middle of a source, so at
+    a source boundary the open block is almost never empty, and a rule that
+    waits for that keeps the whole checkpoint on disk until `finish` -- 74.9 GB
+    for this model instead of the flush interval. The offset makes the release
+    point the flush that passes the source, not a coincidence of where a shard
+    happened to end.
+    """
+    for source, offsets in list(pending.items()):
+        if all(writers[width].total_bytes >= offset for width, offset in offsets.items()):
+            source.unlink(missing_ok=True)
+            del pending[source]
+
+
+def convert_shard(local: Path, outputs: dict[int, tuple[Path, "ShardWriter"]]) -> None:
+    """One source shard into every requested width; its tensors are read once."""
     import ml_dtypes
     from safetensors import safe_open
 
+    with safe_open(str(local), framework="numpy") as handle:
+        for name in handle.keys():
+            value = handle.get_tensor(name)
+            for width, (_directory, writer) in outputs.items():
+                bits = bits_for(name, width)
+                if bits is None:
+                    writer.add(name, value.astype(ml_dtypes.bfloat16))
+                    continue
+                packed, scale, bias = quantize_affine(value, bits)
+                stem = name[: -len(".weight")]
+                writer.add(name, packed)
+                writer.add(stem + ".scales", scale)
+                writer.add(stem + ".biases", bias)
+
+
+def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
+    """Download each shard, convert it at every width, drop it once durable.
+
+    "Converted" is not "persisted": `ShardWriter` buffers up to
+    `SHARD_LIMIT_BYTES` (1 GB) and only `flush` writes a shard. This loop used
+    to `unlink` each source as soon as its tensors had been *added*, so a kill
+    before the next flush lost the converted bytes with the source already gone,
+    and the next run re-fetched everything since the last flush -- with no
+    resume state, from zero on a kill before the first one.
+
+    A source now leaves `--work` at the flush that passes it (see
+    `release_durable_sources`) and at completion, and a source already complete
+    on disk is converted from disk without a request; a partial one continues
+    from its last byte. The output layout and the quantized bytes are unchanged.
+    """
     config = fetch_json("config.json")
     index = fetch_json("model.safetensors.index.json")
     shards = sorted(set(index["weight_map"].values()))
@@ -337,11 +484,57 @@ def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
             raise SystemExit(f"{directory} is not empty; remove it before converting")
         directory.mkdir(parents=True, exist_ok=True)
         outputs[width] = (directory, ShardWriter(directory))
+    writers = {width: writer for width, (_directory, writer) in outputs.items()}
 
+    # Say what the resume can reuse before the first shard request: a killed run
+    # leaves its in-flight sources in `--work`. A complete one is converted from
+    # disk without a body request; a partial one continues from its last byte.
+    present = [shard for shard in shards if (work / shard).is_file()]
+    if present:
+        present_bytes = sum((work / shard).stat().st_size for shard in present)
+        print(
+            f"  resuming: {len(present)} checkpoint shard(s) already in {work} "
+            f"({present_bytes / 1e9:.2f} GB); a complete one is converted from disk "
+            "without a request, a partial one continues from its last byte",
+            flush=True,
+        )
+
+    pending: dict[Path, dict[int, int]] = {}
     for position, shard in enumerate(shards, 1):
         local = work / shard
-        if not local.exists() or local.stat().st_size == 0:
-            print(f"[{position}/{len(shards)}] downloading {shard}", flush=True)
+        have = local.stat().st_size if local.is_file() else 0
+        declared = local_declared_size(local) if have else None
+        if have and declared is None:
+            # An unreadable header is not a prefix worth resuming onto.
+            print(
+                f"[{position}/{len(shards)}] {shard}: unreadable header, discarding",
+                flush=True,
+            )
+            local.unlink(missing_ok=True)
+            have = 0
+        if have and have == declared:
+            print(
+                f"[{position}/{len(shards)}] {shard} is complete, converting from disk",
+                flush=True,
+            )
+        else:
+            expected = expected_size(shard)
+            if have > expected:
+                print(
+                    f"[{position}/{len(shards)}] {shard}: {have} bytes exceeds "
+                    f"{expected}, discarding",
+                    flush=True,
+                )
+                local.unlink()
+                have = 0
+            if have:
+                print(
+                    f"[{position}/{len(shards)}] resuming {shard} at "
+                    f"{have / 1e9:.2f} GB of {expected / 1e9:.2f} GB",
+                    flush=True,
+                )
+            else:
+                print(f"[{position}/{len(shards)}] downloading {shard}", flush=True)
             result = subprocess.run(
                 [
                     "curl",
@@ -362,21 +555,13 @@ def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
             )
             if result.returncode != 0:
                 raise SystemExit(f"download failed for {shard} (curl {result.returncode})")
+            got = local.stat().st_size
+            if got != expected:
+                raise SystemExit(f"{shard}: downloaded {got} bytes, expected {expected}")
         print(f"[{position}/{len(shards)}] converting {shard}", flush=True)
-        with safe_open(str(local), framework="numpy") as handle:
-            for name in handle.keys():
-                value = handle.get_tensor(name)
-                for width, (_directory, writer) in outputs.items():
-                    bits = bits_for(name, width)
-                    if bits is None:
-                        writer.add(name, value.astype(ml_dtypes.bfloat16))
-                        continue
-                    packed, scale, bias = quantize_affine(value, bits)
-                    stem = name[: -len(".weight")]
-                    writer.add(name, packed)
-                    writer.add(stem + ".scales", scale)
-                    writer.add(stem + ".biases", bias)
-        local.unlink()
+        convert_shard(local, outputs)
+        pending[local] = {width: writer.offset() for width, writer in writers.items()}
+        release_durable_sources(pending, writers)
 
     for width, (directory, writer) in outputs.items():
         writer.finish()
@@ -401,6 +586,11 @@ def convert_hf(output: Path, work: Path, widths: list[int]) -> None:
             raw = fetch(remote)
             (tokenizer / remote).write_bytes(raw)
         print(f"wrote {directory} ({len(writer.index)} tensors)", flush=True)
+    # The completion point: every writer has flushed and written its index, so
+    # no source has a reader left. Not earlier, so a failure between the last
+    # conversion and here (a tokenizer fetch, a config write) leaves the sources
+    # a retry converts from disk.
+    release_durable_sources(pending, writers)
 
 
 # --- self test --------------------------------------------------------------

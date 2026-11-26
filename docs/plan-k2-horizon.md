@@ -461,6 +461,16 @@ plan keeps at bf16. The install TinyTitanRepack writes afterwards is a second
 copy, so the peak disk for the 8-bit path is the source download plus ~40 GB
 of snapshot plus ~40 GB of install.
 
+The converter does not stage the checkpoint. A source shard leaves `--work` at
+the output flush that passes it (`release_durable_sources`), so what sits beside
+the snapshot is the last flush interval -- 1 GB of output, about two or three of
+the 1.56 GB source shards at 4-bit and one or two at 8-bit -- plus the shard
+being converted. A kill before the first flush resumes by converting the sources
+already on disk, without fetching them again. A kill after a flush does not
+resume: a non-empty snapshot directory is still refused (this converter adopts
+no partial snapshot), so recovering without a re-fetch means keeping `--work`
+and removing the partial directory.
+
 ## Runtime path and benchmark
 
 `TinyTitanBench k2 <snapshot> "<prompt>" [n]` loads the snapshot, tokenizes
