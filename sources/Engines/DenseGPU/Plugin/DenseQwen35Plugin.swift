@@ -131,12 +131,12 @@ public enum DenseQwen35Plugin: EnginePlugin {
         for suffix in ["-4bit", "-8bit", "-6bit"] where base.hasSuffix(suffix) {
             base = String(base.dropLast(suffix.count))
         }
+        if base == "unknown/snapshot" { base = "qwen3.5-dense" }
         let name: String
         switch base {
         case "qwen3.5-2b": name = "Qwen 3.5 2B"
         case "qwen3.5-4b": name = "Qwen 3.5 4B"
         case "qwen3.5-9b": name = "Qwen 3.5 9B"
-        case "unknown/snapshot": name = "Qwen 3.5 dense"
         default: name = base
         }
         return ModelIdentity(
@@ -148,7 +148,8 @@ public enum DenseQwen35Plugin: EnginePlugin {
             sampling: SamplingProfile(
                 temperature: sampling.temperature, topK: sampling.topK, topP: sampling.topP,
                 minP: sampling.minP, presencePenalty: sampling.presencePenalty, thinking: nil),
-            reasoningControl: coreControl(identity.family.reasoningControl))
+            reasoningControl: coreControl(identity.family.reasoningControl),
+            engines: [.gpu, .cpu])
     }
 
     /// The 6.x preview: the dense family's default chunk is the production one

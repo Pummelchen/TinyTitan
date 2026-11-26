@@ -1,21 +1,38 @@
 import Foundation
 import TinyTitanCore
+import TinyTitanLegacyEngine
+import TinyTitanLib
 import TinyTitanPluginAPI
+import TinyTitanVariants
 
-/// Plugin-backed install probing and on-disk sizing, split out of
-/// `ModelCatalog.swift` under the 500-line-per-file rule (TT-126).
+/// Install probing from the resolved plugin's identity, and on-disk sizing.
+/// Split out of `ModelCatalog.swift` under the 500-line-per-file rule (TT-126);
+/// the identity read moved here in TT-134 group (f).
 extension ModelCatalog {
-    static func probePluginInstall(
-        _ directory: URL,
-        resolved: ResolvedPlugin
-    ) -> Result<Entry, ProbeFailure> {
-        let factory = resolved.engineFactory()
-        let metadata: EngineModelMetadata
+    static func probeInstall(_ directory: URL) -> Result<Entry, ProbeFailure> {
+        let resolved: ResolvedPlugin
         do {
-            metadata = try factory.metadata(directory)
+            resolved = try EngineFactories.pluginRegistry.resolve(directory)
         } catch {
-            return .failure(ProbeFailure(reason: "unreadable plugin metadata: \(error)"))
+            return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }
+        let identity: ModelIdentity
+        do {
+            guard let declared = try resolved.modelIdentity() else {
+                return .failure(
+                    ProbeFailure(
+                        reason: "the engine plugin declares no identity for this install"))
+            }
+            identity = declared
+        } catch {
+            return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
+        }
+        // A family no front end can serve is skipped here rather than offered
+        // and refused on first use. The plugin/adapter owns that judgement.
+        if let reason = identity.unsupportedReason {
+            return .failure(ProbeFailure(reason: reason))
+        }
+        let factory = resolved.engineFactory()
         // A plugin's hook is a closure, not proof the install can tokenize. The
         // catalog must ask the cheapest question that is still true: the
         // plugin's own source predicate when it has one (the Inkling 2 Q4
@@ -46,16 +63,33 @@ extension ModelCatalog {
             return .failure(
                 ProbeFailure(reason: "no tokenizer/tokenizer.json; the install is incomplete"))
         }
+        let preferred = identity.engines.first ?? .gpu
+        let engines = identity.engines.isEmpty ? [preferred] : identity.engines
+        let kind: Kind
+        switch preferred {
+        case .gpu:
+            kind = .gpu(family: identity.family, reasoning: identity.reasoningControl)
+        case .cpu:
+            kind = .cpu(family: identity.family, reasoning: identity.reasoningControl)
+        }
         return .success(
             Entry(
-                id: metadata.modelID,
-                name: resolved.plugin.displayName,
-                kind: .plugin(family: metadata.family, reasoning: metadata.reasoningControl),
-                quant: metadata.weightBits,
+                id: identity.catalogID,
+                name: identity.displayName,
+                kind: kind,
+                quant: identity.weightBits,
                 path: directory,
-                sampling: metadata.sampling,
-                contextLimit: nil,
-                sizeBytes: sizeOnDisk(directory)))
+                sampling: identity.sampling,
+                contextLimit: identity.contextLimit,
+                sizeBytes: sizeOnDisk(directory),
+                engines: engines.map(backend(for:))))
+    }
+
+    package static func backend(for engine: ModelEngine) -> Backend {
+        switch engine {
+        case .gpu: .gpu
+        case .cpu: .cpu
+        }
     }
 
     /// Allocated bytes, so an APFS clone or a sparse file reports what it
@@ -65,7 +99,9 @@ extension ModelCatalog {
         guard
             let walker = FileManager.default.enumerator(
                 at: directory, includingPropertiesForKeys: keys)
-        else { return 0 }
+        else {
+            return 0
+        }
         var total: Int64 = 0
         for case let file as URL in walker {
             guard let values = try? file.resourceValues(forKeys: Set(keys)),

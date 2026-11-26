@@ -1,5 +1,4 @@
 import Foundation
-import Legacy6xRuntime
 import TinyTitanCPUEngine
 import TinyTitanCore
 import TinyTitanLegacyEngine
@@ -11,10 +10,11 @@ import TinyTitanVariants
 /// GPU installs and CPU snapshots alike.
 ///
 /// Identity is read, never parsed out of a directory name: a GPU install's id,
-/// family and width come from its manifest through the same reader the loader
-/// uses, and a CPU snapshot's from its own config.json. A directory the scan
-/// cannot read is skipped with a reason rather than failing startup, because
-/// one half-copied model must not take the other nine offline.
+/// family, width, name and engines come from the plugin the registry resolves
+/// for it (the 6.x adapter while a family still lives there), and a CPU
+/// snapshot's from its own config.json. A directory the scan cannot read is
+/// skipped with a reason rather than failing startup, because one half-copied
+/// model must not take the other nine offline.
 public struct ModelCatalog: Sendable {
 
     /// The engine that serves an install. The concept now lives in
@@ -24,66 +24,55 @@ public struct ModelCatalog: Sendable {
     /// kept so the catalog's own callers read unchanged.
     package typealias Backend = ModelBackend
 
+    /// What a model is, not which engine runs it: a family label and the
+    /// thinking control its template implements. The engine is a capability of
+    /// the install (`Entry.engines`), so a family that both the GPU and CPU
+    /// engines can serve needs no family-specific conversion here.
     public enum Kind: Sendable, Equatable {
-        case gpu(ModelFamily)
-        case cpu(VariantCPUModelFamily)
-        case plugin(family: String, reasoning: ReasoningControl)
+        case gpu(family: String, reasoning: ReasoningControl)
+        case cpu(family: String, reasoning: ReasoningControl)
 
         package var backend: Backend {
             switch self {
-            case .gpu, .plugin: .gpu
+            case .gpu: .gpu
             case .cpu: .cpu
             }
         }
 
-        /// The kind that serves the same install on `backend`, where the
-        /// runtime implements the family there too.
-        package func kind(forBackend backend: Backend) -> Kind? {
-            switch (self, backend) {
-            case (.gpu, .gpu), (.cpu, .cpu), (.plugin, .gpu):
-                return self
-            case (.gpu(.qwen35Dense), .cpu), (.cpu(.qwen35Dense), .gpu):
-                // The dense family is the one both engines implement, and its
-                // payload is identical for either.
-                return backend == .cpu ? .cpu(.qwen35Dense) : .gpu(.qwen35Dense)
-            default:
-                return nil
+        /// The same kind on `backend`. The caller has already checked that the
+        /// install declares that engine (`Entry.served(by:)`); only the label
+        /// of the default engine differs.
+        package func kind(forBackend backend: Backend) -> Kind {
+            switch backend {
+            case .gpu: .gpu(family: familyName, reasoning: reasoning)
+            case .cpu: .cpu(family: familyName, reasoning: reasoning)
+            }
+        }
+
+        package var reasoning: ReasoningControl {
+            switch self {
+            case .gpu(_, let reasoning), .cpu(_, let reasoning): reasoning
             }
         }
 
         public var familyName: String {
             switch self {
-            case .gpu(let family): family.rawValue
-            case .cpu(let family): family.rawValue
-            case .plugin(let family, _): family
+            case .gpu(let family, _), .cpu(let family, _): family
             }
         }
 
         public var supportedReasoningLevels: [TinyTitanCore.ReasoningLevel] {
-            switch self {
-            case .gpu(let family): family.supportedReasoningLevels
-            case .cpu(let family): family.supportedReasoningLevels
-            case .plugin(_, let reasoning): reasoning.supportedLevels
-            }
+            reasoning.supportedLevels
         }
 
         public var levelWhenOn: TinyTitanCore.ReasoningLevel {
-            switch self {
-            case .gpu(let family): family.reasoningControl.levelWhenOn
-            case .cpu(let family): family.levelWhenOn
-            case .plugin(_, let reasoning): reasoning.levelWhenOn
-            }
+            reasoning.levelWhenOn
         }
 
         public func runtimeReasoning(
             for level: TinyTitanCore.ReasoningLevel
         ) throws -> (thinking: ModelThinkingMode, effort: ModelReasoningEffort?) {
-            switch self {
-            case .gpu(let family): try family.runtimeReasoning(for: level)
-            case .cpu(let family): try family.runtimeReasoning(for: level)
-            case .plugin(let family, let reasoning):
-                try reasoning.runtimeReasoning(for: level, family: family)
-            }
+            try reasoning.runtimeReasoning(for: level, family: familyName)
         }
     }
 
@@ -138,13 +127,11 @@ public struct ModelCatalog: Sendable {
         /// `.ssdai` payload is the same file for either, and the runtime picks
         /// the engine.
         package func served(by backend: Backend, id aliasID: String) -> Entry? {
-            guard engines.contains(backend),
-                let kind = kind.kind(forBackend: backend)
-            else { return nil }
+            guard engines.contains(backend) else { return nil }
             return Entry(
                 id: aliasID,
                 name: "\(name) (\(backend.rawValue.uppercased()))",
-                kind: kind, quant: quant, path: path, sampling: sampling,
+                kind: kind.kind(forBackend: backend), quant: quant, path: path, sampling: sampling,
                 contextLimit: contextLimit, sizeBytes: sizeBytes,
                 engines: engines)
         }
@@ -240,80 +227,6 @@ public struct ModelCatalog: Sendable {
                 reason: "neither manifest.json (a GPU install) nor config.json (a CPU snapshot)"))
     }
 
-    private static func probeInstall(_ directory: URL) -> Result<Entry, ProbeFailure> {
-        // Standalone TPP/1 plugins whose declared family is outside the 6.x
-        // `ModelFamily` enum (such as Inkling 2 Q4 and NVFP4, TT-126) supply
-        // their own identity, sampling, reasoning control, and tokenizer hook.
-        if let declaredFamily = try? SSDAIManifestReader.declaredFamily(directoryURL: directory),
-            ModelFamily(rawValue: declaredFamily) == nil,
-            let resolved = try? EngineFactories.pluginRegistry.resolve(directory),
-            resolved.strength > .fallback
-        {
-            return probePluginInstall(directory, resolved: resolved)
-        }
-        let identity: ManifestIdentity
-        do {
-            identity = try ManifestReader.peekIdentity(directoryURL: directory)
-        } catch {
-            return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
-        }
-        switch identity.family {
-        case .qwen36MTP, .qwen38flashMTP, .qwen4flashMTP:
-            // A draft head has no tokenizer and no layers of its own to run;
-            // listing it would offer a model that fails on first use.
-            return .failure(
-                ProbeFailure(
-                    reason:
-                        "an MTP draft head (\(identity.family.rawValue)), served only beside its target"
-                ))
-        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense, .k2Horizon:
-            // K2-Horizon is served by `K2ProbeBackend`, not by the runner, and
-            // that is a property of the loader rather than of the catalogue:
-            // the entry is honest, and `ModelRouter` picks the backend by
-            // family.
-            break
-        case .laguna:
-            return .failure(
-                ProbeFailure(
-                    reason:
-                        "Laguna-S-2.1 (\(identity.family.rawValue)) is not served yet: "
-                        + "its decode probe exists, the server graph does not "
-                        + "(docs/plan-laguna-s-2.1.md)"
-                ))
-        }
-        guard GFTokenizer.tokenizerFolder(forModelDirectory: directory) != nil else {
-            return .failure(
-                ProbeFailure(reason: "no tokenizer/tokenizer.json; the install is incomplete"))
-        }
-        let id = ServerModelIdentity.apiModelID(
-            manifestModelID: identity.modelID,
-            family: identity.family,
-            weightBits: identity.weightBits)
-        let base = ServerModelIdentity.base(
-            manifestModelID: identity.modelID,
-            family: identity.family)
-        return .success(
-            Entry(
-                id: id,
-                name: displayNames[base] ?? base,
-                // A dense install is served by the GPU engine by default now that
-                // the family is implemented there, and by the CPU engine when the
-                // request (or the launch) names it -- `engines` is what says both
-                // are available, and `ModelRouter` derives the `@cpu` alias from it.
-                kind: .gpu(identity.family),
-                quant: identity.weightBits,
-                path: directory,
-                // Two-row shape, matching the loaded model's metadata: a
-                // thinking switch on a not-yet-loaded model still resolves.
-                sampling: identity.family.engineSamplingProfile(identity: identity),
-                // The probe's KV caches are what cap it, not the checkpoint.
-                contextLimit:
-                    identity.family == .k2Horizon
-                    ? K2ProbeBackend.contextCeiling : nil,
-                sizeBytes: sizeOnDisk(directory),
-                engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : nil))
-    }
-
     /// A scanned directory's `config.json`, read under the manifest's bound.
     /// A probe walks every directory the scan finds, so the file in front of it
     /// is not a document this server was told to load, and it can be far larger
@@ -323,7 +236,7 @@ public struct ModelCatalog: Sendable {
     /// still belongs to the file actually read.
     static func readSnapshotConfig(
         _ directory: URL,
-        maxBytes: UInt64 = ManifestReader.defaultMaxBytes
+        maxBytes: UInt64 = SSDAIManifestReader.defaultMaxBytes
     ) throws -> Data {
         do {
             return try BoundedMetadataRead.read(
@@ -384,7 +297,7 @@ public struct ModelCatalog: Sendable {
             Entry(
                 id: id,
                 name: name,
-                kind: .cpu(family),
+                kind: .cpu(family: family.rawValue, reasoning: family.reasoningControl),
                 quant: bits,
                 path: directory,
                 sampling: SamplingProfile(
@@ -410,12 +323,15 @@ public struct ModelCatalog: Sendable {
         if FileManager.default.fileExists(
             atPath: directory.appendingPathComponent("manifest.json").path)
         {
-            let family = try ManifestReader.peekFamily(directoryURL: directory)
-            guard family == .qwen35Dense else {
+            let resolved = try EngineFactories.pluginRegistry.resolve(directory)
+            let declared =
+                try resolved.modelIdentity()?.family
+                ?? SSDAIManifestReader.declaredFamily(directoryURL: directory)
+            guard let family = VariantCPUModelFamily(rawValue: declared ?? "") else {
                 throw CPUModelBackend.CPUBackendError.unsupported(
-                    VariantCPUModelFamily.refusal(modelType: family.rawValue))
+                    VariantCPUModelFamily.refusal(modelType: declared))
             }
-            return .qwen35Dense
+            return family
         }
         let data = try readSnapshotConfig(directory)
         let config = try JSONSerialization.jsonObject(with: data) as? [String: Any]

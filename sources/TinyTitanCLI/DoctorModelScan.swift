@@ -114,7 +114,7 @@ enum DoctorModelScanner {
             return .failure(
                 ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }
-        if let reason = identity.unsupportedReason {
+        if let reason = identity.unsupportedReason ?? identity.cliUnsupportedReason {
             return .failure(ProbeFailure(reason: reason))
         }
         // The memory-fit arithmetic still reads the 6.x tuning profile, so it

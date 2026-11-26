@@ -67,7 +67,7 @@ These are the 7.0 Core contracts, unchanged:
 |---|---|
 | `prepareLoad` | Plan from `SessionBuildOptions`. `maxContext` is the asked window; `expertCacheBudgetBytes` is `--ram-budget` (whole process); `expertCacheSlots` is explicit slots. Return an `EngineLoadPlan`; put the plugin's own plan in `engineConfiguration`. Log the plan through `host.log`. |
 | `metadata`, `resolveArchitecture`, `preview` | Identity (model id, family label, bits, sampling profile, reasoning control) and geometry from the install, without loading weights. |
-| `identity` (optional factory closure, TT-134) | The host-facing identity a catalog or `doctor` shows before load: catalog id, display name, family, width, sampling, thinking levels, and an `unsupportedReason` for a family the engine refuses. Read from the manifest alone; nil for a factory that does not describe its installs. |
+| `identity` (optional factory closure, TT-134) | The host-facing identity a catalog or `doctor` shows before load: catalog id, display name, family, width, sampling, thinking levels, the engines that can serve it (a dense install is `gpu` and `cpu`), an optional context cap, and a refusal for a family no front end can serve (or only this CLI cannot). Read from the manifest alone; nil for a factory that does not describe its installs. |
 | `buildModel` / `buildModelWithSlots` | The `EngineModel`. |
 | `buildRunner` | The `EngineRunner`, sized from the plan. Its `maxContext` is the granted window; the session uses `min(asked, granted)`. |
 | `runRawCompletion` | The generation loop (§5). |

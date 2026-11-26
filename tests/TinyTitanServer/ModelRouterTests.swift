@@ -311,14 +311,20 @@ struct ReasoningFallbackTests {
     /// used to be the middle effort, so the same flag thought less on a
     /// routed server than on a single-model one.
     @Test func onForAnEffortModelIsItsTemplateDefault() throws {
-        let qwen38 = ModelCatalog.Kind.gpu(.qwen38flash)
+        let qwen38 = ModelCatalog.Kind.gpu(
+            family: "qwen38flash",
+            reasoning: .thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         #expect(qwen38.levelWhenOn == .xhigh)
         let choice = try ReasoningFallback.choice(for: qwen38, requested: .on)
         #expect(choice.effective == .xhigh)
         #expect(choice.thinking == .on)
         #expect(choice.effort == .xhigh)
-        #expect(ModelCatalog.Kind.gpu(.qwen36).levelWhenOn == .on)
-        #expect(ModelCatalog.Kind.cpu(.qwen35Dense).levelWhenOn == .on)
+        #expect(
+            ModelCatalog.Kind.gpu(family: "qwen36", reasoning: .binaryThinking).levelWhenOn == .on)
+        #expect(
+            ModelCatalog.Kind.cpu(family: "qwen3_5_dense", reasoning: .binaryThinking).levelWhenOn
+                == .on)
     }
 
     @Test func onWithoutATemplateDefaultFallsToTheMiddleEffort() {
@@ -343,14 +349,20 @@ struct ReasoningFallbackTests {
     }
 
     @Test func theChoiceCarriesTheRuntimeSettings() throws {
-        let flash = try ReasoningFallback.choice(for: .gpu(.qwen38flash), requested: .on)
+        let flash = try ReasoningFallback.choice(
+            for: .gpu(
+                family: "qwen38flash",
+                reasoning: .thinkingWithEffortLevels(
+                    defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])), requested: .on)
         #expect(flash.thinking == .on)
         #expect(flash.effort == .xhigh)
-        let cpu = try ReasoningFallback.choice(for: .cpu(.qwen35Dense), requested: .high)
+        let cpu = try ReasoningFallback.choice(
+            for: .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking), requested: .high)
         #expect(cpu.effective == .on)
         #expect(cpu.thinking == .on)
         #expect(cpu.effort == nil)
-        let off = try ReasoningFallback.choice(for: .gpu(.qwen36), requested: .off)
+        let off = try ReasoningFallback.choice(
+            for: .gpu(family: "qwen36", reasoning: .binaryThinking), requested: .off)
         #expect(off.thinking == .off)
     }
 

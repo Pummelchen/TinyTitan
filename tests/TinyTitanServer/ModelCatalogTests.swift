@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import TinyTitanCore
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 import TinyTitanVariants
@@ -136,13 +135,13 @@ struct ModelCatalogTests {
             ])
         let gpu = try #require(catalog.entry(id: "qwen3.6-35b-a3b_8-Bit"))
         #expect(gpu.name == "Qwen 3.6 35B-A3B")
-        #expect(gpu.kind == .gpu(.qwen36))
+        #expect(gpu.kind == .gpu(family: "qwen36", reasoning: .binaryThinking))
         #expect(gpu.quant == 8)
         #expect(gpu.sampling == .house)
         #expect(gpu.sizeBytes > 0)
         let cpu = try #require(catalog.entry(id: "qwen3.5-2b_4-Bit"))
         #expect(cpu.name == "Qwen 3.5 2B")
-        #expect(cpu.kind == .cpu(.qwen35Dense))
+        #expect(cpu.kind == .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
         #expect(cpu.quant == 4)
         #expect(cpu.sampling == SamplingProfile.house)
         #expect(cpu.contextLimit == 262_144)
@@ -175,7 +174,12 @@ struct ModelCatalogTests {
         let catalog = ModelCatalog.scan(directory: root)
         #expect(catalog.skipped.isEmpty)
         let entry = try #require(catalog.entries.first)
-        #expect(entry.kind == .gpu(.k2Horizon))
+        #expect(
+            entry.kind
+                == .gpu(
+                    family: "k2_horizon",
+                    reasoning: .effortOnly(defaultEffort: .high, supported: [.low, .medium, .high]))
+        )
         #expect(entry.backend == .gpu)
         #expect(entry.contextLimit == K2ProbeBackend.contextCeiling)
         #expect(entry.sampling.temperature == 1.0)
@@ -245,19 +249,26 @@ struct ModelCatalogTests {
     /// must resolve at startup, not only as a request field.
     @Test func theModelFlagFindsAnEngineAlias() {
         let dense = ModelCatalog.Entry(
-            id: "dense_4-Bit", name: "Dense", kind: .gpu(.qwen35Dense), quant: 4,
+            id: "dense_4-Bit", name: "Dense",
+            kind: .gpu(family: "qwen3_5_dense", reasoning: .binaryThinking), quant: 4,
             path: URL(fileURLWithPath: "/models/dense_4Bit"),
             sampling: .house, engines: [.gpu, .cpu])
         let catalog = ModelCatalog(
             directory: URL(fileURLWithPath: "/models"), entries: [dense])
         #expect(catalog.entry(idOrPath: "dense_4-Bit@cpu")?.id == "dense_4-Bit@cpu")
-        #expect(catalog.entry(idOrPath: "dense_4-Bit@cpu")?.kind == .cpu(.qwen35Dense))
+        #expect(
+            catalog.entry(idOrPath: "dense_4-Bit@cpu")?.kind
+                == .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
         // The engine it already defaults to is the install itself, whose id the
         // router's initial lookup holds.
         #expect(catalog.entry(idOrPath: "dense_4-Bit@gpu")?.id == "dense_4-Bit")
-        #expect(catalog.entry(idOrPath: "dense_4-Bit@gpu")?.kind == .gpu(.qwen35Dense))
+        #expect(
+            catalog.entry(idOrPath: "dense_4-Bit@gpu")?.kind
+                == .gpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
         #expect(catalog.entry(idOrPath: "dense_4-Bit@tpu") == nil)
-        #expect(catalog.entry(idOrPath: "dense_4-Bit")?.kind == .gpu(.qwen35Dense))
+        #expect(
+            catalog.entry(idOrPath: "dense_4-Bit")?.kind
+                == .gpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
     }
 
     /// The exact document a launcher script parses, field for field.
@@ -267,7 +278,8 @@ struct ModelCatalogTests {
             entries: [
                 ModelCatalog.Entry(
                     id: "qwen3.6-35b-a3b_8-Bit", name: "Qwen 3.6 35B-A3B",
-                    kind: .gpu(.qwen36), quant: 8, path: URL(fileURLWithPath: "/abs/path"),
+                    kind: .gpu(family: "qwen36", reasoning: .binaryThinking), quant: 8,
+                    path: URL(fileURLWithPath: "/abs/path"),
                     sampling: .house, sizeBytes: 36_200_000_000)
             ])
         let text = try catalog.jsonData().lossyUTF8String
@@ -283,11 +295,16 @@ struct ModelCatalogTests {
             entries: [
                 ModelCatalog.Entry(
                     id: "qwen3.8-flash-next_4-Bit", name: "Qwen 3.8 Flash Next 125B-A6B",
-                    kind: .gpu(.qwen38flash), quant: 4, path: URL(fileURLWithPath: "/f"),
+                    kind: .gpu(
+                        family: "qwen38flash",
+                        reasoning: .thinkingWithEffortLevels(
+                            defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])), quant: 4,
+                    path: URL(fileURLWithPath: "/f"),
                     sampling: SamplingProfile(
                         temperature: 1.0, topK: 20, topP: 0.95, presencePenalty: 0)),
                 ModelCatalog.Entry(
-                    id: "qwen3.5-2b_8-Bit", name: "Qwen 3.5 2B", kind: .cpu(.qwen35Dense),
+                    id: "qwen3.5-2b_8-Bit", name: "Qwen 3.5 2B",
+                    kind: .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking),
                     quant: 8, path: URL(fileURLWithPath: "/c"),
                     sampling: SamplingProfile.house),
             ])
@@ -307,62 +324,44 @@ struct ModelCatalogTests {
     /// property of the model.
     @Test func onlyTheDenseFamilyIsServedByBothEngines() {
         let dense = ModelCatalog.Entry(
-            id: "dense_4-Bit", name: "Dense", kind: .gpu(.qwen35Dense), quant: 4,
+            id: "dense_4-Bit", name: "Dense",
+            kind: .gpu(family: "qwen3_5_dense", reasoning: .binaryThinking), quant: 4,
             path: URL(fileURLWithPath: "/models/dense_4Bit"),
             sampling: .house, engines: [.gpu, .cpu])
         #expect(dense.backend == .gpu)
         #expect(dense.engines == [.gpu, .cpu])
         // The alias keeps the install and switches the engine.
         let cpu = dense.served(by: .cpu, id: "dense_4-Bit@cpu")
-        #expect(cpu?.kind == .cpu(.qwen35Dense))
+        #expect(cpu?.kind == .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
         #expect(cpu?.path == dense.path)
         #expect(cpu?.quant == dense.quant)
         #expect(cpu?.engines == [.gpu, .cpu])
         // And the other direction, for a request that names `@gpu` explicitly.
-        #expect(dense.served(by: .gpu, id: "dense_4-Bit@gpu")?.kind == .gpu(.qwen35Dense))
+        #expect(
+            dense.served(by: .gpu, id: "dense_4-Bit@gpu")?.kind
+                == .gpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
 
         // Every other family has one engine, and asking for the other is
         // refused rather than silently served by the wrong one.
         let moe = ModelCatalog.Entry(
-            id: "moe_4-Bit", name: "MoE", kind: .gpu(.qwen36), quant: 4,
+            id: "moe_4-Bit", name: "MoE", kind: .gpu(family: "qwen36", reasoning: .binaryThinking),
+            quant: 4,
             path: URL(fileURLWithPath: "/models/moe_4Bit"),
             sampling: .house)
         #expect(moe.engines == [.gpu])
         #expect(moe.served(by: .cpu, id: "moe_4-Bit@cpu") == nil)
         let snapshot = ModelCatalog.Entry(
-            id: "snap", name: "Snap", kind: .cpu(.qwen35Dense), quant: 8,
+            id: "snap", name: "Snap",
+            kind: .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking), quant: 8,
             path: URL(fileURLWithPath: "/models/snap"),
             sampling: SamplingProfile.house)
         // A converted snapshot is CPU-only whatever the family: the GPU path
         // reads `.ssdai` installs, so there is no GPU engine to name.
         #expect(snapshot.engines == [.cpu])
         #expect(snapshot.served(by: .gpu, id: "snap@gpu") == nil)
-        #expect(snapshot.served(by: .cpu, id: "snap@cpu")?.kind == .cpu(.qwen35Dense))
-    }
-
-    /// A manifest carries an id, not a name, so an install missing from this
-    /// table is listed as its raw id in `/v1/models`, the launcher and the app.
-    ///
-    /// The list is the shipped set, and the count is asserted so that adding a
-    /// model is a deliberate edit here rather than a silent fallback to the id.
-    /// The KAT-Coder row is what the count guards: it was added with the model,
-    /// before the model had an install.
-    @Test func everyShippedModelHasADisplayName() {
-        let shipped = [
-            "qwen3.6-35b-a3b", "ornith-1.5-35b-a3b", "ornith-1.5-35b-a3b-bf16dense",
-            "qwen-agentworld",
-            "kat-coder-v2.5", "qwen3.8-flash-next", "qwen4-omni-120b-think",
-            "qwen3.5-2b", "qwen3.5-4b", "qwen3.5-9b",
-        ]
-        for id in shipped {
-            let name = ModelCatalog.displayNames[id]
-            #expect(name?.isEmpty == false, "no display name for \(id)")
-        }
-        let names = Array(ModelCatalog.displayNames.values)
-        #expect(Set(names).count == names.count, "two models share a display name")
         #expect(
-            ModelCatalog.displayNames.count == shipped.count,
-            "a display name was added or removed without updating the shipped list")
+            snapshot.served(by: .cpu, id: "snap@cpu")?.kind
+                == .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking))
     }
 
     // MARK: - The size bound on a scanned config

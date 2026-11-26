@@ -55,25 +55,35 @@ package enum ServerModelIdentity {
         "qwen3.5-9b": "Qwen 3.5 9B",
     ]
 
-    /// Why the 6.x engine cannot serve an installed family, or nil when it can.
+    /// Why no front end can serve an installed family, or nil when one can.
     ///
-    /// A memory fit is not a capability claim: K2's install validates but its
-    /// graph does not exist, and the catalog and doctor must say that rather
-    /// than offer a model that stops at the loader's refusal.
+    /// A memory fit is not a capability claim: Laguna's decode probe exists but
+    /// its serving graph does not, and a draft head has no tokenizer or layers
+    /// of its own. The catalog skips these rather than offering a model that
+    /// stops at the loader's refusal.
     package static func unsupportedReason(_ family: ModelFamily) -> String? {
         switch family {
         case .qwen36MTP, .qwen38flashMTP, .qwen4flashMTP:
             return "MTP draft head, served only beside its target"
-        case .k2Horizon:
-            return "K2-Horizon is not served by this CLI: the server's probe "
-                + "backend serves it, and `TinyTitanBench k2gpu` runs it "
-                + "directly (docs/plan-k2-horizon.md)"
         case .laguna:
             return "Laguna-S-2.1's decode probe is implemented; the serving "
                 + "graph is not, so the install validates but is not served "
                 + "(docs/plan-laguna-s-2.1.md)"
-        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense:
+        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense, .k2Horizon:
             return nil
+        }
+    }
+
+    /// Why this CLI cannot launch a family the server still serves. K2 is the
+    /// one case: the server's probe backend runs it, doctor cannot.
+    package static func cliUnsupportedReason(_ family: ModelFamily) -> String? {
+        switch family {
+        case .k2Horizon:
+            return "K2-Horizon is not served by this CLI: the server's probe "
+                + "backend serves it, and `TinyTitanBench k2gpu` runs it "
+                + "directly (docs/plan-k2-horizon.md)"
+        default:
+            return unsupportedReason(family)
         }
     }
 
@@ -91,6 +101,9 @@ package enum ServerModelIdentity {
             weightBits: identity.weightBits,
             sampling: identity.family.engineSamplingProfile(identity: identity),
             reasoningControl: identity.family.engineReasoningControl,
-            unsupportedReason: unsupportedReason(identity.family))
+            engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : [.gpu],
+            contextLimit: identity.family == .k2Horizon ? K2ProbeRuntime.contextCeiling : nil,
+            unsupportedReason: unsupportedReason(identity.family),
+            cliUnsupportedReason: cliUnsupportedReason(identity.family))
     }
 }

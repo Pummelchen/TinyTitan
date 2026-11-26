@@ -5,6 +5,8 @@ import TinyTitanLib
 import TinyTitanCore
 import TinyTitanLegacyEngine
 import TinyTitanCPUEngine
+import TinyTitanPluginAPI
+import TinyTitanVariants
 
 /// Serving K2-Horizon from the GPU probe, through the same HTTP surface as the
 /// other families.
@@ -228,21 +230,27 @@ extension K2ProbeBackend: PromptTokenCounting {
 extension ModelCatalog.Kind {
     package var reasoningProfileTarget: (family: String, control: ReasoningControl) {
         switch self {
-        case .gpu(let family): (family.rawValue, family.engineReasoningControl)
+        case .gpu(let family, let control): (family, control)
         case .cpu: (ModelFamily.qwen36.rawValue, ModelFamily.qwen36.engineReasoningControl)
-        case .plugin(let family, let control): (family, control)
         }
     }
 
     package var isK2Horizon: Bool {
-        if case .gpu(.k2Horizon) = self { return true }
+        if case .gpu(let family, _) = self { return family == ModelFamily.k2Horizon.rawValue }
         return false
     }
 
     package static func resolve(directory: URL, cpu: Bool) throws -> Self {
-        cpu
-            ? .cpu(try ModelCatalog.snapshotFamily(directory))
-            : .gpu(try ManifestReader.peekFamily(directoryURL: directory))
+        if cpu {
+            let family = try ModelCatalog.snapshotFamily(directory)
+            return .cpu(family: family.rawValue, reasoning: family.reasoningControl)
+        }
+        let resolved = try EngineFactories.pluginRegistry.resolve(directory)
+        guard let identity = try resolved.modelIdentity() else {
+            throw EngineFactoryError.unsupported(
+                "no engine plugin declares an identity for \(directory.path)")
+        }
+        return .gpu(family: identity.family, reasoning: identity.reasoningControl)
     }
 
     package static func cpuReasoningProfile(

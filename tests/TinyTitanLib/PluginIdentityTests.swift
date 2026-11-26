@@ -80,6 +80,7 @@ struct PluginIdentityTests {
         #expect(identity.weightBits == 4)
         #expect(identity.sampling == .house)
         #expect(identity.reasoningControl == .binaryThinking)
+        #expect(identity.engines == [.gpu])
         #expect(identity.unsupportedReason == nil)
     }
 
@@ -93,6 +94,7 @@ struct PluginIdentityTests {
         #expect(identity.family == "qwen3_5_dense")
         #expect(identity.weightBits == 4)
         #expect(identity.reasoningControl == .binaryThinking)
+        #expect(identity.engines == [.gpu, .cpu])
         #expect(identity.unsupportedReason == nil)
     }
 
@@ -118,7 +120,10 @@ struct PluginIdentityTests {
             family: "k2_horizon", modelID: "k2-horizon-4bit", bits: 4)
         #expect(k2.modelID == "k2-horizon-4bit")
         #expect(k2.catalogID == "k2-horizon_4-Bit")
-        #expect(k2.unsupportedReason?.contains("server's probe backend") == true)
+        // The catalog can list K2: the server's probe backend serves it. Only
+        // this CLI cannot launch it, so the refusal is the CLI-specific one.
+        #expect(k2.unsupportedReason == nil)
+        #expect(k2.cliUnsupportedReason?.contains("server's probe backend") == true)
 
         let (_, mtp) = try identity(
             family: "qwen36_mtp", modelID: "qwen3.6-35b-a3b-mtp-4bit", bits: 4)
@@ -129,5 +134,47 @@ struct PluginIdentityTests {
         let (_, laguna) = try identity(
             family: "laguna", modelID: "laguna-s-2.1-4bit", bits: 4)
         #expect(laguna.unsupportedReason?.contains("not served") == true)
+    }
+
+    /// A dense install whose manifest carries the placeholder id is named by
+    /// its family, exactly as the old adapter table named it.
+    @Test func aDenseInstallWithoutAnIDUsesTheFamilyName() throws {
+        let (_, identity) = try identity(
+            family: "qwen3_5_dense", modelID: "unknown/snapshot", bits: 4)
+        #expect(identity.catalogID == "qwen3.5-dense_4-Bit")
+        #expect(identity.displayName == "qwen3.5-dense")
+    }
+
+    /// A manifest carries an id, not a card name. The shipped set's names are
+    /// asserted here, through the identity the front ends read, so adding a
+    /// model without a name is a deliberate edit rather than a silent fallback
+    /// to its id.
+    @Test func everyShippedInstallKeepsItsDisplayName() throws {
+        let shipped: [(family: String, modelID: String, bits: Int, name: String)] = [
+            ("qwen36", "qwen3.6-35b-a3b", 8, "Qwen 3.6 35B-A3B"),
+            ("qwen36", "ornith-1.5-35b-a3b", 4, "Ornith 1.5 35B-A3B"),
+            (
+                "qwen36", "ornith-1.5-35b-a3b-bf16dense", 4,
+                "Ornith 1.5 35B-A3B (bf16 dense)"
+            ),
+            ("qwen36", "qwen-agentworld", 4, "Qwen AgentWorld 35B-A3B"),
+            ("qwen36", "kat-coder-v2.5", 4, "KAT-Coder-V2.5-Dev 35B-A3B"),
+            ("qwen38flash", "qwen3.8-flash-next", 4, "Qwen 3.8 Flash Next 125B-A6B"),
+            (
+                "qwen4flash", "qwen4-omni-120b-think", 4,
+                "Qwen 4.0 Flash (Qwen4-Omni-120B-Think)"
+            ),
+            ("qwen3_5_dense", "qwen3.5-2b", 4, "Qwen 3.5 2B"),
+            ("qwen3_5_dense", "qwen3.5-4b", 4, "Qwen 3.5 4B"),
+            ("qwen3_5_dense", "qwen3.5-9b", 4, "Qwen 3.5 9B"),
+        ]
+        var names: Set<String> = []
+        for install in shipped {
+            let (_, identity) = try identity(
+                family: install.family, modelID: install.modelID, bits: install.bits)
+            #expect(identity.displayName == install.name, "\(install.modelID)")
+            names.insert(identity.displayName)
+        }
+        #expect(names.count == shipped.count, "two shipped models share a display name")
     }
 }

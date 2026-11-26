@@ -30,7 +30,7 @@ public enum VariantCPUModelFamily: String, Sendable, CaseIterable {
             + "not."
     }
 
-    var reasoningControl: ReasoningControl {
+    package var reasoningControl: ReasoningControl {
         switch self {
         case .qwen35Dense: return .binaryThinking
         }
