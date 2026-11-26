@@ -1,0 +1,157 @@
+{
+ "TinyTitanFormat": [],
+ "TinyTitanKernelsC": [],
+ "TinyTitanCore": [
+  "TinyTitanFormat"
+ ],
+ "Qwen35Dense2B4Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "Qwen35Dense2B8Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "Qwen35Dense4B4Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "Qwen35Dense4B8Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "Qwen35Dense9B4Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "Qwen35Dense9B8Bit": [
+  "TinyTitanCore",
+  "TinyTitanKernelsC"
+ ],
+ "DenseGPU": [
+  "TinyTitanCore",
+  "TinyTitanFormat",
+  "TinyTitanKernelsC",
+  "TinyTitanPluginAPI"
+ ],
+ "Ornith35B4Bit": [
+  "TinyTitanCore",
+  "TinyTitanFormat",
+  "TinyTitanKernelsC",
+  "TinyTitanPluginAPI"
+ ],
+ "TinyTitanPluginAPI": [
+  "TinyTitanCore"
+ ],
+ "TemplatePlugin": [
+  "TinyTitanCore",
+  "TinyTitanPluginAPI"
+ ],
+ "Inkling2NVFP4": [
+  "TinyTitanCore",
+  "TinyTitanFormat",
+  "TinyTitanPluginAPI"
+ ],
+ "Inkling2GGUFQ4": [
+  "TinyTitanCore",
+  "TinyTitanFormat",
+  "TinyTitanPluginAPI"
+ ],
+ "TinyTitan": [
+  "TinyTitanCore",
+  "TinyTitanFormat",
+  "TinyTitanKernelsC"
+ ],
+ "TinyTitanLib": [
+  "TinyTitanCore"
+ ],
+ "TinyTitanLegacyEngine": [
+  "TinyTitan",
+  "TinyTitanCore",
+  "TinyTitanLib"
+ ],
+ "TinyTitanVariants": [
+  "DenseGPU",
+  "Inkling2GGUFQ4",
+  "Inkling2NVFP4",
+  "Ornith35B4Bit",
+  "Qwen35Dense2B4Bit",
+  "Qwen35Dense2B8Bit",
+  "Qwen35Dense4B4Bit",
+  "Qwen35Dense4B8Bit",
+  "Qwen35Dense9B4Bit",
+  "Qwen35Dense9B8Bit",
+  "TemplatePlugin",
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanPluginAPI"
+ ],
+ "TinyTitanCPUEngine": [
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanVariants"
+ ],
+ "TinyTitanRepackCore": [
+  "TinyTitanCore",
+  "TinyTitanFormat"
+ ],
+ "TinyTitanRepack": [
+  "TinyTitanRepackCore"
+ ],
+ "TinyTitanCLICore": [
+  "TinyTitan",
+  "TinyTitanCLICore",
+  "TinyTitanCPUEngine",
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanPluginAPI",
+  "TinyTitanVariants"
+ ],
+ "TinyTitanCLI": [
+  "TinyTitanCLICore"
+ ],
+ "ContinuityCore": [],
+ "ContinuityDemo": [
+  "ContinuityCore"
+ ],
+ "TinyTitanMemory": [
+  "ContinuityCore"
+ ],
+ "TinyTitanMemoryTool": [
+  "ContinuityCore",
+  "TinyTitanMemory"
+ ],
+ "TinyTitanServerCore": [
+  "TinyTitan",
+  "TinyTitanCPUEngine",
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanMemory",
+  "TinyTitanPluginAPI",
+  "TinyTitanVariants"
+ ],
+ "TinyTitanServer": [
+  "TinyTitanCPUEngine",
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanMemory",
+  "TinyTitanPluginAPI",
+  "TinyTitanServerCore",
+  "TinyTitanVariants"
+ ],
+ "TinyTitanBench": [
+  "TinyTitan",
+  "TinyTitanCore",
+  "TinyTitanLegacyEngine",
+  "TinyTitanLib",
+  "TinyTitanVariants"
+ ],
+ "TinyTitanValidationSupport": [
+  "TinyTitanCore"
+ ]
+}

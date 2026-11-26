@@ -78,3 +78,9 @@ Standalone portable Node audit requires Linux B; integrated server tests belong 
 - Shell release/install drivers, environment variables and credentials, supply chain and dependency locks; Tier A pending source review.
 
 The direct target graph is from Package.swift. Two-hop adjacency is in inventory.json; the contract list is preliminary, not a completed source-derived two-hop cross-project graph. No manual L0–L7 passes are complete. All non-test runtime targets except demo/benchmark/validation support are provisionally A; no Tier B reduction has been claimed.
+
+## Source-derived graph (2026-11-26)
+
+`AUDIT/contracts.md` is the source-derived companion to this manifest inventory: first-party `import`
+edges per target, the two-hop closure, the manifest-versus-actual differences, and the key contract
+table. It is generated from the tree at the audit HEAD; `AUDIT/import-graph.json` is the raw edge list.

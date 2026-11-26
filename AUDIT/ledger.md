@@ -6,12 +6,12 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:9 in_progress:3 open:15 start:9 blocked:1**
+**done:10 in_progress:2 open:16 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
 | 0001 | S0 | DONE | Root SwiftPM / Apple projects | Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host |
-| 0002 | S0 | IN_PROGRESS | Repository | Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation |
+| 0002 | S0 | DONE | Repository | Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation |
 | 0003 | S0 | IN_PROGRESS | Repository | Produce current pinned baseline and tool coverage proofs |
 | 0004 | S1 | DONE | Embedded and plugin examples | Enforce required Swift settings in standalone example packages |
 | 0005 | S1 | DONE | Library demo | Enforce Swift 6 and warnings-as-errors in direct swiftc demo builds |
@@ -47,6 +47,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 | 0036 | S2 | OPEN | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
+| 0038 | S3 | OPEN | Root SwiftPM / manifests | Manifest dependency declarations diverge from actual imports |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -59,11 +60,11 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0002 — Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation
 
-- S0 / Tier A / IN_PROGRESS / audit gate
+- S0 / Tier A / DONE / audit gate
 - Project: Repository; host: Unassigned Apple Silicon Mac
 - Location: AUDIT/inventory.md:1
 - Evidence before: Tree and manifests enumerated; source-level contract mapping and individual classification not complete.
-- Evidence after: Inventory reconciles exactly with the pinned tree (2,520/2,520, A 1,522 / C 998) and with swift package describe (46/46 targets). Source-derived two-hop contract table still incomplete. See AUDIT/evidence/0002.md.
+- Evidence after: Inventory reconciles exactly with the pinned tree (2,520/2,520; A 1,522 / C 998) and swift package describe (46/46 targets). AUDIT/contracts.md records the first-party import graph and two-hop closure for all 32 source targets, the manifest-vs-actual differences, and a contract table for the eight type-A boundaries (HTTP/API, catalog JSON, SSDAI, GGUF/TTXI, journal/memory, plugin registry, Swift-C, DSH YAML); AUDIT/import-graph.json is the raw edges. Residual: per-module L1 review belongs to 0007.
 
 ## 0003 — Produce current pinned baseline and tool coverage proofs
 
@@ -329,4 +330,11 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: CI / release; host: Apple Silicon Mac A
 - Location: .github/workflows/ci.yml; tools/release.sh:520
 - Evidence before: No CI job builds `examples/library-demo` with `swiftc`; `tools/release.sh` only asserts the demo scripts are present in the archive. The direct-swiftc path therefore had no compile in CI, which is how the missing Swift 6 / warnings-as-errors invocation survived.
+
+## 0038 — Manifest dependency declarations diverge from actual imports
+
+- S3 / Tier C / OPEN / build hygiene
+- Project: Root SwiftPM / manifests; host: Apple Silicon Mac A
+- Location: Package.swift: TinyTitanServer, Qwen35Dense*, TinyTitanLib targets
+- Evidence before: The source-derived graph in AUDIT/contracts.md shows TinyTitanServer imports TinyTitanCore, TinyTitanLegacyEngine, TinyTitanLib and TinyTitanMemory without declaring them directly (they arrive through TinyTitanServerCore), while the six Qwen35Dense* targets and TinyTitanLib declare TinyTitanFormat with no direct import. The build succeeds today; the declarations are fragile/unused rather than failing.
 

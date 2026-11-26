@@ -56,7 +56,7 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": "Inventory reconciles exactly with the pinned tree (2,520/2,520, A 1,522 / C 998) and with swift package describe (46/46 targets). Source-derived two-hop contract table still incomplete. See AUDIT/evidence/0002.md.",
+      "evidence-after": "Inventory reconciles exactly with the pinned tree (2,520/2,520; A 1,522 / C 998) and swift package describe (46/46 targets). AUDIT/contracts.md records the first-party import graph and two-hop closure for all 32 source targets, the manifest-vs-actual differences, and a contract table for the eight type-A boundaries (HTTP/API, catalog JSON, SSDAI, GGUF/TTXI, journal/memory, plugin registry, Swift-C, DSH YAML); AUDIT/import-graph.json is the raw edges. Residual: per-module L1 review belongs to 0007.",
       "commit": null,
       "blocked-reason": null,
       "id": "0002",
@@ -66,7 +66,7 @@
       "file:line": "AUDIT/inventory.md:1",
       "title": "Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation",
       "category": "audit gate",
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "evidence-before": "Tree and manifests enumerated; source-level contract mapping and individual classification not complete.",
       "manual": {
         "depends_on": [
@@ -1574,6 +1574,45 @@
         "self_audit_steps": [
           "Confirm the step cannot publish or overwrite a release artifact.",
           "Confirm it uses the same strict invocation the scripts now carry."
+        ]
+      }
+    },
+    {
+      "id": "0038",
+      "severity": "S3",
+      "tier": "C",
+      "project": "Root SwiftPM / manifests",
+      "file:line": "Package.swift: TinyTitanServer, Qwen35Dense*, TinyTitanLib targets",
+      "title": "Manifest dependency declarations diverge from actual imports",
+      "category": "build hygiene",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0002 source-derived import graph",
+      "evidence-before": "The source-derived graph in AUDIT/contracts.md shows TinyTitanServer imports TinyTitanCore, TinyTitanLegacyEngine, TinyTitanLib and TinyTitanMemory without declaring them directly (they arrive through TinyTitanServerCore), while the six Qwen35Dense* targets and TinyTitanLib declare TinyTitanFormat with no direct import. The build succeeds today; the declarations are fragile/unused rather than failing.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "TinyTitanServer declares every module it imports; declared-but-unimported dependencies are removed or justified; the target graph and all builds/tests are unchanged.",
+      "classification": "static graph discrepancy",
+      "manual": {
+        "depends_on": [
+          "0002"
+        ],
+        "problem_description": "SwiftPM exposes a dependency's transitive modules on the search path, so an executable can import a module it does not declare. The reverse also occurs: a target declares a dependency it never imports. Both make the manifest an unreliable map of coupling.",
+        "proposed_solution": [
+          "Add the imported modules as direct dependencies of TinyTitanServer.",
+          "Remove (or justify) the TinyTitanFormat declarations with no import.",
+          "Regenerate the manifest graph and the source-derived graph; they must then agree."
+        ],
+        "verification_steps": [
+          "`swift package describe` and the import graph agree for the touched targets.",
+          "`swift build -c release`, `swift build --build-tests`, full suite and lint unchanged.",
+          "No product behavior change."
+        ],
+        "self_audit_steps": [
+          "Confirm removing a dependency does not drop a re-export some file relies on.",
+          "Confirm the graph tooling was not changed to make the comparison pass."
         ]
       }
     }
