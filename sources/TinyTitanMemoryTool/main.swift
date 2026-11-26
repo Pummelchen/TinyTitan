@@ -66,8 +66,10 @@ func projectName(_ raw: String) -> String {
 }
 
 func resolve(_ raw: String, in directory: URL) -> MemoryProjectFile {
-    let files = MemoryProjectFile.discover(in: directory)
-    switch MemoryProjectFile.resolve(projectName(raw), among: files) {
+    let discovery = MemoryProjectFile.discoverAll(in: directory)
+    switch MemoryProjectFile.resolve(
+        projectName(raw), among: discovery.projects, broken: discovery.broken)
+    {
     case .success(let file):
         warnIfDamaged(file)
         return file
@@ -85,11 +87,12 @@ formatter.dateFormat = "yyyy-MM-dd HH:mm"
 
 switch command {
 case "projects":
-    let files = MemoryProjectFile.discover(in: directory)
-    guard !files.isEmpty else {
+    let discovery = MemoryProjectFile.discoverAll(in: directory)
+    guard !discovery.isEmpty else {
         print("no project files under \(directory.path)")
         exit(0)
     }
+    let files = discovery.projects
     print("\(directory.path)\n")
     func column(_ text: String, _ width: Int, right: Bool = false) -> String {
         let clipped = text.count > width ? String(text.prefix(width)) : text
@@ -113,7 +116,14 @@ case "projects":
             " \(formatter.string(from: file.modifiedAt))")
     }
     // On stderr so the table stays machine-readable, and after it so a reader
-    // sees the rows first.
+    // sees the rows first. A file that could not be read at all is named here
+    // rather than omitted: a present project that vanished from the listing is
+    // the one an operator cannot act on.
+    for file in discovery.broken {
+        warn(
+            "\(file.workspace) is present but could not be read: \(file.reason)\n"
+                + "Repair the file or remove it.")
+    }
     for file in files { warnIfDamaged(file) }
 
 case "list":

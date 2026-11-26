@@ -1,6 +1,35 @@
 import ContinuityCore
 import Foundation
 
+/// The result of looking for project files: the readable ones and the ones
+/// that are present but could not be loaded.
+public struct MemoryProjectDiscovery: Sendable {
+    /// A file that is present but could not be read. `reason` is a safe
+    /// description — a path and an errno, or the rejected line numbers — and
+    /// never record contents.
+    public struct Broken: Sendable, Equatable {
+        public let url: URL
+        public let workspace: String
+        public let reason: String
+
+        public init(url: URL, workspace: String, reason: String) {
+            self.url = url
+            self.workspace = workspace
+            self.reason = reason
+        }
+    }
+
+    public let projects: [MemoryProjectFile]
+    public let broken: [Broken]
+
+    public init(projects: [MemoryProjectFile], broken: [Broken]) {
+        self.projects = projects
+        self.broken = broken
+    }
+
+    public var isEmpty: Bool { projects.isEmpty && broken.isEmpty }
+}
+
 /// A project file read without opening it for writing.
 ///
 /// This is what a person uses the day memory says something wrong: list the
@@ -43,48 +72,115 @@ public struct MemoryProjectFile: Sendable {
     public let damagedRecordLines: [Int]
 
     /// Every project file under a memory directory, newest first.
+    ///
+    /// The loadable ones. A file that is present but cannot be read is not
+    /// part of this list — that is what `discoverAll` is for, and a caller
+    /// that shows projects to a person should be using it. Keeping this
+    /// signature for callers that only want the readable set is the point of
+    /// the split; silently omitting a broken file from the *tool* is the
+    /// defect this replaced.
     public static func discover(in directory: URL) -> [MemoryProjectFile] {
+        discoverAll(in: directory).projects
+    }
+
+    /// Every project file under a memory directory, loadable or not.
+    ///
+    /// `projects` are the files that parsed, newest first. `broken` are the
+    /// files that are present but could not be opened or decoded, with a safe
+    /// reason (a `JournalError` description: a path and an errno, or the line
+    /// numbers of records that did not decode — never record contents).
+    ///
+    /// A project that is present but unreadable is not a missing project. The
+    /// tool lists it in its warnings and refuses a command for it with the
+    /// reason, so an operator can repair or remove it instead of wondering why
+    /// the workspace vanished.
+    public static func discoverAll(in directory: URL) -> MemoryProjectDiscovery {
         let manager = FileManager.default
         guard
             let walker = manager.enumerator(
                 at: directory,
                 includingPropertiesForKeys: [.contentModificationDateKey],
                 options: [.skipsHiddenFiles])
-        else { return [] }
-        var files: [MemoryProjectFile] = []
+        else { return MemoryProjectDiscovery(projects: [], broken: []) }
+        var projects: [MemoryProjectFile] = []
+        var broken: [MemoryProjectDiscovery.Broken] = []
         for case let url as URL in walker where url.pathExtension == "ndjson" {
-            if let file = try? load(url) { files.append(file) }
+            do {
+                projects.append(try load(url))
+            } catch {
+                // `load` throws only `JournalError`; this catch is its one
+                // exhaustive handler, and it records the failure instead of
+                // dropping it.
+                broken.append(
+                    MemoryProjectDiscovery.Broken(
+                        url: url,
+                        workspace: url.deletingPathExtension().lastPathComponent,
+                        reason: error.description))
+            }
         }
-        return files.sorted { $0.modifiedAt > $1.modifiedAt }
+        return MemoryProjectDiscovery(
+            projects: projects.sorted { $0.modifiedAt > $1.modifiedAt },
+            broken: broken.sorted {
+                ($0.workspace, $0.url.path) < ($1.workspace, $1.url.path)
+            })
     }
 
     /// Picks a project by exact workspace id or by a unique prefix, so
     /// `photograph` finds `photograph-851a1c1a`.
+    ///
+    /// A name that matches a file which could not be read answers
+    /// `.unreadable` with that file's reason, rather than "no project matches"
+    /// — the project does exist, and saying otherwise sends an operator
+    /// looking for a file that is right there.
     public static func resolve(_ name: String, among files: [MemoryProjectFile])
         -> Result<MemoryProjectFile, ResolveError>
     {
+        resolve(name, among: files, broken: [])
+    }
+
+    public static func resolve(
+        _ name: String, among files: [MemoryProjectFile],
+        broken: [MemoryProjectDiscovery.Broken]
+    ) -> Result<MemoryProjectFile, ResolveError> {
         if let exact = files.first(where: { $0.workspace == name }) { return .success(exact) }
+        if let exact = broken.first(where: { $0.workspace == name }) {
+            return .failure(.unreadable(exact.workspace, reason: exact.reason))
+        }
         let matches = files.filter { $0.workspace.hasPrefix(name) }
-        switch matches.count {
-        case 0: return .failure(.notFound(name))
-        case 1: return .success(matches[0])
-        default: return .failure(.ambiguous(name, matches.map(\.workspace)))
+        let brokenMatches = broken.filter { $0.workspace.hasPrefix(name) }
+        switch matches.count + brokenMatches.count {
+        case 0:
+            return .failure(.notFound(name))
+        case 1:
+            if let file = matches.first { return .success(file) }
+            let file = brokenMatches[0]
+            return .failure(.unreadable(file.workspace, reason: file.reason))
+        default:
+            let names = matches.map(\.workspace) + brokenMatches.map(\.workspace)
+            return .failure(.ambiguous(name, names.sorted()))
         }
     }
 
     public enum ResolveError: Error, CustomStringConvertible {
         case notFound(String)
         case ambiguous(String, [String])
+        /// The file exists but could not be loaded. Carries only the safe
+        /// reason `discoverAll` collected.
+        case unreadable(String, reason: String)
         public var description: String {
             switch self {
             case .notFound(let name): return "no project matches '\(name)'"
             case .ambiguous(let name, let candidates):
                 return "'\(name)' matches several projects: " + candidates.joined(separator: ", ")
+            case .unreadable(let name, let reason):
+                return
+                    "project '\(name)' is present but could not be read: \(reason)\n"
+                    + "Repair the file or remove it, then try again."
             }
         }
     }
 
-    public static func load(_ url: URL) throws -> MemoryProjectFile {
+    public static func load(_ url: URL) throws(JournalError) -> MemoryProjectFile {
         let replay = try FileJournal.readDetailed(contentsOf: url)
         let records = replay.records
         var items: [String: MemoryItem] = [:]

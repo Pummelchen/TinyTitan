@@ -47,7 +47,7 @@ import Testing
         do {
             _ = try FileJournal.read(contentsOf: url)
             Issue.record("a FIFO was read as if it were a journal")
-        } catch let error as JournalError {
+        } catch {
             guard case .notAFile(let failedURL) = error else {
                 Issue.record("expected notAFile, got \(error)")
                 return
@@ -80,7 +80,7 @@ import Testing
         do {
             _ = try FileJournal.read(contentsOf: url)
             Issue.record("a directory was read as if it were a journal")
-        } catch let error as JournalError {
+        } catch {
             guard case .notAFile = error else {
                 Issue.record("expected notAFile, got \(error)")
                 return

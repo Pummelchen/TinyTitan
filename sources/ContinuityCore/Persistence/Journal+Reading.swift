@@ -48,14 +48,14 @@ extension FileJournal {
     /// rewrites the store — must use `readDetailed` and handle `damage`, or it
     /// will present an incomplete file as a whole one. The package's own
     /// callers do: `MemoryProjectFile.load` and `ContinuityDemo.inspect`.
-    public static func read(contentsOf url: URL) throws -> [JournalRecord] {
+    public static func read(contentsOf url: URL) throws(JournalError) -> [JournalRecord] {
         try readDetailed(contentsOf: url).records
     }
 
     /// The same read, with the positions of complete lines that did not
     /// decode. `read(contentsOf:)` keeps its old shape for the callers that
     /// only want the records; a tool that is diagnosing a file wants this.
-    public static func readDetailed(contentsOf url: URL) throws -> JournalReplay {
+    public static func readDetailed(contentsOf url: URL) throws(JournalError) -> JournalReplay {
         let decoder = Self.makeDecoder()
         // `nil` means the file is not there; anything else that goes wrong is
         // reported, so a caller listing workspaces does not show a file it could
@@ -79,7 +79,7 @@ extension FileJournal {
     /// from following a link planted at the journal path, or blocking on a
     /// FIFO and reading `/dev/zero` until memory runs out. A read may not be a
     /// way around the write path's guard just because it looks harmless.
-    static func readContents(atPath path: String) throws -> Data? {
+    static func readContents(atPath path: String) throws(JournalError) -> Data? {
         let url = URL(fileURLWithPath: path)
         let descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         if descriptor < 0 {
