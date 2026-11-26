@@ -62,6 +62,10 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         /// by the test. A semaphore, not a sleep, so the ordering under test is
         /// the ordering that happens.
         var renameGate: (entered: DispatchSemaphore, release: DispatchSemaphore)?
+        /// The barrier pause: signalled when `fullSync` is entered and released
+        /// by the test. Consumed by the first call so a later barrier (a
+        /// compaction's data barrier, say) is not blocked by the same hold.
+        var fullSyncGate: (entered: DispatchSemaphore, release: DispatchSemaphore)?
     }
 
     let state: Mutex<State>
@@ -127,6 +131,12 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     func holdRename(entered: DispatchSemaphore, release: DispatchSemaphore) {
         state.withLock {
             $0.renameGate = (entered: entered, release: release)
+        }
+    }
+
+    func holdFullSync(entered: DispatchSemaphore, release: DispatchSemaphore) {
+        state.withLock {
+            $0.fullSyncGate = (entered: entered, release: release)
         }
     }
 
@@ -224,16 +234,24 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
     }
 
     func fullSync(_ descriptor: Int32) -> Int32 {
-        let failure = state.withLock { state -> Int32? in
+        let decision = state.withLock {
+            state -> (failure: Int32?, gate: State.PendingGate?) in
             state.fullSyncs += 1
+            let gate = state.fullSyncGate.map(State.PendingGate.init)
+            // One hold: a later barrier in the same test is not blocked by it.
+            state.fullSyncGate = nil
             if let path = state.descriptorPaths[descriptor],
                 let code = state.fullSyncFailurePaths[path]
             {
-                return code
+                return (code, gate)
             }
-            return state.fullSyncFailure
+            return (state.fullSyncFailure, gate)
         }
-        if let failure { return failure }
+        if let gate = decision.gate {
+            gate.entered.signal()
+            gate.release.wait()
+        }
+        if let failure = decision.failure { return failure }
         return real.fullSync(descriptor)
     }
 
@@ -276,6 +294,20 @@ final class JournalFaultFileSystem: JournalFileSystem, Sendable {
         if let mode = override.0 { status.st_mode = mode }
         if let uid = override.1 { status.st_uid = uid }
         return (status, 0)
+    }
+}
+
+/// Wait for a signal without blocking a cooperative thread.
+///
+/// The wait runs on a global queue; the timeout only guards against a hang in
+/// the code under test, it is not the synchronisation.
+func waitForSignal(
+    _ semaphore: DispatchSemaphore, timeout: DispatchTime = .now() + 10
+) async -> Bool {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            continuation.resume(returning: semaphore.wait(timeout: timeout) == .success)
+        }
     }
 }
 
