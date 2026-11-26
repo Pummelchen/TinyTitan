@@ -45,10 +45,11 @@ extension RemoteStreamingRepacker {
         }
         let pinned = remote.pinned(commit: info.resolvedCommit)
         var want = UInt64(16 << 20)  // the Q4_K_XL header is 12 MB
+        let headerBudget = UInt64(GGUFHeaderV3.maximumHeaderBytes)
         var header: GGUFHeaderV3?
         var headerBytes: [UInt8] = []
         while header == nil {
-            let length = min(want, info.size)
+            let length = min(want, info.size, headerBudget)
             let bytes = [UInt8](
                 try await fetchRange(
                     pinned, fileName: fileName, info: info, offset: 0, length: length))
@@ -58,16 +59,28 @@ extension RemoteStreamingRepacker {
                     guard parsed.dataStart <= info.size else {
                         throw GGUFHeaderV3.ReadError.invalid("data section past the file")
                     }
+                    // `want` must move past what this fetch covered, or the
+                    // loop would ask for the same range forever.
+                    guard parsed.dataStart > length else {
+                        throw GGUFHeaderV3.ReadError.invalid("short header read")
+                    }
                     want = parsed.dataStart
                     continue
                 }
                 header = parsed
                 headerBytes = Array(bytes.prefix(Int(parsed.dataStart)))
             } catch GGUFHeaderV3.ReadError.needMoreBytes(let atLeast) {
-                guard length < info.size else {
-                    throw GGUFHeaderV3.ReadError.invalid("truncated file")
+                guard length < info.size,
+                    let current = Int(exactly: length),
+                    let next = GGUFHeaderV3.nextHeaderReadSize(
+                        current: current, atLeast: atLeast),
+                    next > current
+                else {
+                    throw GGUFHeaderV3.ReadError.invalid(
+                        "truncated file, or a header larger than "
+                            + "\(GGUFHeaderV3.maximumHeaderBytes) bytes")
                 }
-                want = max(UInt64(atLeast), want * 2)
+                want = UInt64(next)
             }
         }
         guard let header else { throw GGUFHeaderV3.ReadError.invalid("no header") }

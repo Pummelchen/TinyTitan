@@ -103,29 +103,45 @@ extension RemoteStreamingRepacker {
     }
 
     /// The header, its bytes (up to the data section) and the file size. Reads
-    /// 64 MiB first and widens when the header runs past it.
-    static func readGGUFHeader(at path: String) throws -> (GGUFHeaderV3, [UInt8], UInt64) {
+    /// 64 MiB (or the header budget, if smaller) first and widens when the
+    /// header runs past it, never past `GGUFHeaderV3.maximumHeaderBytes`.
+    static func readGGUFHeader(
+        at path: String,
+        initialBytes: Int = 64 << 20
+    ) throws -> (GGUFHeaderV3, [UInt8], UInt64) {
         guard let handle = FileHandle(forReadingAtPath: path) else {
             throw RepackError.snapshotFileMissing(path: path, detail: "cannot open the GGUF")
         }
         defer { try? handle.close() }
         let fileSize = try handle.seekToEnd()
-        var want = 64 << 20
+        var want = min(
+            max(initialBytes, 1), GGUFHeaderV3.maximumHeaderBytes)
         while true {
             try handle.seek(toOffset: 0)
             let bytes = [UInt8](try handle.read(upToCount: want) ?? Data())
             do {
                 let header = try GGUFHeaderV3(bytes: bytes)
                 guard header.dataStart <= UInt64(bytes.count) else {
-                    want = Int(header.dataStart)
+                    // The parser bounds `dataStart` by the header budget, so
+                    // this conversion cannot see a value outside `Int`.
+                    guard header.dataStart <= UInt64(fileSize) else {
+                        throw GGUFHeaderV3.ReadError.invalid("truncated file")
+                    }
+                    want = min(
+                        Int(header.dataStart), GGUFHeaderV3.maximumHeaderBytes)
                     continue
                 }
                 return (header, Array(bytes.prefix(Int(header.dataStart))), fileSize)
             } catch GGUFHeaderV3.ReadError.needMoreBytes(let atLeast) {
-                guard UInt64(want) < fileSize else {
-                    throw GGUFHeaderV3.ReadError.invalid("truncated file")
+                guard UInt64(want) < fileSize,
+                    let next = GGUFHeaderV3.nextHeaderReadSize(
+                        current: want, atLeast: atLeast)
+                else {
+                    throw GGUFHeaderV3.ReadError.invalid(
+                        "truncated file, or a header larger than "
+                            + "\(GGUFHeaderV3.maximumHeaderBytes) bytes")
                 }
-                want = max(atLeast, want * 2)
+                want = next
             }
         }
     }
