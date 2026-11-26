@@ -49,7 +49,14 @@ OUT="$HERE/tinytitan-demo-dynamic"
 # than at the absolute path it happened to be built against. Keeping it out of
 # the demo's own directory also means the demo never looks like a distribution.
 mkdir -p "$HERE/lib"
-swiftc -O \
+# The compiler standard belongs in the invocation, not in a manifest these
+# scripts never read: Swift 6 language mode (so complete concurrency checking is
+# an error, not a warning), the explicit strict-concurrency flag the pinned
+# compiler accepts, and -warnings-as-errors, which is the repository's standard
+# and makes a warning a failed build. A failed `swiftc` aborts here under
+# `set -e`, so "built" below is only ever printed for a binary that compiled.
+# Keep this line identical in build-static.sh and build-dynamic.sh.
+swiftc -O -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
   -I "$DIST" \
   @"$DIST/swiftc-flags.txt" \
   -D DYNAMIC_LINK \

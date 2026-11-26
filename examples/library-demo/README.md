@@ -35,6 +35,11 @@ cd examples/library-demo
 
 Both scripts also take an explicit path: `./build-static.sh /path/to/library-dist`.
 
+They compile with `-swift-version 6 -strict-concurrency=complete
+-warnings-as-errors`: the same standard the SwiftPM package enforces, applied
+here because these builds never read its manifest. A warning is a failed build,
+and a failed build prints no success line.
+
 They copy the resource bundles (and, for the dynamic app, the dylib) next to the
 executable. That is not decoration: the runtime resolves its Metal shaders
 through `Bundle.module`, which looks beside the *running binary*, so an app that
