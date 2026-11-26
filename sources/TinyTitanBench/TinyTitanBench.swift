@@ -1,6 +1,5 @@
 import Foundation
 import Metal
-import TinyTitan
 import TinyTitanCore
 
 /// Kernel micro-benchmarks. Two families:
@@ -36,7 +35,12 @@ struct TinyTitanBench {
         // touch the GPU, whose bandwidth is the thing being competed for.
         if try runCPUCommand(kernelName, iterations: iterations) { return }
 
-        let context = try MetalContext.runtimeDefault()
+        // The generic Core context: every module these kernel benches dispatch
+        // (dequant_int4, gdn, moe, logit, attention) is in `MetalContext`'s
+        // default list. The 6.x `runtimeDefault()` only adds the Nemotron shader
+        // module on top, which no kernel here launches; the commands that do
+        // measure it (nemotron, laguna, k2) still build their own context.
+        let context = try MetalContext()
         let device = context.device
         print("device: \(device.name)")
 

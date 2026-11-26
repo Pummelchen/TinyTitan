@@ -11,7 +11,6 @@
 
 import Foundation
 import Metal
-import TinyTitan
 import TinyTitanCore
 
 extension TinyTitanBench {
