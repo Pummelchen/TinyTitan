@@ -6,15 +6,15 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:7 in_progress:3 open:13 start:11 blocked:1**
+**done:9 in_progress:3 open:15 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
 | 0001 | S0 | DONE | Root SwiftPM / Apple projects | Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host |
 | 0002 | S0 | IN_PROGRESS | Repository | Complete Phase A inventory, two-hop contracts, trust boundaries and tier validation |
 | 0003 | S0 | IN_PROGRESS | Repository | Produce current pinned baseline and tool coverage proofs |
-| 0004 | S1 | START | Embedded and plugin examples | Enforce required Swift settings in standalone example packages |
-| 0005 | S1 | START | Library demo | Enforce Swift 6 and warnings-as-errors in direct swiftc demo builds |
+| 0004 | S1 | DONE | Embedded and plugin examples | Enforce required Swift settings in standalone example packages |
+| 0005 | S1 | DONE | Library demo | Enforce Swift 6 and warnings-as-errors in direct swiftc demo builds |
 | 0006 | S0 | DONE | Repository | Obtain executable clone and pinned non-Apple toolchains |
 | 0007 | S0 | OPEN | Repository | Complete L0–L7, facade and unused-code audit, remediation and convergence |
 | 0008 | S0 | BLOCKED | Repository | Run Phase E once on an independent fresh-clone host |
@@ -45,6 +45,8 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0033 | S2 | OPEN | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
 | 0034 | S2 | OPEN | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
+| 0036 | S2 | OPEN | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
+| 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -73,17 +75,21 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0004 — Enforce required Swift settings in standalone example packages
 
-- S1 / Tier C / START / language-standard configuration
+- S1 / Tier C / DONE / language-standard configuration
 - Project: Embedded and plugin examples; host: Unassigned Apple Silicon Mac
 - Location: examples/embedded/Package.swift:15; examples/plugin/Package.swift:11
 - Evidence before: Both example manifests require tools version 6.4 but do not declare explicit Swift 6 language mode or warnings-as-errors; tools version alone does not establish warning enforcement. Expected: all example targets enforce the same mode and warnings-as-errors, proven with negative controls.
+- Evidence after: Both example packages declare swiftLanguageModes [.v6] and a 4-setting array on every target (3 upcoming features + -warnings-as-errors); dump-package confirms 6.4.0, ["6"], 4 settings per target (EmbeddedDemo, EchoPlugin, PluginDemo). Scratch #warning and non-Sendable probes fail all three; dependency checks pass. See AUDIT/evidence/0004.md.
+- Commit: `7bc7e238`
 
 ## 0005 — Enforce Swift 6 and warnings-as-errors in direct swiftc demo builds
 
-- S1 / Tier C / START / language-standard configuration
+- S1 / Tier C / DONE / language-standard configuration
 - Project: Library demo; host: Unassigned Apple Silicon Mac
 - Location: examples/library-demo/build-static.sh:46; examples/library-demo/build-dynamic.sh:52
 - Evidence before: Both scripts invoke swiftc -O with no explicit -swift-version 6, strict concurrency or -warnings-as-errors. Expected: both demo build paths carry the strict standard; prove with negative controls and test both linkage forms.
+- Evidence after: Both direct swiftc lines now -O -swift-version 6 -strict-concurrency=complete -warnings-as-errors (byte-identical); #warning and non-Sendable probes exit 1 with no built line; scratch library distribution builds, dynamic links @rpath/libTinyTitanLib.dylib with LC_RPATH @executable_path/lib; demo generation NOT RUN (no model). See AUDIT/evidence/0005.md.
+- Commit: `95742346`
 
 ## 0006 — Obtain executable clone and pinned non-Apple toolchains
 
@@ -309,4 +315,18 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/ModelCatalog+Plugins.swift:19-22
 - Evidence before: The catalog checks `factory.tokenizerFolder != nil`, which only proves the plugin declares a hook. A plugin-backed Q4 install whose GGUF header (the tokenizer source) is missing is still catalogued and then fails on first use. The JS mirror reproduces this deliberately (parity over preference).
+
+## 0036 — Example fixtures bind to the checkout directory name
+
+- S2 / Tier C / OPEN / portability / build configuration
+- Project: Embedded and plugin examples; host: Apple Silicon Mac A
+- Location: examples/embedded/Package.swift:43; examples/plugin/Package.swift:39,47
+- Evidence before: The fixtures declare `.package(path: "../..")` and reference it as `package: "TinyTitan"`. SwiftPM names a path dependency after the directory basename, so any clone or git worktree whose directory is not literally `TinyTitan` fails with `unknown package 'TinyTitan' ... valid packages are: 'examples'`. The prescribed `swift build --package-path examples/...` cannot run in such a checkout before any change.
+
+## 0037 — CI never compiles the library demo, so its compiler standard can regress
+
+- S3 / Tier C / OPEN / coverage gap
+- Project: CI / release; host: Apple Silicon Mac A
+- Location: .github/workflows/ci.yml; tools/release.sh:520
+- Evidence before: No CI job builds `examples/library-demo` with `swiftc`; `tools/release.sh` only asserts the demo scripts are present in the archive. The direct-swiftc path therefore had no compile in CI, which is how the missing Swift 6 / warnings-as-errors invocation survived.
 

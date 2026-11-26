@@ -1677,3 +1677,99 @@ The catalog's tokenizer probe is `factory.tokenizerFolder != nil`, i.e. it check
 **Acceptance:** The catalog either calls the tokenizer hook (bounded, at probe time) or records the exact precondition honestly; an install that cannot tokenize is not offered as servable; the JS mirror agrees.
 
 ---
+
+### Findings 0036–0037 (examples and CI)
+
+<a id="task-0036"></a>
+#### Task 0036 — Example fixtures bind to the checkout directory name
+
+**Project / component:** Embedded and plugin examples  
+**Location:** `examples/embedded/Package.swift:43; examples/plugin/Package.swift:39,47`  
+**Severity / tier:** S2 / C  
+**Status at discovery:** OPEN  
+**Category:** portability / build configuration  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0004.  
+**Evidence classification:** confirmed during 0004 verification
+
+##### 1. Detailed problem description
+
+A path dependency is named from its directory basename unless `name:` is given. The fixtures hardcode `package: "TinyTitan"`, so they only build from a directory called TinyTitan; a worktree, CI checkout under another name, or renamed clone fails to resolve the package.
+
+**Recorded evidence:** The fixtures declare `.package(path: "../..")` and reference it as `package: "TinyTitan"`. SwiftPM names a path dependency after the directory basename, so any clone or git worktree whose directory is not literally `TinyTitan` fails with `unknown package 'TinyTitan' ... valid packages are: 'examples'`. The prescribed `swift build --package-path examples/...` cannot run in such a checkout before any change.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Add the explicit dependency name in both manifests and keep the product references unchanged.
+
+2. Verify from a scratch copy/worktree whose directory name differs.
+
+3. Keep the tools version and the strict settings from 0004.
+
+
+##### 3. Verification — regression and integration
+
+1. `swift build --package-path examples/embedded` and `examples/plugin` from a differently named checkout succeed.
+
+2. `tools/embedded-dependency-check.sh` and `tools/plugin-dependency-check.sh` still pass.
+
+3. No product/dependency change.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the fix does not pin an absolute path or a checkout layout.
+
+2. Confirm both manifests change together.
+
+
+**Acceptance:** `.package(name: "TinyTitan", path: "../..")` (or an equivalent explicit name) makes both fixtures build from a directory with any name; a test/CI fixture proves it from a differently named worktree.
+
+---
+
+<a id="task-0037"></a>
+#### Task 0037 — CI never compiles the library demo, so its compiler standard can regress
+
+**Project / component:** CI / release  
+**Location:** `.github/workflows/ci.yml; tools/release.sh:520`  
+**Severity / tier:** S3 / C  
+**Status at discovery:** OPEN  
+**Category:** coverage gap  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0005.  
+**Evidence classification:** static gap
+
+##### 1. Detailed problem description
+
+The demo is a release artifact (`tools/build_library.sh` output) but no gate compiles it. A compiler-standard regression in `build-static.sh`/`build-dynamic.sh` is invisible until a user builds it.
+
+**Recorded evidence:** No CI job builds `examples/library-demo` with `swiftc`; `tools/release.sh` only asserts the demo scripts are present in the archive. The direct-swiftc path therefore had no compile in CI, which is how the missing Swift 6 / warnings-as-errors invocation survived.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Add a CI step that runs `tools/build_library.sh` into a scratch dir and both demo scripts.
+
+2. Run it with the pinned toolchain and no model; assert the binaries exist and the dynamic rpath is correct.
+
+3. Do not publish or upload the artifacts.
+
+
+##### 3. Verification — regression and integration
+
+1. The new step fails on a deliberately broken demo (or a `#warning`) and passes on HEAD.
+
+2. No network/model dependency; bounded runtime.
+
+3. The release gate still checks presence as before.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm the step cannot publish or overwrite a release artifact.
+
+2. Confirm it uses the same strict invocation the scripts now carry.
+
+
+**Acceptance:** CI builds a scratch library distribution and both demo scripts (no model, no publish); a `#warning` in the demo fails the job.
+
+---

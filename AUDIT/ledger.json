@@ -143,8 +143,8 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Both example packages declare swiftLanguageModes [.v6] and a 4-setting array on every target (3 upcoming features + -warnings-as-errors); dump-package confirms 6.4.0, [\"6\"], 4 settings per target (EmbeddedDemo, EchoPlugin, PluginDemo). Scratch #warning and non-Sendable probes fail all three; dependency checks pass. See AUDIT/evidence/0004.md.",
+      "commit": "7bc7e238",
       "blocked-reason": null,
       "id": "0004",
       "severity": "S1",
@@ -153,7 +153,7 @@
       "file:line": "examples/embedded/Package.swift:15; examples/plugin/Package.swift:11",
       "title": "Enforce required Swift settings in standalone example packages",
       "category": "language-standard configuration",
-      "status": "START",
+      "status": "DONE",
       "evidence-before": "Both example manifests require tools version 6.4 but do not declare explicit Swift 6 language mode or warnings-as-errors; tools version alone does not establish warning enforcement. Expected: all example targets enforce the same mode and warnings-as-errors, proven with negative controls.",
       "manual": {
         "depends_on": [
@@ -183,8 +183,8 @@
       "host": "Unassigned Apple Silicon Mac",
       "discovered-by": "Phase A static discovery",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Both direct swiftc lines now -O -swift-version 6 -strict-concurrency=complete -warnings-as-errors (byte-identical); #warning and non-Sendable probes exit 1 with no built line; scratch library distribution builds, dynamic links @rpath/libTinyTitanLib.dylib with LC_RPATH @executable_path/lib; demo generation NOT RUN (no model). See AUDIT/evidence/0005.md.",
+      "commit": "95742346",
       "blocked-reason": null,
       "id": "0005",
       "severity": "S1",
@@ -193,7 +193,7 @@
       "file:line": "examples/library-demo/build-static.sh:46; examples/library-demo/build-dynamic.sh:52",
       "title": "Enforce Swift 6 and warnings-as-errors in direct swiftc demo builds",
       "category": "language-standard configuration",
-      "status": "START",
+      "status": "DONE",
       "evidence-before": "Both scripts invoke swiftc -O with no explicit -swift-version 6, strict concurrency or -warnings-as-errors. Expected: both demo build paths carry the strict standard; prove with negative controls and test both linkage forms.",
       "manual": {
         "depends_on": [
@@ -1498,6 +1498,84 @@
         ]
       },
       "acceptance-criteria": "The catalog either calls the tokenizer hook (bounded, at probe time) or records the exact precondition honestly; an install that cannot tokenize is not offered as servable; the JS mirror agrees."
+    },
+    {
+      "id": "0036",
+      "severity": "S2",
+      "tier": "C",
+      "project": "Embedded and plugin examples",
+      "file:line": "examples/embedded/Package.swift:43; examples/plugin/Package.swift:39,47",
+      "title": "Example fixtures bind to the checkout directory name",
+      "category": "portability / build configuration",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0004 verification by the examples remediation agent",
+      "evidence-before": "The fixtures declare `.package(path: \"../..\")` and reference it as `package: \"TinyTitan\"`. SwiftPM names a path dependency after the directory basename, so any clone or git worktree whose directory is not literally `TinyTitan` fails with `unknown package 'TinyTitan' ... valid packages are: 'examples'`. The prescribed `swift build --package-path examples/...` cannot run in such a checkout before any change.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "`.package(name: \"TinyTitan\", path: \"../..\")` (or an equivalent explicit name) makes both fixtures build from a directory with any name; a test/CI fixture proves it from a differently named worktree.",
+      "classification": "confirmed during 0004 verification",
+      "manual": {
+        "depends_on": [
+          "0004"
+        ],
+        "problem_description": "A path dependency is named from its directory basename unless `name:` is given. The fixtures hardcode `package: \"TinyTitan\"`, so they only build from a directory called TinyTitan; a worktree, CI checkout under another name, or renamed clone fails to resolve the package.",
+        "proposed_solution": [
+          "Add the explicit dependency name in both manifests and keep the product references unchanged.",
+          "Verify from a scratch copy/worktree whose directory name differs.",
+          "Keep the tools version and the strict settings from 0004."
+        ],
+        "verification_steps": [
+          "`swift build --package-path examples/embedded` and `examples/plugin` from a differently named checkout succeed.",
+          "`tools/embedded-dependency-check.sh` and `tools/plugin-dependency-check.sh` still pass.",
+          "No product/dependency change."
+        ],
+        "self_audit_steps": [
+          "Confirm the fix does not pin an absolute path or a checkout layout.",
+          "Confirm both manifests change together."
+        ]
+      }
+    },
+    {
+      "id": "0037",
+      "severity": "S3",
+      "tier": "C",
+      "project": "CI / release",
+      "file:line": ".github/workflows/ci.yml; tools/release.sh:520",
+      "title": "CI never compiles the library demo, so its compiler standard can regress",
+      "category": "coverage gap",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0005 verification by the examples remediation agent",
+      "evidence-before": "No CI job builds `examples/library-demo` with `swiftc`; `tools/release.sh` only asserts the demo scripts are present in the archive. The direct-swiftc path therefore had no compile in CI, which is how the missing Swift 6 / warnings-as-errors invocation survived.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "CI builds a scratch library distribution and both demo scripts (no model, no publish); a `#warning` in the demo fails the job.",
+      "classification": "static gap",
+      "manual": {
+        "depends_on": [
+          "0005"
+        ],
+        "problem_description": "The demo is a release artifact (`tools/build_library.sh` output) but no gate compiles it. A compiler-standard regression in `build-static.sh`/`build-dynamic.sh` is invisible until a user builds it.",
+        "proposed_solution": [
+          "Add a CI step that runs `tools/build_library.sh` into a scratch dir and both demo scripts.",
+          "Run it with the pinned toolchain and no model; assert the binaries exist and the dynamic rpath is correct.",
+          "Do not publish or upload the artifacts."
+        ],
+        "verification_steps": [
+          "The new step fails on a deliberately broken demo (or a `#warning`) and passes on HEAD.",
+          "No network/model dependency; bounded runtime.",
+          "The release gate still checks presence as before."
+        ],
+        "self_audit_steps": [
+          "Confirm the step cannot publish or overwrite a release artifact.",
+          "Confirm it uses the same strict invocation the scripts now carry."
+        ]
+      }
     }
   ],
   "manual_revision": 1,
