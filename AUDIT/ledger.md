@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:39 in_progress:2 open:17 start:0 blocked:1**
+**done:41 in_progress:2 open:16 start:0 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -30,8 +30,8 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0018 | S1 | DONE | TinyTitanServer | Bound stored response memory by bytes and chain size |
 | 0019 | S1 | DONE | TinyTitanServer | Validate loopback trust boundary, Host and browser-origin protections |
 | 0020 | S1 | DONE | TinyTitanServer | Parse media type exactly instead of accepting application/json prefix |
-| 0021 | S1 | OPEN | TinyTitanKernelsC | Prove allocation products and BLAS narrowing safe at Swift–C boundary |
-| 0022 | S1 | OPEN | TinyTitanKernelsC | Prove C reader offset bounds and destruction versus active batch lifecycle |
+| 0021 | S1 | DONE | TinyTitanKernelsC | Prove allocation products and BLAS narrowing safe at Swift–C boundary |
+| 0022 | S1 | DONE | TinyTitanKernelsC | Prove C reader offset bounds and destruction versus active batch lifecycle |
 | 0023 | S1 | DONE | DSH plugin | Serialize catalog and configuration fields as safe YAML scalars |
 | 0024 | S1 | DONE | DSH plugin | Make settings rewrite atomic and detect concurrent updates |
 | 0025 | S2 | DONE | DSH plugin | Report malformed catalog rows rather than silently dropping them |
@@ -69,6 +69,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0057 | S2 | OPEN | TinyTitanServer | Duplicate workspace header silently picks the first |
 | 0058 | S3 | OPEN | TinyTitanServer | Duplicate anthropic-version silently picks the first |
 | 0059 | S3 | OPEN | TinyTitanServer | ResponseStore.conversation re-concatenates history per continuation |
+| 0060 | S3 | OPEN | TinyTitanKernelsC / Swift wrapper | Reader count conversion still traps above UInt32.max |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -246,17 +247,21 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0021 — Prove allocation products and BLAS narrowing safe at Swift–C boundary
 
-- S1 / Tier A / OPEN / L4 native memory
+- S1 / Tier A / DONE / L4 native memory
 - Project: TinyTitanKernelsC; host: Apple Silicon Mac A
 - Location: sources/TinyTitanKernelsC/gdn_chunk.c:72-126
 - Evidence before: Scratch sizes multiply size_t dimensions without overflow checks; BLAS dimensions explicitly narrow to int. C entry point checks only nonzero dimensions. Need caller reachability and shape bounds before classifying runtime impact.
+- Evidence after: Checked C99 SIZE_MAX helpers validate all seven scratch products, stride minima, tokens<=INT_MAX/2 and dk/dv<=INT_MAX before allocation; distinct return codes (OK/FELL_BACK/INVALID_GEOMETRY/ALLOCATION_FAILED) and the seven callers now aggregate/throw. Pre-fix tokens=2,dk=1<<62,dv=1: UBSan overflow + BLAS abort exit 255; post: code 2, untouched buffers. 10 new tests; ASan 10/10 with C instrumentation; full suite 2,570/0. See AUDIT/evidence/0021.md.
+- Commit: `0af58023`
 
 ## 0022 — Prove C reader offset bounds and destruction versus active batch lifecycle
 
-- S1 / Tier A / OPEN / L2/L4 native interop
+- S1 / Tier A / DONE / L2/L4 native interop
 - Project: TinyTitanKernelsC; host: Apple Silicon Mac A
 - Location: sources/TinyTitanKernelsC/expert_io.c:40-46,87-97,220-238,241-284
 - Evidence before: Offset cast to off_t and addition lack local checked arithmetic; destroy signals work_ready, joins workers and frees state while submit waits on work_done and outstanding. Need verify caller ownership prohibits concurrent destroy and validates ranges.
+- Evidence after: Checked uint64 multiply/add, off_t round-trip, span and INT_MAX count in all three fetch entry points before submit_batch and again in read_one (EOVERFLOW/EINVAL/EIO); id*stride wrap rejected. Destroy precondition documented and met by ARC (no concurrent destroy). 12 new tests; ASan 12/12 with C instrumentation; TSan 12/12 on the lifecycle; existing reader 12/12. See AUDIT/evidence/0022.md.
+- Commit: `6a0b707f`
 
 ## 0023 — Serialize catalog and configuration fields as safe YAML scalars
 
@@ -562,4 +567,11 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: TinyTitanServer; host: Apple Silicon Mac A
 - Location: sources/TinyTitanServer/Core/ResponsesAPIStore.swift:48
 - Evidence before: `conversation` still returns `inputItems + outputItems` per continuation, an O(history) allocation on every stored follow-up; the new byte budget bounds it but does not remove the cost.
+
+## 0060 — Reader count conversion still traps above UInt32.max
+
+- S3 / Tier A / OPEN / L4 native interop
+- Project: TinyTitanKernelsC / Swift wrapper; host: Apple Silicon Mac A
+- Location: sources/TinyTitan/Infrastructure/Streaming/ParallelExpertReader.swift:164
+- Evidence before: `UInt32($0)` at ParallelExpertReader.swift:164 traps above `UInt32.max` instead of throwing; internal callers only today.
 

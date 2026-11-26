@@ -886,13 +886,13 @@
       "file:line": "sources/TinyTitanKernelsC/gdn_chunk.c:72-126",
       "title": "Prove allocation products and BLAS narrowing safe at Swift\u2013C boundary",
       "category": "L4 native memory",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Scratch sizes multiply size_t dimensions without overflow checks; BLAS dimensions explicitly narrow to int. C entry point checks only nonzero dimensions. Need caller reachability and shape bounds before classifying runtime impact.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Checked C99 SIZE_MAX helpers validate all seven scratch products, stride minima, tokens<=INT_MAX/2 and dk/dv<=INT_MAX before allocation; distinct return codes (OK/FELL_BACK/INVALID_GEOMETRY/ALLOCATION_FAILED) and the seven callers now aggregate/throw. Pre-fix tokens=2,dk=1<<62,dv=1: UBSan overflow + BLAS abort exit 255; post: code 2, untouched buffers. 10 new tests; ASan 10/10 with C instrumentation; full suite 2,570/0. See AUDIT/evidence/0021.md.",
+      "commit": "0af58023",
       "blocked-reason": null,
       "acceptance-criteria": "Trace all Swift callers and manifest-derived dimensions; test overflow/INT_MAX boundary in isolated sanitizer harness; reject unsafe geometry before allocating or narrowing.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -930,13 +930,13 @@
       "file:line": "sources/TinyTitanKernelsC/expert_io.c:40-46,87-97,220-238,241-284",
       "title": "Prove C reader offset bounds and destruction versus active batch lifecycle",
       "category": "L2/L4 native interop",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A",
       "discovered-by": "Discovery-only static source inspection at pinned revision",
       "evidence-before": "Offset cast to off_t and addition lack local checked arithmetic; destroy signals work_ready, joins workers and frees state while submit waits on work_done and outstanding. Need verify caller ownership prohibits concurrent destroy and validates ranges.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "Checked uint64 multiply/add, off_t round-trip, span and INT_MAX count in all three fetch entry points before submit_batch and again in read_one (EOVERFLOW/EINVAL/EIO); id*stride wrap rejected. Destroy precondition documented and met by ARC (no concurrent destroy). 12 new tests; ASan 12/12 with C instrumentation; TSan 12/12 on the lifecycle; existing reader 12/12. See AUDIT/evidence/0022.md.",
+      "commit": "6a0b707f",
       "blocked-reason": null,
       "acceptance-criteria": "Trace Swift wrapper and header ownership; test boundary offsets, cancellation and destruction during active batch under ASan/UBSan/TSan if contract permits; enforce lifecycle.",
       "classification": "investigation candidate; not a confirmed defect",
@@ -2395,6 +2395,42 @@
         ]
       },
       "acceptance-criteria": "The retained representation does not allocate a full copy per read, or the cost is measured and documented; the API semantics are unchanged."
+    },
+    {
+      "id": "0060",
+      "severity": "S3",
+      "tier": "A",
+      "project": "TinyTitanKernelsC / Swift wrapper",
+      "file:line": "sources/TinyTitan/Infrastructure/Streaming/ParallelExpertReader.swift:164",
+      "title": "Reader count conversion still traps above UInt32.max",
+      "category": "L4 native interop",
+      "status": "OPEN",
+      "host": "Apple Silicon Mac A",
+      "discovered-by": "0022 native audit",
+      "evidence-before": "`UInt32($0)` at ParallelExpertReader.swift:164 traps above `UInt32.max` instead of throwing; internal callers only today.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "The conversion is checked and throws a typed error; a boundary test at UInt32.max/max+1 exists if constructible.",
+      "classification": "static residual",
+      "manual": {
+        "depends_on": [
+          "0022"
+        ],
+        "problem_description": "A `UInt32(...)` conversion on a count traps rather than refusing an out-of-range value.",
+        "proposed_solution": [
+          "Use `UInt32(exactly:)` and throw a typed error; add a boundary test if constructible.",
+          "Check other narrowing conversions in the reader wrapper."
+        ],
+        "verification_steps": [
+          "Boundary test passes; valid counts unchanged.",
+          "Focused tests and full suite pass."
+        ],
+        "self_audit_steps": [
+          "Confirm internal callers cannot exceed the bound today but the API is still safe."
+        ]
+      }
     }
   ],
   "manual_revision": 1,

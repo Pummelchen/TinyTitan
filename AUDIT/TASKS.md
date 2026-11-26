@@ -2692,3 +2692,46 @@ Every continuation allocates a flattened copy of the prior conversation.
 **Acceptance:** The retained representation does not allocate a full copy per read, or the cost is measured and documented; the API semantics are unchanged.
 
 ---
+
+### Finding 0060 (native reader narrowing)
+
+<a id="task-0060"></a>
+#### Task 0060 — Reader count conversion still traps above UInt32.max
+
+**Project / component:** TinyTitanKernelsC / Swift wrapper  
+**Location:** `sources/TinyTitan/Infrastructure/Streaming/ParallelExpertReader.swift:164`  
+**Severity / tier:** S3 / A  
+**Status at discovery:** OPEN  
+**Category:** L4 native interop  
+**Primary host:** Apple Silicon Mac A  
+**Prerequisites:** 0022.  
+**Evidence classification:** static residual
+
+##### 1. Detailed problem description
+
+A `UInt32(...)` conversion on a count traps rather than refusing an out-of-range value.
+
+**Recorded evidence:** `UInt32($0)` at ParallelExpertReader.swift:164 traps above `UInt32.max` instead of throwing; internal callers only today.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Use `UInt32(exactly:)` and throw a typed error; add a boundary test if constructible.
+
+2. Check other narrowing conversions in the reader wrapper.
+
+
+##### 3. Verification — regression and integration
+
+1. Boundary test passes; valid counts unchanged.
+
+2. Focused tests and full suite pass.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm internal callers cannot exceed the bound today but the API is still safe.
+
+
+**Acceptance:** The conversion is checked and throws a typed error; a boundary test at UInt32.max/max+1 exists if constructible.
+
+---
