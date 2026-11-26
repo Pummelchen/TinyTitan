@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:41 in_progress:2 open:16 start:0 blocked:1**
+**done:45 in_progress:2 open:12 start:0 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -62,10 +62,10 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0050 | S2 | OPEN | ContinuityCore | Two session-log writes still swallow durability failures |
 | 0051 | S2 | OPEN | TinyTitanServer / tests | Client CLI test reports passed when its dependency is absent |
 | 0052 | S2 | OPEN | ContinuityCore | Compatibility reads still drop journal damage silently |
-| 0053 | S1 | OPEN | TinyTitanRepack | GGUF architecture reader traps on non-finite metadata |
-| 0054 | S2 | OPEN | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
-| 0055 | S2 | OPEN | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
-| 0056 | S2 | OPEN | TinyTitanRepack | Checkpoint planner resident index and cursor arithmetic unchecked |
+| 0053 | S1 | DONE | TinyTitanRepack | GGUF architecture reader traps on non-finite metadata |
+| 0054 | S2 | DONE | TinyTitanRepack | Architecture reader multiplies layer geometry unchecked |
+| 0055 | S2 | DONE | TinyTitanRepack | Zero head dimension yields a non-finite attention scale |
+| 0056 | S2 | DONE | TinyTitanRepack | Checkpoint planner resident index and cursor arithmetic unchecked |
 | 0057 | S2 | OPEN | TinyTitanServer | Duplicate workspace header silently picks the first |
 | 0058 | S3 | OPEN | TinyTitanServer | Duplicate anthropic-version silently picks the first |
 | 0059 | S3 | OPEN | TinyTitanServer | ResponseStore.conversation re-concatenates history per continuation |
@@ -521,31 +521,39 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0053 — GGUF architecture reader traps on non-finite metadata
 
-- S1 / Tier A / OPEN / L3 untrusted model parser
+- S1 / Tier A / DONE / L3 untrusted model parser
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:16,19,20,83
 - Evidence before: `Int(Double)` on untrusted metadata traps for NaN, infinity and out-of-range values; `Int(1e300)` was reproduced as exit 133 ('Double value cannot be converted to Int') through `plan`, before the planner arithmetic fixed in 0039.
+- Evidence after: `Inkling2GGUFArch.integer` uses Int(exactly:) with a typed RepackError for every count/list/loop value; checkpoint sibling fixed. Pre-fix NaN metadata trapped signal 5. 10 arch tests (NaN/±inf/1e300/valid boundaries); checkpoint 1e300 refused. See AUDIT/evidence/0053.md.
+- Commit: `348e8721`
 
 ## 0054 — Architecture reader multiplies layer geometry unchecked
 
-- S2 / Tier A / OPEN / L3 model parser
+- S2 / Tier A / DONE / L3 model parser
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:31,87
 - Evidence before: `(passes - 1) * (loopEnd - loopStart)` and `layer + …` products on untrusted metadata are unchecked.
+- Evidence after: Checked add/subtract/multiply for the loop product, extra layers and unrolled total; the unchecked Parameters property removed. Pre-fix 2^62 loops / Int.max layers trapped. 9 tests including helpers and a valid unrolledLayers==4. See AUDIT/evidence/0054.md.
+- Commit: `cac7dc27`
 
 ## 0055 — Zero head dimension yields a non-finite attention scale
 
-- S2 / Tier A / OPEN / L3 model parser
+- S2 / Tier A / DONE / L3 model parser
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2GGUFArch.swift:110
 - Evidence before: `headDim == 0` makes the attention scale divide by zero, producing a non-finite value rather than a typed refusal.
+- Evidence after: Shared archInfo refuses headDim<=0 with a typed RepackError; both readers use it. Pre-fix 0 gave +infinity, -8 NaN. 10 arch + 9 checkpoint tests including the valid finite scale. See AUDIT/evidence/0055.md.
+- Commit: `737f90a0`
 
 ## 0056 — Checkpoint planner resident index and cursor arithmetic unchecked
 
-- S2 / Tier A / OPEN / L3 format arithmetic
+- S2 / Tier A / DONE / L3 format arithmetic
 - Project: TinyTitanRepack; host: Apple Silicon Mac A
 - Location: sources/TinyTitanRepack/Core/Planning/Inkling2CheckpointPlanner.swift
 - Evidence before: The resident index (`tensors * entryBytes + header + stringTable`) and the cursor `+=` remain unchecked on the local checkpoint path; the same class as 0039/0043, not reachable from a GGUF header.
+- Evidence after: plan guards positive layer/expert counts; checked UInt64 cursors, residentIndexSize, source-size and NVFP4 products. 9 checkpoint tests (2 gated); valid plans unchanged. See AUDIT/evidence/0056.md.
+- Commit: `2fb34cd1`
 
 ## 0057 — Duplicate workspace header silently picks the first
 
