@@ -77,6 +77,17 @@ import TinyTitanFormat
         }
     }
 
+    /// `attentionScale` divides by the head dimension; the checkpoint path goes
+    /// through the same shared guard as the GGUF path.
+    @Test func aZeroHeadDimensionIsRefused() {
+        let config = Self.config.replacingOccurrences(
+            of: "\"head_dim\": 128", with: "\"head_dim\": 0")
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2CheckpointArch.archInfo(
+                config: Data(config.utf8), tiedEmbeddings: false)
+        }
+    }
+
     @Test func expertTensorNamesMapToBlobKeys() {
         func key(_ name: String) -> String? {
             Inkling2CheckpointPlanner.expertKey(name).map { "\($0.layer) \($0.key)" }

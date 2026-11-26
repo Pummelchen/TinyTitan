@@ -130,6 +130,26 @@ struct Inkling2GGUFArchTests {
         #expect(arch.variantGeometry?.scalars["unrolledLayers"] == 4)
     }
 
+    /// `attentionScale` is `1 / sqrt(headDim)`; zero (or negative) head
+    /// dimension made it infinite/NaN instead of refusing the model.
+    @Test("A zero or negative head dimension is refused")
+    func zeroHeadDimensionIsRefused() throws {
+        for headDim in [0, -8] {
+            #expect(throws: RepackError.self, "\(headDim)") {
+                _ = try Inkling2Arch.archInfo(Self.parameters(headDim: headDim))
+            }
+        }
+        var fixture = Inkling2GGUFFixture.valid()
+        fixture.set("inkling2.attention.key_length", .u32(0))
+        let header = try GGUFHeaderV3(bytes: fixture.bytes())
+        #expect(throws: RepackError.self) {
+            _ = try Inkling2GGUFArch.archInfo(header)
+        }
+        // The valid fixture still has a finite scale.
+        let valid = try GGUFHeaderV3(bytes: Inkling2GGUFFixture.valid().bytes())
+        #expect(try Inkling2GGUFArch.archInfo(valid).attentionScale.isFinite)
+    }
+
     private static func parameters(
         stored: Int = 2, loopStart: Int = 0, loopEnd: Int = 2, passes: Int = 2,
         headDim: Int = 8

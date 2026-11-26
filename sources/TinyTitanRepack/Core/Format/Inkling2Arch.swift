@@ -119,6 +119,12 @@ enum Inkling2Arch {
                 detail: "Inkling 2 local layers \(p.localLayers) name a layer past "
                     + "\(p.storedLayers)")
         }
+        // `attentionScale` is `1 / sqrt(headDim)`; zero would make it infinite
+        // and a negative value NaN, so neither is a geometry to install.
+        guard p.headDim > 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "Inkling 2 head dimension \(p.headDim) must be positive")
+        }
         let scalars: [String: Double] = [
             "loopStart": Double(p.loopStart), "loopEnd": Double(p.loopEnd),
             "loopPasses": Double(p.loopPasses), "loopGateRank": p.loopGateRank,
