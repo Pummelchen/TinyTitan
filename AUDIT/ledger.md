@@ -6,7 +6,7 @@ Branch: `audit/2026-11-26`. Base revision: `7b0901d75b3b1e79498874babf93218a617a
 
 START = statically demonstrated condition; OPEN = investigation/gate, not a confirmed defect; BLOCKED = an environment/owner blocker; IN_PROGRESS = a fix is being implemented; DONE = fixed and verified with evidence and a commit. Severity on candidates is provisional.
 
-**done:13 in_progress:2 open:19 start:9 blocked:1**
+**done:16 in_progress:2 open:17 start:9 blocked:1**
 
 | ID | Severity | Status | Project | Title |
 |---|---|---|---|---|
@@ -41,9 +41,9 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0029 | S1 | START | ContinuityCore | Guard against zero-progress write loops |
 | 0030 | S2 | DONE | Root SwiftPM / tests | Test targets accept concurrency warnings despite warnings-as-errors |
 | 0031 | S2 | DONE | DSH plugin | No-binary catalog scan rejects Inkling 2 installs the server serves |
-| 0032 | S1 | OPEN | DSH plugin / shell writer | Shell settings writer still truncates in place |
-| 0033 | S2 | OPEN | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
-| 0034 | S2 | OPEN | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
+| 0032 | S1 | DONE | DSH plugin / shell writer | Shell settings writer still truncates in place |
+| 0033 | S2 | DONE | DSH plugin | Debounce and handoff-ratio config still coerce non-numbers |
+| 0034 | S2 | DONE | DSH plugin | Catalog row normalization is not idempotent and its contract is unnamed |
 | 0035 | S2 | OPEN | TinyTitanServer | Catalog tokenizer probe tests the plugin closure, not a call |
 | 0036 | S2 | OPEN | Embedded and plugin examples | Example fixtures bind to the checkout directory name |
 | 0037 | S3 | OPEN | CI / release | CI never compiles the library demo, so its compiler standard can regress |
@@ -54,6 +54,7 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 | 0042 | S2 | OPEN | TinyTitanRepack | Writer's raw layer size product is unchecked and unbounded |
 | 0043 | S3 | OPEN | TinyTitanRepack | Compression tool plan total multiplies unchecked |
 | 0044 | S3 | OPEN | TinyTitanFormat | GGUF parser does not enforce several spec rules |
+| 0045 | S2 | OPEN | DSH plugin | Route token count and port still coerce non-number input |
 
 ## 0001 — Provide primary Xcode 27 / Swift 6.4 Apple Silicon execution host
 
@@ -302,24 +303,30 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 
 ## 0032 — Shell settings writer still truncates in place
 
-- S1 / Tier A / OPEN / L2 persistent config
+- S1 / Tier A / DONE / L2 persistent config
 - Project: DSH plugin / shell writer; host: Apple Silicon Mac A / Linux primary B
 - Location: tools/dsh_route.sh:296,359
 - Evidence before: `tools/dsh_route.sh --write` copies a backup and then `path.write_text`s the settings file in place. The same truncate-and-write class fixed in the plugin by 0024: an ENOSPC/crash mid-write truncates the profile, and a concurrent editor save after the read is overwritten. The JS side now writes atomically; the shell side did not change.
+- Evidence after: The shell writer now does no-op detection, symlink resolution, same-directory mkstemp with fchmod/fsync, a re-read CAS, collision-free backup and os.replace inside the existing python3 heredoc. 7 Python tests (5 RED) and 1 JS test (RED) pinned; test_dsh_route 24 OK, npm test 183/183. See AUDIT/evidence/0032.md.
+- Commit: `131ad1f9`
 
 ## 0033 — Debounce and handoff-ratio config still coerce non-numbers
 
-- S2 / Tier A / OPEN / L3 numeric validation
+- S2 / Tier A / DONE / L3 numeric validation
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/config.js:131,262
 - Evidence before: `resolveDebounce` and `resolveHandoffWindowRatio` use `Number.isFinite(Number(v))`, which accepts `true` as 1, `""` as 0 and whitespace as 0; the ratio accepts a boolean as 1. The sibling `resolveCompactionHeadroom` was tightened in 0026.
+- Evidence after: resolveDebounce and resolveHandoffWindowRatio now use the 0026 safe-integer/decimal-string rules; boolean, array, empty/whitespace, unsafe-integer, hex and exponent coercions are refused. 2 RED tests -> green; npm test 183/183. See AUDIT/evidence/0033.md.
+- Commit: `66476e05`
 
 ## 0034 — Catalog row normalization is not idempotent and its contract is unnamed
 
-- S2 / Tier A / OPEN / L3 API contract / hollow test risk
+- S2 / Tier A / DONE / L3 API contract / hollow test risk
 - Project: DSH plugin; host: Linux primary B
 - Location: plugins/dsh-tinytitan/src/generate.js:206,260
 - Evidence before: `catalogRows(catalogRows(raw))` returns `[]`: a normalized row carries `levels` but no `quant`/`thinking`, so feeding it back into `generateBlock` compares two empty blocks. The original server-vs-folder parity test did exactly that and therefore could not fail; 0031 repaired that test to pass raw rows. The two row shapes remain unnamed in the API, so a future caller can repeat the mistake.
+- Evidence after: CatalogRowShapeError names the two row shapes and refuses an already-normalized row outside the per-row try; a divergent raw row now fails the block parity assertion. 183/183 with the real installs. See AUDIT/evidence/0034.md.
+- Commit: `3712d69b`
 
 ## 0035 — Catalog tokenizer probe tests the plugin closure, not a call
 
@@ -390,4 +397,11 @@ START = statically demonstrated condition; OPEN = investigation/gate, not a conf
 - Project: TinyTitanFormat; host: Apple Silicon Mac A
 - Location: sources/TinyTitanFormat/GGUFHeaderV3.swift:170-205
 - Evidence before: BOOL values other than 0/1 are accepted; key ASCII/hierarchical character rules are not enforced; nested arrays are rejected although the current GGUF specification permits them (pre-existing).
+
+## 0045 — Route token count and port still coerce non-number input
+
+- S2 / Tier A / OPEN / L3 numeric validation
+- Project: DSH plugin; host: Linux primary B
+- Location: plugins/dsh-tinytitan/src/config.js:216,345
+- Evidence before: `resolveRouteTokenCount` and the `port` resolver still use `Number(...)`/`Number.isFinite`: measured `port: true` -> 1, `port: [8096]` -> 8096, `context: true` -> 1, `context: [65536]` -> 65536. Same class as 0026/0033.
 

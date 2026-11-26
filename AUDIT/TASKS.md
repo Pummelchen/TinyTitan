@@ -2029,3 +2029,50 @@ The parser accepts some out-of-spec values and rejects a construct the spec perm
 **Acceptance:** Each rule is either enforced with a typed error/test or documented as an intentional subset with the reason; no valid current model is refused by accident.
 
 ---
+
+### Finding 0045 (DSH numeric validation sibling)
+
+<a id="task-0045"></a>
+#### Task 0045 — Route token count and port still coerce non-number input
+
+**Project / component:** DSH plugin  
+**Location:** `plugins/dsh-tinytitan/src/config.js:216,345`  
+**Severity / tier:** S2 / A  
+**Status at discovery:** OPEN  
+**Category:** L3 numeric validation  
+**Primary host:** Linux primary B  
+**Prerequisites:** 0033.  
+**Evidence classification:** static sibling finding
+
+##### 1. Detailed problem description
+
+Two route config fields still go through a coercion that turns booleans and single-element arrays into numbers, so a malformed profile silently changes the context window or the port the route points at.
+
+**Recorded evidence:** `resolveRouteTokenCount` and the `port` resolver still use `Number(...)`/`Number.isFinite`: measured `port: true` -> 1, `port: [8096]` -> 8096, `context: true` -> 1, `context: [65536]` -> 65536. Same class as 0026/0033.
+
+##### 2. Proposed solution / implementation sequence
+
+1. Apply the same explicit type/range validation as 0026/0033 to `resolveRouteTokenCount` and the port resolver.
+
+2. Keep documented defaults and numeric-string forms; reject with a field-named error.
+
+3. Add boundary tests for booleans, arrays, empty/whitespace, unsafe integers and out-of-range ports/context.
+
+
+##### 3. Verification — regression and integration
+
+1. Before/after tests show the coerced inputs rejected and the documented values unchanged.
+
+2. npm test/lint/format and the shell/python parity tests green.
+
+
+##### 4. Self-audit — cold review and closure
+
+1. Confirm no documented numeric-string form is rejected accidentally.
+
+2. Confirm the port range and context floor/ceiling are unchanged.
+
+
+**Acceptance:** The token count and port accept only supported numeric types/decimal strings, reject booleans/arrays/empty/whitespace/unsafe integers, keep documented defaults, and have boundary tests.
+
+---

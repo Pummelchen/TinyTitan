@@ -1352,13 +1352,13 @@
       "file:line": "tools/dsh_route.sh:296,359",
       "title": "Shell settings writer still truncates in place",
       "category": "L2 persistent config",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Apple Silicon Mac A / Linux primary B",
       "discovered-by": "0024 sibling audit by the DSH remediation agent",
       "evidence-before": "`tools/dsh_route.sh --write` copies a backup and then `path.write_text`s the settings file in place. The same truncate-and-write class fixed in the plugin by 0024: an ENOSPC/crash mid-write truncates the profile, and a concurrent editor save after the read is overwritten. The JS side now writes atomically; the shell side did not change.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "The shell writer now does no-op detection, symlink resolution, same-directory mkstemp with fchmod/fsync, a re-read CAS, collision-free backup and os.replace inside the existing python3 heredoc. 7 Python tests (5 RED) and 1 JS test (RED) pinned; test_dsh_route 24 OK, npm test 183/183. See AUDIT/evidence/0032.md.",
+      "commit": "131ad1f9",
       "blocked-reason": null,
       "acceptance-criteria": "Both writers share the atomic replacement semantics or the shell path documents a narrower contract; interruption leaves the original byte-identical; a failing-before test exists; JS/shell parity is preserved.",
       "classification": "static sibling finding",
@@ -1391,13 +1391,13 @@
       "file:line": "plugins/dsh-tinytitan/src/config.js:131,262",
       "title": "Debounce and handoff-ratio config still coerce non-numbers",
       "category": "L3 numeric validation",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "0026 sibling audit by the DSH remediation agent",
       "evidence-before": "`resolveDebounce` and `resolveHandoffWindowRatio` use `Number.isFinite(Number(v))`, which accepts `true` as 1, `\"\"` as 0 and whitespace as 0; the ratio accepts a boolean as 1. The sibling `resolveCompactionHeadroom` was tightened in 0026.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "resolveDebounce and resolveHandoffWindowRatio now use the 0026 safe-integer/decimal-string rules; boolean, array, empty/whitespace, unsafe-integer, hex and exponent coercions are refused. 2 RED tests -> green; npm test 183/183. See AUDIT/evidence/0033.md.",
+      "commit": "66476e05",
       "blocked-reason": null,
       "acceptance-criteria": "Both resolvers accept only supported numeric types/strings, reject booleans, arrays, empty/whitespace strings, NaN and infinity, and keep documented defaults; boundary tests pin the change.",
       "classification": "static sibling finding",
@@ -1429,13 +1429,13 @@
       "file:line": "plugins/dsh-tinytitan/src/generate.js:206,260",
       "title": "Catalog row normalization is not idempotent and its contract is unnamed",
       "category": "L3 API contract / hollow test risk",
-      "status": "OPEN",
+      "status": "DONE",
       "host": "Linux primary B",
       "discovered-by": "0031 parity-test repair by the DSH remediation agent",
       "evidence-before": "`catalogRows(catalogRows(raw))` returns `[]`: a normalized row carries `levels` but no `quant`/`thinking`, so feeding it back into `generateBlock` compares two empty blocks. The original server-vs-folder parity test did exactly that and therefore could not fail; 0031 repaired that test to pass raw rows. The two row shapes remain unnamed in the API, so a future caller can repeat the mistake.",
       "fix-summary": null,
-      "evidence-after": null,
-      "commit": null,
+      "evidence-after": "CatalogRowShapeError names the two row shapes and refuses an already-normalized row outside the per-row try; a divergent raw row now fails the block parity assertion. 183/183 with the real installs. See AUDIT/evidence/0034.md.",
+      "commit": "3712d69b",
       "blocked-reason": null,
       "acceptance-criteria": "Either `catalogRows` is idempotent (or rejects an already-normalized row with a clear error) and the shape is documented/typed; a test pins the contract and a deliberately divergent row fails the parity assertion.",
       "classification": "confirmed by reproduction",
@@ -1836,6 +1836,44 @@
         ]
       },
       "acceptance-criteria": "Each rule is either enforced with a typed error/test or documented as an intentional subset with the reason; no valid current model is refused by accident."
+    },
+    {
+      "id": "0045",
+      "severity": "S2",
+      "tier": "A",
+      "project": "DSH plugin",
+      "file:line": "plugins/dsh-tinytitan/src/config.js:216,345",
+      "title": "Route token count and port still coerce non-number input",
+      "category": "L3 numeric validation",
+      "status": "OPEN",
+      "host": "Linux primary B",
+      "discovered-by": "0033 sibling audit by the DSH remediation agent",
+      "evidence-before": "`resolveRouteTokenCount` and the `port` resolver still use `Number(...)`/`Number.isFinite`: measured `port: true` -> 1, `port: [8096]` -> 8096, `context: true` -> 1, `context: [65536]` -> 65536. Same class as 0026/0033.",
+      "fix-summary": null,
+      "evidence-after": null,
+      "commit": null,
+      "blocked-reason": null,
+      "acceptance-criteria": "The token count and port accept only supported numeric types/decimal strings, reject booleans/arrays/empty/whitespace/unsafe integers, keep documented defaults, and have boundary tests.",
+      "classification": "static sibling finding",
+      "manual": {
+        "depends_on": [
+          "0033"
+        ],
+        "problem_description": "Two route config fields still go through a coercion that turns booleans and single-element arrays into numbers, so a malformed profile silently changes the context window or the port the route points at.",
+        "proposed_solution": [
+          "Apply the same explicit type/range validation as 0026/0033 to `resolveRouteTokenCount` and the port resolver.",
+          "Keep documented defaults and numeric-string forms; reject with a field-named error.",
+          "Add boundary tests for booleans, arrays, empty/whitespace, unsafe integers and out-of-range ports/context."
+        ],
+        "verification_steps": [
+          "Before/after tests show the coerced inputs rejected and the documented values unchanged.",
+          "npm test/lint/format and the shell/python parity tests green."
+        ],
+        "self_audit_steps": [
+          "Confirm no documented numeric-string form is rejected accidentally.",
+          "Confirm the port range and context floor/ceiling are unchanged."
+        ]
+      }
     }
   ],
   "manual_revision": 1,
