@@ -4,6 +4,7 @@ import Legacy6xRuntime
 import TinyTitanLib
 import TinyTitanLegacyEngine
 import TinyTitanCore
+import TinyTitanValidationSupport
 
 enum PassCostError: Error, CustomStringConvertible {
     case usage
@@ -112,20 +113,7 @@ extension TinyTitanBench {
     /// Code the model is asked to restate: an edit-shaped prompt, so routing
     /// looks like the git-session workload rather than open prose.
     static func passCostPrompt(promptFile: String?) throws -> String {
-        if let promptFile {
-            return try String(contentsOfFile: promptFile, encoding: .utf8)
-        }
-        let source = "sources/TinyTitan/Runtime/Generation/StreamingMTP.swift"
-        let body =
-            (try? String(contentsOfFile: source, encoding: .utf8))
-            .map {
-                $0.split(separator: "\n", omittingEmptySubsequences: false)
-                    .prefix(140).joined(separator: "\n")
-            }
-            ?? "func add(_ a: Int, _ b: Int) -> Int {\n    return a + b\n}"
-        return "Below is a Swift source file.\n```swift\n\(body)\n```\n\n"
-            + "Here is the same file with every doc comment shortened to one line:\n"
-            + "```swift\n"
+        try PassCostPrompt.text(promptFile: promptFile)
     }
 
     /// lint:allow-long one measurement script: load, reference decode, replay

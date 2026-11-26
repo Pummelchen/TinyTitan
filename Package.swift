@@ -417,7 +417,7 @@ let package = Package(
             name: "TinyTitanBench",
             dependencies: [
                 "TinyTitanCore", "Legacy6xRuntime", "TinyTitanLib", "TinyTitanLegacyEngine",
-                "TinyTitanVariants",
+                "TinyTitanVariants", "TinyTitanValidationSupport",
             ],
             path: "sources/TinyTitanBench",
             swiftSettings: tinytitanLanguageStandard
