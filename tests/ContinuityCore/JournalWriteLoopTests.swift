@@ -119,7 +119,6 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("journal.ndjson")
         let task = ContinuityTask(title: "interrupted")
-        let fullEncoding = try await encoded(.task(task), in: directory)
 
         let fileSystem = JournalFaultFileSystem()
         fileSystem.planWrites([.interrupted, .bytes(4), .all])
@@ -128,9 +127,20 @@ import Testing
         try await journal.append(.task(task))
         try await journal.sync()
         #expect(fileSystem.writes == 3)
-        #expect(try Data(contentsOf: url) == fullEncoding)
         try await journal.shutDown()
-        #expect(try records(at: url).count == 1)
+        // Compared by the record's identity and text, not by bytes: the
+        // encoder's key order is not stable between two encodes in one
+        // process, and `.iso8601` drops sub-second precision on the way back
+        // in, so neither raw bytes nor whole-value equality is the right
+        // assertion. What matters is that the record is there, once.
+        let replayed = try records(at: url)
+        #expect(replayed.count == 1)
+        guard case .task(let restored)? = replayed.first else {
+            Issue.record("the record did not survive as a task")
+            return
+        }
+        #expect(restored.id == task.id)
+        #expect(restored.title == task.title)
     }
 
     @Test func manyShortWritesAssembleTheWholeRecord() async throws {
@@ -138,7 +148,6 @@ import Testing
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("journal.ndjson")
         let task = ContinuityTask(title: "in pieces")
-        let fullEncoding = try await encoded(.task(task), in: directory)
 
         let fileSystem = JournalFaultFileSystem()
         fileSystem.planWrites([.bytes(1), .bytes(2), .bytes(3), .all])
@@ -147,8 +156,16 @@ import Testing
         try await journal.append(.task(task))
         try await journal.sync()
         #expect(fileSystem.writes == 4)
-        #expect(try Data(contentsOf: url) == fullEncoding)
         try await journal.shutDown()
+        // Decoded, for the same key-order and timestamp reasons as above.
+        let replayed = try records(at: url)
+        #expect(replayed.count == 1)
+        guard case .task(let restored)? = replayed.first else {
+            Issue.record("the record did not survive as a task")
+            return
+        }
+        #expect(restored.id == task.id)
+        #expect(restored.title == task.title)
     }
 
     @Test func aHardWriteFailureIsReportedWithItsErrno() async throws {
