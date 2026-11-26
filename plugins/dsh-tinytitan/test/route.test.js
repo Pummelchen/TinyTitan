@@ -361,6 +361,85 @@ test("compaction headroom is a safe whole number of tokens, or unset", () => {
   }
 });
 
+test("watch debounce is a safe whole number of milliseconds, or unset", () => {
+  // The folder is watched with this delay; `resolveCompactionHeadroom`'s rules
+  // apply for the same reason: `Number.isFinite(Number(v))` took `true` as 1 ms,
+  // `""` and `[]` as 0 and `"2e3"`/`"0x7d0"` as 2000.
+  assert.equal(resolveConfig().watchDebounceMs, 2000);
+  assert.equal(resolveConfig({ watchDebounceMs: 0 }).watchDebounceMs, 0);
+  assert.equal(resolveConfig({ watchDebounceMs: 250 }).watchDebounceMs, 250);
+  assert.equal(resolveConfig({ watchDebounceMs: "2000" }).watchDebounceMs, 2000);
+  assert.equal(
+    resolveConfig({ watchDebounceMs: Number.MAX_SAFE_INTEGER }).watchDebounceMs,
+    Number.MAX_SAFE_INTEGER,
+  );
+  for (const rejected of [
+    Number.MAX_SAFE_INTEGER + 1,
+    1e21,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    true,
+    false,
+    [],
+    [2000],
+    {},
+    "",
+    " ",
+    "2000 ",
+    " 2000",
+    "2e3",
+    "0x7d0",
+    "08",
+  ]) {
+    assert.throws(
+      () => resolveConfig({ watchDebounceMs: rejected }),
+      /watchDebounceMs must be milliseconds/,
+      JSON.stringify(rejected),
+    );
+  }
+});
+
+test("the handoff window ratio is a finite fraction, or unset", () => {
+  // A ratio is fractional, so a finite number in (0, 1] is the whole contract;
+  // what changes is the type gate, not the range. `true` used to arrive as 1 and
+  // `[0.6]` as 0.6, and an empty string silently meant "use the default".
+  assert.equal(resolveConfig().handoffWindowRatio, 0.6);
+  assert.equal(resolveConfig({ handoffWindowRatio: 0.25 }).handoffWindowRatio, 0.25);
+  assert.equal(resolveConfig({ handoffWindowRatio: 1 }).handoffWindowRatio, 1);
+  assert.equal(resolveConfig({ handoffWindowRatio: 0.0001 }).handoffWindowRatio, 0.0001);
+  assert.equal(resolveConfig({ handoffWindowRatio: "0.6" }).handoffWindowRatio, 0.6);
+  assert.equal(resolveConfig({ handoffWindowRatio: "1" }).handoffWindowRatio, 1);
+  for (const rejected of [
+    0,
+    -1,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    true,
+    false,
+    [],
+    [0.6],
+    {},
+    "",
+    " ",
+    " 0.6",
+    "0.6 ",
+    ".6",
+    "1e-1",
+    "0x1",
+    "six",
+  ]) {
+    assert.throws(
+      () => resolveConfig({ handoffWindowRatio: rejected }),
+      /handoffWindowRatio must be above 0 and at most 1/,
+      JSON.stringify(rejected),
+    );
+  }
+});
+
 test("the reasoning level comes from the config, then the environment, then the default", () => {
   // The route's declared level is what the harness asks for on every call that
   // names none, so it has to be settable from outside without editing a profile.

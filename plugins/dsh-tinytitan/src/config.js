@@ -140,22 +140,31 @@ export function findRepoRoot({
   return { root: candidates[0] ?? "", found: false };
 }
 
+/** Decimal text naming a whole number: `0`, `8192`, and nothing with a sign. */
+const DECIMAL_INTEGER = /^(?:0|[1-9][0-9]*)$/;
+
+/** Decimal text naming a fraction: `0.6`, `0.95`, `1`; no sign, no exponent. */
+const DECIMAL_FRACTION = /^(?:0|1)(?:\.[0-9]+)?$/;
+
 /**
  * How long to wait after the last `models/` change before refreshing.
  *
  * An install writes thousands of files, so the route is rebuilt once per quiet
- * period rather than once per event.
+ * period rather than once per event. The value is arithmetic on a timer, so the
+ * type is explicit rather than coerced: a safe whole number of milliseconds, or
+ * plain decimal text naming one (`""`, `true`, `[]` and `"2e3"` were all accepted
+ * by `Number.isFinite(Number(v))` before).
  */
 function resolveDebounce(value) {
-  const ms = Number(value ?? 2000);
-  if (!Number.isFinite(ms) || ms < 0) {
+  if (value === undefined || value === null) return 2000;
+  let ms = Number.NaN;
+  if (typeof value === "number") ms = value;
+  else if (typeof value === "string" && DECIMAL_INTEGER.test(value)) ms = Number(value);
+  if (!Number.isSafeInteger(ms) || ms < 0) {
     throw new Error(`dsh-tinytitan: watchDebounceMs must be milliseconds, got ${value}`);
   }
   return ms;
 }
-
-/** Decimal text naming a whole number: `0`, `8192`, and nothing with a sign. */
-const DECIMAL_INTEGER = /^(?:0|[1-9][0-9]*)$/;
 
 /**
  * The compaction engine's headroom, when the operator names one.
@@ -292,10 +301,17 @@ function resolveHandoffAtTokens(value) {
  * instead — and that trigger is a different fraction per shape, ~0.625 of a
  * 262,144-token window with this plugin's preset but 0.8 of a 1M one, so the
  * ratio clears the narrowest shape or it clears nothing.
+ *
+ * The range is only half the contract: the value is arithmetic, so it must be a
+ * finite number in (0, 1] or plain decimal text naming one. `Number(value)`
+ * alone took `true` as 1, `[0.6]` as 0.6, and an empty string as "unset", which
+ * is a type the caller never declared.
  */
 function resolveHandoffWindowRatio(value) {
-  if (value === undefined || value === null || value === "") return DEFAULT_HANDOFF_WINDOW_RATIO;
-  const ratio = Number(value);
+  if (value === undefined || value === null) return DEFAULT_HANDOFF_WINDOW_RATIO;
+  let ratio = Number.NaN;
+  if (typeof value === "number") ratio = value;
+  else if (typeof value === "string" && DECIMAL_FRACTION.test(value)) ratio = Number(value);
   if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1) {
     throw new Error(
       `dsh-tinytitan: handoffWindowRatio must be above 0 and at most 1, got ${value}`,
