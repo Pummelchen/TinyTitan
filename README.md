@@ -24,8 +24,7 @@ GGUF quantizations). On a Mac with less RAM, the same engine runs a 35B — or a
 122B/125B — model that the machine could never hold in memory. It also serves
 developers who want a loopback OpenAI- or Anthropic-compatible endpoint for
 Codex, Claude Code, Qwen Code, OpenCode, Zed or the official SDKs. It is a
-terminal-first tool: the engine and its server are the product, and the
-DeepSeek Harness plugins are an optional client of that server. It is **not** a
+terminal-first tool: the engine and its server are the product. It is **not** a
 fine-tuning toolkit, a vision model, a GUI app, or a way to expose a model to
 your network — the server is `127.0.0.1`-only and has no authentication.
 
@@ -110,17 +109,14 @@ can use `<model-id>@cpu` or `<model-id>@gpu`. The full walkthrough is
    shards also run as-is through `--model` (CLI only, same top-1/top-5 as
    llama.cpp, decode at the converted model's speed — no conversion needed,
    no speed gain).
-3. **The DeepSeek Harness plugin — [`plugins/dsh-tinytitan`](plugins/dsh-tinytitan).**
-   The harness finds the models you have installed and keeps its route current,
-   with a quiet compaction backend.
-4. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
+3. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
    [`tools/`](tools).** Stream a checkpoint into a hash-verified install that
    keeps the routed experts on SSD, so a model larger than your RAM still runs —
    and a truncated, swapped or edited install is refused rather than served.
 
-Those four ship from one branch (`main`) and one release tag. The first two are
-the **products** — a library and an engine — and the rest are the plugin and
-tooling that ship beside them; the split is spelled out under
+Those three ship from one branch (`main`) and one release tag. The first two are
+the **products** — a library and an engine — and the tooling ships beside them;
+the split is spelled out under
 [Library and engine](https://github.com/Pummelchen/TinyTitan/wiki/Library-and-Engine).
 
 ## Documentation & Credits

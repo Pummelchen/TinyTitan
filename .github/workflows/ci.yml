@@ -31,9 +31,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           # The Python floor the scripts are written to and that `tools/lint.sh`
@@ -75,31 +72,6 @@ jobs:
             https://github.com/realm/SwiftLint/releases/download/0.65.1/portable_swiftlint.zip
           unzip -q /tmp/swiftlint.zip -d /tmp/swiftlint-0.65.1
           echo "/tmp/swiftlint-0.65.1" >> "$GITHUB_PATH"
-      - name: Plugin tests (harness-version pins)
-        # The cheapest gate, and independent of the Swift build: the plugin
-        # suites run in about a second together. Each plugin asserts the one
-        # harness release it supports against its `package.json` peer pins and
-        # its gate constant, so drift in either fails here in seconds rather
-        # than at a user's boot.
-        run: |
-          for plugin in plugins/dsh-*; do
-            [ -d "$plugin/test" ] || continue
-            echo "::group::$plugin"
-            (cd "$plugin" && node --test test/*.test.js)
-            echo "::endgroup::"
-          done
-      - name: Install the pinned JS toolchain
-        # `tools/lint.sh`'s javascript gate needs each plugin package's own
-        # eslint/prettier and FAILS when they are missing or a different
-        # version, so CI installs them from the committed package-lock.json
-        # (`npm ci`, not `npm install`: the lockfile is the pin).
-        run: |
-          for plugin in plugins/dsh-*; do
-            [ -f "$plugin/package.json" ] || continue
-            echo "::group::$plugin"
-            (cd "$plugin" && npm ci --no-audit --no-fund)
-            echo "::endgroup::"
-          done
       - name: Build release products (0 warnings gate)
         # The same decision `tools/release.sh` makes about the log it publishes from,
         # and now the same function. This step used to carry its own copy of the
@@ -194,7 +166,8 @@ jobs:
           cd benchmark
           /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
             test_prepare_qwen35 test_prepare_agentworld test_tinytitan_quant_fidelity \
-            test_reconcile_snapshot_verdict test_two_bit_pack test_requantize_qwen38_rest
+            test_reconcile_snapshot_verdict test_two_bit_pack test_requantize_qwen38_rest \
+            test_agentworld_resume_e2e
       - name: Installer and launcher gates (model-menu and launcher choices)
         # These tests pin the installer's and launcher's choice handling: a
         # factory-new Mac is not written outside the install root, and the model
@@ -304,8 +277,7 @@ jobs:
         # install fails rather than quietly skipping again.
         run: |
           cd benchmark
-          python3 -m unittest test_dsh_route \
-            test_install_models_menu \
+          python3 -m unittest test_install_models_menu \
             test_install_models_batch_status test_repack_dense_gate_verdict \
             test_release_test_gate test_release_notes_compact \
             test_release_notes_budget_gate test_assert_arch \
@@ -1172,9 +1144,6 @@ jobs:
           # it walks: a shallow clone would scan the tip and miss every commit
           # before it. 1643 commits / 27.7 MB of diff measured 2.5 s locally.
           fetch-depth: 0
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
@@ -1202,16 +1171,3 @@ jobs:
           export PATH="$(python3 -m site --user-base)/bin:$PATH"
           echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
           pip-audit -r benchmark/requirements.txt
-      - name: Node dependency audit (npm audit over the plugin lockfiles)
-        # Both plugin packages' lockfiles are the pins `npm ci` enforces in the
-        # test job; `npm audit` reads them without an install (verified against
-        # a directory holding only the two files) and fails on any advisory at
-        # or above its default level. Dev-only advisories fail too — a plugin
-        # bundle ships whole, so its whole tree is the surface.
-        run: |
-          for plugin in plugins/dsh-*; do
-            [ -f "$plugin/package-lock.json" ] || continue
-            echo "::group::$plugin"
-            (cd "$plugin" && npm audit)
-            echo "::endgroup::"
-          done

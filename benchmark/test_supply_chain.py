@@ -72,7 +72,7 @@ class AdvisoryCoverageTests(unittest.TestCase):
 
     def test_the_config_exists_and_every_entry_is_scheduled(self) -> None:
         self.assertTrue(CONFIG.is_file(), f"{CONFIG} is absent: no advisory feed at all")
-        self.assertGreaterEqual(len(self.blocks), 4, "expected an entry per dependency surface")
+        self.assertGreaterEqual(len(self.blocks), 3, "expected an entry per dependency surface")
         for block in self.blocks:
             with self.subTest(ecosystem=block["ecosystem"], directory=block.get("directory")):
                 self.assertIn("schedule", block, "an entry with no schedule never runs")
@@ -121,7 +121,7 @@ class AdvisoryCoverageTests(unittest.TestCase):
         # waiting to happen. Actions are the exception — a bump there is a
         # supply-chain event that should arrive as a PR rather than as drift.
         watched = [b for b in self.blocks if b["ecosystem"] in {"swift", "npm", "pip"}]
-        self.assertEqual(len(watched), 3, "expected the swift, npm and pip entries")
+        self.assertEqual(len(watched), 2, "expected the swift and pip entries (npm retired with the DSH plugin)")
         for block in watched:
             with self.subTest(ecosystem=block["ecosystem"], directory=block.get("directory")):
                 self.assertEqual(

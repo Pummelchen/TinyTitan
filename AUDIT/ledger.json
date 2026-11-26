@@ -4,7 +4,7 @@
   "branch": "audit/2026-11-26",
   "date": "2026-11-26",
   "state": "REMEDIATION_IN_PROGRESS",
-  "scope": "Remediation on the primary Apple Silicon host, one focused commit per task; discovery continues (0007) and new findings take the next stable IDs. Gate tasks 0001/0006 are met on this host.",
+  "scope": "Remediation on the primary Apple Silicon host, one focused commit per task; discovery continues (0007) and new findings take the next stable IDs. Gate tasks 0001/0006 are met on this host. The DSH plugin was retired on 2026-11-26; see the retirement field. The gate count is 19.",
   "tasks": [
     {
       "host": "Unassigned Apple Silicon Mac",
@@ -2434,5 +2434,6 @@
     }
   ],
   "manual_revision": 1,
-  "manual_scope": "Agent-ready execution specification for all 29 known tasks; proposed designs and tests, not implemented or executed. Investigation tasks require reachability proof before changing code. Remaining discovery is tracked by 0007. Original statuses and findings preserved."
+  "manual_scope": "Agent-ready execution specification for all 29 known tasks; proposed designs and tests, not implemented or executed. Investigation tasks require reachability proof before changing code. Remaining discovery is tracked by 0007. Original statuses and findings preserved.",
+  "retirement": "DeepSeek Harness support was retired on 2026-11-26: plugins/dsh-tinytitan and tools/dsh_route.sh were removed, the javascript lint gate dropped (19 gates), and the DSH-only CI/docs were removed. Audit tasks 0023-0026, 0031-0034, 0045 and 0046 are historical; 0035 is only meaningful for its Swift catalog side (the JS mirror was retired with the plugin)."
 }

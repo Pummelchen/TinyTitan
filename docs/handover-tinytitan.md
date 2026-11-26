@@ -1,6 +1,8 @@
 # Handover: engine 7 plugins, phase 2 (2026-11-25, updated after TT-126, TT-124 & TT-134 slice 5)
 
 **Read this block first; every block below it is older.**
+> **DSH retired (2026-11-26):** the DeepSeek Harness plugin and `tools/dsh_route.sh` were removed; do not reintroduce them. The audit branch work below predates that decision; the plugin-related audit tasks are historical.
+
 
 **Paste this into the next session:**
 
@@ -286,7 +288,7 @@ is `docs/plan-gguf-decode-10toks.md`: the owner wants **10 tok/s decode at
 > this brief said until 2026-10-06 — because CI, `tools/ci-green.sh` and
 > `tools/release.sh` all key on the commit, and `git show <tag-object-sha>` does
 > not print a diff.
-> `tools/lint.sh` runs **twenty** pinned gates (measured 2026-10-08: the modes
+> `tools/lint.sh` runs **nineteen** pinned gates (measured 2026-10-08: the modes
 > in its own usage header), and every one
 > of them **fails** when its dependency is missing rather than reporting a
 > skip — a check that did not run is not a pass. Release notes in the tree keep

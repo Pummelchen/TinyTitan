@@ -65,9 +65,6 @@ __pycache__/
 
 .qwen/
 
-# Node (plugins/dsh-tinytitan)
-node_modules/
-
 # Standalone release binaries
 Binary/
 

@@ -6,7 +6,7 @@
 
 **Architecture:** The server already dispatches to `ServerInferenceBackend`, which already has two impls (`ServerModelSession` GPU, `CPUModelBackend` CPU) selected by `ModelRouter`. We stop binding those sessions to concrete 6.x `Model`/`RealForwardRunner`/`CPUQwen35` and type them on one Core-resident `EngineRunner`/`EngineModel` (+ `CPUEngine*`) protocol that 6.x and every variant engine conform to. The concrete engine is constructed by an injected `EngineFactory` (kept in the server, the only place variants are importable), so `TinyTitanLib` finally stops importing 6.x for inference. One generation path; reused, not copied.
 
-**Tech Stack:** Swift 6.4 / Xcode 27 (the only supported toolchain), SwiftPM, Metal, swift-testing (`@Test`/`#expect`), `tools/lint.sh` (20 gates), `tools/golden-baseline.sh`.
+**Tech Stack:** Swift 6.4 / Xcode 27 (the only supported toolchain), SwiftPM, Metal, swift-testing (`@Test`/`#expect`), `tools/lint.sh` (19 gates), `tools/golden-baseline.sh`.
 
 **Spec:** `docs/superpowers/specs/2026-11-16-tt097-engine-agnostic-session-design.md` (approved 2026-11-16) — read it with this plan; the plan argues from the spec.
 

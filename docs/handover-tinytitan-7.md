@@ -116,7 +116,7 @@ competing model process, valid install receipt; run tests serially, one at a tim
 
 - **Generic 7.0 foundation in `TinyTitanCore`** — registry
   (`registry/registry.json`, 9 models / 19 pairs), `core-purity` and
-  `variant-isolation` lint gates (tools/lint.sh is now 20 checks),
+  `variant-isolation` lint gates (tools/lint.sh is now 19 checks),
   `EngineVariant`/`QuantSpec`/`QuantRole`/`GeometryContract`/profiles
   contracts, `tinytitan catalog --check`, and the **complete generic
   install-reading stack**: `ResidentIndex`, `ModelError`,

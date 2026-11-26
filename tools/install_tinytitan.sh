@@ -292,7 +292,7 @@ install_from_release() {
   xattr -dr com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
   ok "Engine in $BIN_PATH"
 
-  # The tools, the DSH plugin and the docs, from the same tag. Small, and it is
+  # The tools and the docs, from the same tag. Small, and it is
   # what makes the layout identical to a checkout apart from the build.
   say "Downloading the matching tools"
   src_url="https://github.com/Pummelchen/TinyTitan/releases/download/$tag/$tools_asset"
@@ -408,8 +408,8 @@ else
   MODELS_PATH_FINAL="$MODELS_PATH"
 fi
 
-# Exported so every tool this installer runs — the model installer, the launcher,
-# the route writer, the DSH setup — finds the binaries and the models without
+# Exported so every tool this installer runs — the model installer and the
+# launcher — finds the binaries and the models without
 # anyone having to pass them down. A checkout's defaults still apply when these
 # are unset, so this changes nothing for `swift build` users.
 export TINYTITAN_BIN_DIR="$BIN_PATH_FINAL"
@@ -530,8 +530,6 @@ echo "  It prints the base URL to point a client at - by default"
 echo "  http://127.0.0.1:8080/v1 with any API key; --port changes the port."
 echo "  Keep the window open while you use it; one model runs at a time."
 echo
-echo "  For the DeepSeek Harness integration, install the plugins under plugins/"
-echo "  into your own DSH profile; this project no longer installs one for you."
 echo "  New to this? Start here:"
 echo "    https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started"
 echo "  Questions and bug reports: https://github.com/Pummelchen/TinyTitan/issues"

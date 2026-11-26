@@ -1,6 +1,0 @@
-# Test fixtures mirror files shipped by the harness (comments, quote style and
-# blank-line structure are part of the comparison), so the formatter must not
-# rewrite them.
-test/fixtures/
-node_modules/
-package-lock.json

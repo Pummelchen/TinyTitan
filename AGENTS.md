@@ -61,12 +61,13 @@ with a limits list — and the gap is fixed, not documented. The check is
 started; all ten rows must pass for every route a change touches, before a
 model is added, and before a release claims the route.
 
-The DeepSeek Harness integration is **a plugin we publish, not a harness we
-install**: `plugins/dsh-tinytitan` is installed into
-the user's own DSH profile (`dsh plugin --profile <name> add …`), and this project
-no longer bundles, downloads or pins a private DeepSeek Harness of its own. Keep it
-that way: no forking the harness, no GUI code in this tree, no private `~/.tinytitan`
-harness install, and nothing here may depend on a window existing.
+**DeepSeek Harness support was retired on 2026-11-26.** The
+`plugins/dsh-tinytitan` bundle and its `tools/dsh_route.sh` writer were removed;
+this project does not bundle, download or pin a DeepSeek Harness, and it has no
+DSH profile install. The `plugins/opencode-tinytitan/` provider config remains a
+client of the local server. Do not add a DSH bundle back: no forking the harness,
+no GUI code in this tree, no private `~/.tinytitan` harness install, and nothing
+here may depend on a window existing.
 
 **One toolchain, and it is a hard rule: Xcode 27 / Swift 6.4.** Nothing else is
 supported — not an earlier 6.x, not a later one — because every guarantee in this
@@ -113,8 +114,7 @@ agent memory, `sources/TinyTitanMemoryTool/` inspects it (executable
 `tinytitan-memory`), `sources/ContinuityDemo/` is the memory demo executable,
 `sources/TinyTitanBench/` plus `sources/TinyTitanValidation/` are the benchmark
 driver and the validation/reference target. An executable target keeps its
-top-level or `@main` entry in `Command/`; `plugins/dsh-tinytitan/` is the DeepSeek
-Harness bundle (route writer + quiet compaction). `examples/embedded/` is the
+top-level or `@main` entry in `Command/`. `examples/embedded/` is the
 consumer package that proves another package can depend on this one, built by
 `tools/embedded-dependency-check.sh`. `docs/repository-layout.md` has
 the conventions, `tests/` mirrors `sources/` path for path for the runtime and
@@ -334,8 +334,8 @@ for it only when the small model *is* the subject — its own limits, its own
 behaviour — and say in the report that it was deliberate. This does not change the
 golden-baseline targets below, which are what they are.
 
-`tools/lint.sh` runs the twenty checks CI enforces beyond the compiler — the
-first fifteen are project-specific probes, the last five are pinned third-party
+`tools/lint.sh` runs the nineteen checks CI enforces beyond the compiler — the
+first fifteen are project-specific probes, the last four are pinned third-party
 linters:
 
 - `force-cast` — no `as!` / `try!` under `sources/` without a
@@ -433,25 +433,20 @@ linters:
   system frameworks) — never another variant, never a runtime target (7.0 spec
   §3). An empty scan is a failure, not a pass.
 - `shellcheck` (pinned 0.11.0), `swiftlint` (pinned 0.65.1, `--strict`),
-  `swift-format` (the committed `.swift-format`), `javascript` (each plugin
-  package's own eslint + prettier) and `python` (pinned ruff, plus a parse at the
-  declared 3.13 floor). Each pins its tool version and fails when another is on
-  `PATH`.
+  `swift-format` (the committed `.swift-format`) and `python` (pinned ruff, plus
+  a parse at the declared 3.13 floor). Each pins its tool version and fails when
+  another is on `PATH`.
 
 `tools/lint.sh <mode>` runs a single check (`force-cast`, `unbounded-read`,
 `func-length`, `sendable`, `converter`, `arch-path`, `stdout-clean`, `test-skip`,
-`shell`, `shellcheck`, `swiftlint`, `swift-format`, `javascript`, `python`,
+`shell`, `shellcheck`, `swiftlint`, `swift-format`, `python`,
 `core-purity`, `variant-isolation`;
-`format` and `js` are aliases).
+`format` is an alias).
 
-In a fresh checkout the `javascript` check needs the plugin package's
-dependencies first — `npm ci` in `plugins/dsh-tinytitan/` (CI installs it before
-the gate); without it the check
-fails with that command in its message and every other check still runs. The
-`converter` check is the same kind of dependency: it needs `numpy` and the
-converter module, so `python3 -m pip install -r benchmark/requirements.txt`
-first (CI installs those pins in the lint job too), and it fails with that
-command in its message rather than skipping.
+The `converter` check needs `numpy` and the converter module, so
+`python3 -m pip install -r benchmark/requirements.txt` first (CI installs those
+pins in the lint job too), and it fails with that command in its message rather
+than skipping.
 
 `tools/golden-baseline.sh --check <target>` compares greedy, fixed-seed generation
 against `benchmark/golden/`. It is the only check that exercises real inference, so

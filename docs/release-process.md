@@ -88,7 +88,7 @@ remember.
 
 The tools archive is the third: `git archive` of the tag, which is what
 `tools/install_tinytitan.sh` downloads into `~/.tinytitan/src` and then *runs* —
-the launcher, the model installer, the DeepSeek Harness setup. It therefore has to
+the launcher and the model installer. It therefore has to
 carry a published checksum for the installer to accept the release at all: the
 installer verifies both downloaded trees and stops if either cannot be verified, so
 **a release that skips this asset is a release nobody can install.** That is why

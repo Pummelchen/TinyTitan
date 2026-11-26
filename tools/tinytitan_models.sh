@@ -539,7 +539,7 @@ tinytitan_static_catalog() {
 # shellcheck disable=SC2034  # read by server_launcher.sh and install_models.sh
   (( ${#missing[@]} > 0 )) && TINYTITAN_CATALOG_MISSING=("${missing[@]+"${missing[@]}"}")
   if (( ${#TINYTITAN_CAT_ID[@]} == 0 )); then
-    # shellcheck disable=SC2034  # read by dsh_route.sh and server_launcher.sh
+    # shellcheck disable=SC2034  # read by server_launcher.sh
     TINYTITAN_CATALOG_ERROR="no install under $models_dir matches the built-in list"
     return 1
   fi

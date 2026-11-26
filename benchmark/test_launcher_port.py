@@ -106,30 +106,22 @@ class PortChoiceTests(unittest.TestCase):
         self.assertEqual(reported_port(run), str(shared_default()))
         self.assertIn(f"http://127.0.0.1:{shared_default()}/v1", run.stdout)
 
-    def test_a_flagged_port_is_used_and_the_harness_is_told(self) -> None:
+    def test_a_flagged_port_is_used(self) -> None:
         run = run_launcher(self.installs, *self.base, "--port", "9123")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(reported_port(run), "9123")
         self.assertIn("http://127.0.0.1:9123/v1", run.stdout)
-        # Anything that assumes the default has to be told; the harness route is
-        # the one the launcher does not write itself.
-        self.assertIn("TINYTITAN_PORT=9123 tools/dsh_route.sh --write", run.stdout)
 
     def test_the_environment_port_is_used(self) -> None:
         run = run_launcher(self.installs, *self.base, env={"TINYTITAN_PORT": "9321"})
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(reported_port(run), "9321")
-        self.assertIn("TINYTITAN_PORT=9321 tools/dsh_route.sh --write", run.stdout)
 
     def test_a_flag_beats_the_environment(self) -> None:
         run = run_launcher(
             self.installs, *self.base, "--port", "9123", env={"TINYTITAN_PORT": "9321"}
         )
         self.assertEqual(reported_port(run), "9123")
-
-    def test_a_port_the_default_does_not_need_no_hint(self) -> None:
-        run = run_launcher(self.installs, *self.base)
-        self.assertNotIn("dsh_route.sh --write", run.stdout)
 
     def test_bad_ports_are_refused_before_anything_starts(self) -> None:
         for bad in ("abc", "0", "99999", "-1", "80x"):
@@ -177,7 +169,6 @@ class PortQuestionTests(unittest.TestCase):
         run = run_launcher(self.installs, *self.base, stdin="9123\n", interactive=True)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(reported_port(run), "9123")
-        self.assertIn("TINYTITAN_PORT=9123 tools/dsh_route.sh --write", run.stdout)
 
     def test_a_typed_port_that_is_not_a_number_is_refused(self) -> None:
         run = run_launcher(self.installs, *self.base, stdin="eighty\n", interactive=True)

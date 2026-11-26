@@ -1423,8 +1423,6 @@ fi
 if (( PORT < 1024 )); then
   echo "NOTE: port $PORT is privileged; macOS requires root to bind it." >&2
 fi
-non_default_port=0
-if (( PORT != TINYTITAN_DEFAULT_PORT )); then non_default_port=1; fi
 
 
 # The context, KV and YaRN flags reach the GPU runtime only. Asking for one of
@@ -1584,13 +1582,6 @@ print_setup() {
     echo "  API key:    any value (the server does not authenticate)"
     echo "  Model:      $launch_model $api_model_note"
     echo "  Endpoints:  POST /v1/chat/completions, POST /v1/responses"
-  fi
-  if (( non_default_port )); then
-    echo ""
-    echo "Port $PORT is not the default, so anything that assumes ${TINYTITAN_DEFAULT_PORT} needs"
-    echo "telling. The DeepSeek Harness route is one of those; regenerate it"
-    echo "against this server with:"
-    echo "  TINYTITAN_PORT=$PORT tools/dsh_route.sh --write"
   fi
   echo ""
   if (( dynamic )); then

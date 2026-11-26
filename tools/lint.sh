@@ -25,7 +25,6 @@
 #   shell-lint          shellcheck warnings-as-errors over every script, pinned version
 #   swiftlint           SwiftLint violations-as-errors under the committed config
 #   swift-format        formatting enforced under the committed .swift-format
-#   javascript          eslint + prettier --check over the plugin packages, pinned
 #   python              ruff check + ruff format --check under pyproject.toml,
 #                       with the pinned ruff version
 #   core-purity         TinyTitanCore carries no model knowledge (7.0 spec §1.3)
@@ -554,7 +553,7 @@ check_unchecked_sendable() {
 # without them used to print "SKIP: ... (converter deps unavailable)" and exit 0
 # — which is the exact shape of the defect this gate hunts: everything reads
 # green while nothing was checked. Missing dependencies now name the install
-# command, the way the javascript gate names `npm ci`.
+# command, the way this gate names the install command.
 #
 # Opting out: `ALLOW_MISSING_CONVERTER_DEPS=1 tools/lint.sh` for a run that
 # cannot install them (a machine with no numpy for the width this check needs).
@@ -1403,78 +1402,6 @@ check_swift_format() {
   return 0
 }
 
-# --- javascript -------------------------------------------------------------
-# The two DSH plugin packages are npm packages with no runtime dependencies.
-# ESLint and Prettier are pinned exactly in each package.json and locked in its
-# package-lock.json, so `npm ci` reproduces the toolchain byte-for-byte; this
-# gate FAILS when the installed versions differ from those pins instead of
-# skipping, and it fails when a package has no toolchain installed at all.
-ESLINT_PIN="10.11.0"
-PRETTIER_PIN="3.9.9"
-NODE_FLOOR="22"
-
-check_javascript() {
-  echo "== javascript: eslint + prettier --check over the plugin packages (pinned $ESLINT_PIN/$PRETTIER_PIN) =="
-  if ! command -v node >/dev/null 2>&1; then
-    echo "  FAIL: node is not installed; the plugin packages need Node $NODE_FLOOR or newer"
-    status=1
-    return 1
-  fi
-  local node_version node_major
-  node_version="$(node --version)"
-  node_major="${node_version#v}"
-  node_major="${node_major%%.*}"
-  if [ "$node_major" -lt "$NODE_FLOOR" ]; then
-    echo "  FAIL: node $node_version is installed, the packages declare engines.node >=$NODE_FLOOR"
-    status=1
-    return 1
-  fi
-  local package name eslint prettier version output checked=0
-  for package in "$ROOT"/plugins/dsh-*; do
-    [ -f "$package/package.json" ] || continue
-    name="$(basename "$package")"
-    eslint="$package/node_modules/.bin/eslint"
-    prettier="$package/node_modules/.bin/prettier"
-    if [ ! -x "$eslint" ] || [ ! -x "$prettier" ]; then
-      echo "  FAIL: $name has no installed toolchain; run: (cd ${package#"$ROOT"/} && npm ci)"
-      status=1
-      return 1
-    fi
-    version="$("$eslint" --version | tr -d 'v')"
-    if [ "$version" != "$ESLINT_PIN" ]; then
-      echo "  FAIL: $name has eslint $version, this gate pins $ESLINT_PIN"
-      status=1
-      return 1
-    fi
-    version="$("$prettier" --version)"
-    if [ "$version" != "$PRETTIER_PIN" ]; then
-      echo "  FAIL: $name has prettier $version, this gate pins $PRETTIER_PIN"
-      status=1
-      return 1
-    fi
-    if ! output="$(cd "$package" && "$eslint" . 2>&1)"; then
-      printf '%s\n' "$output" | head -20
-      echo "  FAIL: $name: eslint findings (fix: npm run lint, then npm run format)"
-      status=1
-      return 1
-    fi
-    if ! output="$(cd "$package" && "$prettier" --check . 2>&1)"; then
-      printf '%s\n' "$output" | head -20
-      echo "  FAIL: $name: formatting drift (fix: npm run format)"
-      status=1
-      return 1
-    fi
-    checked=$((checked + 1))
-    echo "  ok: $name (node $node_version, eslint $ESLINT_PIN, prettier $PRETTIER_PIN)"
-  done
-  if [ "$checked" -eq 0 ]; then
-    echo "  FAIL: no plugin package found under plugins/"
-    status=1
-    return 1
-  fi
-  return 0
-}
-
 # --- library facade ----------------------------------------------------------
 # `AGENTS.md`'s "Two products, one repository" makes three promises about
 # `sources/TinyTitanLib/` (and the `CPUEngine` facade), the surface an embedder
@@ -1771,12 +1698,12 @@ check_docs() {
 
 # Modes come in two shapes: one per check under its short name, plus the longer
 # names the usage header above and `AGENTS.md` teach (`unchecked-sendable`,
-# `silent-test-skip`, `shell-portability`, `shell-lint`, `format`, `js`). Four of
+# `silent-test-skip`, `shell-portability`, `shell-lint`, `format`). Four of
 # them were documented and *not runnable* — `tools/lint.sh shell-portability`, the
 # exact name in `AGENTS.md`, exited 2 — which is what `tools/lint.sh docs` now
 # refuses. Every spelling must appear in the unknown-check message below.
 case "$want" in
-  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_library_stdout; check_silent_test_skip; check_test_hollow; check_library_facade; check_docs; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_javascript; check_python; check_core_purity; check_variant_isolation ;;
+  all)         check_force_cast; check_unbounded_metadata_read; check_func_length; check_file_length; check_unchecked_sendable; check_converter_expert_order; check_arch_path; check_library_stdout; check_silent_test_skip; check_test_hollow; check_library_facade; check_docs; check_shell_portability; check_shellcheck; check_swiftlint; check_swift_format; check_python; check_core_purity; check_variant_isolation ;;
   force-cast)  check_force_cast ;;
   unbounded-read) check_unbounded_metadata_read ;;
   func-length) check_func_length ;;
@@ -1798,12 +1725,10 @@ case "$want" in
   swiftlint)   check_swiftlint ;;
   swift-format) check_swift_format ;;
   format)      check_swift_format ;;
-  javascript)  check_javascript ;;
-  js)          check_javascript ;;
   python)      check_python ;;
   core-purity) check_core_purity ;;
   variant-isolation) check_variant_isolation ;;
-  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|unchecked-sendable|converter|arch-path|stdout-clean|test-skip|silent-test-skip|test-hollow|library-facade|docs|shell|shell-portability|shellcheck|shell-lint|swiftlint|swift-format|format|javascript|js|python|core-purity|variant-isolation)" >&2; exit 2 ;;
+  *) echo "unknown check: $want (all|force-cast|unbounded-read|func-length|file-length|sendable|unchecked-sendable|converter|arch-path|stdout-clean|test-skip|silent-test-skip|test-hollow|library-facade|docs|shell|shell-portability|shellcheck|shell-lint|swiftlint|swift-format|format|python|core-purity|variant-isolation)" >&2; exit 2 ;;
 esac
 
 exit $status
