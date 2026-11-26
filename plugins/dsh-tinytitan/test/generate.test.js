@@ -22,6 +22,8 @@ import {
   applyDefaultModelToSettings,
   applyRouteThroughSettings,
   applyRouteToSettings,
+  CatalogRowShapeError,
+  catalogRows,
   collectRoute,
   DEFAULT_MODEL_SETTINGS_NS,
   ensureDefaultModel,
@@ -693,6 +695,32 @@ test("an unexpected failure while reading a row is not swallowed", () => {
   assert.throws(
     () => generateBlock([FAKE[0], exploding], { log: () => {} }),
     /catalog getter exploded/,
+  );
+});
+
+test("a row that is already normalized is refused, not silently dropped", () => {
+  // The two shapes are not interchangeable: a catalog row carries `quant` and
+  // `thinking`, a normalized row carries `levels`. A second pass used to return
+  // nothing, so `generateBlock(catalogRows(rows))` was an *empty* route that read
+  // exactly like a catalog of no installs — the same hollow comparison the
+  // catalog-scan parity test once had. It is a caller error, so it is loud.
+  const rows = catalogRows(FAKE);
+  assert.equal(rows.length, 2);
+  for (const attempt of [() => catalogRows(rows), () => generateBlock(rows)]) {
+    assert.throws(attempt, (error) => {
+      assert.ok(error instanceof CatalogRowShapeError, error.name);
+      assert.equal(error.name, "CatalogRowShapeError");
+      assert.match(error.message, /row 1 is already a catalogRows\(\) result/);
+      return true;
+    });
+  }
+  // A mixed list is refused too: skipping the normalized half would be the same
+  // silent route as before.
+  assert.throws(() => catalogRows([...FAKE, ...rows]), /already a catalogRows\(\) result/);
+  // The rail is on the shape, not on the caller: a raw row still works.
+  assert.equal(
+    generateBlock(FAKE).split("\n")[2],
+    "# 2 served model(s); settings.yaml is hot-reloaded.",
   );
 });
 

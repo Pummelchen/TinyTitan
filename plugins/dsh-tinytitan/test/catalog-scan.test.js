@@ -222,6 +222,54 @@ test("a folder is read the way the server reads it", () => {
   assert.ok(skipped.find((entry) => entry.path.endsWith("llama_4Bit")).reason.includes("llama"));
 });
 
+/**
+ * The rows `TinyTitanServer --catalog` prints for this repository's installs.
+ *
+ * Measured on this Mac; the `sampling` and `size_gb` fields are the server's own
+ * and do not reach the picker block. Passing the paths in keeps the rows' `path`
+ * field honest for the synthetic installs.
+ */
+function measuredServerRows({ gguf, nvfp4, qwen }) {
+  return [
+    {
+      id: "inkling-2-mini-gguf-q4",
+      name: "Inkling 2 Mini UD-Q4_K_XL (Unsloth)",
+      family: "inkling2",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu",
+      path: gguf,
+      thinking: ["off", "low", "medium", "high", "xhigh"],
+      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
+      size_gb: 17.7,
+    },
+    {
+      id: "inkling-2-mini-nvfp4",
+      name: "Inkling 2 Mini",
+      family: "inkling2",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu",
+      path: nvfp4,
+      thinking: ["off", "low", "medium", "high", "xhigh"],
+      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
+      size_gb: 19.6,
+    },
+    {
+      id: "qwen3.5-4b_4-Bit",
+      name: "Qwen 3.5 4B",
+      family: "qwen3_5_dense",
+      quant: 4,
+      backend: "gpu",
+      engines: "gpu,cpu",
+      path: qwen,
+      thinking: ["off", "on"],
+      sampling: { temperature: 0.7, top_p: 0.8, top_k: 20 },
+      size_gb: 3.7,
+    },
+  ];
+}
+
 test("a plugin-backed Inkling 2 install scans as the server describes it", () => {
   // The server serves these through a TPP/1 plugin, not through a `ModelFamily`
   // the generic loader knows: the plugin answers with its own identity, display
@@ -281,44 +329,7 @@ test("a plugin-backed Inkling 2 install scans as the server describes it", () =>
     ],
   );
 
-  const server = [
-    {
-      id: "inkling-2-mini-gguf-q4",
-      name: "Inkling 2 Mini UD-Q4_K_XL (Unsloth)",
-      family: "inkling2",
-      quant: 4,
-      backend: "gpu",
-      engines: "gpu",
-      path: gguf,
-      thinking: ["off", "low", "medium", "high", "xhigh"],
-      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
-      size_gb: 17.7,
-    },
-    {
-      id: "inkling-2-mini-nvfp4",
-      name: "Inkling 2 Mini",
-      family: "inkling2",
-      quant: 4,
-      backend: "gpu",
-      engines: "gpu",
-      path: nvfp4,
-      thinking: ["off", "low", "medium", "high", "xhigh"],
-      sampling: { temperature: 0.6, top_p: 0.95, top_k: 20 },
-      size_gb: 19.6,
-    },
-    {
-      id: "qwen3.5-4b_4-Bit",
-      name: "Qwen 3.5 4B",
-      family: "qwen3_5_dense",
-      quant: 4,
-      backend: "gpu",
-      engines: "gpu,cpu",
-      path: qwen,
-      thinking: ["off", "on"],
-      sampling: { temperature: 0.7, top_p: 0.8, top_k: 20 },
-      size_gb: 3.7,
-    },
-  ];
+  const server = measuredServerRows({ gguf, nvfp4, qwen });
   const block = generateBlock(models);
   assert.equal(
     block,
@@ -344,6 +355,24 @@ test("a plugin-backed Inkling 2 install scans as the server describes it", () =>
         "            high: high\n" +
         "            xhigh: xhigh\n",
     ),
+  );
+});
+
+test("a divergent raw row fails the block parity assertion", () => {
+  // The parity test compares generated blocks, so it has to be able to tell two
+  // raw row sets apart in the fields the picker renders — not merely count rows
+  // or compare ids.
+  const rows = measuredServerRows({ gguf: "/models/g", nvfp4: "/models/n", qwen: "/models/q" });
+  const block = generateBlock(rows);
+  const renamed = rows.map((row) => ({ ...row }));
+  renamed[0].name = "Inkling 2 Mini UD-Q4 (copy)";
+  assert.notEqual(generateBlock(renamed), block, "a label change must change the block");
+  const reladdered = rows.map((row) => ({ ...row }));
+  reladdered[1].thinking = ["off"];
+  assert.notEqual(
+    generateBlock(reladdered),
+    block,
+    "an effort ladder change must change the block",
   );
 });
 

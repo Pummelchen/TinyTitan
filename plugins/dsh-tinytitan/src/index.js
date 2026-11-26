@@ -49,6 +49,7 @@ export { scanModelsFolder } from "./catalog-scan.js";
 export {
   applyRouteThroughSettings,
   applyRouteToSettings,
+  CatalogRowShapeError,
   catalogRows,
   collectRoute,
   findModelsDir,

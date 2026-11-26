@@ -205,22 +205,67 @@ function rowIdentity(model) {
 }
 
 /**
+ * A row that is already this module's normalized row, not a catalog row.
+ *
+ * `catalogRows` is the only place a raw row becomes
+ * `{id, name, path, backend, family, engines, levels}`. That result is *not* a
+ * catalog row — it has no `quant` and no `thinking` — so feeding it back used to
+ * return nothing, and `generateBlock(catalogRows(rows))` was an empty route that
+ * read exactly like a catalog of no installs. That is a caller error rather than
+ * a malformed install, so it is refused loudly instead of skipped.
+ */
+export class CatalogRowShapeError extends Error {
+  constructor(position) {
+    super(
+      `catalog: row ${position} is already a catalogRows() result; pass the catalog's ` +
+        "raw models array (the shape --catalog prints), not the normalized rows",
+    );
+    this.name = "CatalogRowShapeError";
+  }
+}
+
+/** Whether one entry is a normalized row rather than a catalog row. */
+function normalizedRow(model) {
+  return (
+    model !== null &&
+    typeof model === "object" &&
+    !Array.isArray(model) &&
+    Array.isArray(model.levels) &&
+    model.quant === undefined &&
+    model.thinking === undefined
+  );
+}
+
+/**
  * Normalize a catalog's `models` array into the rows the block is built from.
+ *
+ * Two shapes exist and they are not interchangeable:
+ *
+ * - a **catalog row**, what `TinyTitanServer --catalog`, the folder scan and the
+ *   harness's own listing produce: `{id, name, path, backend, quant, family?,
+ *   engines?, thinking?, size_gb?}`;
+ * - a **normalized row**, what this function returns:
+ *   `{id, name, path, backend, family, engines, levels}`.
+ *
+ * Passing a normalized row back in throws `CatalogRowShapeError`: a second pass
+ * would otherwise look like a catalog in which every install is malformed.
  *
  * GPU installs first, then CPU ones, mirroring the shell parser: a server
  * serves one resident model at a time, so the route only orders the picker, and
  * GPU is what a launcher starts by default. A row missing a field the block
  * needs is skipped rather than failing the whole route.
  *
- * @param models - the catalog's `models` array.
+ * @param models - the catalog's raw `models` array.
  * @param options - `log`, the channel a refused row's diagnostic goes to.
  * @returns one `{id, name, path, backend, family, engines, levels}` per servable model.
+ * @throws {CatalogRowShapeError} when an entry is already a normalized row.
  */
 export function catalogRows(models, { log = () => {} } = {}) {
   if (!Array.isArray(models)) throw new Error('catalog: "models" is not a list');
   const gpu = [];
   const cpu = [];
   for (const [position, model] of models.entries()) {
+    if (normalizedRow(model)) throw new CatalogRowShapeError(position + 1);
     let row;
     try {
       if (model === null || typeof model !== "object") {
@@ -374,7 +419,10 @@ function buildBlock(rows, options) {
 
 /**
  * The `llm-pi-ai` block for a catalog, byte-for-byte as the shell tool prints it.
- * @param models - the catalog's `models` array.
+ *
+ * @param models - the catalog's raw `models` array, as `--catalog` prints it.
+ *   The rows `catalogRows` returns are a different shape; passing them throws
+ *   `CatalogRowShapeError` instead of building an empty block.
  * @param options - `port`, `provider`, `context`, `maxTokens`, `reasoning`.
  * @returns the block, ending in a newline.
  */
