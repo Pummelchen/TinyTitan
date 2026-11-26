@@ -101,9 +101,9 @@ before reporting done:
 
 ## Layout and commands
 
-`sources/` holds one directory per SwiftPM target. `sources/TinyTitan/` is the
-runtime; `sources/TinyTitanFormat/` plus `sources/TinyTitanKernelsC/` are its
-format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
+`sources/` holds one directory per SwiftPM target. `sources/Engines/Legacy6xRuntime/`
+is the 6.x runtime behind `LegacyEngineAdapter`; `sources/TinyTitanFormat/` plus
+`sources/TinyTitanKernelsC/` are its format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
 `sources/TinyTitanServer/` hold the installer, CLI and loopback server; each of
 those three is a thin executable over a `*Core` library target
 (`TinyTitanRepackCore`, `TinyTitanCLICore`, `TinyTitanServerCore`).

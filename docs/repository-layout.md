@@ -117,16 +117,17 @@ were violated by exactly one file each and both violations were fixed in the
 ## Tests mirror sources
 
 `tests/<Target>/...` mirrors the target's own directory shape, so a test is
-found the same way the code is: `sources/TinyTitan/Runtime/Prefill/X.swift` is
-tested by `tests/TinyTitan/Runtime/Prefill/...`. Where a target has a `Core/`
-library half, the test path repeats it (`sources/TinyTitanServer/Core` ↔
-`tests/TinyTitanServer/Core`).
+found the same way the code is: `sources/Engines/Legacy6xRuntime/Runtime/Prefill/X.swift`
+is tested by `tests/Engines/Legacy6xRuntime/Runtime/Prefill/...`. Where a target
+has a `Core/` library half, the test path repeats it
+(`sources/TinyTitanServer/Core` ↔ `tests/TinyTitanServer/Core`).
 
-One path was inconsistent and is now fixed: the `TinyTitan` runtime's test target
-sat at `tests/TinyTitan/Core` while the runtime itself has no `Core/` level. It is
-`tests/TinyTitan` now, with the target renamed `TinyTitanTestsCore` → `TinyTitanTests`.
+The 6.x runtime's test target moved with its code in TT-134 group (e): it was
+`tests/TinyTitan` (target `TinyTitanTests`) and is now
+`tests/Engines/Legacy6xRuntime` (target `Legacy6xRuntimeTests`), because the
+runtime itself is now `sources/Engines/Legacy6xRuntime`.
 
-`tests/TinyTitan/Runtime/qwen38_tensor_names.txt` and
+`tests/Engines/Legacy6xRuntime/Runtime/qwen38_tensor_names.txt` and
 `tests/TinyTitanRepack/Core/Support/qwen38_tensor_names.txt` are byte-identical
 200 KB fixtures. **That duplication is required, not an oversight:** SwiftPM
 resources belong to one target, the two files are resources of two different

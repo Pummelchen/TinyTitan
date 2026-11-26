@@ -394,9 +394,20 @@ The order is chosen so each step is shippable and bit-identical:
        `RealForwardRunner`, `RuntimeConfiguration`, `KVCacheManager`,
        `StreamingMTPDecoder`, the expert-I/O types. This is the code the
        families not on disk (Qwen 3.8, KAT, AgentWorld, Ornith 8-bit, Laguna)
-       run on. It moves, as one engine target that imports only Core, under
-       `sources/Engines/`, so each later plugin copies from it the way the
-       Ornith plugin did.
+       run on. **Moved 2026-11-26 (TT-134 group e, code only):** the whole
+       former `sources/TinyTitan` target is now `sources/Engines/Legacy6xRuntime`,
+       one engine target that imports only the generic library
+       (`TinyTitanCore`, `TinyTitanFormat`, `TinyTitanKernelsC`, Metal and the
+       tokenizer package), so each later plugin copies from it the way the
+       Ornith plugin did. The move is a `git mv` plus the module/import rename;
+       no type, numeric or adapter behaviour changed. The target also still
+       carries the 6.x CPU engine, the GGUF decoder and the K2/Laguna/Nemotron
+       probe routes, because their closure is entangled with `Model`'s graph
+       (`Runtime/Inference/K2GraphProbe` → `CPUEngine/K2Model`, the GGUF and
+       per-family validation files): separating those is TT-121/TT-132 work,
+       not a pure move. The host files that still reach the runtime now import
+       `Legacy6xRuntime`; TT-134's remaining rows decide whether each is ported
+       or deleted.
      - **Host model knowledge**: `ModelFamily`, `ManifestReader`,
        `ManifestIdentity`, per-family `GenerationDefaults`. In 7.x a plugin
        declares these (identity and `SamplingProfile` in its load plan), so
