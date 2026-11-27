@@ -86,4 +86,48 @@ struct MemoryToolListingFailureTests {
         #expect(result.stdout.contains("repo-a"), "stdout: \(result.stdout)")
         #expect(!result.stderr.contains("could not be listed"), "stderr: \(result.stderr)")
     }
+
+    /// AUD-0064 at the tool: a directory the scan could not enter below the
+    /// root makes the answer incomplete, and the tool says which one instead
+    /// of printing a list that looks whole.
+    @Test func projectsWithAnUnlistableNestedDirectoryFails() async throws {
+        let fixture = try ProjectDirectoryFixture()
+        defer { fixture.cleanup() }
+        try await fixture.makeProject("repo-a")
+        let nested = try fixture.makeUnlistableSubdirectory("archive")
+
+        let result = try run(fixture.directory, ["projects"])
+        #expect(result.status == 1, "stdout: \(result.stdout)")
+        #expect(result.stderr.contains("could not be listed"), "stderr: \(result.stderr)")
+        #expect(
+            result.stderr.contains(nested.resolvingSymlinksInPath().path),
+            "stderr: \(result.stderr)")
+        #expect(result.stderr.contains("archive"), "stderr: \(result.stderr)")
+    }
+
+    @Test func listWithAnUnlistableNestedDirectoryFails() async throws {
+        let fixture = try ProjectDirectoryFixture()
+        defer { fixture.cleanup() }
+        try await fixture.makeProject("repo-a")
+        try fixture.makeUnlistableSubdirectory("archive")
+
+        let result = try run(fixture.directory, ["list", "repo-a"])
+        #expect(result.status == 1, "stdout: \(result.stdout)")
+        #expect(result.stderr.contains("could not be listed"), "stderr: \(result.stderr)")
+    }
+
+    /// A readable subdirectory is still walked and its project listed.
+    @Test func projectsWithANestedProjectListsBoth() async throws {
+        let fixture = try ProjectDirectoryFixture()
+        defer { fixture.cleanup() }
+        try await fixture.makeProject("repo-a")
+        let archive = try fixture.makeNestedDirectory("archive")
+        try await fixture.makeProject("repo-b", in: archive)
+
+        let result = try run(fixture.directory, ["projects"])
+        #expect(result.status == 0, "stderr: \(result.stderr)")
+        #expect(result.stdout.contains("repo-a"), "stdout: \(result.stdout)")
+        #expect(result.stdout.contains("repo-b"), "stdout: \(result.stdout)")
+        #expect(!result.stderr.contains("could not be listed"), "stderr: \(result.stderr)")
+    }
 }

@@ -22,9 +22,14 @@ struct ProjectDirectoryFixture {
     }
 
     /// A readable project with one fact, and the value that fact holds.
+    ///
+    /// `parent` places it below the root, the layout the scan also descends
+    /// into; the top-level store is one file per workspace.
     @discardableResult
-    func makeProject(_ workspace: String) async throws -> (url: URL, value: String) {
-        let url = directory.appendingPathComponent("\(workspace).ndjson")
+    func makeProject(
+        _ workspace: String, in parent: URL? = nil
+    ) async throws -> (url: URL, value: String) {
+        let url = (parent ?? directory).appendingPathComponent("\(workspace).ndjson")
         let value = "value-for-\(workspace)"
         let journal = try FileJournal(url: url, idleDelay: .seconds(60))
         let engine = ContinuityEngine(journal: journal)
@@ -73,6 +78,25 @@ struct ProjectDirectoryFixture {
     func makeUnlistable() throws {
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o000], ofItemAtPath: directory.path)
+    }
+
+    /// A subdirectory of the store, readable.
+    @discardableResult
+    func makeNestedDirectory(_ name: String) throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        try FileManager.default.createDirectory(
+            at: url, withIntermediateDirectories: false)
+        return url
+    }
+
+    /// A subdirectory that can be seen but not entered, so a walk of the root
+    /// cannot descend into it.
+    @discardableResult
+    func makeUnlistableSubdirectory(_ name: String) throws -> URL {
+        let url = try makeNestedDirectory(name)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: url.path)
+        return url
     }
 
     /// Put a plain file where a project directory is expected. Inside the

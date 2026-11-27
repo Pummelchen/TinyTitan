@@ -38,21 +38,30 @@ public struct MemoryProjectDiscovery: Sendable {
     public let broken: [Broken]
     /// Nil when the directory was listed, whatever the files turned out to be.
     public let listingFailure: ListingFailure?
+    /// A directory *below* the root that could not be walked, with the same
+    /// safe reason as `listingFailure`. The store layout is one `.ndjson` per
+    /// workspace at the top, but the scan has always descended, and a
+    /// directory it could not enter used to vanish without a word: that is the
+    /// same defect as an unlistable root, one level down.
+    public let unlistableDirectories: [ListingFailure]
 
     public init(
         projects: [MemoryProjectFile], broken: [Broken],
-        listingFailure: ListingFailure? = nil
+        listingFailure: ListingFailure? = nil,
+        unlistableDirectories: [ListingFailure] = []
     ) {
         self.projects = projects
         self.broken = broken
         self.listingFailure = listingFailure
+        self.unlistableDirectories = unlistableDirectories
     }
 
-    /// Whether the scan found nothing *and* could see the directory. A
+    /// Whether the scan found nothing *and* could see the whole tree. A
     /// listing failure is not an empty directory, and a caller that shows the
     /// result to a person has to handle it first.
     public var isEmpty: Bool {
         projects.isEmpty && broken.isEmpty && listingFailure == nil
+            && unlistableDirectories.isEmpty
     }
 }
 
@@ -121,33 +130,23 @@ public struct MemoryProjectFile: Sendable {
     /// reason, so an operator can repair or remove it instead of wondering why
     /// the workspace vanished.
     public static func discoverAll(in directory: URL) -> MemoryProjectDiscovery {
-        let manager = FileManager.default
         // A directory that cannot be listed is not an empty one. The
-        // existence/type/permission checks come first because the URL-based
-        // enumerator is lazy: on this platform it can hand back a walker for a
-        // missing or unreadable directory and only fail when it is advanced,
-        // with no way to ask what went wrong. A nil walker is still treated as
-        // a failure for the paths where it is the only signal.
+        // existence/type/permission checks come first so the common failures
+        // carry a stable reason ("does not exist", "Permission denied") rather
+        // than whatever a listing call reports; the walk repeats the check for
+        // every level below the root.
         if let reason = listingReason(for: directory) {
             return MemoryProjectDiscovery(
                 projects: [], broken: [],
                 listingFailure: MemoryProjectDiscovery.ListingFailure(
                     url: directory, reason: reason))
         }
-        guard
-            let walker = manager.enumerator(
-                at: directory,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: [.skipsHiddenFiles])
-        else {
-            return MemoryProjectDiscovery(
-                projects: [], broken: [],
-                listingFailure: MemoryProjectDiscovery.ListingFailure(
-                    url: directory, reason: "an I/O error"))
-        }
+        var files: [URL] = []
+        var unlistable: [MemoryProjectDiscovery.ListingFailure] = []
+        walk(directory, files: &files, unlistable: &unlistable)
         var projects: [MemoryProjectFile] = []
         var broken: [MemoryProjectDiscovery.Broken] = []
-        for case let url as URL in walker where url.pathExtension == "ndjson" {
+        for url in files {
             do {
                 projects.append(try load(url))
             } catch {
@@ -165,7 +164,65 @@ public struct MemoryProjectFile: Sendable {
             projects: projects.sorted { $0.modifiedAt > $1.modifiedAt },
             broken: broken.sorted {
                 ($0.workspace, $0.url.path) < ($1.workspace, $1.url.path)
-            })
+            },
+            unlistableDirectories: unlistable.sorted { $0.url.path < $1.url.path })
+    }
+
+    /// Every `.ndjson` file below `directory`, and every directory that could
+    /// not be entered.
+    ///
+    /// This was `FileManager.enumerator`: that walker yields nothing for a
+    /// directory it cannot descend into and offers no error, so an unreadable
+    /// *nested* directory was indistinguishable from an empty one and the
+    /// answer read as complete. `contentsOfDirectory` throws, so the walk can
+    /// name the directory it skipped and why. The worklist is explicit rather
+    /// than recursive: a directory tree is input like any other, and its depth
+    /// is not this process's to bound.
+    private static func walk(
+        _ directory: URL, files: inout [URL],
+        unlistable: inout [MemoryProjectDiscovery.ListingFailure]
+    ) {
+        var pending = [directory]
+        while let next = pending.popLast() {
+            let entries: [URL]
+            do {
+                entries = try FileManager.default.contentsOfDirectory(
+                    at: next,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles])
+            } catch {
+                // The pre-check on the root produces the stable reasons
+                // ("Permission denied"); this is the backstop for a directory
+                // that becomes unreadable between the check and the listing,
+                // and for the levels below the root.
+                let code = (error as NSError).code
+                let reason =
+                    (error as NSError).domain == NSPOSIXErrorDomain
+                    ? String(cString: strerror(Int32(code)))
+                    : "an I/O error"
+                unlistable.append(
+                    MemoryProjectDiscovery.ListingFailure(url: next, reason: reason))
+                continue
+            }
+            for url in entries {
+                // A name ending in `.ndjson` is a project path whatever kind
+                // of entry it is: a directory or FIFO there is the 0061 case,
+                // reported by `load` as broken rather than walked into.
+                if url.pathExtension == "ndjson" {
+                    files.append(url)
+                    continue
+                }
+                let isDirectory =
+                    (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                guard isDirectory else { continue }
+                if let reason = listingReason(for: url) {
+                    unlistable.append(
+                        MemoryProjectDiscovery.ListingFailure(url: url, reason: reason))
+                } else {
+                    pending.append(url)
+                }
+            }
+        }
     }
 
     /// Why `directory` cannot be listed, or nil when it can.

@@ -70,6 +70,9 @@ func resolve(_ raw: String, in directory: URL) -> MemoryProjectFile {
     if let failure = discovery.listingFailure {
         fail("\(failure.url.path) could not be listed: \(failure.reason)")
     }
+    if let failure = discovery.unlistableDirectories.first {
+        fail("\(failure.url.path) could not be listed: \(failure.reason)")
+    }
     switch MemoryProjectFile.resolve(
         projectName(raw), among: discovery.projects, broken: discovery.broken)
     {
@@ -93,8 +96,11 @@ case "projects":
     let discovery = MemoryProjectFile.discoverAll(in: directory)
     // A directory that cannot be listed is not an empty directory: answering
     // "no project files" over an unreadable path reports a fact nobody
-    // established.
+    // established. The same holds one level down, where the scan descends.
     if let failure = discovery.listingFailure {
+        fail("\(failure.url.path) could not be listed: \(failure.reason)")
+    }
+    if let failure = discovery.unlistableDirectories.first {
         fail("\(failure.url.path) could not be listed: \(failure.reason)")
     }
     guard !discovery.isEmpty else {

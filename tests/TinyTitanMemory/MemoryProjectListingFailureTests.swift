@@ -80,4 +80,45 @@ import Testing
         #expect(discovery.broken.count == 1)
         #expect(!discovery.isEmpty)
     }
+
+    /// AUD-0064: the walk descends, so a directory it cannot enter one level
+    /// down is the same defect as an unlistable root. The old enumerator
+    /// yielded nothing for it and offered no error, so the answer read as
+    /// complete.
+    @Test func anUnlistableNestedDirectoryIsReported() async throws {
+        let fixture = try ProjectDirectoryFixture()
+        defer { fixture.cleanup() }
+        try await fixture.makeProject("repo-a")
+        let nested = try fixture.makeUnlistableSubdirectory("archive")
+
+        let discovery = MemoryProjectFile.discoverAll(in: fixture.directory)
+        #expect(discovery.listingFailure == nil)
+        let failure = try #require(discovery.unlistableDirectories.first)
+        #expect(
+            failure.url.resolvingSymlinksInPath().path
+                == nested.resolvingSymlinksInPath().path)
+        #expect(
+            failure.reason.lowercased().contains("permission denied"),
+            "unexpected reason: \(failure.reason)")
+        // What could be read is still read, and the scan is not "empty".
+        #expect(discovery.projects.map(\.workspace) == ["repo-a"])
+        #expect(!discovery.isEmpty, "an unreadable nested directory read as empty")
+    }
+
+    /// The walk rewrite must not lose what the enumerator found: a project in
+    /// a readable subdirectory is still discovered, and reported as clean.
+    @Test func aProjectInAReadableSubdirectoryIsStillFound() async throws {
+        let fixture = try ProjectDirectoryFixture()
+        defer { fixture.cleanup() }
+        try await fixture.makeProject("repo-a")
+        let archive = try fixture.makeNestedDirectory("archive")
+        try await fixture.makeProject("repo-b", in: archive)
+
+        let discovery = MemoryProjectFile.discoverAll(in: fixture.directory)
+        #expect(discovery.unlistableDirectories.isEmpty)
+        #expect(discovery.listingFailure == nil)
+        #expect(
+            Set(discovery.projects.map(\.workspace)) == ["repo-a", "repo-b"],
+            "found: \(discovery.projects.map(\.workspace))")
+    }
 }
