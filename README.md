@@ -44,8 +44,6 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 | Laguna-S-2.1 118B-A8B *(decode probe)* | 8-bit | **0.7 tok/s** | NA | 70% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 4-bit | **21.7 tok/s** | NA | 68% (2.1) | NA |
 | Ornith 1.5 35B-A3B | 8-bit | **11.9 tok/s** | NA | 68% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B *(probe backend)* | 4-bit | **12.4 tok/s** | NA | 59% (2.1) | NA |
-| K2-Horizon-MoVA-36B-A4B *(probe backend)* | 8-bit | **2.0 tok/s** | NA | 59% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.4 tok/s** | NA | 53% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 8-bit | **12.4 tok/s** | NA | 53% (2.1) | NA |
 | NVIDIA Nemotron 3.5 Bolt 74B-A9B *(CLI only)* | 4-bit | **6.7 tok/s** | **3.6 tok/s** | 51% (2.1) | NA |

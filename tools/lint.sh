@@ -1599,7 +1599,7 @@ check_core_purity() {
     return
   fi
   local hits found=0
-  hits=$(grep -rnEi 'qwen36|qwen38|qwen35|qwen4flash|ornith|agentworld|katcoder|laguna|nemotron|k2horizon|deepseek|ModelFamily|ModelProfile|ModelCatalog' "$dir" --include='*.swift' 2>/dev/null)
+  hits=$(grep -rnEi 'qwen36|qwen38|qwen35|qwen4flash|ornith|agentworld|katcoder|laguna|nemotron|deepseek|ModelFamily|ModelProfile|ModelCatalog' "$dir" --include='*.swift' 2>/dev/null)
   local hit file rest line above
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
