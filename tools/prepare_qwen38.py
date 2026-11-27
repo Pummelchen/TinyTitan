@@ -104,6 +104,50 @@ BITS_4, BITS_8 = 4, 8
 INDEXER_QUERY_ROWS = 512
 OUTPUT_SHARD_BYTES = 4 << 30
 
+# --- durable small files ---------------------------------------------------
+
+
+def _fsync_directory(path: Path) -> None:
+    """Make a rename in `path` durable across a power loss."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_bytes_atomic(path: Path, data: bytes) -> None:
+    """Write `data` to `path` so a kill leaves either the old file or the new one.
+
+    These are markers, not payload. `model.safetensors.index.json` is how the
+    next run decides the snapshot is finished, so the in-place write used to
+    turn a kill into a refusal instead of a resume (AUD-0077).
+    """
+    temporary = path.with_name(path.name + ".tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_CLOEXEC, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            fd = -1  # fdopen owns the descriptor now
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    os.replace(temporary, path)
+    _fsync_directory(path.parent)
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    write_bytes_atomic(path, text.encode("utf-8"))
+
+
 # --- PLE constants, per the transformers reference -------------------------
 
 _MASK64 = (1 << 64) - 1
@@ -537,7 +581,7 @@ def write_config(config: dict, out: Path, tensor_names, width: int) -> dict:
         "mode": "affine",
         **overrides,
     }
-    (out / "config.json").write_text(json.dumps(config, indent=1))
+    write_text_atomic(out / "config.json", json.dumps(config, indent=1))
     return config
 
 
@@ -896,8 +940,9 @@ class OutputWriter:
         for n in range(1, self.shard_no + 1):
             src = self.out / f"model-{n:05d}.safetensors"
             src.rename(self.out / f"model-{n:05d}-of-{self.shard_no:05d}.safetensors")
-        (self.out / "model.safetensors.index.json").write_text(
-            json.dumps({"metadata": {"total_size": self.total}, "weight_map": final}, indent=1)
+        write_text_atomic(
+            self.out / "model.safetensors.index.json",
+            json.dumps({"metadata": {"total_size": self.total}, "weight_map": final}, indent=1),
         )
 
 
@@ -1230,7 +1275,7 @@ def fetch_tokenizer(out: Path) -> None:
                     f"cannot fetch {name} from {REPO}; the snapshot would be rejected at repack"
                 )
             continue
-        (out / name).write_bytes(result.stdout)
+        write_bytes_atomic(out / name, result.stdout)
         print(f"  {name} ({len(result.stdout) / 1e6:.2f} MB)")
 
 
@@ -1296,6 +1341,67 @@ def constants_match(previous: dict | None, constants: dict) -> bool:
     if previous is None:
         return False
     return all(previous.get(key) == constants.get(key) for key in REUSE_CONSTANT_KEYS)
+
+
+def _finished_shard(path: Path) -> tuple[int, int] | None:
+    """`(shard, of)` for `model-00003-of-00007.safetensors`, else None."""
+    name = path.name
+    if not name.startswith("model-") or not name.endswith(".safetensors"):
+        return None
+    first, separator, last = name[len("model-") : -len(".safetensors")].partition("-of-")
+    if not separator or not first.isdigit() or not last.isdigit():
+        return None
+    return int(first), int(last)
+
+
+def _shard_contents(path: Path) -> tuple[list[str], int]:
+    """The tensor names and tensor bytes in one finished shard, or refuse it.
+
+    Rebuilding an index from shards is what lets a run that was killed during
+    `finish` be recovered rather than refused, so the shard has to be proved
+    whole first: a torn shard would otherwise be published as a finished
+    snapshot with a plausible index (AUD-0077). `read_shard_header` is the same
+    whole-file test `_resume` already adopts a shard through.
+    """
+    header = read_shard_header(path)
+    if header is None:
+        raise ValueError(f"{path.name} is not a whole safetensors shard")
+    names = [name for name in header if name != "__metadata__"]
+    end = max((int(header[name]["data_offsets"][1]) for name in names), default=0)
+    return names, end
+
+
+def rebuild_finished_index(out: Path) -> dict | None:
+    """Reconstruct `model.safetensors.index.json` from the finished shards.
+
+    Returns the index it wrote, or None when `out` holds no N-of-M shards (the
+    caller then treats a torn index as absent). A partial generation is refused
+    rather than published.
+    """
+    shards = []
+    for path in out.iterdir():
+        numbering = _finished_shard(path)
+        if numbering is not None:
+            shards.append((*numbering, path))
+    if not shards:
+        return None
+    shards.sort()
+    numbers = [shard for shard, _, _ in shards]
+    of = {total for _, total, _ in shards}
+    if len(of) != 1 or numbers != list(range(1, len(shards) + 1)):
+        raise ValueError(f"shards are numbered {numbers}, not one finished 1..M generation")
+    weight_map = {}
+    total_size = 0
+    for _, _, path in shards:
+        names, data_bytes = _shard_contents(path)
+        total_size += data_bytes
+        for name in names:
+            if name in weight_map:
+                raise ValueError(f"tensor {name} is in two shards")
+            weight_map[name] = path.name
+    index = {"metadata": {"total_size": total_size}, "weight_map": weight_map}
+    write_text_atomic(out / "model.safetensors.index.json", json.dumps(index, indent=1))
+    return index
 
 
 def reusable_local_table(
@@ -1451,28 +1557,37 @@ def main() -> int:
     # the N-of-M form and writes the index, so converting into that directory
     # again would lay a second generation of shards beside the first and orphan
     # the older one. The installer skips this case; refuse it here as well.
-    if (args.output / "model.safetensors.index.json").exists():
+    index_path = args.output / "model.safetensors.index.json"
+    if index_path.exists() and read_json_file(index_path) is not None:
         raise SystemExit(
             f"{args.output} already holds a finished snapshot "
             "(model.safetensors.index.json is present). Converting into it would "
             "leave two generations of shards behind; delete the directory or "
             "point --output at a new one."
         )
-    # The same hazard one step earlier: `finish` renames the shards before it
-    # writes the index, so a process killed (or a disk that filled) between the
-    # two leaves finished N-of-M shards and no index. Nothing adopts those --
-    # `_resume` looks for the un-renamed form -- so a run into that directory
-    # would convert everything again and leave the finished generation orphaned
-    # beside the new one, which for a real snapshot is hundreds of GB.
-    renamed = sorted(args.output.glob("model-[0-9]*-of-[0-9]*.safetensors"))
-    if renamed:
-        raise SystemExit(
-            f"{args.output} holds {len(renamed)} finished output shards but no "
-            "model.safetensors.index.json: a run stopped between finishing its "
-            "shards and writing the index. Converting into it again would "
-            "orphan those shards beside a second generation of the same "
-            "tensors; delete the directory or point --output at a new one."
-        )
+    # `finish` renames the shards before it writes the index, so a process
+    # killed (or a disk that filled) during either step leaves finished N-of-M
+    # shards with a missing or torn index. That is a complete snapshot, not a
+    # resume target: the index is derivable from the shards, so rebuild it
+    # instead of refusing (AUD-0077). An unparseable index is treated as absent.
+    if index_path.exists():
+        index_path.unlink()
+    if args.output.exists():
+        try:
+            rebuilt = rebuild_finished_index(args.output)
+        except (OSError, ValueError) as exc:
+            raise SystemExit(
+                f"{args.output} holds output shards that are not a complete finished "
+                f"generation ({exc}); delete the directory or point --output at a "
+                "new one."
+            ) from exc
+        if rebuilt is not None:
+            print(
+                f"{args.output} already held a finished snapshot; rebuilt "
+                "model.safetensors.index.json from its shards",
+                flush=True,
+            )
+            return 0
 
     config = fetch_json(args.config, "config.json")
     text_config = config["text_config"]
@@ -1485,7 +1600,7 @@ def main() -> int:
     # constants that built it, and a table reused under different constants
     # yields garbage n-gram ids rather than an error.
     previous_constants = read_json_file(args.output / "ple_constants.json")
-    (args.output / "ple_constants.json").write_text(json.dumps(constants, indent=1))
+    write_text_atomic(args.output / "ple_constants.json", json.dumps(constants, indent=1))
     rows = sum(constants["ngram_heads_vocab_sizes"])
     divisor = text_config.get("make_ngram_vocab_size_divisible_by", 128)
     padded = math.ceil(rows / divisor) * divisor
@@ -1523,7 +1638,7 @@ def main() -> int:
             "widths in one snapshot without recording it; delete the directory "
             "or point --output at a new one."
         )
-    marker.write_text(json.dumps(recipe, indent=1))
+    write_text_atomic(marker, json.dumps(recipe, indent=1))
 
     writer = OutputWriter(args.output)
 

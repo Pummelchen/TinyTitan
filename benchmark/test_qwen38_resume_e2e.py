@@ -1081,15 +1081,44 @@ class ResumeTests(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("already holds a finished snapshot", log)
 
-    def test_renamed_shards_without_an_index_are_refused(self) -> None:
-        # The other side of `finish`: shards renamed, index not yet written. A
-        # second run would orphan the finished generation beside a new one.
+    def test_a_torn_finished_index_is_rebuilt_from_the_shards(self) -> None:
+        # The index is the finished marker, and it used to be written in place:
+        # a kill during that write left unparseable JSON, which the next run
+        # read as "already finished" and refused. The shards are the snapshot;
+        # the index is derivable from them (AUD-0077).
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        index = self.out / "model.safetensors.index.json"
+        payload = index.read_bytes()
+        index.write_bytes(payload[: len(payload) // 2])
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        self.assertIn("rebuilt model.safetensors.index.json", log)
+        self.assert_no_duplicate_tensors(log)
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint())
+
+    def test_a_finished_generation_without_an_index_is_rebuilt(self) -> None:
+        # The other half of the same window: `finish` renames the shards, then
+        # writes the index. A kill between the two leaves a complete snapshot
+        # with no marker, which must be completed rather than converted again.
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        (self.out / "model.safetensors.index.json").unlink()
+        code, log = self.run_converter()
+        self.assertEqual(code, 0, log)
+        self.assertIn("rebuilt model.safetensors.index.json", log)
+        self.assert_no_duplicate_tensors(log)
+        self.assertEqual(fingerprint(self.out), baseline_fingerprint())
+
+    def test_an_incomplete_finished_generation_is_refused(self) -> None:
+        # Rebuilding must not turn a torn shard into a published snapshot.
         self.out.mkdir(parents=True, exist_ok=True)
-        (self.out / "model-00001-of-00003.safetensors").write_bytes(b"finished")
+        shard = self.out / "model-00001-of-00003.safetensors"
+        shard.write_bytes(b"finished")
         code, log = self.run_converter()
         self.assertNotEqual(code, 0)
-        self.assertIn("finished output shards but no", log)
-        self.assertEqual((self.out / "model-00001-of-00003.safetensors").read_bytes(), b"finished")
+        self.assertIn("not a complete finished generation", log)
+        self.assertEqual(shard.read_bytes(), b"finished")
 
     def test_a_completed_local_table_is_reused_in_place(self) -> None:
         # A previous run (or the older tool) left a whole table here. Reusing it
