@@ -266,33 +266,27 @@ private func readFP16Logits(_ buffer: MTLBuffer, count: Int) -> [Float] {
     return (0..<n).map { Float(ptr[$0]) }
 }
 
-/// The visible text of a growing answer as deltas: the decode of every token
-/// so far, control tokens skipped, with a trailing U+FFFD held back until the
-/// next token completes the character (TT-128's rule).
+/// The visible text of a growing answer as deltas: control tokens skipped, a
+/// byte sequence that a token boundary splits held back until the next token
+/// completes the character (TT-128's rule).
+///
+/// This decodes each token once through the engine's detokenizer. It used to
+/// keep every id and re-decode the whole answer per token — O(n^2) decodes, so a
+/// 4,000-token answer did millions of token lookups to emit its last delta
+/// (AUD-0100's class). The emitted text is the same; only the work changes.
 struct InklingQ4TextStream {
-    let tokenizer: GFTokenizer
-    private var tokens: [Int32] = []
-    private var emitted = ""
+    private var detokenizer: GFDetokenizer
 
     init(tokenizer: GFTokenizer) {
-        self.tokenizer = tokenizer
+        detokenizer = GFDetokenizer(tokenizer: tokenizer)
     }
 
     mutating func push(_ token: Int32) -> String {
-        tokens.append(token)
-        var stable = Substring(tokenizer.decode(tokens, skipSpecialTokens: true))
-        while stable.last == "\u{FFFD}" { stable = stable.dropLast() }
-        guard stable.hasPrefix(emitted), stable.count > emitted.count else { return "" }
-        let delta = String(stable.dropFirst(emitted.count))
-        emitted = String(stable)
-        return delta
+        // A special id decodes to nothing; the detokenizer returns "" for it.
+        (try? detokenizer.push(token)) ?? ""
     }
 
     mutating func flush() -> String {
-        let text = tokenizer.decode(tokens, skipSpecialTokens: true)
-        guard text.hasPrefix(emitted), text.count > emitted.count else { return "" }
-        let delta = String(text.dropFirst(emitted.count))
-        emitted = text
-        return delta
+        detokenizer.flush()
     }
 }
