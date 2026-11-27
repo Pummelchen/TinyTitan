@@ -247,7 +247,7 @@ let package = Package(
         // closure, moved verbatim out of `sources/TinyTitan` and into an
         // engine target so later plugins copy from it the way the Ornith
         // plugin did (docs/plan-engine-plugins.md). It still carries the 6.x
-        // CPU engine, GGUF decoder and the K2/Laguna/Nemotron probe routes
+        // CPU engine, GGUF decoder and the K2/Laguna probe routes
         // because those are entangled with `Model`'s graph; splitting them is
         // TT-121/TT-132 work, not this move.
         .target(

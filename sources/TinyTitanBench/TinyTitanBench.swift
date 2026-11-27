@@ -37,9 +37,8 @@ struct TinyTitanBench {
 
         // The generic Core context: every module these kernel benches dispatch
         // (dequant_int4, gdn, moe, logit, attention) is in `MetalContext`'s
-        // default list. The 6.x `runtimeDefault()` only adds the Nemotron shader
-        // module on top, which no kernel here launches; the commands that do
-        // measure it (nemotron, laguna) still build their own context.
+        // default list. The commands that need a model-specific context
+        // (laguna) build their own.
         let context = try MetalContext()
         let device = context.device
         print("device: \(device.name)")

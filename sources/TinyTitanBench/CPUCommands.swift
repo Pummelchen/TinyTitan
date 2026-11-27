@@ -320,11 +320,6 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
-        case "nemotron", "nemotrongpu", "nemotrongraph",
-            "nemotronlogits", "nemotroninfo":
-            // The Nemotron family has its own reader and graph; see
-            // NemotronCommands for the argument shapes.
-            try runNemotronCommand(CommandLine.arguments)
         case "lagunagpu":
             // The Laguna-S-2.1 install through the probe graph on Metal:
             // install, prompt, greedy limit.

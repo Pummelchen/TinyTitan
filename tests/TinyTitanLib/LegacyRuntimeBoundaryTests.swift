@@ -29,11 +29,9 @@ import Testing
         // The catalog's 6.x bridges: Kind resolution and reasoning targets.
         "sources/TinyTitanServer/Core/CatalogKindBridges.swift": "catalog bridges",
         // Off-disk families with no plugin yet: the CLI's own routes.
-        "sources/TinyTitanCLI/NemotronRun.swift": "Nemotron route (TT-055)",
         "sources/TinyTitanCLI/RunGGUF.swift": "as-is GGUF route (TT-058)",
         // Benchmark probes of the 6.x path and the off-disk families.
         "sources/TinyTitanBench/LagunaCommands.swift": "Laguna bench (TT-054)",
-        "sources/TinyTitanBench/NemotronCommands.swift": "Nemotron bench (TT-055)",
         "sources/TinyTitanBench/PassCostCommands.swift":
             "pass-cost bench over the 6.x path (TT-061)",
         "sources/TinyTitanBench/VerifyProbeCommands.swift":
