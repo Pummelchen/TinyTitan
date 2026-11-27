@@ -30,6 +30,34 @@ package struct GGUFPLESetup {
     package let embedDim: Int
     package let tableRows: UInt64
 
+    /// The highest row the head ranges reach, refused if a range cannot be
+    /// addressed in the table.
+    ///
+    /// Both arrays reach `PLEHash` as `UInt64(bitPattern:)`, so validation has
+    /// to happen in the signed domain: a negative entry is not a negative index
+    /// there, it is a huge unsigned value that passes a naive coverage check
+    /// while the hash computes row ids past the table (AUD-0095). The sum is
+    /// also done in unsigned arithmetic, so a negative value cannot trap the
+    /// add. The coverage need not be exact: this checkpoint's ranges end at
+    /// 320,001,446 of 320,001,536 rows, and the tail is simply unused.
+    package static func coveredRows(
+        offsets: [Int64], vocabSizes: [Int64], tableRows: UInt64
+    ) throws -> UInt64 {
+        guard offsets.allSatisfy({ $0 >= 0 }), vocabSizes.allSatisfy({ $0 > 0 }) else {
+            throw GGUFPLESetupError.inconsistent(
+                "head offsets must be non-negative and vocab sizes positive")
+        }
+        let covered =
+            zip(offsets, vocabSizes)
+            .map { UInt64($0) &+ UInt64($1) }
+            .max() ?? 0
+        guard covered <= tableRows else {
+            throw GGUFPLESetupError.inconsistent(
+                "the head ranges end at \(covered), past the \(tableRows)-row table")
+        }
+        return covered
+    }
+
     package static func read(from model: GGUFModel) throws -> GGUFPLESetup {
         func integers(_ key: String) throws -> [Int64] {
             guard let value = model.metadata["qwen4exp.\(key)"] else {
@@ -84,15 +112,8 @@ package struct GGUFPLESetup {
                 "\(offsets.count) offsets and \(vocabSizes.count) vocab sizes for \(headCount) heads"
             )
         }
-        // Every head's range must be addressable in the table. It need not
-        // end exactly at the last row: this checkpoint's ranges cover
-        // 320,001,446 of the table's 320,001,536 rows, so the tail is simply
-        // unused and asserting equality would refuse a valid file.
-        let covered = zip(offsets, vocabSizes).map { UInt64($0 + $1) }.max() ?? 0
-        guard covered <= tableRows else {
-            throw GGUFPLESetupError.inconsistent(
-                "the head ranges end at \(covered), past the \(tableRows)-row table")
-        }
+        _ = try Self.coveredRows(
+            offsets: offsets, vocabSizes: vocabSizes, tableRows: tableRows)
         let hash = PLEHash(
             multipliers: multipliers.map { UInt64(bitPattern: $0) },
             offsets: offsets.map { UInt64(bitPattern: $0) },
