@@ -46,6 +46,11 @@ a GitHub issue. K2, Nemotron, Laguna, the Qwen 3.6/3.8 and AgentWorld/KAT-Coder
 fine-tunes, Ornith 1.5 122B and the 8-bit Ornith width have all left; MTP
 drafting is out of the supported paths (its code is kept, unused).
 
+**Where effort goes next.** Release 7.5 is this matrix, not a step toward a
+wider one: the one planned addition outside the set is Qwen 4 Flash, run once it
+ships — no date is promised. Beyond that, future resources go into **TinyTitan
+Datacenter** and the main project **XAIOS**.
+
 ## Benchmarks
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
