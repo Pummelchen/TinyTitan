@@ -663,4 +663,39 @@ extension GGUFBlockKernelsTests {
         }
         #expect(Self.floats(chunk, tokens * width) == Self.floats(step, tokens * width))
     }
+
+    /// The decode kernel indexes threadgroup memory as `simd_group * 128 + d`,
+    /// so a head dimension over 128 writes past its array. The converter only
+    /// requires a positive `attention.key_length`, so the refusal has to be
+    /// here (AUD-0091). The encoder is ended by hand: `Self.run` would leave it
+    /// open when the body throws, which Metal aborts on.
+    @Test func aDecodeHeadDimensionOver128IsRefused() throws {
+        let context = try MetalContext()
+        let ops = try InklingQ4Ops(context: context)
+        let device = context.device
+        let dim = 192
+        let args = InklingQ4Ops.AttentionArgs(
+            heads: 6, kvHeads: 2, headDim: UInt32(dim), relative: 16, extent: 20, capacity: 8,
+            ring: 0, scale: 1 / Float(dim).squareRoot(), window: 1 << 30, tokens: 1)
+        let out = try #require(device.makeBuffer(length: 6 * dim * 4))
+        let commandBuffer = try #require(context.queue.makeCommandBuffer())
+        let encoder = try #require(commandBuffer.makeComputeCommandEncoder())
+        #expect(throws: MetalError.self) {
+            try ops.attention(
+                q: .init(try Self.buffer(device, Self.activation(6 * dim, seed: 2))),
+                kCache: try Self.buffer(device, [Float16](repeating: 0, count: 8 * 2 * dim)),
+                vCache: try Self.buffer(device, [Float16](repeating: 0, count: 8 * 2 * dim)),
+                r: .init(try Self.buffer(device, Self.activation(dim * 16, seed: 3))),
+                relativeBias: InklingQ4Tensor(
+                    operand: .init(try Self.buffer(device, Self.activation(20 * 16, seed: 4))),
+                    type: .f32, rows: 20, columns: 16, byteCount: 20 * 16 * 4),
+                sinks: .init(try Self.buffer(device, Self.activation(6, seed: 5))),
+                gate: .init(try Self.buffer(device, Self.activation(6 * dim, seed: 6))),
+                out: .init(out),
+                step: .init(try Self.buffer(device, [UInt32(0)])),
+                args: args,
+                encoder: encoder)
+        }
+        encoder.endEncoding()
+    }
 }

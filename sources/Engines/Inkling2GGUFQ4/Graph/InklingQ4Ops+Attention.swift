@@ -177,6 +177,18 @@ extension InklingQ4Ops {
         if skipped.contains("attention") { return }
         // A chunk runs the tiled kernel (16 queries x 16-key blocks on MMA).
         let tiled = args.tokens > 1 && args.headDim == 128
+        // The decode kernel's threadgroup array is `partial[8][128]` and every
+        // index is `simd_group * 128 + d`, so it needs a head dimension of at
+        // most 128. Nothing upstream validated that: the converter requires
+        // only a positive `attention.key_length`, so a checkpoint with 192
+        // would write past the array inside threadgroup memory on its first
+        // decode token (AUD-0091). Refuse instead of re-tiling: a different
+        // tiling is a numerics change and needs its own golden.
+        guard tiled || args.headDim <= 128 else {
+            throw MetalError.invalidState(
+                "decode attention supports head dimensions up to 128; this install has \(args.headDim)"
+            )
+        }
         let base = tiled ? "relative_attention_chunk" : "relative_attention_decode"
         try pipeline(base + Self.kvKernelSuffix(precision), encoder)
         set(q, 0, encoder)
