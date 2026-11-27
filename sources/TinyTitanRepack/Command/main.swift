@@ -357,8 +357,9 @@ private func run(_ values: [String]) async -> Int32 {
         do {
             let result = try VerifiedInstallTool.run(
                 options: VerifyInstallOptions(inputSSDAI: input))
-            print("Verified \(result.fileCount) files (\(result.bytesVerified) bytes)")
-            print("Receipt: \(result.receiptPath)")
+            for line in VerifiedInstallTool.reportLines(result) {
+                print(line)
+            }
             return 0
         } catch {
             printError("verification failed: \(error)")

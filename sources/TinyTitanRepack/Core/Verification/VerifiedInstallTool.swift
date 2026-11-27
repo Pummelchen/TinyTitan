@@ -112,6 +112,22 @@ public enum VerifiedInstallTool {
             unexpectedEntries: unexpectedEntries)
     }
 
+    /// The lines `--verify-install` prints, in order.
+    ///
+    /// The CLI prints these lines verbatim, so the test pins the text an
+    /// operator reads rather than only the array the tool computes (AUD-0075).
+    /// An ANE prefill sidecar is written into the install by a separate step
+    /// and is therefore not in the manifest; a bare "Verified" left that
+    /// directory looking attested when it never was.
+    package static func reportLines(_ result: VerifyInstallResult) -> [String] {
+        var lines = ["Verified \(result.fileCount) files (\(result.bytesVerified) bytes)"]
+        for entry in result.unexpectedEntries {
+            lines.append("Unattested entry (not in manifest): \(entry)")
+        }
+        lines.append("Receipt: \(result.receiptPath)")
+        return lines
+    }
+
     static func validatePackedExpertLayout(inputSSDAI: String) throws {
         let access = try SSDAIDirectoryAccess(rootPath: inputSSDAI)
         let manifest = try loadManifest(access: access)

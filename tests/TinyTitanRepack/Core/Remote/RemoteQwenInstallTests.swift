@@ -84,6 +84,21 @@ extension RemotePayloadCopyTests {
             options: VerifyInstallOptions(inputSSDAI: remoteOutput))
         #expect(verify.unexpectedEntries.isEmpty)
         #expect(verify.fileCount > 0)
+
+        // AUD-0075: an ANE prefill sidecar is written inside the install by a
+        // separate step and is not in the manifest. The operator has to be told
+        // it was not attested, through the same lines the CLI prints.
+        let sidecar = remoteOutput + "/ane_prefill"
+        try FileManager.default.createDirectory(
+            atPath: sidecar, withIntermediateDirectories: true)
+        try Data([0x01, 0x02]).write(
+            to: URL(fileURLWithPath: sidecar + "/prefill.sidecar"))
+        let withSidecar = try VerifiedInstallTool.run(
+            options: VerifyInstallOptions(inputSSDAI: remoteOutput))
+        #expect(withSidecar.unexpectedEntries == ["ane_prefill", "ane_prefill/prefill.sidecar"])
+        #expect(
+            VerifiedInstallTool.reportLines(withSidecar).contains(
+                "Unattested entry (not in manifest): ane_prefill/prefill.sidecar"))
     }
 
     @Test func qwenCancellationPreservesCommittedRangesForResume() async throws {
