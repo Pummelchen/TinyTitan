@@ -14,14 +14,14 @@
 
 Swift and Metal inference for Qwen-family MoE and dense text models on Apple
 Silicon, streaming routed experts from SSD so a model larger than RAM still runs.
-Supports 4-bit and 8-bit builds of Qwen3.8-Flash-Next 125B-A6B,
-KAT-Coder-V2.5-Dev 35B-A3B, Qwen-AgentWorld 35B-A3B, Ornith 1.5 35B-A3B and
-Qwen 3.6 35B-A3B, plus the dense Qwen 3.5 2B/4B/9B on either engine, and
-Poolside Laguna-S-2.1 118B-A8B at 4 and 8 bits through its decode probe. **The README
-is the authority on which checkpoints and widths are supported** — it changes more
-often than this file, so do not treat any list here as the current matrix.
-`Qwen 3.5 <size> <bits>` (keys `qwen35-2b/4b/9b`) are dense: no routed experts,
-nothing streamed from SSD. Ornith 1.5 4-bit is the shipped build and the default
+**The shipped matrix is Ornith 1.5 35B-A3B 4-bit and the two Inkling 2 Mini
+installs** (Q4_K_XL GGUF and NVFP4), each served by its own TPP/1 plugin; the
+engines for Qwen 3.6/3.8, KAT-Coder, AgentWorld, Ornith 122B/8-bit and Laguna
+left the tree with TT-142 on 2026-11-27. The dense Qwen 3.5 engines remain in
+the tree, but no dense install is in the shipped matrix and their library
+surface is TT-142 slice (b). **The README is the authority on which checkpoints
+and widths are supported** — it changes more often than this file, so do not
+treat any list here as the current matrix. Ornith 1.5 4-bit is the default
 golden target; 8-bit is not shipped and 6-bit is a withdrawn legacy format.
 
 ## Working here
