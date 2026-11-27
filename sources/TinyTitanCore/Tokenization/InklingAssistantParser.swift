@@ -12,6 +12,39 @@ import Tokenizers
 /// whose body is `{"name":…,"args":{…}}`. A call is reported only for a tool
 /// the request offered; anything else the model invokes stays visible as text
 /// rather than vanishing.
+/// Decodes generated ids one at a time, holding back a byte sequence that a
+/// token boundary splits.
+///
+/// The parser needs the text of a growing segment to find each delta. It used
+/// to ask an opaque `decode([Int]) -> String` for the whole segment per token,
+/// which is O(n^2) decodes for an answer (AUD-0100). A reference box so the
+/// parser's struct copy shares the detokenizer's state.
+package protocol IncrementalTextDecoder: AnyObject {
+    func push(_ id: Int) -> String
+    func flush() -> String
+}
+
+/// The engine's detokenizer behind that protocol.
+///
+/// unchecked-invariant: one request owns it through its `InklingAssistantParser`
+/// and consumes tokens from one task; nothing else reads it.
+package final class DetokenizerTextDecoder: IncrementalTextDecoder, @unchecked Sendable {
+    private var detokenizer: GFDetokenizer
+
+    package init(_ tokenizer: GFTokenizer) {
+        detokenizer = GFDetokenizer(tokenizer: tokenizer)
+    }
+
+    package func push(_ id: Int) -> String {
+        // A special id decodes to nothing; the detokenizer returns "".
+        (try? detokenizer.push(Int32(id))) ?? ""
+    }
+
+    package func flush() -> String {
+        detokenizer.flush()
+    }
+}
+
 package struct InklingAssistantParser {
     /// The control-token ids the parser needs, read from the tokenizer.
     package struct Vocabulary: Sendable {
@@ -77,6 +110,10 @@ package struct InklingAssistantParser {
 
     private let vocabulary: Vocabulary
     private let decode: ([Int]) -> String
+    /// When present, text is decoded incrementally and `decode` is only used
+    /// for a tool call's body (once per call). Absent keeps the tests' closure
+    /// path and its whole-segment decode.
+    private let incremental: (any IncrementalTextDecoder)?
     private let offeredTools: Set<String>
     private var state: State
     /// True once the model has started a turn it must not write.
@@ -86,10 +123,12 @@ package struct InklingAssistantParser {
     /// (`openTextTurn`) and for a raw completion.
     package init(
         vocabulary: Vocabulary, decode: @escaping ([Int]) -> String,
+        incremental: (any IncrementalTextDecoder)? = nil,
         offeredTools: Set<String>, startInText: Bool
     ) {
         self.vocabulary = vocabulary
         self.decode = decode
+        self.incremental = incremental
         self.offeredTools = offeredTools
         state = startInText ? .segment(.text, tokens: [], emitted: "") : .idle
     }
@@ -114,6 +153,11 @@ package struct InklingAssistantParser {
         case .idle:
             // Text outside any message: keep it rather than drop it.
             guard !vocabulary.control.contains(token) else { return [] }
+            if let incremental {
+                state = .segment(.text, tokens: [], emitted: "")
+                let piece = incremental.push(token)
+                return piece.isEmpty ? [] : [.content(piece)]
+            }
             state = .segment(.text, tokens: [token], emitted: "")
             return delta()
         case .header(let name):
@@ -132,6 +176,22 @@ package struct InklingAssistantParser {
             return []
         case .segment(let kind, let tokens, let emitted):
             guard !vocabulary.control.contains(token) else { return [] }
+            if let incremental {
+                switch kind {
+                case .text, .thinking:
+                    // The ids are not kept: the detokenizer already holds the
+                    // bytes, and only the tool branch needs them.
+                    let piece = incremental.push(token)
+                    state = .segment(kind, tokens: [], emitted: "")
+                    guard !piece.isEmpty else { return [] }
+                    let isText: Bool
+                    if case .text = kind { isText = true } else { isText = false }
+                    return [isText ? .content(piece) : .reasoning(piece)]
+                case .tool, .ignored:
+                    state = .segment(kind, tokens: tokens + [token], emitted: emitted)
+                    return []
+                }
+            }
             state = .segment(kind, tokens: tokens + [token], emitted: emitted)
             return delta()
         }
@@ -167,6 +227,20 @@ package struct InklingAssistantParser {
         guard case .segment(let kind, let tokens, _) = state else {
             state = .idle
             return []
+        }
+        // A segment ending is where the detokenizer's held-back bytes become
+        // text; without this they would be lost with the segment.
+        if let incremental {
+            if case .text = kind {
+                let tail = incremental.flush()
+                state = .idle
+                return tail.isEmpty ? [] : [.content(tail)]
+            }
+            if case .thinking = kind {
+                let tail = incremental.flush()
+                state = .idle
+                return tail.isEmpty ? [] : [.reasoning(tail)]
+            }
         }
         var events = delta(final: true)
         if case .tool(let nameTokens) = kind {

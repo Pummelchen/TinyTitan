@@ -72,4 +72,48 @@ import TinyTitanCore
         #expect(parser.consume(8).isEmpty)
         #expect(parser.finish() == [.content("\u{FFFD}")])
     }
+
+    // MARK: - The incremental decode (AUD-0100)
+
+    /// A decoder that appends each id's word, standing in for the detokenizer
+    /// so the two parser paths can be compared on the same token stream.
+    private final class WordsDecoder: IncrementalTextDecoder {
+        func push(_ id: Int) -> String { Self.words[id] ?? "" }
+        func flush() -> String { "" }
+        static let words = InklingAssistantParserTests.words
+    }
+
+    /// The live parser decodes each token once instead of re-decoding the
+    /// segment per token. Both paths must produce the same events.
+    @Test func theIncrementalAndWholeSegmentParsersAgree() throws {
+        let streams: [[Int]] = [
+            [100, 102, 3, 105, 100, 101, 1, 2, 105],
+            [100, 101, 1, 105, 100, 4, 103, 5, 105],
+            [1, 2, 3],
+            [100, 101, 2, 1, 105],
+        ]
+        for tokens in streams {
+            var whole = parser()
+            var incremental = InklingAssistantParser(
+                vocabulary: Self.vocabulary,
+                decode: { $0.compactMap { Self.words[$0] }.joined() },
+                incremental: WordsDecoder(),
+                offeredTools: ["get_weather"], startInText: false)
+            // A generated call carries a fresh random id per parser, so the
+            // comparison names the call by its content.
+            func normalized(_ events: [StructuredAssistantEvent]) -> [String] {
+                events.map { event in
+                    switch event {
+                    case .content(let text): return "content:\(text)"
+                    case .reasoning(let text): return "reasoning:\(text)"
+                    case .toolCall(let call):
+                        return "call:\(call.name):\(call.argumentsJSON)"
+                    }
+                }
+            }
+            #expect(
+                normalized(run(tokens, &whole)) == normalized(run(tokens, &incremental)),
+                "stream \(tokens) disagreed")
+        }
+    }
 }

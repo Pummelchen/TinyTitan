@@ -169,6 +169,9 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
         self.inkling = InklingAssistantParser(
             vocabulary: vocabulary,
             decode: { tokenizer.decode($0.map(Int32.init), skipSpecialTokens: true) },
+            // The live path decodes each token once; the closure above stays for
+            // the tool body, read once per call (AUD-0100).
+            incremental: DetokenizerTextDecoder(tokenizer),
             offeredTools: allowedTools, startInText: opensText)
     }
 
