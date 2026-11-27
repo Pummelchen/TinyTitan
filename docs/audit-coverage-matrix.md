@@ -115,5 +115,10 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
 - **K2 and Nemotron left the tree** (TT-086/TT-053/055) and **MTP is kept,
   tested and unused**; the `TinyTitanServerCore` row imports no 6.x runtime at
   all. A retired model returns only on a user request.
-- AUD-0008 (independent host) still has to run after this matrix's Tier-A cells
-  are reviewed, which they are not yet.
+- **AUD-0008 closed 2026-11-27 by owner decision:** there is one Mac, and this
+  Mac plus CI is the verification standard; Phase E on an independent
+  fresh-clone host is not run. That removes the host requirement, not the
+  review requirement — the `–`/`P` cells above are still unreviewed.
+- The tree is shrinking under `TT-142`: the 6.x runtime and its adapter are
+  being removed because no supported model uses them, and the dense family is
+  the one slice that needs a library-surface decision (`TinyTitanCPUEngine`).
