@@ -110,6 +110,19 @@ extension InklingQ4Ops {
         precision: KVCachePrecision = .fp16, encoder: MTLComputeCommandEncoder
     ) throws {
         if skipped.contains("conv") { return }
+        // The quantized cache stores `headDim / 32` (q8) or `/ 16` (q4) groups
+        // per head and indexes the row by that count; a head dimension that is
+        // not a whole number of groups makes every head share one group (under
+        // 32) or drops the tail (40 -> channels 32-39 never stored). Refuse
+        // rather than serve a wrong cache (AUD-0092).
+        if precision != .fp16 {
+            let group = precision == .int8 ? 32 : 16
+            guard args.headDim >= UInt32(group), Int(args.headDim) % group == 0 else {
+                throw MetalError.invalidState(
+                    "quantized KV needs a head dimension that is a multiple of \(group); "
+                        + "this install has \(args.headDim)")
+            }
+        }
         // A chunk: every (head, token) in parallel; the state shift is
         // `kvFinishState`, after the group this joins.
         let base = args.tokens > 1 ? "kv_finish_chunk" : "kv_finish"
@@ -219,8 +232,13 @@ extension InklingQ4Ops {
     ) throws {
         try requireSequential("route")
         if skipped.contains("router") { return }
-        guard args.experts <= 256, args.used <= 32 else {
-            throw MetalError.invalidState("router: \(args.experts) experts, top-\(args.used)")
+        // `used <= 32` bounds the capture array; `used <= experts` is what
+        // keeps `sigmoid_topk` from running out of finite scores, in which case
+        // it emits the 0xFFFFFFFF "no winner" id — read downstream as expert
+        // -1, i.e. a weight pointer past the slab (AUD-0094).
+        guard args.experts <= 256, args.used <= 32, args.used <= args.experts else {
+            throw MetalError.invalidState(
+                "router: \(args.experts) experts, top-\(args.used)")
         }
         try gemv(router, x: x, y: logits, tokens: tokens, encoder: encoder)
         try pipeline("sigmoid_topk", encoder)

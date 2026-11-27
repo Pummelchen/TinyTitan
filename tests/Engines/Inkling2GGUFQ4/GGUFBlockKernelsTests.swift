@@ -698,4 +698,43 @@ extension GGUFBlockKernelsTests {
         }
         encoder.endEncoding()
     }
+
+    /// `sigmoid_topk` writes 0xFFFFFFFF when it cannot fill the top-k, which the
+    /// streamed path reads as expert -1 (AUD-0094); the quantized KV row layout
+    /// divides the head dimension into 32/16-channel groups (AUD-0092). Both are
+    /// refused at the encoder, where the geometry is known.
+    @Test func impossibleRouterAndKvGeometryAreRefused() throws {
+        let context = try MetalContext()
+        let ops = try InklingQ4Ops(context: context)
+        let device = context.device
+        let commandBuffer = try #require(context.queue.makeCommandBuffer())
+        let encoder = try #require(commandBuffer.makeComputeCommandEncoder())
+        let x = try Self.buffer(device, Self.activation(8, seed: 1))
+        let logits = try Self.buffer(device, Self.activation(8 * 4, seed: 2))
+        let ids = try Self.buffer(device, [UInt32](repeating: 0, count: 8))
+        let weights = try Self.buffer(device, [Float](repeating: 0, count: 8))
+        let router = InklingQ4Tensor(
+            operand: .init(try Self.buffer(device, [UInt8](repeating: 0, count: 8))),
+            type: .q8_0, rows: 4, columns: 8, byteCount: 8)
+
+        #expect(throws: MetalError.self) {
+            try ops.route(
+                router: router, bias: router, x: .init(x), logits: .init(logits),
+                ids: .init(ids), weights: .init(weights),
+                args: InklingQ4Ops.RouterArgs(
+                    experts: 4, width: 8, used: 8, weightScale: 1, normEpsilon: 1e-6),
+                tokens: 1, encoder: encoder)
+        }
+        #expect(throws: MetalError.self) {
+            try ops.kvFinish(
+                k: .init(x), v: .init(x), kWeight: router, vWeight: router,
+                state: .init(x), dynamicK: nil, dynamicV: nil,
+                kCache: logits, vCache: logits, step: .init(x),
+                args: InklingQ4Ops.KVFinishArgs(
+                    headDim: 40, kvHeads: 2, hasDynamic: 0, capacity: 8, ring: 0,
+                    threshold: 0, epsilon: 1e-6, scale: 1, tokens: 1),
+                precision: .int8, encoder: encoder)
+        }
+        encoder.endEncoding()
+    }
 }
