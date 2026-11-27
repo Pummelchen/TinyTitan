@@ -48,6 +48,20 @@ public final class RealForwardRunner: ChunkedPrefillRunner, ContextWindowReporti
     /// generation.
     let forwardStepGate = ForwardStepGate()
 
+    /// Test seam (AUD-0089): arms a throw after layer 0's routed command is
+    /// committed, so the failure drain can be exercised with the toy install.
+    /// Off unless `TINYTITAN_FAULT_DECODE=after-layer0`.
+    var faultDecodeAfterLayerZero: Bool {
+        ProcessInfo.processInfo.environment["TINYTITAN_FAULT_DECODE"] == "after-layer0"
+    }
+
+    /// Committed commands a failed decode had to wait for before its expert
+    /// lease released (diagnostics; AUD-0089).
+    private(set) var decodeFailureDrains = 0
+
+    /// Notes one failure drain. In this file because the setter is file-private.
+    func noteDecodeFailureDrain() { decodeFailureDrains += 1 }
+
     // Kernels
     let embedInt4: EmbedLookupInt4
     let affineEmbed: AffineQuantEmbeddingLookup?
