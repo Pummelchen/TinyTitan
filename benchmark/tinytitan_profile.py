@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_PATH = ROOT / "models/ornith-1.5_35B_A3B_8Bit"
+DEFAULT_MODEL_PATH = ROOT / "models/ornith-1.5_35B_A3B_4Bit"
 DEFAULT_API_MODEL = "ornith-1.5-35b-a3b"
 DEFAULT_CONTEXT_TOKENS = 262_144
 DEFAULT_PROMPT_CACHE_MODE = "multi-prefix"

@@ -33,51 +33,33 @@ MODELS_SH = ROOT / "tools/tinytitan_models.sh"
 INSTALLER = ROOT / "tools/install_models.sh"
 MODELS = ROOT / "models"
 
-# The runtime stems the launcher can name, and the catalogue key each width
-# installs under. Spelled out here on purpose: this is the assertion, so reading
-# it from the script under test would assert nothing.
+# The runtime stems the launcher can name, and the catalogue key each one's
+# install uses. Spelled out here on purpose: this is the assertion, so reading
+# it from the script under test would assert nothing. Every shipped row is a
+# single 4-bit width (TT-142, 2026-11-27), and `InstallKeyTests` pins that no
+# stem maps to an 8-bit key.
 STEM_KEYS = {
-    "ornith-1.5_35B_A3B": ("ornith15", "ornith15-8bit"),
-    "ornith-1.5_122B": ("ornith122", "ornith122-8bit"),
-    "qwen3.6_35B_A3B": ("qwen36", "qwen36-8bit"),
-    "qwen-agentworld_35B_A3B": ("agentworld", "agentworld-8bit"),
-    "kat-coder-v2.5_35B_A3B": ("katcoder", "katcoder-8bit"),
-    "qwen3.8-flash-next_125B_A6B": ("qwen38flash", "qwen38flash-8bit"),
-    "qwen3.5_2B": ("qwen35-2b", "qwen35-2b-8bit"),
-    "qwen3.5_4B": ("qwen35-4b", "qwen35-4b-8bit"),
-    "qwen3.5_9B": ("qwen35-9b", "qwen35-9b-8bit"),
+    "ornith-1.5_35B_A3B": "ornith15",
+    "inkling-2-mini_GGUF-Q4": "inkling-q4-k-xl-unsloth",
+    "inkling-2-mini_NVFP4": "inkling2mini",
 }
 
 # The names the launcher's own `tinytitan_resolve_model` accepts, with the
-# catalogue key each one's 4-bit install uses. A missing model is chosen from
-# these, because they are the canonical keys both scripts share.
+# catalogue key each one's install uses. A missing model is chosen from these,
+# because they are the canonical keys both scripts share.
 LAUNCHER_NAMES = {
     "ornith": "ornith15",
-    "ornith122": "ornith122",
-    "qwen36": "qwen36",
-    "agentworld": "agentworld",
-    "katcoder": "katcoder",
-    "qwen38": "qwen38flash",
-    "qwen35-2b": "qwen35-2b",
-    "qwen35-4b": "qwen35-4b",
-    "qwen35-9b": "qwen35-9b",
+    "inkling-q4-k-xl-unsloth": "inkling-q4-k-xl-unsloth",
+    "inkling2mini": "inkling2mini",
 }
 
 # The canonical key list both scripts derive from, with the display name each
-# model must print everywhere and the installer key its 4-bit row carries.
-# Spelled out as the assertion: the menu (TINYTITAN_MODEL_CHOICES), the
-# launcher's resolver and the installer's CATALOGUE are three views of this
-# one list, and CatalogueSyncTests holds them equal to it.
+# model must print everywhere and the installer key its row carries. Spelled out
+# as the assertion: the menu (TINYTITAN_MODEL_CHOICES), the launcher's resolver
+# and the installer's CATALOGUE are three views of this one list, and
+# CatalogueSyncTests holds them equal to it.
 CANONICAL = {
     "ornith": ("Ornith 1.5 35B-A3B", "ornith15"),
-    "ornith122": ("Ornith 1.5 122B", "ornith122"),
-    "qwen36": ("Qwen 3.6 35B-A3B", "qwen36"),
-    "agentworld": ("Qwen-AgentWorld 35B-A3B", "agentworld"),
-    "katcoder": ("KAT-Coder-V2.5-Dev 35B-A3B", "katcoder"),
-    "qwen38": ("Qwen3.8-Flash-Next 125B-A6B", "qwen38flash"),
-    "qwen35-2b": ("Qwen 3.5 2B", "qwen35-2b"),
-    "qwen35-4b": ("Qwen 3.5 4B", "qwen35-4b"),
-    "qwen35-9b": ("Qwen 3.5 9B", "qwen35-9b"),
 }
 
 # Single-width (4-bit only) models: their directory is their stem directly.
@@ -90,9 +72,34 @@ SINGLE_WIDTH_MODELS = {
     "inkling2mini": ("Inkling 2 Mini", "inkling-2-mini_NVFP4", "inkling2mini"),
 }
 
-# Removed from the catalogue 2026-11-16: a quant variant and two draft-head
-# sidecars. Neither script may resolve, offer or install them again.
-REMOVED_KEYS = ("ornith15-bf16dense", "ornith15-mtp", "qwen36-mtp")
+# Removed from the catalogue in two waves: 2026-11-16 (a quant variant and two
+# draft-head sidecars) and 2026-11-27 with TT-142 slice (c), when the shipped
+# matrix became Ornith 1.5 35B-A3B 4-bit and the two Inkling 2 Mini installs.
+# Neither script may resolve, offer or install any of them again; the names are
+# spelled out because that is what makes the guard a guard.
+REMOVED_KEYS = (
+    "ornith15-bf16dense",
+    "ornith15-mtp",
+    "qwen36-mtp",
+    "ornith15-8bit",
+    "ornith122",
+    "ornith122-8bit",
+    "qwen36",
+    "qwen36-8bit",
+    "agentworld",
+    "agentworld-8bit",
+    "katcoder",
+    "katcoder-8bit",
+    "qwen38",
+    "qwen38flash",
+    "qwen38flash-8bit",
+    "qwen35-2b",
+    "qwen35-2b-8bit",
+    "qwen35-4b",
+    "qwen35-4b-8bit",
+    "qwen35-9b",
+    "qwen35-9b-8bit",
+)
 
 
 def catalogue() -> dict[str, str]:
@@ -148,13 +155,11 @@ def first_missing() -> tuple[str, str, str] | None:
     """
     known = catalogue()
     for name, key in LAUNCHER_NAMES.items():
-        for bits in ("4", "8"):
-            catalogue_key = key if bits == "4" else f"{key}-8bit"
-            directory = known.get(catalogue_key)
-            if directory is None:
-                continue
-            if not (MODELS / directory).is_dir():
-                return name, bits, catalogue_key
+        directory = known.get(key)
+        if directory is None:
+            continue
+        if not (MODELS / directory).is_dir():
+            return name, "4", key
     return None
 
 
@@ -167,30 +172,36 @@ def first_catalogue_model() -> tuple[str, str, str]:
     """
     known = catalogue()
     for name, key in LAUNCHER_NAMES.items():
-        for bits in ("4", "8"):
-            catalogue_key = key if bits == "4" else f"{key}-8bit"
-            if catalogue_key in known:
-                return name, bits, catalogue_key
+        if key in known:
+            return name, "4", key
     raise AssertionError("no launcher name maps to an installer catalogue key")
 
 
 class InstallKeyTests(unittest.TestCase):
-    def test_every_stem_and_width_maps_to_the_catalogue_key(self) -> None:
-        for stem, (four, eight) in STEM_KEYS.items():
-            for bits, expected in (("4", four), ("8", eight)):
-                with self.subTest(stem=stem, bits=bits):
-                    result = shell_model_function("tinytitan_install_key", stem, bits)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), expected)
+    def test_every_stem_maps_to_the_catalogue_key(self) -> None:
+        for stem, expected in STEM_KEYS.items():
+            with self.subTest(stem=stem):
+                result = shell_model_function("tinytitan_install_key", stem, "4")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
+    def test_no_stem_maps_to_an_eight_bit_key(self) -> None:
+        # 8-bit is not shipped. A stem that answered `8` would let the launcher
+        # offer a fetch for a width the installer cannot build, so the refusal
+        # is what makes the launcher's automatic 4-bit selection work.
+        for stem in STEM_KEYS:
+            with self.subTest(stem=stem):
+                result = shell_model_function("tinytitan_install_key", stem, "8")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.strip(), "")
 
     def test_every_mapped_key_is_one_the_installer_carries(self) -> None:
         # The map and the installer are two lists; this is the assertion that
         # keeps a renamed or added model from silently having no fetch path.
         known = catalogue()
-        for stem, keys in STEM_KEYS.items():
-            for expected in keys:
-                with self.subTest(key=expected):
-                    self.assertIn(expected, known, f"{stem} maps to a key CATALOGUE lacks")
+        for stem, expected in STEM_KEYS.items():
+            with self.subTest(key=expected):
+                self.assertIn(expected, known, f"{stem} maps to a key CATALOGUE lacks")
 
     def test_an_unknown_stem_has_no_key(self) -> None:
         result = shell_model_function("tinytitan_install_key", "not-a-stem", "4")
@@ -211,7 +222,7 @@ class InstallKeyTests(unittest.TestCase):
             [
                 "bash",
                 "-c",
-                f'source "{MODELS_SH}"; tinytitan_install_size_gb katcoder',
+                f'source "{MODELS_SH}"; tinytitan_install_size_gb ornith15',
             ],
             text=True,
             capture_output=True,
@@ -286,15 +297,13 @@ class MissingOffersTests(unittest.TestCase):
             )
         return rows
 
-    def test_an_empty_install_directory_offers_every_supported_width(self) -> None:
+    def test_an_empty_install_directory_offers_the_three_supported_installs(self) -> None:
         with tempfile.TemporaryDirectory(prefix="missing-") as directory:
             rows = self.offers(pathlib.Path(directory))
         names = [row[0] for row in rows]
-        self.assertIn("ornith", names)
-        self.assertIn("katcoder", names)
-        self.assertIn("qwen38", names)
-        # Nine two-width models (18) plus two single-width Inkling 2 models (2) = 20.
-        self.assertEqual(len(rows), 20, "nine two-width models + two single-width Inkling 2 models")
+        self.assertEqual(names, ["ornith", "inkling-q4-k-xl-unsloth", "inkling2mini"])
+        # Three single-width installs, one row each: the shipped matrix.
+        self.assertEqual(len(rows), 3, "one row per supported install")
         for row in rows:
             self.assertIn(row[1], ("4", "8"))
             self.assertTrue(row[3], f"offer row has no label: {row}")
@@ -313,33 +322,21 @@ class MissingOffersTests(unittest.TestCase):
         for row in rows:
             self.assertIn(row[2], known, f"{row[0]}({row[1]}) offers a key CATALOGUE lacks")
 
-    def test_the_widths_that_are_there_are_not_offered(self) -> None:
+    def test_the_installs_that_are_there_are_not_offered(self) -> None:
         with tempfile.TemporaryDirectory(prefix="missing-") as directory:
             root = pathlib.Path(directory)
-            (root / "ornith-1.5_35B_A3B_8Bit").mkdir()
-            (root / "kat-coder-v2.5_35B_A3B_4Bit").mkdir()
+            (root / "ornith-1.5_35B_A3B_4Bit").mkdir()
+            (root / "inkling-2-mini_NVFP4").mkdir()
             rows = self.offers(root)
         offered = {(row[0], row[1]) for row in rows}
-        self.assertNotIn(("ornith", "8"), offered)
-        self.assertNotIn(("katcoder", "4"), offered)
-        self.assertIn(("ornith", "4"), offered, "the other width is still missing")
+        self.assertNotIn(("ornith", "4"), offered)
+        self.assertNotIn(("inkling2mini", "4"), offered)
+        self.assertIn(("inkling-q4-k-xl-unsloth", "4"), offered, "the third row is still missing")
 
     def test_nothing_missing_offers_nothing(self) -> None:
         with tempfile.TemporaryDirectory(prefix="missing-") as directory:
             root = pathlib.Path(directory)
-            for stem in (
-                "ornith-1.5_35B_A3B",
-                "ornith-1.5_122B",
-                "qwen3.6_35B_A3B",
-                "qwen-agentworld_35B_A3B",
-                "kat-coder-v2.5_35B_A3B",
-                "qwen3.8-flash-next_125B_A6B",
-                "qwen3.5_2B",
-                "qwen3.5_4B",
-                "qwen3.5_9B",
-            ):
-                for bits in ("4Bit", "8Bit"):
-                    (root / f"{stem}_{bits}").mkdir()
+            (root / "ornith-1.5_35B_A3B_4Bit").mkdir()
             for _label, stem, _key in SINGLE_WIDTH_MODELS.values():
                 (root / stem).mkdir()
             rows = self.offers(root)
@@ -579,7 +576,7 @@ class MenuRowPaddingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as empty:
             models = pathlib.Path(empty)
             drawn = self.pick("1", models)
-            for plain, padded in (("8", "08"), ("10", "010"), ("13", "013"), ("16", "016")):
+            for plain, padded in (("1", "01"), ("2", "02"), ("3", "03")):
                 with self.subTest(row=plain, reply=padded):
                     bare = self.pick(plain, models)
                     pad = self.pick(padded, models)
@@ -600,8 +597,9 @@ class MenuRowPaddingTests(unittest.TestCase):
     def test_a_padded_reply_past_the_end_still_refuses(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             models = pathlib.Path(empty)
-            # The catalogue has 20 rows; 21 and 22 are past its end.
-            for padded in ("021", "022"):
+            # The catalogue has three rows; 04 and 08 are past its end, and 08
+            # is the octal reading the guard must not accept.
+            for padded in ("00", "04", "08"):
                 with self.subTest(reply=padded):
                     pad = self.pick(padded, models)
                     combined = pad.stdout + pad.stderr
@@ -611,13 +609,13 @@ class MenuRowPaddingTests(unittest.TestCase):
 
 
 class RemovedModelTests(unittest.TestCase):
-    """The removed rows stay removed (2026-11-16).
+    """The removed rows stay removed.
 
-    ornith15-bf16dense (a quant variant) and the two MTP draft-head sidecars
-    (ornith15-mtp, qwen36-mtp) left the catalogue. The launcher must refuse
-    them by name, and the shared key resolver must not map them to a fetch.
-    OneWidthModelTests lived here while the bf16-dense build was the one
-    single-width model; every remaining model ships both widths.
+    Two waves: 2026-11-16 (ornith15-bf16dense, a quant variant, and the
+    ornith15-mtp/qwen36-mtp draft-head sidecars) and 2026-11-27 with TT-142
+    slice (c), when the matrix became Ornith 1.5 35B-A3B 4-bit plus the two
+    Inkling 2 Mini installs. The launcher must refuse every retired key by name,
+    and the shared resolver must not map it to a fetch.
     """
 
     def test_the_launcher_refuses_the_removed_keys(self) -> None:
@@ -645,22 +643,20 @@ class RemovedModelTests(unittest.TestCase):
 
 
 class InstallerSpellingTests(unittest.TestCase):
-    """The launcher accepts the installer's key spellings, width included.
+    """The launcher accepts the installer's key spellings.
 
     Both scripts read one catalogue (tools/tinytitan_models.sh), so a key the
-    installer prints -- ornith15-8bit, qwen38flash -- is a key the launcher
-    takes, and a canonical key with an -8bit suffix names its own width.
+    installer prints -- ornith15, inkling2mini -- is a key the launcher takes.
+    A bare canonical key takes the width the catalogue carries (4-bit, since
+    every shipped row is 4-bit).
     """
 
-    def test_installer_keys_and_suffixed_canonical_keys_resolve(self) -> None:
+    def test_installer_keys_and_canonical_keys_resolve(self) -> None:
         cases = (
-            ("ornith15-8bit", "ornith15-8bit"),
-            ("ornith15", "ornith15-8bit"),  # bare key takes the historical 8-bit default
-            ("qwen38flash", "qwen38flash-8bit"),
-            ("qwen38flash-8bit", "qwen38flash-8bit"),
-            ("ornith-8bit", "ornith15-8bit"),
-            ("qwen38-8bit", "qwen38flash-8bit"),
-            ("qwen35-4b-8bit", "qwen35-4b-8bit"),
+            ("ornith15", "ornith15"),
+            ("ornith", "ornith15"),
+            ("inkling-q4-k-xl-unsloth", "inkling-q4-k-xl-unsloth"),
+            ("inkling2mini", "inkling2mini"),
         )
         for model, key in cases:
             with (
@@ -674,20 +670,18 @@ class InstallerSpellingTests(unittest.TestCase):
                 self.assertEqual(run.returncode, 1, combined)
                 self.assertIn(f"tools/install_models.sh {key}", combined)
 
-    def test_a_suffixed_key_conflicting_with_bits_is_refused(self) -> None:
+    def test_a_width_suffix_the_catalogue_does_not_carry_is_refused(self) -> None:
+        # `ornith15-8bit` is the installer spelling of a width the matrix no
+        # longer has. It must be refused by name, not resolved onto the 4-bit
+        # row, and it must not reach a fetch.
         with tempfile.TemporaryDirectory(prefix="spelling-") as empty:
             run = run_launcher(
-                "--client",
-                "server",
-                "--model",
-                "ornith-8bit",
-                "--bits",
-                "4",
-                models_dir=pathlib.Path(empty),
+                "--client", "server", "--model", "ornith15-8bit", models_dir=pathlib.Path(empty)
             )
         combined = run.stdout + run.stderr
         self.assertEqual(run.returncode, 2, combined)
-        self.assertIn("names 8-bit, not 4-bit", combined)
+        self.assertIn("unknown model: ornith15-8bit", combined)
+        self.assertNotIn("Install it with", combined)
 
 
 def choices() -> dict[str, tuple[str, str]]:
@@ -730,7 +724,6 @@ class CatalogueSyncTests(unittest.TestCase):
         expected = set()
         for _label, key in CANONICAL.values():
             expected.add(key)
-            expected.add(f"{key}-8bit")
         for _label, _stem, key in SINGLE_WIDTH_MODELS.values():
             expected.add(key)
         self.assertEqual(set(choices()), expected, "menu keys drifted from the canonical list")
@@ -747,12 +740,11 @@ class CatalogueSyncTests(unittest.TestCase):
                 )
                 self.assertEqual(resolved.returncode, 0, resolved.stderr)
                 self.assertEqual(resolved.stdout, label)
-                for width_key in (key, f"{key}-8bit"):
-                    self.assertEqual(
-                        menu[width_key][0],
-                        label,
-                        f"menu label for {width_key} differs from the launcher's",
-                    )
+                self.assertEqual(
+                    menu[key][0],
+                    label,
+                    f"menu label for {key} differs from the launcher's",
+                )
         for name, (label, _stem, key) in SINGLE_WIDTH_MODELS.items():
             with self.subTest(model=name):
                 resolved = shell_snippet(
@@ -764,16 +756,27 @@ class CatalogueSyncTests(unittest.TestCase):
 
     def test_install_target_accepts_both_spellings_of_every_model(self) -> None:
         for name, (_label, key) in CANONICAL.items():
-            for spelling, expected in (
-                (name, key),
-                (f"{name}-8bit", f"{key}-8bit"),
-                (key, key),
-                (f"{key}-8bit", f"{key}-8bit"),
-            ):
+            for spelling, expected in ((name, key), (key, key)):
                 with self.subTest(spelling=spelling):
                     result = shell_snippet(f'tinytitan_install_target "{spelling}"')
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), expected)
+        for name, (_label, _stem, key) in SINGLE_WIDTH_MODELS.items():
+            for spelling, expected in ((name, key), (key, key)):
+                with self.subTest(spelling=spelling):
+                    result = shell_snippet(f'tinytitan_install_target "{spelling}"')
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+
+    def test_install_target_refuses_every_retired_key(self) -> None:
+        # The shared resolver is what a fetch is addressed through, so a retired
+        # key that still mapped would be a route back to a family the matrix
+        # does not have.
+        for key in REMOVED_KEYS:
+            with self.subTest(key=key):
+                result = shell_snippet(f'tinytitan_install_target "{key}"')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.strip(), "")
 
 
 if __name__ == "__main__":

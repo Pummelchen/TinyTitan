@@ -57,16 +57,18 @@ def run_menu(stdin: str | None) -> subprocess.CompletedProcess:
 
 class InstallMenuAnswerTests(unittest.TestCase):
     def test_an_empty_line_takes_the_default(self) -> None:
+        # The default is the first row: Ornith 1.5 35B-A3B 4-bit, the install
+        # every release is verified against.
         result = run_menu("\n")
-        self.assertIn("INSTALLED ornith15-8bit", result.stdout + result.stderr)
+        self.assertIn("INSTALLED ornith15", result.stdout + result.stderr)
 
     def test_a_number_installs_that_row(self) -> None:
-        # Row 13 is Qwen 3.5 2B 4-bit in the current catalogue (it was 14 while
-        # the bf16-dense row sat at 3, before that variant was removed), so this
-        # also pins that a row's number moved with its position rather than
-        # being read from a stale list.
-        result = run_menu("13\n")
-        self.assertIn("INSTALLED qwen35-2b", result.stdout + result.stderr)
+        # Row 3 is the second Inkling install in the current three-row catalogue
+        # (the matrix is Ornith 4-bit plus the two Inkling 2 Mini rows), so this
+        # also pins that a row's number is read from the list's position rather
+        # than a stale one.
+        result = run_menu("3\n")
+        self.assertIn("INSTALLED inkling2mini", result.stdout + result.stderr)
 
     def test_end_of_input_installs_nothing(self) -> None:
         # The bug: `read` failing left the reply empty, and the empty reply fell
@@ -88,7 +90,7 @@ class InstallMenuAnswerTests(unittest.TestCase):
 class MenuRowPaddingTests(unittest.TestCase):
     """A zero-padded row number must mean the row its digits name.
 
-    AUD-305, measured on /bin/bash 3.2.57 with the shipped 16-row catalogue. The
+    AUD-305, measured on /bin/bash 3.2.57 with the then-16-row catalogue. The
     guard and the index both read the reply through arithmetic, and `(( ))` takes
     a leading zero as octal, so three different things go wrong:
 
@@ -104,6 +106,10 @@ class MenuRowPaddingTests(unittest.TestCase):
       single digit. Those two cases are pinned here as neighbours and they pass
       before the repair; they are in this file because the repair must not lose
       them.
+
+    The catalogue is three rows now (TT-142, 2026-11-27), so the in-range padded
+    replies are `01`-`03`; the out-of-range ones are where the octal reading used
+    to slip through.
 
     The repair forces the decimal base rather than refusing a leading zero, and
     that is a measured choice, not a preference: this tree refuses a padded
@@ -122,7 +128,7 @@ class MenuRowPaddingTests(unittest.TestCase):
         return (match.group(1) if match else "", result.stdout + result.stderr)
 
     def test_a_zero_padded_row_installs_the_row_its_digits_name(self) -> None:
-        for padded, plain in (("01", "1"), ("07", "7"), ("08", "8"), ("010", "10"), ("018", "18")):
+        for padded, plain in (("01", "1"), ("02", "2"), ("03", "3")):
             with self.subTest(reply=padded):
                 want, _ = self.installed(plain + "\n")
                 self.assertTrue(want, f"the plain reply {plain} names no row")
@@ -131,9 +137,9 @@ class MenuRowPaddingTests(unittest.TestCase):
                 self.assertNotIn("value too great for base", output)
 
     def test_a_padded_row_outside_the_list_still_refuses(self) -> None:
-        # Forcing the base is not a pass: 21 and 22 are still not rows (the
-        # catalogue has 20), and 0 is still not a row, padded or not.
-        for reply in ("00", "021", "022"):
+        # Forcing the base is not a pass: 4 and 8 are still not rows (the
+        # catalogue has 3), and 0 is still not a row, padded or not.
+        for reply in ("00", "04", "08"):
             with self.subTest(reply=reply):
                 got, output = self.installed(reply + "\n")
                 self.assertEqual(got, "", output)
@@ -167,45 +173,61 @@ class StagingPathTests(unittest.TestCase):
     def test_download_and_conversion_arguments_use_the_work_root(self) -> None:
         for argument in (
             '--work "$WORK/${preset}-shards"',
-            '--output "$WORK/qwen38-affine-${width}bit"',
-            '--work "$WORK/qwen38-shards"',
-            '--output "$WORK/${preset}-affine"',
+            '--output "$snap"',
         ):
             with self.subTest(argument=argument):
                 self.assertIn(argument, self.script)
 
-    def test_qwen38_ships_exactly_two_types_with_hardcoded_recipes(self) -> None:
-        # The 4-bit type carries the 4/8/16 recipe (routed experts 4-bit, every
-        # resident tensor 8-bit, the n-gram table fp16) under the canonical
-        # `_4Bit` spelling -- the recipe lives in the manifest, not the name;
-        # the 8-bit type is uniform. The MTP draft head is not an install type,
-        # and the repacker's no-Python streaming hint must not offer a qwen38
-        # build the installer would not produce.
+    def test_the_retired_rows_and_their_branches_are_gone(self) -> None:
+        # Two waves of removal, and neither may come back:
+        #
+        # - 2026-11-16: ornith15-bf16dense, ornith15-mtp and qwen36-mtp, a quant
+        #   variant and two draft-head sidecars.
+        # - 2026-11-27 (TT-142 slice (c)): every family and width the shipped
+        #   matrix does not have -- the dense Qwen 3.5 sizes, Qwen 3.6/3.8,
+        #   AgentWorld, KAT-Coder, Ornith 122B and Ornith 8-bit -- plus the
+        #   convert branches that only served them (a 360 GB Qwen3.8 fetch, the
+        #   122B solo path, the dense snapshot repack).
+        #
+        # The names are spelled out here on purpose: this is the guard that keeps
+        # a retired row from being re-added by accident, so it has to name them.
+        # `clean` is the one place they may still appear, as the legacy staging it
+        # reclaims, and that rule is now generic rather than a list.
+        retired_rows = (
+            "ornith15-bf16dense",
+            "ornith15-mtp",
+            "qwen36-mtp",
+            "ornith15-8bit",
+            "ornith122",
+            "ornith122-8bit",
+            "qwen36",
+            "qwen36-8bit",
+            "agentworld",
+            "agentworld-8bit",
+            "katcoder",
+            "katcoder-8bit",
+            "qwen38flash",
+            "qwen38flash-8bit",
+            "qwen35-2b",
+            "qwen35-2b-8bit",
+            "qwen35-4b",
+            "qwen35-4b-8bit",
+            "qwen35-9b",
+            "qwen35-9b-8bit",
+        )
+        for row in retired_rows:
+            with self.subTest(row=row):
+                self.assertNotIn(f'"{row}|', self.script)
         for fragment in (
-            '"qwen38flash|qwen3.8-flash-next_125B_A6B_4Bit|4|convert"',
-            '"qwen38flash-8bit|qwen3.8-flash-next_125B_A6B_8Bit|8|convert"',
-            'rest8_arg="--rest-8bit"',
-            'model_id="qwen3.8-flash-next-8bitrest"',
-        ):
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, self.script)
-        self.assertNotIn("convert_qwen38_mtp", self.script)
-        self.assertNotIn("qwen3.8-flash-next_125B_A6B_4E-8R-16N", self.script)
-        self.assertNotIn("qwen38flash-mtp", self.script)
-        self.assertNotIn("qwen3.8-flash-next_125B_A6B_MTP_4Bit", self.script)
-
-    def test_the_removed_rows_and_their_branches_are_gone(self) -> None:
-        # ornith15-bf16dense, ornith15-mtp and qwen36-mtp were removed from the
-        # catalogue (2026-11-16). Their rows, dispatch branches and model ids
-        # must not come back; the legacy staging patterns in `clean` are the
-        # only place the removed names may still appear.
-        for fragment in (
-            '"ornith15-bf16dense|',
-            '"ornith15-mtp|',
-            '"qwen36-mtp|',
             "convert_qwen36_mtp",
             "prepare_ornith_mtp",
             "convert_qwen35moe_dense16",
+            "convert_qwen35moe_solo",
+            "prepare_qwen38.py",
+            "prepare_qwen35.py",
+            "rest8_arg",
+            "install_both",
+            "--all-8bit)",
             "ornith-1.5-35b-a3b-bf16dense",
             "ornith-1.5-35b-a3b-mtp-4bit",
             "qwen3.6-35b-a3b-mtp-4bit",
@@ -228,7 +250,6 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
     """
 
     ORNITH_4 = "ornith-1.5_35B_A3B_4Bit"
-    ORNITH_8 = "ornith-1.5_35B_A3B_8Bit"
 
     def setUp(self) -> None:
         self.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-install-"))
@@ -291,24 +312,6 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.assertNotIn("FAKE-REPACK", output)
         self.assertFalse((self.models / self.ORNITH_4).exists())
 
-    def test_solo_122b_staging_needs_the_retirement_headroom(self) -> None:
-        # The 4-bit row is 66 GB; the install (69 GB including the reserve)
-        # fits in 80 GB, but the staging volume needs the snapshot plus the
-        # pre-unlink headroom, so 80 must refuse while 100 proceeds. The
-        # converter is `/usr/bin/true` here, so no byte is fetched.
-        short = self.run_tool("ornith122", available_gb=80)
-        output = short.stdout + short.stderr
-        self.assertNotEqual(short.returncode, 0, output)
-        self.assertIn("Not starting ornith122", output)
-        self.assertNotIn("FAKE-REPACK", output)
-
-        enough = self.run_tool("ornith122", available_gb=100)
-        output = enough.stdout + enough.stderr
-        self.assertEqual(enough.returncode, 0, output)
-        self.assertIn("FAKE-REPACK", output)
-        # The import consumes its snapshot; the guard's estimate depends on it.
-        self.assertIn("--consume-snapshot", output)
-
     def test_enough_space_lets_the_install_proceed(self) -> None:
         result = self.run_tool("ornith15", available_gb=9999)
         output = result.stdout + result.stderr
@@ -337,34 +340,29 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         )
         self.assertIn("FAKE-REPACK", result.stdout + result.stderr)
 
-    def test_staging_for_a_missing_width_is_kept_and_explained(self) -> None:
+    def test_staging_goes_once_its_own_install_exists(self) -> None:
+        # Every shipped row is one width, so a snapshot has exactly one consumer:
+        # the install it was converted for. Once that install exists the
+        # snapshot is only wasted disk, and the already-installed path says so.
         self.install(self.ORNITH_4)
         snapshot = self.stage("ornith15-affine-4bit", 1)
         result = self.run_tool("ornith15")
         output = result.stdout + result.stderr
-        self.assertTrue(snapshot.exists(), "the reusable snapshot was removed")
-        self.assertIn("kept", output)
-        self.assertIn("clean", output)
+        self.assertFalse(snapshot.exists(), "staging outlived the install it served")
+        self.assertIn("staging cleaned", output)
 
-    def test_staging_goes_once_both_widths_are_installed(self) -> None:
-        for name in (self.ORNITH_4, self.ORNITH_8):
-            self.install(name)
-        snapshot = self.stage("ornith15-affine-4bit", 1)
-        result = self.run_tool("ornith15")
-        self.assertFalse(snapshot.exists())
-        self.assertIn("staging cleaned", result.stdout + result.stderr)
-
-    def test_clean_reclaims_staging_from_removed_rows(self) -> None:
-        # The MTP draft heads and the bf16-dense variant left the catalogue
-        # (2026-11-16). Staging they left behind has no remaining consumer, so
-        # `clean` must reclaim it rather than report it staged forever.
+    def test_clean_reclaims_staging_from_removed_families(self) -> None:
+        # A family that leaves the matrix leaves its `*-affine*`/`*-shards`
+        # behind, and no remaining row can consume it. `clean` must reclaim it
+        # rather than report it staged forever; the rule is generic (nothing a
+        # current row owns) rather than a list of retired names, so any retired
+        # row's staging lands here. `ornith-mtp-src` is the one shape the
+        # `*-affine*`/`*-shards` patterns do not match.
         legacy = [
             self.stage("ornith-mtp-src", 1),
-            self.stage("ornith-mtp-affine", 1),
-            self.stage("qwen36-mtp-affine", 1),
-            self.stage("qwen36-mtp-shards", 1),
-            self.stage("ornith15-bf16dense-affine", 1),
-            self.stage("ornith15-bf16dense-shards", 1),
+            self.stage("retired-affine-4bit", 1),
+            self.stage("retired-affine-8bit", 1),
+            self.stage("retired-shards", 1),
         ]
         result = self.run_tool("clean")
         output = result.stdout + result.stderr
@@ -374,9 +372,22 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         self.assertIn("nothing left staged", output)
 
     def test_removed_models_are_refused_by_name(self) -> None:
-        # The three removed rows must not install, and the refusal must name
-        # what was asked for rather than fall through to a converter.
-        for name in ("ornith15-bf16dense", "ornith15-mtp", "qwen36-mtp"):
+        # A row that left the catalogue must not install, and the refusal must
+        # name what was asked for rather than fall through to a converter.
+        for name in (
+            "ornith15-bf16dense",
+            "ornith15-mtp",
+            "qwen36-mtp",
+            "ornith15-8bit",
+            "ornith122",
+            "qwen36",
+            "agentworld",
+            "katcoder",
+            "qwen38flash",
+            "qwen35-2b",
+            "qwen35-4b",
+            "qwen35-9b",
+        ):
             with self.subTest(model=name):
                 result = self.run_tool(name)
                 output = result.stdout + result.stderr
@@ -389,11 +400,8 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         # both scripts address one catalogue (tools/tinytitan_models.sh).
         for alias, row in (
             ("ornith", "ornith15"),
-            ("ornith-8bit", "ornith15-8bit"),
-            ("qwen38", "qwen38flash"),
-            ("qwen38-8bit", "qwen38flash-8bit"),
-            ("aw", "agentworld"),
-            ("kat-8bit", "katcoder-8bit"),
+            ("inkling2-q4", "inkling-q4-k-xl-unsloth"),
+            ("inkling2-nvfp4", "inkling2mini"),
         ):
             with self.subTest(alias=alias):
                 result = self.run_tool(alias, available_gb=9999)
@@ -402,14 +410,16 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
                 self.assertIn(f"installing {row}", output)
                 self.assertIn("FAKE-REPACK", output)
 
-    def test_clean_keeps_staging_an_uninstalled_width_still_needs(self) -> None:
-        self.install(self.ORNITH_4)
+    def test_clean_keeps_staging_an_uninstalled_row_still_needs(self) -> None:
+        # An install that is not on disk may still be resumed from what is
+        # staged, so `clean` keeps it and says so; once the install exists the
+        # same run reclaims it.
         snapshot = self.stage("ornith15-affine-4bit", 1)
         result = self.run_tool("clean")
         self.assertTrue(snapshot.exists())
         self.assertIn("still staged", result.stdout + result.stderr)
 
-        self.install(self.ORNITH_8)
+        self.install(self.ORNITH_4)
         result = self.run_tool("clean")
         self.assertFalse(snapshot.exists())
         self.assertIn("nothing left staged", result.stdout + result.stderr)
@@ -473,7 +483,7 @@ class DownloadWordingTests(unittest.TestCase):
     def test_help_says_the_command_downloads(self) -> None:
         result = self.run_tool("--help")
         output = result.stdout + result.stderr
-        self.assertIn("download, convert and install one width", output)
+        self.assertIn("download, convert and install it", output)
         self.assertIn("What a run costs", output)
 
     def test_the_menu_says_its_sizes_are_installed_sizes(self) -> None:

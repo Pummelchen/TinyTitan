@@ -1280,7 +1280,7 @@ def parse_args() -> argparse.Namespace:
         help="which supported family's installs to run (default: ornith)",
     )
     parser.add_argument("--output", type=pathlib.Path)
-    parser.add_argument("--quantizations", nargs="+", type=int, choices=(4, 8), default=[8])
+    parser.add_argument("--quantizations", nargs="+", type=int, choices=(4, 8), default=[4])
     parser.add_argument("--clients", nargs="+", choices=tuple(CLIENT_KINDS))
     parser.add_argument(
         "--prompts",

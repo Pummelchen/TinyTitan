@@ -1,7 +1,8 @@
 """Synthetic installs: the launcher's choices, checkable with no model on disk.
 
-`tools/testdata/catalog-example.json` is the shipped catalog fixture — twelve
-rows, one per family and width, pointing at `/Users/example/TinyTitan/models/…`.
+`tools/testdata/catalog-example.json` is the shipped catalog fixture — the
+three supported installs, one row each, pointing at
+`/Users/example/TinyTitan/models/…`.
 That path is a claim about a machine that does not exist, and the launcher
 answers it: `tinytitan_catalog_keep_installed` drops every entry whose install
 directory is gone, so feeding the fixture straight to `TINYTITAN_CATALOG_JSON`
@@ -44,6 +45,7 @@ class SyntheticInstalls:
         self._catalog = catalog
         self._tmp: tempfile.TemporaryDirectory | None = None
         self.rows: list[dict] = []
+        self._cpu_id: str | None = None
 
     def create(self) -> "SyntheticInstalls":
         self._tmp = tempfile.TemporaryDirectory(prefix="tinytitan-launcher-fixture-")
@@ -96,16 +98,40 @@ class SyntheticInstalls:
                 return row["id"]
         raise AssertionError(f"{CATALOG} lists no gpu-backed model")
 
-    def dense(self) -> str:
-        """A dense 4-bit id: the width the CPU engine serves as well as the GPU.
+    def cpu_served(self) -> str:
+        """A CPU-served id, synthesised because no shipped install is one.
 
-        The concurrency tests need one model they can name to either engine, and
-        a dense row is the only kind that qualifies.
+        The concurrency tests need a model they can name to the CPU engine, and
+        the CPU backend still implements the dense family even though no dense
+        install is in the shipped matrix (TT-142 slice (b)). The row is added to
+        this tree and the catalog on first use and is deliberately not part of
+        the shipped fixture: it exists so the CPU rule is checked, not so the
+        family is advertised.
         """
-        for row in self.rows:
-            if "dense" in row["family"] and row["quant"] == 4:
-                return row["id"]
-        raise AssertionError(f"{CATALOG} lists no dense 4-bit model")
+        if self._cpu_id is not None:
+            return self._cpu_id
+        row = {
+            "id": "synthetic-dense_4-Bit",
+            "name": "Synthetic Dense",
+            "family": "qwen3_5_dense",
+            "quant": 4,
+            "backend": "cpu",
+            "path": str(self.models_dir / "synthetic-dense_4Bit"),
+            "thinking": ["off", "on"],
+            "engines": "gpu,cpu",
+            "size_gb": 1.3,
+        }
+        directory = pathlib.Path(row["path"])
+        directory.mkdir()
+        manifest = {
+            "modelID": "synthetic-dense",
+            "quant": {"routedExpert": {"weightBits": 4}},
+        }
+        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        self.rows.append(row)
+        self.catalog_path.write_text(json.dumps({"models": self.rows}, indent=2) + "\n")
+        self._cpu_id = row["id"]
+        return self._cpu_id
 
     def env(self, **extra: str) -> dict[str, str]:
         """A complete environment that points the launcher at this tree.
@@ -168,10 +194,14 @@ class SyntheticInstallsTests(unittest.TestCase):
         # A suite that silently lost its row would test a different model than it
         # says it does, so both selectors are pinned to the shipped fixture.
         gpu = self.installs.first_gpu()
-        dense = self.installs.dense()
         self.assertIn(gpu, self.installs.ids)
-        self.assertIn(dense, self.installs.ids)
-        self.assertEqual(pathlib.Path(self.installs.path_of(dense)).name, "qwen3.5_2B_4Bit")
+        # The CPU row is synthesised on demand: no shipped install is CPU-served,
+        # and the row must not appear in the three-row catalog before it is asked
+        # for.
+        self.assertEqual(len(self.installs.ids), 3)
+        cpu = self.installs.cpu_served()
+        self.assertIn(cpu, self.installs.ids)
+        self.assertEqual(pathlib.Path(self.installs.path_of(cpu)).name, "synthetic-dense_4Bit")
         with self.assertRaises(KeyError):
             self.installs.path_of("no-such-model")
 

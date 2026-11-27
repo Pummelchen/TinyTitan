@@ -68,9 +68,9 @@ class BenchmarkProfileTests(unittest.TestCase):
         self.assertNotIn("--prompt-cache", command)
         self.assertNotIn("--mtp-model", command)
         self.assertEqual("--ram" in command, DEFAULT_EXPERT_CACHE_BUDGET is not None)
-        # The protocol defaults are constants, and Ornith 1.5 8-bit may
-        # legitimately be absent from models/.
-        self.assertEqual(DEFAULT_MODEL_PATH.name, "ornith-1.5_35B_A3B_8Bit")
+        # The protocol defaults are constants, and the one shipped Ornith width
+        # (4-bit) may legitimately be absent from models/.
+        self.assertEqual(DEFAULT_MODEL_PATH.name, "ornith-1.5_35B_A3B_4Bit")
         self.assertEqual(DEFAULT_CONTEXT_TOKENS, 262_144)
         self.assertEqual(DEFAULT_PROMPT_CACHE_MODE, "multi-prefix")
 
@@ -138,17 +138,19 @@ class BenchmarkProfileTests(unittest.TestCase):
         self.assertEqual(command[command.index("--thinking") + 1], "on")
         self.assertFalse(request_model().endswith("-fast"))
 
-    def test_coder_harness_plain_invocation_uses_ornith_eight_bit(self) -> None:
+    def test_coder_harness_plain_invocation_uses_ornith_four_bit(self) -> None:
+        # 4-bit is the shipped Ornith width; 8-bit is not in the matrix, so a
+        # plain run must not default to an install that cannot exist.
         with patch.object(sys, "argv", ["coder_cli_benchmark.py"]):
             arguments = coder_cli_benchmark.parse_args()
         self.assertEqual(arguments.round, "coder")
-        self.assertEqual(arguments.quantizations, [8])
+        self.assertEqual(arguments.quantizations, [4])
 
     def test_precise_benchmark_plain_invocation_excludes_mtp_matrix(self) -> None:
-        configurations = tinytitan_benchmark.selected_configs("8bit")
+        configurations = tinytitan_benchmark.selected_configs("4bit")
         self.assertEqual(
             configurations,
-            [("multi-prefix", "off", "cache_on_mtp_off_8bit", 8081, 0.6)],
+            [("multi-prefix", "off", "cache_on_mtp_off_4bit", 8081, 0.6)],
         )
 
 

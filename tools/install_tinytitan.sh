@@ -37,7 +37,7 @@
 #   --model NAME     install this model without asking. Omit it and, with a
 #                    terminal, the installer shows the model list to choose from
 #                    (`tools/install_models.sh --choose`); through a pipe it
-#                    takes ornith15-8bit rather than hanging on a question.
+#                    takes ornith15 rather than hanging on a question.
 #   --no-model       install no model
 #   --version TAG    install that release instead of the newest (e.g. --version v6.0)
 #   --from-source    clone and `swift build` instead of downloading a release.
@@ -48,7 +48,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/Pummelchen/TinyTitan.git"
 REPO_URL_RAW="https://raw.githubusercontent.com/Pummelchen/TinyTitan/main"
-DEFAULT_MODEL="ornith15-8bit"
+DEFAULT_MODEL="ornith15"
 DEFAULT_DIR="$HOME/TinyTitan"
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
@@ -440,9 +440,8 @@ else
   if (( MODEL_WAS_SET )) || [[ ! -t 0 ]]; then
     echo "  No model is installed yet. TinyTitan needs one to run."
     if [[ "$MODEL" == "$DEFAULT_MODEL" ]]; then
-      echo "  The recommended starting model is Ornith 1.5 35B-A3B at 8-bit,"
-      echo "  about 37 GB installed. The 4-bit version is about 20 GB and faster"
-      echo "  to download if that is a lot:  $TOOLS_PATH/install_models.sh ornith15"
+      echo "  The recommended starting model is Ornith 1.5 35B-A3B at 4-bit,"
+      echo "  about 20 GB installed:  $TOOLS_PATH/install_models.sh ornith15"
     else
       echo "  This run was asked for '$MODEL'."
     fi

@@ -40,8 +40,8 @@ def default_model() -> str:
     """The file's own default id, without the `tinytitan/` prefix.
 
     Derived, not a literal: the id changes when the checked-in install recipe
-    changes (6.3's `qwen3.8-flash-next-8bitrest_4-Bit`), and a literal here
-    would fail every such change with a test that is not about the id.
+    changes, and a literal here would fail every such change with a test that is
+    not about the id.
     """
     return source()["model"].split("/", 1)[1]
 
@@ -143,7 +143,7 @@ class MergeTests(unittest.TestCase):
             '  "provider": {\n'
             '    "anthropic": {"options": {"apiKey": "x"}},\n'
             '    "tinytitan": {"name": "TinyTitan (local)", "options": {"baseURL": "old"},\n'
-            '      "models": {"qwen3.8-flash-next-mtp_4-Bit": {"limit": {"output": 65536}},\n'
+            '      "models": {"retired_4-Bit": {"limit": {"output": 65536}},\n'
             '                 "my-own_4-Bit": {"name": "mine"}}},\n'
             "  },\n"
             "}\n"
@@ -193,10 +193,10 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(block["options"]["baseURL"], "http://127.0.0.1:9090/v1")
         self.assertEqual(block["models"][default_model()]["limit"]["context"], 524288)
         self.file.unlink()
-        self.run_merge(model="katcoder-x_4-Bit")
+        self.run_merge(model="unlisted-x_4-Bit")
         data = json.loads(self.file.read_text())
-        self.assertEqual(data["model"], "tinytitan/katcoder-x_4-Bit")
-        entry = data["provider"]["tinytitan"]["models"]["katcoder-x_4-Bit"]
+        self.assertEqual(data["model"], "tinytitan/unlisted-x_4-Bit")
+        entry = data["provider"]["tinytitan"]["models"]["unlisted-x_4-Bit"]
         self.assertEqual(entry["limit"], {"context": 262144, "output": 32768})
         self.assertNotIn("variants", entry)
 

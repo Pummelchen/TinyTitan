@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Install any supported model at any supported width.
+# Install a supported model install.
 #
-#   tools/install_models.sh                 # what is installed, what is missing
-#   tools/install_models.sh ornith15-8bit   # install one
-#   tools/install_models.sh --all-4bit      # every 4-bit model
-#   tools/install_models.sh --all-8bit      # every 8-bit model
+#   tools/install_models.sh          # what is installed, and what staging is kept
+#   tools/install_models.sh ornith15 # install one
+#   tools/install_models.sh --all-4bit   # every 4-bit model
 #
-# Most models install straight from a pinned Hugging Face release through
-# TinyTitanRepack, which streams and verifies in one pass. Qwen3.8-Flash-Next is
-# the exception and is documented below, because the difference matters when
-# choosing what to trust.
+# Every row is built from a pinned Hugging Face release and converted to .ssdai
+# while it downloads: the MoE row through its converter, the two Inkling installs
+# through TinyTitanRepack's own streaming path. No raw checkpoint is served.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -80,24 +78,12 @@ require_gb() {
 # The paths under $WORK that this tool owns. Deliberately a narrow pattern rather
 # than "everything in $WORK": a checkout keeps its release build, benchmark
 # results and scratch checkouts there too, and measuring those as "staging" made
-# `clean` claim 12 GB it had nothing to do with. `ornith-mtp-src` is legacy
-# staging from a removed draft-head row; it is still counted so `clean` can
-# reclaim it (see legacy_staging_paths).
+# `clean` claim 12 GB it had nothing to do with. `ornith-mtp-src` is staging a
+# removed draft-head row left behind; it is still counted so `clean` can reclaim
+# it (see legacy_staging_paths).
 staging_paths() {
   local dir
   for dir in "$WORK"/*-affine* "$WORK"/*-shards "$WORK"/ornith-mtp-src; do
-    [[ -e "$dir" ]] && printf '%s\n' "$dir"
-  done
-}
-
-# Staging that only removed catalogue rows ever consumed: the two MTP draft
-# heads and the bf16-dense Ornith variant (removed 2026-11-16). No remaining
-# row can reuse any of it, so `clean` reclaims it unconditionally rather than
-# leaving it staged forever with no row left to retire it.
-legacy_staging_paths() {
-  local dir
-  for dir in "$WORK"/ornith-mtp-src "$WORK"/ornith-mtp-affine "$WORK"/qwen36-mtp-affine \
-             "$WORK"/qwen36-mtp-shards "$WORK"/*-bf16dense-affine "$WORK"/*-bf16dense-shards; do
     [[ -e "$dir" ]] && printf '%s\n' "$dir"
   done
 }
@@ -140,56 +126,49 @@ staging_names() {
   (( ${#names[@]} > 0 )) && printf '%s' "$(IFS=', '; printf '%s' "${names[*]+"${names[*]}"}")"
 }
 
-# The install directory of the row that shares this row's download, if any.
-# Paired MoE widths share one conversion, the two Qwen3.8 widths share their
-# shard directory, and the dense Qwen 3.5 sizes share theirs. A draft head
-# shares nothing. This decides whether staging is still worth keeping.
-row_sibling_dir() {
-  local name="$1" row _n dir _w source preset sibling other base row2 n2 d2
-  for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
-    IFS='|' read -r _n dir _w source preset sibling <<<"$row"
-    [[ "$_n" == "$name" ]] || continue
-    case "$source" in
-      convert_qwen35moe) other="$sibling" ;;
-      convert|convert_qwen35)
-        base="${name%-8bit}"
-        if [[ "$name" == *-8bit ]]; then other="$base"; else other="${base}-8bit"; fi ;;
-      *) return 0 ;;
-    esac
-    [[ -n "$other" ]] || return 0
-    for row2 in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
-      IFS='|' read -r n2 d2 _ _ _ _ <<<"$row2"
-      [[ "$n2" == "$other" ]] && { printf '%s' "$d2"; return 0; }
-    done
-    return 0
-  done
-}
-
-# The staging one catalogue row owns, as `reuse:<path>` (a sibling width can
-# still use it) or `drop:<path>` (nobody can).
-row_staging_dirs() {
+# The staging one catalogue row owns, one absolute path per line. `repack` rows
+# stream straight into the install and stage nothing; the Qwen3.5-MoE converter
+# writes a snapshot and its source shards under `$WORK/<preset>-*`. Every row is
+# one width, so a snapshot has exactly one consumer: its own install (TT-142,
+# 2026-11-27).
+row_staging_paths() {
   local name="$1" row _n _dir _w source preset
   for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
     IFS='|' read -r _n _dir _w source preset _ <<<"$row"
     [[ "$_n" == "$name" ]] || continue
     case "$source" in
-      convert)             printf 'drop:%s\n' "$WORK/qwen38-affine-${_w}bit"
-                           printf 'reuse:%s\n' "$WORK/qwen38-shards" ;;
-      # Both MoE widths are quantized into the same pair of snapshots by one
-      # run, so every one of these is what the *other* width would consume.
-      convert_qwen35moe)   printf 'reuse:%s\n' "$WORK/${preset}-affine-4bit" "$WORK/${preset}-affine-8bit" \
-                                              "$WORK/${preset}-affine" "$WORK/${preset}-shards" ;;
-      # A 122B snapshot is 69.5 GB (4-bit) or 129.8 GB (8-bit). Nobody can reuse
-      # it -- the sibling width is a separate fetch by design -- so it goes as
-      # soon as its own install exists. The shard directory holds only partial
-      # shards by then (the converter deletes each converted one) and is dropped
-      # on the same terms.
-      convert_qwen35moe_solo) printf 'drop:%s\n' "$WORK/${preset}-affine-${_w}bit" "$WORK/${preset}-shards" ;;
-      convert_qwen35)      printf 'drop:%s\n' "$WORK/${_n%-8bit}-affine-${_w}bit"
-                           printf 'reuse:%s\n' "$WORK/${_n%-8bit}-shards" ;;
+      convert_qwen35moe) printf '%s\n' "$WORK/${preset}-affine-4bit" "$WORK/${preset}-shards" ;;
     esac
     return 0
   done
+}
+
+# Every staging path any current row owns.
+all_row_staging_paths() {
+  local row name
+  for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
+    IFS='|' read -r name _ <<<"$row"
+    row_staging_paths "$name"
+  done
+}
+
+# Staging under `$WORK` that no catalogue row owns: a snapshot or shard directory
+# a family left behind when it left the matrix. The 122B, the dense Qwen 3.5
+# sizes, Qwen 3.6/3.8, AgentWorld and KAT-Coder rows each wrote their own
+# `*-affine*`/`*-shards` here before they were removed, and `clean` is the one
+# place that can still reclaim them; `staging_paths` counts them as staged, so
+# reporting them as kept forever would be the lie. `ornith-mtp-src` is the one
+# removal whose staging does not match either pattern, so it is named in
+# `staging_paths` and lands here by the same rule.
+legacy_staging_paths() {
+  local dir owned candidate
+  while IFS= read -r dir; do
+    owned=0
+    while IFS= read -r candidate; do
+      [[ "$candidate" == "$dir" ]] && { owned=1; break; }
+    done < <(all_row_staging_paths)
+    (( owned )) || printf '%s\n' "$dir"
+  done < <(staging_paths)
 }
 
 # The install directory one catalogue row would fill.
@@ -201,79 +180,43 @@ row_install_dir() {
   done
 }
 
-# Remove staging that cannot save a future download, and say what happened.
+# Remove staging that cannot save a future install, and say what happened.
 #
-# `mode` "keep" is the normal install path: staging is left alone while any row
-# that would consume it is still missing, and the hint says what is kept and how
-# to reclaim it. `mode` "reap" is the explicit `clean` command: the same rules,
-# silently, for every row. Nothing is removed on a guess — a shared snapshot goes
-# only when every width that reuses it is installed, and a per-width one goes
-# once its own width is.
+# One rule for both callers: a snapshot or shard directory goes once the install
+# it serves exists, and is kept while that install is missing. Nothing is
+# removed on a guess — an install that is not on disk may still be resumed from
+# what is staged here.
 cleanup_staging() {
-  local name="$1" mode="${2:-keep}" dir kind freed=0 removed=()
-  local -a victims=() kept=()
-  local sibling own_dir
-  sibling="$(row_sibling_dir "$name")"
+  local name="$1" dir freed=0 removed=()
+  local own_dir
   own_dir="$(row_install_dir "$name")"
-  while IFS=: read -r kind dir; do
+  [[ -n "$own_dir" && -d "$MODELS/$own_dir" ]] || return 0
+  while IFS= read -r dir; do
     [[ -n "$dir" && -e "$dir" ]] || continue
-    if [[ "$kind" == reuse ]]; then
-      # Kept while either consumer is still uninstalled.
-      if [[ -n "$own_dir" && ! -d "$MODELS/$own_dir" ]] \
-         || { [[ -n "$sibling" ]] && [[ ! -d "$MODELS/$sibling" ]]; }; then
-        kept+=("$dir")
-        continue
-      fi
-    elif [[ -n "$own_dir" && ! -d "$MODELS/$own_dir" ]]; then
-      # Per-width staging (a snapshot, a draft head's source): worth keeping
-      # until this row itself is installed, then it is only wasted disk.
-      kept+=("$dir")
-      continue
-    fi
-    victims+=("$dir")
-  done < <(row_staging_dirs "$name")
-
-  # Remove each one, counting what it held before it went. The list needs no
-  # de-duplication: `row_staging_dirs` names each path once per row.
-  for dir in "${victims[@]+"${victims[@]}"}"; do
     local before
     before="$(du -sk "$dir" 2>/dev/null | awk 'NR==1 {print $1}')"
     rm -rf "$dir"
     freed=$(( freed + ${before:-0} ))
     removed+=("${dir#"$WORK"/}")
-  done
+  done < <(row_staging_paths "$name")
   if (( ${#removed[@]} > 0 )); then
     printf '  staging cleaned (%s freed): %s\n' \
       "$(human_kb "$freed")" "$(IFS=', '; printf '%s' "${removed[*]+"${removed[*]}"}")"
   fi
-
-  # Only the install path explains itself; `clean` has its own summary.
-  if [[ "$mode" == "keep" && ${#kept[@]} -gt 0 ]]; then
-    local kept_kb=0 kept_paths=()
-    for dir in "${kept[@]+"${kept[@]}"}"; do
-      kept_paths+=("${dir#"$WORK"/}")
-      local size
-      size="$(du -sk "$dir" 2>/dev/null | awk 'NR==1 {print $1}')"
-      kept_kb=$(( kept_kb + ${size:-0} ))
-    done
-    printf '  kept %s of staging (%s) so the other width needs no download;\n' \
-      "$(human_kb "$kept_kb")" "$(IFS=', '; printf '%s' "${kept_paths[*]+"${kept_paths[*]}"}")"
-    printf '  reclaim it when you have the widths you want:  %s clean\n' "$0"
-  fi
   return 0
 }
 
-# The explicit `clean`: the rules above for every model, plus empty shard
-# directories, then a summary of what is still staged and why. Safe at any time:
-# it only touches this script's own staging.
+# The explicit `clean`: the rules above for every model, plus staging no row owns
+# any more, plus empty shard directories, then a summary of what is still staged
+# and why. Safe at any time: it only touches this script's own staging.
 cmd_clean() {
   echo "Cleaning install staging under $WORK"
   local row name dir
   for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
     IFS='|' read -r name _ <<<"$row"
-    cleanup_staging "$name" reap
+    cleanup_staging "$name"
   done
-  # Staging from removed rows: nothing left in the catalogue can consume it.
+  # Staging from removed families: nothing left in the catalogue can consume it.
   local legacy freed=0 removed=()
   while IFS= read -r legacy; do
     [[ -n "$legacy" && -e "$legacy" ]] || continue
@@ -294,65 +237,30 @@ cmd_clean() {
   staged="$(staging_size)"
   if [[ -n "$staged" ]]; then
     echo "  still staged: $staged — $(staging_names)"
-    echo "  kept for a width you have not installed yet; it goes automatically once"
-    echo "  both widths of that model are installed"
+    echo "  kept for an install you have not made yet; it goes automatically once"
+    echo "  that install exists"
   else
     echo "  nothing left staged"
   fi
 }
 
-# name|install directory|width|source[|preset[|both-widths-directory]]
+# name|install directory|width|source[|preset]
 #
 # The preset field names the converter preset; it appears on every row a
-# converter branch reads (`convert_qwen35moe`, `convert_qwen35moe_solo`).
-# The sibling field appears only on the paired `convert_qwen35moe` rows: their
-# converter can write *both* widths from one 70 GB download, so a row names the
-# sibling width it pairs with. That is what makes
-# `tools/install_models.sh katcoder both` cost one download instead of two, and
-# it also lets a second width reuse a snapshot a previous run already
-# converted.
+# converter branch reads (`convert_qwen35moe`). The rows are the shipped matrix
+# and nothing else (TT-142, 2026-11-27): a family that leaves the matrix leaves
+# this list, the menu's TINYTITAN_MODEL_CHOICES and the registry together.
 #
 # The keys are the installer's historical spellings; the launcher's canonical
-# keys (ornith, qwen38, ...) and every resolver alias are accepted too, through
+# keys (ornith, ...) and every resolver alias are accepted too, through
 # `tinytitan_install_target` in tools/tinytitan_models.sh. Both scripts print
 # the same display names: the menu reads TINYTITAN_MODEL_CHOICES, whose labels
 # `test_launcher_install` holds equal to `tinytitan_resolve_model`'s.
 CATALOGUE=(
-  "ornith15|ornith-1.5_35B_A3B_4Bit|4|convert_qwen35moe|ornith15|ornith15-8bit"
-  "ornith15-8bit|ornith-1.5_35B_A3B_8Bit|8|convert_qwen35moe|ornith15|ornith15"
-  # Ornith-1.5-122B. Deliberately *not* a paired `convert_qwen35moe` row: one
-  # `--bits 4 8` pass would stage 69.5 GB and 129.8 GB of snapshots at once,
-  # and then a 120 GB install beside them, which no 24 GB/1 TB Mac can hold.
-  # The solo source converts the requested width only and drops its snapshot
-  # once the install exists, so each width costs one fetch (the source shards
-  # are streamed and deleted, never kept). An interrupted width resumes its
-  # own partial snapshot; the other width starts its own fetch.
-  "ornith122|ornith-1.5_122B_4Bit|4|convert_qwen35moe_solo|ornith122"
-  "ornith122-8bit|ornith-1.5_122B_8Bit|8|convert_qwen35moe_solo|ornith122"
-  "qwen36|qwen3.6_35B_A3B_4Bit|4|convert_qwen35moe|qwen36|qwen36-8bit"
-  "qwen36-8bit|qwen3.6_35B_A3B_8Bit|8|convert_qwen35moe|qwen36|qwen36"
-  # Qwen3.8-Flash-Next ships two install types and the quant recipe is
-  # hardcoded per type, not a --bits dial: the "4-bit" type routes its experts
-  # at 4 bits and keeps every always-resident tensor (attention, GDN,
-  # hyper-connection, PLE, indexer, shared expert, embedding, LM head, router)
-  # at 8 bits, the n-gram table at its fp16 -- the 4/8/16 recipe. The
-  # "8-bit" type is uniform 8-bit with the same fp16 table. The directory keeps
-  # the canonical `_4Bit` spelling; the recipe lives in the manifest, not the
-  # name. The MTP draft head is no longer an install type.
-  "qwen38flash|qwen3.8-flash-next_125B_A6B_4Bit|4|convert"
-  "qwen38flash-8bit|qwen3.8-flash-next_125B_A6B_8Bit|8|convert"
-  "katcoder|kat-coder-v2.5_35B_A3B_4Bit|4|convert_qwen35moe|katcoder|katcoder-8bit"
-  "katcoder-8bit|kat-coder-v2.5_35B_A3B_8Bit|8|convert_qwen35moe|katcoder|katcoder"
-  "agentworld|qwen-agentworld_35B_A3B_4Bit|4|convert_qwen35moe|agentworld|agentworld-8bit"
-  "agentworld-8bit|qwen-agentworld_35B_A3B_8Bit|8|convert_qwen35moe|agentworld|agentworld"
-  # The dense Qwen 3.5 models. Small enough to run on the CPU, and the only
-  # installs that do: the 2B beside a big GPU model, the 9B on its own.
-  "qwen35-2b|qwen3.5_2B_4Bit|4|convert_qwen35"
-  "qwen35-2b-8bit|qwen3.5_2B_8Bit|8|convert_qwen35"
-  "qwen35-4b|qwen3.5_4B_4Bit|4|convert_qwen35"
-  "qwen35-4b-8bit|qwen3.5_4B_8Bit|8|convert_qwen35"
-  "qwen35-9b|qwen3.5_9B_4Bit|4|convert_qwen35"
-  "qwen35-9b-8bit|qwen3.5_9B_8Bit|8|convert_qwen35"
+  # Ornith 1.5 35B-A3B, the one 35B-A3B install the matrix has. Qwen's own bf16
+  # release is quantized one shard at a time by tools/prepare_agentworld.py and
+  # then repacked; the snapshot is kept only until the install exists.
+  "ornith15|ornith-1.5_35B_A3B_4Bit|4|convert_qwen35moe|ornith15"
   # Inkling 2 Mini: streamed directly from Hugging Face into .ssdai by
   # TinyTitanRepack without a Python converter or intermediate staging.
   "inkling-q4-k-xl-unsloth|inkling-2-mini_GGUF-Q4|4|repack"
@@ -365,20 +273,17 @@ Commands
 
   tools/install_models.sh                 what is installed, and what staging is kept
   tools/install_models.sh --choose        the install menu (the one real choice)
-  tools/install_models.sh <name>          download, convert and install one width
-  tools/install_models.sh <name> both     4-bit and 8-bit from one download
+  tools/install_models.sh <name>          download, convert and install it
   tools/install_models.sh --all-4bit      every 4-bit model
-  tools/install_models.sh --all-8bit      every 8-bit model
   tools/install_models.sh clean           drop staging that cannot be reused
 
 Model keys
 
-  Every row answers to the launcher's canonical key (ornith, ornith122,
-  qwen36, agentworld, katcoder, qwen38, qwen35-2b, qwen35-4b, qwen35-9b),
-  with -8bit appended for the 8-bit width, and to the historical installer
-  spellings (ornith15, ornith15-8bit, qwen38flash, qwen38flash-8bit, ...).
-  Both scripts accept the same keys and print the same display names; the
-  list is TINYTITAN_MODEL_CHOICES in tools/tinytitan_models.sh.
+  Every row answers to the launcher's canonical key (ornith,
+  inkling-q4-k-xl-unsloth, inkling2mini) and to the historical installer
+  spelling (ornith15). Both scripts accept the same keys and print the same
+  display names; the list is TINYTITAN_MODEL_CHOICES in
+  tools/tinytitan_models.sh.
 
 Where things go
 
@@ -388,10 +293,11 @@ Where things go
   staged under $TINYTITAN_WORK_DIR (default <tools>/../.build) — for an
   installed copy that is ~/.tinytitan/src/.build.
 
-  Staging is kept only while it can save a download: the converted snapshot is
-  what makes the *other* width of the same model free, so it lives until that
-  width is installed and is removed automatically at that point.
-  `clean` applies those rules to everything at once and says what is left.
+  Staging is kept only while it can save an install: the converted snapshot is
+  what a resumed or repeated install of the same row reads, so it lives until
+  that install exists and is removed automatically at that point.
+  `clean` applies those rules to everything at once, reclaims staging a removed
+  family left behind, and says what is left.
 
   A download is refused before it starts when the staging volume or the models
   volume cannot hold it, naming both numbers and both ways out (free space, or
@@ -402,68 +308,41 @@ What a run costs
 
   The sizes in the menu are the space an install occupies. Installing also
   downloads the model's own bf16 release and stages it under
-  $TINYTITAN_WORK_DIR: about 70 GB for a 35B-A3B, which serves both widths,
-  and 360 GB per width for Qwen3.8-Flash-Next. The disk guard above names
+  $TINYTITAN_WORK_DIR: about 70 GB for the 35B-A3B. The disk guard above names
   both volumes and both numbers before anything starts.
 
 Coverage
 
-  Ornith 1.5 35B-A3B        4-bit, 8-bit
-  Ornith 1.5 122B           4-bit, 8-bit (one width per run)
-  Qwen 3.6 35B-A3B          4-bit, 8-bit
-  Qwen3.8-Flash-Next        4-bit (experts 4-bit, the rest 8-bit), 8-bit
-  Qwen-AgentWorld 35B-A3B   4-bit, 8-bit
-  KAT-Coder-V2.5-Dev 35B-A3B 4-bit, 8-bit
-  Qwen 3.5 2B / 4B / 9B     4-bit, 8-bit (CPU models)
+  Ornith 1.5 35B-A3B        4-bit
   Inkling 2 Mini / UD-Q4_K_XL (Unsloth) 4-bit (streams directly via TinyTitanRepack)
+  Inkling 2 Mini (NVFP4)    4-bit (streams directly via TinyTitanRepack)
 
 Sources
 
-  Every install is built from the model's own bf16 release, quantized here
-  (group-64 affine) by the tools in tools/ and imported by TinyTitanRepack.
-  Third-party quantizations are deliberately not used: their group sizes,
-  widths and norm conventions are theirs, and here the router, the
-  shared-expert gate, the DeltaNet gating projections and every norm stay
-  at bf16 in both widths.
+  Every install is built from the model's own release, quantized here
+  (group-64 affine) by the tools in tools/ where a converter is involved, then
+  imported by TinyTitanRepack. Third-party quantizations are deliberately not
+  used for the converted model: their group sizes, widths and norm conventions
+  are theirs, and here the router, the shared-expert gate, the DeltaNet gating
+  projections and every norm stay at bf16.
 
-  convert_qwen35moe   tools/prepare_agentworld.py --model {ornith15,qwen36,agentworld,katcoder}
-                      One ~70 GB download yields both widths, so
-                      `<name> both` installs 4-bit and 8-bit for the cost of
-                      one fetch; one width alone already converts both and
-                      keeps the other snapshot for a later run.
-  convert_qwen35moe_solo
-                      the same converter for Ornith-1.5-122B, one width per
-                      run. A 250 GB source cannot stage both snapshots (69.5
-                      and 129.8 GB) beside a 120 GB install, so the requested
-                      width converts alone, is repacked, and its snapshot is
-                      dropped. The source shards are streamed and deleted as
-                      they convert, so the fetch is repeated for the second
-                      width -- the disk is the constraint, not the link.
-  convert_qwen35      tools/prepare_qwen35.py --size {2b,4b,9b}, then
-                      TinyTitanRepack --input-snapshot. One fetch yields both
-                      widths. These are the dense models, and the only ones
-                      the CPU engine runs; the 9B is the vision-language
-                      build, converted text-only like the others.
-                      tools/repack_dense.sh re-runs the repack and the
-                      equivalence check against a retained snapshot.
-  convert             tools/prepare_qwen38.py, one 360 GB fetch per width.
-                      The quant recipe is hardcoded per width: 4-bit keeps the
-                      routed experts at 4 and moves the rest to 8 (--rest-8bit,
-                      the 4E-8R-16N hybrid); 8-bit quantizes everything at 8.
-                      The n-gram table stays fp16 and the norms and conv1d stay
-                      bf16 in both. Qwen's own FP8 build is not used either: it
-                      quantizes only the routed experts, in [128, 128] blocks
-                      that do not map onto affine group-64.
+  convert_qwen35moe   tools/prepare_agentworld.py --model ornith15
+                      the Qwen3.5-MoE bf16 release quantized one shard at a
+                      time (about a 70 GB fetch), then repacked. The source
+                      shards are deleted as they convert, so the full
+                      checkpoint is never staged.
+  repack              TinyTitanRepack streams the Inkling 2 Mini checkpoints
+                      straight into .ssdai, with no converter and no staging.
 
 USAGE
 }
 
 # What a catalogue `source` means, in words a person reads. The branch names are
-# this script's own, and `convert` alone reads as "converts a file you already
-# fetched" — which is exactly how people read it. Every row downloads first.
+# this script's own, so each one is translated rather than printed. Every row
+# downloads first.
 source_label() {
   case "$1" in
-    convert|convert_qwen35|convert_qwen35moe|convert_qwen35moe_solo)
+    convert_qwen35moe)
       printf 'download + convert' ;;
     repack)
       printf 'download + install' ;;
@@ -485,18 +364,17 @@ status() {
   done
   echo
   echo "Nothing needs fetching by hand: installing a row downloads that model's"
-  echo "pinned bf16 release and converts it here."
+  echo "pinned release and installs it here."
   echo
   local staged
   staged="$(staging_size)"
   if [[ -n "$staged" ]]; then
     echo "staging: $staged under $WORK — $(staging_names)"
-    echo "  a converted snapshot is kept until the other width is installed, so the"
-    echo "  second width needs no download; it is removed automatically at that point"
+    echo "  a converted snapshot is kept until its own install exists, so a resumed"
+    echo "  or repeated install needs no download; it is removed automatically then"
   fi
   echo "tools/install_models.sh --choose        the install menu: pick a model"
-  echo "tools/install_models.sh <name>          download, convert and install one width"
-  echo "tools/install_models.sh <name> both     4-bit and 8-bit from one download"
+  echo "tools/install_models.sh <name>          download, convert and install it"
   echo "tools/install_models.sh clean           drop staging that cannot be reused"
   echo "tools/install_models.sh --help          sources, disk sizes and env vars"
 }
@@ -509,14 +387,14 @@ status() {
 # `TinyTitanRepack --help` accepts.
 tinytitan_repack_streams() {
   case "$1" in
-    qwen36|qwen36-8bit|ornith15|ornith15-8bit|inkling-q4-k-xl-unsloth|inkling2mini) return 0 ;;
+    inkling-q4-k-xl-unsloth|inkling2mini) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 # A Mac that has only Xcode's command-line tools ships Python 3.9, below the
-# converters' 3.10 floor, and there is no Homebrew to install a newer one. Some
-# of these models do not need a converter at all, so say which command works
+# converters' 3.10 floor, and there is no Homebrew to install a newer one. The
+# two Inkling installs do not need a converter at all, so say which command works
 # instead of leaving the person at "no usable Python interpreter found".
 tinytitan_no_python_fallback() {
   local want="$1" row name dir
@@ -531,8 +409,8 @@ tinytitan_no_python_fallback() {
       echo "      .build/release/TinyTitanRepack --model $want --output models/$dir" >&2
     else
       echo "  This one is quantized here from its bf16 release by a Python" >&2
-      echo "  converter, so it does need Python 3.10+. The repacker can stream" >&2
-      echo "  qwen36 and ornith15 without any Python at all." >&2
+      echo "  converter, so it does need Python 3.10+. The two Inkling 2 Mini" >&2
+      echo "  installs stream through the repacker with no Python at all." >&2
     fi
     return 0
   done
@@ -541,9 +419,9 @@ tinytitan_no_python_fallback() {
 
 install_one() {
   local want="$1" found=0 preset_field=""
-  # The launcher's canonical keys and resolver aliases (ornith, qwen38-8bit,
-  # aw) mean the same rows as the historical catalogue keys; one shared
-  # function decides, so the two scripts cannot disagree about what a key is.
+  # The launcher's canonical keys and resolver aliases (ornith, inkling2-q4)
+  # mean the same rows as the historical catalogue keys; one shared function
+  # decides, so the two scripts cannot disagree about what a key is.
   if ! want="$(tinytitan_install_target "$want")"; then
     echo "unknown model: $1" >&2
     status >&2
@@ -554,8 +432,8 @@ install_one() {
   # without Python.
   local python=""
   for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
-    # Up to six fields on the MoE rows, four elsewhere. The preset is read here
-    # because the MoE branches address staging by it (`$WORK/<preset>-affine-*`);
+    # Up to five fields on the MoE row, four elsewhere. The preset is read here
+    # because the MoE branch addresses staging by it (`$WORK/<preset>-affine-*`);
     # it used to be left unset, which worked only while every key equalled its
     # preset by coincidence.
     IFS='|' read -r name dir width source preset_field _ <<<"$row"
@@ -565,18 +443,9 @@ install_one() {
       python="$(tinytitan_resolve_python)" || { tinytitan_no_python_fallback "$want"; return 1; }
     fi
     if [[ -d "$MODELS/$dir" ]]; then
-      # A dense install from before this project repacked them is an affine
-      # snapshot: the directory exists but carries no manifest and no receipt.
-      # Returning here would leave it that way forever, because "the directory
-      # exists" is what this check means. Fall through and let the branch
-      # repack it, which is the only way it becomes verifiable in place.
-      if [[ "$source" == convert_qwen35 && ! -f "$MODELS/$dir/manifest.json" ]]; then
-        echo "$name is an affine snapshot; repacking it as .ssdai"
-      else
-        echo "$name is already installed at models/$dir"
-        cleanup_staging "$name" keep
-        return 0
-      fi
+      echo "$name is already installed at models/$dir"
+      cleanup_staging "$name"
+      return 0
     fi
 
     # --- can this download finish? -----------------------------------------
@@ -585,33 +454,23 @@ install_one() {
     # quarter more on the staging volume for the quantized snapshot's overhead,
     # and the shards being streamed. A Qwen3.5-MoE conversion keeps twenty
     # fetchers busy (~90 GB in flight for a 35B-A3B) and a few finished shards
-    # waiting for the converter; with both widths' snapshots also on the
-    # volume, 104 GB is the upper bound on everything the source shards can
-    # occupy. Every other source streams one shard at a time (12 GB). A
-    # snapshot that is already on disk is not fetched again, so it is not
-    # counted twice. An unreadable df is not a limit: require_gb says nothing
-    # then, which is the same rule the runtime's own guard follows.
+    # waiting for the converter, so 104 GB is the upper bound on everything the
+    # source shards can occupy. A direct repack streams straight into the
+    # install and stages nothing. A snapshot that is already on disk is not
+    # fetched again, so it is not counted twice. An unreadable df is not a
+    # limit: require_gb says nothing then, which is the same rule the runtime's
+    # own guard follows.
     if [[ "${TINYTITAN_SKIP_DISK_CHECK:-0}" != "1" ]]; then
       local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
-      local stream_gb=12 stage_need=""
-      [[ "$source" == convert_qwen35moe ]] && stream_gb=104
+      local stream_gb=104 stage_need=""
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
-        while IFS=: read -r _kind probe; do
+        while IFS= read -r probe; do
           [[ -n "$probe" && -e "$probe" ]] && snap_exists=1
-        done < <(row_staging_dirs "$name")
+        done < <(row_staging_paths "$name")
         [[ -d "$MODELS/$dir" ]] && install_exists=1
         if [[ "$source" == repack ]]; then
-          # Direct repack streams straight into $MODELS/$dir without staging.
           stage_need=""
-        elif [[ "$source" == convert_qwen35moe_solo ]]; then
-          # The solo path consumes its source shards as the install is written
-          # (--consume-snapshot), so the peak is the snapshot plus the
-          # bytes written before the first unlink -- not the snapshot plus the
-          # whole install. 24 GB is the pre-unlink headroom (resident body,
-          # four layer files and the reserve) with two fetchers in flight.
-          stage_need="$(awk -v s="$size_gb" -v have="$snap_exists" \
-               'BEGIN { printf "%d", have ? 24 : s + 24 }')"
         else
           stage_need="$(awk -v s="$size_gb" -v have="$snap_exists" -v stream="$stream_gb" \
                'BEGIN { printf "%d", have ? 2 : s * 1.25 + stream }')"
@@ -619,18 +478,8 @@ install_one() {
         require_gb "the staging volume ($WORK)" "$WORK" "$stage_need" \
           || work_ok=0
         local model_need
-        if [[ "$source" == convert_qwen35moe_solo ]]; then
-          # The solo import consumes its snapshot as the install is written, so
-          # the install is not a second full copy: the repacker charges the
-          # output less the shard bytes that import will release. 24 GB is the
-          # pre-unlink headroom plus the reserve; requiring s + 3 here refused
-          # a build that had 123 GB free for a 123 GB install and a 130 GB
-          # snapshot.
-          if (( install_exists )); then model_need=2; else model_need=24; fi
-        else
-          model_need="$(awk -v s="$size_gb" -v have="$install_exists" \
-               'BEGIN { printf "%d", have ? 2 : s + 3 }')"
-        fi
+        model_need="$(awk -v s="$size_gb" -v have="$install_exists" \
+             'BEGIN { printf "%d", have ? 2 : s + 3 }')"
         require_gb "the models volume ($MODELS)" "$MODELS" "$model_need" \
           || models_ok=0
         if (( ! work_ok || ! models_ok )); then
@@ -655,189 +504,35 @@ install_one() {
           "$BIN" --model "$name" --output "$MODELS/$dir"
         fi
         ;;
-      convert)
-        # Qwen's own bf16 release, quantized one shard at a time by
-        # tools/prepare_qwen38.py (a 360 GB fetch per width), then repacked.
-        # The quant recipe is hardcoded per width (see the CATALOGUE comment):
-        # at 4 bits the routed experts keep the build width and the rest moves
-        # to 8, so the snapshot is the 4E-8R-16N hybrid and the install is
-        # named for it; at 8 bits everything quantised is 8.
-        [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
-        local rest8_arg="" model_id="qwen3.8-flash-next"
-        if [[ "$width" == 4 ]]; then
-          rest8_arg="--rest-8bit"
-          model_id="qwen3.8-flash-next-8bitrest"
-        fi
-        # A mirror: HF_ENDPOINT is the Hub's own variable, and the converter
-        # fetches the checkpoint and its small JSON files from it when set.
-        local endpoint_arg=""
-        if [[ -n "${HF_ENDPOINT:-}" ]]; then endpoint_arg="--endpoint=${HF_ENDPOINT}"; fi
-        if [[ ! -f "$WORK/qwen38-affine-${width}bit/model.safetensors.index.json" ]]; then
-          echo "downloading and converting $name (360 GB fetch) -> $WORK/qwen38-affine-${width}bit"
-          # A run killed mid-conversion resumes: finished output shards are kept
-          # and the checkpoint shards they came from are not fetched again.
-          "$python" "$ROOT/tools/prepare_qwen38.py" --bits "$width" ${rest8_arg:+"$rest8_arg"} \
-              --output "$WORK/qwen38-affine-${width}bit" \
-              --work "$WORK/qwen38-shards" ${endpoint_arg:+"$endpoint_arg"} || return 1
-        fi
-        # `--share-ngram-table` hardlinks the 102 GB table from the staging
-        # snapshot into the install, which only works on one filesystem. With
-        # TINYTITAN_MODELS_DIR on another volume, leave the flag off so the
-        # repack copies it and its own disk-space check is the one that applies.
-        local share_arg=""
-        mkdir -p "$MODELS" || return 1
-        local staging_device models_device
-        staging_device="$(stat -f '%d' "$WORK/qwen38-affine-${width}bit" 2>/dev/null || echo)"
-        models_device="$(stat -f '%d' "$MODELS" 2>/dev/null || echo)"
-        if [[ -n "$staging_device" && "$staging_device" == "$models_device" ]]; then
-          share_arg="--share-ngram-table"
-        else
-          echo "note: staging and $MODELS are on different filesystems;"
-          echo "      ngram_table.bin will be copied rather than hardlinked"
-        fi
-        echo "installing $name -> models/$dir"
-        "$BIN" --input-snapshot "$WORK/qwen38-affine-${width}bit" \
-            --model-id "$model_id" ${share_arg:+"$share_arg"} --output "$MODELS/$dir"
-        ;;
       convert_qwen35moe)
-        # Qwen's own bf16 release, quantized one shard at a time by
+        # The model's own bf16 release, quantized one shard at a time by
         # tools/prepare_agentworld.py (about 70 GB fetched; a source shard is
-        # deleted once its output reaches a finished shard, so the sources
-        # since the last 4 GiB flush -- ~14 GB of bf16 at this width -- stay
-        # beside the fetch-ahead shards), then repacked. `--bits 4 8` writes
-        # *both* widths from that one download, to
-        # `$WORK/<preset>-affine-{4,8}bit`, so neither width may be thrown
-        # away: the snapshot is kept until both installs exist, and the other
-        # width then costs no fetch at all.
+        # deleted once its output reaches a finished shard, so the sources since
+        # the last 4 GiB flush -- ~14 GB of bf16 at this width -- stay beside the
+        # fetch-ahead shards), then repacked. The snapshot is kept until the
+        # install exists, so a failed or repeated run needs no new fetch.
         [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
-        local preset="${preset_field:-${name%-8bit}}" model_id
+        local preset="${preset_field:?catalogue row has no converter preset}" model_id
         case "$preset" in
-          agentworld) model_id="qwen-agentworld" ;;
-          katcoder)   model_id="kat-coder-v2.5" ;;
-          qwen36)     model_id="qwen3.6-35b-a3b" ;;
-          ornith15)   model_id="ornith-1.5-35b-a3b" ;;
+          ornith15) model_id="ornith-1.5-35b-a3b" ;;
+          *) echo "unknown MoE preset: $preset" >&2; return 2 ;;
         esac
-        # Reuse whichever snapshot already exists, in either spelling: the
-        # paired `-8bit` form this script writes, or the plain directory an
-        # earlier manual `--bits 8` run leaves behind. Without this second
-        # check a model already converted by hand re-downloads 70 GB.
         local snap="$WORK/${preset}-affine-${width}bit"
-        if [[ ! -f "$snap/model.safetensors.index.json" \
-              && "$width" == 8 && -f "$WORK/${preset}-affine/model.safetensors.index.json" ]]; then
-          snap="$WORK/${preset}-affine"
-        fi
         if [[ ! -f "$snap/model.safetensors.index.json" ]]; then
-          echo "downloading and converting $preset (~70 GB fetch, both widths) -> $WORK/${preset}-affine-{4,8}bit"
-          "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" --bits 4 8 \
-              --output "$WORK/${preset}-affine" \
+          echo "downloading and converting $preset (~70 GB fetch) -> $snap"
+          "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" --bits "$width" \
+              --output "$snap" \
               --work "$WORK/${preset}-shards" || return 1
-          snap="$WORK/${preset}-affine-${width}bit"
         fi
         echo "installing $name -> models/$dir"
         "$BIN" --input-snapshot "$snap" \
             --model-id "$model_id" --output "$MODELS/$dir"
         ;;
-      convert_qwen35moe_solo)
-        # The 122B path. One width per run, because the two snapshots plus an
-        # install cannot coexist on a 1 TB Mac (69.5 + 129.8 + 120 GB). The
-        # converter streams the 250 GB source with four fetchers and deletes a
-        # shard once every tensor converted from it is in a finished output
-        # shard (four per-expert sources can still be held in the fused buffer,
-        # see `FusedExperts.hold`), so the fetch is the only thing that repeats
-        # -- and a kill before the first flush now resumes from the sources on
-        # disk instead of re-fetching them. A width that was already converted
-        # by hand is reused rather than fetched again; a partial snapshot is
-        # resumed by the converter.
-        [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
-        local preset="${preset_field:-${name%-8bit}}" model_id
-        case "$preset" in
-          ornith122) model_id="ornith-1.5-122b" ;;
-          *) echo "unknown large MoE preset: $preset" >&2; return 2 ;;
-        esac
-        local snap="$WORK/${preset}-affine-${width}bit"
-        if [[ ! -f "$snap/model.safetensors.index.json" ]]; then
-          echo "downloading and converting $preset at ${width}-bit (~250 GB fetch) -> $snap"
-          TINYTITAN_FETCHERS="${TINYTITAN_FETCHERS:-4}" \
-          TINYTITAN_PREFETCH_DEPTH="${TINYTITAN_PREFETCH_DEPTH:-2}" \
-            "$python" "$ROOT/tools/prepare_agentworld.py" --model "$preset" --bits "$width" \
-              --output "$snap" --work "$WORK/${preset}-shards" || return 1
-        fi
-        echo "installing $name -> models/$dir"
-        # The source snapshot is consumed as the install is written: 130 GB of
-        # snapshot + a ~125 GB install cannot coexist on this class of Mac.
-        "$BIN" --input-snapshot "$snap" --consume-snapshot \
-            --model-id "$model_id" --output "$MODELS/$dir"
-        ;;
-      convert_qwen35)
-        # The dense Qwen 3.5 models, from Qwen's own bf16 release. One
-        # download yields both widths, so the other width installs without a
-        # second fetch: only the converted *staging* directory is per-width,
-        # the source shards in $WORK/<preset>-shards are shared.
-        #
-        # Convert, then repack, then drop the staging directory. The snapshot
-        # the converter writes is an intermediate, not the install: every
-        # model this project serves is a .ssdai directory with a manifest and
-        # a path-bound receipt, and a snapshot has neither. Keeping the
-        # intermediate would double the disk for a 9B and buy nothing, since
-        # it is reproducible from the cached shards.
-        #
-        # The receipt is bound to the absolute output path, so the repack must
-        # write straight into models/. Nothing here may move the directory
-        # afterwards.
-        local preset="${name%-8bit}" size_key model_id
-        case "$preset" in
-          qwen35-2b) size_key=2b; model_id="qwen3.5-2b" ;;
-          qwen35-4b) size_key=4b; model_id="qwen3.5-4b" ;;
-          qwen35-9b) size_key=9b; model_id="qwen3.5-9b" ;;
-          *) echo "unknown Qwen 3.5 size: $preset" >&2; return 2 ;;
-        esac
-        [[ -x "$BIN" ]] || { echo "build TinyTitanRepack first: swift build -c release" >&2; return 1; }
-        # The 9B checkpoint is the vision-language build; the converter drops
-        # the model.visual.* tower and writes the text model, so the install
-        # is text-only like every other model here.
-        local stage="$WORK/qwen35-${size_key}-affine-${width}bit"
-        if [[ ! -f "$stage/config.json" ]]; then
-          if [[ -f "$MODELS/$dir/config.json" ]]; then
-            # A legacy snapshot: move it into the converter's staging area
-            # rather than converting it again. It is the same bytes the
-            # converter would fetch and quantize, and it is already here.
-            echo "staging the existing snapshot -> $stage"
-            rm -rf "$stage"
-            mv "$MODELS/$dir" "$stage"
-          else
-            echo "downloading and converting Qwen 3.5 ${size_key} ${width}-bit -> $stage"
-            "$python" "$ROOT/tools/prepare_qwen35.py" --size "$size_key" --bits "$width" \
-                --output "$stage" \
-                --work "$WORK/${preset}-shards" || return 1
-          fi
-        fi
-        # The receipt is bound to the absolute output path below, and it is
-        # written by the repack, so the destination must be empty first and
-        # must never be moved afterwards.
-        echo "repacking $stage -> models/$dir"
-        # `${var:?}` because an unset MODELS or dir would make this `rm -rf /`
-        # or `rm -rf <models>`; the staging path is checked before it is used.
-        rm -rf "${MODELS:?}/${dir:?}"
-        "$BIN" --input-snapshot "$stage" --model-id "$model_id" \
-            --output "$MODELS/$dir" || return 1
-        "$BIN" --verify-install --input-ssdai "$MODELS/$dir" || return 1
-        # The staging snapshot is an intermediate and is reproducible from the
-        # cached shards, so it does not outlive the install. Use
-        # tools/repack_dense.sh instead if you want it kept for the
-        # equivalence gate.
-        rm -rf "$stage"
-        echo "installed $name -> models/$dir (.ssdai)"
-        ;;
       unsupported)
-        # No catalogue row uses this today, and the message it used to carry was
-        # false: it said 8-bit Qwen3.8-Flash-Next "cannot execute -- the runtime
-        # refuses it at load", which predates `SlotGEMV` giving the
-        # hyper-connection, PLE and QSA-indexer projections both a 4- and an
-        # 8-bit path. `validateFamilyQuantSupport` now refuses only a width
-        # neither GEMV implements, and the indexer's bf16 prefill branch exists.
-        # Kept as a generic refusal rather than deleted, so wiring a genuinely
-        # unsupported row here later fails loudly instead of falling through this
-        # switch and reporting a successful install it never performed.
+        # No catalogue row uses this branch. It is kept as a generic refusal
+        # rather than deleted, so wiring a row the runtime cannot execute fails
+        # loudly instead of falling through this switch and reporting a
+        # successful install it never performed.
         cat <<EOF
 $name cannot be run by this installer.
 
@@ -849,43 +544,12 @@ EOF
         return 1
         ;;
     esac
-    # Installed. Drop whatever staging can no longer save a download, and say
-    # what is kept and why — a snapshot a second width will reuse, or nothing.
-    cleanup_staging "$name" keep
+    # Installed. Drop this row's staging: nothing else consumes it, and the
+    # install it serves now exists.
+    cleanup_staging "$name"
     return 0
   done
   [[ "$found" == 1 ]] || { echo "unknown model: $want" >&2; status >&2; return 2; }
-}
-
-# Install one model's 4-bit and 8-bit builds from a single download.
-#
-# Only the Qwen3.5-MoE rows have a sibling width; for anything else there is
-# nothing to pair with, so say so rather than silently installing one width.
-install_both() {
-  local want="$1" row name dir width source preset sibling
-  if ! want="$(tinytitan_install_target "$want")"; then
-    echo "unknown model: $1" >&2
-    status >&2
-    return 2
-  fi
-  for row in "${CATALOGUE[@]+"${CATALOGUE[@]}"}"; do
-    IFS='|' read -r name dir width source preset sibling <<<"$row"
-    [[ "$name" == "$want" ]] || continue
-    if [[ "$source" != convert_qwen35moe || -z "$sibling" ]]; then
-      echo "$want has no second width to pair with; install it by name instead" >&2
-      return 2
-    fi
-    # The 4-bit row carries the sibling; install it first so the one download
-    # converts into both snapshots, then the 8-bit install reuses what is on
-    # disk. `install_one` finds it because it checks both snapshot spellings.
-    echo "installing $want at both widths from one download"
-    install_one "$name" || return 1
-    install_one "$sibling" || return 1
-    return 0
-  done
-  echo "unknown model: $want" >&2
-  status >&2
-  return 2
 }
 
 # Install every model at one width, and report on all of them.
@@ -893,11 +557,10 @@ install_both() {
 # The batch used to be the dispatcher's own loop, whose body ended in
 # `[[ "$w" == 4 ]] && install_one "$n"`. A loop's status is its last body
 # statement's, so the verdict was the *final catalogue row's width test*: with an
-# 8-bit row last, `--all-4bit` exited 1 after installing everything and
-# `--all-8bit` exited 0 whenever the last 8-bit model happened to work, however
-# many before it had been refused (AUD-253). One refused model is enough to make
-# the run incomplete, so every row's status is collected and the count of what
-# was missed is what leaves the script.
+# 8-bit row last, the run exited 1 after installing everything. One refused model
+# is enough to make the run incomplete, so every row's status is collected and
+# the count of what was missed is what leaves the script (AUD-253). Every shipped
+# row is 4-bit today, so the width is a parameter the argument still names.
 install_width() {
   local want="$1" row name _ width
   local ran=() missed=()
@@ -951,7 +614,7 @@ choose_model() {
   echo
   printf 'Choice [1-%d] (Enter for %s): ' "$count" "$default_label"
   # An EOF is not an answer. Treating it as "Enter" started the recommended
-  # 36.9 GB download for a caller that never chose anything (found 2026-09-24 by
+  # download for a caller that never chose anything (found 2026-09-24 by
   # closing stdin on `--choose`); only a real empty line takes the default.
   if ! read -r reply; then
     echo
@@ -988,12 +651,5 @@ case "${1:-}" in
                  fi
                  choose_model ;;
   --all-4bit)    install_width 4 ;;
-  --all-8bit)    install_width 8 ;;
-  # `both` installs a model's 4-bit and 8-bit builds from ONE download. The
-  # MoE checkpoints convert both widths in a single pass, so asking for them
-  # one at a time would fetch the same ~70 GB twice; this is the cheap way and
-  # the one the help text points at.
-  both)          [[ -n "${2:-}" ]] || { echo "usage: tools/install_models.sh <model> both" >&2; exit 2; }
-                 install_both "$2" ;;
-  *)             if [[ "${2:-}" == "both" ]]; then install_both "$1"; else install_one "$1"; fi ;;
+  *)             install_one "$1" ;;
 esac

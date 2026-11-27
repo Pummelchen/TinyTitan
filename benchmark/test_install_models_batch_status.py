@@ -1,22 +1,21 @@
-"""Gates the exit status of `tools/install_models.sh --all-4bit|--all-8bit`.
+"""Gates the exit status of `tools/install_models.sh --all-4bit`.
 
-Both batch modes loop over `CATALOGUE` and their body ended in
-`[[ "$w" == 4 ]] && install_one "$n"`, so the status the script returns is that
-last row's *width test*, not the work: the final catalogue row is 8-bit, which
-makes `--all-4bit` exit 1 after installing every 4-bit model with nothing
-failing, and makes `--all-8bit` exit 0 as long as the last 8-bit model happened
-to install — whatever happened to the seven before it. Measured on this
-machine's /bin/bash 3.2.57:
+The batch loops over `CATALOGUE` and its body used to end in
+`[[ "$w" == 4 ]] && install_one "$n"`, so the status the script returns was that
+last row's *width test*, not the work: with an 8-bit row last, `--all-4bit` exited
+1 after installing every 4-bit model with nothing failing. Measured on this
+machine's /bin/bash 3.2.57 against the then-20-row catalogue:
 
     --all-8bit, qwen38flash-8bit failing -> 8 installed,  EXIT 0
     --all-8bit, nothing failing          -> 9 installed,  EXIT 0
     --all-4bit, ornith15 failing         -> 10 installed, EXIT 1
     --all-4bit, nothing failing          -> 12 installed, EXIT 1
 
-`--all-4bit` is the loud half of the defect and `--all-8bit` is the silent one:
-a gated checkpoint that refuses without an `HF_TOKEN` is a per-row failure, so
-one row can fail and the verdict still read as success. Both spellings are in
-the user-facing installation guide.
+`--all-4bit` is the loud half of the defect and `--all-8bit` was the silent one:
+a gated checkpoint that refuses without an `HF_TOKEN` is a per-row failure, so one
+row can fail and the verdict still read as success. Every shipped row is 4-bit
+now (TT-142, 2026-11-27), so `--all-8bit` is gone with the 8-bit rows and the rule
+is pinned on the one batch mode that remains.
 
 These tests drive the dispatcher's own branch text — extracted verbatim from the
 script, so the instrument cannot drift away from what the script does — inside a
@@ -41,9 +40,8 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "tools" / "install_models.sh"
 
-# Four-bit rows: 11 (9 Qwen/Ornith + inkling2-gguf-q4 + inkling2-nvfp4);
-# eight-bit rows: 9.
-WIDTHS = {"4": 11, "8": 9}
+# Three 4-bit rows and no 8-bit row: the shipped matrix.
+WIDTHS = {"4": 3}
 ROWS = re.compile(r'^\s*"([a-z0-9-]+)\|[^|]*\|([48])\|', re.M).findall(SCRIPT.read_text())
 CATALOGUE_WIDTHS = {name: width for name, width in ROWS}
 
@@ -112,31 +110,22 @@ class BatchStatusTests(unittest.TestCase):
     """The verdict must be about every install the operator named."""
 
     def test_a_batch_that_missed_a_model_does_not_report_success(self) -> None:
-        # (mode, width): the row chosen is a real one, and it is not the last row
-        # of its width, which is the only row whose status used to reach the exit.
-        failing = "qwen38flash-8bit"
-        result = run_batch("8", (failing,))
+        # The row chosen is a real one, and it is not the last row of its width,
+        # which is the only row whose status used to reach the exit.
+        failing = "inkling-q4-k-xl-unsloth"
+        result = run_batch("4", (failing,))
         self.assertIn(failing, result["attempted"], "the batch never tried the row")
         self.assertNotEqual(result["status"], 0, result["output"])
         self.assertIn(failing, result["output"], "the verdict never named what it missed")
 
-    def test_a_batch_that_installed_everything_reports_success(self) -> None:
-        # Passes before the fix as well: it pins the other direction, that a clean
-        # sweep must not turn into a failure once the loop starts reporting the work.
-        result = run_batch("8")
-        self.assertEqual(result["status"], 0, result["output"])
-
     def test_a_complete_4bit_sweep_reports_success(self) -> None:
+        # Also pins the other direction, that a clean sweep must not turn into a
+        # failure once the loop starts reporting the work.
         result = run_batch("4")
         self.assertEqual(result["status"], 0, result["output"])
 
-    def test_a_4bit_batch_that_missed_a_model_does_not_report_success(self) -> None:
-        result = run_batch("4", ("ornith15",))
-        self.assertNotEqual(result["status"], 0, result["output"])
-        self.assertIn("ornith15", result["output"])
-
     def test_the_filter_still_runs_exactly_the_models_of_its_width(self) -> None:
-        for mode in ("4", "8"):
+        for mode in WIDTHS:
             with self.subTest(width=mode):
                 names = run_batch(mode)["attempted"]
                 expected = sorted(name for name, width in CATALOGUE_WIDTHS.items() if width == mode)

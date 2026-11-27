@@ -46,37 +46,20 @@ TINYTITAN_CLIENTS=(
 # `label` is what the menu prints, and it must equal the label
 # `tinytitan_resolve_model` gives the same model: the installer menu and the
 # launcher's fallback list are two views of one catalogue, and
-# `test_launcher_install` asserts the labels and the key sets agree. Both
-# scripts accept the launcher's canonical base keys (ornith, qwen38) and these
-# width-suffixed targets through `tinytitan_install_target`.
+# `test_launcher_install` asserts the labels and the key sets agree. The rows here
+# are the shipped matrix and nothing else (TT-142, 2026-11-27): a family that
+# leaves the matrix leaves this list, the installer's CATALOGUE and the registry
+# together.
 #
 # The sizes are **installed** sizes, not downloads: a MoE install is built from a
-# ~70 GB bf16 fetch and the widths share it, so the number a person has to have
-# free is this one. The first row is the default, and it is the model every
-# release is verified against.
+# ~70 GB bf16 fetch, so the number a person has to have free is this one. The
+# first row is the default, and it is the model every release is verified against.
 #
 # Kept here rather than in the installer so the installer, the model installer
 # and any future menu cannot disagree about what exists or how big it is.
 # shellcheck disable=SC2034  # consumed by install_models.sh and the installer's menu
 TINYTITAN_MODEL_CHOICES=(
-  "ornith15-8bit|Ornith 1.5 35B-A3B|8|36.9|Recommended. Best measured coding and tooling results."
-  "ornith15|Ornith 1.5 35B-A3B|4|19.5|The same model at 4-bit: half the disk, faster decode."
-  "qwen36-8bit|Qwen 3.6 35B-A3B|8|37.8|The other 35B family, at 8-bit."
-  "qwen36|Qwen 3.6 35B-A3B|4|19.5|The other 35B family, at 4-bit."
-  "agentworld-8bit|Qwen-AgentWorld 35B-A3B|8|41.0|Tuned for agentic tool use."
-  "agentworld|Qwen-AgentWorld 35B-A3B|4|20.0|Agentic tool use at 4-bit."
-  "katcoder-8bit|KAT-Coder-V2.5-Dev 35B-A3B|8|38.0|Coding-specialised Qwen 3.6 fine-tune."
-  "katcoder|KAT-Coder-V2.5-Dev 35B-A3B|4|20.0|Coding-specialised, at 4-bit."
-  "qwen35-4b|Qwen 3.5 4B|4|3.7|Dense and small: the quickest way to see it work, and it runs on the CPU too."
-  "qwen35-4b-8bit|Qwen 3.5 4B|8|5.3|Dense 4B at 8-bit."
-  "qwen35-9b|Qwen 3.5 9B|4|7.5|Dense 9B: more capable, still light on disk."
-  "qwen35-9b-8bit|Qwen 3.5 9B|8|11.0|Dense 9B at 8-bit."
-  "qwen35-2b|Qwen 3.5 2B|4|2.3|Dense 2B: seconds to load. Weak at arithmetic and long instructions."
-  "qwen35-2b-8bit|Qwen 3.5 2B|8|2.2|Dense 2B at 8-bit."
-  "ornith122-8bit|Ornith 1.5 122B|8|123.0|The 122B at 8-bit. Highest Terminal-Bench 2.1 score here; slowest decode."
-  "ornith122|Ornith 1.5 122B|4|66.0|The 122B at 4-bit: half the disk, and about twice the decode of 8-bit."
-  "qwen38flash|Qwen3.8-Flash-Next 125B-A6B|4|163.0|Routed experts 4-bit, every resident tensor 8-bit (the 4/8/16 recipe). The largest model, and the most disk."
-  "qwen38flash-8bit|Qwen3.8-Flash-Next 125B-A6B|8|220.0|The largest model at 8-bit."
+  "ornith15|Ornith 1.5 35B-A3B|4|19.5|Recommended. The shipped 35B-A3B at 4-bit; the model every release is verified against."
   "inkling-q4-k-xl-unsloth|Inkling 2 Mini UD-Q4_K_XL (Unsloth)|4|16.5|Unsloth UD-Q4_K_XL (Q8 resident, faster). Streams directly via TinyTitanRepack."
   "inkling2mini|Inkling 2 Mini|4|18.2|Original Hugging Face checkpoint (BF16 resident). Streams directly via TinyTitanRepack."
 )
@@ -137,6 +120,10 @@ tinytitan_coder_client_ids() {
 # (the engine message names it). The catalog is still the better source -- it
 # reads all three off the install -- and the fallback is only reached without
 # it.
+#
+# Only the shipped matrix is resolvable (TT-142, 2026-11-27). A key whose family
+# left the tree is refused by name rather than resolved onto a stem with no
+# install behind it.
 tinytitan_resolve_model() {
   case "${1:-}" in
     ornith|ornith15|ornith1.5)
@@ -145,64 +132,6 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_LABEL="Ornith 1.5 35B-A3B"
       TINYTITAN_MODEL_FAMILY=qwen36
       TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    ornith122|ornith-1.5-122b|ornith1.5-122b)
-      TINYTITAN_MODEL_KEY=ornith122
-      TINYTITAN_MODEL_STEM="ornith-1.5_122B"
-      TINYTITAN_MODEL_LABEL="Ornith 1.5 122B"
-      TINYTITAN_MODEL_FAMILY=qwen36
-      TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    qwen36|qwen3.6)
-      TINYTITAN_MODEL_KEY=qwen36
-      TINYTITAN_MODEL_STEM="qwen3.6_35B_A3B"
-      TINYTITAN_MODEL_LABEL="Qwen 3.6 35B-A3B"
-      TINYTITAN_MODEL_FAMILY=qwen36
-      TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    agentworld|aw)
-      TINYTITAN_MODEL_KEY=agentworld
-      TINYTITAN_MODEL_STEM="qwen-agentworld_35B_A3B"
-      TINYTITAN_MODEL_LABEL="Qwen-AgentWorld 35B-A3B"
-      TINYTITAN_MODEL_FAMILY=qwen36
-      TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    katcoder|kat|kat-coder)
-      TINYTITAN_MODEL_KEY=katcoder
-      TINYTITAN_MODEL_STEM="kat-coder-v2.5_35B_A3B"
-      TINYTITAN_MODEL_LABEL="KAT-Coder-V2.5-Dev 35B-A3B"
-      TINYTITAN_MODEL_FAMILY=qwen36
-      TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    qwen38|qwen3.8|qwen38flash)
-      TINYTITAN_MODEL_KEY=qwen38
-      TINYTITAN_MODEL_STEM="qwen3.8-flash-next_125B_A6B"
-      TINYTITAN_MODEL_LABEL="Qwen3.8-Flash-Next 125B-A6B"
-      TINYTITAN_MODEL_FAMILY=qwen38flash
-      TINYTITAN_MODEL_ENGINES=gpu
-      TINYTITAN_MODEL_THINKING="off,low,medium,xhigh" ;;
-    # The dense models: the one shape both engines implement, GPU by default.
-    qwen35-2b|qwen3.5-2b)
-      TINYTITAN_MODEL_KEY=qwen35-2b
-      TINYTITAN_MODEL_STEM="qwen3.5_2B"
-      TINYTITAN_MODEL_LABEL="Qwen 3.5 2B"
-      TINYTITAN_MODEL_FAMILY=qwen3_5_dense
-      TINYTITAN_MODEL_ENGINES="gpu,cpu"
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    qwen35-4b|qwen3.5-4b)
-      TINYTITAN_MODEL_KEY=qwen35-4b
-      TINYTITAN_MODEL_STEM="qwen3.5_4B"
-      TINYTITAN_MODEL_LABEL="Qwen 3.5 4B"
-      TINYTITAN_MODEL_FAMILY=qwen3_5_dense
-      TINYTITAN_MODEL_ENGINES="gpu,cpu"
-      TINYTITAN_MODEL_THINKING="off,on" ;;
-    qwen35-9b|qwen3.5-9b)
-      # shellcheck disable=SC2034  # read by callers of tinytitan_resolve_model
-      TINYTITAN_MODEL_KEY=qwen35-9b
-      TINYTITAN_MODEL_STEM="qwen3.5_9B"
-      TINYTITAN_MODEL_LABEL="Qwen 3.5 9B"
-      TINYTITAN_MODEL_FAMILY=qwen3_5_dense
-      TINYTITAN_MODEL_ENGINES="gpu,cpu"
       TINYTITAN_MODEL_THINKING="off,on" ;;
     inkling-q4-k-xl-unsloth|inkling_Q4_K_XL_Unsloth|inkling_q4_k_xl_unsloth|inkling2-ud-q4-k-xl-unsloth|inkling2-gguf-q4|inkling2-q4|inkling-2-mini-gguf-q4)
       TINYTITAN_MODEL_KEY=inkling-q4-k-xl-unsloth
@@ -220,7 +149,7 @@ tinytitan_resolve_model() {
       TINYTITAN_MODEL_ENGINES=gpu
       TINYTITAN_MODEL_THINKING="off,low,medium,high,xhigh" ;;
     *)
-      echo "unknown AI model: ${1:-} (ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b|inkling-q4-k-xl-unsloth|inkling2mini)" >&2
+      echo "unknown AI model: ${1:-} (ornith|inkling-q4-k-xl-unsloth|inkling2mini)" >&2
       return 2 ;;
   esac
 }
@@ -252,24 +181,22 @@ tinytitan_install_dirname() {
 
 # tinytitan_install_key <stem> <4|8> -> the install_models.sh target for it.
 #
-# The launcher names a model by its runtime stem (`kat-coder-v2.5_35B_A3B`) and
-# the installer is addressed by its own catalogue keys (`katcoder`,
-# `katcoder-8bit`). This is the one place those two spellings meet, so the
-# launcher can fetch a model that is not on disk yet; `test_launcher_install`
-# asserts every key returned here exists in TINYTITAN_MODEL_CHOICES, which is
-# what keeps the two lists from drifting apart.
+# The launcher names a model by its runtime stem (`ornith-1.5_35B_A3B`) and the
+# installer is addressed by its own catalogue keys (`ornith15`). This is the one
+# place those two spellings meet, so the launcher can fetch a model that is not
+# on disk yet; `test_launcher_install` asserts every key returned here exists in
+# TINYTITAN_MODEL_CHOICES, which is what keeps the two lists from drifting apart.
+#
+# Every row in the shipped matrix is a single 4-bit install (TT-142,
+# 2026-11-27), so a width with no catalogue row returns 1 rather than inventing
+# `<key>-8bit`: the launcher reads that refusal to choose the width that does
+# exist.
 tinytitan_install_key() {
-  local key
   case "${1:-}" in
-    ornith-1.5_35B_A3B)            key=ornith15 ;;
-    ornith-1.5_122B)               key=ornith122 ;;
-    qwen3.6_35B_A3B)               key=qwen36 ;;
-    qwen-agentworld_35B_A3B)       key=agentworld ;;
-    kat-coder-v2.5_35B_A3B)        key=katcoder ;;
-    qwen3.8-flash-next_125B_A6B)   key=qwen38flash ;;
-    qwen3.5_2B)                    key=qwen35-2b ;;
-    qwen3.5_4B)                    key=qwen35-4b ;;
-    qwen3.5_9B)                    key=qwen35-9b ;;
+    ornith-1.5_35B_A3B)
+      [[ "${2:-4}" == "4" ]] || return 1
+      printf '%s\n' "ornith15"
+      return 0 ;;
     inkling-2-mini_GGUF-Q4)
       [[ "${2:-4}" == "4" ]] || return 1
       printf '%s\n' "inkling-q4-k-xl-unsloth"
@@ -280,18 +207,16 @@ tinytitan_install_key() {
       return 0 ;;
     *) return 1 ;;
   esac
-  [[ "${2:-4}" == "8" ]] && key="$key-8bit"
-  printf '%s\n' "$key"
 }
 
 # tinytitan_install_target <key> -> the install_models.sh catalogue key for any
-# spelling either script accepts: a catalogue key itself (ornith15-8bit,
-# qwen38flash), a launcher canonical key (ornith, qwen38), or a resolver alias
-# (aw, kat, qwen3.5-4b), each optionally carrying an -8bit width suffix.
-# Derived from the shared resolver and the stem->key map above rather than a
-# second alias table, so the installer and the launcher cannot drift apart:
-# both accept exactly the keys TINYTITAN_ALL_MODELS and TINYTITAN_MODEL_CHOICES
-# describe. Returns 1 for a key neither list carries.
+# spelling either script accepts: a catalogue key itself (ornith15), a launcher
+# canonical key (ornith), or a resolver alias (inkling2-q4), each optionally
+# carrying an -8bit width suffix. Derived from the shared resolver and the
+# stem->key map above rather than a second alias table, so the installer and the
+# launcher cannot drift apart: both accept exactly the keys
+# TINYTITAN_ALL_MODELS and TINYTITAN_MODEL_CHOICES describe. Returns 1 for a key
+# neither list carries.
 tinytitan_install_target() {
   local key="${1:-}" base bits entry
   for entry in "${TINYTITAN_MODEL_CHOICES[@]+"${TINYTITAN_MODEL_CHOICES[@]}"}"; do
@@ -368,7 +293,7 @@ tinytitan_model_port() {
 # Every model this checkout knows about, for help text and for the fallback
 # list when the server cannot report its catalog. One list: the catalog is
 # still the source of what is installed.
-TINYTITAN_ALL_MODELS=(ornith ornith122 qwen36 agentworld katcoder qwen38 qwen35-2b qwen35-4b qwen35-9b inkling-q4-k-xl-unsloth inkling2mini)
+TINYTITAN_ALL_MODELS=(ornith inkling-q4-k-xl-unsloth inkling2mini)
 
 # --- Installed models, from the server's catalog -----------------------
 #
@@ -383,7 +308,7 @@ TINYTITAN_ALL_MODELS=(ornith ornith122 qwen36 agentworld katcoder qwen38 qwen35-
 # per model and quantization, GPU entries first:
 #   TINYTITAN_CAT_ID  TINYTITAN_CAT_NAME  TINYTITAN_CAT_QUANT (4|8)  TINYTITAN_CAT_BACKEND (gpu|cpu)
 #   TINYTITAN_CAT_PATH  TINYTITAN_CAT_THINKING (comma-separated, off first)  TINYTITAN_CAT_SIZE (GB, or -)
-#   TINYTITAN_CAT_FAMILY (the manifest's family, e.g. qwen3_5_dense)
+#   TINYTITAN_CAT_FAMILY (the manifest's family, e.g. qwen36)
 #   TINYTITAN_CAT_ENGINES (comma-separated engines that can serve it, default first)
 # and returns 1 with the reason in TINYTITAN_CATALOG_ERROR when there is no
 # usable catalog.

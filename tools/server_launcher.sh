@@ -12,21 +12,17 @@
 #
 #   <client>   server (default), or one of the coding clients:
 #              codex, claude, qwen, opencode, zed
-#   <model>    an install key (ornith|ornith122|qwen36|agentworld|katcoder|qwen38, or
-#              qwen35-2b|qwen35-4b|qwen35-9b) optionally followed by 4|8, or a
-#              catalog id such as ornith-1.5-35b-a3b_8-Bit, which names its own
-#              width. The installer's key spellings work here too (ornith15,
-#              ornith15-8bit, qwen38flash, qwen38-8bit, ...): both scripts
-#              accept the same keys, from tools/tinytitan_models.sh. A model
-#              that is not on disk is offered for download and
-#              conversion at that point (see --install). The three qwen35-* keys
-#              are the dense Qwen 3.5 models (2B, 4B, 9B): both engines implement
-#              their family (`qwen3_5_dense`), so they are the one install shape
-#              whose engine is a real choice -- GPU by default, CPU on request.
+#   <model>    an install key (ornith, inkling-q4-k-xl-unsloth, inkling2mini)
+#              optionally followed by a width (4; every shipped row is 4-bit), or
+#              a catalog id such as ornith-1.5-35b-a3b_4-Bit, which names its own
+#              width. The installer's key spelling works here too (ornith15):
+#              both scripts accept the same keys, from tools/tinytitan_models.sh.
+#              A model that is not on disk is offered for download and
+#              installation at that point (see --install).
 #   <thinking> off, on, or any level the chosen model lists
-#              (minimal, low, medium, high, xhigh, max). The dense Qwen 3.5
-#              models define the binary thinking switch, so their levels are
-#              exactly off|on -- off for a direct answer, on to reason first.
+#              (minimal, low, medium, high, xhigh, max). Ornith defines the
+#              binary thinking switch, so its levels are exactly off|on -- off
+#              for a direct answer, on to reason first.
 #   <ram>      resident-memory target for the server in GB: any whole number
 #              from 4 up (the interactive question offers 4, 6, 8, 10, 12, 14
 #              or 16, a Custom value, or its default of half this Mac's physical
@@ -46,14 +42,13 @@
 #              (the list is filled from TINYTITAN_CLIENTS in tools/tinytitan_models.sh,
 #              which the coder benchmark reads too)
 #   --model <m>     model key or catalog id
-#   --bits <4|8>    quantization for a model key
-#   --engine <cpu|gpu>  which engine serves the model. Almost every install
-#              declares exactly one -- a MoE family is GPU-only, a snapshot is
-#              CPU-only -- and asking for the other is refused with the reason.
-#              The dense Qwen 3.5 models (2B/4B/9B) are the exception: both
-#              engines implement their family, so the engine is a real choice,
-#              asked interactively and named by an `@cpu`/`@gpu` suffix on the
-#              model id a request uses.
+#   --bits <4|8>    quantization for a model key (every shipped row is 4-bit)
+#   --engine <cpu|gpu>  which engine serves the model. Every shipped install
+#              declares exactly one -- a MoE or Inkling family is GPU-only -- and
+#              asking for the other is refused with the reason. The catalog
+#              still carries the engine list per install, so an install both
+#              engines implement would be a real choice, asked interactively and
+#              named by an `@cpu`/`@gpu` suffix on the model id a request uses.
 #   --mode <fast|full>       fast strips CLI boilerplate; full keeps tools
 #   --answers <default|concise>
 #   --thinking <level>
@@ -62,8 +57,8 @@
 #              and 16, a Custom value, or its default of half this Mac's memory,
 #              and the benchmark harnesses pass others (9, for instance). The
 #              expert cache gets what is left after the resident weights and the
-#              runtime. 4 GB is the floor (the weights plus a minimum cache are
-#              ~4.7 GB on the 125B install); over 50% of this Mac's physical
+#              runtime. 4 GB is the floor (the resident weights plus a minimum
+#              cache are always more than that); over 50% of this Mac's physical
 #              memory is warned about, not refused
 #   --context <rung|native|max> a native rung: 4096, 8192, 16384, 32768,
 #              65536, 131072 or 262144 (native and max are both 262144), or
@@ -131,8 +126,9 @@
 # --ram is a **process target**, not a cache size: the runtime subtracts the
 # resident weights and a measured runtime reserve and gives the routed-expert
 # cache what is left, stepping down the slot ladder so the server stays under
-# the number. On a Qwen3.8 4-bit install the floor is about 3.7 GB, so --ram 4
-# lands at the 8-slot minimum (~4.7 GB) and anything below 4 is refused. Past 50% of physical
+# the number. The argument's floor is 4 GB and anything below it is refused; it
+# is the smallest target this script will pass on, not a promise that 4 GB fits
+# a 19.5 GB install. Past 50% of physical
 # memory the server starts competing with the rest of the machine -- the cache
 # is wired and cannot be paged out -- so this launcher warns above that line and
 # passes the size on as asked; the runtime separately holds the *profile's* own
@@ -386,7 +382,7 @@ for value in "${positional[@]:$pos}"; do
     # dropping a positional `2` is how a person ends up running the model
     # default while believing they set a limit.
     if [[ "$value" =~ ^[0-9]+[Gg]?$ ]]; then
-      echo "unknown RAM target: $value (minimum 4 GB; the weights plus a minimum expert cache are ~4.7 GB on a 125B install, so a smaller target cannot be honoured)" >&2
+      echo "unknown RAM target: $value (minimum 4 GB; the resident weights plus a minimum expert cache are always more than that, so a smaller target cannot be honoured)" >&2
       exit 2
     fi
   fi
@@ -494,8 +490,8 @@ fi
 # nothing here has to draw progress -- it only has to say what is about to
 # happen.
 #
-# <key> is an install_models.sh target (katcoder-8bit), <label> what to call it
-# in the question, <bits> 4 or 8. Returns 0 once it is on disk.
+# <key> is an install_models.sh target (ornith15), <label> what to call it in
+# the question, <bits> 4 or 8. Returns 0 once it is on disk.
 install_model_key() {
   local key="$1" label="$2" bits="$3" gb="" reply=""
   gb="$(tinytitan_install_size_gb "$key" || true)"
@@ -533,7 +529,7 @@ install_model_key() {
   fi
   say ""
   say "Installing $key. The download and the conversion each report a percentage;"
-  say "this takes a while (hours for a 125B model, minutes on a fast line)."
+  say "this takes a while (the 35B-A3B is about 70 GB to fetch)."
   if ! "$SCRIPT_DIR/install_models.sh" "$key"; then
     echo "ERROR: installing $key failed; the model is still not on disk." >&2
     return 1
@@ -590,7 +586,7 @@ fi
 
 if [[ -z "$MODEL_ARG" ]]; then
   count=${#TINYTITAN_CAT_ID[@]}
-  default_idx="$(tinytitan_catalog_find_dir ornith-1.5_35B_A3B_8Bit)" || default_idx=0
+  default_idx="$(tinytitan_catalog_find_dir ornith-1.5_35B_A3B_4Bit)" || default_idx=0
   echo ""
   if (( dynamic )); then
     echo "Which model? (loaded first; every other one stays available by name)"
@@ -659,9 +655,9 @@ if [[ -z "$MODEL_ARG" ]]; then
   read -r pick || exit 1
   pick="${pick:-$((default_idx + 1))}"
   # Both reads are forced to decimal. `(( ))` and `$(( ))` take a leading zero as
-  # octal, so `010` is a legitimate in-range 8 and picks row 8 -- katcoder-8bit,
-  # 38.0 GB -- for a person who pointed at row 10, while `017` answers as row 15
-  # for a reply that names no row at all. The guard asks the range question
+  # octal, so `010` is a legitimate in-range 8 and picks row 8 for a person who
+  # pointed at row 10, while `017` answers as row 15 for a reply that names no
+  # row at all. The guard asks the range question
   # positively, so the shapes bash cannot read (`08`) land in the refusal below:
   # correct but noisy, and forcing the base is what makes the row pointed at the
   # row chosen. `ram_tier` and `valid_concurrency` force the base the same way;
@@ -701,9 +697,9 @@ else
       esac
     fi
   else
-    # An install key that carries its width in the name (ornith15-8bit,
-    # qwen38-8bit) is the installer's spelling of a model plus a width; accept
-    # it here too, so both scripts take the same keys. Only a key the shared
+    # An install key that carries its width in the name (a `-4bit`/`-8bit`
+    # suffix) is the installer's spelling of a model plus a width; accept it
+    # here too, so both scripts take the same keys. Only a key the shared
     # catalogue knows is split, so a typo keeps its full name in the refusal.
     if [[ "$MODEL_ARG" == *-4bit || "$MODEL_ARG" == *-8bit ]] \
        && tinytitan_install_target "$MODEL_ARG" >/dev/null 2>&1; then
@@ -717,13 +713,13 @@ else
       MODEL_ARG="${MODEL_ARG%-*bit}"
     fi
     if ! tinytitan_resolve_model "$MODEL_ARG" 2>/dev/null; then
-      echo "unknown model: $MODEL_ARG (a model id, or ornith|ornith122|qwen36|agentworld|katcoder|qwen38|qwen35-2b|qwen35-4b|qwen35-9b|inkling-q4-k-xl-unsloth|inkling2mini)" >&2
+      echo "unknown model: $MODEL_ARG (a model id, or ornith|inkling-q4-k-xl-unsloth|inkling2mini)" >&2
       if (( dynamic )); then echo "installed: ${TINYTITAN_CAT_ID[*]+"${TINYTITAN_CAT_ID[*]}"}" >&2; fi
       exit 2
     fi
-    # No width given means 8-bit, the historical default; if a model only ships
-    # 4-bit (such as Inkling 2 Mini), select 4-bit automatically when no --bits
-    # was specified.
+    # No width given means 8-bit, the historical default; every shipped row is
+    # 4-bit only, so 4-bit is selected automatically when no --bits was
+    # specified.
     if [[ -z "$BITS" ]] \
       && ! tinytitan_install_key "$TINYTITAN_MODEL_STEM" 8 >/dev/null 2>&1 \
       && tinytitan_install_key "$TINYTITAN_MODEL_STEM" 4 >/dev/null 2>&1; then
@@ -780,12 +776,10 @@ IFS=',' read -r -a levels <<< "${TINYTITAN_CAT_THINKING[$idx]}"
 # 3b) Engine: which engine serves this install, and what was asked for
 # ============================================================
 
-# The catalog says which engines can serve an install. Almost every install has
-# exactly one -- a MoE family is GPU-only because the CPU engine does not
-# implement those shapes, and a converted snapshot is CPU-only -- but the dense
-# Qwen 3.5 models (2B/4B/9B) are implemented by *both*, from the same `.ssdai`
-# payload. That is the one case where the engine is a real choice, so it is the
-# one case that asks.
+# The catalog says which engines can serve an install. Every shipped install has
+# exactly one -- a MoE or Inkling family is GPU-only because the CPU engine does
+# not implement those shapes -- and a catalog row that lists two is the case
+# where the engine is a real choice, so it asks.
 IFS=',' read -r -a engines <<< "${TINYTITAN_CAT_ENGINES[$idx]:-$MODEL_BACKEND}"
 default_engine="${TINYTITAN_CAT_BACKEND[$idx]}"
 engine_family="${TINYTITAN_CAT_FAMILY[$idx]:--}"
@@ -1070,7 +1064,7 @@ warn_ram_over_rule() {
 
 if [[ -n "$RAM_ARG" ]]; then
   if ! ram_gb="$(ram_tier "$RAM_ARG")"; then
-    echo "unknown RAM target: $RAM_ARG (minimum 4 GB; the weights plus a minimum expert cache are ~4.7 GB on a 125B install, so a smaller target cannot be honoured)" >&2
+    echo "unknown RAM target: $RAM_ARG (minimum 4 GB; the resident weights plus a minimum expert cache are always more than that, so a smaller target cannot be honoured)" >&2
     exit 2
   fi
   if [[ "$ENGINE" != "cpu" ]]; then warn_ram_over_rule; fi
@@ -1104,8 +1098,8 @@ else
   fi
   echo "  1) 4 GB     2) 6 GB     3) 8 GB    4) 10 GB"
   echo "  5) 12 GB    6) 14 GB    7) 16 GB   8) Custom"
-  echo "  (4 GB is the floor: the weights plus the minimum expert cache are"
-  echo "   about 4.7 GB on a 125B install, so a smaller target cannot be met)"
+  echo "  (4 GB is the floor: the resident weights plus the minimum expert cache"
+  echo "   are always more than that, so a smaller target cannot be met)"
   echo "  9) Model default (${rule_hint})"
   printf "Choice [1-9] (default 9): "
   read -r ram_choice || exit 1

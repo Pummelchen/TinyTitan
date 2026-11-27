@@ -145,7 +145,7 @@ print(json.load(open('$model/manifest.json'))['arch']['family'])")" || {
   # must be renamed `ane_prefill-rejected`; this skip stops new installs from
   # writing one. See tracker TT-099 and benchmark/ane-prefill/README.md.
   case "$name" in
-    ornith-1.5_35B_A3B_4Bit|ornith-1.5_35B_A3B_8Bit)
+    ornith-1.5_35B_A3B_4Bit)
        echo "== $name: the ANE sidecar fails the identical-greedy quality gate (TT-099); skipping (rename any existing ane_prefill-rejected and re-measure before exporting)"
        skipped+=("$name (ANE quality gate fails)"); continue ;;
   esac

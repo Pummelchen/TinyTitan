@@ -211,15 +211,16 @@ class ConcurrencyChoiceTests(unittest.TestCase):
     def test_a_cpu_model_is_pinned_to_one_generation(self) -> None:
         # The CPU backend's actor runs a generation to completion before the
         # next starts, so a width above one buys nothing there. The launcher
-        # says so and pins the server to one rather than pretending. The dense
-        # row is the one the CPU engine serves, so this names it instead of the
+        # says so and pins the server to one rather than pretending. No shipped
+        # install is CPU-served, so this names the fixture's synthetic dense row
+        # (the CPU backend still implements the family) instead of the
         # gpu-backed base.
         run = run_launcher(
             self.installs,
             "--client",
             "server",
             "--model",
-            self.installs.dense(),
+            self.installs.cpu_served(),
             "--engine",
             "cpu",
             "--concurrency",
