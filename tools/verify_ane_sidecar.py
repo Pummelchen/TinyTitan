@@ -36,8 +36,9 @@ folded check finds that the mask barely matters (a vacuous check).
 from __future__ import annotations
 
 import argparse
+
+from ssdai_metadata import read_metadata_json
 import dataclasses
-import json
 import math
 import pathlib
 import sys
@@ -271,13 +272,13 @@ def main() -> int:
         raise SystemExit(
             f"{model} has no sidecar for chunk {args.chunk} ({directory.name}); export one first"
         )
-    manifest = json.loads((model / "manifest.json").read_text())
+    manifest = read_metadata_json(model / "manifest.json")
     entries = ex.read_index(model / "model_weights.bin")
     # The chunk is part of the geometry the graph was built for, so it comes
     # from the request, not from the manifest: `--chunk` selects both the
     # directory and the shapes the reference must use.
     geom = dataclasses.replace(ex.geometry_for(manifest, entries), chunk=args.chunk)
-    sidecar = json.loads((directory / "ane_prefill.json").read_text())
+    sidecar = read_metadata_json(directory / "ane_prefill.json")
     if sidecar.get("chunkTokens") != args.chunk:
         raise SystemExit(
             f"{directory.name} holds a "

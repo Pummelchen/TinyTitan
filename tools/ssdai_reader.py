@@ -18,7 +18,7 @@ values, low nibble first, and `value = q * scale + bias` with bf16 scale and
 bias per group.
 """
 
-import json
+from ssdai_metadata import read_metadata_json
 import struct
 from pathlib import Path
 
@@ -40,7 +40,7 @@ class SSDAIWeights:
     def __init__(self, directory):
         self.root = Path(directory)
         self.path = self.root / "model_weights.bin"
-        self.manifest = json.loads((self.root / "manifest.json").read_text())
+        self.manifest = read_metadata_json(self.root / "manifest.json")
         with self.path.open("rb") as handle:
             index_size, resident_size, count = struct.unpack("<QQQ", handle.read(HEADER_BYTES))
             handle.seek(0)
@@ -139,7 +139,7 @@ class PackedExperts:
 
     def __init__(self, directory):
         self.root = Path(directory) / "packed_experts"
-        self.layout = json.loads((self.root / "layout.json").read_text())
+        self.layout = read_metadata_json(self.root / "layout.json")
         self._maps = {}
 
     def _map(self, layer):

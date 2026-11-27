@@ -259,7 +259,8 @@ jobs:
             test_launcher_opencode \
             test_tinytitan_profile \
             launcher_fixture test_progress \
-            test_release_installer_verification test_supply_chain
+            test_release_installer_verification test_supply_chain \
+            test_ssdai_metadata_bounds
       - name: Release gates (the CI-green precondition)
         # `tools/ci-green.sh` is what stops a tag going out over a commit whose CI
         # has not passed — the gap that let v5.18 publish an hour after its own

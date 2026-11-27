@@ -37,6 +37,8 @@ install because its declared row count will not match the sidecar.
 from __future__ import annotations
 
 import argparse
+
+from ssdai_metadata import read_metadata_json
 import hashlib
 import json
 import pathlib
@@ -173,13 +175,13 @@ def sha256_of(path: pathlib.Path) -> str:
 
 def update_metadata(install: pathlib.Path, table: pathlib.Path) -> None:
     constants_path = install / "ple_constants.json"
-    constants = json.loads(constants_path.read_text())
+    constants = read_metadata_json(constants_path)
     constants["table_file"] = table.name
     constants["table_dtype"] = "int4_affine_group32"
     constants_path.write_text(json.dumps(constants, indent=1) + "\n")
 
     manifest_path = install / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = read_metadata_json(manifest_path)
     files = manifest.get("files", {})
     entry = files.pop("ngram_table.bin", None)
     files[table.name] = {
@@ -223,7 +225,7 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
-    constants = json.loads((args.install / "ple_constants.json").read_text())
+    constants = read_metadata_json(args.install / "ple_constants.json")
     row_dim = int(constants["ple_head_dim"])
     total = row_count(constants)
     rows = args.rows if args.rows > 0 else total

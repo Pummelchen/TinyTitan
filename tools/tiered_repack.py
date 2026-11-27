@@ -24,6 +24,8 @@ verbatim, which produces a loadable install in a fraction of the time.
 from __future__ import annotations
 
 import argparse
+
+from ssdai_metadata import read_metadata_json
 import hashlib
 import json
 import os
@@ -126,9 +128,9 @@ def main() -> int:
 
     model = pathlib.Path(args.model)
     out = pathlib.Path(args.out)
-    manifest = json.loads((model / "manifest.json").read_text())
-    layout = json.loads((model / "packed_experts" / "layout.json").read_text())
-    profile = json.loads(pathlib.Path(args.hot_profile).read_text(encoding="utf-8"))
+    manifest = read_metadata_json(model / "manifest.json")
+    layout = read_metadata_json(model / "packed_experts" / "layout.json")
+    profile = read_metadata_json(pathlib.Path(args.hot_profile))
 
     tiered = set(range(len(layout["layers"])))
     if args.layers != "all":
