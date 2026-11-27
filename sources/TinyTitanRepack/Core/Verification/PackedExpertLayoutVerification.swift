@@ -25,6 +25,13 @@ extension VerifiedInstallTool {
             let data = try loadMetadataJSON(
                 access: access,
                 relativePath: "packed_experts/layout.json")
+            // The runtime decodes this file through the format layer, whose
+            // structural validator refuses duplicate layer files, overlapping
+            // experts and impossible counts. The mirror below carries only the
+            // fields the width arithmetic needs, so validating it alone
+            // certified installs the loader then refused -- the opposite of
+            // what a verifier is for (AUD-0074). Same bytes, same predicate.
+            _ = try SSDAIPackedExpertsLayoutCodec.decode(data)
             return try JSONDecoder().decode(PackedExpertsLayout.self, from: data)
         } catch {
             throw RepackError.configurationInvalid(
@@ -69,13 +76,9 @@ extension VerifiedInstallTool {
         // resident index is what describes its weights.
         let declaredExpertBits = manifest.quant?.routedExpert.weightBits
         for layer in layout.layers {
-            let count = layer.expertsPerLayer ?? layout.expertsPerLayer
-            let (capacity, overflow) = UInt64(count)
-                .multipliedReportingOverflow(by: layout.expertStride)
-            guard !overflow else {
-                throw RepackError.configurationInvalid(
-                    detail: "packed expert layer size overflows")
-            }
+            let capacity = try packedLayerCapacity(
+                count: layer.expertsPerLayer ?? layout.expertsPerLayer,
+                stride: layout.expertStride)
             // A raw layer ends where its last expert does. For a uniform layer
             // that is exactly `count * stride`; a compact one (Inkling's NVFP4
             // layers inside a Q8_0-sized stride) ends earlier, which the format
@@ -95,6 +98,26 @@ extension VerifiedInstallTool {
                 expectedLayerSize: expectedLayerSize,
                 declaredExpertBits: declaredExpertBits)
         }
+    }
+
+    /// `count * stride` for one packed layer, refusing a count that cannot be a
+    /// number of experts and a size that overflows.
+    ///
+    /// `layer.expertsPerLayer` is an `Int?` decoded from an untrusted document
+    /// with no bound; the install-wide value is compared against the manifest,
+    /// the per-layer override is not. `UInt64(-1)` traps -- a verifier that
+    /// crashes reads as a broken tool, not a broken install (AUD-0073).
+    static func packedLayerCapacity(count: Int, stride: UInt64) throws -> UInt64 {
+        guard count >= 0 else {
+            throw RepackError.configurationInvalid(
+                detail: "packed expert layer declares \(count) experts")
+        }
+        let (capacity, overflow) = UInt64(count).multipliedReportingOverflow(by: stride)
+        guard !overflow else {
+            throw RepackError.configurationInvalid(
+                detail: "packed expert layer size overflows")
+        }
+        return capacity
     }
 
     /// One layer: its file size, and every expert's own arithmetic.

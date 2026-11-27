@@ -44,8 +44,6 @@ public enum VerifiedInstallTool {
         let manifestSize = try access.fileSize(manifestPath)
         let manifestSha = try access.hash(manifestPath, noCache: true)
         let manifest = try loadManifest(access: access)
-        try validatePackedExpertLayout(access: access, manifest: manifest)
-        try validateQuantAgainstResident(access: access, manifest: manifest)
 
         var files: [RepackAudit.OutputFile] = []
         files.reserveCapacity(manifest.files.count)
@@ -84,6 +82,13 @@ public enum VerifiedInstallTool {
                     size: actualSize,
                     sha256: actualSha))
         }
+        // Content first, structure second: a corrupt `layout.json` is a hash
+        // mismatch on a file the manifest lists, and it must be reported as one
+        // rather than parsed for a JSON error (AUD-0073). Every payload file has
+        // been hashed at this point.
+        try validatePackedExpertLayout(access: access, manifest: manifest)
+        try validateQuantAgainstResident(access: access, manifest: manifest)
+
         let unexpectedEntries = try findUnexpectedEntries(access: access, manifest: manifest)
 
         let receiptData = try VerifiedInstallReceiptWriter.encode(
