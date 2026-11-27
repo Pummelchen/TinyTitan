@@ -149,4 +149,20 @@ import Testing
             targetContextTokens: 1_048_576)
         #expect(parameters.threshold == RuntimeConfiguration.nativeMaximumContextTokens)
     }
+
+    /// The threshold is a manifest/config value, and the kernel takes it as a
+    /// `UInt32`. A threshold above that is refused at init instead of trapping
+    /// on the conversion when the YaRN kernel is encoded (AUD-0084).
+    @Test func aThresholdBeyondUInt32IsRefused() throws {
+        let context = try MetalContext()
+        let parameters = YaRNRoPEParameters(
+            headDim: 256, partialRotaryFactor: 0.25, theta: 10_000_000,
+            targetContextTokens: 1_048_576, threshold: Int(UInt32.max) + 1)
+        #expect(throws: MetalError.self) {
+            _ = try RoPE(context: context, yarn: parameters)
+        }
+        #expect(throws: MetalError.self) {
+            _ = try PrefillRoPE(context: context, yarn: parameters)
+        }
+    }
 }

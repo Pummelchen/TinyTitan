@@ -51,6 +51,15 @@ public enum CPUBatchedMatmul {
                 detail: "batched matmul: no dequantizer for \(matrix.bits)-bit weights")
         }
 
+        guard let rows = Int32(exactly: matrix.rows),
+            let columns = Int32(exactly: matrix.columns),
+            let tokens = Int32(exactly: tokenCount)
+        else {
+            throw ModelError.internalInconsistency(
+                detail: "batched matmul: \(tokenCount) x \(matrix.rows) x \(matrix.columns) "
+                    + "exceeds the kernel's Int32 dimensions")
+        }
+
         var dequantized = [Float](repeating: 0, count: matrix.rows * matrix.columns)
         dequantized.withUnsafeMutableBufferPointer { buffer in
             guard let out = buffer.baseAddress else { return }
@@ -58,9 +67,6 @@ public enum CPUBatchedMatmul {
         }
 
         var result = [Float](repeating: 0, count: tokenCount * matrix.rows)
-        let rows = Int32(matrix.rows)
-        let columns = Int32(matrix.columns)
-        let tokens = Int32(tokenCount)
         x.withUnsafeBufferPointer { xBuffer in
             dequantized.withUnsafeBufferPointer { wBuffer in
                 result.withUnsafeMutableBufferPointer { outBuffer in

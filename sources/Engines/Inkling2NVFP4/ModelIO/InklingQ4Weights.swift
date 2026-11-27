@@ -99,14 +99,12 @@ final class InklingQ4Weights {
                 return try Self.converted(
                     name, entry: entry, conversion: conversion, file: residentFile, device: device)
             }
-            guard entry.fileOffset + entry.sizeBytes <= UInt64(residentFile.length) else {
-                throw InklingQ4Manifest.Error.invalidGeometry("\(name) lies past the file")
-            }
+            let range = try entry.checkedByteRange(within: residentFile.length)
             let (rows, columns) = Self.matrix(entry.shape)
             return InklingQ4Tensor(
-                operand: .init(residentFile.buffer, offset: Int(entry.fileOffset)),
+                operand: .init(residentFile.buffer, offset: range.offset),
                 type: try InklingQ4Manifest.type(indexCode: entry.dtype, tensor: name),
-                rows: rows, columns: columns, byteCount: Int(entry.sizeBytes))
+                rows: rows, columns: columns, byteCount: range.count)
         }
         func optional(_ name: String) throws -> InklingQ4Tensor? {
             entries[name] == nil ? nil : try tensor(name)
@@ -226,14 +224,29 @@ extension InklingQ4Weights {
         let source = conversion.source
         let dims = [source.shape.0, source.shape.1, source.shape.2, source.shape.3]
             .filter { $0 != 0 }.map(Int.init)
-        let count = dims.reduce(1, *)
-        guard source.fileOffset + source.sizeBytes <= UInt64(file.length),
-            source.sizeBytes == UInt64(count * (source.dtype == 3 ? 4 : 2)),
-            source.dtype == 1 || source.dtype == 3
-        else { throw InklingQ4Manifest.Error.invalidGeometry("\(name)'s checkpoint source") }
+        var count = 1
+        for dimension in dims {
+            let (next, overflow) = count.multipliedReportingOverflow(by: dimension)
+            guard !overflow else {
+                throw InklingQ4Manifest.Error.invalidGeometry(
+                    "\(name)'s checkpoint source element count overflows")
+            }
+            count = next
+        }
+        guard source.dtype == 1 || source.dtype == 3 else {
+            throw InklingQ4Manifest.Error.invalidGeometry("\(name)'s checkpoint source")
+        }
+        let elementBytes = source.dtype == 3 ? 4 : 2
+        let (expectedBytes, bytesOverflow) = count.multipliedReportingOverflow(by: elementBytes)
+        guard !bytesOverflow, source.sizeBytes == UInt64(expectedBytes) else {
+            throw InklingQ4Manifest.Error.invalidGeometry(
+                "\(name)'s checkpoint source is \(source.sizeBytes) bytes, not "
+                    + "\(count) elements")
+        }
+        let sourceRange = try source.checkedByteRange(within: file.length)
         let rows = dims.count > 1 ? dims[0] : 1
         let columns = count / rows
-        let base = file.buffer.contents() + Int(source.fileOffset)
+        let base = file.buffer.contents() + sourceRange.offset
         let stored: [Float] =
             source.dtype == 3
             ? Array(

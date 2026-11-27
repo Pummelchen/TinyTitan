@@ -90,14 +90,12 @@ final class InklingQ4Weights {
             guard let entry = entries[name] else {
                 throw InklingQ4Manifest.Error.missingTensor(name)
             }
-            guard entry.fileOffset + entry.sizeBytes <= UInt64(residentFile.length) else {
-                throw InklingQ4Manifest.Error.invalidGeometry("\(name) lies past the file")
-            }
+            let range = try entry.checkedByteRange(within: residentFile.length)
             let (rows, columns) = Self.matrix(entry.shape)
             return InklingQ4Tensor(
-                operand: .init(residentFile.buffer, offset: Int(entry.fileOffset)),
+                operand: .init(residentFile.buffer, offset: range.offset),
                 type: try InklingQ4Manifest.type(indexCode: entry.dtype, tensor: name),
-                rows: rows, columns: columns, byteCount: Int(entry.sizeBytes))
+                rows: rows, columns: columns, byteCount: range.count)
         }
         func optional(_ name: String) throws -> InklingQ4Tensor? {
             entries[name] == nil ? nil : try tensor(name)

@@ -104,17 +104,12 @@ final class InklingMTPWeights {
             guard let entry = entries[name] else {
                 throw InklingQ4Manifest.Error.missingTensor(name)
             }
-            guard entry.fileOffset + entry.sizeBytes <= UInt64(length) else {
-                throw InklingQ4Manifest.Error.invalidGeometry("\(name) lies past resident file")
-            }
-            let dims = [entry.shape.0, entry.shape.1, entry.shape.2, entry.shape.3]
-                .filter { $0 > 0 }.map(Int.init)
-            let columns = dims.last ?? 1
-            let rows = dims.dropLast().reduce(1, *)
+            let range = try entry.checkedByteRange(within: length)
+            let (rows, columns) = try Self.rowsAndColumns(entry)
             return InklingQ4Tensor(
-                operand: .init(buf, offset: Int(entry.fileOffset)),
+                operand: .init(buf, offset: range.offset),
                 type: try InklingQ4Manifest.type(indexCode: entry.dtype, tensor: name),
-                rows: rows, columns: columns, byteCount: Int(entry.sizeBytes))
+                rows: rows, columns: columns, byteCount: range.count)
         }
 
         // Compute row-wise softmax of `mtp.fuse_weight` [numLayers + 1, taps] in FP32.
@@ -180,5 +175,27 @@ final class InklingMTPWeights {
         self.rnnProjBias = try tensor("mtp.markov_head.rnn_proj.bias")
         self.hiddenOutWeight = try tensor("mtp.markov_head.hidden_out.weight")
         self.hiddenOutBias = try tensor("mtp.markov_head.hidden_out.bias")
+    }
+
+    /// `(rows, columns)` of a resident index shape: the last non-zero axis is
+    /// the fast one, the rest multiply into the row count. The product is
+    /// manifest input, so it is refused rather than trapped on overflow
+    /// (AUD-0084).
+    static func rowsAndColumns(
+        _ entry: ResidentIndexEntry
+    ) throws -> (rows: Int, columns: Int) {
+        let dims = [entry.shape.0, entry.shape.1, entry.shape.2, entry.shape.3]
+            .filter { $0 > 0 }.map(Int.init)
+        let columns = dims.last ?? 1
+        var rows = 1
+        for dimension in dims.dropLast() {
+            let (next, overflow) = rows.multipliedReportingOverflow(by: dimension)
+            guard !overflow else {
+                throw InklingQ4Manifest.Error.invalidGeometry(
+                    "\(entry.name) row count overflows")
+            }
+            rows = next
+        }
+        return (rows, columns)
     }
 }

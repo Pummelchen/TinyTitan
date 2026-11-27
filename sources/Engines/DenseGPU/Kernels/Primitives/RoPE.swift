@@ -14,7 +14,7 @@ final class RoPE {
     private let yarnThresholdNeoxSubdim: MTLComputePipelineState
     private let yarnInverseFrequencies: MTLBuffer?
     private let yarnAttentionFactor: Float
-    private let yarnThreshold: Int
+    private let yarnThreshold: UInt32
 
     init(context: MetalContext, yarn: YaRNRoPEParameters? = nil) throws {
         self.defaultNeox = try context.pipeline("rope_default_neox")
@@ -34,8 +34,12 @@ final class RoPE {
         self.yarnThresholdNeoxSubdim = try context.pipeline(
             "rope_yarn_threshold_neox_subdim")
         self.yarnAttentionFactor = yarn?.attentionFactor ?? 1
-        self.yarnThreshold = yarn?.threshold ?? Int.max
         if let yarn {
+            guard let threshold = UInt32(exactly: yarn.threshold) else {
+                throw MetalError.invalidState(
+                    "YaRN threshold \(yarn.threshold) does not fit the kernel's UInt32")
+            }
+            self.yarnThreshold = threshold
             guard
                 let buffer = yarn.inverseFrequencies.withUnsafeBytes({ bytes -> MTLBuffer? in
                     guard let baseAddress = bytes.baseAddress else { return nil }
@@ -48,6 +52,9 @@ final class RoPE {
             }
             self.yarnInverseFrequencies = buffer
         } else {
+            // No YaRN table exists, so the threshold kernel is never encoded;
+            // this only replaces the old `Int.max`-then-`UInt32(...)` trap.
+            self.yarnThreshold = UInt32.max
             self.yarnInverseFrequencies = nil
         }
     }
@@ -169,7 +176,7 @@ final class RoPE {
         var heads = numHeads
         var rotary = rotaryDim
         var magnitude = yarnAttentionFactor
-        var threshold = UInt32(yarnThreshold)
+        var threshold = yarnThreshold
         var thetaValue = theta
         encoder.setBytes(&pos, length: MemoryLayout<UInt32>.size, index: 2)
         encoder.setBytes(&dim, length: MemoryLayout<UInt32>.size, index: 3)

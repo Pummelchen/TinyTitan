@@ -9,7 +9,7 @@ final class PrefillRoPE {
     private let psoYaRNThresholdNeoxSubdim: MTLComputePipelineState
     private let yarnInverseFrequencies: MTLBuffer?
     private let yarnAttentionFactor: Float
-    private let yarnThreshold: Int
+    private let yarnThreshold: UInt32
 
     init(context: MetalContext, yarn: YaRNRoPEParameters? = nil) throws {
         self.psoDefaultNeox = try context.pipeline("prefill_rope_default_neox_block")
@@ -18,8 +18,12 @@ final class PrefillRoPE {
         self.psoYaRNThresholdNeoxSubdim = try context.pipeline(
             "prefill_rope_yarn_threshold_neox_subdim_block")
         self.yarnAttentionFactor = yarn?.attentionFactor ?? 1
-        self.yarnThreshold = yarn?.threshold ?? Int.max
         if let yarn {
+            guard let threshold = UInt32(exactly: yarn.threshold) else {
+                throw MetalError.invalidState(
+                    "YaRN threshold \(yarn.threshold) does not fit the kernel's UInt32")
+            }
+            self.yarnThreshold = threshold
             guard
                 let buffer = yarn.inverseFrequencies.withUnsafeBytes({ bytes -> MTLBuffer? in
                     guard let baseAddress = bytes.baseAddress else { return nil }
@@ -32,6 +36,9 @@ final class PrefillRoPE {
             }
             self.yarnInverseFrequencies = buffer
         } else {
+            // No YaRN table exists, so the threshold kernel is never encoded;
+            // this only replaces the old `Int.max`-then-`UInt32(...)` trap.
+            self.yarnThreshold = UInt32.max
             self.yarnInverseFrequencies = nil
         }
     }
@@ -121,7 +128,7 @@ final class PrefillRoPE {
         var stride = tokenStrideElements
         var rotary = rotaryDim
         var magnitude = yarnAttentionFactor
-        var threshold = UInt32(yarnThreshold)
+        var threshold = yarnThreshold
         var thetaValue = theta
         enc.setBytes(&start, length: MemoryLayout<UInt32>.size, index: 2)
         enc.setBytes(&hd, length: MemoryLayout<UInt32>.size, index: 3)

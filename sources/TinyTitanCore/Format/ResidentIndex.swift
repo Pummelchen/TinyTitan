@@ -56,6 +56,32 @@ public struct ResidentIndexEntry: Sendable, Equatable {
     }
 }
 
+extension ResidentIndexEntry {
+    /// The entry's bytes as machine-size offsets into the resident file.
+    ///
+    /// `fileOffset` and `sizeBytes` come from the manifest, so their sum — and
+    /// each half — can overflow or point past the file. An engine must refuse
+    /// such an entry rather than trap on `Int(...)` or accept a wrapped end
+    /// (AUD-0084).
+    package func checkedByteRange(within fileLength: Int) throws -> (offset: Int, count: Int) {
+        guard fileLength >= 0, let offset = Int(exactly: fileOffset),
+            let count = Int(exactly: sizeBytes)
+        else {
+            throw ModelError.internalInconsistency(
+                detail: "resident entry \(name): byte range \(fileOffset) for \(sizeBytes) "
+                    + "bytes does not fit the resident file's machine size")
+        }
+        let (end, overflow) = offset.addingReportingOverflow(count)
+        guard !overflow, end <= fileLength else {
+            throw ModelError.internalInconsistency(
+                detail: "resident entry \(name): byte range \(fileOffset)..<"
+                    + "\(UInt64(fileOffset) + sizeBytes) lies past the "
+                    + "\(fileLength)-byte resident file")
+        }
+        return (offset, count)
+    }
+}
+
 /// Parsed resident index: header + name-keyed entries.
 package struct ResidentIndex: Sendable {
     package let header: ResidentIndexHeader
