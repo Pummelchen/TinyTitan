@@ -46,10 +46,19 @@
           "target": "Inkling2GGUFQ4",
           "bits": 4,
           "engine": "gpu",
-          "shipped": false,
+          "shipped": true,
           "installedSizeBytes": 17664255634,
           "sourceSizeBytes": 17629759456,
-          "qualification": null,
+          "qualification": {
+            "goldenSHA256": "35c469ab8af6ac8f1da410d6c4a9186f9780a9e466aef6d1bde2d4db889fa966",
+            "decodeTokS": 17.9,
+            "prefillTokS": null,
+            "ttftS": null,
+            "memoryCeilingBytes": null,
+            "terminalBench": null,
+            "hardware": "Apple M3 MacBook Pro 24 GB",
+            "date": "2026-11-27"
+          },
           "recipeNote": "unsloth/Inkling-2-Mini-GGUF (45fd08764f2b0bf16b03a5483a80e5c7aaec8772) Q4_K_XL streamed as .ssdai"
         },
         {
@@ -57,10 +66,19 @@
           "target": "Inkling2NVFP4",
           "bits": 4,
           "engine": "gpu",
-          "shipped": false,
+          "shipped": true,
           "installedSizeBytes": 19592286535,
           "sourceSizeBytes": 19555000000,
-          "qualification": null,
+          "qualification": {
+            "goldenSHA256": "e82608afb493789c2e6a6584ca721ba70e6f5b0368bdba80dfc5e05e2e485017",
+            "decodeTokS": 8.1,
+            "prefillTokS": null,
+            "ttftS": null,
+            "memoryCeilingBytes": null,
+            "terminalBench": null,
+            "hardware": "Apple M3 MacBook Pro 24 GB",
+            "date": "2026-11-27"
+          },
           "recipeNote": "original ModelOpt NVFP4/MXFP8 checkpoint streamed as .ssdai (text only)"
         }
       ]

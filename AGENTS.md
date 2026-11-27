@@ -146,7 +146,7 @@ publish a change means both, whether or not the change touched the wiki.
 ```bash
 swift build -c release
 swift run -c release TinyTitanCLI \
-  --model models/qwen3.5_4B_4Bit \
+  --model models/ornith-1.5_35B_A3B_4Bit \
   --prompt "The capital of France is" \
   --max-new 64
 ```
@@ -276,8 +276,8 @@ fix, not a mode to offer. The raw Inkling folders `models/inkling-2-mini` and
 installs under TT-121 and then removed.
 
 ```bash
-swift run -c release TinyTitanRepack --model ornith15-8bit --output models/ornith-1.5_35B_A3B_8Bit
-swift run -c release TinyTitanRepack --model ornith15-8bit --output models/ornith-1.5_35B_A3B_8Bit --resume
+swift run -c release TinyTitanRepack --model ornith15 --output models/ornith-1.5_35B_A3B_4Bit
+swift run -c release TinyTitanRepack --model ornith15 --output models/ornith-1.5_35B_A3B_4Bit --resume
 ```
 
 An installed model's `verified-install.json` receipt is bound to the absolute path
@@ -287,7 +287,7 @@ corruption and does not need a re-download — re-issue the receipt in place
 (re-hashes the payload against the manifest and rebinds it to the current path):
 
 ```bash
-swift run -c release TinyTitanRepack --verify-install --input-ssdai models/qwen3.5_4B_4Bit
+swift run -c release TinyTitanRepack --verify-install --input-ssdai models/inkling-2-mini_NVFP4
 ```
 
 Never hand-edit the receipt to match the new path: the path binding is what detects
@@ -315,26 +315,23 @@ like `--filter` through. Run only one CLI or model-using test at a time.
 stays model-free while the contract stays runnable:
 
 ```bash
-TINYTITAN_LIBRARY_CONTRACT_MODEL=models/qwen3.5_4B_4Bit \
+TINYTITAN_LIBRARY_CONTRACT_MODEL=models/inkling-2-mini_NVFP4 \
   swift test --no-parallel --filter LibraryContractTests
 ```
 
 Run it when touching `Engine`/`Session` lifetime or concurrency: it is the only
 thing that checks two engines on one device, cancellation and `unload()`.
 
-**Ad-hoc model runs use the 4B or 9B, not the 2B, unless the task says
-otherwise.** That means any run that exercises a code path against a live model —
-a feature check, a live end-to-end, a hand-driven probe:
-`models/qwen3.5_4B_4Bit` or `models/qwen3.5_9B_4Bit`, the 4B first when only one
-is needed. The 2B loads in seconds and is still the wrong instrument for a
-code-under-test run: it echoes the prompt, needs `--thinking off` for a direct
-answer, and its summaries are thin, so a real defect and a 2B limitation look
-alike. Its 2026-11-16 install was also dead — zeroed weights returned repeated
-`!` until both widths were rebuilt on 2026-11-20 (TT-098) — which is why older
-notes read as if the 2B itself failed arithmetic. Reach
-for it only when the small model *is* the subject — its own limits, its own
-behaviour — and say in the report that it was deliberate. This does not change the
-golden-baseline targets below, which are what they are.
+**Ad-hoc model runs use a shipped install, and the smaller Inkling first.**
+That means any run that exercises a code path against a live model — a feature
+check, a live end-to-end, a hand-driven probe: `models/inkling-2-mini_NVFP4` (or
+`models/inkling-2-mini_GGUF-Q4`) when one is needed, `models/ornith-1.5_35B_A3B_4Bit`
+when the 35B MoE path is the subject. The dense Qwen 3.5 installs are no longer
+in the shipped matrix and their engines wait on TT-142 slice (b), so a note that
+uses one is describing history: the 2B's 2026-11-16 install was dead — zeroed
+weights returned repeated `!` until both widths were rebuilt on 2026-11-20
+(TT-098). This does not change the golden-baseline targets below, which are what
+they are.
 
 `tools/lint.sh` runs the nineteen checks CI enforces beyond the compiler — the
 first fifteen are project-specific probes, the last four are pinned third-party

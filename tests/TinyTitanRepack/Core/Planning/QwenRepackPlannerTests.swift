@@ -112,73 +112,63 @@ struct QwenRepackPlannerTests {
         }
     }
 
-    @Test func qwenSourceFingerprintIsKnown() {
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "0b28df60e33753a14e816d3b31577ae2c93884c58430a4a6de6ae9ea483842ea")
-                == "qwen3.6-35b-a3b-4bit")
-        // 6-bit was withdrawn, so its fingerprint no longer resolves. Asserting
-        // nil keeps the removal honest: a source quietly reappearing would fail
-        // here rather than shipping an unsupported quantization.
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "eaea194dfb961e6a5215dcc6e4dd42d0df6efe8d8686161f2dd00634e0ef43fb")
-                == nil)
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "3db12edeebeb65cab9a6eeb63cd74be4e0c74139a75f672701290b98230501cf")
-                == "qwen3.6-35b-a3b-8bit")
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "00e220ddb21ceeb6290a3a1161f97339c553f3d27fc4319900a96edb5cfae74c")
-                == "qwen3.6-35b-a3b-mtp-4bit")
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "c118f13c0dcb729e4ca2e3d653ab193067551eb1a6410badb5192eb426104f36")
-                == "ornith-1.5-35b-a3b-4bit")
-        #expect(
-            SourceFingerprint.modelID(
-                forIndexSha256:
-                    "83c641a791aa957df7d280eef1b0c8faf7a2ec9b19dd3355fb13abae8ae0ed15")
-                == "ornith-1.5-35b-a3b-8bit")
+    /// Every shipped source's index digest resolves to its model id; a retired
+    /// family's digest resolves to nothing, so a source quietly reappearing
+    /// fails here rather than shipping an unsupported quantization.
+    @Test func shippedSourceFingerprintsAreKnown() {
+        let shipped: [(String, String)] = [
+            (
+                "c118f13c0dcb729e4ca2e3d653ab193067551eb1a6410badb5192eb426104f36",
+                "ornith-1.5-35b-a3b-4bit"
+            ),
+            (
+                "e35ee6baa44933adb00cd5196be291a80c7e6b35aa75c2b01549b056057387e0",
+                "inkling-2-mini-gguf-q4"
+            ),
+            (
+                "0b94cadc1237f8d183c2fabf35dd610d4aa7364862be2afda0371eaacef45750",
+                "inkling-2-mini-nvfp4"
+            ),
+        ]
+        for (digest, modelID) in shipped {
+            #expect(
+                SourceFingerprint.modelID(forIndexSha256: digest) == modelID,
+                "\(modelID)")
+        }
+        // A digest that belonged to a retired family resolves to nothing.
+        for retired in [
+            "0b28df60e33753a14e816d3b31577ae2c93884c58430a4a6de6ae9ea483842ea",
+            "3db12edeebeb65cab9a6eeb63cd74be4e0c74139a75f672701290b98230501cf",
+            "83c641a791aa957df7d280eef1b0c8faf7a2ec9b19dd3355fb13abae8ae0ed15",
+            "00e220ddb21ceeb6290a3a1161f97339c553f3d27fc4319900a96edb5cfae74c",
+        ] {
+            #expect(SourceFingerprint.modelID(forIndexSha256: retired) == nil)
+        }
     }
 
-    @Test func ornithSourcesArePinnedAndSixBitRemainsUnsupported() {
-        #expect(SupportedModelSource.default == .ornith15_8bit)
+    /// The shipped matrix is the only set of sources: Ornith 4-bit and the two
+    /// Inklings. The retired families' sources (Qwen 3.6/3.8, Ornith 8-bit and
+    /// the MTP heads) are gone with TT-142, so naming one is now an error.
+    @Test func theShippedSourcesArePinnedAndRetiredOnesAreGone() {
+        #expect(SupportedModelSource.default == .ornith15)
         #expect(SupportedModelSource.named("ornith15") == .ornith15)
-        #expect(SupportedModelSource.named("ornith15-8bit") == .ornith15_8bit)
         #expect(SupportedModelSource.named("ornith15-6bit") == nil)
+        for retired in ["ornith15-8bit", "qwen36", "qwen36-8bit", "qwen38flash", "qwen38flash-mtp"]
+        {
+            #expect(SupportedModelSource.named(retired) == nil, "\(retired)")
+        }
         #expect(
             SupportedModelSource.ornith15.repoID
                 == "ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit")
         #expect(
-            SupportedModelSource.ornith15_8bit.repoID
-                == "ornith-ai/Ornith-1.5-35B-A3B-MLX-8bit")
-        #expect(
-            Set(SupportedModelSource.all.map(\.name)).count
-                == SupportedModelSource.all.count)
+            Set(SupportedModelSource.all.map(\.name))
+                == ["ornith15", "inkling-q4-k-xl-unsloth", "inkling2mini"])
         #expect(
             Set(SupportedModelSource.all.map(\.modelID)).count
                 == SupportedModelSource.all.count)
-        // Two sources may share an index digest: Qwen3.8-Flash-Next ships its
-        // MTP draft inside the target's own repository, so the pair differ by
-        // which namespace they claim rather than by where they come from.
-        // What must stay unique is the pairing of digest and namespace, which
-        // is what decides what an install actually contains.
-        let pins = SupportedModelSource.all.map {
-            "\($0.sourceIndexSHA256)|\($0.installsDraftHead)"
-        }
-        #expect(Set(pins).count == SupportedModelSource.all.count)
         #expect(
-            SupportedModelSource.qwen38flashMTP.repoID
-                == SupportedModelSource.qwen38flash.repoID)
-        #expect(SupportedModelSource.qwen38flashMTP.installsDraftHead)
-        #expect(!SupportedModelSource.qwen38flash.installsDraftHead)
+            Set(SupportedModelSource.all.map(\.sourceIndexSHA256)).count
+                == SupportedModelSource.all.count)
     }
 
     @Test func qwen38DraftClassificationClaimsOnlyTheMTPNamespace() {

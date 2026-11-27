@@ -50,16 +50,16 @@ struct RepackCLITests {
 
         #expect(result.status == 2)
         #expect(result.stderr.contains("unknown model"))
-        #expect(result.stderr.contains("qwen36"))
+        #expect(result.stderr.contains("ornith15"))
     }
 
-    @Test func qwenModelSelectorIsAccepted() throws {
-        let output = temporaryOutput("qwen-model")
+    @Test func modelSelectorIsAccepted() throws {
+        let output = temporaryOutput("model-selector")
         defer { clean(output) }
         // --resume without saved state fails fast after argument parsing,
         // proving the selector itself is accepted without touching the network.
         let result = try run([
-            "--model", "qwen36",
+            "--model", "ornith15",
             "--output", output,
             "--resume",
         ])
