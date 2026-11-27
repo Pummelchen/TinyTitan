@@ -1089,6 +1089,27 @@ struct HTTPServerTests {
                 reply.lowercased().contains("content-length: 0"),
                 "\(path): HEAD did not declare an empty body: \(reply)")
         }
+
+        // A refused HEAD is still a HEAD: the oversized-header check runs
+        // before routing, so it has to suppress the body itself (AUD-0071).
+        let socket = try connectedSocket(port: port)
+        defer { Darwin.close(socket) }
+        var head = "HEAD /health HTTP/1.1\r\nHost: localhost\r\n"
+        for index in 0..<(TinyTitanHTTPServer.maximumRequestHeaderFields + 1) {
+            head += "x-\(index): v\r\n"
+        }
+        try writeAll(socket: socket, text: head + "\r\n")
+        let refusal = try readAvailable(socket: socket, timeoutMilliseconds: 2_000)
+        #expect(refusal.contains(" 431 "), "expected 431, got: \(refusal.prefix(80))")
+        if let separator = refusal.range(of: "\r\n\r\n") {
+            let body = refusal[separator.upperBound...]
+            #expect(body.isEmpty, "a refused HEAD carried a body: \(body.prefix(80))")
+            #expect(
+                refusal.lowercased().contains("content-length: 0"),
+                "a refused HEAD did not declare an empty body: \(refusal)")
+        } else {
+            Issue.record("no head terminator in \(refusal.prefix(80))")
+        }
         try await server.shutdown()
     }
 

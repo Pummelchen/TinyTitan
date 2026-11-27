@@ -143,12 +143,22 @@ final class ServerHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
                 // Answered before `inFlightRequests` is incremented, so this
                 // response must not decrement it: with a pipelined neighbour in
                 // flight the decrement would take that request's count (AUD-0066).
-                writeError(
-                    context, status: .requestHeaderFieldsTooLarge,
-                    OpenAIErrorEnvelope(
-                        message: "request headers are too large",
-                        code: "request_headers_too_large"),
-                    completesRequest: false)
+                //
+                // A HEAD must not carry a body even when it is refused: this
+                // check runs before routing, so `refuseUnsupportedHEAD` never
+                // sees the request (AUD-0071).
+                if head.method == .HEAD {
+                    writeHeadOnly(
+                        context, status: .requestHeaderFieldsTooLarge,
+                        completesRequest: false)
+                } else {
+                    writeError(
+                        context, status: .requestHeaderFieldsTooLarge,
+                        OpenAIErrorEnvelope(
+                            message: "request headers are too large",
+                            code: "request_headers_too_large"),
+                        completesRequest: false)
+                }
                 return
             }
             // S10/S25: reset per-request phase state and drop the reference to
