@@ -42,20 +42,20 @@ let package = Package(
         // `@rpath/libTinyTitanLib.dylib` so the published file can carry the
         // plain name).
         // `TinyTitanVariants` is the engine-factory surface: it selects the
-        // 7.0 variant for an install (or the 6.x engine where none ships) and
-        // is in the product so an embedder and the CLI can both construct an
-        // engine without importing the server. `TinyTitanLib` itself still
-        // imports no engine module; the product is the bundle.
+        // plugin or 7.0 variant for an install and is in the product so an
+        // embedder and the CLI can both construct an engine without importing
+        // the server. `TinyTitanLib` itself still imports no engine module; the
+        // product is the bundle.
         .library(
             name: "TinyTitanLib",
             targets: [
-                "TinyTitanLib", "TinyTitanCore", "TinyTitanLegacyEngine", "TinyTitanVariants",
+                "TinyTitanLib", "TinyTitanCore", "TinyTitanVariants",
                 "TinyTitanCPUEngine", "TinyTitanPluginAPI",
             ]),
         .library(
             name: "TinyTitanLibDynamic", type: .dynamic,
             targets: [
-                "TinyTitanLib", "TinyTitanCore", "TinyTitanLegacyEngine", "TinyTitanVariants",
+                "TinyTitanLib", "TinyTitanCore", "TinyTitanVariants",
                 "TinyTitanCPUEngine", "TinyTitanPluginAPI",
             ]),
         // Each engine plugin is a library of its own (TPP/1): built and tested
@@ -127,11 +127,10 @@ let package = Package(
                 .linkedFramework("Accelerate")
             ]
         ),
-        // The generic library the 7.0 variants share: bounded reads, concurrency,
-        // hardware and the tool-call parsers. Model knowledge stays out —
-        // docs/plan-tinytitan-7-engine.md §1.3 — and the core-purity gate enforces
-        // it. The tokenizer cluster stays in `Legacy6xRuntime` until its internal
-        // GF* coupling is split (tracker row TT-073 records the finding).
+        // The generic library the shared engines use: bounded reads, concurrency,
+        // hardware, the tokenizer cluster and the tool-call parsers. Model
+        // knowledge stays out — docs/plan-tinytitan-7-engine.md §1.3 — and the
+        // core-purity gate enforces it.
         .target(
             name: "TinyTitanCore",
             dependencies: [
@@ -241,26 +240,6 @@ let package = Package(
             path: "sources/Engines/Inkling2GGUFQ4",
             swiftSettings: tinytitanLanguageStandard
         ),
-        // The 6.x MoE runtime behind `LegacyEngineAdapter` (TT-134 group e):
-        // `Model`, `RealForwardRunner`, `RuntimeConfiguration`,
-        // `KVCacheManager`, `StreamingMTPDecoder` and their dependency
-        // closure, moved verbatim out of `sources/TinyTitan` and into an
-        // engine target so later plugins copy from it the way the Ornith
-        // plugin did (docs/plan-engine-plugins.md). It still carries the 6.x
-        // CPU engine, GGUF decoder and the K2/Laguna probe routes
-        // because those are entangled with `Model`'s graph; splitting them is
-        // TT-121/TT-132 work, not this move.
-        .target(
-            name: "Legacy6xRuntime",
-            dependencies: [
-                "TinyTitanCore",
-                "TinyTitanFormat",
-                "TinyTitanKernelsC",
-                .product(name: "Tokenizers", package: "swift-transformers"),
-            ],
-            path: "sources/Engines/Legacy6xRuntime",
-            swiftSettings: tinytitanLanguageStandard
-        ),
         // The supported facade an embedder links: the generation orchestrator,
         // prompt shaping and templating, with no NIO and no HTTP. It depends on
         // the engine and the format reader and on nothing else in this package.
@@ -272,12 +251,6 @@ let package = Package(
             path: "sources/TinyTitanLib",
             swiftSettings: tinytitanLanguageStandard
         ),
-        .target(
-            name: "TinyTitanLegacyEngine",
-            dependencies: ["TinyTitanCore", "Legacy6xRuntime", "TinyTitanLib"],
-            path: "sources/TinyTitanLegacyEngine",
-            swiftSettings: tinytitanLanguageStandard
-        ),
         // The factory surface a single-model front end and an embedder use:
         // the 7.0 variant selection table plus the CPU dense selection. It
         // lives outside `TinyTitanServerCore` because both the CLI and the
@@ -286,7 +259,7 @@ let package = Package(
         .target(
             name: "TinyTitanVariants",
             dependencies: [
-                "TinyTitanCore", "TinyTitanLib", "TinyTitanLegacyEngine",
+                "TinyTitanCore", "TinyTitanLib",
                 "Ornith35B4Bit", "DenseGPU", "Inkling2GGUFQ4", "Inkling2NVFP4",
                 "TinyTitanPluginAPI", "TemplatePlugin",
                 "Qwen35Dense2B4Bit", "Qwen35Dense2B8Bit",
@@ -301,8 +274,7 @@ let package = Package(
         .target(
             name: "TinyTitanCPUEngine",
             dependencies: [
-                "TinyTitanCore", "TinyTitanLib",
-                "TinyTitanLegacyEngine", "TinyTitanVariants",
+                "TinyTitanCore", "TinyTitanLib", "TinyTitanVariants",
             ],
             path: "sources/TinyTitanCPUEngine",
             swiftSettings: tinytitanLanguageStandard
@@ -323,10 +295,9 @@ let package = Package(
             name: "TinyTitanCLICore",
             // The CLI is a front end of the library (phase A2 of
             // `docs/plan-embedded-library.md`), so it depends on the facade it
-            // drives. `Legacy6xRuntime` stays for the few value types `Args`
-            // parses.
+            // drives.
             dependencies: [
-                "TinyTitanCore", "Legacy6xRuntime", "TinyTitanLib", "TinyTitanLegacyEngine",
+                "TinyTitanCore", "TinyTitanLib",
                 "TinyTitanVariants", "TinyTitanPluginAPI",
                 "TinyTitanCPUEngine",
             ],
@@ -386,8 +357,6 @@ let package = Package(
             dependencies: [
                 "TinyTitanCore",
                 "TinyTitanLib", "TinyTitanPluginAPI",
-                "Legacy6xRuntime",
-                "TinyTitanLegacyEngine",
                 "TinyTitanMemory",
                 // The variant selection table lives in `TinyTitanVariants`
                 // now, so the server, the CLI and the library product share
@@ -407,7 +376,7 @@ let package = Package(
             name: "TinyTitanServer",
             dependencies: [
                 "TinyTitanServerCore", "TinyTitanVariants", "TinyTitanCPUEngine",
-                "TinyTitanPluginAPI", "TinyTitanCore", "TinyTitanLegacyEngine",
+                "TinyTitanPluginAPI", "TinyTitanCore",
                 "TinyTitanLib", "TinyTitanMemory",
             ],
             path: "sources/TinyTitanServer/Command",
@@ -416,7 +385,7 @@ let package = Package(
         .executableTarget(
             name: "TinyTitanBench",
             dependencies: [
-                "TinyTitanCore", "Legacy6xRuntime", "TinyTitanLib", "TinyTitanLegacyEngine",
+                "TinyTitanCore", "TinyTitanLib",
                 "TinyTitanVariants", "TinyTitanValidationSupport",
             ],
             path: "sources/TinyTitanBench",
@@ -426,32 +395,6 @@ let package = Package(
             name: "TinyTitanValidationSupport",
             dependencies: ["TinyTitanCore"],
             path: "sources/TinyTitanValidation/Support",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        // The 6.x runtime's suite follows the target into `sources/Engines/`
-        // (TT-134 group e); the directory mirrors the target path, and the
-        // target is named for the module it tests.
-        .testTarget(
-            name: "Legacy6xRuntimeTests",
-            dependencies: [
-                "TinyTitanVariants",
-                .product(name: "yyjson", package: "yyjson"),
-                "Qwen35Dense2B4Bit",
-                "Qwen35Dense2B8Bit",
-                "Qwen35Dense4B4Bit", "Qwen35Dense4B8Bit",
-                "Qwen35Dense9B4Bit", "Qwen35Dense9B8Bit",
-                "TinyTitanCore",
-                "Legacy6xRuntime", "TinyTitanFormat", "TinyTitanValidationSupport",
-                "TinyTitanRepackCore", "TinyTitanCLICore", "TinyTitanLib",
-            ],
-            path: "tests/Engines/Legacy6xRuntime",
-            resources: [
-                .copy("Tokenization/Fixtures"),
-                .copy("Runtime/qwen38_tensor_names.txt"),
-                .copy("Runtime/ple_golden.json"),
-                .copy("Infrastructure/ModelIO/GGUFDequantVectors.txt"),
-                .copy("Infrastructure/ModelIO/GGUFTokenizerVectors.json"),
-            ],
             swiftSettings: tinytitanLanguageStandard
         ),
         .testTarget(
@@ -489,7 +432,7 @@ let package = Package(
         .testTarget(
             name: "Ornith35B4BitTests",
             dependencies: [
-                "Ornith35B4Bit", "Legacy6xRuntime", "TinyTitanCore",
+                "Ornith35B4Bit", "TinyTitanCore",
                 .product(name: "yyjson", package: "yyjson"),
             ],
             path: "tests/Engines/Ornith35B4Bit",
@@ -516,7 +459,7 @@ let package = Package(
         .testTarget(
             name: "Inkling2GGUFQ4Tests",
             dependencies: [
-                "Inkling2GGUFQ4", "Legacy6xRuntime", "TinyTitanCore", "TinyTitanPluginAPI",
+                "Inkling2GGUFQ4", "TinyTitanCore", "TinyTitanPluginAPI",
             ],
             path: "tests/Engines/Inkling2GGUFQ4",
             resources: [.copy("Fixtures")],
@@ -525,7 +468,7 @@ let package = Package(
         .testTarget(
             name: "DenseGPUTests",
             dependencies: [
-                "DenseGPU", "TinyTitanCore", "Legacy6xRuntime",
+                "DenseGPU", "TinyTitanCore",
                 .product(name: "yyjson", package: "yyjson"),
             ],
             path: "tests/Engines/DenseGPU",
@@ -548,15 +491,15 @@ let package = Package(
                 "TinyTitanPluginAPI",
                 "TinyTitanLib",
                 "TinyTitanMemory",
-                // `GenerationDefaults.Sampling`, so the mapper tests can pin
-                // that an omitted field follows the served model's profile
-                // rather than a hardcoded house default.
-                "Legacy6xRuntime",
                 // The factory surface the selection tests pin; its own
                 // target names the variant modules, so the tests import one
                 // module instead of eight.
                 "TinyTitanVariants",
                 "TinyTitanCPUEngine",
+                // The scripted CPU model runs on the shipped 2B variant's
+                // engine, so the backend tests exercise a real forward pass.
+                "Qwen35Dense2B4Bit",
+                "Ornith35B4Bit",
                 .product(name: "NIOEmbedded", package: "swift-nio"),
             ],
             path: "tests/TinyTitanServer",
@@ -571,7 +514,7 @@ let package = Package(
             name: "TinyTitanLibTests",
             dependencies: [
                 .product(name: "yyjson", package: "yyjson"),
-                "TinyTitanCore", "TinyTitanLib", "Legacy6xRuntime", "TinyTitanLegacyEngine",
+                "TinyTitanCore", "TinyTitanLib",
                 // The identity surface: a resolved plugin declares its
                 // install's catalog id and name (TT-134 group f).
                 "TinyTitanPluginAPI",

@@ -1,7 +1,6 @@
 import Foundation
 import TinyTitanLib
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanPluginAPI
 import TinyTitanVariants
 
@@ -110,6 +109,15 @@ enum DoctorModelScanner {
                         reason: "the engine plugin declares no identity for this install"))
             }
             identity = declared
+        } catch let error as PluginRegistryError {
+            switch error {
+            case .noPlugin:
+                return .failure(
+                    ProbeFailure(
+                        reason: "no engine plugin serves this install (\(directory.path))"))
+            case .ambiguous, .incompatible:
+                return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
+            }
         } catch {
             return .failure(
                 ProbeFailure(reason: "unreadable manifest.json: \(error)"))
@@ -117,12 +125,11 @@ enum DoctorModelScanner {
         if let reason = identity.unsupportedReason ?? identity.cliUnsupportedReason {
             return .failure(ProbeFailure(reason: reason))
         }
-        // The memory-fit arithmetic still reads the 6.x tuning profile, so it
-        // lives beside the adapter (`LegacyInstallEstimator`); the report's
-        // identity above is the plugin's.
-        let estimate: LegacyInstallEstimate
+        // The memory-fit arithmetic comes from the same plugin's load plan, so
+        // the slot count and prefill chunk are the ones a real load takes.
+        let estimate: InstallFitEstimate
         do {
-            estimate = try LegacyInstallEstimator.estimate(
+            estimate = try InstallFitEstimator.estimate(
                 directory: directory, physicalMemory: physicalMemory,
                 contextTokens: contextTokens, environment: environment)
         } catch {

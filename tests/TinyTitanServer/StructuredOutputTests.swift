@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import TinyTitanCore
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
@@ -108,9 +107,10 @@ struct StructuredOutputRequestTests {
     /// written as part of the JSON. Thinking is off, and the note says why.
     @Test func thinkingIsOffForAConstrainedRequest() throws {
         let on = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue, thinkingMode: .on,
+            family: "qwen3.8-flash-next", thinkingMode: .on,
             reasoningEffort: .xhigh,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: .thinkingWithEffortLevels(
+                defaultEffort: .medium, supported: [.low, .medium, .high, .xhigh]))
         let request = try JSONDecoder().decode(
             OpenAIChatRequest.self,
             from: Data(

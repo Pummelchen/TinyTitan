@@ -25,9 +25,9 @@ extension RealForwardRunner {
         // serving graph does not.
         guard cfg.modelFamily != .laguna else {
             throw ModelError.unsupportedArchitecture(
-                detail: "Laguna-S-2.1 does not run on this runner: "
-                    + "`TinyTitanBench lagunagpu <install> \"<prompt>\"` runs "
-                    + "its decode probe. See docs/plan-laguna-s-2.1.md.")
+                detail: "Laguna-S-2.1 is not supported by this build: its "
+                    + "decode probe route was removed with the unsupported "
+                    + "families (TT-142).")
         }
         precondition(
             slots > 0 && slots <= KVCacheManager.maximumSlots,

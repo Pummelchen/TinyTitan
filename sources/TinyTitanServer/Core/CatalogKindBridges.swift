@@ -1,19 +1,17 @@
 import Foundation
-import Legacy6xRuntime
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanLib
 import TinyTitanPluginAPI
 import TinyTitanVariants
 
-/// 6.x `ModelFamily` bridges for `ModelCatalog.Kind`, kept in one host file so
-/// `ModelRouter`, `ModelRouterError` and `main.swift` need not import the 6.x
-/// runtime themselves (TT-134).
+/// Bridges from a catalog kind to the host's reasoning surfaces, kept in one
+/// file so `ModelRouter`, `ModelRouterError` and `main.swift` need not import
+/// the pieces themselves.
 extension ModelCatalog.Kind {
     package var reasoningProfileTarget: (family: String, control: ReasoningControl) {
         switch self {
         case .gpu(let family, let control): (family, control)
-        case .cpu: (ModelFamily.qwen36.rawValue, ModelFamily.qwen36.engineReasoningControl)
+        case .cpu(let family, let control): (family, control)
         }
     }
 
@@ -34,9 +32,9 @@ extension ModelCatalog.Kind {
         thinking: ModelThinkingMode
     ) -> ServerReasoningProfile {
         ServerReasoningProfile(
-            family: ModelFamily.qwen36.rawValue,
+            family: VariantCPUModelFamily.qwen35Dense.rawValue,
             thinkingMode: thinking,
             reasoningEffort: nil,
-            reasoningControl: ModelFamily.qwen36.engineReasoningControl)
+            reasoningControl: VariantCPUModelFamily.qwen35Dense.reasoningControl)
     }
 }

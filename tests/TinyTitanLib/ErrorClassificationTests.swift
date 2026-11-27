@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import Legacy6xRuntime
 @testable import TinyTitanCore
 
 @testable import TinyTitanLib
@@ -14,10 +13,10 @@ import Legacy6xRuntime
 /// where the facade deliberately declines to classify.
 @Suite struct ErrorClassificationTests {
     private let directory = URL(fileURLWithPath: "/tmp/some-install")
-    private let family = ModelFamily.qwen35Dense
+    private let family = "qwen3_5_dense"
 
     private func classify(_ error: ModelError) -> TinyTitanError? {
-        Engine.classify(error, directory: directory, family: family.rawValue)
+        Engine.classify(error, directory: directory, family: family)
     }
 
     @Test func aFormatThisBuildDoesNotReadIsTheCallersToFix() {
@@ -67,7 +66,7 @@ import Legacy6xRuntime
                 Issue.record("\(error) should classify as .unsupportedFamily")
                 continue
             }
-            #expect(named == family.rawValue)
+            #expect(named == family)
         }
     }
 

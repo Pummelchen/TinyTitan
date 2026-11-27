@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import Legacy6xRuntime
 import TinyTitanMemory
 
 @testable import TinyTitanLib

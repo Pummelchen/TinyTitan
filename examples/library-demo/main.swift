@@ -138,7 +138,8 @@ do {
     let engine = try await Engine(
         directory: URL(fileURLWithPath: modelDirectory),
         device: device,
-        factory: EngineFactories.sixXGPU())
+        factory: try EngineFactories.routingFactory(
+            directoryURL: URL(fileURLWithPath: modelDirectory)))
 
     let descriptor = engine.descriptor
     status(

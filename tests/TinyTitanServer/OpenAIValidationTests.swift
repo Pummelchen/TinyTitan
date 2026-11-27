@@ -3,7 +3,6 @@ import NIOHTTP1
 import Testing
 @testable import TinyTitanCore
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
@@ -86,12 +85,12 @@ struct OpenAIValidationTests {
 
         #expect(
             BackendWithoutACard().maximumContext
-                == RuntimeConfiguration.nativeMaximumContextTokens)
+                == RuntimeLimits.nativeMaximumContextTokens)
         // The ceiling itself, and that it is not the wider YaRN one.
-        #expect(RuntimeConfiguration.nativeMaximumContextTokens == 262_144)
+        #expect(RuntimeLimits.nativeMaximumContextTokens == 262_144)
         #expect(
-            RuntimeConfiguration.nativeMaximumContextTokens
-                < RuntimeConfiguration.maximumContextTokens)
+            RuntimeLimits.nativeMaximumContextTokens
+                < RuntimeLimits.maximumContextTokens)
 
         func chat(maxTokens: Int) throws -> OpenAIChatRequest {
             try JSONDecoder().decode(
@@ -102,14 +101,14 @@ struct OpenAIValidationTests {
         }
 
         let atTheCeiling = try chat(
-            maxTokens: RuntimeConfiguration.nativeMaximumContextTokens)
+            maxTokens: RuntimeLimits.nativeMaximumContextTokens)
         let validated = try OpenAIRequestValidator.validate(atTheCeiling, modelID: "m")
         #expect(
             validated.maximumCompletionTokens
-                == RuntimeConfiguration.nativeMaximumContextTokens)
+                == RuntimeLimits.nativeMaximumContextTokens)
 
         let pastIt = try chat(
-            maxTokens: RuntimeConfiguration.nativeMaximumContextTokens + 1)
+            maxTokens: RuntimeLimits.nativeMaximumContextTokens + 1)
         #expect(throws: ServerRequestError.self) {
             try OpenAIRequestValidator.validate(pastIt, modelID: "m")
         }
@@ -122,10 +121,11 @@ struct OpenAIValidationTests {
         let on = try OpenAIRequestValidator.validate(
             request, modelID: "m",
             reasoningProfile: ServerReasoningProfile(
-                family: ModelFamily.qwen38flash.rawValue,
+                family: "qwen38flash",
                 thinkingMode: .on,
                 reasoningEffort: nil,
-                reasoningControl: ModelFamily.qwen38flash.engineReasoningControl),
+                reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                    defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])),
             sampling: SamplingProfile(
                 temperature: 0.7, topK: 20, topP: 0.80, presencePenalty: 1.5,
                 thinking: ThinkingDefaults(
@@ -141,10 +141,11 @@ struct OpenAIValidationTests {
         let off = try OpenAIRequestValidator.validate(
             request, modelID: "m",
             reasoningProfile: ServerReasoningProfile(
-                family: ModelFamily.qwen38flash.rawValue,
+                family: "qwen38flash",
                 thinkingMode: .off,
                 reasoningEffort: nil,
-                reasoningControl: ModelFamily.qwen38flash.engineReasoningControl),
+                reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                    defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])),
             sampling: SamplingProfile(
                 temperature: 0.7, topK: 20, topP: 0.80, presencePenalty: 1.5,
                 thinking: ThinkingDefaults(
@@ -907,7 +908,7 @@ struct ServerArgumentTests {
     /// The three causes (not an integer, above the ceiling, between rungs) also
     /// shared one string, so a typo read as a policy refusal.
     @Test func theContextRefusalNamesTheChoicesTheHelpPromises() throws {
-        let rungs = RuntimeConfiguration.supportedContextTokens
+        let rungs = RuntimeLimits.supportedContextTokens
             .map(String.init).joined(separator: ", ")
 
         func message(_ value: String) -> String {
@@ -931,10 +932,10 @@ struct ServerArgumentTests {
         // The ceiling is derived rather than literal because it moved to 2097152
         // with the 2M rung — the old "2000000" probe is now a *rung* violation,
         // not an over-the-ceiling one.
-        let aboveCeiling = String(RuntimeConfiguration.maximumContextTokens + 1)
+        let aboveCeiling = String(RuntimeLimits.maximumContextTokens + 1)
         for value in ["abc", aboveCeiling] {
             let refusal = message(value)
-            #expect(refusal.contains("\(RuntimeConfiguration.maximumContextTokens)"))
+            #expect(refusal.contains("\(RuntimeLimits.maximumContextTokens)"))
             #expect(!refusal.contains(rungs))
         }
         // A value between the native rungs is still refused as a rung violation
@@ -947,7 +948,7 @@ struct ServerArgumentTests {
         // Its sibling in the same file has the same shape: a membership test
         // against an allowed list whose refusal named nothing, while
         // --expert-cache-slots spells its choices out.
-        let chunks = RuntimeConfiguration.allowedPrefillChunkTokens
+        let chunks = RuntimeLimits.allowedPrefillChunkTokens
             .map(String.init).joined(separator: ", ")
         var chunkRefusal = ""
         do {
@@ -992,10 +993,11 @@ struct ServerArgumentTests {
     /// what the model will actually do instead.
     @Test func reasoningEffortReportsWhatWasApplied() throws {
         let profile = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: nil,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         // With no override the template default xhigh is the active level, so
         // asking for it is exact and silent.
         let exact = try OpenAIRequestValidator.validate(
@@ -1022,10 +1024,11 @@ struct ServerArgumentTests {
         #expect(max.reasoningNotes[0].contains("extra high"))
 
         let lowProfile = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: .low,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         let low = try OpenAIRequestValidator.validate(
             try Self.effortRequest("low"), modelID: "m",
             reasoningProfile: lowProfile)
@@ -1038,10 +1041,10 @@ struct ServerArgumentTests {
         // Loaded on/off and thinking off: a request naming an effort level
         // must come back wanting thinking on.
         let binary = ServerReasoningProfile(
-            family: ModelFamily.qwen36.rawValue,
+            family: "qwen36",
             thinkingMode: .off,
             reasoningEffort: nil,
-            reasoningControl: ModelFamily.qwen36.engineReasoningControl)
+            reasoningControl: ReasoningControl.binaryThinking)
         let wantsThinking = try OpenAIRequestValidator.validate(
             try Self.effortRequest("xhigh"), modelID: "m",
             reasoningProfile: binary)
@@ -1050,10 +1053,11 @@ struct ServerArgumentTests {
         // And naming "off" on a server loaded with thinking on must come back
         // wanting it off -- the switch a coding agent reaches for.
         let effortOn = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: .xhigh,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         let wantsOff = try OpenAIRequestValidator.validate(
             try Self.effortRequest("off"), modelID: "m",
             reasoningProfile: effortOn)
@@ -1094,10 +1098,11 @@ struct ServerArgumentTests {
     /// cap and truncate the summary -- had the fix silently lost.
     @Test func templateKwargsTurnThinkingOff() throws {
         let loadedOn = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: .xhigh,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         let off = try OpenAIRequestValidator.validate(
             try Self.request(withExtra: #""chat_template_kwargs":{"enable_thinking":false}"#),
             modelID: "m", reasoningProfile: loadedOn)
@@ -1107,10 +1112,10 @@ struct ServerArgumentTests {
         // `true` is the switch the other way: it must turn a thinking-off
         // server on rather than being ignored as a no-op.
         let loadedOff = ServerReasoningProfile(
-            family: ModelFamily.qwen36.rawValue,
+            family: "qwen36",
             thinkingMode: .off,
             reasoningEffort: nil,
-            reasoningControl: ModelFamily.qwen36.engineReasoningControl)
+            reasoningControl: ReasoningControl.binaryThinking)
         let on = try OpenAIRequestValidator.validate(
             try Self.request(withExtra: #""chat_template_kwargs":{"enable_thinking":true}"#),
             modelID: "m", reasoningProfile: loadedOff)
@@ -1122,10 +1127,11 @@ struct ServerArgumentTests {
     /// that sends both cannot be surprised by which one applied.
     @Test func templateKwargsEffortIsHonouredAndTopLevelWins() throws {
         let profile = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: .xhigh,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         let fromKwargs = try OpenAIRequestValidator.validate(
             try Self.request(withExtra: #""chat_template_kwargs":{"reasoning_effort":"low"}"#),
             modelID: "m", reasoningProfile: profile)
@@ -1187,10 +1193,11 @@ struct ServerArgumentTests {
     /// ladder, so none of them is a failure.
     @Test func unfamiliarReasoningVocabularyIsAccepted() throws {
         let profile = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue,
+            family: "qwen38flash",
             thinkingMode: .on,
             reasoningEffort: nil,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: ReasoningControl.thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         for word in [
             "ultra", "none", "extra-high", "thinking", "auto",
             "max", "minimal", "EXTRA HIGH", "highest",
@@ -1281,18 +1288,11 @@ struct ServerArgumentTests {
                 "--model", "model.ssdai", "--host-kv-window", "-1",
             ])
         }
-        #expect(throws: RuntimeConfigurationError.self) {
-            try RuntimeConfiguration(hostKVWindowTokens: 0)
-        }
         #expect(throws: ServerArgumentError.self) {
             try ServerArguments.parse([
                 "--model", "model.ssdai", "--host-kv-window",
-                String(RuntimeConfiguration.maximumContextTokens + 1),
+                String(RuntimeLimits.maximumContextTokens + 1),
             ])
-        }
-        #expect(throws: RuntimeConfigurationError.self) {
-            try RuntimeConfiguration(
-                hostKVWindowTokens: RuntimeConfiguration.maximumContextTokens + 1)
         }
     }
 

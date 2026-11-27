@@ -2,7 +2,6 @@ import Foundation
 import Synchronization
 import Testing
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 @testable import TinyTitanCore

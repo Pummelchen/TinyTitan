@@ -1,4 +1,0 @@
-import TinyTitanCore
-
-public typealias StructuredAssistantEvent = TinyTitanCore.StructuredAssistantEvent
-public typealias StructuredAssistantDecoder = TinyTitanCore.StructuredAssistantDecoder

@@ -2,9 +2,8 @@ import Foundation
 import Testing
 import TinyTitanCore
 import TinyTitanVariants
+import Ornith35B4Bit
 
-@testable import Legacy6xRuntime
-@testable import TinyTitanLegacyEngine
 @testable import TinyTitanServerCore
 
 /// TT-097 Phase 3 Task 10: the server's factory selection. Model-free by
@@ -23,32 +22,32 @@ import TinyTitanVariants
                 routedExpertWeightBits: 4) == .ornith35B4Bit)
     }
 
-    @Test("every other GPU identity stays on the 6.x engine")
-    func everythingElseStaysLegacy() {
+    @Test("every other GPU identity has no shipped variant")
+    func everythingElseHasNoVariant() {
         // The 8-bit ornith variant is not shipped.
         #expect(
             EngineFactories.gpuSelection(
                 family: "qwen36", manifestModelID: "ornith-1.5-35b-a3b",
-                routedExpertWeightBits: 8) == .legacy)
+                routedExpertWeightBits: 8) == nil)
         // A different qwen36 install is not the ornith variant.
         #expect(
             EngineFactories.gpuSelection(
                 family: "qwen36", manifestModelID: "some-private-checkpoint",
-                routedExpertWeightBits: 4) == .legacy)
+                routedExpertWeightBits: 4) == nil)
         // Other families have no shipped GPU variant.
         #expect(
             EngineFactories.gpuSelection(
                 family: "qwen38flash", manifestModelID: "qwen3.8-flash-next",
-                routedExpertWeightBits: 4) == .legacy)
+                routedExpertWeightBits: 4) == nil)
         #expect(
             EngineFactories.gpuSelection(
                 family: "laguna", manifestModelID: "laguna-s-2-1",
-                routedExpertWeightBits: 4) == .legacy)
+                routedExpertWeightBits: 4) == nil)
     }
 
     @Test("the ornith plugin factory composes its own planner stages")
     func variantFactoryIsComplete() throws {
-        let variant = EngineFactories.gpuFactory(
+        let variant = try EngineFactories.gpuFactory(
             family: "qwen36", manifestModelID: "ornith-1.5-35b-a3b-4bit",
             routedExpertWeightBits: 4)
         // The planner and architecture stages are the family-generic
@@ -86,8 +85,8 @@ import TinyTitanVariants
         }
     }
 
-    @Test("the router dispatch hands ornith its variant factory, others 6.x")
-    func routerDispatchSelectsPerIdentity() {
+    @Test("the router dispatch hands ornith its variant factory, others a refusal")
+    func routerDispatchSelectsPerIdentity() throws {
         // With no Metal context the engine stage is where the two factories
         // differ, and the error names the engine: a model-free probe of
         // which factory the dispatch returned.
@@ -103,23 +102,24 @@ import TinyTitanVariants
             }
         }
 
-        let ornith = EngineFactories.gpuFactory(
+        let ornith = try EngineFactories.gpuFactory(
             family: "qwen36", manifestModelID: "ornith-1.5-35b-a3b",
             routedExpertWeightBits: 4)
         #expect(
             engineStageError(ornith).contains("Ornith engine"),
             "the shipped ornith identity must dispatch to the variant factory")
 
-        let legacy = EngineFactories.gpuFactory(
-            family: "qwen36", manifestModelID: "some-private-checkpoint",
-            routedExpertWeightBits: 4)
-        #expect(
-            engineStageError(legacy).contains("6.x"),
-            "every other identity stays on the 6.x engine")
+        // Every identity no shipped variant claims is refused by name: there
+        // is no fallback engine (TT-142).
+        #expect(throws: EngineFactoryError.self) {
+            _ = try EngineFactories.gpuFactory(
+                family: "qwen36", manifestModelID: "some-private-checkpoint",
+                routedExpertWeightBits: 4)
+        }
 
         // The dense family routes to the shared dense-GPU engine, whose
         // engine stage names itself (Task 13's flip).
-        let dense = EngineFactories.gpuFactory(
+        let dense = try EngineFactories.gpuFactory(
             family: "qwen3_5_dense", manifestModelID: "qwen3.5-4b",
             routedExpertWeightBits: 4)
         #expect(
@@ -189,9 +189,9 @@ import TinyTitanVariants
             #expect("\(error)".contains("Ornith engine"))
         }
         // The CLI and an embedder call `routingFactory`, which must take the
-        // same table: a directory naming the Ornith install gets the variant,
-        // not the 6.x fallback.
-        let routed = EngineFactories.routingFactory(directoryURL: directory)
+        // same plugin resolution: a directory naming the Ornith install gets
+        // the variant, not some other engine.
+        let routed = try EngineFactories.routingFactory(directoryURL: directory)
         do {
             _ = try routed.buildModel(directory, ArchConfig.qwen36_35B_A3B, nil)
             Issue.record("the routed factory must be the variant too")

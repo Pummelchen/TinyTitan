@@ -12,7 +12,6 @@
 import Foundation
 import Metal
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanVariants
 
 extension TinyTitanBench {
@@ -269,7 +268,6 @@ extension TinyTitanBench {
     /// The CPU side-engine's commands. Returns whether one ran, so `main`
     /// can dispatch them before it creates a Metal context.
     static func runCPUCommand(_ name: String, iterations: Int) throws -> Bool {
-        if try runWideVerifyCommand(name) { return true }
         switch name {
         case "cpuload":
             // Sustained load at one width, for measuring what the side-engine
@@ -320,19 +318,6 @@ extension TinyTitanBench {
                 snapshot: snapshot,
                 input: URL(fileURLWithPath: CommandLine.arguments[3]),
                 output: URL(fileURLWithPath: CommandLine.arguments[4]))
-        case "lagunagpu":
-            // The Laguna-S-2.1 install through the probe graph on Metal:
-            // install, prompt, greedy limit.
-            let install =
-                CommandLine.arguments.count > 2
-                ? CommandLine.arguments[2] : "models/laguna-s-2.1-4bit.ssdai"
-            let prompt =
-                CommandLine.arguments.count > 3
-                ? CommandLine.arguments[3] : "The capital of France is"
-            let limit =
-                CommandLine.arguments.count > 4
-                ? Int(CommandLine.arguments[4]) ?? 1 : 1
-            try runLagunaGPU(install: install, prompt: prompt, limit: limit)
         case "cpu35ppl":
             // Held-out text through the CPU forward pass: mean NLL and
             // perplexity, the sharper instrument the twenty-prompt A/B was

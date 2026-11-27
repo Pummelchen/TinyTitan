@@ -53,7 +53,7 @@ import TinyTitanLib
 
     private func profile(
         knobs: CalibrationProfile.Knobs,
-        modelID: String = "ornith",
+        modelID: String = "ornith-1.5-35b-a3b",
         family: String = "qwen36",
         weightBits: Int = 4
     ) throws -> URL {
@@ -72,7 +72,7 @@ import TinyTitanLib
     }
 
     @Test func profileFillsKnobsTheFlagsLeftUnset() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         let url = try profile(
             knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
@@ -89,7 +89,7 @@ import TinyTitanLib
     }
 
     @Test func explicitFlagsWinOverTheProfile() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         let url = try profile(
             knobs: .init(prefillChunkTokens: 128, expertCacheSlots: 96))
@@ -104,7 +104,7 @@ import TinyTitanLib
     }
 
     @Test func switchlessKnobsAreReportedNotApplied() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         let url = try profile(knobs: .init(boundedIO: false))
         defer { try? FileManager.default.removeItem(at: url) }
@@ -118,7 +118,7 @@ import TinyTitanLib
     }
 
     @Test func foreignMachineProfileIsRefused() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         var machine = CalibrationProfile.currentMachine()
         machine = .init(
@@ -127,7 +127,7 @@ import TinyTitanLib
         let profile = CalibrationProfile(
             machine: machine,
             target: .init(
-                modelID: "ornith", family: "qwen36", weightBits: 4,
+                modelID: "ornith-1.5-35b-a3b", family: "qwen36", weightBits: 4,
                 contextTokens: 8192),
             measured: true, measuredAt: "2026-10-22T00:00:00Z",
             source: "calibrate/1")
@@ -147,7 +147,7 @@ import TinyTitanLib
     /// one, and a profile for a different checkpoint is not evidence about
     /// this install: both are refused rather than applied.
     @Test func foreignOSAndModelProfilesAreRefused() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         var otherOS = CalibrationProfile.currentMachine()
         otherOS = .init(
@@ -156,7 +156,7 @@ import TinyTitanLib
         let osProfile = CalibrationProfile(
             machine: otherOS,
             target: .init(
-                modelID: "ornith", family: "qwen36", weightBits: 4,
+                modelID: "ornith-1.5-35b-a3b", family: "qwen36", weightBits: 4,
                 contextTokens: 8192),
             measured: true, measuredAt: "2026-10-22T00:00:00Z",
             source: "calibrate/1")
@@ -171,8 +171,8 @@ import TinyTitanLib
             ])
         }
         for (modelID, family, bits) in [
-            ("other", "qwen36", 4), ("ornith", "qwen38", 4),
-            ("ornith", "qwen36", 8),
+            ("other", "qwen36", 4), ("ornith-1.5-35b-a3b", "qwen38", 4),
+            ("ornith-1.5-35b-a3b", "qwen36", 8),
         ] {
             let url = try profile(
                 knobs: .init(), modelID: modelID, family: family,
@@ -198,7 +198,7 @@ import TinyTitanLib
     }
 
     @Test func corruptProfileIsRefused() throws {
-        let install = try Self.toyInstall(modelID: "ornith")
+        let install = try Self.toyInstall(modelID: "ornith-1.5-35b-a3b")
         defer { try? FileManager.default.removeItem(at: install) }
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("server-calibration-bad-\(UUID().uuidString).json")

@@ -5,7 +5,6 @@ import Inkling2NVFP4
 import Ornith35B4Bit
 import TemplatePlugin
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanPluginAPI
 
 extension EngineFactories {
@@ -13,17 +12,15 @@ extension EngineFactories {
     /// first only for readability: resolution is by probe strength.
     ///
     /// `TemplatePlugin`, `Inkling2GGUFQ4Plugin`, `Ornith35B4BitPlugin` and
-    /// `DenseQwen35Plugin` are standalone plugins. `LegacyEngineAdapter` wraps the
-    /// 6.x engine, whose families still borrow its stages and
-    /// are migrated into plugins of their own one by one (TT-132); each adapter
-    /// is removed when its plugin lands.
+    /// `DenseQwen35Plugin` are standalone plugins. There is no fallback
+    /// adapter: an install no plugin claims is refused by name, because the
+    /// shipped matrix is exactly what these plugins serve (TT-142).
     public static let builtInPlugins: [any EnginePlugin.Type] = [
         TemplatePlugin.self,
         Inkling2GGUFQ4Plugin.self,
         Inkling2NVFP4Plugin.self,
         Ornith35B4BitPlugin.self,
         DenseQwen35Plugin.self,
-        LegacyEngineAdapter.self,
     ]
 
     /// The process's registry with the built-in plugins registered. An
@@ -39,24 +36,4 @@ extension EngineFactories {
             try? PluginRegistry.shared.register(plugin)
         }
     }()
-}
-
-/// Adapter (TT-132 migrates it, family by family): the 6.x engine, which
-/// serves every install no plugin claims more specifically.
-public enum LegacyEngineAdapter: EnginePlugin {
-    public static let pluginID = "ai.tinytitan.adapter.legacy-6x"
-    public static let protocolVersion = ProtocolVersion.current
-    public static let displayName = "TinyTitan 6.x engine (adapter)"
-
-    public static func probe(_ install: InstallProbe) -> MatchStrength? { .fallback }
-
-    public static func parameters(for install: InstallProbe) -> ParameterSupport {
-        ParameterSupport()
-    }
-
-    public static func reasoningControl(for install: InstallProbe) -> ReasoningControl? { nil }
-
-    public static func engineFactory(host: HostServices) -> EngineFactory {
-        EngineFactories.sixXGPU()
-    }
 }

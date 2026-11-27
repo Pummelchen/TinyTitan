@@ -2,7 +2,6 @@ import Foundation
 import Metal
 import TinyTitanCore
 import TinyTitanLib
-import TinyTitanLegacyEngine
 import TinyTitanVariants
 
 /// Measures one calibration arm by loading its engine and timing a fresh
@@ -54,7 +53,7 @@ public struct CalibrationMeasurer: Sendable {
             logSink: { _ in })
         let engine = try await Engine(
             directory: directory, device: device,
-            factory: EngineFactories.routingFactory(directoryURL: directory),
+            factory: try EngineFactories.routingFactory(directoryURL: directory),
             configuration: configuration)
         let session = await engine.session(
             system: "You are a calibration probe. Answer in one paragraph.")

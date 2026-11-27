@@ -1,6 +1,5 @@
 import Foundation
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanLib
 
 /// A dense CPU variant engine plus the tokenizer from the same directory,

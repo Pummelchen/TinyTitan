@@ -8,7 +8,6 @@ import Qwen35Dense4B8Bit
 import Qwen35Dense9B4Bit
 import Qwen35Dense9B8Bit
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanLib
 import TinyTitanPluginAPI
 
@@ -24,12 +23,11 @@ extension EngineFactories {
 
     /// Which GPU engine a catalog identity selects. The table is explicit and
     /// small: a shipped variant joins it when it qualifies (registry
-    /// `shipped: true`, `catalog --check` green), and every identity that
-    /// misses falls back to the 6.x engine — which stays the serving engine
-    /// for every model without a shipped variant (TT-087). `Equatable` so a
-    /// test can pin the selection without running a model.
+    /// `shipped: true`, `catalog --check` green). An identity the table does
+    /// not name has no engine here — the plugins own everything the host
+    /// serves, and the host refuses the rest by name (TT-142). `Equatable` so
+    /// a test can pin the selection without running a model.
     public enum GPUVariantSelection: Equatable {
-        case legacy
         case ornith35B4Bit
         case qwen35DenseGPU
     }
@@ -37,13 +35,13 @@ extension EngineFactories {
     /// The selection for a GPU catalog identity, decided from the manifest
     /// identity the entry's directory carries: the shipped Ornith 1.5 35B-A3B
     /// install at 4 bits routes to its variant, every dense Qwen 3.5 install
-    /// routes to the shared dense-GPU engine, and everything else stays on
-    /// the 6.x engine.
+    /// routes to the shared dense-GPU engine, and nil means no shipped
+    /// variant claims the identity.
     public static func gpuSelection(
         family: String,
         manifestModelID: String,
         routedExpertWeightBits: Int
-    ) -> GPUVariantSelection {
+    ) -> GPUVariantSelection? {
         if family == "qwen36",
             manifestModelID.hasPrefix("ornith-1.5-35b"),
             routedExpertWeightBits == 4
@@ -53,24 +51,15 @@ extension EngineFactories {
         if family == "qwen3_5_dense" {
             return .qwen35DenseGPU
         }
-        return .legacy
+        return nil
     }
 
-    /// The GPU factory a catalog identity selects. The router reads the
-    /// install manifest identity (the same bounded read its plan performs)
-    /// and dispatches through the selection table: the shipped variant
-    /// engines for their installs, the 6.x engine for everything else —
-    /// which keeps serving every model without a shipped variant (TT-087).
-    ///
-    /// Resolved through the plugin registry (TPP/1, TT-130): the strongest
-    /// plugin probe wins. An install no plugin claims specifically and that has
-    /// no readable manifest is refused here, as before the registry.
+    /// The GPU factory a catalog identity selects. Resolved through the
+    /// plugin registry (TPP/1, TT-130): the strongest plugin probe wins. An
+    /// install no plugin claims is refused here by name; there is no
+    /// fallback engine (TT-142).
     public static func gpuFactory(directoryURL: URL) throws -> EngineFactory {
-        let resolved = try pluginRegistry.resolve(directoryURL)
-        if resolved.strength == .fallback {
-            _ = try SSDAIManifestReader.read(directoryURL: directoryURL)
-        }
-        return resolved.engineFactory()
+        try pluginRegistry.resolve(directoryURL).engineFactory()
     }
 
     /// The CPU factory for a dense Qwen 3.5 install: the per-width variant
@@ -103,19 +92,20 @@ extension EngineFactories {
     static let denseCPUFamily = "qwen3_5_dense"
 
     /// The GPU factory a single-model front end (the CLI) and an embedder
-    /// use: the same selection table the server's router uses, keyed on the
-    /// install's manifest identity. A directory without a readable manifest
-    /// (an affine snapshot, a GGUF directory) falls back to the 6.x factory,
-    /// which is what those paths used before this surface existed.
-    public static func routingFactory(directoryURL: URL) -> EngineFactory {
-        (try? pluginRegistry.resolve(directoryURL))?.engineFactory() ?? sixXGPU()
+    /// use: the same plugin resolution the server's router uses. A directory
+    /// no plugin serves is refused by name; there is no fallback engine.
+    public static func routingFactory(directoryURL: URL) throws -> EngineFactory {
+        try pluginRegistry.resolve(directoryURL).engineFactory()
     }
 
+    /// The factory for a catalog identity, through the selection table. An
+    /// identity no shipped variant claims is refused by name rather than
+    /// handed to an engine for a family that is not supported (TT-142).
     public static func gpuFactory(
         family: String,
         manifestModelID: String,
         routedExpertWeightBits: Int
-    ) -> EngineFactory {
+    ) throws -> EngineFactory {
         switch gpuSelection(
             family: family,
             manifestModelID: manifestModelID,
@@ -123,7 +113,10 @@ extension EngineFactories {
         {
         case .ornith35B4Bit: return Ornith35B4BitPlugin.engineFactory(host: .standard)
         case .qwen35DenseGPU: return DenseQwen35Plugin.engineFactory(host: .standard)
-        case .legacy: return sixXGPU()
+        case nil:
+            throw EngineFactoryError.unsupported(
+                "no shipped GPU engine serves family \(family) model "
+                    + "\(manifestModelID) at \(routedExpertWeightBits) bits")
         }
     }
 

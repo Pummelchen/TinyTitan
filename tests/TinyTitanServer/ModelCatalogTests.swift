@@ -103,14 +103,17 @@ struct ModelCatalogTests {
         let root = try CatalogFixture.root()
         defer { try? FileManager.default.removeItem(at: root) }
         try CatalogFixture.install(
-            root, "qwen3.6_35B_A3B_8Bit", modelID: "qwen3.6-35b-a3b",
-            family: "qwen36", bits: 8)
+            root, "ornith-1.5_35B_A3B_4Bit", modelID: "ornith-1.5-35b-a3b",
+            family: "qwen36", bits: 4)
         try CatalogFixture.install(
             root, "qwen3.6_35B_A3B_MTP_4Bit", modelID: "qwen3.6-35b-a3b-mtp-4bit",
             family: "qwen36_mtp", bits: 4)
         try CatalogFixture.install(
-            root, "no-tokenizer", modelID: "other", family: "qwen36",
-            bits: 4, tokenizer: false)
+            root, "ornith-no-tokenizer", modelID: "ornith-1.5-35b-a3b",
+            family: "qwen36", bits: 4, tokenizer: false)
+        try CatalogFixture.install(
+            root, "qwen3.6_35B_A3B_8Bit", modelID: "qwen3.6-35b-a3b",
+            family: "qwen36", bits: 8)
         try CatalogFixture.snapshot(root, "qwen3.5_2B_4Bit", config: CatalogFixture.cpuConfig())
         try CatalogFixture.snapshot(
             root, "unnamed_2B_8Bit",
@@ -131,12 +134,12 @@ struct ModelCatalogTests {
 
         #expect(
             catalog.entries.map(\.id) == [
-                "qwen3.6-35b-a3b_8-Bit", "qwen3.5-2b_4-Bit", "unnamed_2B_8Bit",
+                "ornith-1.5-35b-a3b_4-Bit", "qwen3.5-2b_4-Bit", "unnamed_2B_8Bit",
             ])
-        let gpu = try #require(catalog.entry(id: "qwen3.6-35b-a3b_8-Bit"))
-        #expect(gpu.name == "Qwen 3.6 35B-A3B")
+        let gpu = try #require(catalog.entry(id: "ornith-1.5-35b-a3b_4-Bit"))
+        #expect(gpu.name == "Ornith 1.5 35B-A3B")
         #expect(gpu.kind == .gpu(family: "qwen36", reasoning: .binaryThinking))
-        #expect(gpu.quant == 8)
+        #expect(gpu.quant == 4)
         #expect(gpu.sampling == .house)
         #expect(gpu.sizeBytes > 0)
         let cpu = try #require(catalog.entry(id: "qwen3.5-2b_4-Bit"))
@@ -154,10 +157,13 @@ struct ModelCatalogTests {
             })
         #expect(
             Set(skipped.keys) == [
-                "qwen3.6_35B_A3B_MTP_4Bit", "no-tokenizer", "llama",
+                "qwen3.6_35B_A3B_8Bit", "qwen3.6_35B_A3B_MTP_4Bit",
+                "ornith-no-tokenizer", "llama",
                 "unquantised", "half-written", "broken", "gguf",
             ])
-        #expect(skipped["qwen3.6_35B_A3B_MTP_4Bit"]?.contains("draft head") == true)
+        #expect(skipped["qwen3.6_35B_A3B_8Bit"]?.contains("no engine plugin serves") == true)
+        #expect(skipped["qwen3.6_35B_A3B_MTP_4Bit"]?.contains("no engine plugin serves") == true)
+        #expect(skipped["ornith-no-tokenizer"]?.contains("no tokenizer") == true)
         #expect(skipped["llama"]?.contains("does not implement") == true)
         #expect(skipped["half-written"]?.contains("incomplete") == true)
     }

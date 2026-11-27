@@ -1,56 +1,12 @@
 import Foundation
-import Metal
 import Testing
-import Legacy6xRuntime
 
 @testable import TinyTitanLib
-@testable import TinyTitanServerCore
 @testable import TinyTitanCore
-@testable import TinyTitanLegacyEngine
 
-/// The batched-serving headroom rule: a worst-case per-slot size computed from
-/// the architecture, and a width clamped so the slots fit beside the wired
-/// expert cache.
+/// The batched-serving headroom rule: a width clamped so the requested slots
+/// fit beside the wired expert cache.
 @Suite struct BatchedMemoryBudgetTests {
-
-    private let config = ArchConfig.qwen36_35B_A3B
-
-    /// The formula must agree with what the manager allocates. A manager whose
-    /// capacity is the whole context is the worst case, so its buffer lengths
-    /// are the number to match rather than a second copy of the same arithmetic.
-    @Test func kvWorstCaseMatchesTheAllocatedLayout() throws {
-        let ctx = try MetalContext()
-        let maxContext = 128
-        let slots = 3
-        let kv = try KVCacheManager(
-            device: ctx.device, config: config,
-            maxContext: maxContext, slots: slots,
-            fp16RingEnabled: false,
-            slidingWindow: config.slidingWindow,
-            maxPrefillChunkTokens: 128)
-        var allocated = 0
-        for layer in 0..<config.numLayers where kv.layerKind(layer) != .linear {
-            allocated += kv.bufferLength(layer: layer) * 2  // K and V
-        }
-        let predicted = KVCacheManager.worstCaseBytes(
-            config: config, maxContext: maxContext, precision: .fp16,
-            slots: slots, fp16RingEnabled: false,
-            slidingWindow: config.slidingWindow, maxPrefillChunkTokens: 128)
-        #expect(predicted == allocated)
-    }
-
-    @Test func gdnWorstCaseMatchesTheAllocatedLayout() throws {
-        let ctx = try MetalContext()
-        let slots = 3
-        let gdn = try GDNStateManager(device: ctx.device, config: config, slots: slots)
-        var allocated = 0
-        for layer in 0..<config.numLayers where gdn.isLinear(layer: layer) {
-            allocated +=
-                gdn.stateBuffer(layer: layer).length
-                + gdn.convTailBuffer(layer: layer).length
-        }
-        #expect(GDNStateManager.worstCaseBytes(config: config, slots: slots) == allocated)
-    }
 
     @Test func widthIsClampedToTheBudgetButNeverBelowOne() {
         #expect(
@@ -96,45 +52,6 @@ import Legacy6xRuntime
             BatchedMemoryBudget.expertCacheHeldBack(numExperts: 512, configured: 8 * 1_073_741_824)
                 == 8 * 1_073_741_824)
         #expect(BatchedMemoryBudget.expertCacheHeldBack(numExperts: 512, configured: -1) == 0)
-    }
-
-    /// A shipped install at the advertised context must fit: the clamp exists
-    /// for the models that do not, not to shrink the common case.
-    @Test func aShippedModelFitsItsWorstCaseAtTheAdvertisedContext() {
-        let perSlot = LegacyBatchedMemoryBudget.perSlotBytes(
-            config: config, maxContext: 262_144, precision: .int8,
-            fp16RingEnabled: false, slidingWindow: config.slidingWindow,
-            maxPrefillChunkTokens: 128, vocab: config.vocabSize)
-        #expect(perSlot > 0)
-        let budget = BatchedMemoryBudget.slotBudgetBytes(
-            physicalMemory: 24 * 1_073_741_824,
-            expertCacheBudgetBytes: 4 * 1_073_741_824)
-        #expect(
-            BatchedMemoryBudget.effectiveSlots(
-                requested: 4, perSlotBytes: perSlot, budgetBytes: budget) >= 1)
-    }
-
-    /// The host tier trades VRAM for host RAM, not for nothing: a bounded
-    /// server must count the window and the arena together.
-    @Test func hostKVCountsTheWindowAndTheArena() {
-        let maxContext = 262_144
-        let window = 65_536
-        let streamed = LegacyBatchedMemoryBudget.perSlotBytes(
-            config: config, maxContext: maxContext, precision: .int8,
-            fp16RingEnabled: false, slidingWindow: config.slidingWindow,
-            maxPrefillChunkTokens: 128, vocab: config.vocabSize,
-            hostKVWindowTokens: window)
-        let metal = KVCacheManager.worstCaseBytes(
-            config: config, maxContext: maxContext, precision: .int8,
-            fp16RingEnabled: false, slidingWindow: config.slidingWindow,
-            maxPrefillChunkTokens: 128, windowTokens: window)
-        let host = KVCacheManager.worstCaseHostArenaBytes(
-            config: config, maxContext: maxContext, precision: .int8)
-        #expect(host > 0)
-        #expect(streamed > metal)
-        #expect(
-            streamed >= metal + host,
-            "the per-slot budget must include the authoritative arena")
     }
 
     @Test func aPerSequenceStateModelIsServedOneAtATime() {

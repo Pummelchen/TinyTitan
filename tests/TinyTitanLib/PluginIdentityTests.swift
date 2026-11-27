@@ -1,7 +1,6 @@
 import Foundation
 import Testing
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanPluginAPI
 import TinyTitanVariants
 
@@ -98,63 +97,13 @@ struct PluginIdentityTests {
         #expect(identity.unsupportedReason == nil)
     }
 
-    /// The 6.x adapter owns what it still serves: it reads the manifest itself
-    /// and reports the same id, name and sampling the catalog published before
-    /// the identity moved onto it.
-    @Test func theAdapterNamesTheFamiliesItStillServes() throws {
-        let (resolved, identity) = try identity(
-            family: "qwen36", modelID: "qwen3.6-35b-a3b", bits: 8)
-        #expect(resolved.pluginID == "ai.tinytitan.adapter.legacy-6x")
-        #expect(identity.modelID == "qwen3.6-35b-a3b")
-        #expect(identity.catalogID == "qwen3.6-35b-a3b_8-Bit")
-        #expect(identity.displayName == "Qwen 3.6 35B-A3B")
-        #expect(identity.family == "qwen36")
-        #expect(identity.weightBits == 8)
-        #expect(identity.unsupportedReason == nil)
-    }
-
-    /// A family the adapter's engine cannot serve says so in its identity, so a
-    /// front end does not need its own family table to refuse it.
-    @Test func theAdapterReportsWhyAFamilyIsNotServed() throws {
-        let (_, mtp) = try identity(
-            family: "qwen36_mtp", modelID: "qwen3.6-35b-a3b-mtp-4bit", bits: 4)
-        #expect(mtp.modelID == "qwen3.6-35b-a3b-mtp-4bit")
-        #expect(mtp.catalogID == "qwen3.6-35b-a3b-mtp_4-Bit")
-        #expect(mtp.unsupportedReason?.contains("MTP draft head") == true)
-
-        let (_, laguna) = try identity(
-            family: "laguna", modelID: "laguna-s-2.1-4bit", bits: 4)
-        #expect(laguna.unsupportedReason?.contains("not served") == true)
-    }
-
-    /// A dense install whose manifest carries the placeholder id is named by
-    /// its family, exactly as the old adapter table named it.
-    @Test func aDenseInstallWithoutAnIDUsesTheFamilyName() throws {
-        let (_, identity) = try identity(
-            family: "qwen3_5_dense", modelID: "unknown/snapshot", bits: 4)
-        #expect(identity.catalogID == "qwen3.5-dense_4-Bit")
-        #expect(identity.displayName == "qwen3.5-dense")
-    }
-
     /// A manifest carries an id, not a card name. The shipped set's names are
     /// asserted here, through the identity the front ends read, so adding a
     /// model without a name is a deliberate edit rather than a silent fallback
     /// to its id.
     @Test func everyShippedInstallKeepsItsDisplayName() throws {
         let shipped: [(family: String, modelID: String, bits: Int, name: String)] = [
-            ("qwen36", "qwen3.6-35b-a3b", 8, "Qwen 3.6 35B-A3B"),
             ("qwen36", "ornith-1.5-35b-a3b", 4, "Ornith 1.5 35B-A3B"),
-            (
-                "qwen36", "ornith-1.5-35b-a3b-bf16dense", 4,
-                "Ornith 1.5 35B-A3B (bf16 dense)"
-            ),
-            ("qwen36", "qwen-agentworld", 4, "Qwen AgentWorld 35B-A3B"),
-            ("qwen36", "kat-coder-v2.5", 4, "KAT-Coder-V2.5-Dev 35B-A3B"),
-            ("qwen38flash", "qwen3.8-flash-next", 4, "Qwen 3.8 Flash Next 125B-A6B"),
-            (
-                "qwen4flash", "qwen4-omni-120b-think", 4,
-                "Qwen 4.0 Flash (Qwen4-Omni-120B-Think)"
-            ),
             ("qwen3_5_dense", "qwen3.5-2b", 4, "Qwen 3.5 2B"),
             ("qwen3_5_dense", "qwen3.5-4b", 4, "Qwen 3.5 4B"),
             ("qwen3_5_dense", "qwen3.5-9b", 4, "Qwen 3.5 9B"),

@@ -1,6 +1,5 @@
 import Foundation
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanVariants
 
 extension CPUEngineFactory {

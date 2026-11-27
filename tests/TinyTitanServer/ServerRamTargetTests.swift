@@ -1,6 +1,5 @@
 import Testing
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 @testable import TinyTitanCore
@@ -28,7 +27,7 @@ import Testing
                 ["--model", "/m", "--ram-budget", accepted], environment: [:])
             #expect(
                 arguments.expertCacheBudgetBytes
-                    == RuntimeConfiguration.parseBudgetBytes(accepted))
+                    == RuntimeLimits.parseBudgetBytes(accepted))
         }
     }
 

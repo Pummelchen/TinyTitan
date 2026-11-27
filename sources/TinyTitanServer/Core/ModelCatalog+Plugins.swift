@@ -1,6 +1,5 @@
 import Foundation
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanLib
 import TinyTitanPluginAPI
 import TinyTitanVariants
@@ -13,6 +12,15 @@ extension ModelCatalog {
         let resolved: ResolvedPlugin
         do {
             resolved = try EngineFactories.pluginRegistry.resolve(directory)
+        } catch let error as PluginRegistryError {
+            switch error {
+            case .noPlugin:
+                return .failure(
+                    ProbeFailure(
+                        reason: "no engine plugin serves this install (\(directory.path))"))
+            case .ambiguous, .incompatible:
+                return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
+            }
         } catch {
             return .failure(ProbeFailure(reason: "unreadable manifest.json: \(error)"))
         }

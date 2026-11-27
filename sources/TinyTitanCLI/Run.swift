@@ -10,7 +10,6 @@ import Foundation
 import Metal
 import TinyTitanLib
 import TinyTitanCPUEngine
-import TinyTitanLegacyEngine
 import TinyTitanCore
 import TinyTitanVariants
 
@@ -85,7 +84,7 @@ public func run(
         // exists: which head the load may use depends on whether this plan is
         // pure greedy. Anything the caller named on the command line wins;
         // this only fills what they left alone.
-        let declared = SamplingDefaults.forInstall(
+        let declared = try SamplingDefaults.forInstall(
             at: modelURL, thinkingMode: thinkingMode,
             factory: EngineFactories.routingFactory(directoryURL: modelURL))
         let options = GenerationOptions(
@@ -107,16 +106,6 @@ public func run(
             && options.presencePenalty == 0
             && options.repetitionPenalty == 1
         let prompt = try buildPrompt(args: args)
-        // A directory of .gguf shards is not an install and has no manifest;
-        // it runs in place on the as-is decoder. Branched before the
-        // tokenizer-only prefill-chunk resolution, which expects an install.
-        if isGGUFModelDirectory(modelURL) {
-            return await runGGUFAsIs(
-                args: args, modelURL: modelURL, prompt: prompt,
-                options: options, thinkingMode: thinkingMode,
-                reasoningEffort: reasoningEffort,
-                stdout: stdout, stderr: stderr)
-        }
         let prefillChunkTokens = try await resolvePrefillChunk(
             args: args, prompt: prompt, modelURL: modelURL,
             thinkingMode: thinkingMode, reasoningEffort: reasoningEffort)
@@ -159,7 +148,7 @@ public func run(
             }
             engine = try await Engine(
                 directory: modelURL, device: device,
-                factory: EngineFactories.routingFactory(directoryURL: modelURL),
+                factory: try EngineFactories.routingFactory(directoryURL: modelURL),
                 configuration: configuration)
         }
         // The one request would arrive before any layer is warm and stop the

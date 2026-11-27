@@ -3,7 +3,6 @@ import Metal
 import Testing
 
 import TinyTitanLib
-import TinyTitanLegacyEngine
 import TinyTitanVariants
 @testable import TinyTitanCore
 

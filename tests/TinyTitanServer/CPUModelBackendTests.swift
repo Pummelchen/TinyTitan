@@ -1,8 +1,8 @@
 import Foundation
 import Testing
+@testable import Qwen35Dense2B4Bit
 @testable import TinyTitanCPUEngine
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 @testable import TinyTitanCore
@@ -141,7 +141,7 @@ import TinyTitanVariants
     }
 
     private final class StubCPUEngine: CPUEngineRunner {
-        private let engine: CPUQwen35
+        private let engine: Qwen35Dense2B4Bit.CPUQwen35
         var configuration: CPUEngineConfiguration { engine.configuration }
         var threads: Int { 77 }
         var contention: (@Sendable () -> Bool)? {
@@ -157,7 +157,7 @@ import TinyTitanVariants
             set { engine.idleThreads = newValue }
         }
 
-        init(_ engine: CPUQwen35) { self.engine = engine }
+        init(_ engine: Qwen35Dense2B4Bit.CPUQwen35) { self.engine = engine }
         func reset() { engine.reset() }
         func prefill(tokens: [Int]) throws -> [Float] { try engine.prefill(tokens: tokens) }
         func step(token: Int) throws -> [Float] { try engine.step(token: token) }
@@ -173,7 +173,10 @@ import TinyTitanVariants
     /// without a factory (`aScriptedModelWithNoVariantIsRefusedByName`) -- so
     /// these tests run it on the config-driven engine directly.
     static func scriptedEngine(_ directory: URL) -> CPUEngineFactory {
-        CPUEngineFactory { try CPUQwen35(snapshot: AffineSnapshot(directory: directory)) }
+        CPUEngineFactory {
+            try Qwen35Dense2B4Bit.CPUQwen35(
+                snapshot: Qwen35Dense2B4Bit.AffineSnapshot(directory: directory))
+        }
     }
 
     /// unchecked-invariant: every access is under `lock`.
@@ -186,7 +189,7 @@ import TinyTitanVariants
 
     private func request(
         stops: [String] = [],
-        reasoning: RequestReasoning? = nil
+        reasoning: TinyTitanCore.RequestReasoning? = nil
     ) -> ValidatedChatRequest {
         var configuration = GenerationConfig(maxNewTokens: 32, temperature: 0)
         configuration.stopStrings = stops
@@ -224,7 +227,7 @@ import TinyTitanVariants
     /// The scripted backend, without running a generation: the tests that ask
     /// the backend about itself need the object, not an answer.
     private func scriptedBackend(
-        thinking: ModelThinkingMode,
+        thinking: TinyTitanCore.ModelThinkingMode,
         factory: ((URL) -> CPUEngineFactory)? = nil
     ) async throws -> (backend: CPUModelBackend, directory: URL, spoken: [Int32]) {
         let fixture = try TokenizerFixture.folder()
@@ -284,7 +287,9 @@ import TinyTitanVariants
     @Test func theBackendBuildsFromAnInjectedCPUEngineFactory() async throws {
         let factory: (URL) -> CPUEngineFactory = { directory in
             CPUEngineFactory {
-                StubCPUEngine(try CPUQwen35(snapshot: AffineSnapshot(directory: directory)))
+                StubCPUEngine(
+                    try Qwen35Dense2B4Bit.CPUQwen35(
+                        snapshot: Qwen35Dense2B4Bit.AffineSnapshot(directory: directory)))
             }
         }
         let (backend, directory, _) = try await scriptedBackend(
@@ -297,7 +302,7 @@ import TinyTitanVariants
 
     /// The served engine keeps the width its load chose, token after token.
     ///
-    /// `CPUQwen35` can narrow itself per token when it is given a contention
+    /// `Qwen35Dense2B4Bit.CPUQwen35` can narrow itself per token when it is given a contention
     /// signal, and the side engine is: one thread while a person is waiting,
     /// four in the gaps. The served engine is handed none, and this is the
     /// guard for that being right rather than accidental. A signal read from
@@ -319,7 +324,8 @@ import TinyTitanVariants
 
     /// Runs the scripted model through the backend: after the prompt it
     /// says "hm", closes its thought, says "ok", and ends the turn.
-    private func generate(thinking: ModelThinkingMode, stops: [String] = []) async throws
+    private func generate(thinking: TinyTitanCore.ModelThinkingMode, stops: [String] = [])
+        async throws
         -> (completion: ServerCompletion, events: [ServerInferenceEvent], tokens: [Int32])
     {
         let (backend, directory, spoken) = try await scriptedBackend(thinking: thinking)
@@ -469,14 +475,14 @@ import TinyTitanVariants
 
         // Counting resolves a tokenizer for the switch without generating.
         let count = try await backend.countPromptTokens(
-            request(reasoning: RequestReasoning(thinkingMode: .on, effort: nil)))
+            request(reasoning: TinyTitanCore.RequestReasoning(thinkingMode: .on, effort: nil)))
         #expect(count > 0)
 
         // Generating does too, and the switch has to change the split: the
         // scripted model's "hm" is a thought only while thinking is on.
         let sink = Sink()
         let completion = try await backend.generate(
-            request(reasoning: RequestReasoning(thinkingMode: .on, effort: nil))
+            request(reasoning: TinyTitanCore.RequestReasoning(thinkingMode: .on, effort: nil))
         ) { sink.append($0) }
         #expect(completion.reasoning == "hm")
         #expect(completion.content == "ok")

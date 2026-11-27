@@ -1,7 +1,6 @@
 import Foundation
 import Metal
 import TinyTitanCore
-import TinyTitanLegacyEngine
 import TinyTitanLib
 import TinyTitanVariants
 

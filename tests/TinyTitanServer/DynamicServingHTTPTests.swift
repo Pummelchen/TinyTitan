@@ -3,7 +3,6 @@ import NIOCore
 import Testing
 import TinyTitanCPUEngine
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 @testable import TinyTitanCore
@@ -375,7 +374,7 @@ struct DynamicServingHTTPTests {
             #expect(try object(reply)["model"] as? String == "test-model")
         }
         let request = try #require(log.requests.first)
-        #expect(request.generationConfig.temperature == GenerationDefaults.house.temperature)
+        #expect(request.generationConfig.temperature == SamplingProfile.house.temperature)
         #expect(request.maximumCompletionTokens == backend.maximumContext)
     }
 }
@@ -469,7 +468,7 @@ struct DynamicServingArgumentTests {
         }
         // The argument's ceiling is the engine's slot cap, so the two cannot
         // drift apart: a width the server accepts is one the engine can build.
-        #expect(KVCacheManager.maximumSlots == 256)
+        #expect(RuntimeLimits.maximumConcurrentSequences == 256)
     }
 
     /// More than one slot turns the single-sequence prompt cache off rather

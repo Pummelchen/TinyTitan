@@ -3,7 +3,6 @@ import NIOCore
 import Testing
 @testable import TinyTitanCore
 
-@testable import Legacy6xRuntime
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
 
@@ -244,9 +243,10 @@ struct AnthropicReasoningTests {
     @Test func requestThinkingOverridesTheLoadedProfile() async throws {
         let backend = ThinkingBackend()
         let loaded = ServerReasoningProfile(
-            family: ModelFamily.qwen38flash.rawValue, thinkingMode: .on,
+            family: "qwen38flash", thinkingMode: .on,
             reasoningEffort: .low,
-            reasoningControl: ModelFamily.qwen38flash.engineReasoningControl)
+            reasoningControl: .thinkingWithEffortLevels(
+                defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
         try await withServer(backend, profile: loaded) { port in
             let asked =
                 #"{"model":"test-model","max_tokens":65536,"messages":[{"role":"user","content":"hi"}]"#

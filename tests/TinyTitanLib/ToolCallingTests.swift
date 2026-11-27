@@ -3,7 +3,7 @@ import Metal
 import Testing
 
 import TinyTitanLib
-import TinyTitanLegacyEngine
+import TinyTitanVariants
 @testable import TinyTitanCore
 
 /// The tool loop, against a real install.
@@ -29,7 +29,7 @@ struct ToolCallingTests {
         return try await Engine(
             directory: model,
             device: device,
-            factory: EngineFactories.sixXGPU(),
+            factory: try EngineFactories.routingFactory(directoryURL: model),
             configuration: EngineConfiguration(contextWindow: 8_192))
     }
 
