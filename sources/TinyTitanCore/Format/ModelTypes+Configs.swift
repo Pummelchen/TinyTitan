@@ -49,7 +49,13 @@ public struct SparseIndexerConfig: Sendable, Equatable {
 
     public static let none = SparseIndexerConfig(
         numHeads: 0, numKVHeads: 0, headDim: 0, budget: 0, compressRatio: 0)
-    public var enabled: Bool { budget > 0 }
+    /// A budget alone is not enough: the indexer pools blocks of
+    /// `compressRatio` cells and divides by it, and a manifest that names a
+    /// budget without a ratio (or names 0) produced `enabled == true` with a
+    /// zero divisor — a trap in `QSAIndexer` and a hardware divide in
+    /// `qsa.metal` (AUD-0093). With either half missing the config is simply
+    /// off, which runs the exact dense attention path: slower, never wrong.
+    public var enabled: Bool { budget > 0 && compressRatio > 0 }
 }
 
 /// Hashed n-gram "per-layer embedding" configuration (Qwen3.8-Flash-Next).
