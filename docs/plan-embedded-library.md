@@ -186,6 +186,40 @@ Qwen 3.5 engine (`DenseGPU`, the six `Qwen35Dense*`) stays; whether the public
 not part of the adapter removal. See `docs/plan-engine-plugins.md` for the
 matrix and the deletion inventory.
 
+### Decision 2026-11-28 (TT-142 slice (b)): the CPU facade and the dense engines left
+
+**The library promise is retracted.** `TinyTitanCPUEngine` is removed from the
+product, and the dense engines it served (`sources/Engines/DenseGPU` and the six
+`Qwen35Dense{2B,4B,9B}{4,8}Bit` targets) are deleted rather than carried. The
+reason is the matrix, not the code: the shipped installs are Ornith 1.5 35B-A3B
+4-bit and the two Inkling 2 Mini installs, all GPU plugins, and no dense Qwen 3.5
+install is in it. A library facade for a model nobody can install is a promise
+without a subject — it would keep `CPUEngine`, the dense snapshot reader and a
+second generation path alive, tested and released for zero supported routes.
+The dense family returns as a TPP/1 plugin if anyone asks, with the facade
+question reopened at that point; it is not kept "just in case".
+
+**What an embedder loses.** The `CPUEngine` actor (and the `CPUModelBackend` it
+wrapped) is gone. Also gone are the surfaces that existed only to select it:
+`EngineFactories.routingCPUFactory`, `variantCPUEngine`, `DenseCPUVariantSelection`,
+`VariantCPUModelFamily`, `DenseCPUInstall`, `DenseSideEngineModel`, and the
+server's `--cpu` / `--no-cpu-resident` flags, `--engine cpu` in the CLI and
+launcher, the `@cpu`/`@gpu` catalog aliases, and the dense-snapshot probe in the
+catalog. The memory subsystem's optional side-engine hook stays as a port, but
+the server binds it to nothing: its only implementation was the dense CPU model.
+
+**What an embedder keeps.** `Engine`, `Session`, `EngineConfiguration`,
+`CachePrecision`, `ChatMessage`, `GenerationOptions`, the generation event and
+summary types, and `TinyTitanError` — unchanged. The product is now exactly
+`TinyTitanLib` + `TinyTitanVariants` (+ `TinyTitanCore` and
+`TinyTitanPluginAPI`), and every engine it can construct comes from a GPU
+plugin through `EngineFactories.routingFactory(directoryURL:)`. A source
+consumer that never called `CPUEngine` needs no code change.
+
+The product's target list in §3 and the decisions above describe the tree before
+this deletion; this decision supersedes their `TinyTitanCPUEngine` and dense
+entries. `docs/repository-layout.md` carries the current-state target list.
+
 ## 4. The API to freeze (v1 sketch)
 
 Names are provisional; the shapes are the point.
@@ -489,9 +523,10 @@ the facade in P1.
    `tinytitan-kit` repository versions cleanly and cannot accidentally expose the
    app's gates; a product of this package keeps one release, one CI, one set of
    goldens. The plan above assumes the product-of-this-package route first.
-4. **Does the CPU engine need to be embeddable without Metal?** The dense CPU path
-   (`CPUQwen35`) runs without the GPU engine, so a CPU-only consumer is plausible;
-   it would need its own facade and its own tests.
+4. **Does the CPU engine need to be embeddable without Metal?** No — answered
+   2026-11-28 (TT-142 slice (b), above): no dense install is shipped, so the
+   CPU-only facade and the dense engines behind it were removed. A dense family
+   that returns as a plugin reopens this question.
 5. **Naming.** `TinyTitanLib` vs `TinyTitanEngine` vs reusing `TinyTitan` (which is
    taken by the current target).
 6. **What does "supported" mean for the first release?** Which parts of the
