@@ -23,6 +23,8 @@ extension MemoryBackend {
     func scheduleConsolidation(after context: MemorySessionContext) {
         guard configuration.sessionConsolidation else { return }
         let scope = context.scope
+        noteScopeUse(scope)
+        evictScopesIfOverCapacity()
         unconsolidated[scope] = context
         idleTimers[scope]?.cancel()
         let delay = configuration.consolidationIdleSeconds

@@ -46,6 +46,10 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     /// environment per request is the pattern that once cost 40% of a token.
     let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
     /// Declared directories already refused, so each is logged once.
+    ///
+    /// Bounded by construction rather than by a cap: the refusal predicate
+    /// admits exactly three paths (the home directory, its parent, and `/`),
+    /// so it can never hold more (AUD-0087, verified by test).
     var refusedDirectories: Set<String> = []
     /// Sessions with turns not yet distilled into memory, by scope. One per
     /// scope: a new session in a scope replaces the pending one, and the
@@ -53,6 +57,11 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     var unconsolidated: [MemoryScope: MemorySessionContext] = [:]
     /// The idle timer per scope. Reset on every turn; fires consolidation.
     var idleTimers: [MemoryScope: Task<Void, Never>] = [:]
+    /// Scopes with consolidation state, least recently used first, so the
+    /// scope-keyed maps below are bounded the way the per-conversation ones
+    /// are (AUD-0087). A scope comes from a *declared* working directory, which
+    /// a client supplies, so the number of scopes is client-controlled.
+    var scopeRecency: [MemoryScope] = []
     /// A session that rolled over before its idle timer fired. Consolidated
     /// as soon as the current request has returned, never before.
     var pendingAfterTurn: [MemoryScope: MemorySessionContext] = [:]

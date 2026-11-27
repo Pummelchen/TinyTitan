@@ -699,6 +699,98 @@ import TinyTitanMemory
         #expect(installed[ids[capacity + 1]] != nil)
     }
 
+    /// A request whose system message declares a working directory, which is
+    /// what turns into a memory workspace (and so a scope).
+    private func requestDeclaring(_ directory: String, _ text: String)
+        -> ValidatedChatRequest
+    {
+        ValidatedChatRequest(
+            messages: [
+                GFTokenizer.Message(
+                    role: .system, content: "Working directory: \(directory)"),
+                GFTokenizer.Message(role: .user, content: text),
+            ],
+            tools: [],
+            stream: false,
+            includeUsage: false,
+            generationConfig: GenerationConfig(maxNewTokens: 32),
+            maximumCompletionTokens: 32)
+    }
+
+    /// A scope comes from a working directory the *client* declares, so the
+    /// number of scopes is client-controlled: one pending context and one idle
+    /// timer per declared directory, dropped only when the timer fires. Before
+    /// the bound, a client that declared a new directory on every request grew
+    /// the scope maps until each timer expired (AUD-0087).
+    @Test func scopeStateIsBoundedAndEvictsTheOldest() async throws {
+        let (service, configuration) = service(tools: false)
+        var consolidating = configuration
+        consolidating.sessionConsolidation = true
+        // Long enough that no timer fires during the test: what is measured is
+        // the bound, not the consolidation.
+        consolidating.consolidationIdleSeconds = 3_600
+        let backend = MemoryBackend(
+            wrapping: ScriptedBackend([]), service: service,
+            configuration: consolidating)
+
+        let capacity = MemoryBackend.maximumScopes
+        var scopes: [MemoryScope] = []
+        for index in 0..<(capacity + 2) {
+            let request = requestDeclaring("/tmp/project-\(index)", "turn \(index)")
+            _ = try await backend.generate(request, onEvent: { _ in })
+            let keys = await backend.unconsolidated.keys
+            if let newest = keys.first(where: {
+                $0.workspace.hasSuffix(
+                    MemoryConfiguration.workspaceIdentifier(
+                        forPath: "/tmp/project-\(index)"
+                    ).suffix(40))
+            }) {
+                scopes.append(newest)
+            }
+        }
+
+        let unconsolidated = await backend.unconsolidated
+        let timers = await backend.idleTimers
+        let recency = await backend.scopeRecency
+        #expect(unconsolidated.count == capacity)
+        #expect(timers.count == capacity)
+        #expect(recency.count == capacity)
+        #expect(scopes.count == capacity + 2, "could not identify \(scopes.count) scopes")
+        // The oldest two left, the newest stayed, and no timer outlived its
+        // context: a scope with a timer and no pending context is a leak that
+        // would survive the bound.
+        #expect(unconsolidated[scopes[0]] == nil)
+        #expect(unconsolidated[scopes[1]] == nil)
+        #expect(unconsolidated[scopes[capacity + 1]] != nil)
+        #expect(timers[scopes[0]] == nil)
+        #expect(
+            Set(unconsolidated.keys) == Set(timers.keys),
+            "the two scope maps disagree")
+    }
+
+    /// The sibling half of AUD-0087: `refusedDirectories` is bounded by its
+    /// predicate rather than by a cap — only the home directory, its parent and
+    /// `/` are refused — so repeating them cannot grow it.
+    @Test func refusedDirectoriesCannotGrowPastItsPredicate() async throws {
+        let (service, configuration) = service(tools: false)
+        var consolidating = configuration
+        consolidating.sessionConsolidation = true
+        let backend = MemoryBackend(
+            wrapping: ScriptedBackend([]), service: service,
+            configuration: consolidating)
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let parent = URL(fileURLWithPath: home).deletingLastPathComponent().path
+        for _ in 0..<5 {
+            for path in [home, parent] {
+                _ = try await backend.generate(
+                    requestDeclaring(path, "hello"), onEvent: { _ in })
+            }
+        }
+        let refused = await backend.refusedDirectories
+        #expect(refused.count == 2, "refusals recorded: \(refused)")
+    }
+
     /// The counterpart of eviction: an explicit session end must drop the
     /// companion entries too, or the maps that the eviction bounds would keep
     /// one dead conversation's instruction and turn counter forever.

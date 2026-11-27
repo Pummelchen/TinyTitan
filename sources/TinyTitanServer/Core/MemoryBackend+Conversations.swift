@@ -70,3 +70,42 @@ extension MemoryBackend {
         await service.endSession(context)
     }
 }
+
+// MARK: - Scopes
+
+extension MemoryBackend {
+    /// Scopes with consolidation state kept at once.
+    ///
+    /// A scope is (namespace, user, workspace), and the workspace is derived
+    /// from a working directory the *client* declares in a system message, so
+    /// the number of scopes is client-controlled: one pending context and one
+    /// idle timer per declared directory, dropped only when the timer fires.
+    /// A client that declares a new directory on every request therefore grew
+    /// the scope maps without limit until each timer expired (AUD-0087).
+    ///
+    /// Evicting a scope cancels its timer and drops its pending consolidation.
+    /// That is safe by the feature's own contract: consolidation is
+    /// best-effort, the turns stay in the journal, and the next turn in that
+    /// scope arms a timer again.
+    static let maximumScopes = 128
+
+    func noteScopeUse(_ scope: MemoryScope) {
+        if let index = scopeRecency.firstIndex(of: scope) {
+            scopeRecency.remove(at: index)
+        }
+        scopeRecency.append(scope)
+    }
+
+    func evictScopesIfOverCapacity() {
+        while scopeRecency.count > Self.maximumScopes {
+            let oldest = scopeRecency.removeFirst()
+            idleTimers.removeValue(forKey: oldest)?.cancel()
+            let pending = unconsolidated.removeValue(forKey: oldest) != nil
+            pendingAfterTurn.removeValue(forKey: oldest)
+            consolidationChain.removeValue(forKey: oldest)?.cancel()
+            ServerLog.memory(
+                "scope evicted reason=capacity capacity=\(Self.maximumScopes) "
+                    + "pending=\(pending)")
+        }
+    }
+}
