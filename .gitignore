@@ -81,3 +81,7 @@ models/gguf/
 # repository: a committed ledger goes stale the moment the tree moves on.
 /AUDIT/
 *.sarif
+# Coverage profiling output: `swift test --enable-code-coverage` and a directly
+# run test binary both write it to the working directory.
+*.profraw
+*.profdata
