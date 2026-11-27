@@ -70,7 +70,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 | `TinyTitanMemory` | A | 5.3k | R | P | R | R | – | R | N | scope validation, discovery/listing (AUD-0061/0063/0064), store keys read; consolidation and bootstrap partial |
 | `TinyTitanMemoryTool` | B | 0.2k | R | N | R | N | N | R | N | read in full; its failure paths are pinned by tests |
 | `TinyTitanBench` / `TinyTitanValidationSupport` | B | 4.7k | P | N | P | N | N | P | N | `PassCostPrompt` read and pinned (TT-139); the rest is operator tooling and was not audited |
-| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | `prepare_qwen38` transport/ngram/driver read; AUD-0077 fixed; `prepare_laguna_s21`, `prepare_*_mtp`, `install_models.sh`, `install_tinytitan.sh` not reviewed (`prepare_k2_horizon` was read and has since been deleted with K2's withdrawal, TT-086; `prepare_nemotron` was deleted with Nemotron's withdrawal, TT-055) |
+| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | The 2026-11-27 tools pass read the shipped converter's (`prepare_agentworld.py`) download/convert/finish paths and the four install readers (`ssdai_reader`, `tiered_repack`, `verify_ane_sidecar`, `quantize_ngram_table`) at their trust boundaries: AUD-0102 fixed (finish renamed non-idempotently and wrote its index in place) and AUD-0103 fixed (four readers loaded metadata whole; one bounded descriptor read now). Skimmed but not read line-by-line: `export_ane_prefill.py`, `internal-speeds.py` (benchmark driver, operator-named inputs), `render_badges.py`, `compact-release-notes.py`, `client_config_merge.py`. `install_models.sh`/`install_tinytitan.sh` are exercised by their suites, not read as code. Retired families' converters are gone (TT-142 slice (d)); the retired-family readers this row used to name were read and then deleted with their withdrawals. |
 | `tools/*.sh`, `benchmark/*.py` | B | — | P | N | P | P | N | P | N | the gates and the launcher suite are exercised on every run; not audited line-by-line |
 
 ## What this pass covered (2026-11-27)
@@ -98,16 +98,18 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
 
 ## Residual, stated plainly
 
-- The `–` and `P` cells above are what no one has read end-to-end: the 6.x MoE
-  and model bodies behind the adapter, `TinyTitanBench`/`TinyTitanValidationSupport`,
-  and most of `tools/` (`install_tinytitan.sh`, `install_models.sh`, the release
-  and gate scripts beyond their failures). The tokenizer's `PromptCheckpoint*`,
-  `JSONGrammar`/`JSONConstraint` beyond the schema path, and the Anthropic
-  mapper bodies were skimmed, not read.
-- The findings this pass produced are the tracker rows AUD-0066…0101; the ones
-  that remain open are AUD-0088…0101 (two S1, one S1 owner decision, the rest
-  S2/S3, three of them open investigations rather than asserted defects). Each
-  row carries the location, the concrete break and the test that should pin it.
+- The `–` and `P` cells above are what no one has read end-to-end:
+  `TinyTitanBench`/`TinyTitanValidationSupport` (operator tooling; its argument
+  clamps were reviewed and fixed under AUD-0007), and most of `tools/`
+  (`install_tinytitan.sh`, `install_models.sh`, the release and gate scripts
+  beyond their failures, and the five files the tools row names as skimmed).
+  The tokenizer's `PromptCheckpoint*`, `JSONGrammar`/`JSONConstraint` beyond
+  the schema path, and the Anthropic mapper bodies were skimmed, not read.
+  The 6.x MoE bodies this bullet used to carry are gone (TT-142 slice (a)).
+- The findings this pass produced are the tracker rows AUD-0066…0101; what is
+  still open is the tracker's list, which is the authority — this document
+  records what the pass read, not the current state. Each row carries the
+  location, the concrete break and the test that should pin it.
 - Everything else this pass found is fixed with a commit whose message carries
   the RED evidence: 0065, 0066, 0067, 0068, 0069, 0071…0087. AUD-0070 and the
   `refusedDirectories` half of 0087 did not reproduce; both are closed with a
