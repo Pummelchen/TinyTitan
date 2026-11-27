@@ -32,6 +32,15 @@ void tinytitan_int4_affine_gemv(const uint8_t *weights,
                             size_t rows,
                             size_t n,
                             float *out) {
+    // The whole kernel is written for whole 64-element groups: `row_bytes` is
+    // `n/2` and every row after the first is addressed by it, so a width that
+    // is not a multiple of 64 reads later rows from the wrong byte and drops
+    // the tail -- silently wrong, not out of bounds. Swift already refuses
+    // such a width (`Int8AffineGEMV.requireWholeGroups`); this is the C
+    // contract stated at the boundary (AUD-0078).
+    if (n == 0 || n % TINYTITAN_GROUP_SIZE != 0) {
+        return;
+    }
     const size_t groups = n / TINYTITAN_GROUP_SIZE;
     const size_t row_bytes = n / 2;
 

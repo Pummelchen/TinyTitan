@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TinyTitanCore
 import TinyTitanFormat
 
 /// Path validation for SSDAI directory operations uses the single
@@ -12,7 +13,7 @@ package final class SSDAIDirectoryAccess {
     private let rootFD: Int32
 
     package init(rootPath: String) throws {
-        let standardized = URL(fileURLWithPath: rootPath).standardizedFileURL.path
+        let standardized = InstallPathBinding.canonical(URL(fileURLWithPath: rootPath))
         let fd = open(standardized, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         guard fd >= 0 else {
             throw RepackError.fileOpenFailed(path: standardized, errno: errno)

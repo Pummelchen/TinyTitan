@@ -53,6 +53,11 @@ void tinytitan_rmsnorm_f32(const float *x, const float *weight, size_t n,
 void tinytitan_rmsnorm_gated_f32(const float *x, const float *gate,
                                  const float *weight, size_t n, size_t group,
                                  float epsilon, float *out) {
+    // A zero group would step `start` by nothing and never terminate (AUD-0080:
+    // a caller-derived size guarded at the boundary, not assumed). The
+    // Swift caller divides a configuration by `mambaGroups`; a group larger
+    // than `n` is harmless (one clamped iteration).
+    if (group == 0) return;
     for (size_t start = 0; start < n; start += group) {
         size_t end = start + group;
         if (end > n) end = n;
@@ -142,6 +147,10 @@ void tinytitan_mamba_ssm_range(const float *x, const float *b, const float *c,
                                size_t groups, float timeStepMin,
                                size_t firstHead, size_t headCount,
                                float *state, float *y) {
+    // `groups` is a model geometry value: zero divides by zero in C (SIGFPE),
+    // and `heads < groups` makes `headsPerGroup` zero, which the next loop
+    // divides by. Refuse both at the boundary instead of trapping.
+    if (groups == 0 || heads < groups) return;
     const size_t headsPerGroup = heads / groups;
     for (size_t h = firstHead; h < firstHead + headCount; ++h) {
         const size_t group = h / headsPerGroup;

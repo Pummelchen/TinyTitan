@@ -43,9 +43,6 @@ public struct LogitMask: Sendable, Equatable {
 
     /// No id is allowed. A constrained decode in that state cannot continue.
     public var isEmpty: Bool { words.allSatisfy { $0 == 0 } }
-
-    /// Whether the mask allows every id (nothing to do).
-    public var isEverything: Bool { count == vocab }
 }
 
 /// The value written into a disallowed logit, per dtype.

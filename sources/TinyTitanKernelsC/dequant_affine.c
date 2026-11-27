@@ -65,6 +65,12 @@ void tinytitan_dequant_affine8(const uint8_t *weights,
                                size_t rows,
                                size_t n,
                                float *out) {
+    // Whole groups only: `groups` is `n / TINYTITAN_DEQUANT_GROUP` and every
+    // row is addressed by `n`, so a width that is not a multiple of the group
+    // silently drops the tail (AUD-0078).
+    if (n == 0 || n % TINYTITAN_DEQUANT_GROUP != 0) {
+        return;
+    }
     const size_t groups = n / TINYTITAN_DEQUANT_GROUP;
     for (size_t r = 0; r < rows; ++r) {
         const uint8_t *row = weights + r * n;
@@ -95,6 +101,11 @@ void tinytitan_dequant_affine4(const uint8_t *weights,
                                size_t rows,
                                size_t n,
                                float *out) {
+    // Whole groups only, and even ones: the row stride is `n / 2` packed
+    // bytes, so an odd width mis-addresses every row (AUD-0078).
+    if (n == 0 || n % TINYTITAN_DEQUANT_GROUP != 0) {
+        return;
+    }
     const size_t groups = n / TINYTITAN_DEQUANT_GROUP;
     const size_t packed_per_group = TINYTITAN_DEQUANT_GROUP / 2;
     for (size_t r = 0; r < rows; ++r) {

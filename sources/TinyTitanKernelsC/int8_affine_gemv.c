@@ -43,6 +43,11 @@ void tinytitan_int8_affine_gemv(const uint8_t *weights,
                             size_t rows,
                             size_t n,
                             float *out) {
+    // Whole 64-element groups only; a narrower width would mis-address every
+    // row after the first (see the 4-bit kernel and AUD-0078).
+    if (n == 0 || n % TINYTITAN_GROUP_SIZE != 0) {
+        return;
+    }
     const size_t groups = n / TINYTITAN_GROUP_SIZE;
 
 #if defined(__ARM_NEON)

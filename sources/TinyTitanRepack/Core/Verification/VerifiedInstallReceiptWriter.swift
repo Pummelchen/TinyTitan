@@ -1,4 +1,5 @@
 import Foundation
+import TinyTitanCore
 import TinyTitanFormat
 
 enum VerifiedInstallReceiptWriter {
@@ -28,7 +29,11 @@ enum VerifiedInstallReceiptWriter {
         var receipt: [String: Any] = [
             "schemaVersion": 1,
             "manifestSha256": manifestSha256,
-            "modelDirectoryPath": URL(fileURLWithPath: outputDir).standardizedFileURL.path,
+            // Physical, not the operator's spelling: a symlinked models
+            // directory is a supported layout, and the loader compares
+            // against the resolved path (AUD-0072).
+            "modelDirectoryPath": InstallPathBinding.canonical(
+                URL(fileURLWithPath: outputDir)),
             "verificationTimestamp": ISO8601DateFormatter().string(from: Date()),
             "toolVersion": toolVersion,
             "files": filesDict,

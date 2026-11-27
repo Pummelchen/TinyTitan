@@ -39,7 +39,16 @@ static void tinytitan_delta_rule_heads(const float *query,
                                        size_t headCount,
                                        float *state,
                                        float *readout) {
+    // The NEON body steps four floats at a time (`column += 4` with
+    // `vld1q_f32`/`vst1q_f32`), so `dk` must be a multiple of 4 or the last
+    // step reads and writes past both the row and the state (AUD-0079 class:
+    // a geometry value whose alignment is assumed, not checked). The shipping
+    // caller uses the chunked entry point, which validates; this one is reached
+    // by tests and is refused rather than allowed to overrun.
     if (heads == 0 || keyHeads == 0 || dk == 0 || dv == 0 || heads % keyHeads != 0) {
+        return;
+    }
+    if (dk % 4 != 0) {
         return;
     }
     if (firstHead >= heads || headCount == 0 || firstHead + headCount > heads) {

@@ -474,9 +474,6 @@ public struct JSONGrammar: Hashable, Sendable {
         stack.removeLast()
         return finishValue()
     }
-
-    /// The schema node governing the value being parsed, exposed for tests.
-    public var valueNode: JSONSchemaNode { node }
 }
 
 extension JSONSchemaNode {

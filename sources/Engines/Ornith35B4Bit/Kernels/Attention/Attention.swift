@@ -393,7 +393,23 @@ final class Attention {
                 partialPSO = simd
             }
         }
-        let tgWidth = min(Self.threadsPerGroup, Int(partialPSO.maxTotalThreadsPerThreadgroup))
+        // The partial kernel sizes its per-thread register array from the
+        // *declared* thread count (`kAttnThreads = 256`) and fills one slot per
+        // loop iteration over the head dimension. A dispatch narrower than the
+        // declaration would make every thread iterate more times and write
+        // past that array inside the shader -- a stack overwrite no Swift test
+        // can see. `maxTotalThreadsPerThreadgroup` is the attribute clamped by
+        // the kernel's register use, so it is the number that can surprise us;
+        // refuse instead of silently launching the narrower grid (AUD-0082).
+        precondition(
+            Int(partialPSO.maxTotalThreadsPerThreadgroup) >= Self.threadsPerGroup,
+            "attention partial kernel admits "
+                + "\(partialPSO.maxTotalThreadsPerThreadgroup) threads; it is written for "
+                + "\(Self.threadsPerGroup)")
+        // Always the declared width: the kernel's register array is sized for
+        // it, so a wider grid would read past that array and a narrower one is
+        // the overwrite the precondition above refuses.
+        let tgWidth = Self.threadsPerGroup
 
         guard let p1 = commandBuffer.makeComputeCommandEncoder() else {
             throw MetalError.commandEncoderFailed

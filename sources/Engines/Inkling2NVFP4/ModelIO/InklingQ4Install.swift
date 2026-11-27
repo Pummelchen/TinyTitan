@@ -108,7 +108,10 @@ package struct InklingQ4Install {
         else {
             throw Error.receipt("it does not describe this manifest")
         }
-        guard receipt.modelDirectoryPath == directory.standardizedFileURL.path else {
+        guard
+            InstallPathBinding.matches(
+                receipt.modelDirectoryPath, directory: directory)
+        else {
             throw Error.receipt(
                 "issued for \(receipt.modelDirectoryPath), the model is at "
                     + "\(directory.path); re-issue it with TinyTitanRepack --verify-install "

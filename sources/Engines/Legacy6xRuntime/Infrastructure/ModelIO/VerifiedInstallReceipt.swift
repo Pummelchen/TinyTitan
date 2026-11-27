@@ -179,7 +179,7 @@ public enum VerifiedInstallReceiptReader {
         _ receipt: VerifiedInstallReceipt,
         directoryURL: URL
     ) -> Bool {
-        receipt.modelDirectoryPath == directoryURL.standardizedFileURL.path
+        InstallPathBinding.matches(receipt.modelDirectoryPath, directory: directoryURL)
     }
 
     public static func validateManifestBinding(
