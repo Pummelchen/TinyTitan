@@ -1,14 +1,15 @@
 # Adding a model to the family
 
 This is the checklist for turning a Hugging Face checkpoint into a first-class
-TinyTitan member at 4-bit and 8-bit. It exists because the work is spread over
-eight places in the tree and the order matters: the research decides whether it
-is a wiring job or a runtime job, and nothing is called *supported* until a real
-model has been run.
+TinyTitan member at 4-bit (every shipped install's width) or 8-bit. It exists
+because the work is spread over eight places in the tree and the order matters:
+the research decides whether it is a wiring job or a runtime job, and nothing is
+called *supported* until a real model has been run.
 
-`KAT-Coder-V2.5-Dev` is the worked example throughout — a Qwen3.6-35B-A3B
-fine-tune, which is the cheap case. A checkpoint whose architecture is not
-already implemented is a different project; see the tracker's "planned work".
+`Ornith 1.5 35B-A3B` is the worked example throughout — the shipped Qwen3.5-MoE
+text graph, which is the cheap case: it needs a converter entry, a catalogue row
+and a plugin, not a new kernel. A checkpoint whose architecture is not already
+implemented is a different project; see the tracker's "planned work".
 
 ## 0. Research the checkpoint before touching the tree
 
@@ -76,7 +77,8 @@ PY
 ```
 
 A `vision_config` in `config.json` does **not** mean the checkpoint carries a
-vision tower: KAT declares one and ships language weights only. Check the index.
+vision tower: a fine-tune of a wrapped release can declare one and ship language
+weights only. Check the index.
 
 ### The checks that cost nothing and catch the expensive mistakes
 
@@ -84,22 +86,23 @@ All four run before a byte of weights is fetched. They exist because a
 conversion is 69 GB of download and an hour of quantization, and each of these
 has a failure mode that would otherwise appear at the end of it.
 
-**1. Diff the chat template against a sibling the runtime already serves.** The
+**1. Diff the chat template against the model the runtime already serves.** The
 renderer uses the model's own `chat_template.jinja` (its absence is a hard
 error), so the template *is* the prompt, the tool-call dialect and the
-reasoning markers. KAT's differs from AgentWorld's in two places — AgentWorld
-has an extra `audio` content branch, and a mid-conversation system message
-raises on AgentWorld where KAT renders it inline — and nowhere else: the ChatML
-markers, the `<tool_call>` block, the thinking block and the generation prompt
-are byte-identical. That answers "will the parser accept its tool calls?" by
-construction rather than by hoping.
+reasoning markers. Diffing a fine-tune against its base (or against Ornith 1.5
+35B-A3B for a checkpoint of the same graph) answers "will the parser accept its
+tool calls?" by construction rather than by hoping: a difference in the ChatML
+markers, the `<tool_call>` block, the thinking block or the generation prompt is
+a parser change, and anything else is usually a content branch the runtime never
+sends.
 
 **2. Resolve every key the repacker's arch reader requires.** Read the
 `loadQwen35MoE` branch of
 `sources/TinyTitanRepack/Core/Format/ArchInfo+Loaders.swift`,
 extract its `try i("…")` keys, and check each against the checkpoint's
 `text_config`. A missing one is a `configJsonInvalid` at the end of the
-conversion; KAT has all seventeen, plus `layer_types` and both rope keys.
+conversion. Ornith 1.5 35B-A3B, the shipped model of that graph, has all
+seventeen, plus `layer_types` and both rope keys.
 
 **3. Check the production cross-check.** The same file carries
 `crossCheckProductionQwen35MoE`, which refuses a 2048/40 model whose geometry
@@ -125,7 +128,7 @@ even though the converter would not complain.
 | 5 | `ModelProfile.swift` | One row per width. Sample from the **checkpoint's** config; say in the comment when cache/prefetch values are inherited from identical geometry rather than measured |
 | 6 | `ModelCatalog.swift` — `displayNames` | The served id → human name (`/v1/models` reads this) |
 | 7 | `tests/` | `ModelProfileTests.shipped` (and the table count) |
-| 8 | ANE prefill sidecar | `tools/ane_sidecars.sh <install>` — export and verify it. A GPU-path install without one has no ANE prefill at all: the switch is on by default, the runtime asks for the sidecar, and finds nothing. Three kinds are skipped. The exporter has no graph for the one-layer MTP draft, which the runtime verifies rather than prefills on the ANE. The ANE has been *measured not to pay* for `qwen38flash`: its GPU path already attends to only the indexer's ~2,051 selected keys while the ANE graph is dense over the context, so a sidecar there only slows the default path (0.72×, `benchmark/ane-prefill/README.md`); its block is still exportable — the runtime folds the QSA selection into the mask — but export one explicitly to re-measure, never to install. And Ornith 1.5 35B-A3B's sidecar fails the identical-greedy quality gate (the ANE arm diverges at the first character and prefills slower), so `tools/ane_sidecars.sh` refuses to export one until tracker TT-099 is resolved; an existing sidecar must be renamed `ane_prefill-rejected` because the runtime selects `ane_prefill` when it exists |
+| 8 | ANE prefill sidecar | `tools/ane_sidecars.sh <install>` — export and verify it. A GPU-path install without one has no ANE prefill at all: the switch is on by default, the runtime asks for the sidecar, and finds nothing. Three kinds are skipped. The exporter has no graph for the one-layer MTP draft, which the runtime verifies rather than prefills on the ANE. Export one explicitly to re-measure, never to install: an install whose family was measured not to pay on the ANE should not carry one (`benchmark/ane-prefill/README.md`). Ornith 1.5 35B-A3B is the shipped example of a refusal — its sidecar fails the identical-greedy quality gate (the ANE arm diverges at the first character and prefills slower), so `tools/ane_sidecars.sh` refuses to export one until tracker TT-099 is resolved; an existing sidecar must be renamed `ane_prefill-rejected` because the runtime selects `ane_prefill` when it exists |
 
 Validate 1 before any download:
 
@@ -253,40 +256,6 @@ The project's bar, in this order:
 Never mark a model "supported" before §4 passes. "Install path landed,
 verification pending" is the honest state, and it is worth writing down.
 
-## 5b. A wider member of an existing family
-
-Ornith-1.5-122B is the worked example of a *geometry* addition rather than an
-architecture one. It is the same Qwen3.5-MoE text graph as the 35B-A3B
-(`family: qwen36`), at hidden 3072, 48 layers, 256 experts top-8, F=1024,
-32 Q / 2 KV heads and 16 GDN K / 64 V heads. Three things differ from the 35B
-checklist above:
-
-1. **The runtime must serve two shapes under one family.** `ArchConfig.resolved`
-   returns the 35B preset when the manifest declares the 35B shape and otherwise
-   builds the config from the manifest's own `arch` block (all conventions are
-   `required`, never defaulted). The repacker's `crossCheckOrnith122` pins the
-   3072/48 geometry the same way `crossCheckProductionQwen35MoE` pins 2048/40.
-2. **The MoE threadgroup tile.** `kMoEXMaxD` in `moe.metal` and
-   `Model.maximumThreadgroupTileWidth` are 3072, not 2816. A hidden size above
-   the tile is a silent out-of-bounds write in the kernel, so the load guard is
-   the thing that makes this a refusal rather than wrong numbers. The GDN tile is
-   already 4096.
-3. **Disk, not compute, decides the conversion shape.** The source is 250 GB,
-   the 4-bit snapshot 69.5 GB and the 8-bit 129.8 GB; one `--bits 4 8` pass
-   stages 199 GB and then wants a 125 GB install beside it. The `ornith122` rows
-   are therefore `convert_qwen35moe_solo`: one width per run, converter fetchers
-   capped at four, and `TinyTitanRepack --input-snapshot --consume-snapshot`
-   unlinks each snapshot shard after its last planned range is committed. That is
-   a ~142 GB peak for the 8-bit width instead of ~255 GB. It consumes the
-   snapshot: a failed repack after a retirement needs the snapshot rebuilt, which
-   is the trade the checklist's "converted widths are reproducible from the
-   source" already assumes. The converter itself holds a source shard until
-   every tensor converted from it is in a finished output shard (4 GiB of
-   output), which is ~8 GB of bf16 source at the 8-bit width and ~15 GB at
-   4-bit, and keeps a per-expert source longer while its layer's experts are
-   still buffered; a kill before that flush resumes by converting those files
-   again instead of fetching them.
-
 ## 6. After the checkout moves
 
 An install receipt is bound to its absolute path. Moving or renaming the
@@ -311,8 +280,7 @@ moved or swapped directory.
 - [ ] The index's tensor names checked against the converter's namespaces
 - [ ] `--plan` classifies every tensor and the output size fits the disk table
 - [ ] All eight wiring points above
-- [ ] Conversion and install, one width at a time, snapshots deleted after
-      (a 122B install additionally uses `--consume-snapshot`)
+- [ ] Conversion and install, snapshots deleted once the install exists
 - [ ] Continuations, golden target, receipt, catalog, launcher keys
 - [ ] `tools/api-feature-check.py` 10/10 on every engine the model is served on
 - [ ] README, wiki pages, tracker, roadmap — with deviations and status

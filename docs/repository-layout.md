@@ -55,13 +55,17 @@ and it needs a decision recorded in the plan first.
 `sources/` holds one directory per SwiftPM target, and the name of the
 directory is the name of the target:
 
-- **`sources/Engines/`** — one target per shipped engine: `Ornith35B4Bit`,
-  `Inkling2GGUFQ4`, `Inkling2NVFP4`, the shared dense-GPU engine `DenseGPU`
-  and the six dense CPU variants (`Qwen35Dense{2B,4B,9B}{4,8}Bit`). Each is a
-  standalone plugin target (TPP/1) and imports only `TinyTitanCore`,
-  `TinyTitanFormat`, `TinyTitanPluginAPI`, the C kernels and system
-  frameworks. The old 6.x runtime and its `LegacyEngineAdapter` are gone:
-  no shipped family used them (TT-142, 2026-11-27).
+- **`sources/Engines/`** — one target per engine. Three are shipped and served:
+  `Ornith35B4Bit`, `Inkling2GGUFQ4` and `Inkling2NVFP4`. The rest — the shared
+  dense-GPU engine `DenseGPU` and the six dense CPU variants
+  (`Qwen35Dense{2B,4B,9B}{4,8}Bit`) — are engine code with no supported install,
+  still in the tree until TT-142 slice (b) retracts or replaces the `CPUEngine`
+  facade (`docs/plan-embedded-library.md`), and `registry/registry.json` lists
+  them under `unshippedTargets` rather than as variants. Each is a standalone
+  plugin target (TPP/1) and imports only `TinyTitanCore`, `TinyTitanFormat`,
+  `TinyTitanPluginAPI`, the C kernels and system frameworks. The old 6.x runtime
+  and its `LegacyEngineAdapter` are gone: no shipped family used them (TT-142,
+  2026-11-27).
 - **`TinyTitanLib`** — the library product: the supported facade (`Engine`,
   `Session`, their options, events, summary and errors) plus the generation
   orchestration it drives. No NIO and no HTTP: this is the target another Swift

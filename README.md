@@ -16,17 +16,18 @@ installer/repacker, and a loopback OpenAI-compatible server with no MLX and no
 GGUF dependency.
 
 **Who it is for.** Every M-series Mac, not only the small ones. With RAM to
-spare, TinyTitan keeps more of the model resident and runs as a fast local
-engine built to match or beat the established Apple Silicon engines on the
-models it supports. Measured head to head against llama.cpp's Metal build, it
-is **1.26–1.40× faster** on decode and prefill (Inkling 2 Mini, 24 GB M3, both
-GGUF quantizations). On a Mac with less RAM, the same engine runs a 35B — or a
-122B/125B — model that the machine could never hold in memory. It also serves
-developers who want a loopback OpenAI- or Anthropic-compatible endpoint for
-Codex, Claude Code, Qwen Code, OpenCode, Zed or the official SDKs. It is a
-terminal-first tool: the engine and its server are the product. It is **not** a
-fine-tuning toolkit, a vision model, a GUI app, or a way to expose a model to
-your network — the server is `127.0.0.1`-only and has no authentication.
+spare, TinyTitan keeps more of the model resident and runs as a fast local engine
+built to match or beat the established Apple Silicon engines on the models it
+supports. Measured head to head against llama.cpp's Metal build, it is
+**1.26–1.40× faster** on decode and prefill (Inkling 2 Mini, 24 GB M3, both GGUF
+quantizations). On a Mac with less RAM, the same engine streams the routed
+experts from SSD, so a model the machine could not hold in memory still runs. It
+also serves developers who want a loopback OpenAI- or Anthropic-compatible
+endpoint for Codex, Claude Code, Qwen Code, OpenCode, Zed or the official SDKs.
+It is a terminal-first tool: the engine and its server are the product. It is
+**not** a fine-tuning toolkit, a vision model, a GUI app, or a way to expose a
+model to your network — the server is `127.0.0.1`-only and has no
+authentication.
 
 ## Supported models
 
@@ -38,12 +39,12 @@ Three installs are supported, and nothing else is:
 | Inkling 2 Mini 26B-A5B | UD-Q4_K_XL (Unsloth) | `Inkling2GGUFQ4Plugin` |
 | Inkling 2 Mini 26B-A5B | Original NVFP4/MXFP8 | `Inkling2NVFP4Plugin` |
 
-The benchmark table below also carries measurements this engine has taken
-against other checkpoints. Those rows are a **record of what was measured**, not
-a supported route: a family leaves this matrix when support does, and returns
-only if someone asks for it in a GitHub issue. K2 and Nemotron have left the
-tree entirely; MTP drafting is out of the supported paths (its code is kept,
-unused).
+The benchmark table below is the same matrix: the three supported installs,
+measured on one machine. A family that is not in the table is not a route — it
+leaves this matrix when support does, and returns only if someone asks for it in
+a GitHub issue. K2, Nemotron, Laguna, the Qwen 3.6/3.8 and AgentWorld/KAT-Coder
+fine-tunes, Ornith 1.5 122B and the 8-bit Ornith width have all left; MTP
+drafting is out of the supported paths (its code is kept, unused).
 
 ## Benchmarks
 
@@ -51,30 +52,9 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 
 | Model | Quantization | GPU | CPU | Terminal-Bench 2.x | Terminal-Bench 4.0 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Qwen3.8-Flash-Next 125B-A6B | 4-bit | **5.5 tok/s** | NA | 86% (2.1) | 25% |
-| Qwen3.8-Flash-Next 125B-A6B | 8-bit | **2.1 tok/s** | NA | 86% (2.1) | 25% |
-| Ornith 1.5 122B | 4-bit | **2.9 tok/s** | NA | 81% (2.1) | NA |
-| Ornith 1.5 122B | 8-bit | **1.2 tok/s** | NA | 81% (2.1) | NA |
+| Ornith 1.5 35B-A3B | 4-bit | **21.7 tok/s** | NA | 68% (2.1) | NA |
 | Inkling 2 Mini 26B-A5B | UD-Q4_K_XL (Unsloth) | **17.9 tok/s** | NA | 72% (2.1) | 5.6% |
 | Inkling 2 Mini 26B-A5B | Original (NVFP4/MXFP8) | **8.1 tok/s** | NA | 72% (2.1) | 5.6% |
-| Laguna-S-2.1 118B-A8B *(decode probe)* | 4-bit | **1.5 tok/s** | NA | 70% (2.1) | NA |
-| Laguna-S-2.1 118B-A8B *(decode probe)* | 8-bit | **0.7 tok/s** | NA | 70% (2.1) | NA |
-| Ornith 1.5 35B-A3B | 4-bit | **21.7 tok/s** | NA | 68% (2.1) | NA |
-| Ornith 1.5 35B-A3B | 8-bit | **11.9 tok/s** | NA | 68% (2.1) | NA |
-| Qwen 3.6 35B-A3B | 4-bit | **21.4 tok/s** | NA | 53% (2.1) | NA |
-| Qwen 3.6 35B-A3B | 8-bit | **12.4 tok/s** | NA | 53% (2.1) | NA |
-| Qwen-AgentWorld 35B-A3B | 4-bit | **21.7 tok/s** | NA | 40% (2.0) | NA |
-| Qwen-AgentWorld 35B-A3B | 8-bit | **12.3 tok/s** | NA | 40% (2.0) | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.9 tok/s** | NA | 33% (2.1) | NA |
-| KAT-Coder-V2.5-Dev 35B-A3B | 8-bit | **6.9 tok/s** | NA | 33% (2.1) | NA |
-| Qwen 3.5 4B (dense) | 4-bit | **22.8 tok/s** | **7.5 tok/s** | 26% (2.1) | NA |
-| Qwen 3.5 4B (dense) | 8-bit | **14.1 tok/s** | **7.9 tok/s** | 26% (2.1) | NA |
-| Qwen 3.5 9B (dense) | 4-bit | **12.9 tok/s** | **4.4 tok/s** | 9% (2.0) | NA |
-| Qwen 3.5 9B (dense) | 8-bit | **7.8 tok/s** | **4.4 tok/s** | 9% (2.0) | NA |
-| Qwen 3.5 2B (dense) | 4-bit | **44.4 tok/s** | **17.4 tok/s** | 3% (2.1) | NA |
-| Qwen 3.5 2B (dense) | 8-bit | **29.6 tok/s** | **18.1 tok/s** | 3% (2.1) | NA |
-
-*Models tagged *(decode probe)*, *(probe backend)*, or *(CLI only)* are partial ports without full catalogue installer/server parity; see [Model Support](https://github.com/Pummelchen/TinyTitan/wiki/Model-Support) for details.*
 
 ## Quick start
 
@@ -90,11 +70,11 @@ swift build -c release
 .build/release/TinyTitanCLI --help
 ```
 
-Install a model with `tools/install_models.sh --choose` (the dense 2B row is
-about 2.3 GB), then run a prompt:
+Install a model with `tools/install_models.sh --choose` (the default Ornith
+1.5 35B-A3B 4-bit row is a 19.5 GB install), then run a prompt:
 
 ```bash
-.build/release/TinyTitanCLI --model models/qwen3.5_2B_4Bit \
+.build/release/TinyTitanCLI --model models/ornith-1.5_35B_A3B_4Bit \
   --prompt "What is the capital of Paris ?" --max-new 96
 ```
 
@@ -114,13 +94,10 @@ models** above). The full walkthrough is
    tokens through a callback. Same kernels, format reader and sampler as the
    engine, in your process — no subprocess, no HTTP, no model reimplementation.
 2. **The complete local LLM engine — `TinyTitanCLI` + `TinyTitanServer`.** Run a
-   35B, 122B or 125B model from the terminal and serve it on a loopback
+   35B or 26B model from the terminal and serve it on a loopback
    OpenAI-/Anthropic-compatible endpoint for Codex, Claude Code, Qwen Code,
    OpenCode, Zed or the official SDKs. Native Swift and Metal: no MLX, no GGUF
-   library. Experimental: the Unsloth Qwen3.8-Flash-Next UD-IQ3_XXS GGUF
-   shards also run as-is through `--model` (CLI only, same top-1/top-5 as
-   llama.cpp, decode at the converted model's speed — no conversion needed,
-   no speed gain).
+   library.
 3. **The `.ssdai` model format and its converter — `TinyTitanRepack` +
    [`tools/`](tools).** Stream a checkpoint into a hash-verified install that
    keeps the routed experts on SSD, so a model larger than your RAM still runs —
