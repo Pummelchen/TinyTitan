@@ -55,7 +55,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 | `Engines/DenseGPU` | A | 55.4k | P | P | P | P | – | P | N | as Ornith (19 files differ); `RoPE.swift` read (AUD-0084 open) |
 | `Engines/Legacy6xRuntime` | A | 60.4k | P | P | P | P | – | P | N | the 6.x runtime, moved here by TT-134(e); audited only where the other rows reach — `Infrastructure/Streaming` (AUD-0060/0062), `Attention.swift`, `VerifiedInstallReceipt`; the rest is TT-132's porting surface |
 | `Engines/Inkling2GGUFQ4` | A | 4.8k | P | P | R | R | – | R | N | plugin, install, sidecar, weights, decoder graph read; AUD-0065/0075/0076-class fixes here; MTP/`Decoder` internals partial |
-| `Engines/Inkling2NVFP4` | A | 6.1k | P | P | R | R | – | R | N | as above; MTP table (AUD-0075 fixed), weights (AUD-0084 open) |
+| `Engines/Inkling2NVFP4` | A | 6.1k | P | P | R | R | – | R | N | as above; MTP table and weights read (AUD-0075/0084 fixed); the MTP path is kept but unused |
 | `Engines/Qwen35Dense*` (6) | A | 3.5k each | P | P | P | P | – | P | N | `AffineSnapshot`, `CPUBatchedMatmul`, `CPUTensorOps` read (AUD-0083/0084 open); the six differ only in `Variant.swift` |
 | `TinyTitanPluginAPI` | B | 0.6k | R | P | R | N | N | P | N | protocol, registry, probe read; no I/O, no threads of its own |
 | `Plugins/TemplatePlugin` | B | 0.4k | R | P | R | N | N | P | N | golden base, read in full |
@@ -63,14 +63,14 @@ Reviewed 2026-11-27 at `84006bb8`:
 | `TinyTitanLegacyEngine` | A | 1.1k | R | P | R | N | – | P | N | the adapter boundary, read in full; TT-132 removes it |
 | `TinyTitanVariants` | B | 0.6k | R | P | R | N | N | P | N | selection table read; `LegacyRuntimeBoundaryTests` pins the 6.x import set |
 | `TinyTitanCPUEngine` | B | 0.5k | R | P | R | N | – | P | N | facade over the dense CPU backend, read |
-| `TinyTitanServerCore` | A | 10.7k | R | R | R | R | P | R | R | all 41 files read line-by-line 2026-11-27; AUD-0066/0068/0069/0070/0071 open, 0067 open; loopback policy, body/header bounds, response store, coordinator, model router verified clean |
+| `TinyTitanServerCore` | A | 10.7k | R | R | R | R | P | R | R | all 41 files read line-by-line 2026-11-27; AUD-0066/0067/0068/0069/0071 fixed, 0070 did not reproduce and is pinned by a test, 0087 open; loopback policy, body/header bounds, response store, coordinator, model router verified clean |
 | `TinyTitanRepackCore` / `TinyTitanRepack` | A | 13.1k | R | R | R | R | P | R | R | verification/remote/local/planning/format/workflow read; AUD-0072/0073/0074 fixed, 0075/0076 open; `ArchInfo+*`, `RemoteChunkPolicy`, progress display, RANS writer skimmed |
 | `TinyTitanCLICore` / `TinyTitanCLI` | B | 3.2k | R | P | P | N | – | P | N | args, run, doctor, plugin-check read; calibration and off-disk routes partial |
 | `ContinuityCore` | A | 4.3k | R | R | P | P | – | R | N | journal durability and append/compaction serialisation closed by the earlier audit tasks (0010–0016) and pinned by its suites; store beyond the journal partial |
 | `TinyTitanMemory` | A | 5.3k | R | P | R | R | – | R | N | scope validation, discovery/listing (AUD-0061/0063/0064), store keys read; consolidation and bootstrap partial |
 | `TinyTitanMemoryTool` | B | 0.2k | R | N | R | N | N | R | N | read in full; its failure paths are pinned by tests |
 | `TinyTitanBench` / `TinyTitanValidationSupport` | B | 4.7k | P | N | P | N | N | P | N | `PassCostPrompt` read and pinned (TT-139); the rest is operator tooling and was not audited |
-| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | `prepare_qwen38` transport/ngram/driver read; AUD-0077 open; `prepare_laguna_s21`, `prepare_nemotron`, `prepare_*_mtp`, `install_models.sh`, `install_tinytitan.sh` not reviewed (`prepare_k2_horizon` was read and has since been deleted with K2's withdrawal, TT-086) |
+| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | `prepare_qwen38` transport/ngram/driver read; AUD-0077 fixed; `prepare_laguna_s21`, `prepare_nemotron`, `prepare_*_mtp`, `install_models.sh`, `install_tinytitan.sh` not reviewed (`prepare_k2_horizon` was read and has since been deleted with K2's withdrawal, TT-086) |
 | `tools/*.sh`, `benchmark/*.py` | B | — | P | N | P | P | N | P | N | the gates and the launcher suite are exercised on every run; not audited line-by-line |
 
 ## What this pass covered (2026-11-27)
@@ -104,10 +104,14 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
   of `tools/`.
 - The 6.x runtime is the porting surface for TT-132 and is audited only where
   the rows above reach; porting replaces it rather than auditing it twice.
-- The findings that remain open are the tracker rows AUD-0066…0071, 0075,
-  0076, 0077, 0081, 0083, 0084 and 0085, plus the four open investigations on
-  the parent row; each carries its location, the concrete break and the test
-  that should pin it. AUD-0065 and AUD-0072…0074 are fixed and their rows
-  removed.
+- Everything this pass found is fixed or closed except **AUD-0087** (three more
+  unbounded maps in the memory actor, the sibling of AUD-0067) and the four open
+  investigations recorded on the parent row. Each closed finding is a commit
+  whose message carries the RED evidence; AUD-0070 did not reproduce and is
+  pinned by a regression test instead.
+- **K2 left the tree** under TT-086/TT-053 (202 files, −17,127 lines), and the
+  `TinyTitanServerCore` row above no longer imports the 6.x runtime at all. The
+  shared `K2MoEStage`/`K2Head` stay because Laguna's probe links them, and MTP is
+  kept, tested and unused.
 - AUD-0008 (independent host) still has to run after this matrix has no
   unreviewed Tier-A cell, which it does not yet.
