@@ -322,43 +322,7 @@ check_golden() {  # <install dir> <golden target>
 # still accepts: these strings are what the absence report prints and what
 # --publish greps the release notes for, so a bare `8` would match almost any
 # notes and make the requirement meaningless.
-check_golden ornith-1.5_35B_A3B_8Bit ornith-8
 check_golden ornith-1.5_35B_A3B_4Bit ornith-4
-check_golden qwen3.6_35B_A3B_4Bit qwen36-4
-check_golden qwen3.6_35B_A3B_8Bit qwen36-8
-# The 4-bit type carries the 4/8/16 recipe (experts 4-bit, the rest 8-bit)
-# under the canonical `_4Bit` spelling; 8-bit is uniform.
-check_golden qwen3.8-flash-next_125B_A6B_4Bit qwen38-4
-check_golden qwen3.8-flash-next_125B_A6B_8Bit qwen38-8
-check_golden qwen-agentworld_35B_A3B_4Bit agentworld-4
-check_golden qwen-agentworld_35B_A3B_8Bit agentworld-8
-# KAT-Coder-V2.5-Dev. Declared before its install existed so the first release
-# that ships it cannot pass without its baseline.
-check_golden kat-coder-v2.5_35B_A3B_4Bit katcoder-4
-check_golden kat-coder-v2.5_35B_A3B_8Bit katcoder-8
-# The dense Qwen 3.5 models. They used to have no baseline at all, which made
-# them the one supported shape a release never verified; the targets exist now
-# and are inert on a machine that has not installed them, exactly like every
-# other target here.
-check_golden qwen3.5_2B_4Bit qwen35-2b-4
-check_golden qwen3.5_2B_8Bit qwen35-2b-8
-check_golden qwen3.5_4B_4Bit qwen35-4b-4
-check_golden qwen3.5_4B_8Bit qwen35-4b-8
-check_golden qwen3.5_9B_4Bit qwen35-9b-4
-check_golden qwen3.5_9B_8Bit qwen35-9b-8
-# The CPU twins share the install but have their own `-cpu` baselines; the
-# registry ships them as separate variants, so the release checks both.
-check_golden qwen3.5_2B_4Bit qwen35-2b-4-cpu
-check_golden qwen3.5_2B_8Bit qwen35-2b-8-cpu
-check_golden qwen3.5_4B_4Bit qwen35-4b-4-cpu
-check_golden qwen3.5_4B_8Bit qwen35-4b-8-cpu
-check_golden qwen3.5_9B_4Bit qwen35-9b-4-cpu
-check_golden qwen3.5_9B_8Bit qwen35-9b-8-cpu
-# Ornith 1.5 122B, the wider member of the Ornith family: hidden 3072 over 48
-# layers in the same qwen36 graph. Declared before this machine had the
-# installs, so the first release that ships them cannot skip the check.
-check_golden ornith-1.5_122B_4Bit ornith122-4
-check_golden ornith-1.5_122B_8Bit ornith122-8
 check_golden inkling-2-mini_GGUF-Q4 inkling2-gguf-q4
 check_golden inkling-2-mini_NVFP4 inkling2-nvfp4
 

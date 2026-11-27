@@ -1645,7 +1645,7 @@ check_variant_isolation() {
       case "$imp" in
         TinyTitanCore|TinyTitanFormat|Metal|MetalKit|Foundation|Accelerate|Compression|SystemPackage|Darwin|Synchronization|IOKit|TinyTitanKernelsC) ;;
         TinyTitan|TinyTitanLib|TinyTitanServerCore|TinyTitanRepackCore|TinyTitanCLICore) bad=1 ;;
-        TinyTitanVariants|TinyTitanLegacyEngine|TinyTitanCPUEngine) bad=1 ;;
+        TinyTitanVariants|TinyTitanCPUEngine) bad=1 ;;
         *)
           # Another variant or plugin target: a sibling directory under
           # sources/Engines or sources/Plugins (TPP/1: a plugin is standalone).

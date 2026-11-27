@@ -4,25 +4,16 @@
 # pass". Phase 2 of the production audit needs this before RealForwardRunner
 # is decomposed.
 #
-#   tools/golden-baseline.sh [target ...]     # default: ornith-8
+#   tools/golden-baseline.sh [target ...]     # default: ornith-4
 #   tools/golden-baseline.sh --check [...]    # compare against the stored file
 #   tools/golden-baseline.sh --server [...]   # CLI and server must agree
 #   tools/golden-baseline.sh --engine cpu ... # capture/compare the CPU path
 #                                             # (file suffix `-cpu`; dense only)
 #
-# Targets: ornith-4, ornith-8, ornith122-4, ornith122-8,
-# qwen36-4, qwen36-8, qwen38-4, qwen38-8, agentworld-4, agentworld-8,
-# katcoder-4, katcoder-8, and the dense qwen35-{2b,4b,9b}-{4,8}.
-# The katcoder and qwen35 targets are declared whether
-# or not their install is present: a target is inert until the directory is
-# there, and release.sh demands the baseline as soon as it is.
-# Bare 4 and 8 still mean
-# Ornith, because the stored baselines are named for it.
-#
-# Qwen3.8-Flash-Next is the broader gate: it is the only family exercising
-# hyper-connections, the PLE block and the QSA indexer, and at 8-bit it is the
-# only one exercising the affine GEMV path through them. Ornith reaches none
-# of that, so an Ornith-only baseline can pass while those kernels are wrong.
+# Targets: ornith-4, inkling2-gguf-q4 and inkling2-nvfp4 — the shipped matrix
+# (TT-142). A target is inert until its install is present, and release.sh
+# demands the baseline as soon as it is. Bare `4` still means Ornith 1.5
+# 35B-A3B 4-bit, because the stored baseline is named for it.
 #
 # Determinism comes from greedy decoding: --temperature 0 with a fixed seed and
 # a fixed prompt. Greedy means the sampler never draws, so the only inputs are
@@ -191,7 +182,7 @@ while [ "$#" -gt 0 ]; do
     *)        targets+=("$1"); shift ;;
   esac
 done
-[ ${#targets[@]} -eq 0 ] && targets=(ornith-8)
+[ ${#targets[@]} -eq 0 ] && targets=(ornith-4)
 
 if [ ! -x "$CLI" ]; then
   echo "missing $CLI — run: swift build -c release" >&2
@@ -379,35 +370,9 @@ PY
 for t in "${targets[@]+"${targets[@]}"}"; do
   case "$t" in
     4|ornith-4) dir="ornith-1.5_35B_A3B_4Bit"; file="ornith-1.5-35b-a3b-4bit.txt"; q=4 ;;
-    8|ornith-8) dir="ornith-1.5_35B_A3B_8Bit"; file="ornith-1.5-35b-a3b-8bit.txt"; q=8 ;;
-    # Ornith 1.5 122B: the wider member of the same family, so it exercises the
-    # same graph at hidden 3072 and 48 layers. Declared before its install is on
-    # every machine, like the other targets: inert where the directory is
-    # missing, demanded by release.sh the moment it is there.
-    ornith122-4) dir="ornith-1.5_122B_4Bit"; file="ornith-1.5-122b-4bit.txt"; q=4 ;;
-    ornith122-8) dir="ornith-1.5_122B_8Bit"; file="ornith-1.5-122b-8bit.txt"; q=8 ;;
-    qwen38-4)   dir="qwen3.8-flash-next_125B_A6B_4Bit"
-                file="qwen3.8-flash-next-125b-a6b-4bit.txt"; q=4 ;;
-    qwen38-8)   dir="qwen3.8-flash-next_125B_A6B_8Bit"
-                file="qwen3.8-flash-next-125b-a6b-8bit.txt"; q=8 ;;
-    qwen36-4) dir="qwen3.6_35B_A3B_4Bit"; file="qwen3.6-35b-a3b-4bit.txt"; q=4 ;;
-    qwen36-8) dir="qwen3.6_35B_A3B_8Bit"; file="qwen3.6-35b-a3b-8bit.txt"; q=8 ;;
-    agentworld-4) dir="qwen-agentworld_35B_A3B_4Bit"; file="qwen-agentworld-35b-a3b-4bit.txt"; q=4 ;;
-    agentworld-8) dir="qwen-agentworld_35B_A3B_8Bit"; file="qwen-agentworld-35b-a3b-8bit.txt"; q=8 ;;
-    katcoder-4) dir="kat-coder-v2.5_35B_A3B_4Bit"; file="kat-coder-v2.5-35b-a3b-4bit.txt"; q=4 ;;
-    katcoder-8) dir="kat-coder-v2.5_35B_A3B_8Bit"; file="kat-coder-v2.5-35b-a3b-8bit.txt"; q=8 ;;
-    # The dense Qwen 3.5 models, which had no baseline at all. They are the one
-    # shape that runs on either engine, so this drives the default engine (GPU);
-    # the CPU-versus-GPU equivalence is a separate opt-in test.
-    qwen35-2b-4) dir="qwen3.5_2B_4Bit"; file="qwen3.5-2b-4bit.txt"; q=4 ;;
-    qwen35-2b-8) dir="qwen3.5_2B_8Bit"; file="qwen3.5-2b-8bit.txt"; q=8 ;;
-    qwen35-4b-4) dir="qwen3.5_4B_4Bit"; file="qwen3.5-4b-4bit.txt"; q=4 ;;
-    qwen35-4b-8) dir="qwen3.5_4B_8Bit"; file="qwen3.5-4b-8bit.txt"; q=8 ;;
-    qwen35-9b-4) dir="qwen3.5_9B_4Bit"; file="qwen3.5-9b-4bit.txt"; q=4 ;;
     inkling-q4-k-xl-unsloth|inkling2-q4|inkling2-gguf-q4) dir="inkling-2-mini_GGUF-Q4"; file="inkling-2-mini-gguf-q4.txt"; q=4 ;;
     inkling2mini|inkling2-nvfp4) dir="inkling-2-mini_NVFP4"; file="inkling-2-mini-nvfp4.txt"; q=4 ;;
-    qwen35-9b-8) dir="qwen3.5_9B_8Bit"; file="qwen3.5-9b-8bit.txt"; q=8 ;;
-    *) echo "unknown target: $t (ornith-4, ornith-8, ornith122-4, ornith122-8, qwen36-4, qwen36-8, qwen38-4, qwen38-8, agentworld-4, agentworld-8, katcoder-4, katcoder-8, qwen35-2b-4, qwen35-2b-8, qwen35-4b-4, qwen35-4b-8, qwen35-9b-4, qwen35-9b-8, inkling2-gguf-q4, inkling2-nvfp4)" >&2
+    *) echo "unknown target: $t (ornith-4, inkling2-gguf-q4, inkling2-nvfp4)" >&2
        status=1; continue ;;
   esac
   model="$ROOT/models/$dir"
