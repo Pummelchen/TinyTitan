@@ -44,6 +44,15 @@ public enum VerifiedInstallTool {
         let manifestSize = try access.fileSize(manifestPath)
         let manifestSha = try access.hash(manifestPath, noCache: true)
         let manifest = try loadManifest(access: access)
+        // Structure before content. This order is deliberate and pinned by
+        // `PackedExpertWidthTests.aLayoutThatMisannotatesAnExpertIsRefusedBefore
+        // TheHashes`: a layout whose expert annotation lies about the width must
+        // be reported as a bad annotation, not as a corrupted file, even though
+        // both would be true. The trap that used to live here is fixed in
+        // `packedLayerCapacity`, and the format validator now runs over the same
+        // bytes (AUD-0073/0074); the order does not need to change for either.
+        try validatePackedExpertLayout(access: access, manifest: manifest)
+        try validateQuantAgainstResident(access: access, manifest: manifest)
 
         var files: [RepackAudit.OutputFile] = []
         files.reserveCapacity(manifest.files.count)
@@ -82,13 +91,6 @@ public enum VerifiedInstallTool {
                     size: actualSize,
                     sha256: actualSha))
         }
-        // Content first, structure second: a corrupt `layout.json` is a hash
-        // mismatch on a file the manifest lists, and it must be reported as one
-        // rather than parsed for a JSON error (AUD-0073). Every payload file has
-        // been hashed at this point.
-        try validatePackedExpertLayout(access: access, manifest: manifest)
-        try validateQuantAgainstResident(access: access, manifest: manifest)
-
         let unexpectedEntries = try findUnexpectedEntries(access: access, manifest: manifest)
 
         let receiptData = try VerifiedInstallReceiptWriter.encode(
