@@ -28,6 +28,23 @@ terminal-first tool: the engine and its server are the product. It is **not** a
 fine-tuning toolkit, a vision model, a GUI app, or a way to expose a model to
 your network — the server is `127.0.0.1`-only and has no authentication.
 
+## Supported models
+
+Three installs are supported, and nothing else is:
+
+| model | width | engine plugin |
+| --- | --- | --- |
+| Ornith 1.5 35B-A3B | 4-bit | `Ornith35B4BitPlugin` |
+| Inkling 2 Mini 26B-A5B | UD-Q4_K_XL (Unsloth) | `Inkling2GGUFQ4Plugin` |
+| Inkling 2 Mini 26B-A5B | Original NVFP4/MXFP8 | `Inkling2NVFP4Plugin` |
+
+The benchmark table below also carries measurements this engine has taken
+against other checkpoints. Those rows are a **record of what was measured**, not
+a supported route: a family leaves this matrix when support does, and returns
+only if someone asks for it in a GitHub issue. K2 and Nemotron have left the
+tree entirely; MTP drafting is out of the supported paths (its code is kept,
+unused).
+
 ## Benchmarks
 
 Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
@@ -84,11 +101,10 @@ about 2.3 GB), then run a prompt:
 Start the server with `tools/server_launcher.sh`; it prompts for model, RAM
 budget, context window (`16K`–`2M`), and KV-cache precision (`8`/`4`/`16`),
 prints the base URL, and writes the client configuration. The server runs
-standalone TPP/1.1 engine plugins for Inkling 2 Mini (UD-Q4_K_XL and Original
-NVFP4/MXFP8), Ornith 1.5 35B-A3B 4-bit, and dense Qwen 3.5 on CPU and GPU;
-other supported installs retain their qualified 6.x path. For a dense install,
-`--engine cpu` or `--engine gpu` selects the launch path, and catalogue requests
-can use `<model-id>@cpu` or `<model-id>@gpu`. The full walkthrough is
+standalone TPP/1.1 engine plugins for the three supported installs — Inkling 2
+Mini (UD-Q4_K_XL and Original NVFP4/MXFP8) and Ornith 1.5 35B-A3B 4-bit. Any
+other install in the catalogue is not a supported route (see **Supported
+models** above). The full walkthrough is
 [Getting Started](https://github.com/Pummelchen/TinyTitan/wiki/Getting-Started).
 
 ## What this repository delivers
