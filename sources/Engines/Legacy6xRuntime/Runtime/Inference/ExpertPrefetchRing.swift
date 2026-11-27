@@ -75,7 +75,12 @@ final class ExpertPrefetchRing: @unchecked Sendable {
     /// Slots for later layers (a two-layer-ahead read still waiting for its
     /// layer) are kept, which is what lets more than one layer be in flight.
     /// Reads issued by every `begin`, for the runner's per-token stats.
+    ///
+    /// Written under `lock`; read through `issuedReadCount` so a diagnostics
+    /// caller cannot race a generation (AUD-0090).
     private(set) var issuedReads = 0
+
+    var issuedReadCount: Int { lock.withLock { issuedReads } }
     /// Slot states observed at each `begin`, summed: why the ring had no
     /// free slot. `held` = completed but its layer has not been planned yet.
     private(set) var observedSubmitted = 0
@@ -163,18 +168,29 @@ final class ExpertPrefetchRing: @unchecked Sendable {
     }
 
     /// One line for the stats footer.
+    ///
+    /// Read under the lock the counters are written under: `Int`/`UInt64` are
+    /// not atomic in Swift, so a diagnostics read beside a live generation
+    /// would be a data race rather than a torn number (AUD-0090).
     var summary: String {
+        lock.lock()
         let b = Double(max(1, begins))
         let n = Double(max(1, reclaimedOps))
+        let values = (
+            begins, slots.count, depthByTargetLayer.count, observedFree,
+            observedSubmitted, observedInFlight, observedHeld,
+            reclaimedOps, reclaimedQueueNanos, reclaimedLoadNanos
+        )
+        lock.unlock()
         return String(
             format: "prefetch_ring begins=%d slots=%d links_deep=%d free=%.2f submitted=%.2f "
                 + "inflight=%.2f held=%.2f "
                 + "spec_ops=%d spec_queue_ms=%.2f spec_load_ms=%.2f",
-            begins, slots.count, depthByTargetLayer.count, Double(observedFree) / b,
-            Double(observedSubmitted) / b, Double(observedInFlight) / b,
-            Double(observedHeld) / b,
-            reclaimedOps, Double(reclaimedQueueNanos) / n / 1e6,
-            Double(reclaimedLoadNanos) / n / 1e6)
+            values.0, values.1, values.2, Double(values.3) / b,
+            Double(values.4) / b, Double(values.5) / b,
+            Double(values.6) / b,
+            values.7, Double(values.8) / n / 1e6,
+            Double(values.9) / n / 1e6)
     }
 
     func readyBuffers(layer: Int, experts: [Int]) -> [Int: MTLBuffer] {

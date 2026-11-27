@@ -214,9 +214,10 @@ extension RealForwardRunner {
                 sublayer == .attention
                 ? try model.hcAttnMixUp(layer: layer)
                 : try model.hcMlpMixUp(layer: layer)
-            // A wide verify pass must reproduce decode, whose read is the
-            // composed path (the fused read cannot build; see canFuseRead):
-            // the same norm, silu and reduce, with decode's GEMV per row.
+            // A wide verify pass must reproduce decode, and decode reads
+            // fused when the fused path is enabled (it builds now; see
+            // canFuseRead): the same norm, silu and reduce, with decode's GEMV
+            // per row.
             if decodeOrderVerify, hcFusedEnabled,
                 hc.canFuseRead(down: gateWeightsPublic(down), up: gateWeightsPublic(up))
             {

@@ -312,20 +312,15 @@ final class HyperConnection {
     /// Whether the fused decode kernels can serve these gates: int4 weights,
     /// a single row, and the threadgroup-memory bound of the phase-1 kernel.
     ///
-    /// **The phase-1 half of this is currently never true.**
-    /// `hc_read_phase1_int4` declares two simultaneously live threadgroup arrays
-    /// of `kHCMaxWide` (10,240) halves — `nrm` and `xs` — which is 40,992 bytes
-    /// against Apple's 32,768-byte `maxThreadgroupMemoryLength`.
-    /// `makeComputePipelineState` throws at init, `try?` stores nil, and this
-    /// returns false, so the composed three-dispatch read path always runs and
-    /// the `dim * streams <= 10_240` clause below is unreachable in practice.
-    ///
-    /// The clause is left as written because it is the correct *bound*; the fix
-    /// belongs on the kernel side, where staging one array instead of two
-    /// (reading the second vector from device memory) brings the kernel under
-    /// the limit and makes the clause live again. Until then, no measurement of
-    /// the fused read path has measured anything, and `hc_inject_int4` — 32
-    /// bytes of threadgroup memory — is the only one of the two that can build.
+    /// `hc_read_phase1_int4` stages one `kHCMaxWide` threadgroup array
+    /// (20,480 bytes) — it used to declare two, which exceeded Apple's
+    /// 32,768-byte `maxThreadgroupMemoryLength` and made the pipeline fail to
+    /// build, so `psoReadPhase1` was nil and this returned false. `fused.metal`
+    /// now reads the second vector from device memory, so the kernel builds and
+    /// the `dim * streams <= 10_240` clause below is the live bound. The fused
+    /// read path is behind `TINYTITAN_HC_FUSED=1`; it has not been A/B-measured
+    /// against the composed path, so a numerics claim for it would still be
+    /// unearned.
     func canFuseRead(down: Weights, up: Weights) -> Bool {
         psoReadPhase1 != nil && psoReadPhase2 != nil
             && !down.isBF16 && !up.isBF16

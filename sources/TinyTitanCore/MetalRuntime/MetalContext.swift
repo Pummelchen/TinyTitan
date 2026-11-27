@@ -106,10 +106,8 @@ public final class MetalContext: @unchecked Sendable {
         "dequant_affine",
         "kv_cache_quantize",
         "rmsnorm",
-        "short_conv",
         "rope",
         "attention",
-        "relative_attention",
         "moe",
         "logit",
         "utility",
@@ -140,7 +138,6 @@ public final class MetalContext: @unchecked Sendable {
     /// Bundle locations for runtime shader modules.
     public static let shaderSubdirectories: [String: String] = [
         "attention": "Metal/Attention",
-        "relative_attention": "Metal/Attention",
         "qsa": "Metal/Attention",
         "dequant_int4": "Metal/Quant",
         "dequant_int8": "Metal/Quant",
@@ -171,7 +168,6 @@ public final class MetalContext: @unchecked Sendable {
         "moe": "Metal/MoE",
         "prefill": "Metal/Prefill",
         "rmsnorm": "Metal/Primitives",
-        "short_conv": "Metal/Primitives",
         "rope": "Metal/Primitives",
         "tensorops": "Metal/TensorCore",
         "utility": "Metal/Primitives",
