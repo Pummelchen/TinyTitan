@@ -144,6 +144,10 @@ package enum SSDAIResidentIndexCodec {
                 try validateBlockEncodedSizes(
                     encoding, shape: shape, sizeBytes: sizeBytes,
                     scaleSize: scaleSize, biasSize: biasSize, index: index)
+            } else {
+                try validatePlainPayload(
+                    dtype: knownDType, shape: shape, offset: fileOffset,
+                    sizeBytes: sizeBytes, index: index)
             }
             try validatePrimaryPayloadRange(
                 offset: fileOffset, size: sizeBytes,
@@ -241,6 +245,52 @@ package enum SSDAIResidentIndexCodec {
         guard offset >= header.indexSize, end <= residentEnd else {
             throw TinyTitanFormatError.invalid(
                 field: field, reason: "range outside resident payload")
+        }
+    }
+
+    /// A plain tensor's bytes are one element per shape cell, and consumers
+    /// `bindMemory` at `fileOffset`, so the offset must be aligned for the
+    /// element width and the size exactly what the shape implies. A 4n+2 F32
+    /// entry otherwise truncates its last element silently (AUD-0083).
+    ///
+    /// `u32` is also the code for a *packed quantized weight* (dtype 0 in
+    /// `docs/ssdai-format.md`): its `sizeBytes` covers packed words, not
+    /// `product(shape)` words, so only a whole-word size is required there.
+    private static func validatePlainPayload(
+        dtype: SSDAIFormatV1.DType, shape: [UInt32], offset: UInt64,
+        sizeBytes: UInt64, index: Int
+    ) throws {
+        let elementBytes: UInt64
+        switch dtype {
+        case .fp32, .u32: elementBytes = 4
+        case .bf16, .fp16: elementBytes = 2
+        case .ggufQ8_0, .ggufNVFP4, .nvfp4, .mxfp8: return
+        }
+        let field = "resident.entries[\(index)]"
+        guard offset % elementBytes == 0 else {
+            throw TinyTitanFormatError.invalid(
+                field: "\(field).weights",
+                reason: "offset \(offset) is not \(elementBytes)-byte aligned for \(dtype)")
+        }
+        guard sizeBytes % elementBytes == 0 else {
+            throw TinyTitanFormatError.invalid(
+                field: "\(field).weights",
+                reason: "\(sizeBytes) bytes is not whole \(elementBytes)-byte \(dtype) elements")
+        }
+        if dtype != .u32 {
+            var elements: UInt64 = 1
+            for dimension in shape where dimension != 0 {
+                elements = try ssdaiCheckedMultiply(
+                    elements, UInt64(dimension), field: "\(field).shape")
+            }
+            let expected = try ssdaiCheckedMultiply(
+                elements, elementBytes, field: "\(field).weights")
+            guard sizeBytes == expected else {
+                throw TinyTitanFormatError.invalid(
+                    field: "\(field).weights",
+                    reason: "\(sizeBytes) bytes is not \(elements) \(dtype) elements "
+                        + "(\(expected) bytes)")
+            }
         }
     }
 

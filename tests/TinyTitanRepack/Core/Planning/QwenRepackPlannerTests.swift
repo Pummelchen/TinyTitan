@@ -486,6 +486,38 @@ struct QwenRepackPlannerTests {
         try data.write(to: URL(fileURLWithPath: path))
     }
 
+    /// Every resident tensor starts where the engine can bind it: the mapped
+    /// payload is read with `bindMemory` at `fileOffset`, so the planner pads
+    /// each tensor to 16 bytes (AUD-0083). Before this, a 2-byte BF16 vector
+    /// such as `A_log` was packed flush and left `dt_bias` at +8.
+    @Test func everyResidentTensorStartsOnA16ByteBoundary() throws {
+        let snapshotDir = temporaryRoot("qwen-align")
+        let outputDir = temporaryRoot("qwen-align-out")
+        defer {
+            try? FileManager.default.removeItem(atPath: snapshotDir)
+            try? FileManager.default.removeItem(atPath: outputDir)
+        }
+        let snapshot = try SyntheticSnapshot.buildQwen(at: snapshotDir)
+        let metadata = try IndexLoader.load(snapshotDir: snapshotDir)
+        let arch = try ArchInfo.load(
+            configPath: (snapshotDir as NSString).appendingPathComponent("config.json"))
+        let plan = try RepackPlanner.plan(
+            meta: metadata, arch: arch, shardHeaders: [try parseHeader(path: snapshot.shardPath)],
+            outputDir: outputDir)
+
+        #expect(plan.resident.entries.count > 0)
+        for entry in plan.resident.entries {
+            #expect(
+                entry.fileOffset % RepackPlanner.residentTensorAlignment == 0,
+                "\(entry.name) starts at \(entry.fileOffset) on a 16-byte boundary")
+            #expect(RepackPlanner.alignedResidentOffset(entry.fileOffset) == entry.fileOffset)
+        }
+        // The tensor's own bytes are unchanged by the padding: the plan's size
+        // is the source tensor's size, not a padded one.
+        let first = try #require(plan.resident.entries.first)
+        #expect(first.sizeBytes == first.sourceWeight.sizeBytes)
+    }
+
     private func temporaryRoot(_ tag: String) -> String {
         let path = (NSTemporaryDirectory() as NSString)
             .appendingPathComponent("tinytitan-qwen-plan-\(tag)-\(UUID().uuidString)")

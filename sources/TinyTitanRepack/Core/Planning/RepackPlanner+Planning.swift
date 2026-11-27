@@ -194,11 +194,11 @@ extension RepackPlanner {
                     forPackedSource: weight.shape,
                     scalesShape: scales.shape)
 
-                let wOff = fileCursor
+                let wOff = RepackPlanner.alignedResidentOffset(fileCursor)
                 let wSize = weight.sizeBytes
-                let sOff = wOff + wSize
+                let sOff = RepackPlanner.alignedResidentOffset(wOff + wSize)
                 let sSize = scales.sizeBytes
-                let bOff = sOff + sSize
+                let bOff = RepackPlanner.alignedResidentOffset(sOff + sSize)
                 let bSize = biases.sizeBytes
                 fileCursor = bOff + bSize
 
@@ -213,7 +213,7 @@ extension RepackPlanner {
                         sourceWeight: weight, sourceScales: scales, sourceBiases: biases))
             } else {
                 // Unquantized (BF16 norm / scalar) — no companions.
-                let off = fileCursor
+                let off = RepackPlanner.alignedResidentOffset(fileCursor)
                 let size = weight.sizeBytes
                 fileCursor = off + size
 

@@ -181,7 +181,13 @@ offset 0                                    offset indexSize
 
 `fileOffset`, `scaleOffset` and `biasOffset` in an entry are absolute file
 offsets, so they already include `indexSize`. The payload is written in plan
-order and packed back to back.
+order, and every tensor starts on a 16-byte boundary: the planner pads between
+tensors so the engine can `bindMemory` at `fileOffset` to the element type
+(4-byte alignment for `u32`/`fp32`, 2-byte for `bf16`/`fp16`). The padding is
+not part of any tensor's `sizeBytes`. The reader refuses a plain entry whose
+`fileOffset` is not aligned for its dtype, whose `sizeBytes` is not whole
+elements, or (except for `u32`, which also codes packed weights) whose
+`sizeBytes` is not `product(shape) * elementSize`.
 
 ### The index header, 24 bytes
 
@@ -234,6 +240,10 @@ through the weight's own `scaleOffset`/`scaleSize`/`biasOffset`/`biasSize`
 fields, and they are BF16. This is the sharpest difference from a safetensors
 snapshot, which names `foo.scales` and `foo.biases` as separate tensors. Reading
 a `.ssdai` index by looking up `"foo.scales"` finds nothing.
+
+Because `dtype 0` is both a packed weight and a plain `u32` tensor, the index
+requires its size to be a whole number of 4-byte words but cannot require
+`sizeBytes == product(shape) * 4`: a 4-bit row of `n` values is `n/2` bytes.
 
 ### Block encodings: stored as the source wrote them
 

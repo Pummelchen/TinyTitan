@@ -4,6 +4,20 @@ import Foundation
 /// of host page size — the format is the contract, not the kernel.
 
 extension RepackPlanner {
+    /// Every resident tensor starts on a 16-byte boundary. The engine maps the
+    /// payload and binds a tensor's bytes at `fileOffset` to `Float`/`UInt16`,
+    /// so a 2-byte BF16 vector packed flush ahead of an F32 tensor would leave
+    /// every later tensor misaligned (AUD-0083). Only offsets change; a
+    /// tensor's bytes, and therefore the logits, do not.
+    static let residentTensorAlignment: UInt64 = 16
+
+    /// `value` rounded up to `residentTensorAlignment`.
+    static func alignedResidentOffset(_ value: UInt64) -> UInt64 {
+        let alignment = residentTensorAlignment
+        let remainder = value % alignment
+        return remainder == 0 ? value : value + (alignment - remainder)
+    }
+
     /// The largest single non-tensor file the repacker will carry, and therefore
     /// the smallest per-file cap a receipt verifier may use.
     ///
