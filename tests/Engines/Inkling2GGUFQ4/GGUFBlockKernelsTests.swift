@@ -545,10 +545,23 @@ extension GGUFBlockKernelsTests {
     /// position 0, and a ring with a window and a non-zero start.
     @Test(arguments: [false, true])
     func chunkAttentionMatchesReference(ring: Bool) throws {
+        try checkAttention(tokens: 37, ring: ring)
+    }
+
+    /// The one-token path runs the decode kernel instead of the tiled chunk
+    /// kernel, and it had no reference test at all — only the chunk path was
+    /// pinned, which is how AUD-0091's missing head-dimension bound went
+    /// unnoticed. Same reference, one query.
+    @Test(arguments: [false, true])
+    func oneTokenDecodeAttentionMatchesReference(ring: Bool) throws {
+        try checkAttention(tokens: 1, ring: ring)
+    }
+
+    private func checkAttention(tokens: Int, ring: Bool) throws {
         let context = try MetalContext()
         let ops = try InklingQ4Ops(context: context)
         let device = context.device
-        let (heads, kvHeads, dim, rank, extent, tokens) = (6, 2, 128, 16, 20, 37)
+        let (heads, kvHeads, dim, rank, extent) = (6, 2, 128, 16, 20)
         let capacity = ring ? 48 : 128
         let start = ring ? 30 : 0
         let window = ring ? 25 : 1 << 30
