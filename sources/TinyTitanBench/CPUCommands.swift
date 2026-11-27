@@ -273,9 +273,12 @@ extension TinyTitanBench {
             // Sustained load at one width, for measuring what the side-engine
             // costs the model the person is waiting for. `iterations` is
             // seconds here; the third argument is the thread count.
-            let threads =
+            // A zero-thread pool is not a pool; the operator value is a
+            // divisor's partner and a worker count (AUD-0007).
+            let threads = max(
+                1,
                 CommandLine.arguments.count > 3
-                ? Int(CommandLine.arguments[3]) ?? 4 : 4
+                    ? Int(CommandLine.arguments[3]) ?? 4 : 4)
             runCPULoad(seconds: Double(iterations), threads: threads)
         case "cpu35":
             // The side-engine's model, on the same continuations the numpy
@@ -299,9 +302,10 @@ extension TinyTitanBench {
             let prompt =
                 CommandLine.arguments.count > 3
                 ? CommandLine.arguments[3] : "The capital of France is"
-            let limit =
+            let limit = max(
+                1,
                 CommandLine.arguments.count > 4
-                ? Int(CommandLine.arguments[4]) ?? 32 : 32
+                    ? Int(CommandLine.arguments[4]) ?? 32 : 32)
             try runCPUQwen35Generation(snapshot: snapshot, prompt: prompt, limit: limit)
         case "cpu35batch":
             // A file of prompts in, a file of completions out, so an
@@ -330,9 +334,10 @@ extension TinyTitanBench {
             }
             let snapshot = CommandLine.arguments[2]
             let text = URL(fileURLWithPath: CommandLine.arguments[3])
-            let maximum =
+            let maximum = max(
+                1,
                 CommandLine.arguments.count > 4
-                ? Int(CommandLine.arguments[4]) ?? 1_024 : 1_024
+                    ? Int(CommandLine.arguments[4]) ?? 1_024 : 1_024)
             let nll =
                 CommandLine.arguments.count > 5
                 ? URL(fileURLWithPath: CommandLine.arguments[5]) : nil

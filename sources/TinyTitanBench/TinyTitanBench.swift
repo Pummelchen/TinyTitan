@@ -27,9 +27,13 @@ struct TinyTitanBench {
         let kernelName =
             CommandLine.arguments.count > 1
             ? CommandLine.arguments[1] : "baseline"
-        let iterations =
+        // Clamped at the read: the count is divided into (a zero would report
+        // an infinite rate) and is a loop bound, and `0` seconds would make
+        // `cpuload`'s own timer divide by zero (AUD-0007).
+        let iterations = max(
+            1,
             CommandLine.arguments.count > 2
-            ? Int(CommandLine.arguments[2]) ?? 300 : 300
+                ? Int(CommandLine.arguments[2]) ?? 300 : 300)
 
         // Before the Metal context: these measure the CPU and must not
         // touch the GPU, whose bandwidth is the thing being competed for.
