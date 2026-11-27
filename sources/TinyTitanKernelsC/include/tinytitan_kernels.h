@@ -75,6 +75,12 @@ void tinytitan_dequant_affine8(const uint8_t *weights,
 /// `transposed_b` is non-zero (stored `columns`-by-`inner`), otherwise stored
 /// `inner`-by-`columns`. A thin wrapper over the platform BLAS so the
 /// deprecated CBLAS declaration stays out of Swift.
+///
+/// `a` must be a **contiguous** row-major `rows`-by-`inner` matrix: the leading
+/// dimension is `inner`, with no padding between rows. A strided operand is not
+/// supported and would be read as if it were contiguous, silently producing
+/// wrong values (AUD-0085). `b` is contiguous too: `inner`-by-`columns`, or
+/// `columns`-by-`inner` when transposed.
 void tinytitan_sgemm_rowmajor(int transposed_b, int rows, int columns, int inner,
                               const float *a, const float *b, float *out);
 

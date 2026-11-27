@@ -144,6 +144,12 @@ void tinytitan_dequant_affine4(const uint8_t *weights,
 /// (stored columns-by-inner, the weight-matrix case) or not (stored
 /// inner-by-columns, the score-times-values case).
 ///
+/// The leading dimension is `inner` for `a` and is passed to BLAS rather than
+/// derived, so `a` must be contiguous row-major: `cblas_sgemm` below hard-codes
+/// `inner` as `a`'s lda, and a caller with padded rows would be silently
+/// misread (AUD-0085). The only reason this wrapper takes no `lda` is that
+/// every caller in this tree passes contiguous buffers.
+///
 /// A thin wrapper rather than a Swift call: `cblas_sgemm` is deprecated on
 /// this SDK against the ILP64 headers, and a deprecation in Swift is an
 /// error with no local suppression.
