@@ -443,7 +443,9 @@ extra verify passes over weights that were not resident; the extra passes cost
 more than the accepted tokens save. The measured failure is recorded in
 `docs/qwen38-mtp-and-overlap-verdict.md` (43 points short of its own gate with
 byte-identical output). Phase 7 is withdrawn with it, and the per-family sidecar
-installers were already removed (TT-092).
+installers were already removed (TT-092). **The code is kept, not deleted:** it
+stays tested and unused, so a later draft head can be enabled without rebuilding
+it.
 
 The 7.0 target is one variant per row and width: two for every "Shipped" or
 "Installed" row, two for the 122B, two for K2 when a K2 runner exists, and no

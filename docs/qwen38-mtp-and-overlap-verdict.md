@@ -123,9 +123,11 @@ What this closes:
 - The Qwen/Ornith sidecar installers were already removed (TT-092); Inkling's
   bundled head remains in its plugin as an opt-in that defaults off.
 
-What remains in the tree, and is now unused-code scope rather than a plan: the
-`--mtp-model` server flag and its plumbing (`SessionBuildOptions.mtpModelDirectory`,
+**The code stays.** This is a scope decision, not a removal: the `--mtp-model`
+server flag and its plumbing (`SessionBuildOptions.mtpModelDirectory`,
 `EngineFactories` sidecar resolution), `StreamingMTP` / wide-verify in the
-runtime, `InklingMTP*` and the per-engine MTP kernels. Nothing is deleted here:
-removal is a separate change that must keep the shipped Inkling route loading
-and the full suite green.
+runtime, `InklingMTP*` and the per-engine MTP kernels all remain in the tree,
+tested, and are simply not part of any shipped path. They are deliberately kept
+rather than classified as unused code — nothing in the audit should propose
+deleting them — so that enabling a draft head later, on hardware or a model
+where speculation pays, does not mean rebuilding it.
