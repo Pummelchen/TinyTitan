@@ -52,6 +52,46 @@ import TinyTitanPluginAPI
         #expect(Inkling2GGUFQ4Plugin.probe(install) == nil)
     }
 
+    /// The cache folder the exported tokenizer lands in is built from
+    /// `manifest.modelID`, which is checkpoint text, not a path: a `modelID`
+    /// with `/` or `..` used to put the folder outside the cache, and the
+    /// three writes with it (reached from `--catalog` alone).
+    @Test func theCacheFolderIsOneSafeComponent() {
+        for hostile in [
+            "../../evil", "a/b", "..", ".", "", "/tmp/absolute", "space id",
+        ] {
+            let component = Inkling2GGUFQ4Plugin.cacheComponent(
+                modelID: hostile, snapshot: "abc123", size: 42)
+            #expect(
+                !component.contains("/") && !component.contains(":"),
+                "\(hostile.debugDescription) produced \(component.debugDescription)")
+            #expect(component != "." && component != "..")
+            #expect(
+                URL(fileURLWithPath: "/cache/gguf-tokenizers")
+                    .appendingPathComponent(component)
+                    .standardizedFileURL.path.hasPrefix("/cache/gguf-tokenizers/"),
+                "\(hostile.debugDescription) escaped the cache: \(component)")
+        }
+    }
+
+    /// Two ids that sanitise to the same text must not share a folder: a
+    /// collision would reuse the other install's tokenizer.
+    @Test func idsThatSanitiseAlikeStillDiffer() {
+        let slash = Inkling2GGUFQ4Plugin.cacheComponent(
+            modelID: "a/b", snapshot: "s", size: 1)
+        let dash = Inkling2GGUFQ4Plugin.cacheComponent(
+            modelID: "a-b", snapshot: "s", size: 1)
+        #expect(slash != dash)
+    }
+
+    /// The readable part is kept, so the cache stays inspectable by a person.
+    @Test func anOrdinaryIDStaysReadable() {
+        let component = Inkling2GGUFQ4Plugin.cacheComponent(
+            modelID: "inkling-2-mini-gguf-q4", snapshot: "0123abcd", size: 7)
+        #expect(component.hasPrefix("inkling-2-mini-gguf-q4-"))
+        #expect(component.hasSuffix("-0123abcd-7"))
+    }
+
     /// A GGUF header with three metadata keys: a string, an array of strings
     /// and an integer, in the on-disk layout (little endian, v3).
     @Test func readsHeaderMetadataWithoutTensors() throws {

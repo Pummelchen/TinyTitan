@@ -154,7 +154,9 @@ public enum Inkling2GGUFQ4Plugin: EnginePlugin {
         let folder =
             host.cacheDirectory
             .appendingPathComponent("gguf-tokenizers", isDirectory: true)
-            .appendingPathComponent("\(manifest.modelID)-\(snapshot)-\(size)", isDirectory: true)
+            .appendingPathComponent(
+                cacheComponent(modelID: manifest.modelID, snapshot: String(snapshot), size: size),
+                isDirectory: true)
         let files = [
             GGUFTokenizerSidecar.tokenizerFileName, GGUFTokenizerSidecar.templateFileName,
         ]
@@ -165,5 +167,39 @@ public enum Inkling2GGUFQ4Plugin: EnginePlugin {
                 from: try GGUFModelReader.readHeader(at: header), to: folder)
         }
         return folder
+    }
+
+    /// One filesystem-safe cache component for an install.
+    ///
+    /// `manifest.modelID` is not path text: it is whatever a checkpoint says,
+    /// and this component decides where the host writes three files — reached
+    /// from `--catalog` alone, before any load. A `modelID` containing `/` or
+    /// `..` therefore wrote outside the cache (a `createDirectory` and two
+    /// writes at an attacker-chosen path). Every character outside
+    /// `[A-Za-z0-9._-]` becomes `-`, a `.`/`..` result is replaced, and a hash
+    /// of the raw id keeps two ids that sanitise alike from colliding — a
+    /// collision would reuse the wrong tokenizer, which is worse than a
+    /// cosmetic name.
+    static func cacheComponent(modelID: String, snapshot: String, size: Int) -> String {
+        let allowed = modelID.map { character -> Character in
+            guard character.isASCII else { return "-" }
+            let keep =
+                character.isLetter || character.isNumber || character == "-"
+                || character == "_" || character == "."
+            return keep ? character : "-"
+        }
+        let clipped = String(String(allowed).prefix(64))
+        let usable = (clipped.isEmpty || clipped == "." || clipped == "..") ? "model" : clipped
+        return "\(usable)-\(stableHash(modelID))-\(snapshot)-\(size)"
+    }
+
+    /// FNV-1a over the raw id, as eight hex digits: stable across processes
+    /// and runs, which is what a cache key needs, and no dependency.
+    static func stableHash(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
+        }
+        return String(hash & 0xffff_ffff, radix: 16)
     }
 }
