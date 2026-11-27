@@ -128,6 +128,39 @@ extension OpenAIRequestValidator {
         }
     }
 
+    /// Spellings that a chat template turns into a control token.
+    ///
+    /// A message's content is *text*, but swift-transformers maps an added
+    /// token's spelling to its special id before normalisation, so a client
+    /// (or a tool result: a fetched page, a file, an MCP result, a memory
+    /// recall) could otherwise close its turn and open a `system` one. The
+    /// tokenizer records the old assumption as a trusted-input limitation; the
+    /// shipped surfaces no longer satisfy it (AUD-0098).
+    static let controlMarkers = [
+        "<|im_start|>", "<|im_end|>", "<|endoftext|>",
+        "<|message_system|>", "<|message_user|>", "<|message_assistant|>",
+        "<|message_tool|>", "<|content_text|>", "<|end_message|>",
+        "<tool_response>", "</tool_response>",
+    ]
+
+    static func controlMarker(in text: String) -> String? {
+        controlMarkers.first { text.contains($0) }
+    }
+
+    /// The bundled template refuses a list with no real user turn ("No user
+    /// query found in messages"), and a `raise_exception` there escapes the
+    /// renderer as HTTP 500. This is the same predicate the renderer means by
+    /// `last_query_index`: a `.user` message that is not only a
+    /// `<tool_response>` echo (AUD-0099).
+    static func hasUserQuery(_ input: [OpenAIChatMessage]) -> Bool {
+        input.contains { message in
+            guard message.role == GFTokenizer.Role.user.rawValue else { return false }
+            let content = ((try? message.content?.textValue()) ?? nil ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return !(content.hasPrefix("<tool_response>") && content.hasSuffix("</tool_response>"))
+        }
+    }
+
     static func validateMessages(
         _ input: [OpenAIChatMessage],
         rules: RequestRules
@@ -145,6 +178,10 @@ extension OpenAIRequestValidator {
                     "message count exceeds maximum of 1000",
                     "messages", "value_too_large")
             }
+        }
+        guard hasUserQuery(input) else {
+            throw invalid(
+                "messages must contain a user turn", "messages", "invalid_message")
         }
         var knownCalls: [String: (name: String, resolved: Bool)] = [:]
         var result: [GFTokenizer.Message] = []
@@ -165,6 +202,18 @@ extension OpenAIRequestValidator {
                 sawConversationMessage = true
             }
             let content = try message.content?.textValue()
+            if let content, let marker = Self.controlMarker(in: content) {
+                throw invalid(
+                    "message content contains the control marker \(marker)",
+                    "messages", "invalid_message")
+            }
+            if let name = message.name,
+                name.range(of: #"^[A-Za-z0-9_-]{1,64}$"#, options: .regularExpression) == nil
+            {
+                throw invalid(
+                    "message name must match [A-Za-z0-9_-]{1,64}",
+                    "messages", "invalid_message")
+            }
             let calls: [GFTokenizer.HistoricalToolCall] = try (message.toolCalls ?? []).map {
                 call in
                 guard role == .assistant, call.type == "function",
@@ -176,6 +225,11 @@ extension OpenAIRequestValidator {
                     throw invalid(
                         "invalid or duplicate historical tool call",
                         "messages", "invalid_tool_call")
+                }
+                if let marker = Self.controlMarker(in: call.function.arguments) {
+                    throw invalid(
+                        "tool call arguments contain the control marker \(marker)",
+                        "messages", "invalid_tool_arguments")
                 }
                 let data = Data(call.function.arguments.utf8)
                 let arguments = try JSONDecoder().decode(JSONValue.self, from: data)
