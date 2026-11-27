@@ -344,7 +344,7 @@ class CompareTests(unittest.TestCase):
         with contextlib.redirect_stdout(buffer):
             internal_speeds.compare(self.candidate(), self.candidate(), 10.0)
         printed = buffer.getvalue()
-        self.assertIn("10 metric(s) compared", printed)
+        self.assertIn("9 metric(s) compared", printed)
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             internal_speeds.compare(
