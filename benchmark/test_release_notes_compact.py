@@ -413,5 +413,44 @@ class ListItemTests(unittest.TestCase):
         )
 
 
+class OperatorArgumentValidationTests(unittest.TestCase):
+    """A count the operator passes is checked before it is used.
+
+    Each of these three was accepted and then meant something it should not:
+    `--width 0` reached `textwrap` as a `ValueError` traceback, a negative
+    `--max-chars` failed every release with a budget no output can meet, and an
+    empty `--require` token is in every output `in` tests, so the publish gate
+    passed over nothing at all (AUD-0104).
+    """
+
+    NOTES = "### Streaming\n\nThe reader coalesces adjacent ranges.\n"
+
+    def test_a_zero_width_is_refused_not_a_traceback(self) -> None:
+        result = compact(self.NOTES, "--width", "0")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--width", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(result.compact_out, "")
+
+    def test_a_negative_width_is_refused(self) -> None:
+        result = compact(self.NOTES, "--width", "-1")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--width", result.stderr)
+
+    def test_a_negative_budget_is_refused_as_an_argument_error(self) -> None:
+        result = compact(self.NOTES, "--max-chars", "-5")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--max-chars", result.stderr)
+        self.assertNotIn("over the -5 budget", result.stderr)
+
+    def test_an_empty_required_token_is_refused(self) -> None:
+        # `"" in body` is always true, so this used to report a pass having
+        # checked nothing -- the gate shape the repo bans.
+        result = compact(self.NOTES, "--require", "")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("--require", result.stderr)
+        self.assertEqual(result.compact_out, "")
+
+
 if __name__ == "__main__":
     unittest.main()

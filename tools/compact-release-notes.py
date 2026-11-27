@@ -127,6 +127,20 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    # Operator counts are validated here rather than deep in the formatter: a
+    # width of 0 reaches `textwrap` as a ValueError traceback, a negative
+    # `--max-chars` is a budget no output can meet, and an empty `--require`
+    # token is in every output, so it would pass over nothing (AUD-0104).
+    if args.width < 1:
+        print("error: --width must be at least 1", file=sys.stderr)
+        return 2
+    if args.max_chars < 0:
+        print("error: --max-chars cannot be negative (0 means no limit)", file=sys.stderr)
+        return 2
+    if any(token == "" for token in args.require):
+        print("error: --require needs a non-empty token", file=sys.stderr)
+        return 2
+
     try:
         with open(args.notes, encoding="utf-8") as handle:
             lines = handle.read().split("\n")
