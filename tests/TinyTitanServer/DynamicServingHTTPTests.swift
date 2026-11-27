@@ -419,6 +419,23 @@ struct DynamicServingArgumentTests {
         }
     }
 
+    /// The CPU engine keeps its snapshot resident and cannot release it, so
+    /// these flags were accepted, printed in the ready banner, and ignored
+    /// (AUD-0068). They are refused instead.
+    @Test func cpuResidencyFlagsAreRefused() throws {
+        for flags in [["--lazy-load"], ["--idle-unload-seconds", "600"]] {
+            #expect(throws: ServerArgumentError.self) {
+                try parse(["--model", "/m", "--cpu"] + flags)
+            }
+        }
+        // The GPU engine still accepts both, alone and together.
+        #expect(try parse(["--model", "/m", "--lazy-load"]).managesResidency)
+        #expect(
+            try parse(["--model", "/m", "--idle-unload-seconds", "600"]).managesResidency)
+        // And the CPU engine still accepts its own resident switch.
+        #expect(try parse(["--model", "/m", "--cpu", "--no-cpu-resident"]).cpuResident == false)
+    }
+
     @Test func singleModelFlagsAreRefusedWithACatalog() {
         for flags in [
             ["--model-id", "x"], ["--cpu"], ["--mtp-model", "/d"], ["--idle-unload-seconds", "60"],

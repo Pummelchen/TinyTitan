@@ -358,6 +358,15 @@ public struct ServerArguments: Equatable, Sendable {
         guard let model = model ?? (catalogOnly ? "" : nil) else {
             throw ServerArgumentError.invalid("--model is required")
         }
+        // The CPU engine keeps its snapshot resident and has no
+        // `ResidencyManaging` implementation, so these flags would be accepted,
+        // printed back in the ready banner as active, and do nothing (AUD-0068).
+        // Refuse rather than report a residency the engine does not have.
+        if cpu, lazyLoad || idleUnloadSeconds > 0 {
+            throw ServerArgumentError.invalid(
+                "--lazy-load and --idle-unload-seconds are for the GPU engine; "
+                    + "--cpu keeps its snapshot resident")
+        }
         if reasoningLevel != nil, thinkingWasSet || effortWasSet {
             throw ServerArgumentError.invalid(
                 "--reasoning replaces --thinking and --reasoning-effort; pass one or the other")
