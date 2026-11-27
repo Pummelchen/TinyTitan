@@ -189,6 +189,15 @@ not part of any tensor's `sizeBytes`. The reader refuses a plain entry whose
 elements, or (except for `u32`, which also codes packed weights) whose
 `sizeBytes` is not `product(shape) * elementSize`.
 
+**Measured 2026-11-27 (AUD-0083), before the refusal was kept:** both installs
+on this machine decode cleanly under those rules — `inkling-2-mini_NVFP4` (740
+entries, 3,854,692,160 resident bytes; 114 `fp32`, 626 `bf16`) and
+`inkling-2-mini_GGUF-Q4` (646 entries, 1,819,914,240 bytes; 468 `fp32`, 146
+`GGUF_Q8_0`, 32 `bf16`). The `u32` exemption is not theoretical: the in-tree
+GGUF writer emits a 640×2560 4-bit weight as 819,200 packed bytes where
+`product(shape) * 4` is 6,553,600, so the literal product rule would refuse a
+live writer's output.
+
 ### The index header, 24 bytes
 
 | Offset | Type | Field |
