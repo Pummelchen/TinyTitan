@@ -76,6 +76,37 @@ private actor FailingBackend: ServerInferenceBackend {
     }
 }
 
+/// Records how many token counts run at once, and holds each one long enough
+/// that everything admitted together overlaps. The peak is then what
+/// admission allows rather than what the scheduler happened to interleave
+/// (AUD-0069).
+private actor GatedCountBackend: ServerInferenceBackend, PromptTokenCounting {
+    private var active = 0
+    private var peakValue = 0
+    private var countedValue = 0
+
+    var peak: Int { peakValue }
+    var counted: Int { countedValue }
+
+    func generate(
+        _ request: ValidatedChatRequest,
+        onEvent: @escaping @Sendable (ServerInferenceEvent) -> Void
+    ) async throws -> ServerCompletion {
+        ServerCompletion(
+            content: "", toolCalls: [], finishReason: "stop",
+            usage: OpenAIUsage(promptTokens: 0, completionTokens: 0, totalTokens: 0))
+    }
+
+    func countPromptTokens(_ request: ValidatedChatRequest) async throws -> Int {
+        active += 1
+        countedValue += 1
+        peakValue = max(peakValue, active)
+        defer { active -= 1 }
+        try? await Task.sleep(for: .milliseconds(250))
+        return 42
+    }
+}
+
 private struct SSEEvent {
     let name: String?
     let object: [String: Any]
@@ -619,6 +650,53 @@ struct AnthropicMessagesHTTPTests {
                 """, headers: version)
             #expect(status.statusCode == 501)
             #expect((try json(data)["error"] as? [String: Any])?["type"] as? String == "api_error")
+        }
+    }
+
+    /// Counting is a backend call that loads and runs the tokenizer, so it is
+    /// admitted like a generation. Before the fix it started a task of its
+    /// own: a burst of counts ran at once (up to the connection cap) with no
+    /// 429, and could reload the tokenizer per request (AUD-0069).
+    @Test func countTokensIsAdmittedAndShedsBeyondTheQueue() async throws {
+        let backend = GatedCountBackend()
+        let width = 2
+        let queueLimit = 2
+        let server = TinyTitanHTTPServer(
+            modelID: "test-model", queueLimit: queueLimit,
+            maxConcurrentSequences: width, backend: backend)
+        let channel = try await server.start(port: 0)
+        let port = try #require(channel.localAddress?.port)
+        do {
+            let body = """
+                {"model":"test-model","messages":[{"role":"user","content":"hi"}]}
+                """
+            let headers = version
+            let statuses = try await withThrowingTaskGroup(of: Int.self) { group in
+                for _ in 0..<6 {
+                    group.addTask {
+                        let (_, response) = try await post(
+                            port, "/v1/messages/count_tokens", body, headers: headers)
+                        return response.statusCode
+                    }
+                }
+                var result: [Int] = []
+                for try await status in group { result.append(status) }
+                return result
+            }
+
+            let peak = await backend.peak
+            let counted = await backend.counted
+            // Never more than the coordinator's width at once, and never
+            // more than width + queueLimit admitted; the rest is shed.
+            #expect(peak == width)
+            #expect(counted == width + queueLimit)
+            #expect(statuses.filter { $0 == 200 }.count == width + queueLimit)
+            // The excess is shed with the same 429 as any other admission.
+            #expect(statuses.filter { $0 == 429 }.count == 2)
+            try await server.shutdown()
+        } catch {
+            try await server.shutdown()
+            throw error
         }
     }
 }

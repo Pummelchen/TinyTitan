@@ -233,7 +233,16 @@ extension ServerHTTPHandler {
             let contextBox = SendableContext(context)
             activeTask = childChannels.startTask {
                 do {
-                    let count = try await counting.countPromptTokens(request)
+                    // Counting runs the backend's tokenizer, which can be
+                    // loaded and decoded on the request path, so it takes the
+                    // same admission gate as a generation. Without it a burst
+                    // of count requests -- up to the connection cap -- decoded
+                    // at once and could reload the tokenizer per request
+                    // (AUD-0069). A full queue is a 429, as for any other
+                    // admission.
+                    let count = try await self.coordinator.run {
+                        try await counting.countPromptTokens(request)
+                    }
                     self.writeJSON(
                         contextBox.value, status: .ok, object: ["input_tokens": count],
                         surface: .anthropic, requestID: requestID)
