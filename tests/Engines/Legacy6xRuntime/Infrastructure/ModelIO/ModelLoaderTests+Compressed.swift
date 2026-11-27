@@ -30,6 +30,16 @@ extension ModelLoaderTests {
         #expect(result.layerCount > 0)
         #expect(result.compressedBytes < result.rawBytes)
 
+        // The conversion is built in `<output>.partial` and renamed into place,
+        // so the receipt has to bind to the final directory rather than to the
+        // staging path it was written in (AUD-0076).
+        let receiptData = try Data(
+            contentsOf: compressed.appendingPathComponent("verified-install.json"))
+        let receipt = try #require(
+            try JSONSerialization.jsonObject(with: receiptData) as? [String: Any])
+        let recorded = try #require(receipt["modelDirectoryPath"] as? String)
+        #expect(InstallPathBinding.matches(recorded, directory: compressed))
+
         let layoutData = try Data(
             contentsOf: compressed.appendingPathComponent("packed_experts/layout.json"))
         let layout = try SSDAIPackedExpertsLayoutCodec.decode(layoutData)

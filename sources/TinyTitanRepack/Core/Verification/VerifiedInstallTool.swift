@@ -37,6 +37,18 @@ public enum VerifiedInstallTool {
     public static let payloadMaxBytes: UInt64 = RepackPlanner.maximumPassthroughFileBytes
 
     public static func run(options: VerifyInstallOptions) throws -> VerifyInstallResult {
+        try run(options: options, recordedDirectory: nil)
+    }
+
+    /// `recordedDirectory` is where the receipt says the install will live once
+    /// a caller that builds elsewhere has renamed it into place. Verification
+    /// still reads `options.inputSSDAI`; only the binding (and the reported
+    /// receipt path) use the destination, because a receipt naming the scratch
+    /// directory is one the loader refuses after the swap (AUD-0076).
+    static func run(
+        options: VerifyInstallOptions,
+        recordedDirectory: String?
+    ) throws -> VerifyInstallResult {
         let access = try SSDAIDirectoryAccess(rootPath: options.inputSSDAI)
         let manifestPath = "manifest.json"
         try SSDAIPathValidator.validateRelativePath(
@@ -94,7 +106,7 @@ public enum VerifiedInstallTool {
         let unexpectedEntries = try findUnexpectedEntries(access: access, manifest: manifest)
 
         let receiptData = try VerifiedInstallReceiptWriter.encode(
-            outputDir: access.rootPath,
+            outputDir: recordedDirectory ?? access.rootPath,
             manifestSha256: manifestSha,
             manifestSize: manifestSize,
             sourceRepoID: nil,
@@ -102,9 +114,15 @@ public enum VerifiedInstallTool {
             toolVersion: "TinyTitanRepack verify-install",
             files: files)
         let receiptPath =
-            access.rootPath
+            (recordedDirectory ?? access.rootPath)
             + "/" + VerifiedInstallReceiptWriter.fileName
-        try receiptData.write(to: URL(fileURLWithPath: receiptPath), options: .atomic)
+        // Written where the bytes are being verified, even when the receipt
+        // records where they will live after the caller's rename.
+        try receiptData.write(
+            to: URL(
+                fileURLWithPath: access.rootPath
+                    + "/" + VerifiedInstallReceiptWriter.fileName),
+            options: .atomic)
         return VerifyInstallResult(
             receiptPath: receiptPath,
             fileCount: files.count + 1,

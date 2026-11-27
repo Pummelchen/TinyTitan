@@ -96,14 +96,18 @@ public enum CompressExpertsTool {
         options: CompressExpertsOptions,
         progress: (CompressExpertsProgress) -> Void = { _ in }
     ) throws -> CompressExpertsResult {
-        try prepareOutput(options)
+        // Built beside the destination and renamed onto it only once the
+        // conversion, the manifest and the receipt are all complete. With
+        // `--overwrite` that is what makes the flag mean "replace on success":
+        // until the rename, the previous install keeps every byte (AUD-0076).
+        let staging = try prepareOutput(options)
         do {
             let input = try loadInput(options.inputSSDAI, codec: options.codec)
             let rawBytes = try totalRawBytes(
                 rawLayerBytes: input.rawLayerBytes, layerCount: input.layers.count)
-            try copyPayload(from: input.root, to: options.output)
+            try copyPayload(from: input.root, to: staging)
             let layerResults = try compressLayers(
-                input: input, output: options.output, progress: progress)
+                input: input, output: staging, progress: progress)
             // The result's byte totals are reported to the operator. Summing
             // them before the receipt makes an (unreachable for real files)
             // overflow a failed conversion rather than a trap after success.
@@ -114,12 +118,14 @@ public enum CompressExpertsTool {
             let layoutBytes = try SSDAIJSON.markCompressed(
                 layoutData: input.layoutData,
                 compression: input.codec == .rans ? .rans : .lzfse)
-            try writeLayout(layoutBytes, to: options.output)
+            try writeLayout(layoutBytes, to: staging)
             try writeManifest(
-                input: input, output: options.output,
+                input: input, output: staging,
                 layoutBytes: layoutBytes, layerResults: layerResults)
             let receipt = try VerifiedInstallTool.run(
-                options: VerifyInstallOptions(inputSSDAI: options.output))
+                options: VerifyInstallOptions(inputSSDAI: staging),
+                recordedDirectory: options.output)
+            try install(staging, at: options.output, overwrite: options.overwrite)
             return CompressExpertsResult(
                 outputDirectory: options.output,
                 layerCount: input.layers.count,
@@ -129,9 +135,10 @@ public enum CompressExpertsTool {
                 receiptPath: receipt.receiptPath)
         } catch {
             // A failed conversion must not leave a directory that looks like an
-            // install. The receipt above is the last thing written, so a
-            // directory without one was never a usable output.
-            try? FileManager.default.removeItem(atPath: options.output)
+            // install, and must not have disturbed the previous one. The
+            // receipt above is the last thing written into the staging
+            // directory, so a staging directory without one was never usable.
+            try? FileManager.default.removeItem(atPath: staging)
             throw error
         }
     }
@@ -170,8 +177,12 @@ public enum CompressExpertsTool {
         return total
     }
 
-    /// Validate the input/output pairing and create a clean output directory.
-    static func prepareOutput(_ options: CompressExpertsOptions) throws {
+    /// Validate the input/output pairing and create the staging sibling.
+    ///
+    /// The existing destination is checked but never removed here: removing it
+    /// up front is what lost both copies when a conversion failed (AUD-0076).
+    /// Returns the directory the conversion writes into.
+    static func prepareOutput(_ options: CompressExpertsOptions) throws -> String {
         let input = URL(fileURLWithPath: options.inputSSDAI).standardizedFileURL
         let output = URL(fileURLWithPath: options.output).standardizedFileURL
         guard input.path != output.path else {
@@ -198,13 +209,46 @@ public enum CompressExpertsTool {
                 throw RepackError.configurationInvalid(
                     detail: "\(output.path) already exists; pass --overwrite to replace it")
             }
-            try FileManager.default.removeItem(atPath: output.path)
+        }
+        let staging = output.path + ".partial"
+        guard staging != input.path, !staging.hasPrefix(input.path + "/"),
+            !input.path.hasPrefix(staging + "/")
+        else {
+            throw RepackError.configurationInvalid(
+                detail: "the staging directory \(staging) overlaps the input install")
+        }
+        // A killed conversion leaves this behind, and it is never a finished
+        // install -- the rename onto `--output` is the last step -- so it is
+        // this run's to reclaim.
+        if FileManager.default.fileExists(atPath: staging) {
+            try FileManager.default.removeItem(atPath: staging)
         }
         try FileManager.default.createDirectory(
-            atPath: output.path, withIntermediateDirectories: true)
+            atPath: staging, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
-            atPath: output.appendingPathComponent("packed_experts").path,
-            withIntermediateDirectories: true)
+            atPath: staging + "/packed_experts", withIntermediateDirectories: true)
+        return staging
+    }
+
+    /// Rename the finished build onto `--output`, replacing an existing install
+    /// only now that the new one is complete.
+    static func install(_ staging: String, at output: String, overwrite: Bool) throws {
+        switch try Posix.entryKind(output) {
+        case .absent:
+            try Posix.rename(from: staging, to: output)
+        default:
+            guard overwrite else {
+                throw RepackError.configurationInvalid(
+                    detail: "\(output) appeared during the conversion; pass --overwrite "
+                        + "to replace it")
+            }
+            // One atomic exchange, so a kill cannot leave the destination
+            // missing: either the old install or the new one is there.
+            try Posix.renameSwap(staging, output)
+            // After the exchange the staging path holds the previous install.
+            try? FileManager.default.removeItem(atPath: staging)
+        }
+        try Posix.fsyncDirectory((output as NSString).deletingLastPathComponent)
     }
 
     /// Read the manifest and layout, and check the raw contract they claim.
