@@ -50,13 +50,13 @@ let package = Package(
             name: "TinyTitanLib",
             targets: [
                 "TinyTitanLib", "TinyTitanCore", "TinyTitanVariants",
-                "TinyTitanCPUEngine", "TinyTitanPluginAPI",
+                "TinyTitanPluginAPI",
             ]),
         .library(
             name: "TinyTitanLibDynamic", type: .dynamic,
             targets: [
                 "TinyTitanLib", "TinyTitanCore", "TinyTitanVariants",
-                "TinyTitanCPUEngine", "TinyTitanPluginAPI",
+                "TinyTitanPluginAPI",
             ]),
         // Each engine plugin is a library of its own (TPP/1): built and tested
         // standalone, compiled into the products above.
@@ -142,60 +142,6 @@ let package = Package(
             resources: [.copy("Metal")],
             swiftSettings: tinytitanLanguageStandard
         ),
-        // The first 7.0 engine variant (plan task 5). A variant target imports
-        // only the generic library — the variant-isolation gate enforces it.
-        .target(
-            name: "Qwen35Dense2B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense2B4Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .target(
-            name: "Qwen35Dense2B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense2B8Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .target(
-            name: "Qwen35Dense4B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense4B4Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .target(
-            name: "Qwen35Dense4B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense4B8Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .target(
-            name: "Qwen35Dense9B4Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense9B4Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .target(
-            name: "Qwen35Dense9B8Bit",
-            dependencies: ["TinyTitanCore", "TinyTitanKernelsC"],
-            path: "sources/Engines/Qwen35Dense9B8Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        // The shared config-driven dense-GPU engine (TT-097 Task 12): one
-        // target for the whole dense Qwen 3.5 family, geometry taken from each
-        // install's manifest (`numExperts == 0` makes the same graph dense),
-        // refusing non-dense installs by name. A spec-sanctioned copy of the
-        // shipped variant's engine — the variant-isolation rule forbids a
-        // cross-variant import.
-        .target(
-            name: "DenseGPU",
-            dependencies: [
-                "TinyTitanCore", "TinyTitanFormat", "TinyTitanKernelsC",
-                .product(name: "Tokenizers", package: "swift-transformers"),
-                "TinyTitanPluginAPI",
-            ],
-            path: "sources/Engines/DenseGPU",
-            swiftSettings: tinytitanLanguageStandard
-        ),
         .target(
             name: "Ornith35B4Bit",
             dependencies: [
@@ -252,31 +198,18 @@ let package = Package(
             swiftSettings: tinytitanLanguageStandard
         ),
         // The factory surface a single-model front end and an embedder use:
-        // the 7.0 variant selection table plus the CPU dense selection. It
-        // lives outside `TinyTitanServerCore` because both the CLI and the
-        // library product need it, and the server must not be the only way to
-        // reach a variant engine.
+        // the plugin registry and the shipped selection table. It lives
+        // outside `TinyTitanServerCore` because both the CLI and the library
+        // product need it, and the server must not be the only way to reach an
+        // engine.
         .target(
             name: "TinyTitanVariants",
             dependencies: [
                 "TinyTitanCore", "TinyTitanLib",
-                "Ornith35B4Bit", "DenseGPU", "Inkling2GGUFQ4", "Inkling2NVFP4",
+                "Ornith35B4Bit", "Inkling2GGUFQ4", "Inkling2NVFP4",
                 "TinyTitanPluginAPI", "TemplatePlugin",
-                "Qwen35Dense2B4Bit", "Qwen35Dense2B8Bit",
-                "Qwen35Dense4B4Bit", "Qwen35Dense4B8Bit",
-                "Qwen35Dense9B4Bit", "Qwen35Dense9B8Bit",
             ],
             path: "sources/TinyTitanVariants",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        // The CPU dense backend, shared by the server and the library's CPU
-        // facade.
-        .target(
-            name: "TinyTitanCPUEngine",
-            dependencies: [
-                "TinyTitanCore", "TinyTitanLib", "TinyTitanVariants",
-            ],
-            path: "sources/TinyTitanCPUEngine",
             swiftSettings: tinytitanLanguageStandard
         ),
         .target(
@@ -299,7 +232,6 @@ let package = Package(
             dependencies: [
                 "TinyTitanCore", "TinyTitanLib",
                 "TinyTitanVariants", "TinyTitanPluginAPI",
-                "TinyTitanCPUEngine",
             ],
             path: "sources/TinyTitanCLI",
             exclude: ["Command"],
@@ -364,7 +296,6 @@ let package = Package(
                 // the variant-isolation rule; only a variant may not import
                 // the server.
                 "TinyTitanVariants",
-                "TinyTitanCPUEngine",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
@@ -375,7 +306,7 @@ let package = Package(
         .executableTarget(
             name: "TinyTitanServer",
             dependencies: [
-                "TinyTitanServerCore", "TinyTitanVariants", "TinyTitanCPUEngine",
+                "TinyTitanServerCore", "TinyTitanVariants",
                 "TinyTitanPluginAPI", "TinyTitanCore",
                 "TinyTitanLib", "TinyTitanMemory",
             ],
@@ -422,14 +353,6 @@ let package = Package(
             swiftSettings: tinytitanLanguageStandard
         ),
         .testTarget(
-            name: "Qwen35Dense2B4BitTests",
-            dependencies: [
-                "Qwen35Dense2B4Bit", "TinyTitanCore", .product(name: "yyjson", package: "yyjson"),
-            ],
-            path: "tests/Engines/Qwen35Dense2B4Bit",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .testTarget(
             name: "Ornith35B4BitTests",
             dependencies: [
                 "Ornith35B4Bit", "TinyTitanCore",
@@ -466,15 +389,6 @@ let package = Package(
             swiftSettings: tinytitanLanguageStandard
         ),
         .testTarget(
-            name: "DenseGPUTests",
-            dependencies: [
-                "DenseGPU", "TinyTitanCore",
-                .product(name: "yyjson", package: "yyjson"),
-            ],
-            path: "tests/Engines/DenseGPU",
-            swiftSettings: tinytitanLanguageStandard
-        ),
-        .testTarget(
             name: "TinyTitanMemoryTests",
             dependencies: [
                 "TinyTitanMemory", "ContinuityCore", .product(name: "yyjson", package: "yyjson"),
@@ -495,10 +409,6 @@ let package = Package(
                 // target names the variant modules, so the tests import one
                 // module instead of eight.
                 "TinyTitanVariants",
-                "TinyTitanCPUEngine",
-                // The scripted CPU model runs on the shipped 2B variant's
-                // engine, so the backend tests exercise a real forward pass.
-                "Qwen35Dense2B4Bit",
                 "Ornith35B4Bit",
                 .product(name: "NIOEmbedded", package: "swift-nio"),
             ],

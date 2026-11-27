@@ -105,7 +105,6 @@ public struct TensorSchema: Sendable {
         case .qwen38flashMTP: return .qwen38flashMTP
         case .qwen4flash: return .qwen4flash
         case .qwen4flashMTP: return .qwen4flashMTP
-        case .qwen35Dense: return .qwen35Dense
         case .laguna: return .laguna
         }
     }

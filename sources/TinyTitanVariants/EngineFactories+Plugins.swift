@@ -1,5 +1,4 @@
 import Foundation
-import DenseGPU
 import Inkling2GGUFQ4
 import Inkling2NVFP4
 import Ornith35B4Bit
@@ -11,8 +10,8 @@ extension EngineFactories {
     /// The engine plugins compiled into this build (TPP/1, TT-130), strongest
     /// first only for readability: resolution is by probe strength.
     ///
-    /// `TemplatePlugin`, `Inkling2GGUFQ4Plugin`, `Ornith35B4BitPlugin` and
-    /// `DenseQwen35Plugin` are standalone plugins. There is no fallback
+    /// `TemplatePlugin`, `Inkling2GGUFQ4Plugin`, `Inkling2NVFP4Plugin` and
+    /// `Ornith35B4BitPlugin` are standalone plugins. There is no fallback
     /// adapter: an install no plugin claims is refused by name, because the
     /// shipped matrix is exactly what these plugins serve (TT-142).
     public static let builtInPlugins: [any EnginePlugin.Type] = [
@@ -20,7 +19,6 @@ extension EngineFactories {
         Inkling2GGUFQ4Plugin.self,
         Inkling2NVFP4Plugin.self,
         Ornith35B4BitPlugin.self,
-        DenseQwen35Plugin.self,
     ]
 
     /// The process's registry with the built-in plugins registered. An

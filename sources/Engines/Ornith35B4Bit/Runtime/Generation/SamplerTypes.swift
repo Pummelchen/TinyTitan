@@ -82,9 +82,6 @@ public enum GenerationDefaults {
             return qwen38Thinking
         case .qwen4flash, .qwen4flashMTP:
             return qwen4Thinking
-        case .qwen35Dense:
-            // Qwen 3.5 is a Qwen 3.6-lineage card: 0.6 / top-p 0.95.
-            return Sampling(temperature: 0.6, topK: topK, topP: 0.95)
         case .laguna:
             // generation_config.json: temperature 1.0, top_p 1.0, top_k 20.
             return Sampling(temperature: 1.0, topK: 20, topP: 1.0)

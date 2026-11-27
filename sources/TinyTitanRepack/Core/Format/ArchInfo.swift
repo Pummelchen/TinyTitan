@@ -15,9 +15,6 @@ enum RepackModelFamily: String, Sendable, Equatable {
     /// touching the 3.8 port.
     case qwen4flash = "qwen4flash"
     case qwen4flashMTP = "qwen4flash_mtp"
-    /// Qwen 3.5's dense text models (2B, 4B, 9B). A whole model, not a draft
-    /// head, and the only family here whose weights carry no routed experts.
-    case qwen35Dense = "qwen3_5_dense"
     /// Laguna-S-2.1: per-head softplus gating, QK norms, two RoPE dialects
     /// and a 1:3 global-to-sliding layer mask.
     case laguna = "laguna"
@@ -263,20 +260,16 @@ struct ArchInfo: Sendable, Equatable {
             throw RepackError.configJsonInvalid(path: configPath, detail: "not a JSON object")
         }
         // A vision-language or MoE checkpoint nests the text model under
-        // `text_config`. A dense Qwen 3.5 snapshot is already flat -- the
-        // converter writes the text config at the root, because that is the
-        // shape the CPU engine reads -- so the root *is* the text config
-        // there. Accepting both keeps one reader for one architecture instead
-        // of a second config shape nobody else can parse.
+        // `text_config`. A text-only export is already flat -- its config is
+        // written at the root -- so the root *is* the text config there.
+        // Accepting both keeps one reader for one architecture instead of a
+        // second config shape nobody else can parse.
         let tc = (root["text_config"] as? [String: Any]) ?? root
         if (root["model_type"] as? String) == "qwen3_5_mtp" {
             return try loadQwen36MTP(configPath: configPath, tc: tc)
         }
         if (root["model_type"] as? String) == "qwen3_5_moe" {
             return try loadQwen35MoE(configPath: configPath, tc: tc)
-        }
-        if (root["model_type"] as? String) == "qwen3_5_dense" {
-            return try loadQwen35Dense(configPath: configPath, tc: tc)
         }
         if (root["model_type"] as? String) == "qwen4_exp" {
             return try loadQwen4Exp(configPath: configPath, tc: tc, root: root)

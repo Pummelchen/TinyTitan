@@ -81,16 +81,9 @@ extension ArchConfig {
             }
             return preset
         }
-        // The families without a preset whose architecture is fully declared by
-        // the manifest. Anything else keeps the previous behaviour: refused by
-        // name, because there is no preset to load it at.
-        guard family == .qwen35Dense else {
-            throw ArchResolutionError.unsupportedFamily(family.rawValue)
-        }
-        // `read`, not `load`: this is precisely the case `load` cannot serve --
-        // there is no GPU config to validate the manifest against yet.
-        let manifest = try ManifestReader.read(directoryURL: directoryURL)
-        return try from(manifest: manifest.arch, family: family)
+        // No preset and no manifest-declared family: refused by name, because
+        // there is no preset to load it at.
+        throw ArchResolutionError.unsupportedFamily(family.rawValue)
     }
 
     /// The architecture a manifest declares.

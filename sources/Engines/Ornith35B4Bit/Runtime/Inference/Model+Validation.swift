@@ -163,10 +163,6 @@ extension Model {
         case .laguna:
             // Handled before the shared geometry gate; unreachable.
             return
-        case .qwen35Dense:
-            try Self.validateDenseSchema(
-                checks: checks, config: config,
-                quant: quant, overrides: manifest.quantOverrides)
         case .qwen38flash:
             try Self.validateQwen38Schema(
                 checks: checks, config: config, quant: quant,
@@ -339,37 +335,6 @@ extension Model {
         guard manifest.files[Qwen4FlashTensors.pleConstantsFile] != nil else {
             throw ModelError.missingFile(
                 name: Qwen4FlashTensors.pleConstantsFile)
-        }
-    }
-
-    /// The dense Qwen 3.5 family's own tensors.
-    ///
-    /// No router and no shared expert, an MLP that *is* the FFN, and per-tensor
-    /// widths that differ from the slots: `mlp.*` is 4-bit against an 8-bit
-    /// `sharedExpert` slot, and the full-attention `k_proj`/`v_proj` are 8-bit
-    /// against a 4-bit `attention` slot. Every check resolves the tensor's own
-    /// slot, which is why this family has a branch of its own rather than
-    /// reusing the qwen36 one.
-    private static func validateDenseSchema(
-        checks: RuntimeSchemaChecks,
-        config: ArchConfig,
-        quant: ManifestQuant,
-        overrides: [String: Int]
-    ) throws {
-        let dense = TensorSchema.schema(for: .qwen35Dense)
-        try checks.requireAffine(
-            dense.embedding, rows: config.vocabSize, columns: config.hiddenSize,
-            slot: quant.slot(
-                forTensorNamed: dense.embedding,
-                overrides: overrides, fallback: quant.embedding))
-        if !config.tieWordEmbeddings {
-            // The 9B. The 2B and 4B tie the embedding and ship no head tensor
-            // at all, so requiring one there would refuse a correct install.
-            try checks.requireAffine(
-                dense.lmHead, rows: config.vocabSize, columns: config.hiddenSize,
-                slot: quant.slot(
-                    forTensorNamed: dense.lmHead,
-                    overrides: overrides, fallback: quant.embedding))
         }
     }
 

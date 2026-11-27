@@ -34,14 +34,6 @@ public enum ModelFamily: String, Sendable, Equatable {
     /// projections that combine the target's wide residual with the next
     /// token's embedding. Shares the target's embedding and head.
     case qwen4flashMTP = "qwen4flash_mtp"
-    /// Qwen 3.5's dense text models (2B, 4B, 9B), served by the CPU engine.
-    ///
-    /// Its own value rather than a reuse of `qwen36`: `ModelFamily` is what the
-    /// GPU loader dispatches on, so a dense model wearing the MoE family's name
-    /// would reach `Model.load` and the `qwen36` schema checks -- which demand
-    /// affine MoE-shaped tensors -- before the CPU engine saw it. The raw value
-    /// matches the `model_type` the converter writes.
-    case qwen35Dense = "qwen3_5_dense"
     /// Poolside Laguna-S-2.1 (`model_type: laguna`).
     ///
     /// 48 layers, 256 routed experts at top-10 plus one shared expert, GQA

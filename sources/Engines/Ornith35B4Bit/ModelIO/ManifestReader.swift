@@ -212,11 +212,6 @@ public enum ManifestReader {
             // The 4.0 Flash path inherits the 3.8 preview's uniform router
             // width until its checkpoint declares otherwise.
             allowedRouterBits = [4, 8]
-        case .qwen35Dense:
-            // A dense model has no router tensor at all, so there is no width
-            // to constrain. The slot still has to satisfy `validateQuant`'s
-            // table, so allow both rather than inventing a rule.
-            allowedRouterBits = [4, 8]
         case .laguna:
             // This router stays bf16 in the checkpoint; the install's slot
             // still has to name a width the format accepts, and the runtime
