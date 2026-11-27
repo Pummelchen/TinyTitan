@@ -273,8 +273,8 @@ public enum AnthropicMapper {
                 throw invalid(
                     "budget_tokens must be less than max_tokens", "thinking.budget_tokens")
             }
-            // Three rungs for the Qwen effort template (low|medium|xhigh); K2's
-            // set ends at high and the request path maps the nearest level it
+            // Three rungs for the Qwen effort template (low|medium|xhigh). A
+            // template with a narrower set maps to the nearest level it
             // supports. Binary templates map any effort to "think". The
             // boundaries are the published budgets Claude Code itself sends:
             // 4k is its small setting, 16k its large.

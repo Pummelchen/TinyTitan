@@ -1144,8 +1144,8 @@ struct ServerArgumentTests {
                 "--reasoning-effort", "medium",
             ])
         }
-        // "high" is K2's default effort, so it parses here; the family
-        // check against the manifest is what rejects it for Qwen3.8.
+        // "high" is a level the flag accepts; the family check against the
+        // manifest is what rejects it for Qwen3.8.
         #expect(
             try ServerArguments.parse([
                 "--model", "model.ssdai",

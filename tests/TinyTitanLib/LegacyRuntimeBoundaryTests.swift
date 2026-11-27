@@ -21,21 +21,17 @@ import Testing
         "sources/TinyTitanLegacyEngine/DefaultEngineConfiguration.swift": "adapter",
         "sources/TinyTitanLegacyEngine/EngineFactories.swift": "adapter",
         "sources/TinyTitanLegacyEngine/EngineLoadPolicy.swift": "adapter",
-        "sources/TinyTitanLegacyEngine/K2ProbeRuntime.swift": "adapter",
         "sources/TinyTitanLegacyEngine/LegacyBatchedMemoryBudget.swift": "adapter",
         "sources/TinyTitanLegacyEngine/LegacyInstallEstimator.swift": "adapter",
         "sources/TinyTitanLegacyEngine/ServerModelIdentity.swift": "adapter",
         "sources/TinyTitanLegacyEngine/ServerModelSession+Benchmark.swift": "adapter",
         "sources/TinyTitanLegacyEngine/ServerModelSession+ExpertWarmup.swift": "adapter",
-        // The K2 probe backend: blocked on the K2 keep/drop decision (TT-086).
-        "sources/TinyTitanServer/Core/K2ProbeBackend.swift": "K2 probe (TT-086)",
+        // The catalog's 6.x bridges: Kind resolution and reasoning targets.
+        "sources/TinyTitanServer/Core/CatalogKindBridges.swift": "catalog bridges",
         // Off-disk families with no plugin yet: the CLI's own routes.
         "sources/TinyTitanCLI/NemotronRun.swift": "Nemotron route (TT-055)",
         "sources/TinyTitanCLI/RunGGUF.swift": "as-is GGUF route (TT-058)",
-        "sources/TinyTitanCLI/RunK2.swift": "K2 route (TT-086)",
         // Benchmark probes of the 6.x path and the off-disk families.
-        "sources/TinyTitanBench/K2Checks.swift": "K2 bench (TT-086)",
-        "sources/TinyTitanBench/K2Commands.swift": "K2 bench (TT-086)",
         "sources/TinyTitanBench/LagunaCommands.swift": "Laguna bench (TT-054)",
         "sources/TinyTitanBench/NemotronCommands.swift": "Nemotron bench (TT-055)",
         "sources/TinyTitanBench/PassCostCommands.swift":

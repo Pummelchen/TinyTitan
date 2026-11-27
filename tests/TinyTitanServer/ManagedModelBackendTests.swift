@@ -165,16 +165,16 @@ struct ManagedModelBackendTests {
             })
     }
 
-    /// The plan-free initializer is what K2's residency path uses: no
-    /// `ModelSessionPlan` exists for the family, so the wrapper takes the
-    /// facts, the context limit, the sampling row and a loader directly.
-    private func k2Backend(
+    /// The plan-free initializer takes the facts, the context limit, the
+    /// sampling row and a loader directly, for a backend that has no
+    /// `ModelSessionPlan`.
+    private func planFreeBackend(
         idleTimeout: Duration? = nil,
         recorder: LoadRecorder
     ) -> ManagedModelBackend {
         ManagedModelBackend(
             facts: ModelSessionFacts(
-                modelID: "k2",
+                modelID: "probe",
                 prefillChunkTokens: 0,
                 promptCacheMode: .off,
                 expertCacheSlots: 16),
@@ -190,7 +190,7 @@ struct ManagedModelBackendTests {
 
     @Test func planFreeInitializerDefersAndReportsItsOwnFacts() async throws {
         let recorder = LoadRecorder()
-        let managed = k2Backend(recorder: recorder)
+        let managed = planFreeBackend(recorder: recorder)
 
         // Before any load: the values a request is validated against.
         #expect(managed.maximumContext == 8_192)
@@ -210,7 +210,7 @@ struct ManagedModelBackendTests {
 
     @Test func planFreeInitializerUnloadsAfterIdleAndReloads() async throws {
         let recorder = LoadRecorder()
-        let managed = k2Backend(idleTimeout: .milliseconds(30), recorder: recorder)
+        let managed = planFreeBackend(idleTimeout: .milliseconds(30), recorder: recorder)
 
         _ = try await managed.generate(request()) { _ in }
         #expect(recorder.loads == 1)

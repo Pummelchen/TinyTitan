@@ -288,7 +288,6 @@ public final class EngineFactories: @unchecked Sendable {
             case .qwen4flash: id = "qwen4-omni-120b-think"
             case .qwen4flashMTP: id = "qwen4-omni-120b-think-mtp"
             case .qwen35Dense: id = "qwen3.5-dense"
-            case .k2Horizon: id = "k2-horizon"
             case .laguna: id = "laguna-s-2-1"
             }
         }

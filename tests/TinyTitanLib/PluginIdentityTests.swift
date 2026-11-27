@@ -116,15 +116,6 @@ struct PluginIdentityTests {
     /// A family the adapter's engine cannot serve says so in its identity, so a
     /// front end does not need its own family table to refuse it.
     @Test func theAdapterReportsWhyAFamilyIsNotServed() throws {
-        let (_, k2) = try identity(
-            family: "k2_horizon", modelID: "k2-horizon-4bit", bits: 4)
-        #expect(k2.modelID == "k2-horizon-4bit")
-        #expect(k2.catalogID == "k2-horizon_4-Bit")
-        // The catalog can list K2: the server's probe backend serves it. Only
-        // this CLI cannot launch it, so the refusal is the CLI-specific one.
-        #expect(k2.unsupportedReason == nil)
-        #expect(k2.cliUnsupportedReason?.contains("server's probe backend") == true)
-
         let (_, mtp) = try identity(
             family: "qwen36_mtp", modelID: "qwen3.6-35b-a3b-mtp-4bit", bits: 4)
         #expect(mtp.modelID == "qwen3.6-35b-a3b-mtp-4bit")

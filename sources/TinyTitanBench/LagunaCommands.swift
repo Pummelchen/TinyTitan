@@ -43,7 +43,7 @@ extension TinyTitanBench {
         let model = try Model.load(
             directoryURL: install, device: context.device, expecting: config,
             streamingMode: .pread(slotCount: 16))
-        guard let tokenizer = try loadK2Tokenizer(install) else {
+        guard let tokenizer = try loadCheckpointTokenizer(install) else {
             FileHandle.standardError.write(Data("no tokenizer in \(install.path)\n".utf8))
             exit(2)
         }
@@ -132,5 +132,32 @@ extension TinyTitanBench {
                     + tokenizer.decode(
                         tokens: Array(ranked), skipSpecialTokens: false))
         }
+    }
+
+    /// The generic swift-transformers tokenizer, for a checkpoint whose special
+    /// tokens are not Qwen's.
+    static func loadCheckpointTokenizer(_ directory: URL) throws -> Tokenizer? {
+        guard let folder = GFTokenizer.resolvedTokenizerFolder(forModelDirectory: directory)
+        else { return nil }
+        // unchecked-invariant: written only inside the Task below and read
+        // only after `semaphore.wait()` returns, which orders the read after
+        // the write; no concurrent access.
+        final class Box: @unchecked Sendable {
+            var value: Tokenizer?
+            var error: Error?
+        }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            do {
+                box.value = try await AutoTokenizer.from(modelFolder: folder)
+            } catch {
+                box.error = error
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if let error = box.error { throw error }
+        return box.value
     }
 }

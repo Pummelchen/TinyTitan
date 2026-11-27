@@ -19,7 +19,6 @@ package enum ServerModelIdentity {
         // Reached only for an install whose manifest carries no model id; the
         // dense converter always writes one.
         case .qwen35Dense: return "qwen3.5-dense"
-        case .k2Horizon: return "k2-horizon"
         case .laguna: return "laguna-s-2-1"
         }
     }
@@ -69,22 +68,15 @@ package enum ServerModelIdentity {
             return "Laguna-S-2.1's decode probe is implemented; the serving "
                 + "graph is not, so the install validates but is not served "
                 + "(docs/plan-laguna-s-2.1.md)"
-        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense, .k2Horizon:
+        case .qwen36, .qwen38flash, .qwen4flash, .qwen35Dense:
             return nil
         }
     }
 
-    /// Why this CLI cannot launch a family the server still serves. K2 is the
-    /// one case: the server's probe backend runs it, doctor cannot.
+    /// Why this CLI cannot launch a family the server still serves. Today no
+    /// family is server-only, so it is the server's own answer.
     package static func cliUnsupportedReason(_ family: ModelFamily) -> String? {
-        switch family {
-        case .k2Horizon:
-            return "K2-Horizon is not served by this CLI: the server's probe "
-                + "backend serves it, and `TinyTitanBench k2gpu` runs it "
-                + "directly (docs/plan-k2-horizon.md)"
-        default:
-            return unsupportedReason(family)
-        }
+        unsupportedReason(family)
     }
 
     /// The host-facing identity of a 6.x install, read from its manifest alone.
@@ -102,7 +94,7 @@ package enum ServerModelIdentity {
             sampling: identity.family.engineSamplingProfile(identity: identity),
             reasoningControl: identity.family.engineReasoningControl,
             engines: identity.family == .qwen35Dense ? [.gpu, .cpu] : [.gpu],
-            contextLimit: identity.family == .k2Horizon ? K2ProbeRuntime.contextCeiling : nil,
+            contextLimit: nil,
             unsupportedReason: unsupportedReason(identity.family),
             cliUnsupportedReason: cliUnsupportedReason(identity.family))
     }

@@ -22,8 +22,8 @@ import TinyTitanCore
 /// here.
 ///
 /// A raw `--prompt` stays raw; `--messages-file` (and `--concise`) render
-/// through the tokenizer's ChatML template, the same rule the K2 branch
-/// applies. Stop strings are not implemented on this path; generation stops
+/// through the tokenizer's ChatML template. Stop strings are not implemented
+/// on this path; generation stops
 /// on the tokenizer's stop tokens (`<|im_end|>`, `<|endoftext|>`) or the
 /// token budget.
 func runGGUFAsIs(
@@ -129,7 +129,7 @@ private func ggufTokenizer(
 }
 
 /// A raw prompt stays raw; a conversation renders through the tokenizer's
-/// ChatML template and is encoded as text, the K2 branch's rule.
+/// ChatML template and is encoded as text.
 private func ggufPromptIDs(
     _ prompt: Prompt, tokenizer: GFTokenizer
 ) throws -> [Int32] {

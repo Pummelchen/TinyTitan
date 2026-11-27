@@ -106,7 +106,7 @@ extension Args {
           --reasoning-effort <lvl>  Reasoning-effort level: low, medium, high,
                                     or xhigh. Requires --thinking on and a model
                                     family whose chat template defines effort
-                                    levels (Qwen3.8-Flash-Next, K2-Horizon);
+                                    levels (Qwen3.8-Flash-Next);
                                     Ornith 1.5 and Qwen 3.6 reject it.
           --quiet                   Suppress the timing footer.
           --help                    Show this message.

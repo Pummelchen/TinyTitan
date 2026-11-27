@@ -112,15 +112,6 @@ public func run(
             && options.presencePenalty == 0
             && options.repetitionPenalty == 1
         let prompt = try buildPrompt(args: args)
-        // K2-Horizon has no runner graph; the CLI drives the probe runtime
-        // instead. Branch before the runner-specific chunk resolution.
-        if (try? SSDAIManifestReader.declaredFamily(directoryURL: modelURL)) == "k2_horizon" {
-            return await runK2Probe(
-                args: args, modelURL: modelURL, prompt: prompt,
-                options: options, thinkingMode: thinkingMode,
-                reasoningEffort: reasoningEffort,
-                stdout: stdout, stderr: stderr)
-        }
         // A directory of .gguf shards is not an install and has no manifest;
         // it runs in place on the as-is decoder. Branched before the
         // tokenizer-only prefill-chunk resolution, which expects an install.
