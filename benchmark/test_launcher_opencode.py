@@ -231,6 +231,69 @@ def configure_opencode_source() -> str:
     return match.group(0)
 
 
+class MergeArgumentValidationTests(unittest.TestCase):
+    """The merge writes the client's own token limit, so its counts are checked.
+
+    `--context` lands verbatim in `limit.context` (OpenCode) and `max_tokens`
+    (Zed). A 0 or negative value is not a small context -- the client is offered
+    a model it cannot use -- and an empty `--model` writes a nameless entry.
+    Both were accepted and written before this check (AUD-0105).
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.file = pathlib.Path(self.tmp.name) / "opencode.jsonc"
+
+    def run_merge(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        return merge(
+            "opencode",
+            "--file",
+            str(self.file),
+            "--source",
+            str(SOURCE),
+            "--model",
+            default_model(),
+            "--base-url",
+            URL,
+            *extra,
+        )
+
+    def test_a_zero_context_is_refused_before_the_file_is_written(self) -> None:
+        run = self.run_merge("--context", "0")
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("--context", run.stderr)
+        self.assertFalse(self.file.exists(), "the refused run wrote a config")
+
+    def test_a_negative_context_is_refused(self) -> None:
+        run = self.run_merge("--context", "-4096")
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("--context", run.stderr)
+
+    def test_an_empty_model_is_refused(self) -> None:
+        run = merge(
+            "opencode",
+            "--file",
+            str(self.file),
+            "--source",
+            str(SOURCE),
+            "--model",
+            "",
+            "--base-url",
+            URL,
+        )
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("--model", run.stderr)
+        self.assertFalse(self.file.exists(), "the refused run wrote a config")
+
+    def test_a_positive_context_reaches_the_file(self) -> None:
+        run = self.run_merge("--context", "8192")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        document = json.loads(self.file.read_text(encoding="utf-8"))
+        model = document["provider"]["tinytitan"]["models"][default_model()]
+        self.assertEqual(model["limit"]["context"], 8192)
+
+
 class LauncherConfigureTests(unittest.TestCase):
     """The launcher's own function, run against a temporary HOME."""
 

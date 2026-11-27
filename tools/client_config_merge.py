@@ -266,6 +266,13 @@ def main(argv=None):
         help="opencode: another config file OpenCode reads; only disabled_providers is fixed there",
     )
     args = parser.parse_args(argv)
+    # `--context` is written into the client's own token limit, so 0 is not a
+    # small context -- it is "no context at all", and a client offered that
+    # cannot use the model. Refused before the config is read (AUD-0105).
+    if args.context < 1:
+        parser.error("--context must be at least 1")
+    if not args.model.strip():
+        parser.error("--model must name the served model")
     if args.schema == "opencode":
         if not args.source:
             parser.error("opencode needs --source")
