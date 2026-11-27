@@ -283,13 +283,18 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
                 throw error
             }
         }
-        guard var tokens = toolTokens else { return nil }
-        tokens.append(tokenID)
-        guard tokens.count * MemoryLayout<Int32>.size <= QwenToolCallParser.maximumBytes else {
+        // `var tokens = toolTokens` copies the whole buffer on the first append
+        // (copy-on-write, because `toolTokens` still holds the storage), so a
+        // 64K-token tool body cost gigabytes of memcpy; append in place
+        // (AUD-0100).
+        guard toolTokens != nil else { return nil }
+        toolTokens?.append(tokenID)
+        guard let count = toolTokens?.count,
+            count * MemoryLayout<Int32>.size <= QwenToolCallParser.maximumBytes
+        else {
             failed = true
             throw ToolCallParserError.oversized
         }
-        toolTokens = tokens
         return []
     }
 
