@@ -421,7 +421,7 @@ another branch is present on this machine; "Concept" means design only.
 | ~~K2-Horizon-MoVA-36B-A4B~~ | — | — | — | — | Withdrawn | Withdrawn | Withdrawn from the shipped matrix 2026-11-27 (TT-086); install-only is not a shipped engine path |
 | Ornith 1.5 122B | `qwen36` (3072×48) | MoE top-8 | 122B | ≈12B* | In progress | In progress | On `main` since 2026-10-27; both widths installed and measured at a 12 GB target, golden baseline still missing |
 | Laguna-S-2.1 (poolside) | `laguna` (3072×48) | MoE top-10 | 118B | 8B | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
-| Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88) | MoE top-9 | 74B | 9B | Installed | Not installed | 43 GB 4-bit install; 8-bit built then removed under disk pressure; code on `nemotron-3.5-bolt` |
+| ~~Nemotron-3.5-Bolt-74B-A9B (NVIDIA)~~ | — | — | — | — | Withdrawn | Withdrawn | Withdrawn from the tree 2026-11-27 (TT-055): a partial CLI/bench port with no `ModelFamily`, server backend, catalogue entry or golden target; returns only on a user request |
 | DeepSeek-V4.1-Flash-1017 | `deepseek_v41` | MoE top-6 + Engram/CSA | 763B | n/a | No (policy) | No (policy) | Concept only; precision-preserving mixed install, no re-quantization |
 
 \* **Ornith 122B active parameters are computed, not published:** 8 routed

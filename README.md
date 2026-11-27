@@ -46,8 +46,6 @@ Peak decode on a base 8-core M3 MacBook Pro with 24 GB, after a warm-up pass.
 | Ornith 1.5 35B-A3B | 8-bit | **11.9 tok/s** | NA | 68% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 4-bit | **21.4 tok/s** | NA | 53% (2.1) | NA |
 | Qwen 3.6 35B-A3B | 8-bit | **12.4 tok/s** | NA | 53% (2.1) | NA |
-| NVIDIA Nemotron 3.5 Bolt 74B-A9B *(CLI only)* | 4-bit | **6.7 tok/s** | **3.6 tok/s** | 51% (2.1) | NA |
-| NVIDIA Nemotron 3.5 Bolt 74B-A9B *(CLI only)* | 8-bit | **0.6 tok/s** | **0.9 tok/s** | 51% (2.1) | NA |
 | Qwen-AgentWorld 35B-A3B | 4-bit | **21.7 tok/s** | NA | 40% (2.0) | NA |
 | Qwen-AgentWorld 35B-A3B | 8-bit | **12.3 tok/s** | NA | 40% (2.0) | NA |
 | KAT-Coder-V2.5-Dev 35B-A3B | 4-bit | **17.9 tok/s** | NA | 33% (2.1) | NA |

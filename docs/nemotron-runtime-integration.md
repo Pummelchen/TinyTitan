@@ -1,3 +1,7 @@
+> **Withdrawn 2026-11-27 — Nemotron is retired; returns only on a user request.**
+> Kept as the runtime-integration record, not as current guidance: the
+> Nemotron runtime it maps was deleted from the tree on that date (TT-055).
+
 # Nemotron 3.5 Bolt — where a new family plugs into the runtime
 
 Code-verified map of the TinyTitan runtime as it stands for the

@@ -1,3 +1,8 @@
+> **Withdrawn 2026-11-27 — Nemotron is retired; returns only on a user request.**
+> Kept as the port record, not as a supported model. The runtime, CLI/bench
+> routes, converter and kernels were deleted from the tree on that date
+> (TT-055); see the banner in `docs/nemotron-35-bolt-port.md` for what went.
+
 # Nemotron 3.5 Bolt 74B-A9B — port record
 
 Status: **complete.** Both installs are written and pass

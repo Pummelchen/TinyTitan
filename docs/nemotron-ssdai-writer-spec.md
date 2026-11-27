@@ -1,3 +1,8 @@
+> **Withdrawn 2026-11-27 — Nemotron is retired; returns only on a user request.**
+> Kept as the writer-spec record, not as current guidance: the Nemotron
+> converter that wrote this layout was deleted from the tree on that date
+> (TT-055), so a `.ssdai` it produced can no longer be loaded.
+
 # The `.ssdai` install format, as written by `TinyTitanRepack`
 
 A code-verified specification of what the repacker **writes**, sufficient to

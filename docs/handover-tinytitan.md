@@ -169,9 +169,10 @@ engine 8, validation 5, variants 1):
   engine target under `sources/Engines/`, from which each later plugin copies
   (as the Ornith plugin did). Largest slice; plan it before moving code.
 - **Side routes**: Inkling GGUF (`sources/TinyTitan/Inkling2GGUF`), the raw
-  checkpoint route (`Inkling2ServerBackend`), Nemotron and the as-is GGUF
-  CLI. These are deleted with their routes (TT-127, TT-055, TT-058), not
-  ported. TT-127's raw model folders
+  checkpoint route (`Inkling2ServerBackend`) and the as-is GGUF
+  CLI. These are deleted with their routes (TT-127, TT-058), not
+  ported. Nemotron was deleted from the tree on 2026-11-27 (TT-055) and
+  returns only on a user request. TT-127's raw model folders
   (`models/inkling-2-mini` 19 GB, `models/inkling-2-mini-gguf` 16 GB) are to
   be **proposed** for deletion, never deleted without approval;
   `models/inkling-2-mini` is the second reference in

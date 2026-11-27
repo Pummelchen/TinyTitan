@@ -380,10 +380,11 @@ The order is chosen so each step is shippable and bit-identical:
      the backend).
    - What the remaining 50 files reach, by owner:
      - **Side routes (TT-127)**: `Inkling2GGUFSession` and its parser and
-       format; Nemotron (`NemotronInstall`, `NemotronMetalGraph`, ...);
-       `GGUFDecoder`. These are deleted with their routes or become plugins;
-       they are not ported into Core. (The K2 probe was in this list and is
-       gone: K2 left the shipped matrix on 2026-11-27, TT-086.)
+       format; `GGUFDecoder`. These are deleted with their routes or become
+       plugins; they are not ported into Core. (The K2 probe and Nemotron were
+       in this list and are gone: K2 left the shipped matrix on 2026-11-27
+       (TT-086), and Nemotron was deleted from the tree on 2026-11-27
+       (TT-055).)
      - **The 6.x dense CPU engine** (`CPUQwen35`, `AffineSnapshot`,
        `SideEngine`, `CPUModelFamily`): no longer served (slice 2). Still
        reached by the memory side engine (`SideEngineService`,
@@ -401,8 +402,8 @@ The order is chosen so each step is shippable and bit-identical:
        tokenizer package), so each later plugin copies from it the way the
        Ornith plugin did. The move is a `git mv` plus the module/import rename;
        no type, numeric or adapter behaviour changed. The target also still
-       carries the 6.x CPU engine, the GGUF decoder and the Laguna/Nemotron
-       probe routes, because their closure is entangled with `Model`'s graph
+       carries the 6.x CPU engine, the GGUF decoder and the Laguna
+       probe route, because their closure is entangled with `Model`'s graph
        (the GGUF and per-family validation files): separating those is
        TT-121/TT-132 work, not a pure move. The host files that still reach the runtime now import
        `Legacy6xRuntime`; TT-134's remaining rows decide whether each is ported
