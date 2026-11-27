@@ -30,6 +30,10 @@ package enum ExpertRANSIndex {
     package static let headerBytes = 16
     package static let blockBytes = 24
     package static let maximumBlockCount = 64
+    /// The most streams one block is split into. The GPU side sizes its
+    /// descriptor region from this, so the clamp in `streams(symbolCount:)`
+    /// and the buffer can never disagree.
+    package static let maximumStreamsPerBlock = 256
 
     package struct Model: Sendable, Equatable {
         package var frequencies: [UInt16]
@@ -261,7 +265,7 @@ package enum ExpertRANSIndex {
 
     /// Streams per block, sized so one GPU thread decodes about 2 KiB.
     package static func streams(symbolCount: Int) -> Int {
-        max(1, min(256, symbolCount / 2048))
+        max(1, min(maximumStreamsPerBlock, symbolCount / 2048))
     }
 
     /// The phase each block index belongs to, derived from the layer's tensors.

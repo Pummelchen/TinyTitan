@@ -15,6 +15,15 @@ import TinyTitanCore
 
 struct RANSStreamPlan {
     static let descriptorWords = 9
+
+    /// Bytes of descriptor region one expert position needs: one descriptor
+    /// per stream, for every model (phase) the layer declares. Sized from the
+    /// index's clamp rather than a literal, so a higher clamp cannot make a
+    /// write land past the buffer.
+    static func descriptorStride(models: Int) -> Int {
+        models * ExpertRANSIndex.maximumStreamsPerBlock * descriptorWords * 4
+    }
+
     var payloadOffset: UInt32
     var tableOffset: UInt32
     var outputOffset: UInt32
@@ -264,7 +273,8 @@ final class RANSLayerResources: @unchecked Sendable {
         self.plans = accumulator.plans
         let stride = max(1, maximumPayload)
         self.payloadStride = stride
-        let maximumStreams = maximumWave * layout.models.count * 256
+        let maximumStreams =
+            maximumWave * layout.models.count * ExpertRANSIndex.maximumStreamsPerBlock
         guard
             let payloadBuffer = device.makeBuffer(
                 length: max(1, stride * maximumWave), options: .storageModeShared),

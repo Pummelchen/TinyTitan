@@ -97,7 +97,8 @@ extension PreadExpertStreamer {
         try readRanges(offsets: sourceOffsets, counts: counts, into: destinations)
         let tReadDone = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let descriptorWords = RANSStreamPlan.descriptorWords
-        let descriptorStride = resources.layout.models.count * 256 * descriptorWords * 4
+        let descriptorStride = RANSStreamPlan.descriptorStride(
+            models: resources.layout.models.count)
         let descriptorPointer = resources.descriptors.contents()
 
         for phase in 0...1 {

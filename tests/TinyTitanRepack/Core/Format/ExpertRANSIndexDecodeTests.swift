@@ -89,6 +89,22 @@ struct ExpertRANSIndexDecodeTests {
         }
     }
 
+    @Test("The stream clamp equals the exported descriptor capacity")
+    func streamClampMatchesExportedCapacity() {
+        // The GPU sizes its descriptor region from `maximumStreamsPerBlock`;
+        // the writer's clamp must never exceed it (AUD-0081).
+        #expect(ExpertRANSIndex.maximumStreamsPerBlock == 256)
+        #expect(
+            ExpertRANSIndex.streams(symbolCount: 2048 * ExpertRANSIndex.maximumStreamsPerBlock)
+                == ExpertRANSIndex.maximumStreamsPerBlock)
+        #expect(
+            ExpertRANSIndex.streams(
+                symbolCount: 2048 * (ExpertRANSIndex.maximumStreamsPerBlock + 1))
+                == ExpertRANSIndex.maximumStreamsPerBlock)
+        #expect(ExpertRANSIndex.streams(symbolCount: 1) == 1)
+        #expect(ExpertRANSIndex.streams(symbolCount: 2048 * 2) == 2)
+    }
+
     @Test("The implemented scale decodes")
     func acceptsImplementedScale() throws {
         let layout = try ExpertRANSIndex.decode(
