@@ -70,7 +70,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 | `TinyTitanMemory` | A | 5.3k | R | P | R | R | – | R | N | scope validation, discovery/listing (AUD-0061/0063/0064), store keys read; consolidation and bootstrap partial |
 | `TinyTitanMemoryTool` | B | 0.2k | R | N | R | N | N | R | N | read in full; its failure paths are pinned by tests |
 | `TinyTitanBench` / `TinyTitanValidationSupport` | B | 4.7k | P | N | P | N | N | P | N | `PassCostPrompt` read and pinned (TT-139); the rest is operator tooling and was not audited |
-| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | `prepare_qwen38` transport/ngram/driver and `prepare_k2_horizon` release/convert read; AUD-0077 open; `prepare_laguna_s21`, `prepare_nemotron`, `prepare_*_mtp`, `install_models.sh`, `install_tinytitan.sh` not reviewed |
+| `tools/*.py` (converter) | A | — | P | P | P | R | – | R | N | `prepare_qwen38` transport/ngram/driver read; AUD-0077 open; `prepare_laguna_s21`, `prepare_nemotron`, `prepare_*_mtp`, `install_models.sh`, `install_tinytitan.sh` not reviewed (`prepare_k2_horizon` was read and has since been deleted with K2's withdrawal, TT-086) |
 | `tools/*.sh`, `benchmark/*.py` | B | — | P | N | P | P | N | P | N | the gates and the launcher suite are exercised on every run; not audited line-by-line |
 
 ## What this pass covered (2026-11-27)

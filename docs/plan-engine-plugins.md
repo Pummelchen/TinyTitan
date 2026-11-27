@@ -63,7 +63,7 @@ what a plugin protocol has to remove:
 |---|---|---|
 | Engine selection | `EngineFactories.gpuSelection` / `gpuFactory(directoryURL:)` — a hand-written switch on `ModelFamily` and model-id prefixes | a new `isInkling2Q4` branch in two functions |
 | Family identity | the 6.x `ModelFamily` enum, read by the catalog (`ModelCatalog.Kind.gpu(ModelFamily)`), reasoning fallback, generation defaults (9 files outside the runtime) | a separate reasoning path in `singleModelReasoning`; not in the catalog at all (TT-126) |
-| Front-end branches | `TinyTitanServer/Command/main.swift` and the CLI main: 18 model-specific branches (K2 probe, Inkling routes, GGUF, CPU) | its own branch until TT-122 removed it |
+| Front-end branches | `TinyTitanServer/Command/main.swift` and the CLI main: the model-specific branches (Inkling routes, GGUF, CPU) | its own branch until TT-122 removed it |
 | Chat format | `TokenizerDialect` enum in Core with 45 `dialect ==`/`switch` sites, copied into each variant's decoder | a new enum case, edits to the renderer, the decoder (and its two copies in the Ornith and dense variants), the JSON table |
 | Prompt cache | ChatML continuation bridges and checkpoint markers keyed on ChatML's message-start token in `TinyTitanLib` | a dialect guard, then `PromptMessageMarkers` |
 | Tokenizer source | `GFTokenizer.tokenizerFolder` assumes `tokenizer/` in the install | a `tokenizerFolder` factory hook |
@@ -152,7 +152,7 @@ to open a turn). `AssistantStreamParser` is the shape `StructuredAssistantDecode
 → `[StructuredAssistantEvent]`.
 
 Core ships **reference dialects**, not an enum: `ChatMLDialect` (the Qwen
-families), `K2Dialect`, `InklingDialect`. A plugin picks one or brings its own;
+families) and `InklingDialect`. A plugin picks one or brings its own;
 adding a dialect touches no host file. The `TokenizerDialect` enum and its 45
 switch sites go away, and so do the copies of the decoder in the variant
 targets, because the decoder is the dialect's.
@@ -343,7 +343,7 @@ The order is chosen so each step is shippable and bit-identical:
 3. **TT-132: dialects become `ChatDialect` values.**
    - Delete `TokenizerDialect` and the decoder copies.
    - Migrate engines one per commit: Inkling Q4, then Ornith, then dense Qwen,
-     then the 6.x engine (as `LegacyPlugin`), then K2 and the CPU engine.
+     then the 6.x engine (as `LegacyPlugin`), then the CPU engine.
    - Then delete `gpuSelection`, the `main.swift` model branches and
      `ModelFamily` outside the 6.x runtime.
 4. **The Inkling NVFP4 engine (TT-125) is the first engine written directly as
@@ -380,10 +380,10 @@ The order is chosen so each step is shippable and bit-identical:
      the backend).
    - What the remaining 50 files reach, by owner:
      - **Side routes (TT-127)**: `Inkling2GGUFSession` and its parser and
-       format; the K2 probe (`K2GraphProbe`, `K2Model`, `K2Snapshot`);
-       Nemotron (`NemotronInstall`, `NemotronMetalGraph`, ...); `GGUFDecoder`.
-       These are deleted with their routes or become plugins; they are not
-       ported into Core.
+       format; Nemotron (`NemotronInstall`, `NemotronMetalGraph`, ...);
+       `GGUFDecoder`. These are deleted with their routes or become plugins;
+       they are not ported into Core. (The K2 probe was in this list and is
+       gone: K2 left the shipped matrix on 2026-11-27, TT-086.)
      - **The 6.x dense CPU engine** (`CPUQwen35`, `AffineSnapshot`,
        `SideEngine`, `CPUModelFamily`): no longer served (slice 2). Still
        reached by the memory side engine (`SideEngineService`,
@@ -401,11 +401,10 @@ The order is chosen so each step is shippable and bit-identical:
        tokenizer package), so each later plugin copies from it the way the
        Ornith plugin did. The move is a `git mv` plus the module/import rename;
        no type, numeric or adapter behaviour changed. The target also still
-       carries the 6.x CPU engine, the GGUF decoder and the K2/Laguna/Nemotron
+       carries the 6.x CPU engine, the GGUF decoder and the Laguna/Nemotron
        probe routes, because their closure is entangled with `Model`'s graph
-       (`Runtime/Inference/K2GraphProbe` → `CPUEngine/K2Model`, the GGUF and
-       per-family validation files): separating those is TT-121/TT-132 work,
-       not a pure move. The host files that still reach the runtime now import
+       (the GGUF and per-family validation files): separating those is
+       TT-121/TT-132 work, not a pure move. The host files that still reach the runtime now import
        `Legacy6xRuntime`; TT-134's remaining rows decide whether each is ported
        or deleted.
      - **Host model knowledge**: `ModelFamily`, `ManifestReader`,

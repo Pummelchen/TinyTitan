@@ -165,10 +165,12 @@ written at `SSDAIJSON.swift:129-146`):
 `pleNgramSize`, `pleVocabSizeBase`, `pleHeadsPerNgram`, `pleVocabDivisor` (int),
 `routerNormTopK` (bool), `quantGroupSize` (int).
 
-K2-only block (`SSDAIJSON.swift:147-166`): `movaNumExperts`, `movaTopKExperts`,
-`normGroups`, `attentionGate` (string), `routerScaling`, `routerHasBias`,
-`movaRouterScaling`, `movaRouterHasBias`, `movaActivation` (string),
-`denseLayerIndices` (array[int]), `routerNormTopK`.
+The Laguna block adds `denseLayerIndices` (array[int]) and `routerNormTopK`.
+The MoVA keys (`movaNumExperts`, `movaTopKExperts`, `movaRouterScaling`,
+`movaRouterHasBias`, `movaActivation`), `normGroups`, `attentionGate` (string),
+`routerScaling` and `routerHasBias` remain optional in the format, but no
+shipped family writes them: they belonged to K2-Horizon, which left the shipped
+matrix on 2026-11-27 (TT-086).
 
 **Who enforces what.** `--verify-install` runs only `SSDAIManifestCodec.validate`,
 which never inspects the optional extension keys — so a Nemotron manifest may
@@ -220,8 +222,8 @@ override whose `weightBits` is not 4 or 8 is rejected **at decode**
 Real examples: Ornith 4-bit → `attention 4, embedding 8, routedExpert 4,
 router 8, sharedExpert 4`, 252 overrides; Ornith 8-bit → `attention 8,
 embedding 8, routedExpert 8, router 8, sharedExpert 8` (252 overrides);
-K2 4-bit → `attention 4, embedding 8, routedExpert 4, router 8,
-sharedExpert 8`, 3221 overrides.
+Laguna 4-bit → `attention 4, embedding 8, routedExpert 4, router 8,
+sharedExpert 8`.
 
 ### 1.4 `files` object
 
@@ -370,8 +372,9 @@ group 0 `language_model.model.embed_tokens.weight`; group 1 per-layer tensors by
 layer then a Qwen slot rank; group 2 everything else; group 3
 `language_model.model.norm.weight`; group 4 `language_model.lm_head.weight`.
 The order has **no** semantic force — readers look tensors up by name — but a
-byte-faithful clone should copy it. (It is a hard-coded Qwen template: K2's
-`model.embed_tokens.weight` falls into group 2 and ends up after the layers.)
+byte-faithful clone should copy it. (It is a hard-coded Qwen template: a
+checkpoint without the `language_model.` prefix, such as Laguna's, falls into
+group 2 and ends up after the layers.)
 
 First entry's `fileOffset` is `indexSize` in both reference installs; the
 payload then fills the file exactly to `indexSize + residentSize`.
@@ -471,9 +474,10 @@ Naming: `layer_%02d.bin` for layer indices < 100 (`:111-112`), so `layer_00.bin`
 
 ### 3.3 A dense layer inside a sparse install
 
-K2 proves the accepted shape: layers 0-2 have `expertsPerLayer: 0`, an empty
-`experts` array, and a nominal `file` name; **no `layer_00.bin` is written and
-none is listed in the manifest**. Both `--verify-install`
+A mixed install proves the accepted shape: a dense layer inside a sparse
+install has `expertsPerLayer: 0`, an empty `experts` array, and a nominal
+`file` name; **no `layer_NN.bin` is written for it and none is listed in the
+manifest**. Both `--verify-install`
 (`PackedExpertLayoutVerification.swift:110-117`) and the runtime
 (`ManifestReader.swift:204-226`) skip a layer whose expected size is zero.
 
@@ -888,7 +892,7 @@ still refuse it:
 - `ModelFamily` has six cases and no Nemotron (`ModelTypes.swift:8-42`);
   `TensorSchema.schema(for:)` is an exhaustive switch (`TensorSchema.swift:100-110`).
 - `ArchConfig.resolved(forFamily:)` throws `unsupportedFamily` for any family
-  without a preset except `qwen35Dense`/`k2Horizon`
+  without a preset except `qwen35Dense`
   (`ArchConfig+Manifest.swift:49-54`).
 - `ManifestReader` requires `model_weights.bin` + `packed_experts/layout.json`
   (`ManifestReader.swift:27-30`), a `quant` block (`:200-204`), and for
@@ -979,9 +983,9 @@ at `e * expert_stride` in `layer_NN.bin`, and the file is exactly
   `indexSize` is page-aligned; the payload is contiguous and individual tensor
   offsets are not aligned (`RepackPlanner+Planning.swift:197-203`).
 - `docs/ssdai-format.md:295-301` says a dense `layout.json` lists a layer per
-  layer with a nominal file. Code agrees, and K2 shows the same shape for its
-  three dense layers — but the writer also emits a per-layer `expertsPerLayer`
-  key (`SSDAIJSON.swift:341`) that the doc does not mention; older installs
+  layer with a nominal file. Code agrees, and the Laguna install shows the same
+  shape for its dense layer — but the writer also emits a per-layer
+  `expertsPerLayer` key (`SSDAIJSON.swift:341`) that the doc does not mention; older installs
   (Ornith) lack it.
 - `docs/ssdai-format.md:36-44` implies `--verify-install` accepts both magics;
   it does, via `SSDAIManifestCodec.validate`, which accepts `"GTURBO"` as well.

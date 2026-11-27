@@ -111,7 +111,7 @@ These are the 7.0 Core contracts, unchanged:
 
 A plugin declares its chat format via `EnginePlugin.chatDialect(for:)` (TPP/1.1,
 TT-132), returning one of Core's reference `ChatDialect` values
-(`ChatMLDialect`, `K2Dialect`, `InklingDialect`) or a plugin-owned conformer.
+(`ChatMLDialect`, `InklingDialect`) or a plugin-owned conformer.
 The 6.x fallback adapter returns `nil` and defers to tokenizer auto-detection.
 
 ## 7. Conformance: when a plugin is "supported"

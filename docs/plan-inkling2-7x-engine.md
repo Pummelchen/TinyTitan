@@ -463,7 +463,7 @@ way they apply to Ornith. The work is split into tracker rows, in this order:
 - `ArchConfig` is built from the install's `arch` block. The session only
   reads `vocabSize`, `numExperts`, `finalLogitSoftcap`, `sparseIndexer` and `ple`.
 - The tokenizer becomes a `GFTokenizer` with an Inkling dialect, following the
-  K2 precedent:
+  existing dialect precedent:
   - `applyChatTemplate` renders `Inkling2GGUFChatFormat`;
   - `StructuredAssistantDecoder` learns the thinking and
     `content_invoke_tool_json` markers;
@@ -504,7 +504,8 @@ Model runs stay under the owner's 16 GB cap.
 
   The session's window is now `min(asked, runner.maxContext)`, for an engine
   whose plan grants less than was asked.
-- **Tokenizer dialect.** `TokenizerDialect.inkling` follows the K2 precedent:
+- **Tokenizer dialect.** `TokenizerDialect.inkling` follows the dialect
+  precedent:
   - `InklingChatTemplate` (moved from the 6.x route into Core, one renderer)
     renders the prompt;
   - `InklingAssistantParser` (moved likewise) runs inside

@@ -126,7 +126,6 @@ Sources/
     Qwen38Flash4Bit/
     Qwen38Flash8Bit/
     Qwen35Dense2B4Bit/ ...       # dense CPU/GPU variants
-    K2Horizon4Bit/               # when its runner exists, otherwise no target
   Registry/                      # generated lookup: VariantID -> factory
 Models/
   registry.json                  # data, not code; one entry per model+variant
@@ -238,13 +237,15 @@ compile error in the variant.
 ## 8. Features live with the variant, not on `Model`
 
 The union graph from 6.x is **not** the 7.0 target. Hyper-connections, PLE,
-QSA and MoVA are Qwen3.8/K2 concepts; they live in those variants.
+QSA is a Qwen3.8 concept; it lives in that variant.
 
 - `Model` becomes a tensor/residency handle: it knows names, buffers, offsets
   and dtypes, not PLE or hyper-connections.
 - A Qwen3.8 variant reads its HC/PLE/indexer tensors with its own types.
-- A K2 variant either has its own runner and target, or it has no variant at
-  all. "Install-only" is not a shipped engine path.
+- A family either has its own runner and target, or it has no variant at all.
+  "Install-only" is not a shipped engine path; K2-Horizon left the shipped
+  matrix on 2026-11-27 for exactly that reason (TT-086), and support returns
+  only on a user request.
 - If two variants want the same optional block, one copies it from the other
   with provenance; that is cheaper than a shared abstraction that couples
   their release cadence.
@@ -336,7 +337,7 @@ time, with a gate at each step:
 | 5 | Qwen 3.8 125B 4/8 (HC/PLE/QSA inside its variants) | parity |
 | 6 | Ornith 122B 4/8 (3072/48, dedicated tile per variant) | parity + new qualification |
 | 7 | ~~MTP sidecars as variants of their own~~ — withdrawn 2026-11-27, see the MTP verdict | — |
-| 8 | K2 own runner or drop it from the shipped matrix | graph exists or install-only removed |
+| 8 | ~~K2 own runner or drop it from the shipped matrix~~ — withdrawn 2026-11-27: K2 left the matrix (TT-086) | — |
 | 9 | Delete the family enum switches, `ModelProfile` table, Python tools | `rg` finds no model names in core |
 
 Parity means: same prompt set, greedy output hash identical or a recorded,
@@ -362,9 +363,9 @@ supersedes that. The union graph is a 6.x reference, not a 7.0 target.)
    internal to the variant so a width cannot be bypassed.
 4. **Split `ModelProfile`** into `PerformanceProfile` and `SamplingProfile`,
    held as constants in the variant target. One lookup, no silent fallback.
-5. **Features move into variants.** PLE/HC/QSA/MoVA leave `Model` and the
-   shared config; Qwen3.8's variant owns them. K2 gets its own runner or is
-   removed from the matrix.
+5. **Features move into variants.** PLE/HC/QSA leave `Model` and the shared
+   config; Qwen3.8's variant owns them. A family with no runner is not in the
+   matrix.
 6. **Matrix tests per variant**, not per family: synthetic manifests for every
    variant × role × width × head/embedding override, asserting every role
    resolves and every kernel width has a path.
@@ -417,7 +418,7 @@ another branch is present on this machine; "Concept" means design only.
 | Qwen-AgentWorld 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | |
 | KAT-Coder-V2.5-Dev 35B-A3B | `qwen36` | MoE top-8 | 35B | 3B | Shipped | Shipped | |
 | Qwen 4.0 Flash Next (Qwen3.8-Flash-Next) 125B-A6B | `qwen4_exp` / `qwen38flash` | MoE top-10 | 125B | 6B | Shipped | Shipped | Checkpoint is `Qwen/Qwen3.8-Flash-Next`; MTP draft 4-bit sidecar |
-| K2-Horizon-MoVA-36B-A4B | `k2_horizon` | MoE top-8 + MoVA top-4 | 36B | 4B | Install-only | Install-only | No GPU graph; cannot serve |
+| ~~K2-Horizon-MoVA-36B-A4B~~ | — | — | — | — | Withdrawn | Withdrawn | Withdrawn from the shipped matrix 2026-11-27 (TT-086); install-only is not a shipped engine path |
 | Ornith 1.5 122B | `qwen36` (3072×48) | MoE top-8 | 122B | ≈12B* | In progress | In progress | On `main` since 2026-10-27; both widths installed and measured at a 12 GB target, golden baseline still missing |
 | Laguna-S-2.1 (poolside) | `laguna` (3072×48) | MoE top-10 | 118B | 8B | Installed | Not installed | 62 GB 4-bit install; code on `laguna-s-2.1` |
 | Nemotron-3.5-Bolt-74B-A9B (NVIDIA) | `nemotron_h` (4096×88) | MoE top-9 | 74B | 9B | Installed | Not installed | 43 GB 4-bit install; 8-bit built then removed under disk pressure; code on `nemotron-3.5-bolt` |
@@ -448,5 +449,5 @@ stays tested and unused, so a later draft head can be enabled without rebuilding
 it.
 
 The 7.0 target is one variant per row and width: two for every "Shipped" or
-"Installed" row, two for the 122B, two for K2 when a K2 runner exists, and no
-variant for the DeepSeek concept until its precision policy changes.
+"Installed" row, two for the 122B, and no variant for the DeepSeek concept
+until its precision policy changes.

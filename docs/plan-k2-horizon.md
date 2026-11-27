@@ -1,5 +1,14 @@
 # Plan: K2-Horizon-MoVA-36B-A4B
 
+> **Withdrawn 2026-11-27 — K2 is not in the shipped matrix; support returns
+> only on a user request (GitHub issue).** K2-Horizon-MoVA-36B-A4B was
+> install-only: no serving graph existed, and "install-only is not a shipped
+> engine path" (7.0 spec §8). The owner decision (TT-086) removed the family,
+> its probe graph, its server/CLI/bench routes, its tools and its tests; this
+> document is kept as the design record. `ChatDialect`, the optional
+> manifest/arch extension fields and the shared probe kernels remain, because
+> other families use them.
+
 Status: **the graph runs and the server serves it, from a catalogue entry
 too; the runner and the CLI do not.** Both installs load and validate, `K2GraphProbe` executes the real 36B on
 Metal (dense layers plus the sparse MoVA layers, streamed routed experts,

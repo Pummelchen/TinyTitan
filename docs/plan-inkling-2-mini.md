@@ -103,7 +103,7 @@ is a single ~20 GB mixed-precision checkpoint (26.4 B parameters):
 
 ## What TinyTitan has today
 
-- `ModelFamily` carries Qwen3.5/3.6/3.8/4, K2-Horizon and Laguna. Inkling is
+- `ModelFamily` carries Qwen3.5/3.6/3.8/4 and Laguna. Inkling is
   none of them; its graph, tensor contract and tokenizer are new.
 - Runtime quantization is **INT4/INT8 affine** (plus BF16). GGUF's `nvfp4` /
   `f8E4M3` type names are recognised in the format reader, but there is no

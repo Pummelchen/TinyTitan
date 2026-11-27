@@ -1,5 +1,14 @@
 # Plan: K2-Horizon runner phase (batched prefill, ANE)
 
+> **Withdrawn 2026-11-27 — K2 is not in the shipped matrix; support returns
+> only on a user request (GitHub issue).** K2-Horizon-MoVA-36B-A4B was
+> install-only: no serving graph existed, and "install-only is not a shipped
+> engine path" (7.0 spec §8). The owner decision (TT-086) removed the family,
+> its probe graph, its server/CLI/bench routes, its tools and its tests; this
+> document is kept as the design record. `ChatDialect`, the optional
+> manifest/arch extension fields and the shared probe kernels remain, because
+> other families use them.
+
 Status: **phase 1 pays on 4-bit.** Every layer has a chunked form —
 `K2DenseBatch` for the dense prefix, `K2SparseBatch` for the sparse MoVA
 layers — and `K2GraphProbe.forwardChunk` drives the whole graph layer-major

@@ -81,8 +81,8 @@ are fetched from SSD per token, exactly like the Qwen MoE path.
 
 Two details are easy to get wrong and are pinned by tests:
 
-- the gate is `softplus(x)` (plain, natural log), **not** K2's
-  `softplus(x; beta = ln 2)`, and it is applied per head;
+- the gate is `softplus(x)` (plain, natural log), **not** the
+  `softplus(x; beta = ln 2)` form, and it is applied per head;
 - the global and sliding layers use different RoPE dialects *and* different
   head counts, so neither can come from a single scalar in `ArchConfig`.
 
@@ -128,7 +128,7 @@ renorm + scale), `k2_moe_accumulate_fp16`, the embedding lookup and the head.
 Two changes:
 
 - `softplus_gate_per_head_mul_fp16` (`Metal/Primitives/utility.metal`): one
-  plain softplus value per head, broadcast over 128 channels. K2's existing
+  plain softplus value per head, broadcast over 128 channels. The existing
   kernel uses beta = ln 2 and a per-channel gate, so it is a different
   function, not a flag on the same one.
 - `Attention.maxQHeads` 32 -> 96: Laguna's sliding layers run 72 query heads
@@ -162,7 +162,7 @@ the page cache holds, not by a steady-state ceiling. A 32-token chat run of
 the 4-bit install reasons "Okay, the user is asking for the capital of France.
 Let me start by recalling what I know. France is a country in Western Europe.
 The capital is" — the model is the chat model it says it is, and the plain
-continuation used by the earlier K2 run is not its format.
+continuation used by an earlier probe run is not its format.
 
 Both numbers are the **GPU (Metal)** decode; `NA` for CPU is deliberate (the
 CPU engine only serves the dense Qwen 3.5 models) and there is no ANE decode

@@ -1,5 +1,9 @@
 # K2 decode targets: >12 tok/s at 4-bit, >6 tok/s at 8-bit
 
+> **Withdrawn 2026-11-27 — K2 is not in the shipped matrix; support returns
+> only on a user request (GitHub issue).** The probe these numbers measure was
+> removed with the family (TT-086). Kept as the measurement record.
+
 Status: **4-bit is at the line, 8-bit is hardware-bound.** Measured on the base
 M3 / 24 GB host with `TinyTitanBench k2gpu`, greedy, 32 decode tokens, warm
 expert cache, `TINYTITAN_K2_REPEAT` (the repeat is the same prompt and token

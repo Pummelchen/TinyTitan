@@ -224,7 +224,8 @@ accepts both widths.
 
 The checkpoint's tokenizer is not one of the dialects `GFTokenizer` resolves:
 it has `<|im_start|>`/`<|im_end|>` turns but no `<|endoftext|>` (so ChatML is
-refused) and no `<|ifm|…>` markers (so K2 is refused). `NemotronTokenizer`
+refused) and no `<|ifm|…>` markers (so the dialect resolver refuses it).
+`NemotronTokenizer`
 loads it with `AutoTokenizer` and renders the checkpoint's own
 `chat_template.jinja`, setting `enable_thinking=false` before the template's
 `is defined` fallback.

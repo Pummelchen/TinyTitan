@@ -7,10 +7,12 @@ from the tree, not recalled; every claim carries a `file:line`.
 
 **Baseline.** Read on branch `nemotron-3.5-bolt` at HEAD `03040160`
 ("nemotron: record the checkpoint and plan its conversion") on 2026-10-25. The
-tree has since returned to `main` (`713c1619`); the three files that commit
-touched — `K2GraphProbe.swift`, `K2SparseLayerProbe.swift`,
-`K2Commands.swift` — were re-checked against `main` and their line numbers
-below are the `main` ones. The companion files
+tree has since returned to `main`. **Updated 2026-11-27:** the probe this
+document was written against (K2-Horizon) was withdrawn from the shipped matrix
+that day (TT-086), so every probe reference below now names the Laguna-S-2.1
+probe that survives — `LagunaGraphProbe.swift`, `LagunaLayer.swift`,
+`LagunaCommands.swift` — which has the same shape: a `package final class` over
+`Model` + `MetalContext` that the runner refuses by name. The companion files
 (`docs/nemotron-35-bolt-port.md`, `tools/prepare_nemotron.py`) live on the
 `nemotron-3.5-bolt` branch, not on `main`. No source file was modified for this
 document.
@@ -68,7 +70,7 @@ resolved architecture gets an `archMismatch` on hidden size, not a family error.
 | Contract | Where | What it needs |
 | --- | --- | --- |
 | **Identity / manifest read** | `ModelFamily` enum `ModelTypes.swift:8`; `ManifestReader.peekIdentity` `ManifestReader.swift:143` | A raw value matching `manifest.arch.family` (`ManifestReader.swift:165–171`). The wire format does **not** validate the string — it is free-form (`SSDAIManifestV1.swift:36–39`) — so the enum is the only gate. |
-| **Arch decode** | `ArchConfig.resolved(forFamily:directoryURL:)` `ArchConfig+Manifest.swift:43` | Either a preset in `ArchConfig.knownArchitectures` (`ModelTypes.swift:412–417`) **or** a manifest-declared branch. The guard at `ArchConfig+Manifest.swift:51` is an allow-list of exactly `.qwen35Dense` and `.k2Horizon`; anything else throws `ArchResolutionError.unsupportedFamily`. |
+| **Arch decode** | `ArchConfig.resolved(forFamily:directoryURL:)` `ArchConfig+Manifest.swift:43` | Either a preset in `ArchConfig.knownArchitectures` (`ModelTypes.swift:412–417`) **or** a manifest-declared branch. The guard at `ArchConfig+Manifest.swift` is an allow-list of exactly `.qwen35Dense`; anything else throws `ArchResolutionError.unsupportedFamily`. |
 | **Schema validation** | `Model.validateRuntimeSchema` `Model+Validation.swift:126` | A `case` in the family switch (`:148`) plus a family validation body. `validateExecutableGeometry` (`:73`) runs *before* the switch and is not family-specific. |
 | **Model handle** | `Model` struct `Model.swift:31`, `Model.init` `:270` | No code change: `Model.load` constructs it (`Model+Loading.swift:226–239`). Resident tensor access goes through `TensorSchema` (`Model+Accessors.swift:24–25`), so new tensor names are a schema file, not an accessor edit. |
 
@@ -82,7 +84,7 @@ Legend: **compile** = the build fails if missed (exhaustive `switch`, no
 | --- | --- | --- | --- |
 | 1 | `ModelFamily` enum — `ModelTypes.swift:8–42` | enum | `peekIdentity` does not recognise the string and **falls back to qwen36** (`ManifestReader.swift:165–184`), then `archMismatch`, which `Engine.readManifest` flattens to `notAnInstall` (`Engine.swift:269–273`). Misleading, not silent-wrong: the family is never named. |
 | 2 | `TensorSchema.schema(for:)` — `TensorSchema.swift:100–109` | compile | new family has no names at all. |
-| 3 | `TensorSchema` stored roles + memberwise init — `TensorSchema.swift:16–98` | compile (all six literals) | adding a role means updating `qwen36`, `qwen36MTP`, `qwen38flash`, `qwen38flashMTP`, `qwen35Dense`, `k2Horizon`. A family with no such role points at an impossible name — the `qwen35Dense` precedent (`Qwen35DenseFamily.swift:36,40`). |
+| 3 | `TensorSchema` stored roles + memberwise init — `TensorSchema.swift:16–98` | compile (all six literals) | adding a role means updating `qwen36`, `qwen36MTP`, `qwen38flash`, `qwen38flashMTP`, `qwen35Dense`, `laguna`. A family with no such role points at an impossible name — the `qwen35Dense` precedent (`Qwen35DenseFamily.swift:36,40`). |
 | 4 | `ArchConfig.knownArchitectures` — `ModelTypes.swift:412` | runtime | `ArchResolutionError.unsupportedFamily` unless the manifest path is opened. |
 | 5 | `ArchConfig.resolved` allow-list — `ArchConfig+Manifest.swift:51` | runtime | same error; this is the single line that decides whether a manifest-declared architecture is readable at all. |
 | 6 | `ArchConfig.from(manifest:family:)` + `layerShape` — `ArchConfig+Manifest.swift:61–127`, `:144–220` | runtime (`manifestOmitsField` / `manifestDeclaresInvalidValue`) | every convention (`attnOutputGate`, `ropeNeoxSubdim`, …) must be declared, not defaulted. |
@@ -90,9 +92,9 @@ Legend: **compile** = the build fails if missed (exhaustive `switch`, no
 | 8 | `SSDAIManifestV1` validation — `SSDAIManifestV1.swift:280` (`isDense`), `:313` (mask must be 0/1/2), `:291–293` (`numLayers`/`numExperts` must equal the streaming metadata) | runtime (`invalid architecture values`) | a Mamba layer kind cannot be encoded **at all** today; and `arch.numExperts` is forced to the single install-wide `expertsPerLayer`, so Nemotron's 240–496 must be declared as the maximum with smaller per-layer counts in `layout.json` (see B3). |
 | 9 | `Model.validateRuntimeSchema` switch — `Model+Validation.swift:148–198` | compile | — |
 | 10 | `validateExecutableGeometry` — `Model+Validation.swift:73–124` | runtime | hiddenSize > 2816 with routed experts is refused (`:95–101`); mask value 0 refused (`:83–88`); `numHeads > 32` (`:111`); `headDim > 512` (`:116`). **Nemotron's 4096 hits the first one.** |
-| 11 | `validateLayerTensors` / `validateRoleUniformity` / `validateFamilyQuantSupport` — `Model+SchemaValidation.swift:130`, `:21`, `:102` | runtime | only reached if the family branch does *not* return early. K2 returns early (`Model+Validation.swift:160`) and validates its own roles (`Model+Validation+K2.swift:19–81`). |
+| 11 | `validateLayerTensors` / `validateRoleUniformity` / `validateFamilyQuantSupport` — `Model+SchemaValidation.swift:130`, `:21`, `:102` | runtime | only reached if the family branch does *not* return early. Laguna returns early (`Model+Validation.swift:160`) and validates its own roles (`Model+Validation+Laguna.swift`). |
 | 12 | `ManifestReader.validateQuant` switch — `ManifestReader.swift:235–255` | compile | router widths per family. |
-| 13 | `ManifestReader.validateArch` + family extension checks — `ManifestReader.swift:289–393`, K2 pattern `:403–438` | runtime (`archMismatch`) | new geometry that differs from the runtime's is refused here — which is the point. |
+| 13 | `ManifestReader.validateArch` + family extension checks — `ManifestReader.swift:289–393` | runtime (`archMismatch`) | new geometry that differs from the runtime's is refused here — which is the point. |
 | 14 | `RealForwardRunner.buildCore` refusal — `RealForwardRunner+BuildCore.swift:27–32` | runtime | without it the runner builds a Qwen-shaped graph from a foreign payload. **A new family must be refused here in phase 1.** |
 | 15 | `ModelProfile.table` — `ModelProfile.swift:57–201` | silent | family default: `RuntimeConfiguration.decodeTuning` (`RuntimeConfiguration.swift:127–143`) → 8 GiB cache, prefetch 0; `GenerationDefaults.forFamily` (`SamplerTypes.swift:65–80`) → `house` sampling. |
 | 16 | `ModelFamily.reasoningControl` — `ReasoningControl.swift:57–67` | compile | — |
@@ -128,10 +130,10 @@ is only checked accessors for optional kernels/buffers (`:12–83`, e.g.
 `requireElementwise`, `requireBuffer`). The entire family gate is:
 
 ```swift
-// RealForwardRunner+BuildCore.swift:27
-guard cfg.family != .k2Horizon else {
+// RealForwardRunner+BuildCore.swift:31
+guard cfg.modelFamily != .laguna else {
     throw ModelError.unsupportedArchitecture(
-        detail: "K2-Horizon's GPU graph is not implemented yet; …")
+        detail: "Laguna-S-2.1 does not run on this runner: …")
 }
 ```
 
@@ -141,36 +143,36 @@ Construction then proceeds unconditionally: profile resolution `:66`, KV cache
 `:186`, every kernel `:198–318`, optional subsystems behind `cfg` flags
 `:334–415`, RoPE `:416–418`. There is no second gate.
 
-### 2.2 How K2 is refused end-to-end (the template)
+### 2.2 How Laguna is refused end-to-end (the template)
 
 | Layer | Behaviour | Ref |
 | --- | --- | --- |
-| Format | Accepted; mask all-1, `family: "k2_horizon"` is a legal string | `SSDAIManifestV1.swift:36`, `ArchInfo+Loaders+K2.swift:79` |
+| Format | Accepted; `family: "laguna"` is a legal string with its own preset | `SSDAIManifestV1.swift:36`, `ArchConfig+Laguna.swift` |
 | Identity | `ModelFamily(rawValue:)` resolves | `ManifestReader.swift:165–171` |
-| `Model.load` | Succeeds; validates K2's own schema and **returns early** before the Qwen layer checks | `Model+Validation.swift:149–160`, `Model+Validation+K2.swift:19–81` |
-| Runner | Refused in `buildCore` | `RealForwardRunner+BuildCore.swift:27–32` |
-| Catalog | Directory skipped with a reason, not listed | `ModelCatalog.swift:250–261` |
+| `Model.load` | Succeeds; validates Laguna's own schema and **returns early** before the Qwen layer checks | `Model+Validation.swift:149–160`, `Model+Validation+Laguna.swift` |
+| Runner | Refused in `buildCore` | `RealForwardRunner+BuildCore.swift:26–35` |
+| Catalog | Directory skipped with a reason, not listed | `ServerModelIdentity.unsupportedReason` |
 | Doctor | Reported as not servable | `DoctorModelScan.swift:95–100` |
-| Bench | **Bypasses `RealForwardRunner` entirely** | `K2Commands.swift:147–214` |
+| Bench | **Bypasses `RealForwardRunner` entirely** | `LagunaCommands.swift` (`lagunagpu`) |
 
 The bench bypass is the important half:
 
 ```swift
-// K2Commands.swift:150–155, 178
-let config = try ArchConfig.resolved(forFamily: .k2Horizon, directoryURL: install)
-let context = try MetalContext()
+// LagunaCommands.swift
+let config = try ArchConfig.resolved(forFamily: .laguna, directoryURL: install)
+let context = try MetalContext.runtimeDefault()
 let model = try Model.load(directoryURL: install, device: context.device,
-                           expecting: config, streamingMode: .pread(slotCount: slots))
+                           expecting: config, streamingMode: .pread(slotCount: 16))
 …
-let graph = try K2GraphProbe(model: model, context: context,
-                             maxSequence: ids.count + limit + 1)
+let graph = try LagunaGraphProbe(model: model, context: context,
+                                 maxSequence: ids.count + limit + 1)
 ```
 
-`K2GraphProbe` is a `package final class` (`K2GraphProbe.swift:11`) that owns one
-`K2DenseLayer` per dense layer and one `K2SparseLayerProbe` per sparse layer
-(`:29–41`), drives them one at a time, and carries the hidden state as `[Float16]`
-between command buffers (`:59–75`). It conforms to **nothing**. That is the whole
-seam: `Model` + `MetalContext` + the kernel wrappers, no runner.
+`LagunaGraphProbe` is a `package final class` (`LagunaGraphProbe.swift`) that
+owns one `LagunaLayer` per layer, drives them one at a time, and carries the
+hidden state as `[Float16]` between command buffers. It conforms to **nothing**.
+That is the whole seam: `Model` + `MetalContext` + the kernel wrappers, no
+runner.
 
 ### 2.3 Extension points that exist — and what they cannot do
 
@@ -184,7 +186,7 @@ What is genuinely pluggable today:
 - **Per-subsystem kernels** — `GDN`, `HyperConnection`, `PLEBlock`, `QSAIndexer`,
   `MoVAValueStage` are separate classes built behind `cfg` flags in `buildCore`
   (`:334–415`) and consumed by `if let` branches in the decode loop.
-- **Per-family validation** — one file + one `case` (K2 precedent).
+- **Per-family validation** — one file + one `case` (`Model+Validation+Laguna.swift`).
 - **Model accessors** — family-prefixed functions (`Model+Accessors.swift:48–105`)
   rather than editing shared ones.
 
@@ -221,7 +223,7 @@ state layout) rather than a compile error.
 Cost of a dedicated graph: one new class tree, unreachable from the server, and
 one refusal line in `buildCore`. It leaves every existing path byte-identical.
 
-The K2 port already paid for this decision and documented it
+The Laguna port already paid for this decision and documented it
 (`docs/plan-k2-horizon.md`, `Model+Validation.swift:149–153`).
 
 ---
@@ -232,40 +234,23 @@ The K2 port already paid for this decision and documented it
 streaming, and (c) a benchmark command.** The three exist, in three different
 places, and that fact drives the plan in §6.
 
-### 3.1 (b) + text-only decode + benchmark: the K2 CPU stack
+### 3.1 (b) + text-only decode + benchmark: the dense CPU stack
 
-`K2Snapshot` — `sources/TinyTitan/CPUEngine/K2Snapshot.swift`
+The text-only CPU precedent is the dense engine: `AffineSnapshot` (with its
+`+Loading` / `+Access` splits) reads the install, and `CPUQwen35` runs the layer
+stack — `init(snapshot:threads:)`, `reset()`, `step(token:needsLogits:)`,
+`generate`, `project` (quantized GEMV), `projectFloat` (bf16 router), with the
+attention/MLP/GDN splits beside it. It is dense-only, and that is the limitation
+that matters here: **no CPU path streams routed experts.** There is no
+packed-expert reader in `CPUEngine/` at all, and the GPU-side equivalent is
+`Model.routedExpert(layer:expert:)` (`Model+LayerStreamers.swift:19`), which
+returns an `MTLBuffer` slot — unusable on the CPU.
 
-| API | Line | Behaviour |
-| --- | --- | --- |
-| `init(directory:maxBytes:)` | `:54` | reads `config.json`, the safetensors index, maps every shard |
-| `Configuration` | `:17–43` | 25 fields from the checkpoint's own config, no runtime enum |
-| `has(_:)` / `floats(_:)` | `:150`, `:153` | tensor lookup and bf16/norm read |
-| `bits(forStem:)` | `:159` | base width or per-stem override |
-| `matrix(_:)` | `:164` | packed `UInt32` weights + bf16 scales/biases → `AffineSnapshot.Matrix` |
-| `row(_:_:)` | `:209` | dequantizes one embedding row by hand |
-| `WeightCache` | `:263–351` | LRU copy of hot expert matrices; budget `TINYTITAN_K2_CACHE_MB`, default 6 GiB (`:284–288`) |
-
-`K2Model` — `sources/TinyTitan/CPUEngine/K2Model.swift`: `init(snapshot:threads:)`
-`:33`, `reset()` `:50`, `step(token:needsLogits:)` `:60` (the whole 48-layer
-stack), `generate` `:88`, `project` `:115` (quantized GEMV), `projectFloat`
-`:136` (bf16 router), `groupedNorm` `:161`, `topK` `:197`. Attention and MLP
-live in `K2Model+Attention.swift` / `K2Model+MLP.swift`.
-
-Critically: **it streams routed experts from safetensors shards, not from
-`packed_experts`.** There is no packed-expert reader in `CPUEngine/` at all
-(grep for `packed_experts|PackedExpertsLayout` in `sources/TinyTitan/CPUEngine/`
-returns nothing). The GPU-side equivalent is `Model.routedExpert(layer:expert:)`
-(`Model+LayerStreamers.swift:19`), which returns an `MTLBuffer` slot — unusable
-on the CPU.
-
-`SideEngine` — `sources/TinyTitan/CPUEngine/SideEngine.swift`: the serving shape
-for a CPU model. `SideEngineModel` protocol (`:194–211`: `reset`, `encode`,
-`decode`, `generate`, `endOfSequence`, `contention`, `busyThreads`,
-`idleThreads`, `threads`), `SideEngine` actor with a single-flight load
-(`:249–338`, `judge` `:280`), and `CPUQwen35SideEngineModel` (`:351–417`) which
-is the wrapper that knows how to open **both** a `.ssdai` install and a flat
-snapshot (`:358–365`).
+`SideEngine` — `sources/Engines/Legacy6xRuntime/CPUEngine/SideEngine.swift`: the
+serving shape for a CPU model. `SideEngineModel` protocol (reset, encode, decode,
+generate, endOfSequence, contention, busy/idle threads), the `SideEngine` actor
+with a single-flight load, and `CPUQwen35SideEngineModel`, which is the wrapper
+that knows how to open **both** a `.ssdai` install and a flat snapshot.
 
 ### 3.2 (a) `.ssdai` on the CPU: `AffineSnapshot(ssdai:)`
 
@@ -297,25 +282,20 @@ context is created (`TinyTitanBench.swift:36`), then falls through to GPU
 micro-benchmarks:
 
 ```swift
-// CPUCommands.swift:269
+// CPUCommands.swift
 static func runCPUCommand(_ name: String, iterations: Int) throws -> Bool {
     switch name {
-    case "cpu35gen":   … :292
-    case "k2gpu":      … :320   // GPU family probe, creates its own MetalContext
-    case "k2":         … :333   // CPU family probe
+    case "cpu35gen":   …
+    case "lagunagpu":  …   // GPU family probe, creates its own MetalContext
     …
     default: return false
     }
 }
 ```
 
-`k2` is `K2Commands.runK2(snapshot:prompt:limit:)` (`K2Commands.swift:11`):
-snapshot → model → tokenizer (or comma-separated token ids for a tokenizer-less
-fixture, `:17–23`) → prefill loop → greedy decode loop → prints
-prefill tok/s, decode tok/s, output, and optionally raw logits
-(`TINYTITAN_K2_LOGITS`, `:80–82`).
-`k2gpu` is `runK2GPU` (`:124`) → `runK2GPUAsync` (`:147`) with the same output
-shape plus token ids.
+`lagunagpu` is `LagunaCommands.runLagunaGPU(install:prompt:limit:)`: install →
+`Model.load` → tokenizer → prefill loop → greedy decode loop → prints
+prefill tok/s, decode tok/s and output.
 
 ### 3.4 Verdict for Nemotron
 
@@ -357,7 +337,7 @@ family problem rather than as a corrupt one).
 
 `ModelCatalog.probeInstall` (`ModelCatalog.swift:232–287`):
 
-- family switch `:239` — MTP draft heads skipped `:240–247`, K2 skipped
+- family switch `:239` — MTP draft heads skipped `:240–247`, Laguna skipped
   `:250–261` (compile error if a case is missed);
 - tokenizer required `:262–265`;
 - id from `ServerModelIdentity.apiModelID` `:266–269`;
@@ -409,11 +389,11 @@ decode and is the reason to ship the bench command first.
 | Shipped profile rows | `tests/TinyTitan/Runtime/Configuration/ModelProfileTests.swift:6–11` (`shipped`), `:23` | `#expect(ModelProfile.table.count == 10)` — becomes 12 with two Nemotron widths, and the new id must appear in `shipped` or `everyShippedInstallHasItsOwnRow` fails |
 | Display names | `tests/TinyTitanServer/ModelCatalogTests.swift:328–343` | `let shipped = […]` plus `#expect(ModelCatalog.displayNames.count == shipped.count)` — a new name without a new entry fails |
 | Catalog probe | `tests/TinyTitanServer/ModelCatalogTests.swift:101–161` | `catalog.entries.map(\.id)` exact list, and the skipped-directory set |
-| K2 skip reason | `tests/TinyTitanServer/ModelCatalogTests.swift:166–180` | the precedent for a "not served yet" assertion — clone it for Nemotron |
+| Skip reason | `tests/TinyTitanLib/PluginIdentityTests.swift` | the precedent for a "not served yet" assertion — clone it for Nemotron |
 | Preset count | `tests/TinyTitan/Infrastructure/ModelIO/ArchConfigManifestTests.swift:87–103` | `presetFamilies` list and `#expect(ArchConfig.knownArchitectures.count == 4)` — 5 if Nemotron gets a preset |
 | Family schema | `tests/TinyTitan/Runtime/FamilySchemaTests.swift` (whole file) | one pin per family; add `nemotronSchemaMatches…` and, if new roles are added, extend `layerRoles(of:)` `:128–143` so the "no two roles collide" check covers them |
-| Doctor | `tests/TinyTitan/CLI/DoctorCommandTests.swift:282–292` | `unsupportedInstallReason(.k2Horizon)` non-nil, `.qwen36/.qwen38flash/.qwen35Dense` nil — add the Nemotron expectation |
-| Serving defaults | `tests/TinyTitan/Runtime/K2SurfaceTests.swift:11–44` | the template for a new family's sampling/reasoning pin |
+| Doctor | `tests/Engines/Legacy6xRuntime/CLI/DoctorCommandTests.swift` | `unsupportedReason(.laguna)` non-nil, `.qwen36/.qwen38flash/.qwen35Dense` nil — add the Nemotron expectation |
+| Serving defaults | `tests/Engines/Legacy6xRuntime/Runtime/ReasoningControlTests.swift` | the template for a new family's sampling/reasoning pin |
 | Reasoning surfaces | `tests/TinyTitan/Runtime/ReasoningControlTests.swift:13–101` | per-family level lists |
 | Launcher tables | `benchmark/test_launcher_install.py:39` (`STEM_KEYS`), `:53` (`LAUNCHER_NAMES`), `:283–299` | every stem the launcher can name; a new install needs both tables plus `tools/tinytitan_models.sh` (`:125–178`) and `tools/install_models.sh` `CATALOGUE` |
 
@@ -435,7 +415,7 @@ These are hard stops in the current tree, in the order a load hits them:
 | B3 | **Per-layer expert widths are not expressible in a verifiable install.** `expertStride` is install-global (`PackedExpertsLayout.swift:61`); the runtime checks every routed layer against one `config.moeIntermediateSize` (`Model+SchemaValidation.swift:265–269`); and `--verify-install` additionally demands `expert.size == expertStride`, `offset == expert * expertStride` and one width for every expert (`PackedExpertLayoutVerification.swift:154–157`, `:146–149`, `:339–348`). So the only shape that both loads and verifies is: stride = the widest layer's expert, every narrower expert padded to it, uniform width, with per-layer counts declared no larger than the manifest's `numExperts` (`SSDAIManifestV1.swift:291–293`). A true per-layer stride is a format extension. Per-layer *counts* are already legal (`LayerLayout.expertsPerLayer`, `PackedExpertsLayout.swift:47`). | as cited |
 | B4 | **`relu²` does not exist as an expert activation.** `moe.metal` implements SiLU or `gelu_pytorch_tanh` only, selected by a function constant; `Elementwise` has silu/sigmoid/softplus, no relu². | `Metal/MoE/moe.metal:153–159`; `Kernels/Primitives/Elementwise.swift:18–40` |
 | B5 | **Latent MoE**: the routed expert FFN input is the 1,024-wide latent, not the model hidden. The MoE wrapper is built with `specializedD = cfg.hiddenSize` (`RealForwardRunner+BuildCore.swift:266`) and the kernels assume that. | `RealForwardRunner+BuildCore.swift:259–269` |
-| B6 | **Router** is grouped (8 groups, top-1 group by top-2 sum), bias-corrected and scaled ×5 — not the runtime's sigmoid top-k. There is a per-family precedent to copy: `K2RouterSelection` is a dedicated kernel (`k2_router_topk_select_kn`) for sigmoid + bias + top-k + normalize + scale, precisely because "those are different arithmetic, not a flag on the same one". Nemotron needs one group-selection step in front of it. | `Kernels/MoE/K2RouterSelection.swift:4–12` (rationale), `:18` (pipeline), `:22–35` (encode); Qwen router `Kernels/MoE/MoE.swift:237`; CPU readback pattern `K2SparseLayerProbe.swift:121–160` |
+| B6 | **Router** is grouped (8 groups, top-1 group by top-2 sum), bias-corrected and scaled ×5 — not the runtime's sigmoid top-k. There is a per-family precedent to copy: `K2RouterSelection` is a dedicated kernel (`k2_router_topk_select_kn`) for sigmoid + bias + top-k + normalize + scale, precisely because "those are different arithmetic, not a flag on the same one". Nemotron needs one group-selection step in front of it. | `Kernels/MoE/K2RouterSelection.swift` (rationale, pipeline, encode); Qwen router `Kernels/MoE/MoE.swift:237` |
 | B7 | **No RoPE** on the 8 attention layers. This is *good*: leave `ropeNeoxSubdim` false so `buildCore` makes no `RoPE` (`RealForwardRunner+BuildCore.swift:416`), but the format still requires `ropeTheta > 0` (`SSDAIManifestV1.swift:311`) and `validateArch` compares `partialRotaryFactor` (`ManifestReader.swift:317`) — write placeholders and document them. | as cited |
 | B8 | **Serving seam** is concrete (`ServerModelSession.swift:71`). Phase 1 cannot serve. | §4.5 |
 
@@ -445,7 +425,7 @@ deliberate deferral.
 
 ### 6.2 Options
 
-**Option A — dedicated GPU probe graph (K2GraphProbe pattern).**
+**Option A — dedicated GPU probe graph (LagunaGraphProbe pattern).**
 One class tree over `Model` + `MetalContext`, reusing `RMSNorm`,
 `AffineQuantGEMV` (4/8), `BF16GEMV`, `AffineQuantEmbeddingLookup`, `Attention`
 and `Model.routedExpert`; per-block classes for mamba / latent-MoE / attention;
@@ -469,7 +449,7 @@ MTP, and a `relu²` kernel.
 - Risk: high — every change is on the path the shipped families execute,
   and the failure modes are silent (`KVCacheManager+Storage.swift:33`).
 
-**Option C — build on `CPUEngine` (K2Model pattern).**
+**Option C — build on `CPUEngine` (dense CPU pattern).**
 A `NemotronSnapshot`/`NemotronCPUModel` pair, dims from `config.json` or a
 `.ssdai` manifest, experts read from `packed_experts` with a new CPU reader.
 
@@ -493,10 +473,10 @@ Rationale, in one line each:
 2. The expert-streaming machinery Nemotron needs already exists exactly once, on
    the GPU (`Model.routedExpert` → `PreadExpertStreamer`), and a 74B-A9B on a
    24 GB host cannot run without it.
-3. K2 proved the pattern: load + validate in `Model`, refuse in `buildCore`,
+3. Laguna proved the pattern: load + validate in `Model`, refuse in `buildCore`,
    bypass the runner with a probe graph, publish numbers from a bench command,
    then wire serving later (`Model+Validation.swift:149–160`,
-   `RealForwardRunner+BuildCore.swift:27`, `K2Commands.swift:147`).
+   `RealForwardRunner+BuildCore.swift:26`, `LagunaCommands.swift`).
 4. Option B's only advantage — server support — is explicitly deferred by the
    port record (benchmarks first, "nothing called supported until … the runtime
    answers from them"), and it can be reached later by either promoting the probe
@@ -527,7 +507,7 @@ Touch:
 - `sources/TinyTitan/Runtime/Family/TensorSchema.swift` + new
   `Runtime/Family/NemotronFamily.swift`.
 - `sources/TinyTitan/Runtime/Inference/Model+Validation+Nemotron.swift` — its own
-  schema (K2 file as the template).
+  schema (`Model+Validation+Laguna.swift` as the template).
 - `sources/TinyTitan/Metal/MoE/moe.metal` — raise `kMoEXMaxD` to 4096 (`:16`;
   the staging array goes from 2,816 to 4,096 halfs, i.e. 5.6 KB → 8 KB of
   threadgroup memory, inside Metal's 32 KB budget) **or** exempt the family;
@@ -542,7 +522,7 @@ synthetic 2-layer install through `Model.load`, `ArchConfigManifestTests`.
 
 Add, under `sources/TinyTitan/Runtime/Inference/`:
 - `NemotronGraphProbe.swift` — block sequencing, hidden state as `[Float16]`,
-  one command buffer per block (K2GraphProbe.swift:11–148 is the template).
+  one command buffer per block (`LagunaGraphProbe.swift` is the template).
 - `NemotronMambaStage.swift` — in_proj (18,560 rows), conv1d + bias, SSM state
   update, gated RMSNorm, SiLU gate, D skip; holds `[d_inner × state]` + conv tail
   per layer.
@@ -551,7 +531,7 @@ Add, under `sources/TinyTitan/Runtime/Inference/`:
   (or a CPU readback for the first cut), 9 expert FFNs at latent width, relu²,
   `fc2_latent_proj`, shared expert (`5,376`, relu²).
 - `NemotronAttentionStage.swift` — GQA 32/2 × 128, scale `128^-0.5`, no RoPE,
-  plain FP16 KV cache (the `K2DenseLayer` pattern).
+  plain FP16 KV cache (the `LagunaLayer` pattern).
 - `NemotronHead.swift` — embedding, final norm, 8-bit head GEMV (the `K2Head`
   pattern).
 - A `relu²` path: a small `.metal` function + Swift wrapper, or a
@@ -564,7 +544,7 @@ Touch:
 **Phase 2 — the benchmark command**
 
 - `sources/TinyTitanBench/NemotronCommands.swift` — `runNemotron(install:prompt:limit:)`
-  modelled on `K2Commands.runK2GPU` (`:124–214`): resolve arch → `Model.load`
+  modelled on `LagunaCommands.runLagunaGPU`: resolve arch → `Model.load`
   with `streamingMode: .pread(slotCount:)` → tokenizer → prefill loop → greedy
   decode → print prefill/decode tok/s and output.
 - `sources/TinyTitanBench/CPUCommands.swift` — one dispatch case before
@@ -602,7 +582,7 @@ wanted — the `ServerModelSession.runner` abstraction (`:71`) plus a
 - Do not add the family to `ModelProfile.table` before a width exists — the row
   is a promise that an install was measured (the KAT-Coder comment,
   `ModelProfile.swift:137–145`).
-- Do not let `ModelCatalog` list the install before the bench runs. K2's refusal
+- Do not let `ModelCatalog` list the install before the bench runs. Laguna's refusal
   (`ModelCatalog.swift:250–261`) exists because "listing it would send a launch
   at a family whose runner refuses".
 - Do not put Mamba layers behind mask 2. `layerIsLinear` drives
@@ -635,7 +615,7 @@ From `docs/nemotron-35-bolt-port.md` §1 and `tools/prepare_nemotron.py`
 Load: `Model+Loading.swift:25,28,42,101,115,174,187,189,209,219,226`;
 `ManifestReader.swift:27,47,80,143,165,230,235,289,317,403`;
 `Model+Validation.swift:73,83,95,111,116,126,132,144,148,149,160,203,209`;
-`Model+Validation+K2.swift:19`; `Model+SchemaValidation.swift:21,102,130,192,223,265`;
+`Model+Validation+Laguna.swift`; `Model+SchemaValidation.swift:21,102,130,192,223,265`;
 `ModelTypes.swift:8,41,49,110,412,451`; `TensorSchema.swift:16,100`;
 `Qwen35DenseFamily.swift:36,40`; `ArchConfig+Manifest.swift:43,51,61,144`;
 `SSDAIManifestV1.swift:36,280,291,311,313`; `ManifestWireConversion.swift:21`;
@@ -652,14 +632,12 @@ Runner: `RealForwardRunner+BuildCore.swift:27,66,186,198,259,266,334,416`;
 `KVCacheManager+Storage.swift:31,33,71`; `GDNStateManager.swift:56,89`;
 `Attention.swift:56,57`.
 
-K2 probe: `K2GraphProbe.swift:11,21,29,59`; `K2SparseLayerProbe.swift:78,121,149`;
-`K2DenseLayer.swift:11`; `K2Head.swift:11`; `K2Commands.swift:11,124,147,150,156,158,178`;
+Probe: `LagunaGraphProbe.swift`; `LagunaLayer.swift`; `LagunaCommands.swift`;
 `CPUCommands.swift:194,269,292,320,333`; `TinyTitanBench.swift:36`;
 `K2RouterSelection.swift:4,18,22`; `MoE.swift:237`.
 
-CPU: `K2Snapshot.swift:17,54,150,159,164,209,263,284`;
-`K2Model.swift:33,50,60,88,115,136,161,197`;
-`SideEngine.swift:194,249,280,351,358`; `AffineSnapshot+Loading.swift:113,120,173,186`;
+CPU: `AffineSnapshot.swift`; `AffineSnapshot+Loading.swift:113,120,173,186`;
+`CPUQwen35.swift`; `SideEngine.swift:194,249,280,351,358`;
 `CPUModelFamily.swift:18,22,25,37,50,75`.
 
 CLI/catalog/profile: `Args.swift:154,165`; `Run.swift:134`; `Engine.swift:70,240,251,269`;
@@ -676,5 +654,5 @@ CLI/catalog/profile: `Args.swift:154,165`; `Run.swift:134`; `Engine.swift:70,240
 Tests: `ModelProfileTests.swift:6,14,23`;
 `ModelCatalogTests.swift:101,166,328,341`;
 `ArchConfigManifestTests.swift:87,103`; `FamilySchemaTests.swift:128`;
-`DoctorCommandTests.swift:282`; `K2SurfaceTests.swift:11`;
+`DoctorCommandTests.swift:282`; `ReasoningControlTests.swift:13`;
 `ReasoningControlTests.swift:13`; `benchmark/test_launcher_install.py:39,53,283`.
