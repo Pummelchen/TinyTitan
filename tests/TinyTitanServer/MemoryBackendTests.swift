@@ -656,4 +656,77 @@ import TinyTitanMemory
         #expect(ids.count == 2)
         #expect(inner.callCount == 2)
     }
+
+    /// A new conversation is a new (workspace, first user message) key, and
+    /// the API never says a conversation ended. Before the bound, every key
+    /// left its context, frozen instruction, turn index and consolidated
+    /// position in the actor for the life of the process, so a long-lived
+    /// server grew without limit (AUD-0067).
+    @Test func conversationStateIsBoundedAndEvictsTheOldest() async throws {
+        let (service, configuration) = service(tools: false)
+        let backend = MemoryBackend(
+            wrapping: ScriptedBackend([]), service: service,
+            configuration: configuration)
+
+        let capacity = MemoryBackend.maximumConversations
+        var ids: [String] = []
+        for index in 0..<(capacity + 2) {
+            let conversation = request("conversation \(index)")
+            ids.append(await backend.conversationKey(for: conversation))
+            _ = try await backend.generate(conversation, onEvent: { _ in })
+        }
+
+        // Capped, and the cap is the documented one rather than whatever the
+        // run happened to reach.
+        let contexts = await backend.contexts
+        #expect(contexts.count == capacity)
+        // The oldest left, the newest stayed, and an entry past the boundary
+        // is old too: an off-by-one that evicted only one entry would pass a
+        // "count is capped" check once and then grow again.
+        #expect(contexts[ids[0]] == nil)
+        #expect(contexts[ids[1]] == nil)
+        #expect(contexts[ids[2]] != nil)
+        #expect(contexts[ids[capacity + 1]] != nil)
+
+        let recency = await backend.conversationRecency
+        let installed = await backend.installedInstructions
+        let turns = await backend.turnIndex
+        #expect(recency.count == capacity)
+        #expect(installed.count == capacity)
+        #expect(turns.count == capacity)
+        #expect(installed[ids[0]] == nil)
+        #expect(turns[ids[0]] == nil)
+        #expect(installed[ids[capacity + 1]] != nil)
+    }
+
+    /// The counterpart of eviction: an explicit session end must drop the
+    /// companion entries too, or the maps that the eviction bounds would keep
+    /// one dead conversation's instruction and turn counter forever.
+    @Test func endingAConversationDropsEverythingKeyedByIt() async throws {
+        let (service, configuration) = service(tools: false)
+        let backend = MemoryBackend(
+            wrapping: ScriptedBackend([completion("hi")]), service: service,
+            configuration: configuration)
+        let conversation = request("the only conversation")
+        _ = try await backend.generate(conversation, onEvent: { _ in })
+        let id = await backend.conversationKey(for: conversation)
+
+        let liveContexts = await backend.contexts
+        let liveInstructions = await backend.installedInstructions
+        let liveTurns = await backend.turnIndex
+        #expect(liveContexts[id] != nil)
+        #expect(liveInstructions[id] != nil)
+        #expect(liveTurns[id] == 1)
+
+        await backend.endSession(conversation: id)
+
+        let closedContexts = await backend.contexts
+        let closedInstructions = await backend.installedInstructions
+        let closedTurns = await backend.turnIndex
+        let closedThrough = await backend.consolidatedThrough
+        #expect(closedContexts[id] == nil)
+        #expect(closedInstructions[id] == nil)
+        #expect(closedTurns[id] == nil)
+        #expect(closedThrough[id] == nil)
+    }
 }

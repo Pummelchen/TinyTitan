@@ -38,6 +38,10 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
     var installedInstructions: [String: String] = [:]
     /// Turn counter per conversation, for the journal.
     var turnIndex: [String: Int] = [:]
+    /// Conversation keys in least-recently-used order, oldest first, so the
+    /// per-conversation maps can be bounded. See
+    /// `MemoryBackend+Conversations.swift` for why they have to be.
+    var conversationRecency: [String] = []
     /// Read once. The workspace guard needs it per request, and reading the
     /// environment per request is the pattern that once cost 40% of a token.
     let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
@@ -345,14 +349,6 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
             workspace: placement.workspace)
     }
 
-    /// Runs the session-end hook, if consolidation is on. The engine calls
-    /// this when a conversation is finished with; nothing calls it
-    /// automatically, because the API has no end-of-conversation signal.
-    public func endSession(conversation id: String) async {
-        guard let context = contexts.removeValue(forKey: id) else { return }
-        await service.endSession(context)
-    }
-
     /// Resolves, and caches, the memory session for this conversation.
     func sessionContext(for request: ValidatedChatRequest) async
         -> MemorySessionContext?
@@ -361,7 +357,10 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
         let id = ServerMemory.sessionIdentifier(
             messages: request.messages,
             workspace: placement.workspace)
-        if let existing = contexts[id] { return existing }
+        if let existing = contexts[id] {
+            noteConversationUse(id)
+            return existing
+        }
         let focus = request.messages.first { $0.role == .user }?.content
             .map { String($0.prefix(600)) }
         guard
@@ -373,6 +372,8 @@ public actor MemoryBackend: ServerInferenceBackend, PromptTokenCounting, Residen
                 focus: focus)
         else { return nil }
         contexts[id] = context
+        noteConversationUse(id)
+        evictConversationsIfOverCapacity()
         // A new session in a scope whose last session still has undistilled
         // turns is a rollover: the end-of-conversation signal the API never
         // sends. The previous session is consolidated once this request has
